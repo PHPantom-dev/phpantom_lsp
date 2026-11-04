@@ -4,9 +4,9 @@
 
 use super::*;
 use crate::symbol_map::extraction::symfony::{
-    RouteDeclaration, RouteName, push_route_spans, route_declarations,
+    RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
-use crate::symbol_map::{EntityTypeSite, StringKeyKind};
+use crate::symbol_map::{DeclaredParameter, DrupalRouteSite, EntityTypeSite, StringKeyKind};
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 
 const CONTENT_STORAGE: &str = "Drupal\\Core\\Entity\\Sql\\SqlContentEntityStorage";
@@ -120,6 +120,13 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
 /// inherit, so an abstract controller's routes are declared where they are
 /// written, under its own prefix, and without aliases, whose class name
 /// would be the subclass's.
+///
+/// Each placeholder of a route's path declares a parameter of the route,
+/// the class route's path included, which comes before every method
+/// route's.  A route is kept beside the spans with the method it
+/// dispatches to, for its parameters to be upcast by (see
+/// [`DrupalRouteSite`]); an abstract controller's are not, since that
+/// method is the subclass's.
 pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
     class: &Class<'_>,
     ctx: &mut ExtractionCtx<'_>,
@@ -137,12 +144,14 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
     let is_abstract = class.modifiers.contains_abstract();
     // Drupal's discovery reads attributes only, never `@Route` annotations.
     let class_routes = route_declarations(&class.attribute_lists, None, class, ctx);
+    let class_details = route_details(&class.attribute_lists, ctx);
     let prefix = match class_routes.first().map(|route| &route.name) {
         Some(RouteName::Literal(name, _, _)) => name.as_str(),
         _ => "",
     };
     let is_named = |route: &&RouteDeclaration| matches!(route.name, RouteName::Literal(..));
     let mut spans = Vec::new();
+    let mut sites = Vec::new();
     let mut aliases = Vec::new();
     let mut route_count = 0usize;
     let mut any_method_route = false;
@@ -156,6 +165,7 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
         let is_invoke = method_name.eq_ignore_ascii_case("__invoke");
         invokable |= is_invoke;
         let routes = route_declarations(&method.attribute_lists, None, class, ctx);
+        let details = route_details(&method.attribute_lists, ctx);
         any_method_route |= !routes.is_empty();
         let named = routes.iter().filter(is_named).count();
         route_count += named;
@@ -163,7 +173,10 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
         if named == 1 {
             aliases.push(format!("{fqn}::{method_name}"));
         }
-        for route in routes.iter().filter(is_named) {
+        for (route, own) in routes.iter().zip(&details) {
+            let RouteName::Literal(name, _, _) = &route.name else {
+                continue;
+            };
             push_route_spans(
                 route,
                 prefix,
@@ -172,13 +185,30 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
                 &[],
                 &mut spans,
             );
+            sites.extend(attribute_route(
+                &format!("{prefix}{name}"),
+                class_details.first(),
+                own,
+                format!("{fqn}::{method_name}"),
+                &mut spans,
+            ));
         }
     }
     if !any_method_route && invokable && !is_abstract {
-        for route in class_routes.iter().filter(is_named) {
+        for (route, own) in class_routes.iter().zip(&class_details) {
+            let RouteName::Literal(name, _, _) = &route.name else {
+                continue;
+            };
             route_count += 1;
             fqcn_alias = true;
             push_route_spans(route, "", None, StringKeyKind::DrupalRoute, &[], &mut spans);
+            sites.extend(attribute_route(
+                name,
+                None,
+                own,
+                format!("{fqn}::__invoke"),
+                &mut spans,
+            ));
         }
     }
     if fqcn_alias && route_count == 1 {
@@ -191,8 +221,220 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
                 ctx.drupal_route_aliases.push(alias);
             }
         }
+        ctx.drupal_routes.extend(sites);
     }
     ctx.spans.extend(spans);
+}
+
+/// What a `#[Route]` gives besides its name: its path, as written with the
+/// offset of its text, and the defaults and options Drupal upcasts the
+/// route's parameters by.
+#[derive(Default)]
+struct RouteDetails {
+    path: Option<(String, u32)>,
+    /// Whether the path is written as something other than a literal.
+    path_unreadable: bool,
+    /// The parameters `options` declares, or `None` when it has no
+    /// `parameters`.
+    parameters: Option<Vec<DeclaredParameter>>,
+    /// The `defaults` keys that are not Drupal's own, with whether each is
+    /// `NULL`.
+    defaults: Vec<(String, bool)>,
+    title_callback: Option<String>,
+    entity_view: Option<String>,
+    entity_form: Option<String>,
+}
+
+/// The details of each `#[Route]` among `attribute_lists`, in the order
+/// [`route_declarations`] reads them.
+fn route_details(
+    attribute_lists: &Sequence<'_, AttributeList<'_>>,
+    ctx: &ExtractionCtx<'_>,
+) -> Vec<RouteDetails> {
+    let content = ctx.content;
+    let literal = |value: &Expression<'_>| {
+        resolved_string_literal(value, content).map(|(text, _, _)| text.to_string())
+    };
+    let mut found = Vec::new();
+    for attribute in attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+    {
+        let written = bytes_to_str(attribute.name.value());
+        let resolved = ctx
+            .resolved_name_at(attribute.name.span().start.offset)
+            .unwrap_or(written);
+        if !is_route_attribute(resolved) {
+            continue;
+        }
+        let mut details = RouteDetails::default();
+        for (parameter, value) in attribute_arguments(
+            attribute,
+            &["path", "name", "requirements", "options", "defaults"],
+        ) {
+            match parameter {
+                "path" => match resolved_string_literal(value, content) {
+                    Some((path, start, _)) => details.path = Some((path.to_string(), start as u32)),
+                    None => details.path_unreadable = true,
+                },
+                "options" => {
+                    details.parameters = array_entry(value, "parameters", content)
+                        .map(|parameters| declared_parameters(parameters, content));
+                }
+                "defaults" => {
+                    let default = |key: &str| array_entry(value, key, content).and_then(literal);
+                    details.title_callback = default("_title_callback")
+                        .and_then(|callback| crate::drupal::routing::handler_of(&callback));
+                    details.entity_view = default("_entity_view")
+                        .and_then(|view| crate::drupal::routing::entity_type_of(&view));
+                    details.entity_form = default("_entity_form")
+                        .and_then(|form| crate::drupal::routing::entity_type_of(&form));
+                    details.defaults = default_values(value, content);
+                }
+                _ => {}
+            }
+        }
+        found.push(details);
+    }
+    found
+}
+
+/// The route an attribute declares under `name`, dispatching to
+/// `controller`, after the class route `globals`: the spans of the
+/// parameters its path declares, pushed to `spans`, and the route, unless
+/// its path is not all written out.
+///
+/// Drupal puts the class route's path in front of the route's, and lets the
+/// route's own defaults and options replace the class route's key by key.
+fn attribute_route(
+    name: &str,
+    globals: Option<&RouteDetails>,
+    own: &RouteDetails,
+    controller: String,
+    spans: &mut Vec<SymbolSpan>,
+) -> Option<DrupalRouteSite> {
+    let mut path = String::new();
+    let mut readable = true;
+    for details in globals.into_iter().chain([own]) {
+        readable &= !details.path_unreadable;
+        let Some((written, start)) = &details.path else {
+            continue;
+        };
+        for (from, to) in crate::drupal::routing::path_parameters(written) {
+            spans.push(SymbolSpan {
+                start: start + from as u32,
+                end: start + to as u32,
+                kind: SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalRouteParameter,
+                    key: crate::drupal::routing::route_parameter_key(name, &written[from..to]),
+                    is_write: true,
+                    is_optional: false,
+                },
+            });
+        }
+        path.push_str(written);
+    }
+    if !readable {
+        return None;
+    }
+    let entity_view = own
+        .entity_view
+        .clone()
+        .or_else(|| globals.and_then(|globals| globals.entity_view.clone()));
+    let entity_form = own
+        .entity_form
+        .clone()
+        .or_else(|| globals.and_then(|globals| globals.entity_form.clone()));
+    let title_callback = own
+        .title_callback
+        .clone()
+        .or_else(|| globals.and_then(|globals| globals.title_callback.clone()));
+    let mut defaults = own.defaults.clone();
+    for (name, is_null) in globals.iter().flat_map(|globals| &globals.defaults) {
+        if !defaults.iter().any(|(own, _)| own == name) {
+            defaults.push((name.clone(), *is_null));
+        }
+    }
+    Some(DrupalRouteSite {
+        name: name.to_string(),
+        path,
+        controller: Some(controller),
+        title_callback,
+        parameters: own
+            .parameters
+            .clone()
+            .or_else(|| globals.and_then(|globals| globals.parameters.clone()))
+            .unwrap_or_default(),
+        defaults,
+        entity_type: entity_view.or(entity_form),
+    })
+}
+
+/// The value an array literal gives the string key `key`.
+fn array_entry<'a, 'arena>(
+    array: &'a Expression<'arena>,
+    key: &str,
+    content: &str,
+) -> Option<&'a Expression<'arena>> {
+    crate::parser::array_literal_elements(array)?
+        .iter()
+        .find_map(|element| match element {
+            ArrayElement::KeyValue(entry) => resolved_string_literal(entry.key, content)
+                .filter(|(written, _, _)| *written == key)
+                .map(|_| entry.value),
+            _ => None,
+        })
+}
+
+/// Each parameter an `options` array's `parameters` declares, with the
+/// `type` it gives and whether it names its own converter.
+fn declared_parameters(parameters: &Expression<'_>, content: &str) -> Vec<DeclaredParameter> {
+    let Some(entries) = crate::parser::array_literal_elements(parameters) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|element| {
+            let ArrayElement::KeyValue(entry) = element else {
+                return None;
+            };
+            let (name, _, _) = resolved_string_literal(entry.key, content)?;
+            let ty = array_entry(entry.value, "type", content)
+                .and_then(|ty| resolved_string_literal(ty, content))
+                .map(|(ty, _, _)| ty.to_string());
+            let converted_otherwise = ["converter", "tempstore"]
+                .iter()
+                .any(|key| array_entry(entry.value, key, content).is_some());
+            Some(DeclaredParameter {
+                name: name.to_string(),
+                ty,
+                converted_otherwise,
+            })
+        })
+        .collect()
+}
+
+/// The keys of a `defaults` array that are not Drupal's own, with whether
+/// each is `NULL`.
+fn default_values(defaults: &Expression<'_>, content: &str) -> Vec<(String, bool)> {
+    let Some(entries) = crate::parser::array_literal_elements(defaults) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|element| {
+            let ArrayElement::KeyValue(entry) = element else {
+                return None;
+            };
+            let (name, _, _) = resolved_string_literal(entry.key, content)?;
+            (!name.starts_with('_')).then(|| {
+                (
+                    name.to_string(),
+                    matches!(entry.value, Expression::Literal(Literal::Null(_))),
+                )
+            })
+        })
+        .collect()
 }
 
 /// Whether `fqn` is a class under an extension's (or core's) `Controller`
@@ -458,32 +700,119 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_url_spans(
 }
 
 /// Record the route name a call reads in its positional argument `index`,
-/// or in the `route_name:` argument that names it.
+/// or in the `route_name:` argument that names it, and the parameters of
+/// that route it passes in the argument after it, or in the
+/// `route_parameters:` argument.
 pub(in crate::symbol_map::extraction) fn emit_drupal_route_span(
     index: usize,
     argument_list: &ArgumentList<'_>,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    let route =
-        argument_list
-            .arguments
-            .iter()
-            .enumerate()
-            .find_map(|(at, argument)| match argument {
-                Argument::Positional(positional) if at == index => Some(positional.value),
-                Argument::Named(named) if named.name.value == b"route_name" => Some(named.value),
-                _ => None,
-            });
-    if let Some(route) = route {
-        push_laravel_string_span(
-            StringKeyKind::DrupalRoute,
-            false,
-            false,
-            route,
-            ctx.content,
-            &mut ctx.spans,
-        );
+    let Some(route) = argument_at(argument_list, index, b"route_name") else {
+        return;
+    };
+    push_laravel_string_span(
+        StringKeyKind::DrupalRoute,
+        false,
+        false,
+        route,
+        ctx.content,
+        &mut ctx.spans,
+    );
+    let Some((route, _, _)) = resolved_string_literal(route, ctx.content) else {
+        return;
+    };
+    let Some(parameters) = argument_at(argument_list, index + 1, b"route_parameters") else {
+        return;
+    };
+    for (key, start, end) in parameter_keys(parameters, ctx.content) {
+        ctx.spans.push(SymbolSpan {
+            start,
+            end,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::DrupalRouteParameter,
+                key: crate::drupal::routing::route_parameter_key(route, key),
+                is_write: false,
+                is_optional: false,
+            },
+        });
     }
+}
+
+/// Record the route parameters a call on a typed receiver passes after the
+/// route name it reads (see [`crate::drupal::route_parameter_call`]), for
+/// the type engine to confirm against its receiver like the name.
+pub(in crate::symbol_map::extraction) fn record_drupal_route_parameter_sites(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some((receiver, parameter)) = crate::drupal::route_parameter_call(member_name) else {
+        return;
+    };
+    // The route name is read only when it is written first, as the
+    // receiver's own sites read it.
+    let Some(Argument::Positional(route)) = argument_list.arguments.first() else {
+        return;
+    };
+    let Some((route, _, _)) = resolved_string_literal(route.value, ctx.content) else {
+        return;
+    };
+    let Some(parameters) = argument_at(argument_list, 1, parameter.as_bytes()) else {
+        return;
+    };
+    for (key, start, end) in parameter_keys(parameters, ctx.content) {
+        ctx.typed_receiver_sites.push(TypedReceiverSite {
+            start,
+            end,
+            key: crate::drupal::routing::route_parameter_key(route, key),
+            is_write: false,
+            is_optional: false,
+            guards: 0,
+            receiver,
+        });
+    }
+}
+
+/// The argument a call passes its parameter `index` in: positional, or
+/// named `name`.
+fn argument_at<'a, 'arena>(
+    argument_list: &'a ArgumentList<'arena>,
+    index: usize,
+    name: &[u8],
+) -> Option<&'a Expression<'arena>> {
+    argument_list
+        .arguments
+        .iter()
+        .enumerate()
+        .find_map(|(at, argument)| match argument {
+            Argument::Positional(positional) if at == index => Some(positional.value),
+            Argument::Named(named) if named.name.value == name => Some(named.value),
+            _ => None,
+        })
+}
+
+/// The keys of an array literal of route parameters that are written out,
+/// each with the byte range of its text.
+fn parameter_keys<'arena>(
+    parameters: &Expression<'arena>,
+    content: &str,
+) -> Vec<(&'arena str, u32, u32)> {
+    let Some(entries) = crate::parser::array_literal_elements(parameters) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            ArrayElement::KeyValue(entry) => resolved_string_literal(entry.key, content),
+            _ => None,
+        })
+        .filter(|(key, _, _)| !key.is_empty())
+        .map(|(key, start, end)| (key, start as u32, end as u32))
+        .collect()
 }
 
 /// The class a `handlers` array gives the handler `name`, as a class
@@ -851,6 +1180,220 @@ abstract class Base {
                 "Drupal\\acme\\Controller\\About",
                 "Drupal\\acme\\Controller\\About::__invoke",
                 "Drupal\\acme\\Controller\\Notes::list",
+            ]
+        );
+    }
+
+    /// The route parameter keys `php`'s static calls pass, sorted, and the
+    /// ones its method calls leave for the type engine to confirm, with the
+    /// receiver they need.
+    fn route_parameters(
+        php: &str,
+    ) -> (Vec<String>, Vec<(String, crate::symbol_map::ReceiverClass)>) {
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: true,
+                twig: false,
+            },
+            None,
+        );
+        let mut passed: Vec<String> = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalRouteParameter,
+                    key,
+                    is_write: false,
+                    ..
+                } => {
+                    assert_eq!(
+                        key.rsplit('#').next(),
+                        php.get(span.start as usize..span.end as usize)
+                    );
+                    Some(key.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        passed.sort();
+        let sites = map
+            .typed_receiver_sites
+            .iter()
+            .filter(|site| {
+                site.receiver
+                    .targets()
+                    .iter()
+                    .any(|(_, kind)| *kind == StringKeyKind::DrupalRouteParameter)
+            })
+            .map(|site| (site.key.clone(), site.receiver))
+            .collect();
+        (passed, sites)
+    }
+
+    #[test]
+    fn route_calls_pass_the_parameters_of_their_route() {
+        let php = r#"<?php
+namespace Drupal\acme;
+use Drupal\Core\Link;
+use Drupal\Core\Url;
+final class Links {
+    public function run($form_state, $urls, string $id): void {
+        Url::fromRoute('acme.note', ['acme_note' => $id, 'mode' => 'full', 0 => 'x']);
+        new Url('acme.note', route_parameters: ['acme_note' => 1]);
+        Link::createFromRoute('Note', 'acme.note', ['acme_note' => 2]);
+        Url::fromRoute($id, ['acme_note' => 3]);
+        $form_state->setRedirect('acme.note', ['acme_note' => 4]);
+        $urls->generateFromRoute('acme.note', parameters: ['mode' => 'teaser']);
+        $form_state->setRedirect('acme.note', 'not_an_array');
+        $form_state->other('acme.note', ['nope' => 1]);
+    }
+}
+"#;
+        let (passed, sites) = route_parameters(php);
+        assert_eq!(
+            passed,
+            [
+                "acme.note#acme_note",
+                "acme.note#acme_note",
+                "acme.note#acme_note",
+                "acme.note#mode",
+            ]
+        );
+        assert_eq!(
+            sites,
+            [
+                (
+                    "acme.note#acme_note".to_string(),
+                    crate::symbol_map::ReceiverClass::FormRedirectParameters
+                ),
+                (
+                    "acme.note#mode".to_string(),
+                    crate::symbol_map::ReceiverClass::UrlGeneratorParameters
+                ),
+            ]
+        );
+    }
+
+    /// A call's parameters are confirmed by a receiver of the same classes
+    /// as its route name, so neither can be read without the other.
+    #[test]
+    fn route_parameter_receivers_reach_the_classes_of_the_route_name() {
+        let classes = |receiver: crate::symbol_map::ReceiverClass, wanted: StringKeyKind| {
+            receiver
+                .targets()
+                .iter()
+                .filter(|(_, kind)| *kind == wanted)
+                .map(|(class, _)| *class)
+                .collect::<Vec<&str>>()
+        };
+        for method in [
+            "setRedirect",
+            "redirect",
+            "generateFromRoute",
+            "generate",
+            "checkNamedRoute",
+        ] {
+            let (names, _) = crate::symbol_map::extraction::symfony_receiver_method(method, 0)
+                .unwrap_or_else(|| panic!("{method} names no route"));
+            let (parameters, _) = crate::drupal::route_parameter_call(method)
+                .unwrap_or_else(|| panic!("{method} passes no parameters"));
+            assert_eq!(
+                classes(names, StringKeyKind::DrupalRoute),
+                classes(parameters, StringKeyKind::DrupalRouteParameter),
+                "{method}"
+            );
+        }
+    }
+
+    #[test]
+    fn route_attributes_declare_their_parameters_and_routes() {
+        let php = r#"<?php
+namespace Drupal\acme\Controller;
+use Symfony\Component\Routing\Attribute\Route;
+#[Route(path: '/notes/{acme_note}', name: 'acme.notes.')]
+final class Notes {
+    #[Route(path: '/view/{mode}', name: 'view', options: ['parameters' => ['acme_note' => ['type' => 'entity:acme_note']]])]
+    public function view($acme_note, string $mode): array { return []; }
+}
+#[Route('/about/{node}', name: 'acme.about', defaults: ['_entity_view' => 'node.full'])]
+final class About {
+    public function __invoke(): array { return []; }
+}
+"#;
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: true,
+                twig: false,
+            },
+            None,
+        );
+        let declared: Vec<(&str, &str)> = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalRouteParameter,
+                    key,
+                    is_write: true,
+                    ..
+                } => Some((&php[span.start as usize..span.end as usize], key.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            declared,
+            [
+                ("acme_note", "acme.notes.view#acme_note"),
+                ("mode", "acme.notes.view#mode"),
+                ("node", "acme.about#node"),
+            ]
+        );
+        assert_eq!(
+            map.drupal_routes,
+            [
+                DrupalRouteSite {
+                    name: "acme.notes.view".to_string(),
+                    path: "/notes/{acme_note}/view/{mode}".to_string(),
+                    controller: Some("Drupal\\acme\\Controller\\Notes::view".to_string()),
+                    title_callback: None,
+                    parameters: vec![DeclaredParameter {
+                        name: "acme_note".to_string(),
+                        ty: Some("entity:acme_note".to_string()),
+                        converted_otherwise: false,
+                    }],
+                    defaults: Vec::new(),
+                    entity_type: None,
+                },
+                DrupalRouteSite {
+                    name: "acme.about".to_string(),
+                    path: "/about/{node}".to_string(),
+                    controller: Some("Drupal\\acme\\Controller\\About::__invoke".to_string()),
+                    title_callback: None,
+                    parameters: Vec::new(),
+                    defaults: Vec::new(),
+                    entity_type: Some("node".to_string()),
+                },
             ]
         );
     }

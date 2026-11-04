@@ -21,7 +21,7 @@ pub(crate) mod types;
 
 use crate::Backend;
 use crate::atom::Atom;
-use crate::symbol_map::{StringKeyKind, SymbolKind};
+use crate::symbol_map::{ReceiverClass, StringKeyKind, SymbolKind};
 
 /// The web roots of the workspace's Drupal projects, and the declaration
 /// files found under them.
@@ -125,6 +125,48 @@ pub(crate) fn static_route_argument(class: &str, method: &str) -> Option<usize> 
     } else {
         None
     }
+}
+
+/// The calls on a typed receiver that take a route's parameters after the
+/// route name they take first, with the receiver that confirms them.  Each
+/// one's route name is read through the receiver
+/// `symbol_map::extraction::symfony_receiver_method` gives it.
+const ROUTE_PARAMETER_CALLS: &[(&str, ReceiverClass, &str)] = &[
+    (
+        "setRedirect",
+        ReceiverClass::FormRedirectParameters,
+        "route_parameters",
+    ),
+    (
+        "redirect",
+        ReceiverClass::RouteRedirectParameters,
+        "route_parameters",
+    ),
+    (
+        "generateFromRoute",
+        ReceiverClass::UrlGeneratorParameters,
+        "parameters",
+    ),
+    (
+        "generate",
+        ReceiverClass::UrlGeneratorParameters,
+        "parameters",
+    ),
+    (
+        "checkNamedRoute",
+        ReceiverClass::AccessCheckParameters,
+        "parameters",
+    ),
+];
+
+/// The receiver that confirms the route parameters a call of `method`
+/// passes second, and the name of their argument, when the call takes
+/// them.
+pub(crate) fn route_parameter_call(method: &str) -> Option<(ReceiverClass, &'static str)> {
+    ROUTE_PARAMETER_CALLS
+        .iter()
+        .find(|(name, _, _)| method.eq_ignore_ascii_case(name))
+        .map(|(_, receiver, parameter)| (*receiver, *parameter))
 }
 
 /// Whether `class`, a resolved class name, is `Drupal\Core\Url`, whose
@@ -309,6 +351,22 @@ impl Backend {
         aliases.sort_unstable();
         aliases.dedup();
         aliases
+    }
+
+    /// The paths of the routes the project names `name`, sorted.
+    pub(crate) fn drupal_route_paths(&self, name: &str) -> Vec<String> {
+        let mut paths = Vec::new();
+        self.visit_declaring_symbol_maps(|_, map| {
+            paths.extend(
+                map.drupal_routes
+                    .iter()
+                    .filter(|route| route.name == name)
+                    .map(|route| route.path.clone()),
+            );
+        });
+        paths.sort_unstable();
+        paths.dedup();
+        paths
     }
 
     /// Whether `uri` is code a Drupal site never runs against its own

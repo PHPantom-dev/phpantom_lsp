@@ -4,8 +4,10 @@
 //! top-level key, and places it by route: the link's `route_name`, the
 //! `base_route` a task is grouped under, and the routes an action
 //! `appears_on`.  A `parent` or `parent_id` names another link, not a
-//! route.
+//! route.  The keys of a link's `route_parameters` are parameters of the
+//! route its `route_name` names.
 
+use super::routing::{entries, lines, route_parameter_key, scalar};
 use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolSpan};
 use crate::symfony::routes::is_drupal_route_name;
 
@@ -56,6 +58,71 @@ pub(crate) fn links_route_spans(content: &str) -> Vec<SymbolSpan> {
         }
     }
     spans
+}
+
+/// The spans of the route parameters a links file passes: each key of a
+/// link's `route_parameters`, as a parameter of its `route_name`, which
+/// may come before or after it.
+pub(crate) fn links_parameter_spans(content: &str) -> Vec<SymbolSpan> {
+    let lines = lines(content);
+    let mut spans = Vec::new();
+    for (_, link) in entries(&lines) {
+        let mut route = None;
+        let mut keys: Vec<(String, usize)> = Vec::new();
+        for (child, nested) in entries(link) {
+            match child.key {
+                "route_name" => route = Some(scalar(child.value, child.value_start).0),
+                "route_parameters" if nested.is_empty() => {
+                    keys.extend(flow_keys(child.value, child.value_start));
+                }
+                "route_parameters" => keys.extend(
+                    entries(nested)
+                        .into_iter()
+                        .map(|(parameter, _)| (parameter.key.to_string(), parameter.key_start)),
+                ),
+                _ => {}
+            }
+        }
+        let Some(route) = route.filter(|route| is_drupal_route_name(route)) else {
+            continue;
+        };
+        for (key, start) in keys {
+            spans.push(SymbolSpan {
+                start: start as u32,
+                end: (start + key.len()) as u32,
+                kind: SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalRouteParameter,
+                    key: route_parameter_key(&route, &key),
+                    is_write: false,
+                    is_optional: false,
+                },
+            });
+        }
+    }
+    spans
+}
+
+/// The keys of a `{ a: 1, 'b': 2 }` flow mapping written at `start`, each
+/// with the absolute offset of its text.
+fn flow_keys(raw: &str, start: usize) -> Vec<(String, usize)> {
+    let Some(open) = raw.find('{') else {
+        return Vec::new();
+    };
+    let close = raw.rfind('}').unwrap_or(raw.len()).max(open + 1);
+    let mut keys = Vec::new();
+    let mut pair_start = open + 1;
+    for pair in raw[open + 1..close].split(',') {
+        if let Some(colon) = pair.find(':') {
+            let written = pair[..colon].trim();
+            let leading = pair[..colon].len() - pair[..colon].trim_start().len();
+            let (key, (quote, _)) = crate::framework::strip_yaml_quotes(written);
+            if !key.is_empty() {
+                keys.push((key.to_string(), start + pair_start + leading + quote));
+            }
+        }
+        pair_start += pair.len() + 1;
+    }
+    keys
 }
 
 /// Push the route `raw`, a YAML scalar starting at `start`, names.
@@ -147,6 +214,29 @@ mod tests {
             routes(yaml),
             [
                 "one", "two", "three", "four", "five", "six", "seven", "eight"
+            ]
+        );
+    }
+
+    #[test]
+    fn route_parameters_are_keys_of_the_links_route() {
+        let yaml = "a:\n  route_parameters:\n    name: 'World'\n    'id': 1\n  route_name: acme.greeting\nb:\n  route_name: acme.note\n  route_parameters: { acme_note: 1, 'mode': full }\nc:\n  route_parameters:\n    orphan: 1\n";
+        let found: Vec<(&str, String)> = links_parameter_spans(yaml)
+            .iter()
+            .map(|span| {
+                let SymbolKind::StringKey { key, .. } = &span.kind else {
+                    unreachable!()
+                };
+                (&yaml[span.start as usize..span.end as usize], key.clone())
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("name", "acme.greeting#name".to_string()),
+                ("id", "acme.greeting#id".to_string()),
+                ("acme_note", "acme.note#acme_note".to_string()),
+                ("mode", "acme.note#mode".to_string()),
             ]
         );
     }

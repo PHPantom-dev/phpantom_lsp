@@ -317,6 +317,9 @@ pub(crate) struct SymbolMap {
     /// which no text of the file spells out.  Empty for every file that
     /// declares none.
     pub drupal_route_aliases: Vec<String>,
+    /// The Drupal routes the file declares, in source order.  Empty for
+    /// every file that declares none.
+    pub drupal_routes: Vec<DrupalRouteSite>,
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,

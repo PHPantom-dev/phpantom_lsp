@@ -79,7 +79,8 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::MessengerBus
         | StringKeyKind::YiiRoute
         | StringKeyKind::DrupalEntityType
-        | StringKeyKind::DrupalRoute => backend.symfony_declaration_locations(*kind, key),
+        | StringKeyKind::DrupalRoute
+        | StringKeyKind::DrupalRouteParameter => backend.symfony_declaration_locations(*kind, key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
         StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
@@ -316,7 +317,8 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::MessengerBus
         | StringKeyKind::YiiRoute
         | StringKeyKind::DrupalEntityType
-        | StringKeyKind::DrupalRoute => {
+        | StringKeyKind::DrupalRoute
+        | StringKeyKind::DrupalRouteParameter => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // The catalogues named after a domain declare it, and the paths of

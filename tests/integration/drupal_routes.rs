@@ -695,3 +695,143 @@ async fn test_code_and_unread_projects_are_not_judged() {
             .is_empty()
     );
 }
+
+const PARAMETERS: &str = r#"<?php
+namespace Drupal\acme\Controller;
+
+use Drupal\Core\Access\AccessManagerInterface;
+use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Link;
+use Drupal\Core\Routing\UrlGeneratorInterface;
+use Drupal\Core\Url;
+
+final class Parameters extends ControllerBase {
+    public function __construct(
+        private UrlGeneratorInterface $urls,
+        private AccessManagerInterface $access,
+    ) {}
+
+    public function run(FormStateInterface $form_state, Redirect $other): void {
+        Url::fromRoute('acme.greeting', ['name' => 'World']);
+        new Url('acme.greeting', ['name' => 'World']);
+        Link::createFromRoute('Hello', 'acme.greeting', ['name' => 'World']);
+        $form_state->setRedirect('acme.greeting', ['name' => 'World']);
+        $this->redirect('acme.greeting', ['name' => 'World']);
+        $this->urls->generateFromRoute('acme.greeting', ['name' => 'World']);
+        $this->access->checkNamedRoute('acme.greeting', ['name' => 'World']);
+        $other->setRedirect('acme.greeting', ['name' => 'World']);
+    }
+}
+
+final class Redirect {
+    public function setRedirect(string $path, array $query = []): void {}
+}
+"#;
+
+const PARAMETERS_PATH: &str = "web/modules/custom/acme/src/Controller/Parameters.php";
+
+const MENU: &str = "acme.greeting:\n  title: 'Greeting'\n  route_parameters:\n    name: 'World'\n  route_name: acme.greeting\n";
+const MENU_PATH: &str = "web/modules/custom/acme/acme.links.menu.yml";
+
+/// A key of the parameters a route call or a links file passes goes to
+/// the placeholder of the route's path, which lists every one of them.
+#[tokio::test]
+async fn route_parameters_go_to_the_path_that_declares_them() {
+    let (backend, dir) = workspace(&files(&[
+        (ROUTING_PATH, ROUTING),
+        (PARAMETERS_PATH, PARAMETERS),
+        (MENU_PATH, MENU),
+    ]))
+    .await;
+    let php = uri_for(&dir, PARAMETERS_PATH);
+    let yaml = uri_for(&dir, ROUTING_PATH);
+    let menu = uri_for(&dir, MENU_PATH);
+
+    let found = definitions_at(
+        &backend,
+        &php,
+        position_in(PARAMETERS, "fromRoute('acme.greeting', ['name'", 30),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        (&found[0].uri, found[0].range.start),
+        (&yaml, Position::new(1, 25))
+    );
+    let found = definitions_at(&backend, &menu, Position::new(3, 5)).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((&found[0].uri, found[0].range.start.line), (&yaml, 1));
+
+    let found = references_at(&backend, &yaml, Position::new(1, 26)).await;
+    // Every call but the other class's `setRedirect()`.
+    let mut expected: Vec<_> = (17..=23).map(|line| (php.clone(), line)).collect();
+    expected.push((yaml, 1));
+    expected.push((menu, 3));
+    expected.sort();
+    assert_eq!(found, expected);
+
+    let position = position_in(PARAMETERS, "fromRoute('acme.greeting', ['name'", 30);
+    let hover = hover_text_at(&backend, &php, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(hover.contains("Route parameter"), "{hover}");
+    assert!(hover.contains("/acme/greeting/{name}"), "{hover}");
+}
+
+/// The keys of the parameters complete from the route's path, in every
+/// call that takes a route name and its parameters.
+#[tokio::test]
+async fn route_parameters_complete_from_the_path() {
+    let consumer = PARAMETERS.replace("['name' => 'World']", "['' => 'World']");
+    let (backend, dir) = workspace(&files(&[
+        (ROUTING_PATH, ROUTING),
+        (PARAMETERS_PATH, consumer.as_str()),
+    ]))
+    .await;
+    let php = uri_for(&dir, PARAMETERS_PATH);
+    for (needle, inside) in [
+        ("fromRoute('acme.greeting', [''", 29),
+        ("new Url('acme.greeting', [''", 27),
+        ("'Hello', 'acme.greeting', [''", 28),
+        ("$form_state->setRedirect('acme.greeting', [''", 44),
+        ("$this->redirect('acme.greeting', [''", 35),
+        ("generateFromRoute('acme.greeting', [''", 37),
+        ("checkNamedRoute('acme.greeting', [''", 35),
+    ] {
+        let position = position_in(&consumer, needle, inside);
+        let labels = response_labels(
+            completion_response(&backend, &php, position.line, position.character, None).await,
+        );
+        assert_eq!(labels, ["name"], "{needle}");
+    }
+    let position = position_in(&consumer, "$other->setRedirect('acme.greeting', [''", 39);
+    let labels = response_labels(
+        completion_response(&backend, &php, position.line, position.character, None).await,
+    );
+    assert!(!labels.contains(&"name".to_string()), "{labels:?}");
+}
+
+/// Drupal sends a parameter no path declares as the query string, so no
+/// key is reported.
+#[tokio::test]
+async fn route_parameters_no_path_declares_are_not_reported() {
+    let consumer = PARAMETERS.replace("['name' => 'World']", "['page' => 2]");
+    let (backend, dir) = workspace(&files(&[
+        (ROUTING_PATH, ROUTING),
+        (PARAMETERS_PATH, consumer.as_str()),
+    ]))
+    .await;
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(
+        uri_for(&dir, PARAMETERS_PATH).as_str(),
+        &consumer,
+        &mut diagnostics,
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !crate::common::message_text(&diagnostic.message).contains("page")),
+        "{diagnostics:?}"
+    );
+}

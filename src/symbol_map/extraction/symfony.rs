@@ -1436,7 +1436,7 @@ pub(in crate::symbol_map::extraction) fn emit_template_attribute_span(
 
 /// Whether `class_name`, as resolved, is Symfony's `#[Route]`, under its
 /// current name or the `Annotation` one older applications import.
-fn is_route_attribute(class_name: &str) -> bool {
+pub(in crate::symbol_map::extraction) fn is_route_attribute(class_name: &str) -> bool {
     let class_name = class_name.trim_start_matches('\\');
     ROUTE_ATTRIBUTES
         .iter()

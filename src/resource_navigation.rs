@@ -276,6 +276,7 @@ impl Backend {
         let mut spans = Vec::new();
         let mut container_values = Vec::new();
         let mut route_imports = Vec::new();
+        let mut drupal_routes = Vec::new();
         let mut declares_twig_loader = false;
         // A Drupal declaration file is Drupal's, also in a Drupal site that
         // requires Symfony's container and has a `config` directory on the
@@ -291,9 +292,13 @@ impl Backend {
                 crate::drupal::DeclarationFile::Routing => {
                     spans = crate::symfony::routes::drupal_routing_spans(content);
                     spans.extend(crate::drupal::routing::routing_value_spans(content));
+                    let (parameters, routes) = crate::drupal::routing::routing_routes(content);
+                    spans.extend(parameters);
+                    drupal_routes = routes;
                 }
                 crate::drupal::DeclarationFile::Links => {
                     spans = crate::drupal::links::links_route_spans(content);
+                    spans.extend(crate::drupal::links::links_parameter_spans(content));
                 }
             }
         } else if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
@@ -380,6 +385,7 @@ impl Backend {
             member_access_indices,
             container_values,
             route_imports,
+            drupal_routes,
             declares_twig_loader,
             source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
             ..SymbolMap::default()

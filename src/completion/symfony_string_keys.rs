@@ -655,7 +655,7 @@ where
 }
 
 /// Whether `before`, the text before a callee's name, ends with `new`.
-fn is_instantiation(before: &str) -> bool {
+pub(crate) fn is_instantiation(before: &str) -> bool {
     let before = before.trim_end();
     before.strip_suffix("new").is_some_and(|rest| {
         !rest
@@ -666,7 +666,7 @@ fn is_instantiation(before: &str) -> bool {
 }
 
 /// The (possibly qualified) name `text` ends with.
-fn trailing_name(text: &str) -> &str {
+pub(crate) fn trailing_name(text: &str) -> &str {
     let start = text
         .bytes()
         .rposition(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'\\')))

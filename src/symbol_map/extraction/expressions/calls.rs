@@ -488,6 +488,7 @@ fn extract_method_call<'a>(
         let member_name = crate::atom::atom_bytes(ident.value);
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
         record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
+        record_drupal_route_parameter_sites(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
         // Recorded with `->` for both spellings so callable resolution

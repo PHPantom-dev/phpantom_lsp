@@ -458,7 +458,8 @@ struct ReceiverCallWalker<'a, 'sites> {
 impl<'sites> ReceiverCallWalker<'_, 'sites> {
     /// The candidates the argument at `index` holds: in the string itself,
     /// or in the entries of the array a `first(['a', 'b'])` or an
-    /// `args(['%app.sender%'])` builds.
+    /// `args(['%app.sender%'])` builds, their keys included, which name
+    /// the parameters of a Drupal `setRedirect('route', ['node' => 1])`.
     fn matching_sites(
         &self,
         expr: &Expression<'_>,
@@ -496,7 +497,10 @@ impl<'sites> ReceiverCallWalker<'_, 'sites> {
         for element in elements.iter() {
             match element {
                 ArrayElement::Value(value) => self.matching_sites(value.value, index, out),
-                ArrayElement::KeyValue(value) => self.matching_sites(value.value, index, out),
+                ArrayElement::KeyValue(value) => {
+                    self.matching_sites(value.key, index, out);
+                    self.matching_sites(value.value, index, out);
+                }
                 _ => {}
             }
         }

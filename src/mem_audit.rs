@@ -1411,6 +1411,24 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             {
                 sym.add(name.capacity());
             }
+            sym.add(sm.drupal_routes.capacity() * size_of::<crate::symbol_map::DrupalRouteSite>());
+            for route in &sm.drupal_routes {
+                sym.add(route.name.capacity() + route.path.capacity());
+                sym.add(route.controller.as_ref().map_or(0, String::capacity));
+                sym.add(route.title_callback.as_ref().map_or(0, String::capacity));
+                sym.add(route.entity_type.as_ref().map_or(0, String::capacity));
+                sym.add(
+                    route.parameters.capacity() * size_of::<crate::symbol_map::DeclaredParameter>(),
+                );
+                for parameter in &route.parameters {
+                    sym.add(parameter.name.capacity());
+                    sym.add(parameter.ty.as_ref().map_or(0, String::capacity));
+                }
+                sym.add(route.defaults.capacity() * size_of::<(String, bool)>());
+                for (name, _) in &route.defaults {
+                    sym.add(name.capacity());
+                }
+            }
             sym.add(sm.routes.capacity() * size_of::<crate::symbol_map::RouteSite>());
             for route in &sm.routes {
                 sym.add(route.path.as_ref().map_or(0, String::capacity));

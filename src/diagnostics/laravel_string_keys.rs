@@ -95,8 +95,11 @@ impl CheckedStringKind {
             // template variable no render was found to pass may be passed
             // by one that builds its context at runtime.  A module can add
             // an entity type in PHP, through `hook_entity_type_build()`.
+            // Drupal sends a route parameter no path declares as the query
+            // string.
             StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
+            | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack
