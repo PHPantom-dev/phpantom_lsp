@@ -51,7 +51,7 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
 }
 
 /// The operation that consumes an Eloquent attribute name.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AttributeNameKind {
     /// A database query, which requires a backing column.
     Column,
@@ -73,6 +73,12 @@ fn collect_names<'a>(
 ) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut columns = Vec::new();
+    // Names a computed property claims that this operation cannot take.
+    let rejected: HashSet<&str> = properties
+        .clone()
+        .filter(|property| !accepts_property(property, kind))
+        .map(|property| property.name.as_str())
+        .collect();
 
     let mut push = |name: &str| {
         // `$guarded = ['*']` describes mass-assignment policy, not a column.
@@ -103,9 +109,7 @@ fn collect_names<'a>(
             // Visibility lists can name computed properties. An explicit
             // fillable/guarded entry remains independent column evidence.
             if sources & (model_declaration::FILLABLE | model_declaration::GUARDED) == 0
-                && properties.clone().any(|property| {
-                    property.name == col.as_str() && !accepts_property(property, kind)
-                })
+                && rejected.contains(col.as_str())
             {
                 continue;
             }
@@ -155,10 +159,7 @@ fn collect_names<'a>(
     // after this function), so read them from the tags parsed when the
     // class was extracted.
     for (name, _type) in class.doc_properties() {
-        if !properties
-            .clone()
-            .any(|property| property.name == name.as_str() && !accepts_property(property, kind))
-        {
+        if !rejected.contains(name.as_str()) {
             push(name);
         }
     }

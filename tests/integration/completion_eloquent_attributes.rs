@@ -748,6 +748,21 @@ async fn computed_accessors_with_setters_complete_in_attribute_arrays() {
             );
         }
     }
+    // The lookup array is queried before it is assigned, so it takes
+    // columns only; the values array takes writable attributes.
+    let lookup =
+        item_labels(complete_statement(&backend, &uri, "User::firstOrCreate(['§']);").await);
+    assert!(lookup.iter().any(|item| item == "name"), "{lookup:?}");
+    assert!(
+        !lookup.iter().any(|item| item == "modern_writable"),
+        "{lookup:?}"
+    );
+    let values =
+        item_labels(complete_statement(&backend, &uri, "User::firstOrCreate([], ['§']);").await);
+    assert!(
+        values.iter().any(|item| item == "modern_writable"),
+        "{values:?}"
+    );
 }
 
 #[tokio::test]
