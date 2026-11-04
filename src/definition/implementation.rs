@@ -563,7 +563,41 @@ impl Backend {
     /// (`Countable`, `Iterator`, …) are implemented across the whole
     /// dependency tree, so scanning it for them would cost far more than
     /// the answer is worth.
+    ///
+    /// Under the full indexing strategy this first waits for the workspace
+    /// index, running it on this thread when no other thread is.
     pub(crate) fn find_implementors(
+        &self,
+        target_short: &str,
+        target_fqn: &str,
+        class_loader: &ResolvedClassLoader<'_>,
+        include_abstract: bool,
+        direct_only: bool,
+        project_only: bool,
+    ) -> Vec<Arc<ClassInfo>> {
+        if self.config().indexing.strategy() == IndexingStrategy::Full
+            && !self.workspace_index.indexed.load(Ordering::Acquire)
+        {
+            self.ensure_workspace_indexed_for_request();
+        }
+        self.find_implementors_without_index_wait(
+            target_short,
+            target_fqn,
+            class_loader,
+            include_abstract,
+            direct_only,
+            project_only,
+        )
+    }
+
+    /// [`find_implementors`](Self::find_implementors) without waiting for
+    /// the workspace index.  While the index is incomplete, the source scans
+    /// cover the files it has not reached yet.
+    ///
+    /// For lookups made while a class is being loaded: the workspace index
+    /// loads classes too, so waiting on it from there can deadlock, and
+    /// running it there would do the whole pass inside that one load.
+    pub(crate) fn find_implementors_without_index_wait(
         &self,
         target_short: &str,
         target_fqn: &str,
@@ -579,11 +613,6 @@ impl Backend {
             include_abstract,
             direct_only,
         };
-        if self.config().indexing.strategy() == IndexingStrategy::Full
-            && !self.workspace_index.indexed.load(Ordering::Acquire)
-        {
-            self.ensure_workspace_indexed_for_request();
-        }
         let workspace_index_ready = self.workspace_index.indexed.load(Ordering::Acquire);
 
         // A target that ships in a Composer package is answered from the

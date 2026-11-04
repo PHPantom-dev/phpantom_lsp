@@ -164,8 +164,7 @@ pub(crate) mod where_property;
 
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use auth::{
-    AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, is_computing_auth_model, patch_auth_user_class,
-    resolve_auth_user_type,
+    AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type,
 };
 pub(crate) use cache_state::LaravelCacheState;
 pub(crate) use collections::{
