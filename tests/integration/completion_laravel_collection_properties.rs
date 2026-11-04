@@ -400,6 +400,21 @@ $identity = $users->pluck(null, null);
         "$ids = $users->pluck('id');",
         &[("$ids", "Collection<int, int>")],
     );
+    // `*`, `{first}` and `{last}` are data_get() operators, not keys: `*`
+    // collects every element into a list rather than reading one.
+    assert_projection(
+        "\\Illuminate\\Support\\Collection<int, User>",
+        r#"
+$roles = $users->pluck('roles.*');
+$firstRole = $users->pluck('roles.{first}');
+$byRole = $users->keyBy('roles.*');
+"#,
+        &[
+            ("$roles", "Collection<int, mixed>"),
+            ("$firstRole", "Collection<int, mixed>"),
+            ("$byRole", "Collection<array-key, User>"),
+        ],
+    );
 }
 
 #[test]

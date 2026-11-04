@@ -98,6 +98,9 @@ fn selected_keys_follow_collection_coercions() {
         ("float", false, true, "float"),
         ("null", false, false, "''"),
         ("?int", false, false, "int|''"),
+        // A lazy keyBy() yields the selected value as the key, null included.
+        ("null", false, true, "null"),
+        ("?int", false, true, "int|null"),
         ("int|string", false, false, "int|string"),
         ("mixed", false, false, "array-key"),
         ("array", true, false, "array-key"),

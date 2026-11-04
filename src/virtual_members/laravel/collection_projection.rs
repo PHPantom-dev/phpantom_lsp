@@ -254,7 +254,8 @@ pub(super) fn collection_key_type(
             });
     }
     if value.is_null() {
-        return if lazy && !enum_keys {
+        // Generators yield a null key as-is; an array key casts it to "".
+        return if lazy {
             PhpType::null()
         } else {
             PhpType::literal_string_value("")
@@ -300,14 +301,15 @@ fn array_key() -> PhpType {
     ARRAY_KEY.clone()
 }
 
-#[cfg(test)]
-#[path = "collection_projection_tests.rs"]
-mod tests;
-
 fn property_path_type(value: &PhpType, path: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
     let (head, tail) = path
         .split_once('.')
         .map_or((path, None), |(head, tail)| (head, Some(tail)));
+    // data_get() treats these segments as operators (or escapes of them),
+    // not as property names.
+    if matches!(head, "*" | "{first}" | "{last}") || head.starts_with('\\') {
+        return None;
+    }
     let next = match value.kind() {
         TypeKind::Nullable(inner) => {
             return property_path_type(inner, path, ctx).map(PhpType::or_null);
@@ -361,3 +363,7 @@ fn property_path_type(value: &PhpType, path: &str, ctx: &ResolutionCtx<'_>) -> O
         None => Some(next),
     }
 }
+
+#[cfg(test)]
+#[path = "collection_projection_tests.rs"]
+mod tests;
