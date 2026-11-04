@@ -113,9 +113,16 @@ pub(super) fn resolve_array_access_subject(
         property,
     } = base
     {
+        let names = super::variable_subjects::resolve_dynamic_member_names(property, ctx);
         let owner_arcs = resolved_to_arcs(resolve_target_classes_expr(prop_base, access_kind, ctx));
         owner_arcs.iter().find_map(|cls| {
-            crate::inheritance::resolve_property_type_hint(cls, property, class_loader)
+            let hints: Vec<PhpType> = names
+                .iter()
+                .filter_map(|name| {
+                    crate::inheritance::resolve_property_type_hint(cls, name, class_loader)
+                })
+                .collect();
+            (!hints.is_empty()).then(|| PhpType::union(hints))
         })
     } else {
         None

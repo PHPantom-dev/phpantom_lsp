@@ -194,40 +194,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B727. A property or method named by a variable does not resolve in a chain
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @param array{price: Decimal, member_price: Decimal} $prices */
-function differences(ProductPrice $price, array $prices): void {
-    foreach ($prices as $column => $amount) {
-        $price->{$column}->equals($amount);
-        // Cannot verify method 'equals': the type of its subject could not be resolved
-    }
-}
-
-$name = 'getD';
-$p->$name()->equals($d);   // type of '$p->?()' could not be resolved
-```
-
-`$column` is `'price'|'member_price'`, so `$price->{$column}` is the
-union of those two properties' types. Even a single literal does not
-resolve as the subject of a chain, whether it is a property (`$m->$col`,
-`$m->{$col}`) or a method call (`$m->$meth()`). The symbol map records the
-member as `?`. `resolve_dynamic_member_name` in
-`src/type_engine/resolver/variable_subjects.rs` takes only the first
-literal it finds, and is only consulted from the call-return path in
-`call_resolution/return_types.rs`.
-
-The name should resolve to every literal the variable can hold, joining
-the member types, for property fetches as well as calls and wherever the
-access sits in a chain. The `dynamic_member_names` diagnostic already
-reads the same literal set.
-
-Before 2026-10-27 this site resolved `$price->{$column}` to `ProductPrice`
-itself, so `equals()` was looked up on the model and hidden by its
-`__call`. It now shows up as unresolved under `unresolved-member-access`.
-
-Found in a Laravel project's back-office tool comparing a price row's
-columns against a cached copy.
+No outstanding items.

@@ -317,15 +317,19 @@ pub(crate) fn resolve_subject_outcome(
     // For property chains, check the property's type hint.
     if let SubjectExpr::PropertyChain { base, property } = &expr {
         let base_arcs = resolved_to_arcs(resolve_target_classes_expr(base, access_kind, ctx));
+        let names = super::variable_subjects::resolve_dynamic_member_names(property, ctx);
         for cls in &base_arcs {
             let merged = resolve_class_fully_maybe_cached(
                 cls,
                 ctx.file.class_loader,
                 ctx.resolved_class_cache,
             );
-            if let Some(parsed) =
-                resolve_property_type_hint(&merged, property, ctx.file.class_loader)
-            {
+            let hints: Vec<PhpType> = names
+                .iter()
+                .filter_map(|name| resolve_property_type_hint(&merged, name, ctx.file.class_loader))
+                .collect();
+            if !hints.is_empty() {
+                let parsed = PhpType::union(hints);
                 if parsed.all_members_primitive_scalar() {
                     let scalar = parsed.non_null_type().unwrap_or(parsed);
                     if access_kind != AccessKind::DoubleColon || !is_all_string_type(&scalar) {

@@ -390,25 +390,35 @@ impl Backend {
     ) -> Vec<Arc<ClassInfo>> {
         match callee {
             SubjectExpr::MethodCall { base, method } => {
-                let method = crate::type_engine::resolver::resolve_dynamic_member_name(method, ctx);
-                Self::return_types_of_method_call(
-                    base,
-                    &method,
-                    text_args,
-                    receiver,
-                    ctx,
-                    return_type_hint_out,
-                )
+                let names = crate::type_engine::resolver::resolve_dynamic_member_names(method, ctx);
+                // A dynamic name reads its receiver once for every method
+                // it can name, so the receiver is resolved up front.
+                let receiver = match (&receiver, names.len()) {
+                    (None, n) if n > 1 => {
+                        Some(crate::type_engine::resolver::resolve_target_classes_expr(
+                            base,
+                            AccessKind::Arrow,
+                            ctx,
+                        ))
+                    }
+                    _ => receiver,
+                };
+                Self::join_member_returns(&names, return_type_hint_out, |name, hint_out| {
+                    Self::return_types_of_method_call(
+                        base,
+                        name,
+                        text_args,
+                        receiver.clone(),
+                        ctx,
+                        hint_out,
+                    )
+                })
             }
             SubjectExpr::StaticMethodCall { class, method } => {
-                let method = crate::type_engine::resolver::resolve_dynamic_member_name(method, ctx);
-                Self::return_types_of_static_method_call(
-                    class,
-                    &method,
-                    text_args,
-                    ctx,
-                    return_type_hint_out,
-                )
+                let names = crate::type_engine::resolver::resolve_dynamic_member_names(method, ctx);
+                Self::join_member_returns(&names, return_type_hint_out, |name, hint_out| {
+                    Self::return_types_of_static_method_call(class, name, text_args, ctx, hint_out)
+                })
             }
             SubjectExpr::FunctionCall(func_name) => {
                 Self::return_types_of_function_call(func_name, text_args, ctx, return_type_hint_out)
@@ -426,6 +436,37 @@ impl Backend {
                 return_type_hint_out,
             ),
             _ => Self::return_types_of_other_callee(callee, ctx, return_type_hint_out),
+        }
+    }
+
+    /// Join what a call returns over every member name its selector can
+    /// stand for (see `resolve_dynamic_member_names`).  The return type
+    /// hint is the union of each name's, and is left unset when any name
+    /// has none, since the classes alone then say more than a partial hint.
+    fn join_member_returns(
+        names: &[std::borrow::Cow<'_, str>],
+        return_type_hint_out: Option<&mut Option<PhpType>>,
+        mut resolve: impl FnMut(&str, Option<&mut Option<PhpType>>) -> Vec<Arc<ClassInfo>>,
+    ) -> Vec<Arc<ClassInfo>> {
+        match names {
+            [] => Vec::new(),
+            [name] => resolve(name, return_type_hint_out),
+            _ => {
+                let mut classes: Vec<Arc<ClassInfo>> = Vec::new();
+                let mut hints: Option<Vec<PhpType>> = Some(Vec::new());
+                for name in names {
+                    let mut hint = None;
+                    ClassInfo::extend_unique_arc(&mut classes, resolve(name, Some(&mut hint)));
+                    match (hint, hints.as_mut()) {
+                        (Some(hint), Some(hints)) => hints.push(hint),
+                        _ => hints = None,
+                    }
+                }
+                if let Some(out) = return_type_hint_out {
+                    *out = hints.map(PhpType::union);
+                }
+                classes
+            }
         }
     }
 

@@ -15335,6 +15335,83 @@ function test(Certainty $c, string $name): void {
     );
 }
 
+/// A member named by a variable that holds known literals names each of
+/// them, wherever the access sits in a chain: `$row->{$column}` is the
+/// union of the properties `$column` can name, and `$row->$getter()` the
+/// union of what the methods return.
+#[test]
+fn a_member_named_by_a_literal_variable_resolves_in_a_chain() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///dynamic_chain.php";
+    let text = r#"<?php
+class Decimal {
+    public function equals(Decimal $other): bool { return true; }
+}
+class Money {
+    public function equals(Decimal $other): bool { return true; }
+}
+class ProductPrice {
+    public Decimal $price;
+    public Money $member_price;
+    public function getD(): Decimal { return new Decimal(); }
+    public function getM(): Money { return new Money(); }
+    public function __call(string $name, array $args): mixed { return null; }
+}
+
+/** @param array{price: Decimal, member_price: Decimal} $prices */
+function differences(ProductPrice $price, array $prices): void {
+    foreach ($prices as $column => $amount) {
+        $price->{$column}->equals($amount);
+        $price->$column->equals($amount);
+    }
+}
+
+function single(ProductPrice $p, Decimal $d, bool $flag): void {
+    $name = 'getD';
+    $p->$name()->equals($d);
+    $p->{$name}()->equals($d);
+    $both = $flag ? 'getD' : 'getM';
+    $p->$both()->equals($d);
+    $p->{'price'}->equals($d);
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "every dynamic member names known members, got: {diags:?}"
+    );
+
+    // A method none of the named members has is still reported.
+    let text_missing = r#"<?php
+class Decimal {}
+class Money {}
+class ProductPrice {
+    public Decimal $price;
+    public Money $member_price;
+}
+
+function differences(ProductPrice $price, Decimal $d, bool $flag): void {
+    $column = $flag ? 'price' : 'member_price';
+    $price->{$column}->equals($d);
+}
+"#;
+    let backend = create_test_backend();
+    let diags =
+        unknown_member_diagnostics(&backend, "file:///dynamic_chain_missing.php", text_missing);
+    assert!(
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("equals")
+                && message_text(&d.message).contains("Decimal, Money")),
+        "`equals` is missing on both members of the union, got: {diags:?}",
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Narrowing a subject that is not a plain variable
 // ═══════════════════════════════════════════════════════════════════════════
