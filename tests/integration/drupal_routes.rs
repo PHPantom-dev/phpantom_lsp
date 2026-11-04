@@ -840,19 +840,26 @@ const NOTE: &str = r#"<?php
 namespace Drupal\acme\Entity;
 
 use Drupal\Core\Entity\Attribute\ContentEntityType;
-use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\ContentEntityBase;
 
 #[ContentEntityType(id: 'acme_note')]
-class Note implements ContentEntityInterface {}
+class Note extends ContentEntityBase {}
 "#;
 const NOTE_PATH: &str = "web/modules/custom/acme/src/Entity/Note.php";
 const ENTITY_INTERFACE: &str =
     "<?php\nnamespace Drupal\\Core\\Entity;\ninterface EntityInterface {}\n";
 const ENTITY_INTERFACE_PATH: &str = "web/core/lib/Drupal/Core/Entity/EntityInterface.php";
-const CONTENT_ENTITY_INTERFACE: &str = "<?php\nnamespace Drupal\\Core\\Entity;\ninterface ContentEntityInterface extends EntityInterface {}\n";
+// As in core, a content entity is `\Traversable`, which PHP's stubs declare
+// `iterable`.
+const CONTENT_ENTITY_INTERFACE: &str = "<?php\nnamespace Drupal\\Core\\Entity;\ninterface ContentEntityInterface extends \\Traversable, EntityInterface {}\n";
 const CONTENT_ENTITY_INTERFACE_PATH: &str =
     "web/core/lib/Drupal/Core/Entity/ContentEntityInterface.php";
-const USER_INTERFACE: &str = "<?php\nnamespace Drupal\\user;\ninterface UserInterface {}\n";
+/// PHP's own iteration interfaces, as its stubs declare them.
+const PHP_ITERATION: &str = "<?php\ninterface Traversable extends iterable {}\ninterface IteratorAggregate extends Traversable {\n    public function getIterator(): Iterator;\n}\n";
+const PHP_ITERATION_PATH: &str = "stubs/Traversable.php";
+const CONTENT_ENTITY_BASE: &str = "<?php\nnamespace Drupal\\Core\\Entity;\nabstract class ContentEntityBase implements \\IteratorAggregate, ContentEntityInterface {\n    public function getIterator(): \\ArrayIterator { return new \\ArrayIterator([]); }\n}\n";
+const CONTENT_ENTITY_BASE_PATH: &str = "web/core/lib/Drupal/Core/Entity/ContentEntityBase.php";
+const USER_INTERFACE: &str = "<?php\nnamespace Drupal\\user;\ninterface UserInterface extends \\Drupal\\Core\\Entity\\ContentEntityInterface {}\n";
 const USER_INTERFACE_PATH: &str = "web/core/modules/user/src/UserInterface.php";
 
 const NOTE_ROUTING: &str = r#"acme.note:
@@ -1075,6 +1082,8 @@ fn note_files() -> Vec<(&'static str, &'static str)> {
     files(&[
         (ENTITY_INTERFACE_PATH, ENTITY_INTERFACE),
         (CONTENT_ENTITY_INTERFACE_PATH, CONTENT_ENTITY_INTERFACE),
+        (CONTENT_ENTITY_BASE_PATH, CONTENT_ENTITY_BASE),
+        (PHP_ITERATION_PATH, PHP_ITERATION),
         (USER_INTERFACE_PATH, USER_INTERFACE),
         (NOTE_PATH, NOTE),
         ("web/modules/custom/acme/acme.routing.yml", NOTE_ROUTING),
@@ -1171,4 +1180,391 @@ async fn controller_parameters_are_the_entities_drupal_upcasts() {
     )
     .await;
     assert!(text.contains("$acme_note = Note\n"), "{text}");
+}
+
+const TITLE_ROUTING: &str = r#"acme_extra.converted:
+  path: '/extra/{acme_note}/converted'
+  defaults:
+    _controller: '\Drupal\acme_extra\Controller\TitleController::converted'
+  options:
+    parameters:
+      acme_note:
+        converter: acme_extra.note_converter
+acme_extra.titled:
+  path: '/extra/{acme_note}/titled'
+  defaults:
+    _controller: '\Drupal\acme_extra\Controller\TitleController::titledView'
+    _title_callback: '\Drupal\acme_extra\Controller\TitleController::titledTitle'
+acme_extra.declared:
+  path: '/extra/{note}/declared'
+  defaults:
+    _controller: '\Drupal\acme_extra\Controller\TitleController::declaredView'
+    _title_callback: '\Drupal\acme_extra\Controller\TitleController::declaredTitle'
+  options:
+    parameters:
+      note:
+        type: entity:acme_note
+"#;
+const TITLE_ROUTING_PATH: &str = "web/modules/custom/acme_extra/acme_extra.routing.yml";
+
+const TITLE_CONTROLLER: &str = r#"<?php
+namespace Drupal\acme_extra\Controller;
+
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\user\UserInterface;
+
+final class NoteDto {}
+
+final class TitleController {
+    public function converted(NoteDto $acme_note): array { return []; }
+
+    public function titledView($acme_note): array { return []; }
+
+    public function titledTitle(EntityInterface $acme_note): string { return ''; }
+
+    public function declaredView($note): array { return []; }
+
+    public function declaredTitle(UserInterface $note): string { return ''; }
+}
+"#;
+const TITLE_CONTROLLER_PATH: &str =
+    "web/modules/custom/acme_extra/src/Controller/TitleController.php";
+
+/// The positions of the `invalid_drupal_route_parameter` warnings the
+/// diagnostics of `content` at `path` report.
+async fn blocked_upcasts(
+    backend: &phpantom_lsp::Backend,
+    dir: &tempfile::TempDir,
+    path: &str,
+    content: &str,
+) -> Vec<Position> {
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri_for(dir, path).as_str(), content, &mut diagnostics);
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(tower_lsp_server::gen_lsp_types::Code::String(code))
+                    if code == "invalid_drupal_route_parameter"
+            )
+        })
+        .map(|diagnostic| diagnostic.range.start)
+        .collect()
+}
+
+/// A hint the entity class does not fit leaves Drupal passing the raw ID,
+/// which is reported; an untyped parameter, one no route declares, and a
+/// method no route reaches are not.
+#[tokio::test]
+async fn a_hint_that_blocks_upcasting_is_reported() {
+    let (backend, dir) = workspace(&note_files()).await;
+    assert_eq!(
+        blocked_upcasts(&backend, &dir, PAGE_CONTROLLER_PATH, PAGE_CONTROLLER).await,
+        [position_in(PAGE_CONTROLLER, "UserInterface $acme_note", 14)]
+    );
+}
+
+/// A parameter with its own converter, and a title callback, are not
+/// judged.
+#[tokio::test]
+async fn converters_and_title_callbacks_are_not_judged() {
+    let mut files = note_files();
+    files.extend([
+        (TITLE_ROUTING_PATH, TITLE_ROUTING),
+        (TITLE_CONTROLLER_PATH, TITLE_CONTROLLER),
+    ]);
+    let (backend, dir) = workspace(&files).await;
+    assert_eq!(
+        blocked_upcasts(&backend, &dir, TITLE_CONTROLLER_PATH, TITLE_CONTROLLER).await,
+        Vec::<Position>::new()
+    );
+}
+
+const MEMO: &str = "<?php\nnamespace Drupal\\acme_check\\Entity;\n\nuse Drupal\\acme\\Entity\\Note;\n\nfinal class Memo extends Note {}\n";
+const MEMO_PATH: &str = "web/modules/custom/acme_check/src/Entity/Memo.php";
+const BROKEN: &str =
+    "<?php\nnamespace Drupal\\acme_check\\Entity;\n\ninterface Broken extends Gone {}\n";
+const BROKEN_PATH: &str = "web/modules/custom/acme_check/src/Entity/Broken.php";
+const CHECK_ROUTING_PATH: &str = "web/modules/custom/acme_check/acme_check.routing.yml";
+const CHECK_CONTROLLER_PATH: &str =
+    "web/modules/custom/acme_check/src/Controller/CheckController.php";
+
+/// `CheckController` in the `acme_check` module, with `methods`.
+fn check_controller(methods: &str) -> String {
+    format!(
+        "<?php\nnamespace Drupal\\acme_check\\Controller;\n\nuse Drupal\\acme\\Entity\\Note;\nuse Drupal\\acme_check\\Entity\\Broken;\nuse Drupal\\acme_check\\Entity\\Memo;\nuse Drupal\\Core\\Entity\\EntityInterface;\nuse Drupal\\user\\UserInterface;\nuse Symfony\\Component\\Routing\\Attribute\\Route;\n\nfinal class CheckController {{\n{methods}}}\n"
+    )
+}
+
+/// A workspace with the `acme_note` entity type, the `acme_check` module's
+/// `routing` file, and `php` at `path`.
+async fn check_workspace(
+    routing: &str,
+    path: &str,
+    php: &str,
+) -> (phpantom_lsp::Backend, tempfile::TempDir) {
+    workspace(&files(&[
+        (ENTITY_INTERFACE_PATH, ENTITY_INTERFACE),
+        (CONTENT_ENTITY_INTERFACE_PATH, CONTENT_ENTITY_INTERFACE),
+        (CONTENT_ENTITY_BASE_PATH, CONTENT_ENTITY_BASE),
+        (PHP_ITERATION_PATH, PHP_ITERATION),
+        (USER_INTERFACE_PATH, USER_INTERFACE),
+        (NOTE_PATH, NOTE),
+        (MEMO_PATH, MEMO),
+        (BROKEN_PATH, BROKEN),
+        ROUTE_ATTRIBUTE,
+        (CHECK_ROUTING_PATH, routing),
+        (path, php),
+    ]))
+    .await
+}
+
+/// The warnings the diagnostics of `CheckController`, holding `methods`,
+/// report with `routing` declaring its routes.
+async fn check_warnings(routing: &str, methods: &str) -> (String, Vec<Position>) {
+    let php = check_controller(methods);
+    let (backend, dir) = check_workspace(routing, CHECK_CONTROLLER_PATH, &php).await;
+    let found = blocked_upcasts(&backend, &dir, CHECK_CONTROLLER_PATH, &php).await;
+    (php, found)
+}
+
+/// What hovering `$acme_note` before `marker` in `CheckController`,
+/// holding `methods`, shows with `routing` declaring its routes.
+async fn check_hover(routing: &str, methods: &str, marker: &str) -> String {
+    let php = check_controller(methods);
+    let (backend, dir) = check_workspace(routing, CHECK_CONTROLLER_PATH, &php).await;
+    hover_before(
+        &backend,
+        &uri_for(&dir, CHECK_CONTROLLER_PATH),
+        &php,
+        marker,
+    )
+    .await
+}
+
+/// Whether `hover` shows `$acme_note` as a `Note` or `null`.
+fn is_nullable_note(hover: &str) -> bool {
+    hover.contains("$acme_note = ?Note\n") || hover.contains("$acme_note = Note|null\n")
+}
+
+/// A `Class::method` controller hinting an entity-type-named parameter
+/// with an interface unrelated to the entity class gets the raw ID.
+#[tokio::test]
+async fn a_controller_hint_unrelated_to_the_entity_is_reported() {
+    let routing = "acme_check.view:\n  path: '/check/{acme_note}'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::view'\n";
+    let (php, found) = check_warnings(
+        routing,
+        "    public function view(UserInterface $acme_note): array { return []; }\n",
+    )
+    .await;
+    assert_eq!(found, [position_in(&php, "UserInterface $acme_note", 14)]);
+}
+
+/// A `_form` class's `buildForm()` is reflected like a controller.
+#[tokio::test]
+async fn a_form_hint_unrelated_to_the_entity_is_reported() {
+    let routing = "acme_check.form:\n  path: '/check/{acme_note}/form'\n  defaults:\n    _form: '\\Drupal\\acme_check\\Form\\CheckForm'\n";
+    let path = "web/modules/custom/acme_check/src/Form/CheckForm.php";
+    let php = "<?php\nnamespace Drupal\\acme_check\\Form;\n\nuse Drupal\\user\\UserInterface;\n\nfinal class CheckForm {\n    public function buildForm(array $form, $form_state, UserInterface $acme_note): array { return $form; }\n}\n";
+    let (backend, dir) = check_workspace(routing, path, php).await;
+    assert_eq!(
+        blocked_upcasts(&backend, &dir, path, php).await,
+        [position_in(php, "UserInterface $acme_note", 14)]
+    );
+}
+
+/// A `#[Route]` method is reflected like a controller.
+#[tokio::test]
+async fn a_route_attribute_hint_unrelated_to_the_entity_is_reported() {
+    let (php, found) = check_warnings(
+        "",
+        "    #[Route(path: '/check/{acme_note}/attribute', name: 'acme_check.attribute')]\n    public function attribute(UserInterface $acme_note): array { return []; }\n",
+    )
+    .await;
+    assert_eq!(found, [position_in(&php, "UserInterface $acme_note", 14)]);
+}
+
+/// A declared `entity:` type converts the parameter as declared, a bundle
+/// class hint included.
+#[tokio::test]
+async fn a_declared_parameter_with_a_bundle_class_hint_is_not_judged() {
+    let routing = "acme_check.bundle:\n  path: '/check/{acme_note}/bundle'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::bundle'\n  options:\n    parameters:\n      acme_note:\n        type: entity:acme_note\n";
+    let (_, found) = check_warnings(
+        routing,
+        "    public function bundle(Memo $acme_note): array { return []; }\n",
+    )
+    .await;
+    assert_eq!(found, Vec::<Position>::new());
+}
+
+/// A declared `entity:` type converts the parameter as declared, whatever
+/// its hint.
+#[tokio::test]
+async fn a_declared_parameter_with_an_unrelated_hint_is_not_judged() {
+    let routing = "acme_check.unrelated:\n  path: '/check/{acme_note}/unrelated'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::unrelated'\n  options:\n    parameters:\n      acme_note:\n        type: entity:acme_note\n";
+    let (_, found) = check_warnings(
+        routing,
+        "    public function unrelated(UserInterface $acme_note): array { return []; }\n",
+    )
+    .await;
+    assert_eq!(found, Vec::<Position>::new());
+}
+
+/// A bundle class hint is not reported, since an alter hook can make it
+/// the entity class.
+#[tokio::test]
+async fn a_bundle_class_hint_is_not_reported() {
+    let routing = "acme_check.bundle:\n  path: '/check/{acme_note}/bundle'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::bundle'\n";
+    let (_, found) = check_warnings(
+        routing,
+        "    public function bundle(Memo $acme_note): array { return []; }\n",
+    )
+    .await;
+    assert_eq!(found, Vec::<Position>::new());
+}
+
+/// A title callback is never reported, nor reflected by core.
+#[tokio::test]
+async fn a_title_callback_is_not_reported() {
+    let routing = "acme_check.titled:\n  path: '/check/{acme_note}/titled'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::view'\n    _title_callback: '\\Drupal\\acme_check\\Controller\\CheckController::title'\n";
+    let (_, found) = check_warnings(
+        routing,
+        "    public function view($acme_note): array { return []; }\n    public function title(UserInterface $acme_note): string { return ''; }\n",
+    )
+    .await;
+    assert_eq!(found, Vec::<Position>::new());
+}
+
+/// A title callback on a route whose controller is a service's method is
+/// not reported either.
+#[tokio::test]
+async fn a_title_callback_beside_a_service_controller_is_not_reported() {
+    let routing = "acme_check.service:\n  path: '/check/{acme_note}/service'\n  defaults:\n    _controller: 'acme_check.pages:show'\n    _title_callback: '\\Drupal\\acme_check\\Controller\\CheckController::title'\n";
+    let (_, found) = check_warnings(
+        routing,
+        "    public function title(UserInterface $acme_note): string { return ''; }\n",
+    )
+    .await;
+    assert_eq!(found, Vec::<Position>::new());
+}
+
+/// A function controller is not judged.
+#[tokio::test]
+async fn a_function_controller_is_not_judged() {
+    let routing = "acme_check.function:\n  path: '/check/{acme_note}/function'\n  defaults:\n    _controller: 'acme_check_page'\n";
+    let path = "web/modules/custom/acme_check/acme_check.module";
+    let php = "<?php\n\nuse Drupal\\user\\UserInterface;\n\nfunction acme_check_page(UserInterface $acme_note): array { return []; }\n";
+    let (backend, dir) = check_workspace(routing, path, php).await;
+    assert_eq!(
+        blocked_upcasts(&backend, &dir, path, php).await,
+        Vec::<Position>::new()
+    );
+}
+
+/// A route whose controller class is not found gives its title callback
+/// no verdict.
+#[tokio::test]
+async fn a_route_whose_controller_is_not_found_is_not_judged() {
+    let routing = "acme_check.missing:\n  path: '/check/{acme_note}/missing'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\Missing::view'\n    _title_callback: '\\Drupal\\acme_check\\Controller\\CheckController::title'\n";
+    let (_, found) = check_warnings(
+        routing,
+        "    public function title(UserInterface $acme_note): string { return ''; }\n",
+    )
+    .await;
+    assert_eq!(found, Vec::<Position>::new());
+}
+
+/// A hint whose ancestors are not all found is not judged.
+#[tokio::test]
+async fn a_hint_with_missing_ancestors_is_not_judged() {
+    let routing = "acme_check.broken:\n  path: '/check/{acme_note}/broken'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::broken'\n";
+    let (_, found) = check_warnings(
+        routing,
+        "    public function broken(Broken $acme_note): array { return []; }\n",
+    )
+    .await;
+    assert_eq!(found, Vec::<Position>::new());
+}
+
+/// A `NULL` default the path does not override is passed as it is.
+#[tokio::test]
+async fn a_null_default_outside_the_path_is_not_judged() {
+    let routing = "acme_check.null:\n  path: '/check/null'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::view'\n    acme_note: NULL\n";
+    let (_, found) = check_warnings(
+        routing,
+        "    public function view(UserInterface $acme_note): array { return []; }\n",
+    )
+    .await;
+    assert_eq!(found, Vec::<Position>::new());
+}
+
+const CHECK_VIEW_ROUTING: &str = "acme_check.view:\n  path: '/check/{acme_note}'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::view'\n";
+
+/// A nullable hint keeps `null` in the upcast type.
+#[tokio::test]
+async fn an_upcast_parameter_with_a_nullable_hint_may_be_null() {
+    let text = check_hover(
+        CHECK_VIEW_ROUTING,
+        "    public function view(?Note $acme_note): array {\n        $acme_note; // view\n        return [];\n    }\n",
+        "$acme_note; // view",
+    )
+    .await;
+    assert!(is_nullable_note(&text), "{text}");
+}
+
+/// A parameter defaulting to `NULL` keeps `null` in the upcast type.
+#[tokio::test]
+async fn an_upcast_parameter_defaulting_to_null_may_be_null() {
+    let text = check_hover(
+        CHECK_VIEW_ROUTING,
+        "    public function view(Note $acme_note = NULL): array {\n        $acme_note; // view\n        return [];\n    }\n",
+        "$acme_note; // view",
+    )
+    .await;
+    assert!(is_nullable_note(&text), "{text}");
+}
+
+/// A routing file's `NULL` default for a path parameter keeps `null` in
+/// the upcast type.
+#[tokio::test]
+async fn an_upcast_parameter_a_route_defaults_to_null_may_be_null() {
+    let routing = "acme_check.view:\n  path: '/check/{acme_note}'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::view'\n    acme_note: NULL\n";
+    let text = check_hover(
+        routing,
+        "    public function view(EntityInterface $acme_note): array {\n        $acme_note; // view\n        return [];\n    }\n",
+        "$acme_note; // view",
+    )
+    .await;
+    assert!(is_nullable_note(&text), "{text}");
+}
+
+/// A `#[Route]`'s `NULL` default keeps `null` in the upcast type.
+#[tokio::test]
+async fn an_upcast_parameter_a_route_attribute_defaults_to_null_may_be_null() {
+    let text = check_hover(
+        "",
+        "    #[Route(path: '/check/{acme_note}', name: 'acme_check.view', defaults: ['acme_note' => NULL])]\n    public function view(EntityInterface $acme_note): array {\n        $acme_note; // view\n        return [];\n    }\n",
+        "$acme_note; // view",
+    )
+    .await;
+    assert!(is_nullable_note(&text), "{text}");
+}
+
+/// A quoted `'~'`, `'null'`, `"null"` or `''` default is a string, not
+/// `NULL`.
+#[tokio::test]
+async fn a_quoted_null_default_is_a_string() {
+    for value in ["'~'", "'null'", "\"null\"", "''"] {
+        let routing = format!(
+            "acme_check.view:\n  path: '/check/{{acme_note}}'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::view'\n    acme_note: {value}\n"
+        );
+        let text = check_hover(
+            &routing,
+            "    public function view(EntityInterface $acme_note): array {\n        $acme_note; // view\n        return [];\n    }\n",
+            "$acme_note; // view",
+        )
+        .await;
+        assert!(text.contains("$acme_note = Note\n"), "{value}: {text}");
+    }
 }

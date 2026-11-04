@@ -158,6 +158,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         "invalid_member_name",
         Backend::collect_dynamic_member_name_diagnostics_with_context,
     ),
+    always(
+        "invalid_drupal_route_parameter",
+        Backend::collect_drupal_route_parameter_diagnostics,
+    ),
     SlowCollector {
         name: "invalid_string_key",
         collect: Backend::collect_invalid_laravel_string_key_diagnostics,

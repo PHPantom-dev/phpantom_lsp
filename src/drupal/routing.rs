@@ -223,7 +223,8 @@ pub(crate) fn routing_routes(content: &str) -> (Vec<SymbolSpan>, Vec<DrupalRoute
         for (default, _) in entries(defaults) {
             let (value, _) = scalar(default.value, default.value_start);
             if !default.key.starts_with('_') {
-                values.push((default.key.to_string(), is_yaml_null(&value)));
+                // Read as written: a quoted `'~'` or `''` is a string.
+                values.push((default.key.to_string(), is_yaml_null(default.value.trim())));
             }
             match default.key {
                 "_controller" => controller = handler_of(&value),
@@ -269,7 +270,7 @@ pub(crate) fn routing_routes(content: &str) -> (Vec<SymbolSpan>, Vec<DrupalRoute
     (spans, routes)
 }
 
-/// Whether a YAML scalar, unquoted, is `null`.
+/// Whether a YAML scalar, as written with its quotes, is `null`.
 fn is_yaml_null(value: &str) -> bool {
     matches!(value, "" | "~" | "null" | "Null" | "NULL")
 }
