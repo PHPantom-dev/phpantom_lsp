@@ -2268,6 +2268,31 @@ $foo;
 }
 
 #[test]
+fn by_ref_closure_capture_sees_the_assignment_it_is_written_inside() {
+    // The assignment stores its value once the closure exists, so the
+    // closure never sees the `null` the variable held before.
+    let content = r#"<?php
+/** @var int */
+$foo = \Some\Unknown\make(function () use (&$foo) {
+    $foo;
+});
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(query(
+        "$foo",
+        content,
+        cursor_offset,
+        &ClassInfo::default(),
+        &[],
+        &|_| None,
+    ));
+
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "int");
+}
+
+#[test]
 fn by_ref_closure_capture_sees_a_narrowed_push_on_a_returning_path() {
     // The gather-into-an-array idiom: the closure narrows its parameter
     // with `instanceof`, pushes it onto a captured array and returns.  The

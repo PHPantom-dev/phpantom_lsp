@@ -311,7 +311,7 @@ fn walk_top_level_block<'b>(
                     record_scope_snapshot(stmt.span().start.offset, top_level_scope);
                     let pre_stmt_scope = top_level_scope.clone();
                     process_statement(stmt, top_level_scope, &ctx);
-                    walk_closures_in_statement(stmt, &pre_stmt_scope, top_level_scope, &ctx);
+                    walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
                     record_scope_snapshot(stmt.span().end.offset, top_level_scope);
                 }
                 if diag_ctx.wants(stmt.span()) {
@@ -334,7 +334,7 @@ fn walk_top_level_block<'b>(
                 record_scope_snapshot(stmt.span().start.offset, top_level_scope);
                 let pre_stmt_scope = top_level_scope.clone();
                 process_statement(stmt, top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &pre_stmt_scope, top_level_scope, &ctx);
+                walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
                 record_scope_snapshot(stmt.span().end.offset, top_level_scope);
             }
         }

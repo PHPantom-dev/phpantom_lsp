@@ -707,6 +707,63 @@ function register(): void {
     );
 }
 
+/// A closure passed into the expression assigned to the variable it
+/// captures by reference sees what that assignment stores, not the value
+/// the variable held when the closure was created.
+#[test]
+fn by_ref_capture_of_the_variable_the_closure_is_assigned_into() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///by_ref_assigned_into.php";
+    let text = r#"<?php
+/** @template T */
+final class Semaphore {
+    /** @param T $seed */
+    public function __construct(public mixed $seed, public \Closure $operation) {}
+    /** @return T */
+    public function waitFor(string $key): mixed { return $this->seed; }
+}
+
+function plain(): void {
+    $ks = new Semaphore('a', function (string $key) use (&$ks): string {
+        return $ks->waitFor($key);
+    });
+}
+
+class Lock {}
+final class KeyedLock extends Lock {
+    public function waitFor(string $key): string { return $key; }
+}
+final class Locks {
+    public static function make(\Closure $operation): Lock { return new KeyedLock(); }
+}
+
+function annotated(): void {
+    /** @var KeyedLock */
+    $ks = Locks::make(function (string $key) use (&$ks): string {
+        return $ks->waitFor($key);
+    });
+}
+
+function assignedBefore(): void {
+    $ks = null;
+    $ks = new Semaphore('a', function (string $key) use (&$ks): string {
+        return $ks->waitFor($key);
+    });
+}
+"#;
+    backend.update_ast(uri, text);
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+
+    let messages: Vec<_> = diags.iter().map(|d| d.message.clone()).collect();
+    assert!(
+        messages.is_empty(),
+        "Expected the by-reference capture of $ks to resolve to the Semaphore \
+         assigned to it, got: {messages:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Closure param with a declared union type must not collapse to one arm
 // ═══════════════════════════════════════════════════════════════════════════

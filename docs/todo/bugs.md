@@ -167,23 +167,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B707. A closure capturing by reference the variable it is assigned to sees it as `null`
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @var KeyedSemaphore<string, string, string> */
-$ks = new KeyedSemaphore(1, function (string $key) use (&$ks): string {
-    return $ks->waitFor($key, 'inner');   // Cannot access method 'waitFor' on type 'null'
-});
-```
-
-`use (&$ks)` captures the variable, not its value, so when the closure
-runs `$ks` holds what the outer scope assigned it afterwards, here the
-semaphore. We type the capture as `null`, its value at the point the
-closure is created, with or without the `@var`, and whether or not `$ks`
-was assigned before. A by-reference capture should take the types the
-outer variable is assigned after the capture (the `@var` included), not
-the one it had before.
-
-Found by `analyze` on azjezz/psl (`KeyedSemaphoreTest`, 21 false positives).
+No outstanding items.
