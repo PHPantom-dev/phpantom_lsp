@@ -110,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Ruling out a range's edge value.** After a guard like `if (0 === $id) { throw ...; }`, an `int<0, max>` variable or property is now `int<1, max>`, so passing it where a positive integer is expected is no longer reported.
 - **Code examples in hover.** A multi-line `<code>` or `<pre>` example in a docblock, as in Doctrine's query builder, now shows as a code block instead of running together on one line.
 - **Imports only fully qualified names refer to.** `use DateTime;` is now reported as unused when the file only ever writes `\DateTime`, and the same goes for function and constant imports.
 - **Untyped methods that return `new static()`.** Calling such a method through a subclass, or on a class that uses the trait declaring it, now gives that class instead of the one the method is declared in.

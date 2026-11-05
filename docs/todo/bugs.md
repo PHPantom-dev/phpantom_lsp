@@ -65,30 +65,6 @@ matches PHP 8 throwing a `ValueError` on a negative.
 Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.
 
-### B708. Excluding an int range's boundary value does not shrink the range
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @param int<0, max> $v */
-function f(int $v, Raw $r): void {
-    if (0 === $v) { throw new Exception(); }
-    wantPositive($v);       // expects int<1, max>, got int<0, max>
-    if ($r->streamId === 0) { return; }
-    wantPositive($r->streamId);   // same, on a property
-}
-```
-
-After a guard rules out `0`, `int<0, max>` should become `int<1, max>`
-(and `int<min, 0>` should become `int<min, -1>`). The `!==` narrowing
-removes literals from unions but leaves a range whose edge is the removed
-value as it was, for variables and properties alike. PHPStan and Mago both
-shrink the range.
-
-Found by `analyze` on azjezz/psl, where it is most of the false positives
-in the library code: the HTTP/2 frame decoders check `0 === $frame->streamId`
-before building a frame whose constructor takes `int<1, max>`.
-
 ## Array types
 
 No outstanding items.
