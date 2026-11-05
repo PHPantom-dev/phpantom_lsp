@@ -1033,6 +1033,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#a46-convert-nested-calls-to-the-pipe-operator-php-85" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A46. Convert nested calls to the pipe operator (PHP 8.5+)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a47-convert-a-getter-or-setter-method-into-a-property-hook-php-84" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A47. Convert a getter or setter method into a property hook (PHP 8.4+)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1817,6 +1839,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#a46-convert-nested-calls-to-the-pipe-operator-php-85" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A46. Convert nested calls to the pipe operator (PHP 8.5+)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a47-convert-a-getter-or-setter-method-into-a-property-hook-php-84" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A47. Convert a getter or setter method into a property hook (PHP 8.4+)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2218,6 +2262,37 @@ something to produce as output.</p>
   <code>Simplification</code> enum rather than a new module.</li>
 </ul>
 <p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.</p>
+<hr />
+<h3 id="a46-convert-nested-calls-to-the-pipe-operator-php-85">A46. Convert nested calls to the pipe operator (PHP 8.5+)<a class="headerlink" href="#a46-convert-nested-calls-to-the-pipe-operator-php-85" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$slug = strtolower(trim(str_replace(' ', '-', $title)));</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">// →</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$slug = $title</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    |&gt; (fn($x) =&gt; str_replace(' ', '-', $x))</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    |&gt; trim(...)</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    |&gt; strtolower(...);</span>
+</code></pre></div>
+<p>PhpStorm offers this on any call nested in another call's sole or first
+argument. A call whose only argument is the inner result becomes a
+first-class callable (<code>trim(...)</code>); one with other arguments becomes an
+arrow function, since <code>|&gt;</code> passes exactly one argument. Offer it only when
+the project's PHP version is 8.5 or later, and the reverse ("Inline pipe
+into nested calls") on a <code>|&gt;</code> chain.</p>
+<hr />
+<h3 id="a47-convert-a-getter-or-setter-method-into-a-property-hook-php-84">A47. Convert a getter or setter method into a property hook (PHP 8.4+)<a class="headerlink" href="#a47-convert-a-getter-or-setter-method-into-a-property-hook-php-84" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">private string $name;</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">public function getName(): string { return strtoupper($this-&gt;name); }</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">// →</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">public string $name { get =&gt; strtoupper($this-&gt;name); }</span>
+</code></pre></div>
+<p>"Generate property hooks" (<code>src/code_actions/generate_property_hooks.rs</code>)
+adds an empty hook to a property. PhpStorm also offers the migration: when
+a method only returns (or only assigns) one property, move its body into
+the property's hook, make the property public, and rewrite the callers
+(<code>$x-&gt;getName()</code> → <code>$x-&gt;name</code>) through the rename machinery. Skip it when
+the method is part of an interface or overrides a parent, since the
+callers through that contract cannot be rewritten.</p>
 
 
 

@@ -1380,6 +1380,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T62. A sealed hierarchy is not narrowed by ruling out its other members
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1690,6 +1701,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T60. A float literal is typed <code>float</code>, not its value
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T62. A sealed hierarchy is not narrowed by ruling out its other members
       </span>
     </span>
   </a>
@@ -2328,6 +2350,27 @@ API endpoint that types its request this way gets every parameter wrong.
 <p>Integer, string and boolean literals keep their value as their type;
 float literals become <code>float</code>. A template bound to one, or a condition
 over one, loses the value. 2 assertions of the WordPress stubs fixtures.</p>
+<hr />
+<h2 id="t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members">T62. A sealed hierarchy is not narrowed by ruling out its other members<a class="headerlink" href="#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/** @psalm-inheritors LeafNode|TreeNode */</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">interface NodeInterface {}</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">function at_index(NodeInterface $node): mixed {</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">    if ($node instanceof LeafNode) {</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">        return null;</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="x">    }</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">    $node-&gt;getChildren();   // Method 'getChildren' not found on class 'NodeInterface'</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>@psalm-inheritors</code> and <code>@phpstan-sealed</code> list every class that may extend
+or implement the type. Once a guard rules out all but one, the subject is
+that one (<code>TreeNode</code> here), and a <code>match</code> over them is exhaustive. The tags
+are recognised (<code>src/docblock/tag_kind.rs</code>) but nothing reads them, so
+the subject keeps the declared interface. Store the permitted list on
+<code>ClassInfo</code> and subtract from it in the <code>instanceof</code> narrowing, the way an
+enum's cases are subtracted.</p>
+<p>Found by <code>analyze</code> on azjezz/psl, whose tree nodes are sealed this way.</p>
 
 
 

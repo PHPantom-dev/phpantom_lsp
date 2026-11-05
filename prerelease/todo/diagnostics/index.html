@@ -1100,6 +1100,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D41. A thrown exception nothing catches or documents is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d42-from-with-a-literal-no-enum-case-backs-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D42. <code>from()</code> with a literal no enum case backs is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1730,6 +1752,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D41. A thrown exception nothing catches or documents is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d42-from-with-a-literal-no-enum-case-backs-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D42. <code>from()</code> with a literal no enum case backs is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2195,6 +2239,51 @@ generated fields into the index would let the check treat both kinds the
 same.</p>
 <p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index, which
 D31 also needs) and <code>src/diagnostics/uninitialized_properties.rs</code>.</p>
+<hr />
+<h2 id="d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported">D41. A thrown exception nothing catches or documents is not reported<a class="headerlink" href="#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** Loads the settings. */</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">function load(string $path): array</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">{</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    return json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    // JsonException is neither caught nor in a @throws tag</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>PhpStorm's "Unhandled exception" inspection is one of the checks its users
+rely on most: an exception the body throws, or a callee's <code>@throws</code>
+propagates, that no <code>try</code> catches and the function's own <code>@throws</code> does not
+list. PHPantom already computes exactly that set, since typing <code>@</code> in a
+docblock suggests <code>@throws</code> for each uncaught exception and "Update
+docblock" adds the missing tags, but nothing reports it. Report it as an
+opt-in diagnostic (it is a documentation contract, not a runtime failure,
+so Hint by the severity philosophy above), with "Update docblock" as its
+quick fix.</p>
+<p>PhpStorm treats <code>\RuntimeException</code> and <code>\Error</code> subclasses as unchecked by
+default, and so does PHPStan's <code>missingCheckedExceptionInThrows</code>; follow
+that, and make the unchecked list configurable the way both tools do.</p>
+<p>On a mid-sized Symfony API it was PhpStorm's most frequent real finding (60
+unhandled exceptions, 22 incomplete <code>@throws</code>, mostly <code>random_bytes()</code>'s
+<code>RandomException</code> and Doctrine's <code>ORMException</code>), where PHPantom reported
+nothing. The same set also tells a <code>catch</code> whose <code>try</code> cannot throw the
+class it catches, which PhpStorm reports as well; PHPStan's
+<code>catch.neverThrown</code> fix (H24) would then work without PHPStan.</p>
+<p><strong>Where to look:</strong> <code>src/completion/source/throws_analysis/uncaught.rs</code>
+(the uncaught set), <code>src/code_actions/update_docblock/</code> (the fix), and
+PHPStan's <code>MissingCheckedExceptionInThrowsCheck</code>.</p>
+<hr />
+<h2 id="d42-from-with-a-literal-no-enum-case-backs-is-not-reported">D42. <code>from()</code> with a literal no enum case backs is not reported<a class="headerlink" href="#d42-from-with-a-literal-no-enum-case-backs-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">enum Status: string { case Active = 'active'; }</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">Status::from('Active');      // ValueError at runtime</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">Status::tryFrom('Active');   // always null</span>
+</code></pre></div>
+<p>When the argument is a literal and the enum is known, whether a case backs
+it is decidable, and <code>from()</code> throwing a <code>ValueError</code> is a crash, so Error
+severity. <code>tryFrom()</code> with such a literal always returns <code>null</code>, which is
+worth a Warning. PhpStorm reports both.</p>
+<p><strong>Where to look:</strong> <code>src/diagnostics/enum_errors.rs</code>, and the enum's case
+values on <code>ClassInfo</code>.</p>
 
 
 
