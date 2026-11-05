@@ -18154,3 +18154,39 @@ class Child extends Base {
         diags
     );
 }
+
+/// A conditional return that tests an array argument picks the same branch
+/// for a chained member access as it does for the call on its own.
+#[test]
+fn chained_call_on_array_argument_conditional_uses_the_matching_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/** @template T */
+class Coll {
+    /** @return T|null */
+    public function first(): mixed { return null; }
+}
+class Pen {
+    public function write(): void {}
+}
+class Drawer {
+    /**
+     * @param  int|list<int>  $id
+     * @return ($id is list<int> ? Coll<Pen> : Pen|null)
+     */
+    public function find(int|array $id): Coll|Pen|null { return null; }
+}
+function run(Drawer $d): void {
+    $d->find([7, 8])->first();
+    $ids = [7, 8];
+    $d->find($ids)->first();
+    $d->find(7)?->write();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected each call to resolve on its matching branch, got: {diags:?}"
+    );
+}

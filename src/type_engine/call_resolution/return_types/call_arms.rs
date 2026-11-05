@@ -291,8 +291,15 @@ impl Backend {
                     hint_captured = true;
                 }
             }
-            let mr_ctx =
-                MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, false);
+            let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+            let mr_ctx = MethodReturnCtx::for_call(
+                ctx,
+                &template_subs,
+                &var_resolver,
+                &arg_ty_resolver,
+                &written,
+                false,
+            );
             if let Some((date_class, date_return_type)) =
                 Self::configured_laravel_date_return(&owner, method_name, ctx.file.class_loader)
             {
@@ -352,8 +359,15 @@ impl Backend {
                 let template_subs =
                     Self::build_method_template_subs(owner, method_name, &arg_refs, ctx);
                 let var_resolver = build_var_resolver(ctx);
-                let mr_ctx =
-                    MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, true);
+                let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+                let mr_ctx = MethodReturnCtx::for_call(
+                    ctx,
+                    &template_subs,
+                    &var_resolver,
+                    &arg_ty_resolver,
+                    &written,
+                    true,
+                );
                 ClassInfo::extend_unique_arc(
                     &mut union_results,
                     Self::resolve_method_return_types_with_args(
@@ -504,8 +518,15 @@ impl Backend {
             }
 
             let var_resolver = build_var_resolver(ctx);
-            let mr_ctx =
-                MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, true);
+            let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+            let mr_ctx = MethodReturnCtx::for_call(
+                ctx,
+                &template_subs,
+                &var_resolver,
+                &arg_ty_resolver,
+                &written,
+                true,
+            );
             if let Some((date_class, date_return_type)) =
                 Self::configured_laravel_date_return(&merged, method_name, ctx.file.class_loader)
             {
@@ -1166,35 +1187,31 @@ fn method_call_return_hint(
     written: &dyn Fn(&str) -> String,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    let substituted = resolve_conditional_return_hint(
-        m,
-        text_args,
-        Some(var_resolver),
+    let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, ctx);
+    let mr_ctx = MethodReturnCtx::for_call(
+        ctx,
         template_subs,
-        crate::type_engine::conditional_resolution::ConditionalClassContext {
-            calling: ctx.current_class.map(|c| c.fqn().as_str()),
-            declaring: None,
-            written_class: Some(written),
-        },
-        owner,
-        ctx.file.class_loader,
-    )
-    .or_else(|| {
-        m.return_type.as_ref().map(|ret| {
-            if template_subs.is_empty() {
-                ret.clone()
-            } else {
-                ret.substitute(template_subs)
-            }
-        })
-    })?;
+        var_resolver,
+        &arg_ty_resolver,
+        written,
+        false,
+    );
+    let substituted = resolve_conditional_return_hint(m, text_args, template_subs, &mr_ctx, owner)
+        .or_else(|| {
+            m.return_type.as_ref().map(|ret| {
+                if template_subs.is_empty() {
+                    ret.clone()
+                } else {
+                    ret.substitute(template_subs)
+                }
+            })
+        })?;
     // Collapse any conditional nested inside the return type (e.g.
     // `Collection<($k is array|string ? array-key : TGroupKey), …>`)
     // against this call's arguments.
     if !substituted.contains_conditional() {
         return Some(substituted);
     }
-    let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, ctx);
     let tpl = TemplateContext {
         defaults: Some(template_subs),
         params: m.template_params(),

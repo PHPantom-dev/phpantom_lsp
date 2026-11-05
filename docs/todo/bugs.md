@@ -29,34 +29,7 @@ No outstanding items.
 
 ## Conditional return types
 
-### B705. A member accessed on a call whose conditional return tests an array argument is looked up on the wrong branch
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-class Drawer {
-    /**
-     * @param  int|list<int>  $id
-     * @return ($id is list<int> ? Coll<Pen> : Pen|null)
-     */
-    public function find(int|array $id): Coll|Pen|null { … }
-}
-
-wantInt($d->find([7, 8]));   // expects int, got Coll<Pen>   (right)
-$m = $d->find([7, 8]);
-$m->first();                 // resolves on Coll<Pen>        (right)
-$d->find([7, 8])->first();   // Method 'first' not found on class 'Pen'
-```
-
-The shared resolver picks the `list<int>` branch for the call, whether the
-argument is a literal or a variable holding a list, but the member lookup
-on a chained call resolves the same call's subject to `Pen`, the else
-branch. The member-access subject path evaluates the conditional
-differently from `resolve_rhs_expression`, so the fix is to make it go
-through the shared path rather than to teach it this one case.
-
-Found by `analyze` on `examples/php/scaffolding/assertions.php`
-(`$drawer->find([7, 8])->first()`).
+No outstanding items.
 
 ## Standard-library return types
 

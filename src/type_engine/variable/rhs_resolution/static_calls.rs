@@ -308,6 +308,7 @@ fn static_call_on_class_strings(
     let text_args = arg_texts.join(", ");
     let rctx = ctx.as_resolution_ctx();
     let var_resolver = build_var_resolver_from_ctx(ctx);
+    let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
     let mut union_types: Vec<PhpType> = Vec::new();
     let mut union_classes: Vec<ResolvedType> = Vec::new();
     for target in targets {
@@ -341,6 +342,7 @@ fn static_call_on_class_strings(
             backend: ctx.file.backend,
             template_subs: &template_subs,
             var_resolver: Some(&var_resolver),
+            arg_type_resolver: Some(&arg_ty_resolver),
             cache: ctx.resolved_class_cache,
             calling_class_name: Some(ctx.current_class.fqn().as_str()),
             written_class: Some(&|name: &str| ctx.written_names().resolve_class(name)),
