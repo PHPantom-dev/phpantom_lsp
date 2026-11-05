@@ -12,7 +12,6 @@ namespace Demo;
 
 require_once __DIR__ . '/../autoload.php';
 
-use Closure;
 use Demo\Scaffolding;
 use Demo\Scaffolding\UserProfile as Profile;
 use Exception;

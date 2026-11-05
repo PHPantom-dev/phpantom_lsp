@@ -531,7 +531,8 @@ fn skip_type_token(s: &str) -> &str {
 /// a simple string-replacement pass, not a full HTML parser, so tag
 /// matching is case-sensitive and attributes are not recognised.
 pub(crate) fn html_to_markdown(text: &str) -> String {
-    text.replace("<b>", "**")
+    fence_multiline_code(text)
+        .replace("<b>", "**")
         .replace("</b>", "**")
         .replace("<strong>", "**")
         .replace("</strong>", "**")
@@ -560,6 +561,41 @@ pub(crate) fn html_to_markdown(text: &str) -> String {
         .replace("</dd>", "")
         .replace("<span>", "")
         .replace("</span>", "")
+}
+
+/// Turn each `<code>` or `<pre>` element whose content spans several lines
+/// into a fenced code block, which is how docblocks (Doctrine's, for one)
+/// embed examples.  A one-line `<code>` is left for the inline conversion,
+/// since a backtick span cannot hold a line break.
+fn fence_multiline_code(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains("<code>") && !text.contains("<pre>") {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut rest = text;
+    while let Some((open, tag)) = ["<code>", "<pre>"]
+        .iter()
+        .filter_map(|tag| rest.find(tag).map(|at| (at, *tag)))
+        .min_by_key(|(at, _)| *at)
+    {
+        let close = if tag == "<code>" { "</code>" } else { "</pre>" };
+        let body_start = open + tag.len();
+        let Some(len) = rest[body_start..].find(close) else {
+            break;
+        };
+        let body = &rest[body_start..body_start + len];
+        out.push_str(&rest[..open]);
+        if body.contains('\n') {
+            out.push_str("\n```php\n");
+            out.push_str(body.trim_matches('\n').trim_end());
+            out.push_str("\n```\n");
+        } else {
+            out.push_str(&rest[open..body_start + len + close.len()]);
+        }
+        rest = &rest[body_start + len + close.len()..];
+    }
+    out.push_str(rest);
+    std::borrow::Cow::Owned(out)
 }
 
 /// Extract the description from a pre-parsed [`DocblockInfo`], applying

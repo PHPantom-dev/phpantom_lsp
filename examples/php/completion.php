@@ -3225,7 +3225,7 @@ class InvokeReturnTypeDemo
         }
 
         // Enum from()/tryFrom() chains to instance methods
-        Scaffolding\Status::from('Active')->label();          // from() returns Scaffolding\Status
+        Scaffolding\Status::from('active')->label();         // from() returns Scaffolding\Status
     }
 
     private Scaffolding\ScaffoldingFormatter $formatter;

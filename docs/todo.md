@@ -32,9 +32,15 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| D42 | [`from()` with a literal no enum case backs is not reported](todo/diagnostics.md#d42-from-with-a-literal-no-enum-case-backs-is-not-reported) | Low-Medium  | Low         |
 | DR9 | [Drupal directories outside `contrib` and `custom`](todo/drupal.md#dr9-drupal-directories-outside-contrib-and-custom) | Medium-High | Low-Medium |
+| D41 | [A thrown exception nothing catches or documents is not reported](todo/diagnostics.md#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported) | Medium      | Medium      |
+| T45 | [Doctrine `getRepository(Entity::class)` is typed as the generic repository](todo/type-inference.md#t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository) | Low-Medium  | Medium      |
+| F54 | [Symfony form options, constraint options, and serializer groups](todo/lsp-features.md#f54-symfony-form-options-constraint-options-and-serializer-groups) | Low-Medium  | Medium      |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
+| F43 | [Doctrine entity fields in repository calls](todo/lsp-features.md#f43-doctrine-entity-fields-in-repository-calls) (depends on T45) | Medium      | Medium-High |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
+| F44 | [Doctrine DQL and query builder strings](todo/lsp-features.md#f44-doctrine-dql-and-query-builder-strings) | Medium      | High        |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -198,6 +204,7 @@ ships, remove every row that names it.
 | T41 | [A reading of the callee's body overrides a declared `@param-out`](todo/type-inference.md#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out)            | Low-Medium  | Low         |
 | T60 | [A float literal is typed `float`, not its value](todo/type-inference.md#t60-a-float-literal-is-typed-float-not-its-value) | Low         | Low         |
 | T58 | [`new<T>` is not supported](todo/type-inference.md#t58-newt-is-not-supported) | Low-Medium  | Low-Medium  |
+| T62 | [A sealed hierarchy is not narrowed by ruling out its other members](todo/type-inference.md#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members) | Medium      | Medium      |
 | T26 | [Class constants named as docblock types (`Foo::BAR`, `Foo::BAR_*`)](todo/type-inference.md#t26-class-constants-named-as-docblock-types-foobar-foobar_) | Medium      | Medium      |
 | T49 | [A closure passed to a constructor gets no parameter types from it](todo/type-inference.md#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it) | Medium      | Medium      |
 | T59 | [`T[K]` on a class template is not resolved](todo/type-inference.md#t59-tk-on-a-class-template-is-not-resolved) | Medium      | Medium      |
@@ -219,7 +226,9 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| D42 | [`from()` with a literal no enum case backs is not reported](todo/diagnostics.md#d42-from-with-a-literal-no-enum-case-backs-is-not-reported) | Low-Medium  | Low         |
 | D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
+| D41 | [A thrown exception nothing catches or documents is not reported](todo/diagnostics.md#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported) | Medium      | Medium      |
 | D19 | [`invalid_member_access` cannot tell a property read from a write](todo/diagnostics.md#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
 | D33 | [Private properties nothing reads or writes are not reported](todo/diagnostics.md#d33-private-properties-nothing-reads-or-writes-are-not-reported) | Low-Medium  | Medium      |
@@ -259,7 +268,9 @@ ships, remove every row that names it.
 | FX2 | [`unused_variable` — remove unused variables](todo/fix-cli.md#fx2-unused_variable-remove-unused-variables)                                                                 | Medium      | Medium      |
 | A29 | [Simplify boolean return](todo/actions.md#a29-simplify-boolean-return) (`if (cond) return true; return false;` → `return cond;`)                                            | Low-Medium  | Medium      |
 | A45 | [Simplify with `?:`](todo/actions.md#a45-simplify-with-elvis-operator) (replace `$x ? $x : $y` with `$x ?: $y`)                                                             | Low-Medium  | Medium      |
+| A46 | [Convert nested calls to the pipe operator](todo/actions.md#a46-convert-nested-calls-to-the-pipe-operator-php-85) (PHP 8.5+)                                              | Low-Medium  | Medium      |
 | D28 | ["Remove unreachable code" is wired to PHPStan only](todo/diagnostics.md#d28-remove-unreachable-code-is-wired-to-phpstan-only)                                              | Low-Medium  | Medium      |
+| A47 | [Convert a getter or setter method into a property hook](todo/actions.md#a47-convert-a-getter-or-setter-method-into-a-property-hook-php-84) (PHP 8.4+)                   | Low         | Medium      |
 | H20 | `generics.callSiteVarianceRedundant` — remove redundant variance annotation                                                                                                 | Low         | Medium      |
 | A31 | [Remove always-else](todo/actions.md#a31-remove-always-else-extract-guard-clause) (extract guard clause)                                                                    | Low-Medium  | Medium-High |
 | A37 | [Simplify with `?->`](todo/actions.md#a37-simplify-with-nullsafe-operator) (replace null-checked chains with the nullsafe operator)                                       | Low-Medium  | Medium-High |

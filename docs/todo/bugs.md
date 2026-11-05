@@ -29,7 +29,34 @@ No outstanding items.
 
 ## Conditional return types
 
-No outstanding items.
+### B705. A member accessed on a call whose conditional return tests an array argument is looked up on the wrong branch
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+class Drawer {
+    /**
+     * @param  int|list<int>  $id
+     * @return ($id is list<int> ? Coll<Pen> : Pen|null)
+     */
+    public function find(int|array $id): Coll|Pen|null { … }
+}
+
+wantInt($d->find([7, 8]));   // expects int, got Coll<Pen>   (right)
+$m = $d->find([7, 8]);
+$m->first();                 // resolves on Coll<Pen>        (right)
+$d->find([7, 8])->first();   // Method 'first' not found on class 'Pen'
+```
+
+The shared resolver picks the `list<int>` branch for the call, whether the
+argument is a literal or a variable holding a list, but the member lookup
+on a chained call resolves the same call's subject to `Pen`, the else
+branch. The member-access subject path evaluates the conditional
+differently from `resolve_rhs_expression`, so the fix is to make it go
+through the shared path rather than to teach it this one case.
+
+Found by `analyze` on `examples/php/scaffolding/assertions.php`
+(`$drawer->find([7, 8])->first()`).
 
 ## Standard-library return types
 
@@ -65,6 +92,30 @@ matches PHP 8 throwing a `ValueError` on a negative.
 Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.
 
+### B708. Excluding an int range's boundary value does not shrink the range
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @param int<0, max> $v */
+function f(int $v, Raw $r): void {
+    if (0 === $v) { throw new Exception(); }
+    wantPositive($v);       // expects int<1, max>, got int<0, max>
+    if ($r->streamId === 0) { return; }
+    wantPositive($r->streamId);   // same, on a property
+}
+```
+
+After a guard rules out `0`, `int<0, max>` should become `int<1, max>`
+(and `int<min, 0>` should become `int<min, -1>`). The `!==` narrowing
+removes literals from unions but leaves a range whose edge is the removed
+value as it was, for variables and properties alike. PHPStan and Mago both
+shrink the range.
+
+Found by `analyze` on azjezz/psl, where it is most of the false positives
+in the library code: the HTTP/2 frame decoders check `0 === $frame->streamId`
+before building a frame whose constructor takes `int<1, max>`.
+
 ## Array types
 
 No outstanding items.
@@ -79,7 +130,53 @@ No outstanding items.
 
 ## Templates
 
-No outstanding items.
+### B706. A template nested in an iterable parameter's value type binds to the whole argument
+
+**Impact: Medium-High · Complexity: Medium**
+
+```php
+/**
+ * @template Tk of array-key
+ * @template Tv
+ * @param iterable<Tk, (Closure(): Tv)> $tasks
+ * @return array<Tk, Tv>
+ */
+function concurrently(iterable $tasks): array { … }
+
+[$server, $client] = concurrently([$listener->accept(...), fn(): Stream => connect()]);
+$server->writeAll('…');   // Cannot access method 'writeAll' on type 'list{Closure(): Stream, …}'
+```
+
+`Tk` is inferred from the keys, but `Tv` is bound to the whole array
+literal (`list{Closure(): Stream, Closure(): Stream}`) instead of to the
+return type of each closure in it. A lone `@param Closure(): Tv` infers
+`Tv` correctly, so the closure-return binding is there; it is not applied
+when the closure type is the value type of an `iterable`/`array`
+parameter. The values should each bind `Tv` from their return type,
+first-class callables included, and the bindings union.
+
+The same happens when the value type is a generic class rather than a
+closure:
+
+```php
+/**
+ * @template Tk of array-key
+ * @template Tv
+ * @param array<Tk, TypeInterface<Tv>> $elements
+ * @return TypeInterface<array<Tk, Tv>>
+ */
+function shape(array $elements): TypeInterface { … }
+
+shape(['x' => int(), 'label' => string()])->coerce($data);
+// array<string, array{x: TypeInterface<int>, label: TypeInterface<string>}>,
+// want array<string, int|string>
+```
+
+So the fix belongs where an argument's element types are matched against
+the parameter's value type, not in the closure-return binding.
+
+Found by `analyze` on azjezz/psl: `Async\concurrently()` and
+`Async\all()` in its tests (about 70 false positives), and `Type\shape()`.
 
 ## Framework names in strings
 
@@ -121,4 +218,23 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B707. A closure capturing by reference the variable it is assigned to sees it as `null`
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+/** @var KeyedSemaphore<string, string, string> */
+$ks = new KeyedSemaphore(1, function (string $key) use (&$ks): string {
+    return $ks->waitFor($key, 'inner');   // Cannot access method 'waitFor' on type 'null'
+});
+```
+
+`use (&$ks)` captures the variable, not its value, so when the closure
+runs `$ks` holds what the outer scope assigned it afterwards, here the
+semaphore. We type the capture as `null`, its value at the point the
+closure is created, with or without the `@var`, and whether or not `$ks`
+was assigned before. A by-reference capture should take the types the
+outer variable is assigned after the capture (the `@var` included), not
+the one it had before.
+
+Found by `analyze` on azjezz/psl (`KeyedSemaphoreTest`, 21 false positives).

@@ -110,6 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Code examples in hover.** A multi-line `<code>` or `<pre>` example in a docblock, as in Doctrine's query builder, now shows as a code block instead of running together on one line.
+- **Imports only fully qualified names refer to.** `use DateTime;` is now reported as unused when the file only ever writes `\DateTime`, and the same goes for function and constant imports.
 - **Untyped methods that return `new static()`.** Calling such a method through a subclass, or on a class that uses the trait declaring it, now gives that class instead of the one the method is declared in.
 - **Named arguments in attributes.** In `#[Foo(bar: 'hello')]`, the `bar:` label is now a reference to the property a promoted `$bar` constructor parameter declares, so find references, rename, go-to-definition and hover reach it from both sides.
 - **`#[\AllowDynamicProperties]` classes.** Reading or writing a property such a class, or a subclass of one, does not declare is no longer reported as unknown.
