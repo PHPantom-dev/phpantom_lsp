@@ -128,7 +128,6 @@ ships, remove every row that names it.
 | DR10 | [Plugin IDs](todo/drupal.md#dr10-plugin-ids) | Medium | Medium |
 | DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
-| P88 | [A Drupal site takes over a gigabyte once indexed](todo/performance.md#p88-a-drupal-site-takes-over-a-gigabyte-once-indexed) | High | Medium-High |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
 | DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) | Medium-High | High        |
 | DR16 | [Event subscribers](todo/drupal.md#dr16-event-subscribers) | Medium | Low-Medium |

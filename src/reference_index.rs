@@ -492,6 +492,31 @@ impl Backend {
         Some(uris)
     }
 
+    /// Every key of a `kind` string key some file of the workspace names,
+    /// in no particular order.
+    ///
+    /// `None` means the workspace index cannot answer yet.
+    pub(crate) fn indexed_string_keys(&self, kind: StringKeyKind) -> Option<Vec<String>> {
+        if self.skip_reference_index || !self.workspace_index.indexed.load(Ordering::Acquire) {
+            return None;
+        }
+        let index = self.reference_index.read();
+        Some(
+            index
+                .by_key
+                .iter()
+                .filter_map(|(key, uris)| match key {
+                    ReferenceIndexKey::StringKey { kind: found, key }
+                        if *found == kind && !uris.is_empty() =>
+                    {
+                        Some(key.clone())
+                    }
+                    _ => None,
+                })
+                .collect(),
+        )
+    }
+
     /// Candidate files for method names, matching PHP's case-insensitive
     /// lookup across static and instance calls. Existing member keys retain
     /// their spelling because property and constant names are case-sensitive.

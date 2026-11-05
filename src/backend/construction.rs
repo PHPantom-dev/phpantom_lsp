@@ -93,6 +93,7 @@ impl BackendState {
             client: None,
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
+            dormant_files: RwLock::new(HashSet::new()),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
             stub_index: Arc::new(RwLock::new(stubs.classes)),
             stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(stubs.functions))),

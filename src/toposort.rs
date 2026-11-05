@@ -196,9 +196,19 @@ pub(crate) fn toposort_classes<'a>(
 pub(crate) fn toposort_from_uri_classes_index(
     uri_classes_index: &HashMap<String, Vec<Arc<ClassInfo>>>,
 ) -> Vec<String> {
+    toposort_from_uri_classes_index_except(uri_classes_index, &Default::default())
+}
+
+/// [`toposort_from_uri_classes_index`] leaving out the classes of the
+/// files in `skip`.
+pub(crate) fn toposort_from_uri_classes_index_except(
+    uri_classes_index: &HashMap<String, Vec<Arc<ClassInfo>>>,
+    skip: &std::collections::HashSet<String>,
+) -> Vec<String> {
     let iter = uri_classes_index
-        .values()
-        .flat_map(|classes| classes.iter())
+        .iter()
+        .filter(|(uri, _)| !skip.contains(*uri))
+        .flat_map(|(_, classes)| classes.iter())
         .map(|class| (class.fqn().to_string(), class.as_ref()));
     toposort_classes(iter)
 }

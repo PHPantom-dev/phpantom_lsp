@@ -20,34 +20,28 @@ against that bar.
 
 ---
 
-## P88. A Drupal site takes over a gigabyte once indexed
+## P89. A long method chain makes the symbol map quadratic in its length
 
-**Impact: High · Complexity: Medium-High**
+**Impact: Medium · Complexity: Medium**
 
-The `memory_drupal_module` scenario of `benches/memory_usage.py` (a
-Drupal 11.4 site with core in `web/core`, one custom module open) settles
-at 1,138 MiB after indexing, against 138 MiB for the WordPress plugin
-scenario and 87 MiB for symfony/demo (release build, 2026-11-05). Every
-Drupal user pays it as soon as the site is opened.
+Drupal core ships database dumps as test fixtures
+(`core/modules/migrate_drupal/tests/fixtures/drupal7.php` and three like
+it, 0.7 to 1.9 MB each): `$connection->insert('table')->fields([...])`
+followed by up to 1,027 `->values([...])` calls in one statement. Every
+link of such a chain records its receiver as subject text that spells out
+the whole chain before it, arrays included, so the text built for one
+statement grows with the square of its length.
 
-It is not the Drupal readers: the same tree with Drupal detection turned
-off (no `drupal-scaffold` web root, no `drupal/core` requirement) settles
-at 1,144 MiB. It is core's own size. `web/core` holds 11,462 PHP files
-outside `vendor/`, so they are indexed as project code, and 6,093 of them
-are under `tests/` directories. Deleting those directories brings the
-site down to 350 MiB, so core's tests alone account for about 780 MiB.
+Indexing the four files takes 0.3 to 0.6 s each (release build,
+2026-11-05), against about a millisecond for a typical core file. That is
+most of the second phase of a Drupal site's workspace index, and they are
+what lifts the `memory_drupal_module` scenario of
+`benches/memory_usage.py` to a peak of about 860 MiB on the way to
+settling under 300 MiB.
 
-They cannot simply be skipped: a site's own tests extend
-`BrowserTestBase` and `KernelTestBase` and use traits such as
-`NodeCreationTrait`, which live under core's `tests/` directories. Find
-which store keeps that much per file (the symbol maps, the parsed
-classes, or a peak the allocator never returns), and make a file that is
-only on the classmap cost what a vendor file costs until something opens
-or reads it.
-
-**Where to look:** the workspace walk in `src/indexing/`,
-`scan_drupal_directories` in `src/classmap_scanner/discovery.rs`, and
-`src/mem_audit.rs` for attributing the bytes.
+**Where to look:** `src/symbol_map/extraction/subject_text.rs`
+(`lower_spine_base`, `format_arg_expr`) and `SubjectText` in
+`src/symbol_map/span.rs`.
 
 ---
 

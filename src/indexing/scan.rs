@@ -304,6 +304,10 @@ impl Backend {
             .as_ref()
             .map(composer::linked_package_roots)
             .unwrap_or_default();
+        let installed_packages = installed
+            .as_ref()
+            .map(composer::installed_package_roots)
+            .unwrap_or_default();
         let vendor_paths = if vendor_path.is_dir() {
             path_aliases(&vendor_path)
         } else {
@@ -315,6 +319,12 @@ impl Backend {
             project.stub_packages = stub_packages;
             project.vendor_paths = vendor_paths;
             project.linked_packages = linked_packages;
+            project.installed_packages = installed_packages;
+            *self.workspace.installed_package_uri_prefixes.lock() = projects
+                .iter()
+                .flat_map(|project| &project.installed_packages)
+                .map(|root| crate::util::dir_uri_prefix(root))
+                .collect();
         }
         self.workspace.forget_project_scopes();
 

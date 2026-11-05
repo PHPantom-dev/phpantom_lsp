@@ -425,6 +425,39 @@ async fn computed_hook_names_reach_their_documented_pattern() {
     assert_eq!(found, vec![(api, 3), (module, 3)], "{found:?}");
 }
 
+/// A documented pattern lists the hooks an installed core implements, whose
+/// files the workspace index keeps no parse of.
+#[tokio::test]
+async fn a_pattern_lists_the_hooks_an_installed_core_implements() {
+    let node = "<?php\nnamespace Drupal\\node\\Entity;\n/**\n * @ContentEntityType(\n *   id = \"node\",\n * )\n */\nclass Node {}\n";
+    let node_module = "<?php\nfunction node_node_presave($node) {\n}\n";
+    let node_module_path = "web/core/modules/node/node.module";
+    let (backend, dir) = drupal(
+        &[
+            INSTALLED_CORE,
+            ("web/core/lib/Drupal/Core/Form/form.api.php", PATTERN_API),
+            ("web/core/modules/node/node.info.yml", "type: module\n"),
+            ("web/core/modules/node/src/Entity/Node.php", node),
+            (node_module_path, node_module),
+        ],
+        &[],
+    )
+    .await;
+    let api = uri_for(&dir, "web/core/lib/Drupal/Core/Form/form.api.php");
+
+    let found = references_at(
+        &backend,
+        &api,
+        position_in(PATTERN_API, "ENTITY_TYPE_presave", 1),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![(api, 3), (uri_for(&dir, node_module_path), 1)],
+        "{found:?}"
+    );
+}
+
 /// Hooks complete where an implementation is named and where a hook name is
 /// written, an alter call's without its `_alter`.
 #[tokio::test]
@@ -818,15 +851,35 @@ const STORAGES: &[(&str, &str)] = &[
 /// stores its entity type.
 #[tokio::test]
 async fn computed_hooks_reach_the_core_call_that_fires_them() {
+    computed_hooks_reach_the_core_call(&[]).await;
+}
+
+/// Composer's record of core installed into the web root, which makes the
+/// workspace index let go of core's files once it has read them.
+const INSTALLED_CORE: (&str, &str) = (
+    "vendor/composer/installed.json",
+    r#"{ "packages": [ { "name": "drupal/core", "type": "drupal-core", "install-path": "../../web/core" } ] }"#,
+);
+
+#[tokio::test]
+async fn computed_hooks_reach_the_core_call_of_an_installed_core() {
+    computed_hooks_reach_the_core_call(&[INSTALLED_CORE]).await;
+}
+
+async fn computed_hooks_reach_the_core_call(extra: &[(&str, &str)]) {
     let builder_path = "web/core/lib/Drupal/Core/Form/FormBuilder.php";
+    let files: Vec<(&str, &str)> = [
+        ("web/core/lib/Drupal/Core/Form/form.api.php", PATTERN_API),
+        (builder_path, FORM_BUILDER),
+        STORAGES[0],
+        STORAGES[1],
+        STORAGES[2],
+    ]
+    .into_iter()
+    .chain(extra.iter().copied())
+    .collect();
     let (backend, dir) = drupal(
-        &[
-            ("web/core/lib/Drupal/Core/Form/form.api.php", PATTERN_API),
-            (builder_path, FORM_BUILDER),
-            STORAGES[0],
-            STORAGES[1],
-            STORAGES[2],
-        ],
+        &files,
         &[("web/modules/custom/acme/acme.module", PATTERN_MODULE)],
     )
     .await;

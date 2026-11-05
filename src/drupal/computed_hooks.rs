@@ -314,6 +314,7 @@ impl Backend {
                 let Some(uri) = self.class_declaration_uri(class) else {
                     continue;
                 };
+                self.wake_dormant_files([uri.as_str()]);
                 let Some(map) = self.symbol_map_for(&uri) else {
                     continue;
                 };

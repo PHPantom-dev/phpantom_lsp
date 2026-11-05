@@ -236,6 +236,12 @@ impl Backend {
         }
     }
 
+    /// Whether the file at `uri` declares a name
+    /// [`Self::visit_declaring_symbol_maps`] visits it for.
+    pub(crate) fn is_declaring_uri(&self, uri: &str) -> bool {
+        self.symfony.declaring_uris.read().contains(uri)
+    }
+
     /// Visit the symbol map of every file that declares a name, in a
     /// stable order.
     pub(crate) fn visit_declaring_symbol_maps(&self, mut visit: impl FnMut(&str, &SymbolMap)) {

@@ -985,24 +985,35 @@ impl Backend {
         use crate::symbol_map::{StringKeyKind, SymbolKind};
         let index = self.hook_index();
         let is_entity_type = |id: &str| index.entity_types.contains(id);
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut hooks: Vec<String> = Vec::new();
-        for (_, map) in self.user_file_symbol_maps() {
-            for span in &map.spans {
-                if let SymbolKind::StringKey {
-                    kind: StringKeyKind::DrupalHook,
-                    key,
-                    ..
-                } = &span.kind
-                    && !is_hook_pattern(key)
-                    && seen.insert(key.clone())
+        // The reference index names the hooks of the files the workspace
+        // index let go of too, whose symbol maps are not kept.
+        self.ensure_workspace_index_ready_for_request();
+        let named = self
+            .indexed_string_keys(StringKeyKind::DrupalHook)
+            .unwrap_or_else(|| {
+                self.user_file_symbol_maps()
+                    .iter()
+                    .flat_map(|(_, map)| map.spans.iter())
+                    .filter_map(|span| match &span.kind {
+                        SymbolKind::StringKey {
+                            kind: StringKeyKind::DrupalHook,
+                            key,
+                            ..
+                        } => Some(key.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            });
+        let mut hooks: Vec<String> = named
+            .into_iter()
+            .filter(|key| {
+                !is_hook_pattern(key)
                     && matches_hook_pattern(pattern, key, &is_entity_type)
                     && index.best_patterns(key).contains(&pattern)
-                {
-                    hooks.push(key.clone());
-                }
-            }
-        }
+            })
+            .collect();
+        hooks.sort_unstable();
+        hooks.dedup();
         hooks
     }
 

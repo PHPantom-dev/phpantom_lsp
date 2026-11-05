@@ -466,6 +466,18 @@ pub struct BackendState {
     /// `find_implementors`).  Populated in `update_ast_inner` and
     /// `parse_and_cache_content_versioned`.
     pub(crate) parsed_uris: Arc<RwLock<HashSet<String>>>,
+    /// Files of an installed package (see
+    /// [`WorkspaceEnv::installed_package_uri_prefixes`](crate::workspace_env::WorkspaceEnv))
+    /// the workspace index has read and let go of again.
+    ///
+    /// A Drupal site holds all of core and its tests outside `vendor/`, and
+    /// keeping every one of those files' symbol maps resident cost the
+    /// better part of a gigabyte.  Such a file keeps what a vendor file
+    /// keeps (its declarations, its classes once loaded) plus its entries
+    /// in the reference index, so searches still select it, and is parsed
+    /// again when a search reads it (see
+    /// [`Backend::wake_dormant_files`]) or the editor opens it.
+    pub(crate) dormant_files: RwLock<HashSet<String>>,
     /// Set of file URIs currently being parsed by another thread.
     ///
     /// Used by [`parse_and_cache_file`](Self::parse_and_cache_file) to avoid

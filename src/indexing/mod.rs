@@ -23,9 +23,12 @@
 //!   those change mid-session.
 //! - [`reindex`] — re-scanning a batch of files that changed on disk, the
 //!   step [`watch`] and [`reconcile`] share.
+//! - [`dormant`] — letting go of the parse of an installed package's file
+//!   once it is indexed, and parsing it again when a search reads it.
 
 use std::path::{Path, PathBuf};
 
+mod dormant;
 mod extra_roots;
 mod init;
 mod library_paths;

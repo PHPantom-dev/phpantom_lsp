@@ -282,6 +282,7 @@ impl Backend {
                 move |backend: &Backend, uri: &str| match crate::util::read_php_source(&path) {
                     Some(content) => {
                         backend.update_ast(uri, &content);
+                        backend.put_to_sleep([uri]);
                     }
                     None => backend.forget_closed_file(uri),
                 };

@@ -127,12 +127,7 @@ pub(crate) fn path_repo_psr4_mappings(
 
     for package in &installed.packages {
         // Condition 1: dist.type must be "path".
-        let is_path_repo = package
-            .get("dist")
-            .and_then(|d| d.get("type"))
-            .and_then(|t| t.as_str())
-            == Some("path");
-        if !is_path_repo {
+        if !is_path_repository(package) {
             continue;
         }
 
@@ -241,10 +236,33 @@ fn is_stub_package(package: &serde_json::Value) -> bool {
 /// installer placed elsewhere.  Each is given canonically and, when that
 /// differs, as `install-path` spells it from the vendor directory.
 pub(crate) fn linked_package_roots(installed: &InstalledPackages) -> Vec<PathBuf> {
+    roots_outside_vendor(installed, |_| true)
+}
+
+/// The roots of the packages a custom installer placed outside the vendor
+/// directory (Drupal core and contributed extensions under the web root,
+/// say), spelled as [`linked_package_roots`] spells them.  Path
+/// repositories are left out: they are the project's own code, linked in.
+pub(crate) fn installed_package_roots(installed: &InstalledPackages) -> Vec<PathBuf> {
+    roots_outside_vendor(installed, |package| !is_path_repository(package))
+}
+
+fn is_path_repository(package: &serde_json::Value) -> bool {
+    package
+        .get("dist")
+        .and_then(|d| d.get("type"))
+        .and_then(|t| t.as_str())
+        == Some("path")
+}
+
+fn roots_outside_vendor(
+    installed: &InstalledPackages,
+    include: impl Fn(&serde_json::Value) -> bool,
+) -> Vec<PathBuf> {
     let canonical_vendor = dunce::canonicalize(&installed.vendor_path)
         .unwrap_or_else(|_| installed.vendor_path.clone());
     let mut roots = Vec::new();
-    for package in &installed.packages {
+    for package in installed.packages.iter().filter(|package| include(package)) {
         let Some(root) = installed.package_root(package) else {
             continue;
         };

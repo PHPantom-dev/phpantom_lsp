@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use crate::Backend;
+use crate::parser::AstIndexParseResult;
 
 impl Backend {
     /// Eagerly full-parse the given autoload helper files in parallel.
@@ -239,7 +240,12 @@ impl Backend {
         // pass publishes `workspace_indexed`, which it does either way.
         let already_indexed = self.workspace_index.indexed.load(Ordering::Acquire);
         self.report_workspace_index_progress(progress, 1, "Preparing workspace index");
-        let existing_uris: HashSet<String> = self.uris_with_symbol_maps().into_iter().collect();
+        // A dormant file has been indexed too; it only let go of its parse.
+        let existing_uris: HashSet<String> = self
+            .uris_with_symbol_maps()
+            .into_iter()
+            .chain(self.dormant_files.read().iter().cloned())
+            .collect();
 
         // Build the vendor URI prefixes so we can skip vendor files in
         // Phase 1 (fqn_uri_index may contain vendor URIs from prior
@@ -502,6 +508,7 @@ impl Backend {
             |(uri, content)| self.index_progress_weight_for_uri(uri, content.as_deref()),
             |(uri, content)| content.clone().or_else(|| self.get_file_content(uri)),
             progress,
+            true,
         );
     }
 
@@ -521,18 +528,38 @@ impl Backend {
             |(_, path)| index_progress_weight_for_path(path),
             |(_, path)| crate::util::read_php_source(path),
             progress,
+            true,
+        );
+    }
+
+    /// [`Self::parse_paths_parallel_with_progress`] for files a search is
+    /// about to read, which keeps every one of them resident.
+    pub(crate) fn parse_paths_parallel_awake(&self, files: &[(String, PathBuf)]) {
+        self.parse_batch_parallel(
+            files,
+            |(uri, _)| uri.as_str(),
+            |(_, path)| index_progress_weight_for_path(path),
+            |(_, path)| crate::util::read_php_source(path),
+            None,
+            false,
         );
     }
 
     /// Parse a batch of items into owned index updates on parallel
-    /// workers, then publish them all in a single merge.
+    /// workers, then publish them.
     ///
     /// The caller supplies how to read an item's URI, its progress weight,
     /// and its content.  Everything else (work ordering, thread sizing,
-    /// progress accounting, and the final merge) is shared by every batch
+    /// progress accounting, and the merge) is shared by every batch
     /// parser.  Workers claim indices from a shared cursor in
     /// largest-first order so one oversized file cannot become the long
     /// tail of the batch.
+    ///
+    /// The batch is published in a single merge, except for the files of
+    /// installed packages when `let_sleep` is set: those are published
+    /// [`DORMANT_CHUNK`] at a time and put to sleep (see
+    /// [`Self::put_to_sleep`]) after each, so their parses never all sit
+    /// in memory at once.
     fn parse_batch_parallel<T: Sync>(
         &self,
         items: &[T],
@@ -540,64 +567,101 @@ impl Backend {
         weight_of: impl Fn(&T) -> u64 + Sync,
         content_of: impl Fn(&T) -> Option<String> + Sync,
         progress: Option<&(dyn Fn(usize, usize, u64, u64) + Sync)>,
+        let_sleep: bool,
     ) {
         if items.is_empty() {
             return;
         }
-        let total = items.len();
-        let parsed = AtomicUsize::new(0);
         let weights: Vec<u64> = items.iter().map(&weight_of).collect();
-        let total_units = weights.iter().copied().sum::<u64>().max(1);
-        let parsed_units = AtomicU64::new(0);
+        let counter = ParseCounter {
+            parsed: AtomicUsize::new(0),
+            parsed_units: AtomicU64::new(0),
+            total: items.len(),
+            total_units: weights.iter().copied().sum::<u64>().max(1),
+        };
+        let (dormant, resident): (Vec<usize>, Vec<usize>) = (0..items.len())
+            .partition(|&idx| let_sleep && self.is_installed_package_file(uri_of(&items[idx])));
+
+        let parse = |batch: &[usize]| {
+            self.parse_and_publish(batch, &weights, &counter, progress, |idx| {
+                let item = &items[idx];
+                content_of(item)
+                    .map(|content| self.parse_ast_index_update_for_index(uri_of(item), &content))
+            });
+        };
+        parse(&resident);
+        for chunk in dormant.chunks(DORMANT_CHUNK) {
+            parse(chunk);
+            self.put_to_sleep(chunk.iter().map(|&idx| uri_of(&items[idx])));
+        }
+    }
+
+    /// Parse the items at `batch` (indices into `weights`) on parallel
+    /// workers and publish them in a single merge.
+    fn parse_and_publish(
+        &self,
+        batch: &[usize],
+        weights: &[u64],
+        counter: &ParseCounter,
+        progress: Option<&(dyn Fn(usize, usize, u64, u64) + Sync)>,
+        parse_item: impl Fn(usize) -> Option<AstIndexParseResult> + Sync,
+    ) {
+        if batch.is_empty() {
+            return;
+        }
+        let report = |idx: usize| {
+            report_weighted_parse_progress(
+                progress,
+                &counter.parsed,
+                &counter.parsed_units,
+                weights[idx],
+                counter.total,
+                counter.total_units,
+            );
+        };
 
         // For very small batches, avoid thread overhead.
-        if total <= 2 {
-            let mut results = Vec::with_capacity(total);
-            for (idx, item) in items.iter().enumerate() {
-                if let Some(content) = content_of(item) {
-                    results.push(self.parse_ast_index_update_for_index(uri_of(item), &content));
-                }
-                report_weighted_parse_progress(
-                    progress,
-                    &parsed,
-                    &parsed_units,
-                    weights[idx],
-                    total,
-                    total_units,
-                );
+        if batch.len() <= 2 {
+            let mut results = Vec::with_capacity(batch.len());
+            for &idx in batch {
+                results.extend(parse_item(idx));
+                report(idx);
             }
-            report_weighted_merge_progress(progress, total, total_units);
-            self.apply_ast_index_parse_results_batch(results);
+            self.publish_parsed(results, counter, progress);
             return;
         }
 
         // Workers claim positions in the largest-first order, so the index
         // the pool reports is a position in that order, not the item's own.
-        let work_order = largest_first_work_order(&weights);
-        let mut results = crate::parallel::map_indexed("workspace-parse", total, |_, work_idx| {
-            let idx = work_order[work_idx];
-            let item = &items[idx];
-            let result = content_of(item).map(|content| {
-                (
-                    idx,
-                    self.parse_ast_index_update_for_index(uri_of(item), &content),
-                )
+        let batch_weights: Vec<u64> = batch.iter().map(|&idx| weights[idx]).collect();
+        let work_order = largest_first_work_order(&batch_weights);
+        let mut results =
+            crate::parallel::map_indexed("workspace-parse", batch.len(), |_, work_idx| {
+                let idx = batch[work_order[work_idx]];
+                let result = parse_item(idx).map(|result| (idx, result));
+                report(idx);
+                result
             });
-            report_weighted_parse_progress(
-                progress,
-                &parsed,
-                &parsed_units,
-                weights[idx],
-                total,
-                total_units,
-            );
-            result
-        });
         results.sort_by_key(|(_, (idx, _))| *idx);
-        report_weighted_merge_progress(progress, total, total_units);
-        self.apply_ast_index_parse_results_batch(
+        self.publish_parsed(
             results.into_iter().map(|(_, (_, result))| result).collect(),
+            counter,
+            progress,
         );
+    }
+
+    /// Publish one merge of [`Self::parse_and_publish`], reporting the
+    /// batch complete first when it is the last one.
+    fn publish_parsed(
+        &self,
+        results: Vec<AstIndexParseResult>,
+        counter: &ParseCounter,
+        progress: Option<&(dyn Fn(usize, usize, u64, u64) + Sync)>,
+    ) {
+        if counter.parsed.load(Ordering::Relaxed) == counter.total {
+            report_weighted_merge_progress(progress, counter.total, counter.total_units);
+        }
+        self.apply_ast_index_parse_results_batch(results);
     }
 
     pub(crate) fn index_progress_weight_for_uri(&self, uri: &str, content: Option<&str>) -> u64 {
@@ -660,6 +724,20 @@ fn report_weighted_progress(
     if let Some(progress) = progress {
         progress(done, total, done_units, total_units);
     }
+}
+
+/// How many files of installed packages one merge publishes before they
+/// are put to sleep, which bounds how many of their parses are in memory
+/// at once.
+const DORMANT_CHUNK: usize = 1024;
+
+/// Progress shared by every merge of one [`Backend::parse_batch_parallel`]
+/// call.
+struct ParseCounter {
+    parsed: AtomicUsize,
+    parsed_units: AtomicU64,
+    total: usize,
+    total_units: u64,
 }
 
 pub(crate) fn largest_first_work_order(weights: &[u64]) -> Vec<usize> {
