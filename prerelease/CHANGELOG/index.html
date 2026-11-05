@@ -5231,6 +5231,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Untyped methods that return <code>new static()</code>.</strong> Calling such a method through a subclass, or on a class that uses the trait declaring it, now gives that class instead of the one the method is declared in.</li>
+<li><strong>Named arguments in attributes.</strong> In <code>#[Foo(bar: 'hello')]</code>, the <code>bar:</code> label is now a reference to the property a promoted <code>$bar</code> constructor parameter declares, so find references, rename, go-to-definition and hover reach it from both sides.</li>
 <li><strong><code>#[\AllowDynamicProperties]</code> classes.</strong> Reading or writing a property such a class, or a subclass of one, does not declare is no longer reported as unknown.</li>
 <li><strong>Variables passed to typed by-reference parameters.</strong> After a call to your own function or method that takes <code>array &amp;$message</code>, the variable now has the parameter's type instead of the shape it had before the call, so reads of keys the callee added are no longer reported.</li>
 <li><strong>Keys written into a plain <code>array</code>.</strong> After <code>$args['foo'] = $foo</code> on an untyped <code>array</code>, <code>$args['foo']</code> is now known to be the value written, so it completes and is checked like any other entry. The array still counts as holding whatever other keys it came with.</li>
