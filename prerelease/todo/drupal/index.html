@@ -1345,17 +1345,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#dr15-benchmark-for-drupal-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        DR15. Benchmark for Drupal names
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#dr16-event-subscribers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1464,6 +1453,13 @@ YAML files are close to what the Symfony support already reads. PHPStan's
 Drupal extension (<code>mglaman/phpstan-drupal</code>) is the checklist of what a
 Drupal developer expects from types; PhpStorm's built-in Drupal support
 is what they expect from an editor.</p>
+<p><strong>Benchmarks.</strong> <code>benches/memory_usage.py</code> measures memory on a site that
+installs core into <code>web/core</code> through Composer (<code>memory_drupal_module</code>),
+next to the other framework scenarios. <code>benches/drupal_completion.rs</code>
+measures completion of service IDs, route names, entity type IDs, hook
+names, and hook implementations over a generated site with many custom
+modules. Every item that adds a name Drupal declares adds its case to
+it.</p>
 <p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
@@ -1617,16 +1613,6 @@ their <code>*.services.yml</code> as the project. Until DR2 to DR4 ship most
 assertions are a <code>// SKIP</code> pointing at the item that covers them; file
 any that no item does. Rules about Drupal's own deprecations are listed
 in the README as not ported.</p>
-<hr />
-<h2 id="dr15-benchmark-for-drupal-names">DR15. Benchmark for Drupal names<a class="headerlink" href="#dr15-benchmark-for-drupal-names" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong> (depends on DR2)</p>
-<p>Laravel, Symfony, and Yii have Criterion benchmarks in <code>benches/</code>.
-Once Drupal service IDs complete (DR2), add
-<code>benches/drupal_completion.rs</code> in the shape of
-<code>benches/symfony_completion.rs</code>: generate a site with many modules,
-each declaring services, routes, and hooks, and time completion of
-service IDs, route names, and hook names as each ships. Register it in
-<code>Cargo.toml</code> so <code>benches/ci_benchmarks.py</code> picks it up.</p>
 <hr />
 <h2 id="dr16-event-subscribers">DR16. Event subscribers<a class="headerlink" href="#dr16-event-subscribers" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>

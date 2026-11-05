@@ -1075,6 +1075,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#p88-a-drupal-site-takes-over-a-gigabyte-once-indexed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P88. A Drupal site takes over a gigabyte once indexed
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1373,6 +1384,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#p88-a-drupal-site-takes-over-a-gigabyte-once-indexed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P88. A Drupal site takes over a gigabyte once indexed
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1498,6 +1520,30 @@ against that bar.</p>
 </tr>
 </tbody>
 </table>
+<hr />
+<h2 id="p88-a-drupal-site-takes-over-a-gigabyte-once-indexed">P88. A Drupal site takes over a gigabyte once indexed<a class="headerlink" href="#p88-a-drupal-site-takes-over-a-gigabyte-once-indexed" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: High · Complexity: Medium-High</strong></p>
+<p>The <code>memory_drupal_module</code> scenario of <code>benches/memory_usage.py</code> (a
+Drupal 11.4 site with core in <code>web/core</code>, one custom module open) settles
+at 1,138 MiB after indexing, against 138 MiB for the WordPress plugin
+scenario and 87 MiB for symfony/demo (release build, 2026-11-05). Every
+Drupal user pays it as soon as the site is opened.</p>
+<p>It is not the Drupal readers: the same tree with Drupal detection turned
+off (no <code>drupal-scaffold</code> web root, no <code>drupal/core</code> requirement) settles
+at 1,144 MiB. It is core's own size. <code>web/core</code> holds 11,462 PHP files
+outside <code>vendor/</code>, so they are indexed as project code, and 6,093 of them
+are under <code>tests/</code> directories. Deleting those directories brings the
+site down to 350 MiB, so core's tests alone account for about 780 MiB.</p>
+<p>They cannot simply be skipped: a site's own tests extend
+<code>BrowserTestBase</code> and <code>KernelTestBase</code> and use traits such as
+<code>NodeCreationTrait</code>, which live under core's <code>tests/</code> directories. Find
+which store keeps that much per file (the symbol maps, the parsed
+classes, or a peak the allocator never returns), and make a file that is
+only on the classmap cost what a vendor file costs until something opens
+or reads it.</p>
+<p><strong>Where to look:</strong> the workspace walk in <code>src/indexing/</code>,
+<code>scan_drupal_directories</code> in <code>src/classmap_scanner/discovery.rs</code>, and
+<code>src/mem_audit.rs</code> for attributing the bytes.</p>
 <hr />
 <h2 id="p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse">P86. A Symfony app's generated <code>config/reference.php</code> is slow to parse<a class="headerlink" href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
