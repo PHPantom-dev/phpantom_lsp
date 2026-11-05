@@ -258,7 +258,7 @@ impl Backend {
                 member_name,
                 *is_static,
                 MemberRefKind::of_access(symbol)?,
-                *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod,
+                *docblock_ref,
             ),
             SymbolKind::ClassReference {
                 name,

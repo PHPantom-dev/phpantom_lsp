@@ -478,7 +478,8 @@ fn property_source(src: &PropertySource) -> Sz {
             z += vs(pivot_columns);
         }
         PropertySource::RelationshipCount { relationship } => z.add(relationship.capacity()),
-        PropertySource::Pivot | PropertySource::DocblockTag => {}
+        PropertySource::Pivot | PropertySource::DocblockTag | PropertySource::PromotedParameter => {
+        }
     }
     z
 }

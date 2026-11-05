@@ -256,22 +256,26 @@ impl Backend {
 
                 // Resolve the subject to determine the class hierarchy
                 // so we only return references on related classes.
-                let (hierarchy, declaration_scope) = self.resolve_member_access_scopes(
-                    uri,
-                    super::member_scope::AccessReceiver {
-                        subject_text: subject_text.as_str(source),
-                        is_static: *is_static,
-                        docblock_ref: *docblock_ref,
-                    },
-                    span_start,
-                    member_name,
-                    mode,
-                );
+                let receiver = super::member_scope::AccessReceiver {
+                    subject_text: subject_text.as_str(source),
+                    is_static: *is_static,
+                    docblock_ref: *docblock_ref,
+                };
+                let member_is_static = receiver.member_is_static();
+                let (hierarchy, declaration_scope) =
+                    self.resolve_member_access_scopes(uri, receiver, span_start, member_name, mode);
                 // A string passed to `allows()` on something that is not a
                 // mock names no method, so there is nothing to search for;
                 // the name-only search an unresolved receiver falls back to
-                // would match every method of that name.
-                if hierarchy.is_none() && *docblock_ref == DocblockMemberRef::MockedMethod {
+                // would match every method of that name.  Likewise an
+                // attribute's named-argument label whose parameter the
+                // constructor does not promote names no property.
+                if hierarchy.is_none()
+                    && matches!(
+                        docblock_ref,
+                        DocblockMemberRef::MockedMethod | DocblockMemberRef::AttributeNamedArg
+                    )
+                {
                     return Vec::new();
                 }
 
@@ -306,7 +310,7 @@ impl Backend {
                 };
                 let mut locations = self.find_member_references(
                     member_name,
-                    *is_static,
+                    member_is_static,
                     target_kind,
                     include_declaration,
                     hierarchy.as_ref(),

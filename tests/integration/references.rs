@@ -5381,3 +5381,181 @@ async fn a_docblock_member_reference_counts_for_a_constant_and_a_method() {
         assert!(found.contains(&see), "from {needle:?}: {found:?}");
     }
 }
+
+const ATTRIBUTE_WITH_PROMOTED_PARAMETER: &str = r#"<?php
+namespace App\Attr;
+
+#[\Attribute]
+class Foo
+{
+    public function __construct(public ?string $bar = null) {}
+}
+
+#[Foo(bar: 'hello')]
+class Baz
+{
+    public function read(Foo $foo): ?string { return $foo->bar; }
+}
+"#;
+
+#[test]
+fn promoted_property_references_include_attribute_named_arguments() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_attribute_named_arg.php";
+    let content = ATTRIBUTE_WITH_PROMOTED_PARAMETER;
+    open_file(&backend, uri, content);
+
+    // From the promoted parameter.
+    let results = backend
+        .find_references(uri, content, Position::new(6, 49), true)
+        .expect("should find references");
+    assert_no_duplicates(&results, "attribute_named_arg_from_declaration");
+    assert_eq!(reference_lines(&results), vec![6, 9, 12], "{results:#?}");
+    let label = results
+        .iter()
+        .find(|loc| loc.range.start.line == 9)
+        .unwrap();
+    assert_eq!(
+        (label.range.start.character, label.range.end.character),
+        (6, 9),
+        "the reference covers the label alone"
+    );
+
+    // From the label.
+    let results = backend
+        .find_references(uri, content, Position::new(9, 7), true)
+        .expect("should find references");
+    assert_eq!(reference_lines(&results), vec![6, 9, 12], "{results:#?}");
+}
+
+#[test]
+fn attribute_named_argument_for_a_plain_parameter_names_no_property() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_attribute_plain_param.php";
+    let content = r#"<?php
+#[\Attribute]
+class Route
+{
+    private string $path;
+
+    public function __construct(string $path) { $this->path = $path; }
+}
+
+#[Route(path: '/home')]
+class HomeController {}
+"#;
+    open_file(&backend, uri, content);
+
+    // The property's references leave out the label, which names the
+    // constructor's parameter rather than the property.
+    let results = backend
+        .find_references(uri, content, Position::new(4, 20), true)
+        .expect("should find references");
+    assert_eq!(reference_lines(&results), vec![4, 6], "{results:#?}");
+
+    // And the label leads to no property.
+    let results = backend
+        .find_references(uri, content, Position::new(9, 9), true)
+        .unwrap_or_default();
+    assert!(
+        results.iter().all(|loc| loc.range.start.line != 4),
+        "{results:#?}"
+    );
+}
+
+#[test]
+fn attribute_named_argument_resolves_the_attribute_name_like_php() {
+    let backend = create_test_backend();
+    let global_uri = "file:///tmp/test_refs_attribute_global.php";
+    let global = r#"<?php
+#[\Attribute]
+class Tag
+{
+    public function __construct(public string $name) {}
+}
+"#;
+    let app_uri = "file:///tmp/test_refs_attribute_app.php";
+    let app = r#"<?php
+namespace App;
+
+#[\Attribute]
+class Tag
+{
+    public function __construct(public string $name) {}
+}
+"#;
+    let user_uri = "file:///tmp/test_refs_attribute_user.php";
+    let user = r#"<?php
+namespace Other;
+
+use App\Tag;
+
+#[Tag(name: 'imported')]
+class First {}
+
+#[\Tag(name: 'global')]
+class Second {}
+"#;
+    open_file(&backend, global_uri, global);
+    open_file(&backend, app_uri, app);
+    open_file(&backend, user_uri, user);
+
+    let label_lines = |results: Vec<Location>| -> Vec<u32> {
+        let mut lines: Vec<u32> = results
+            .iter()
+            .filter(|loc| loc.uri.as_str() == user_uri)
+            .map(|loc| loc.range.start.line)
+            .collect();
+        lines.sort_unstable();
+        lines
+    };
+
+    let results = backend
+        .find_references(app_uri, app, Position::new(6, 46), true)
+        .expect("should find references");
+    assert_eq!(
+        label_lines(results),
+        vec![5],
+        "the imported `Tag` is App\\Tag"
+    );
+
+    let results = backend
+        .find_references(global_uri, global, Position::new(4, 46), true)
+        .expect("should find references");
+    assert_eq!(label_lines(results), vec![8], "`\\Tag` is the global class");
+}
+
+#[test]
+fn attribute_named_argument_follows_the_inherited_constructor() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_attribute_inherited_ctor.php";
+    let content = r#"<?php
+abstract class Base
+{
+    public function __construct(public int $level = 0) {}
+}
+
+#[\Attribute]
+class Inherits extends Base {}
+
+#[\Attribute]
+class Overrides extends Base
+{
+    public function __construct(int $level = 0) { parent::__construct($level); }
+}
+
+#[Inherits(level: 1)]
+#[Overrides(level: 2)]
+class Target {}
+"#;
+    open_file(&backend, uri, content);
+
+    let results = backend
+        .find_references(uri, content, Position::new(3, 45), true)
+        .expect("should find references");
+    assert_eq!(
+        reference_lines(&results),
+        vec![3, 15],
+        "only the constructor that promotes `$level` makes the label the property: {results:#?}"
+    );
+}

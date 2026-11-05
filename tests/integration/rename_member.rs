@@ -1789,3 +1789,88 @@ async fn renaming_an_enum_case_leaves_a_same_named_static_method_alone() {
             .replace("Suit::Hearts()", "Suit::Deal()"),
     );
 }
+
+const ATTRIBUTE_WITH_PROMOTED_PARAMETER: &str = concat!(
+    "<?php\n",
+    "#[\\Attribute]\n",
+    "class Foo {\n",
+    "    public function __construct(public ?string $bar = null) {}\n",
+    "}\n",
+    "#[Foo(bar: 'hello')]\n",
+    "class Baz {}\n",
+    "function read(Foo $foo): ?string { return $foo->bar; }\n",
+);
+
+const ATTRIBUTE_WITH_PROMOTED_PARAMETER_RENAMED: &str = concat!(
+    "<?php\n",
+    "#[\\Attribute]\n",
+    "class Foo {\n",
+    "    public function __construct(public ?string $qux = null) {}\n",
+    "}\n",
+    "#[Foo(qux: 'hello')]\n",
+    "class Baz {}\n",
+    "function read(Foo $foo): ?string { return $foo->qux; }\n",
+);
+
+#[tokio::test]
+async fn rename_promoted_property_renames_attribute_named_arguments() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let text = ATTRIBUTE_WITH_PROMOTED_PARAMETER;
+    open_php(&backend, &uri, text).await;
+
+    for needle in ["$bar", "bar:", "->bar"] {
+        let (line, character) = line_char_of(text, needle);
+        let edit = rename(&backend, &uri, line, character + 2, "qux")
+            .await
+            .unwrap_or_else(|| panic!("expected a rename edit from {needle:?}"));
+        assert_eq!(
+            apply_edits(text, &edits_for_uri(&edit, &uri)),
+            ATTRIBUTE_WITH_PROMOTED_PARAMETER_RENAMED,
+            "from {needle:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn rename_property_leaves_an_attribute_label_naming_a_plain_parameter() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "#[\\Attribute]\n",
+        "class Route {\n",
+        "    private string $path;\n",
+        "    public function __construct(string $path) { $this->path = $path; }\n",
+        "}\n",
+        "#[Route(path: '/home')]\n",
+        "class HomeController {}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "$path;");
+    let edit = rename(&backend, &uri, line, character + 1, "target")
+        .await
+        .expect("expected a rename edit");
+    assert_eq!(
+        apply_edits(text, &edits_for_uri(&edit, &uri)),
+        concat!(
+            "<?php\n",
+            "#[\\Attribute]\n",
+            "class Route {\n",
+            "    private string $target;\n",
+            "    public function __construct(string $path) { $this->target = $path; }\n",
+            "}\n",
+            "#[Route(path: '/home')]\n",
+            "class HomeController {}\n",
+        ),
+    );
+
+    let (line, character) = line_char_of(text, "path:");
+    assert!(
+        rename(&backend, &uri, line, character + 1, "target")
+            .await
+            .is_none(),
+        "a label naming a plain parameter is not the property"
+    );
+}

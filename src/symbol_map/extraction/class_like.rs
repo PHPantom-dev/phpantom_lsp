@@ -302,6 +302,7 @@ pub(super) fn extract_from_attribute_lists<'a>(
             // inside `#[Attr(...)]` just like `new Attr(...)`.
             if let Some(ref arg_list) = attr.argument_list {
                 extract_from_partial_arguments(&arg_list.arguments, ctx, scope_start);
+                emit_attribute_named_arg_spans(&attr.name, arg_list, ctx);
                 let class_name = raw.trim_start_matches('\\');
                 if !class_name.is_empty() {
                     emit_partial_call_site(
@@ -411,6 +412,54 @@ pub(super) fn extract_from_attribute_lists<'a>(
                 );
             }
         }
+    }
+}
+
+/// Emit a span for each named argument's label in an attribute,
+/// `#[Foo(bar: 1)]`, naming the property `bar` of the attribute class `Foo`.
+///
+/// Only a promoted constructor parameter is a property, which takes the
+/// class to tell, so the span is marked
+/// [`AttributeNamedArg`](DocblockMemberRef::AttributeNamedArg) for its
+/// consumers to check.  A `new Foo(bar: 1)` gets no such span: an
+/// attribute's arguments exist to set its properties, while a call's
+/// common parameter names (`name`, `id`) would mostly name properties the
+/// call has nothing to do with.
+fn emit_attribute_named_arg_spans<'a>(
+    attribute_name: &Identifier<'a>,
+    arg_list: &mago_syntax::cst::PartialArgumentList<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+) {
+    let name_span = attribute_name.span();
+    let subject = bytes_to_str(attribute_name.value());
+    for arg in arg_list.arguments.iter() {
+        let mago_syntax::cst::PartialArgument::Named(named) = arg else {
+            continue;
+        };
+        let label = bytes_to_str(named.name.value);
+        if label.is_empty() {
+            continue;
+        }
+        ctx.spans.push(SymbolSpan {
+            start: named.name.span.start.offset,
+            end: named.name.span.end.offset,
+            kind: SymbolKind::MemberAccess {
+                subject_text: SubjectText::new(
+                    subject.to_string(),
+                    name_span.start.offset,
+                    name_span.end.offset,
+                    ctx.content,
+                ),
+                member_name: crate::atom::atom(label),
+                // The subject is a class name, which is what a static
+                // access's subject is.
+                is_static: true,
+                is_method_call: false,
+                docblock_ref: DocblockMemberRef::AttributeNamedArg,
+                is_array_callable: false,
+                is_nullsafe: false,
+            },
+        });
     }
 }
 

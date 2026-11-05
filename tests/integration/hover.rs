@@ -3,8 +3,8 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
     create_test_backend_with_full_stubs, create_test_backend_with_function_stubs,
-    create_test_backend_with_stdclass_stub, hover_at, hover_response, hover_text, markup_hover_at,
-    open_php,
+    create_test_backend_with_stdclass_stub, hover_at, hover_response, hover_text, hover_text_at,
+    markup_hover_at, open_php,
 };
 use phpantom_lsp::Backend;
 use tower_lsp_server::gen_lsp_types::*;
@@ -17324,4 +17324,33 @@ function run(Child $c): void {
     assert!(text.contains("$d = Base"), "declaring class: {text}");
     let text = markup_hover_at(&backend, &uri, 14, 6).await;
     assert!(text.contains("$u = User"), "trait method: {text}");
+}
+
+#[tokio::test]
+async fn test_hover_attribute_named_argument() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///hover_attribute_named_arg.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "#[\\Attribute]\n",
+        "class Foo {\n",
+        "    /** The label of the thing. */\n",
+        "    private string $plain = '';\n",
+        "    public function __construct(public ?string $bar = null, string $plain = '') {}\n",
+        "}\n",
+        "#[Foo(bar: 'hello', plain: 'x')]\n",
+        "class Baz {}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let hover = hover_text_at(&backend, &uri, 7, 7)
+        .await
+        .expect("the label of a promoted parameter hovers as the property");
+    assert!(hover.contains("$bar"), "{hover}");
+
+    let hover = hover_text_at(&backend, &uri, 7, 21).await;
+    assert!(
+        hover.is_none_or(|text| !text.contains("The label of the thing")),
+        "a label naming a plain parameter is not the property of its name"
+    );
 }

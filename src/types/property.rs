@@ -103,6 +103,10 @@ pub enum PropertySource {
     DeclaredDefault {
         value: Box<str>,
     },
+    /// Declared by a constructor parameter with a visibility modifier
+    /// (`public function __construct(private int $x)`), so a named argument
+    /// to that constructor (`x: 1`) names the property too.
+    PromotedParameter,
     DatabaseColumn {
         column: DatabaseColumnSource,
         attribute_default: Option<AttributeDefaultSource>,
