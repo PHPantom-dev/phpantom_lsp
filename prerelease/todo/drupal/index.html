@@ -1257,17 +1257,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#dr6-hooks" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        DR6. Hooks
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#dr7-render-arrays-theme-hooks-and-libraries" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1400,6 +1389,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#dr19-warn-on-unknown-hook-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR19. Warn on unknown hook names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#dr20-complete-route-names-built-in-code" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1451,9 +1451,9 @@
 root is detected, core, contrib, and the Drupal file extensions
 (<code>.module</code>, <code>.install</code>, <code>.theme</code>, …) are indexed past <code>.gitignore</code>, and
 the services the <code>*.services.yml</code> files declare, the entity types
-entity classes declare, and the routes the routing files, route
-attributes, and route builders declare are read. Nothing reads Drupal's
-other declarations yet: fields or hooks.</p>
+entity classes declare, the routes the routing files, route attributes,
+and route builders declare, and the hooks the <code>*.api.php</code> files document
+and the extensions implement are read. Nothing reads fields yet.</p>
 <p>The requests in
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/issues/48">#48</a> are the
 scope of this document: the indexing it asked for first has shipped, and
@@ -1502,29 +1502,13 @@ entity as <code>FieldItemListInterface</code> without checking the name. That is
 the floor; reading the configuration is what lets an editor complete
 names and report a misspelt one.</p>
 <hr />
-<h2 id="dr6-hooks">DR6. Hooks<a class="headerlink" href="#dr6-hooks" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function acme_form_alter(&amp;$form, FormStateInterface $form_state, $form_id) { … }</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">#[Hook('form_alter')]</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">public function formAlter(array &amp;$form, FormStateInterface $form_state, $form_id): void { … }</span>
-</code></pre></div>
-<p>A hook is implemented by naming a function <code>&lt;module&gt;_&lt;hook&gt;</code> or, since
-Drupal 11.1, with a <code>#[Hook]</code> attribute on a method. Core and modules
-document each hook as a <code>hook_&lt;name&gt;()</code> function in a <code>*.api.php</code> file.
-Link an implementation to that documentation: hover shows it,
-go-to-definition reaches it, find references lists the implementations,
-and completing <code>acme_</code> in a <code>.module</code> file offers the hooks with their
-documented signatures. Parameter types for an implementation that
-omits them can come from the documented signature.</p>
-<hr />
 <h2 id="dr7-render-arrays-theme-hooks-and-libraries">DR7. Render arrays, theme hooks, and libraries<a class="headerlink" href="#dr7-render-arrays-theme-hooks-and-libraries" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">return [</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    '#theme' =&gt; 'acme_order_summary',</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    '#order' =&gt; $order,</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    '#attached' =&gt; ['library' =&gt; ['acme/order-summary']],</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">];</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">return [</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    '#theme' =&gt; 'acme_order_summary',</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    '#order' =&gt; $order,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    '#attached' =&gt; ['library' =&gt; ['acme/order-summary']],</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">];</span>
 </code></pre></div>
 <ul>
 <li><strong><code>#theme</code></strong> names a theme hook a <code>hook_theme()</code> implementation
@@ -1541,8 +1525,8 @@ variables would be one more source of them (see <code>src/twig/variables.rs</cod
 <hr />
 <h2 id="dr8-permission-and-configuration-names">DR8. Permission and configuration names<a class="headerlink" href="#dr8-permission-and-configuration-names" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$account-&gt;hasPermission('administer acme orders');</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">\Drupal::config('acme.settings')-&gt;get('notify_email');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$account-&gt;hasPermission('administer acme orders');</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">\Drupal::config('acme.settings')-&gt;get('notify_email');</span>
 </code></pre></div>
 <p>Permissions are declared in <code>&lt;module&gt;.permissions.yml</code> (and by
 permission callbacks), configuration objects in <code>config/install</code> and
@@ -1571,10 +1555,10 @@ there.</p>
 <hr />
 <h2 id="dr10-plugin-ids">DR10. Plugin IDs<a class="headerlink" href="#dr10-plugin-ids" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">#[Block(id: 'acme_order_summary', admin_label: new TranslatableMarkup('Order summary'))]</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">final class OrderSummaryBlock extends BlockBase { … }</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">$block = $this-&gt;blockManager-&gt;createInstance('acme_order_summary');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">#[Block(id: 'acme_order_summary', admin_label: new TranslatableMarkup('Order summary'))]</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">final class OrderSummaryBlock extends BlockBase { … }</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$block = $this-&gt;blockManager-&gt;createInstance('acme_order_summary');</span>
 </code></pre></div>
 <p>Blocks, field types, formatters, widgets, queue workers, and the other
 plugin types declare an ID in an attribute (or, in older code, a
@@ -1586,8 +1570,8 @@ type <code>createInstance()</code> as the plugin class.</p>
 <hr />
 <h2 id="dr11-form-and-render-callbacks">DR11. Form and render callbacks<a class="headerlink" href="#dr11-form-and-render-callbacks" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$form['actions']['submit']['#submit'][] = '::submitOrder';</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$form['country']['#ajax'] = ['callback' =&gt; '::updateRegions'];</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$form['actions']['submit']['#submit'][] = '::submitOrder';</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">$form['country']['#ajax'] = ['callback' =&gt; '::updateRegions'];</span>
 </code></pre></div>
 <p><code>#submit</code>, <code>#validate</code>, <code>#element_validate</code>, <code>#pre_render</code>,
 <code>#after_build</code>, and an <code>#ajax</code> <code>callback</code> name methods of the form class
@@ -1596,7 +1580,7 @@ complete them, and report one that names nothing.</p>
 <hr />
 <h2 id="dr12-translation-placeholders">DR12. Translation placeholders<a class="headerlink" href="#dr12-translation-placeholders" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$this-&gt;t('Order @number was placed by %name', ['@number' =&gt; $id, '%nmae' =&gt; $name]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$this-&gt;t('Order @number was placed by %name', ['@number' =&gt; $id, '%nmae' =&gt; $name]);</span>
 </code></pre></div>
 <p><code>t()</code>, <code>$this-&gt;t()</code>, <code>new TranslatableMarkup()</code>, and <code>formatPlural()</code>
 replace <code>@</code>, <code>%</code>, and <code>:</code> placeholders from the array they are given.
@@ -1605,11 +1589,11 @@ a key the string never uses.</p>
 <hr />
 <h2 id="dr13-module-names-and-infoyml">DR13. Module names and <code>*.info.yml</code><a class="headerlink" href="#dr13-module-names-and-infoyml" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">\Drupal::moduleHandler()-&gt;moduleExists('acme_shop');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">\Drupal::moduleHandler()-&gt;moduleExists('acme_shop');</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">dependencies</span><span class="p">:</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">drupal:node</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">acme:acme_shop</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">dependencies</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">drupal:node</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">acme:acme_shop</span>
 </code></pre></div>
 <p>A module's machine name is the basename of its <code>*.info.yml</code>. Complete
 and navigate machine names in <code>moduleExists()</code>, <code>getModule()</code>, and the
@@ -1646,11 +1630,11 @@ service IDs, route names, and hook names as each ships. Register it in
 <hr />
 <h2 id="dr16-event-subscribers">DR16. Event subscribers<a class="headerlink" href="#dr16-event-subscribers" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">final class AcmeSubscriber implements EventSubscriberInterface {</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    public static function getSubscribedEvents(): array {</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">        return [KernelEvents::REQUEST =&gt; 'onRequest'];</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    }</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">final class AcmeSubscriber implements EventSubscriberInterface {</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    public static function getSubscribedEvents(): array {</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">        return [KernelEvents::REQUEST =&gt; 'onRequest'];</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    }</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>Drupal's event subscribers are Symfony's: a service tagged
 <code>event_subscriber</code> maps event names to its own methods in
@@ -1663,7 +1647,7 @@ the event names complete where Drupal's event dispatcher takes one.</p>
 <hr />
 <h2 id="dr17-warn-on-unknown-service-ids">DR17. Warn on unknown service IDs<a class="headerlink" href="#dr17-warn-on-unknown-service-ids" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">$manager = \Drupal::service('acme.order_manger');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$manager = \Drupal::service('acme.order_manger');</span>
 </code></pre></div>
 <p>A service ID no <code>*.services.yml</code> declares is a typo or a module the site
 lacks, and the container throws for it at run time. Report one where
@@ -1673,7 +1657,7 @@ lists, so an ID such a provider may register must not warn.</p>
 <hr />
 <h2 id="dr18-warn-on-unknown-entity-type-ids">DR18. Warn on unknown entity type IDs<a class="headerlink" href="#dr18-warn-on-unknown-entity-type-ids" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$storage = \Drupal::entityTypeManager()-&gt;getStorage('nod');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">$storage = \Drupal::entityTypeManager()-&gt;getStorage('nod');</span>
 </code></pre></div>
 <p>An entity type ID no entity class declares is a typo or a module the
 site lacks, and the entity type manager throws for it at run time.
@@ -1681,6 +1665,15 @@ Report one where <code>getStorage()</code>, <code>\Drupal::entityQuery()</code>,
 calls that take an entity type ID take it. A module can add entity types
 in code from <code>hook_entity_type_build()</code>, which no class declares, so a
 site where an implementation of that hook may add one stays silent.</p>
+<hr />
+<h2 id="dr19-warn-on-unknown-hook-names">DR19. Warn on unknown hook names<a class="headerlink" href="#dr19-warn-on-unknown-hook-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">\Drupal::moduleHandler()-&gt;invokeAll('acme_order_placd', [$order]);</span>
+</code></pre></div>
+<p>Any module may invoke any hook name, and many hooks have no <code>*.api.php</code>
+documentation, so a name nothing documents is not wrong on that alone.
+Report only a hook name that nothing in the site documents, implements,
+or invokes anywhere else, which is most likely a typo.</p>
 <hr />
 <h2 id="dr20-complete-route-names-built-in-code">DR20. Complete route names built in code<a class="headerlink" href="#dr20-complete-route-names-built-in-code" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>

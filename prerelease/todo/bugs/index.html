@@ -1070,6 +1070,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b734-passing-a-variable-to-a-typed-by-reference-parameter-leaves-its-old-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B734. Passing a variable to a typed by-reference parameter leaves its old type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1783,6 +1794,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b734-passing-a-variable-to-a-typed-by-reference-parameter-leaves-its-old-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B734. Passing a variable to a typed by-reference parameter leaves its old type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1962,6 +1984,25 @@ only the replacement declares is reported: about ninety times on core,
 all for <code>language_manager</code>. Read the literal <code>setClass()</code> calls in
 <code>ServiceProvider::alter()</code> methods and type the service as the union of
 the declared class and every replacement.</p>
+<h3 id="b734-passing-a-variable-to-a-typed-by-reference-parameter-leaves-its-old-type">B734. Passing a variable to a typed by-reference parameter leaves its old type<a class="headerlink" href="#b734-passing-a-variable-to-a-typed-by-reference-parameter-leaves-its-old-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">function mail(array &amp;$message): void {</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    $message['body'][] = new Markup();</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">}</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">$message = ['body' =&gt; []];</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">mail($message);</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">$message['body'][0];   // null, should be mixed (or Markup)</span>
+</code></pre></div>
+<p>After a call, a variable passed to a by-reference parameter keeps the
+type it had before the call when the parameter declares a type, native
+or <code>@param</code>, and no <code>@param-out</code>. An untyped by-reference parameter
+takes the type the callee's body writes into it, so only the typed case
+is wrong. PHPStan gives the variable the parameter's declared type when
+there is no <code>@param-out</code>. A test of Drupal's update module reports
+<code>Cannot access method 'render' on type 'never'</code> after calling a
+<code>hook_mail()</code> implementation, which reads <code>$message</code> as <code>array</code> from the
+hook's documentation.</p>
 
 
 
