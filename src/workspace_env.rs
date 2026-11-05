@@ -167,6 +167,15 @@ pub(crate) struct ComposerProjectPaths {
     /// Every spelling of the project's vendor directory, or empty when it
     /// has none on disk.
     pub(crate) vendor_paths: Vec<PathBuf>,
+    /// The bin directory of `bamarni/composer-bin-plugin`, when the project
+    /// requires it (see [`composer::bin_namespaces`]).
+    pub(crate) bin_target: Option<PathBuf>,
+    /// The roots of the project's bin namespaces.
+    pub(crate) bin_namespace_roots: Vec<PathBuf>,
+    /// Every spelling of the vendor directories of the project's bin
+    /// namespaces that exist on disk.  They are the project's vendor
+    /// directories as much as `vendor_paths` is.
+    pub(crate) bin_vendor_paths: Vec<PathBuf>,
     /// The packages it installed from outside its vendor directory (see
     /// [`composer::linked_package_roots`]), which can lie in another
     /// project's tree.

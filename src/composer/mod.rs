@@ -10,6 +10,8 @@
 //!   `vendor/composer/`, and the files they pull in.
 //! - [`project`]: what kind of project a `composer.json` describes (PHP
 //!   version, Laravel, Drupal, permission packages).
+//! - [`bin_plugin`]: the tools `bamarni/composer-bin-plugin` installs into
+//!   bin namespaces of their own.
 //!
 //! # PSR-4 Resolution
 //!
@@ -31,6 +33,7 @@ use std::path::{Path, PathBuf};
 pub use mago_composer::ComposerPackage;
 
 mod autoload_files;
+mod bin_plugin;
 mod installed;
 mod project;
 mod psr4;
@@ -40,6 +43,7 @@ pub use autoload_files::{
     parse_autoload_classmap, parse_autoload_files, parse_autoload_namespaces,
     scan_composer_bootstrap_classes,
 };
+pub(crate) use bin_plugin::{BinNamespace, bin_namespaces, bin_target_directory};
 pub use installed::extract_path_repo_psr4_mappings;
 pub(crate) use installed::{
     InstalledPackages, installed_package_roots, linked_package_roots, parse_installed_packages,
@@ -206,7 +210,7 @@ pub(crate) fn get_bin_dir(package: &ComposerPackage) -> String {
 ///
 /// returns `[(monorepo/project-a, "vendor"), (monorepo/packages/project-b, "vendor")]`.
 pub fn discover_subproject_roots(workspace_root: &Path) -> Vec<(PathBuf, String)> {
-    outermost_with_vendor_dirs(composer_json_dirs(workspace_root, None))
+    outermost_with_vendor_dirs(composer_json_dirs(workspace_root, &[]))
 }
 
 /// The Composer projects nested inside a workspace that has a
@@ -218,13 +222,15 @@ pub fn discover_subproject_roots(workspace_root: &Path) -> Vec<(PathBuf, String)
 /// knows nothing about, which is what makes it a project to index rather
 /// than a package the root installs from a path repository or a fixture
 /// a test suite keeps beside its sources: those have no `vendor/` of their
-/// own.  `root_vendor` is the root project's vendor directory, which is
-/// not walked: every installed package carries a `composer.json`.
+/// own.  The directories in `skip` are not walked: the root project's
+/// vendor directory, since every installed package carries a
+/// `composer.json`, and its bin directory, whose namespaces install the
+/// root's own tools (see [`bin_namespaces`]).
 pub fn discover_installed_subprojects(
     workspace_root: &Path,
-    root_vendor: &Path,
+    skip: &[PathBuf],
 ) -> Vec<(PathBuf, String)> {
-    let installed = composer_json_dirs(workspace_root, Some(root_vendor))
+    let installed = composer_json_dirs(workspace_root, skip)
         .into_iter()
         .filter(|dir| {
             let vendor_dir = read_composer_package(dir)
@@ -240,11 +246,11 @@ pub fn discover_installed_subprojects(
 
 /// The directories below `workspace_root` holding a `composer.json`,
 /// shallowest first, found by a gitignore-aware walk that skips hidden
-/// directories and `skip`.
-fn composer_json_dirs(workspace_root: &Path, skip: Option<&Path>) -> Vec<PathBuf> {
+/// directories and the directories in `skip`.
+fn composer_json_dirs(workspace_root: &Path, skip: &[PathBuf]) -> Vec<PathBuf> {
     use ignore::WalkBuilder;
 
-    let skip = skip.map(Path::to_path_buf);
+    let skip = skip.to_vec();
     let walker = WalkBuilder::new(workspace_root)
         .git_ignore(true)
         .git_global(true)
@@ -254,7 +260,7 @@ fn composer_json_dirs(workspace_root: &Path, skip: Option<&Path>) -> Vec<PathBuf
         .ignore(true)
         // Sort to get deterministic output
         .sort_by_file_name(|a, b| a.cmp(b))
-        .filter_entry(move |entry| skip.as_deref() != Some(entry.path()))
+        .filter_entry(move |entry| !skip.iter().any(|dir| dir == entry.path()))
         .build();
 
     let mut candidates: Vec<PathBuf> = Vec::new();
