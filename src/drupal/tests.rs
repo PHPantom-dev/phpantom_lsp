@@ -68,6 +68,82 @@ fn services_files_in_the_web_root_declare_services_and_parameters() {
 }
 
 #[test]
+fn a_routing_file_under_a_config_directory_is_drupals_in_a_symfony_site() {
+    // Core's `config` module puts a `config` segment on the way to its
+    // routing file, which a Symfony site reads as container configuration.
+    let (backend, dir) = drupal_backend(&[]);
+    backend.set_is_symfony(true);
+    backend.update_resource_symbol_index(
+        &uri(dir.path(), "web/core/modules/config/config.routing.yml"),
+        "config.sync:\n  path: '/admin/config/development/configuration'\n",
+    );
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::DrupalRoute),
+        vec!["config.sync".to_string()]
+    );
+}
+
+/// The route names `content`, published as the template at `path`, reads,
+/// with the kind of route each is read as.
+fn template_routes(
+    backend: &crate::Backend,
+    root: &Path,
+    path: &str,
+    content: &str,
+) -> Vec<(StringKeyKind, String)> {
+    let template = uri(root, path);
+    backend.update_resource_symbol_index(&template, content);
+    let map = backend
+        .symbol_map_for(&template)
+        .expect("the template's map");
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            crate::symbol_map::SymbolKind::StringKey { kind, key, .. }
+                if matches!(
+                    kind,
+                    StringKeyKind::DrupalRoute | StringKeyKind::SymfonyRoute
+                ) =>
+            {
+                Some((*kind, key.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_drupal_sites_templates_name_drupal_routes_in_a_symfony_project() {
+    let (backend, dir) = drupal_backend(&[]);
+    backend.set_is_symfony(true);
+    assert_eq!(
+        template_routes(
+            &backend,
+            dir.path(),
+            "web/modules/custom/acme/templates/acme.html.twig",
+            "{{ path('acme.greeting') }}\n",
+        ),
+        vec![(StringKeyKind::DrupalRoute, "acme.greeting".to_string())]
+    );
+}
+
+#[test]
+fn a_template_outside_the_web_root_names_symfony_routes() {
+    // A Symfony application beside the Drupal site, in the same workspace.
+    let (backend, dir) = drupal_backend(&[]);
+    backend.set_is_symfony(true);
+    assert_eq!(
+        template_routes(
+            &backend,
+            dir.path(),
+            "app/templates/base.html.twig",
+            "{{ path('blog_index') }}\n",
+        ),
+        vec![(StringKeyKind::SymfonyRoute, "blog_index".to_string())]
+    );
+}
+
+#[test]
 fn other_yaml_is_not_read_as_services() {
     let (backend, _dir) = drupal_backend(&[
         // A file with a `services:` key that Drupal does not load services from.
@@ -244,4 +320,71 @@ fn a_namespace_a_vendor_package_shares_is_renamed_outside_drupal() {
     let edit = format!("{:?}", plan.as_ref().expect("the rename is planned"));
     assert!(edit.contains("src/Shared/Mine.php"), "{edit}");
     assert!(!edit.contains("vendor/acme"), "{edit}");
+}
+
+#[test]
+fn route_patterns_match_any_run_for_each_star() {
+    use super::matches_route_pattern;
+    assert!(matches_route_pattern(
+        "search.view_*",
+        "search.view_node_search"
+    ));
+    assert!(matches_route_pattern(
+        "*.bc",
+        "entity.block_content.edit_form.bc"
+    ));
+    assert!(matches_route_pattern(
+        "layout_builder.*.view",
+        "layout_builder.overrides.node.view"
+    ));
+    assert!(matches_route_pattern("acme.*", "acme."));
+    assert!(!matches_route_pattern("search.view_*", "search.help_x"));
+    assert!(!matches_route_pattern(
+        "layout_builder.*.view",
+        "layout_builder.overrides.node.edit"
+    ));
+    assert!(!matches_route_pattern("a*a", "a"));
+    assert!(matches_route_pattern("exact", "exact"));
+    assert!(!matches_route_pattern("exact", "exactly"));
+}
+
+/// The key of the hash a Drupal template's `path()` passes is a parameter
+/// of the route, never a Twig variable, also in a project that reads
+/// Twig's variables; the value after it stays a variable.
+#[test]
+fn a_path_hash_key_is_a_route_parameter_not_a_variable() {
+    let (backend, dir) = drupal_backend(&[]);
+    backend.set_is_twig(true);
+    let content = "{{ path('entity.node.canonical', {node: node.id}) }}\n";
+    let template = uri(
+        dir.path(),
+        "web/modules/custom/acme/templates/acme.html.twig",
+    );
+    backend.update_resource_symbol_index(&template, content);
+    let map = backend
+        .symbol_map_for(&template)
+        .expect("the template's map");
+    let kinds_at = |offset: usize| -> Vec<(StringKeyKind, String)> {
+        map.spans
+            .iter()
+            .filter(|span| span.start as usize == offset)
+            .filter_map(|span| match &span.kind {
+                crate::symbol_map::SymbolKind::StringKey { kind, key, .. } => {
+                    Some((*kind, key.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        kinds_at(content.find("node:").unwrap()),
+        [(
+            StringKeyKind::DrupalRouteParameter,
+            "entity.node.canonical#node".to_string()
+        )]
+    );
+    assert_eq!(
+        kinds_at(content.find("node.id").unwrap()),
+        [(StringKeyKind::TwigVariable, "node".to_string())]
+    );
 }

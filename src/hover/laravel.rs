@@ -291,12 +291,13 @@ impl Backend {
             | StringKeyKind::SymfonyRoute
             | StringKeyKind::SymfonyTranslation
             | StringKeyKind::TranslationDomain
-            | StringKeyKind::DrupalEntityType => {
+            | StringKeyKind::DrupalEntityType
+            | StringKeyKind::DrupalRoute => {
                 let label = match kind {
                     StringKeyKind::ServiceId => "Service",
                     StringKeyKind::DrupalEntityType => "Entity type",
                     StringKeyKind::ContainerParameter => "Parameter",
-                    StringKeyKind::SymfonyRoute => "Route",
+                    StringKeyKind::SymfonyRoute | StringKeyKind::DrupalRoute => "Route",
                     StringKeyKind::SymfonyTranslation => "Translation",
                     _ => "Translation domain",
                 };
@@ -371,6 +372,21 @@ impl Backend {
                         .join("\n\n")
                 };
                 ("Route argument", detail)
+            }
+            // A parameter is shown by its name, under the paths of its
+            // route.
+            StringKeyKind::DrupalRouteParameter => {
+                let (route, name) = crate::drupal::routing::split_route_parameter_key(key);
+                shown = name;
+                let mut detail = format!("Route `{}`", route);
+                let paths = self.drupal_route_paths(route);
+                if paths.is_empty() {
+                    detail.push_str("\n\nNot declared in the project's routing files");
+                }
+                for path in paths {
+                    detail.push_str(&format!("\n\nPath `{}`", path));
+                }
+                ("Route parameter", detail)
             }
             // An installed bundle's schema is not read, so a key no schema
             // of the project's declares is only not one of its own.

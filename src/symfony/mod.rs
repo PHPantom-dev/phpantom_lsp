@@ -125,8 +125,8 @@ pub(crate) struct SymfonyState {
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
 /// translation key, a template, a Twig filter or function, a configuration
-/// key, an event listener, a Messenger bus, or a Drupal entity type,
-/// outright or through a configurator call still to be
+/// key, an event listener, a Messenger bus, a Drupal entity type, or a
+/// Drupal route, outright or through a configurator call still to be
 /// confirmed, or registers a Messenger handler, or imports routes, or
 /// declares a Twig loader.
 ///
@@ -148,6 +148,8 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
         || (map.declares_twig_loader && enabled(StringKeyKind::TwigTemplate))
+        || ((!map.drupal_route_patterns.is_empty() || !map.drupal_route_aliases.is_empty())
+            && enabled(StringKeyKind::DrupalRoute))
         || map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
@@ -210,6 +212,7 @@ impl Backend {
                 .lock()
                 .iter()
                 .any(|prefix| uri.starts_with(prefix.as_str()));
+        self.note_drupal_routes(uri, Some(map));
         // Only take the write lock when the answer changes.
         if self.symfony.declaring_uris.read().contains(uri) == declares {
             return;
@@ -224,6 +227,7 @@ impl Backend {
 
     /// Forget a file that no longer exists.
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
+        self.note_drupal_routes(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
         }

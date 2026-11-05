@@ -75,7 +75,7 @@ pub(crate) fn symfony_receiver_method(
     // turned away on a single byte.
     if !matches!(
         member_name.as_bytes().first().map(u8::to_ascii_lowercase),
-        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f')
+        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f' | b'c')
     ) {
         return None;
     }
@@ -102,7 +102,13 @@ pub(crate) fn symfony_receiver_method(
         0 if is("generateUrl") || is("redirectToRoute") => {
             Some((ReceiverClass::ControllerRouting, false))
         }
-        0 if is("generate") || is("generateAbsolute") => Some((ReceiverClass::UrlGenerator, false)),
+        0 if is("generate") || is("generateAbsolute") || is("generateFromRoute") => {
+            Some((ReceiverClass::UrlGenerator, false))
+        }
+        0 if is("setRedirect") => Some((ReceiverClass::FormRedirect, false)),
+        0 if is("redirect") => Some((ReceiverClass::RouteRedirect, false)),
+        0 if is("checkNamedRoute") => Some((ReceiverClass::AccessCheck, false)),
+        0 if is("getRouteByName") => Some((ReceiverClass::RouteLookup, false)),
         3 if is("generateFromCurrent") => Some((ReceiverClass::UrlGenerator, false)),
         0 if is("add") => Some((ReceiverClass::RoutingConfigurator, true)),
         0 if is("getParameter") || is("hasParameter") => {
@@ -1430,7 +1436,7 @@ pub(in crate::symbol_map::extraction) fn emit_template_attribute_span(
 
 /// Whether `class_name`, as resolved, is Symfony's `#[Route]`, under its
 /// current name or the `Annotation` one older applications import.
-fn is_route_attribute(class_name: &str) -> bool {
+pub(in crate::symbol_map::extraction) fn is_route_attribute(class_name: &str) -> bool {
     let class_name = class_name.trim_start_matches('\\');
     ROUTE_ATTRIBUTES
         .iter()
@@ -1438,7 +1444,7 @@ fn is_route_attribute(class_name: &str) -> bool {
 }
 
 /// A route's name, as its declaration writes it.
-enum RouteName {
+pub(in crate::symbol_map::extraction) enum RouteName {
     /// No name: Symfony derives one from the class and the method.
     Absent,
     /// A literal, with the byte range of its text.
@@ -1449,8 +1455,8 @@ enum RouteName {
 
 /// One `#[Route]` attribute or `@Route` annotation, by what bears on the
 /// names it declares.
-struct RouteDeclaration {
-    name: RouteName,
+pub(in crate::symbol_map::extraction) struct RouteDeclaration {
+    pub(in crate::symbol_map::extraction) name: RouteName,
     /// The byte range a derived name spans: the path, or the whole
     /// declaration when the path is not a literal.
     at: (usize, usize),
@@ -1532,7 +1538,7 @@ fn route_name_value(
 /// The routes the `#[Route]` attributes in `attribute_lists` declare, and
 /// the `@Route` annotations in `docblock` (its text and offset), on `class`
 /// or one of its methods.
-fn route_declarations(
+pub(in crate::symbol_map::extraction) fn route_declarations(
     attribute_lists: &Sequence<'_, AttributeList<'_>>,
     docblock: Option<(&str, u32)>,
     class: &Class<'_>,
@@ -1912,7 +1918,12 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
         if action.count == 1
             && let Some(class) = derive
         {
-            declare_route(&mut spans, format!("{class}::{method_name}"), action.at);
+            declare_route(
+                &mut spans,
+                StringKeyKind::SymfonyRoute,
+                format!("{class}::{method_name}"),
+                action.at,
+            );
         }
         count += action.count;
         last_at = action.at;
@@ -1936,19 +1947,34 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
         && count == 1
         && let Some(class) = derive
     {
-        declare_route(&mut spans, class.to_string(), last_at);
-        declare_route(&mut spans, format!("{class}::__invoke"), last_at);
+        declare_route(
+            &mut spans,
+            StringKeyKind::SymfonyRoute,
+            class.to_string(),
+            last_at,
+        );
+        declare_route(
+            &mut spans,
+            StringKeyKind::SymfonyRoute,
+            format!("{class}::__invoke"),
+            last_at,
+        );
     }
     ctx.spans.extend(spans);
 }
 
-/// Declare the route `key` over the byte range `at`.
-fn declare_route(spans: &mut Vec<SymbolSpan>, key: String, at: (usize, usize)) {
+/// Declare the route `key`, a `kind` key, over the byte range `at`.
+fn declare_route(
+    spans: &mut Vec<SymbolSpan>,
+    kind: StringKeyKind,
+    key: String,
+    at: (usize, usize),
+) {
     spans.push(SymbolSpan {
         start: at.0 as u32,
         end: at.1 as u32,
         kind: SymbolKind::StringKey {
-            kind: StringKeyKind::SymfonyRoute,
+            kind,
             key,
             is_write: true,
             is_optional: false,
@@ -2409,32 +2435,40 @@ fn push_action_route_spans(
         } else {
             &route.locales
         };
-        action.unreadable |= push_route_spans(route, prefix, derived, locales, spans);
+        action.unreadable |= push_route_spans(
+            route,
+            prefix,
+            derived,
+            StringKeyKind::SymfonyRoute,
+            locales,
+            spans,
+        );
         action.count += locales.len().max(1);
         action.at = route.at;
     }
     action
 }
 
-/// The spans one route declares: its name, or the `derived` one, and its
-/// aliases, each under every one of its `locales`.  A localized route's own
+/// The spans one route declares as `kind` keys: its name, or the `derived`
+/// one, and its aliases, each under every one of its `locales`.  A localized route's own
 /// name still generates the current locale's route; an alias's does not.
 /// Whether its name cannot be read.
-fn push_route_spans(
+pub(in crate::symbol_map::extraction) fn push_route_spans(
     route: &RouteDeclaration,
     prefix: &str,
     derived: Option<String>,
+    kind: StringKeyKind,
     locales: &[String],
     spans: &mut Vec<SymbolSpan>,
 ) -> bool {
     let localized = |spans: &mut Vec<SymbolSpan>, name: &str, at: (usize, usize)| {
         for locale in locales {
-            declare_route(spans, format!("{name}.{locale}"), at);
+            declare_route(spans, kind, format!("{name}.{locale}"), at);
         }
     };
     let declare = |spans: &mut Vec<SymbolSpan>, name: String, at: (usize, usize)| {
         localized(spans, &name, at);
-        declare_route(spans, name, at);
+        declare_route(spans, kind, name, at);
     };
     let unreadable = match &route.name {
         RouteName::Literal(name, start, end) => {
@@ -2451,7 +2485,7 @@ fn push_route_spans(
     };
     for (alias, start, end) in &route.aliases {
         if locales.is_empty() {
-            declare_route(spans, alias.clone(), (*start, *end));
+            declare_route(spans, kind, alias.clone(), (*start, *end));
         } else {
             localized(spans, alias, (*start, *end));
         }
@@ -2603,11 +2637,27 @@ mod tests {
         ("getRouteProviders", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
         ("hasHandler", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
         ("getHandler", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("generate", 0, URL_GENERATOR, ROUTE),
+        ("generateFromRoute", 0, URL_GENERATOR, ROUTE),
+        ("setRedirect", 0, FORM_STATE, ROUTE),
+        ("redirect", 0, CONTROLLER_BASE, ROUTE),
+        ("redirect", 0, FORM_BASE, ROUTE),
+        ("redirect", 0, ENTITY_CONTROLLER, ROUTE),
+        ("checkNamedRoute", 0, ACCESS_MANAGER, ROUTE),
+        ("getRouteByName", 0, ROUTE_PROVIDER, ROUTE),
     ];
 
     const ENTITY_TYPE_MANAGER: &str = "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
     const ENTITY_TYPE: crate::symbol_map::StringKeyKind =
         crate::symbol_map::StringKeyKind::DrupalEntityType;
+    const URL_GENERATOR: &str = "Drupal\\Core\\Routing\\UrlGeneratorInterface";
+    const FORM_STATE: &str = "Drupal\\Core\\Form\\FormStateInterface";
+    const CONTROLLER_BASE: &str = "Drupal\\Core\\Controller\\ControllerBase";
+    const FORM_BASE: &str = "Drupal\\Core\\Form\\FormBase";
+    const ENTITY_CONTROLLER: &str = "Drupal\\Core\\Entity\\Controller\\EntityController";
+    const ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterface";
+    const ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
+    const ROUTE: crate::symbol_map::StringKeyKind = crate::symbol_map::StringKeyKind::DrupalRoute;
 
     #[test]
     fn every_drupal_receiver_method_reaches_its_drupal_class() {

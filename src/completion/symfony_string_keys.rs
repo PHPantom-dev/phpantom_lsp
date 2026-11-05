@@ -218,6 +218,9 @@ impl Backend {
                 if call.arg_index == 0 && is_bus_name_stamp(&class) {
                     return Some(StringKeyKind::MessengerBus);
                 }
+                if call.arg_index == 0 && crate::drupal::is_url_class(&class) {
+                    return Some(StringKeyKind::DrupalRoute);
+                }
                 is_translatable_message(&class)
             } else {
                 let function = resolve_function_name(ctx, written, offset);
@@ -235,17 +238,21 @@ impl Backend {
             };
         };
         if call.is_static {
-            // `\Drupal::service('|')`, `\Drupal::hasService('|')`, and
-            // `\Drupal::entityQuery('|')`.
-            if call.arg_index != 0 || !self.is_drupal_project() {
-                return None;
-            }
+            // `\Drupal::service('|')`, `\Drupal::hasService('|')`,
+            // `\Drupal::entityQuery('|')`, `Url::fromRoute('|')`, and
+            // `Link::createFromRoute('', '|')`.
             let class = ctx.resolve_name_at(subject, cursor as u32);
-            if crate::drupal::is_service_lookup(&class, &call.method_name) {
-                return Some(StringKeyKind::ServiceId);
+            if call.arg_index == 0 && self.is_drupal_project() {
+                if crate::drupal::is_service_lookup(&class, &call.method_name) {
+                    return Some(StringKeyKind::ServiceId);
+                }
+                if crate::drupal::is_entity_query(&class, &call.method_name) {
+                    return Some(StringKeyKind::DrupalEntityType);
+                }
             }
-            return crate::drupal::is_entity_query(&class, &call.method_name)
-                .then_some(StringKeyKind::DrupalEntityType);
+            return (crate::drupal::static_route_argument(&class, &call.method_name)
+                == Some(call.arg_index))
+            .then_some(StringKeyKind::DrupalRoute);
         }
         self.receiver_call_key(
             subject,
@@ -341,9 +348,20 @@ impl Backend {
         let cursor = position_to_offset(content, position) as usize;
         let (kind, prefix_start) = if self.is_twig_template_uri(uri) {
             // Template names are Twig's, and route names and translation
-            // keys Symfony's.
+            // keys Symfony's; Drupal's Twig reads route names too.
             if !self.is_twig_project() {
-                return None;
+                if !self.is_drupal_project() {
+                    return None;
+                }
+                let start = crate::symfony::routes::drupal_twig_route_name_start(content, cursor)?;
+                return self.symfony_key_response(
+                    uri,
+                    StringKeyKind::DrupalRoute,
+                    content,
+                    start,
+                    cursor,
+                    position,
+                );
             }
             if is_symfony
                 && let Some((start, domain)) =
@@ -375,11 +393,25 @@ impl Backend {
             }
             if let Some(start) = crate::twig::templates::twig_template_name_start(content, cursor) {
                 (StringKeyKind::TwigTemplate, start)
+            } else if let Some(start) = self
+                .is_in_drupal_web_root(uri)
+                .then(|| crate::symfony::routes::drupal_twig_route_name_start(content, cursor))
+                .flatten()
+            {
+                // The templates in a Drupal web root name Drupal's routes,
+                // also when the site requires Symfony's container.
+                (StringKeyKind::DrupalRoute, start)
             } else if let Some(start) = is_symfony
                 .then(|| crate::symfony::routes::twig_route_name_start(content, cursor))
                 .flatten()
             {
                 (StringKeyKind::SymfonyRoute, start)
+            } else if let Some(start) = self
+                .is_drupal_project()
+                .then(|| crate::symfony::routes::drupal_twig_route_name_start(content, cursor))
+                .flatten()
+            {
+                (StringKeyKind::DrupalRoute, start)
             } else {
                 let (start, kind) = crate::twig::callables::callable_name_start(content, cursor)?;
                 let names = self.twig_callable_names(kind);
@@ -417,8 +449,15 @@ impl Backend {
                 return (!items.is_empty())
                     .then_some(CompletionResponse::CompletionItemList(items));
             }
-        } else if self.is_drupal_services_uri(uri) {
-            resource_key_at(content, cursor)?
+        } else if let Some(file) = self.drupal_declaration_file(uri) {
+            match file {
+                crate::drupal::DeclarationFile::Services => resource_key_at(content, cursor)?,
+                crate::drupal::DeclarationFile::Links => (
+                    StringKeyKind::DrupalRoute,
+                    crate::drupal::links::links_route_name_start(content, cursor)?,
+                ),
+                crate::drupal::DeclarationFile::Routing => return None,
+            }
         } else if !is_symfony {
             return None;
         } else if crate::symfony::resources::is_container_config_uri(uri) {
@@ -616,7 +655,7 @@ where
 }
 
 /// Whether `before`, the text before a callee's name, ends with `new`.
-fn is_instantiation(before: &str) -> bool {
+pub(crate) fn is_instantiation(before: &str) -> bool {
     let before = before.trim_end();
     before.strip_suffix("new").is_some_and(|rest| {
         !rest
@@ -627,7 +666,7 @@ fn is_instantiation(before: &str) -> bool {
 }
 
 /// The (possibly qualified) name `text` ends with.
-fn trailing_name(text: &str) -> &str {
+pub(crate) fn trailing_name(text: &str) -> &str {
     let start = text
         .bytes()
         .rposition(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'\\')))

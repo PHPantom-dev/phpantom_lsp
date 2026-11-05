@@ -160,6 +160,18 @@ pub(crate) enum StringKeyKind {
     /// the entity type manager's `getStorage()` and the other methods that
     /// take one.
     DrupalEntityType,
+    /// A Drupal route name: declared by a top-level key of a routing file,
+    /// and read by `Url::fromRoute()`, `Link::createFromRoute()`, a form
+    /// state's `setRedirect()`, a controller's or form's `redirect()`, and
+    /// the URL generator, access manager, and route provider methods that
+    /// take one.
+    DrupalRoute,
+    /// A parameter of a Drupal route, keyed by the route as well as the
+    /// name (see `drupal::routing::route_parameter_key`): a `{node}` only
+    /// means something under its route.  Declared by each placeholder of
+    /// the route's path, and read by the keys of the parameters a route
+    /// call or a links file's `route_parameters:` passes.
+    DrupalRouteParameter,
 }
 
 impl StringKeyKind {
@@ -206,7 +218,9 @@ impl StringKeyKind {
             | Self::TwigVariable => KeyFramework::Twig,
             Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
-            Self::DrupalEntityType => KeyFramework::Drupal,
+            Self::DrupalEntityType | Self::DrupalRoute | Self::DrupalRouteParameter => {
+                KeyFramework::Drupal
+            }
         }
     }
 
@@ -657,6 +671,73 @@ pub(crate) struct RouteSite {
     pub handler: Option<String>,
 }
 
+/// A route a Drupal routing file or `#[Route]` declares, with what Drupal
+/// reads from it besides its name to upcast its parameters (see
+/// `drupal::upcasting`): the path, the controller and title callback, the
+/// parameters its `options` declare, the values its `defaults` give, and
+/// the entity type an `_entity_view` or `_entity_form` default names.
+///
+/// Kept beside the spans, which hold the name and the path's parameters,
+/// since only the type engine and hover read the rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DrupalRouteSite {
+    pub name: String,
+    pub path: String,
+    /// The method the route dispatches to, as `Class::method` without the
+    /// leading `\`: its `_form`'s `buildForm()`, else its `_controller`
+    /// (a class alone is its `__invoke()`).  `None` for a controller
+    /// written as `service:method`, whose class only the container knows.
+    pub controller: Option<String>,
+    /// The `_title_callback`, spelled like [`Self::controller`].
+    pub title_callback: Option<String>,
+    /// Each parameter `options.parameters` declares, with or without a
+    /// `type`.
+    pub parameters: Vec<DeclaredParameter>,
+    /// Each `defaults` key that is not one of Drupal's own (`_controller`,
+    /// `_title`, …), with whether its value is `NULL`.  Drupal converts a
+    /// parameter only when the path or a default gives it a value.
+    pub defaults: Vec<(String, bool)>,
+    /// The entity type the `_entity_view` default names, else the
+    /// `_entity_form` one.
+    pub entity_type: Option<String>,
+}
+
+/// A parameter a route's `options.parameters` declares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeclaredParameter {
+    pub name: String,
+    /// The `type` it declares, as written (`entity:node`).
+    pub ty: Option<String>,
+    /// Whether it names a `converter` or a `tempstore`, which convert it
+    /// some other way than Drupal's entity converter.
+    pub converted_otherwise: bool,
+}
+
+impl DrupalRouteSite {
+    /// What `options.parameters` declares for the parameter `name`.
+    pub(crate) fn declared(&self, name: &str) -> Option<&DeclaredParameter> {
+        self.parameters
+            .iter()
+            .find(|parameter| parameter.name == name)
+    }
+
+    /// Whether Drupal gives the parameter `name` a value to convert: the
+    /// path declares it, or a default gives it one.
+    pub(crate) fn passes(&self, name: &str) -> bool {
+        crate::drupal::routing::path_parameter_names(&self.path)
+            .any(|placeholder| placeholder == name)
+            || self.defaults.iter().any(|(default, _)| default == name)
+    }
+
+    /// Whether a default gives the parameter `name` the value `NULL`, which
+    /// Drupal leaves as it is.
+    pub(crate) fn defaults_to_null(&self, name: &str) -> bool {
+        self.defaults
+            .iter()
+            .any(|(default, is_null)| *is_null && default == name)
+    }
+}
+
 /// One `{name}` in a route's path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RoutePlaceholder {
@@ -728,6 +809,13 @@ const YII_LEGACY_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\ViewRenderer";
 const YII_VIEW: &str = "Yiisoft\\View\\ViewInterface";
 pub(crate) const DRUPAL_ENTITY_TYPE_MANAGER: &str =
     "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
+const DRUPAL_URL_GENERATOR: &str = "Drupal\\Core\\Routing\\UrlGeneratorInterface";
+const DRUPAL_FORM_STATE: &str = "Drupal\\Core\\Form\\FormStateInterface";
+const DRUPAL_CONTROLLER_BASE: &str = "Drupal\\Core\\Controller\\ControllerBase";
+const DRUPAL_FORM_BASE: &str = "Drupal\\Core\\Form\\FormBase";
+const DRUPAL_ENTITY_CONTROLLER: &str = "Drupal\\Core\\Entity\\Controller\\EntityController";
+const DRUPAL_ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterface";
+const DRUPAL_ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -784,8 +872,9 @@ pub(crate) enum ReceiverClass {
     /// the shortcuts a Symfony controller inherits.
     ControllerRouting,
     /// A URL generator, the router included, whose `generate()` takes a
-    /// route name: Symfony's, and Yii's, whose `generateAbsolute()` takes
-    /// one too and whose `generateFromCurrent()` takes a fallback.
+    /// route name: Symfony's, Drupal's, whose `generateFromRoute()` takes
+    /// one too, and Yii's, whose `generateAbsolute()` takes one too and
+    /// whose `generateFromCurrent()` takes a fallback.
     UrlGenerator,
     /// A PHP routing configurator, a collection of one, or the route one
     /// of them just added, whose `add()` declares a route.
@@ -822,6 +911,29 @@ pub(crate) enum ReceiverClass {
     /// both Symfony's container builder and Drupal's entity type manager
     /// have: the one takes a service ID, the other an entity type ID.
     DefinitionLookup,
+    /// A Drupal form state, whose `setRedirect()` takes a route name.
+    FormRedirect,
+    /// What has Drupal's `redirect()` shortcut, which takes a route name: a
+    /// controller or a form.
+    RouteRedirect,
+    /// Drupal's access manager, whose `checkNamedRoute()` takes a route
+    /// name.
+    AccessCheck,
+    /// Drupal's route provider, whose `getRouteByName()` takes a route
+    /// name.
+    RouteLookup,
+    /// A Drupal form state again, for the route parameters its
+    /// `setRedirect()` takes after the route name.
+    FormRedirectParameters,
+    /// What has Drupal's `redirect()` shortcut again, for the route
+    /// parameters it takes after the route name.
+    RouteRedirectParameters,
+    /// Drupal's URL generator, for the route parameters its
+    /// `generateFromRoute()` and `generate()` take after the route name.
+    UrlGeneratorParameters,
+    /// Drupal's access manager, for the route parameters its
+    /// `checkNamedRoute()` takes after the route name.
+    AccessCheckParameters,
 }
 
 impl ReceiverClass {
@@ -870,7 +982,10 @@ impl ReceiverClass {
             Self::ConfiguratorArgument => &[(SYMFONY_ABSTRACT_CONFIGURATOR, ContainerParameter)],
             Self::ContainerBuilder => &[(SYMFONY_CONTAINER_BUILDER, ServiceId)],
             Self::ControllerRouting => &[(SYMFONY_ABSTRACT_CONTROLLER, SymfonyRoute)],
+            // Drupal's generator extends Symfony's, so it has to be asked
+            // about first.
             Self::UrlGenerator => &[
+                (DRUPAL_URL_GENERATOR, StringKeyKind::DrupalRoute),
                 (SYMFONY_URL_GENERATOR, SymfonyRoute),
                 (YII_URL_GENERATOR, YiiRoute),
             ],
@@ -907,6 +1022,31 @@ impl ReceiverClass {
                 (SYMFONY_CONTAINER_BUILDER, ServiceId),
                 (DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType),
             ],
+            Self::FormRedirect => &[(DRUPAL_FORM_STATE, StringKeyKind::DrupalRoute)],
+            Self::RouteRedirect => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalRoute),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalRoute),
+                (DRUPAL_ENTITY_CONTROLLER, StringKeyKind::DrupalRoute),
+            ],
+            Self::AccessCheck => &[(DRUPAL_ACCESS_MANAGER, StringKeyKind::DrupalRoute)],
+            Self::RouteLookup => &[(DRUPAL_ROUTE_PROVIDER, StringKeyKind::DrupalRoute)],
+            Self::FormRedirectParameters => {
+                &[(DRUPAL_FORM_STATE, StringKeyKind::DrupalRouteParameter)]
+            }
+            Self::RouteRedirectParameters => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalRouteParameter),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalRouteParameter),
+                (
+                    DRUPAL_ENTITY_CONTROLLER,
+                    StringKeyKind::DrupalRouteParameter,
+                ),
+            ],
+            Self::UrlGeneratorParameters => {
+                &[(DRUPAL_URL_GENERATOR, StringKeyKind::DrupalRouteParameter)]
+            }
+            Self::AccessCheckParameters => {
+                &[(DRUPAL_ACCESS_MANAGER, StringKeyKind::DrupalRouteParameter)]
+            }
         }
     }
 

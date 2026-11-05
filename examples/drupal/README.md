@@ -40,6 +40,31 @@ Run `composer install` here first. Composer puts core and contrib into
   `$count`: an entity query gives the IDs of its entity type, or their
   number once it counts, and the ID inside `\Drupal::entityQuery('')`
   navigates and completes too.
+- Route names navigate between the routing file that declares them and the
+  code, links files, and templates that name them. In
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the
+  definition of `'acme.greeting'` in `greetTheWorld()` or `worldLink()`,
+  which lands on its key in `acme.routing.yml`, or find its references from
+  there, `acme.links.menu.yml` and the `path()` in
+  `templates/acme-greeting.html.twig` included. Complete a route name inside
+  `redirect('')`, `Url::fromRoute('')`, or after `route_name:` in a links
+  file; core's routes are offered too. A route name nothing declares is
+  reported, except one of the shapes core builds routes in: in
+  `web/modules/custom/acme/src/CoreLinks.php`, `'entity.node.canonical'`,
+  which core's entity route provider builds, and `'view.content.page_1'`,
+  which Views builds for the content view's page, are not.
+- Route parameters navigate from the keys that pass them to the placeholder
+  of the route's path. In `worldLink()`, go to the definition of `'name'`,
+  which lands on `{name}` in `acme.routing.yml`, or complete a key inside the
+  parameters array; the `route_parameters:` of `acme.links.menu.yml` and the
+  `path()` hash in `templates/acme-greeting.html.twig` go there too.
+- A controller's parameter is typed as the entity Drupal upcasts it to. In
+  `web/modules/custom/acme/src/Controller/NoteController.php`, hover
+  `$acme_note` in `view()`, named after the `acme_note` entity type and
+  hinted with an interface `Note` implements, or in the untyped `title()`,
+  the same route's title callback: both are a `Note`. A controller hint
+  unrelated to the entity class, which leaves Drupal passing the raw ID, is
+  reported.
 
 ## What the Symfony support already reads
 

@@ -256,6 +256,15 @@ impl Backend {
             let spans = if is_template {
                 if self.is_twig_project() {
                     self.twig_template_spans(uri, content, is_symfony)
+                } else if self.is_drupal_project() {
+                    let mut spans = crate::symfony::routes::twig_route_spans(
+                        content,
+                        StringKeyKind::DrupalRoute,
+                    );
+                    let parameters = crate::drupal::routing::twig_parameter_spans(content, &spans);
+                    spans.extend(parameters);
+                    spans.sort_by_key(|span| span.start);
+                    spans
                 } else {
                     Vec::new()
                 }
@@ -274,15 +283,31 @@ impl Backend {
         let mut spans = Vec::new();
         let mut container_values = Vec::new();
         let mut route_imports = Vec::new();
+        let mut drupal_routes = Vec::new();
         let mut declares_twig_loader = false;
         // A Drupal declaration file is Drupal's, also in a Drupal site that
         // requires Symfony's container and has a `config` directory on the
         // way to it, as core's `config` module does.
-        if self.is_drupal_services_uri(uri) {
-            let (container_spans, values) =
-                crate::symfony::resources::container_declarations(uri, content);
-            spans = container_spans;
-            container_values = values;
+        if let Some(file) = self.drupal_declaration_file(uri) {
+            match file {
+                crate::drupal::DeclarationFile::Services => {
+                    let (container_spans, values) =
+                        crate::symfony::resources::container_declarations(uri, content);
+                    spans = container_spans;
+                    container_values = values;
+                }
+                crate::drupal::DeclarationFile::Routing => {
+                    spans = crate::symfony::routes::drupal_routing_spans(content);
+                    spans.extend(crate::drupal::routing::routing_value_spans(content));
+                    let (parameters, routes) = crate::drupal::routing::routing_routes(content);
+                    spans.extend(parameters);
+                    drupal_routes = routes;
+                }
+                crate::drupal::DeclarationFile::Links => {
+                    spans = crate::drupal::links::links_route_spans(content);
+                    spans.extend(crate::drupal::links::links_parameter_spans(content));
+                }
+            }
         } else if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
             declares_twig_loader = crate::symfony::tags::tags_twig_loader(content);
             // A bus is declared by a key under `config/packages/`, which is
@@ -367,6 +392,7 @@ impl Backend {
             member_access_indices,
             container_values,
             route_imports,
+            drupal_routes,
             declares_twig_loader,
             source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
             ..SymbolMap::default()
@@ -376,16 +402,36 @@ impl Backend {
 
 impl Backend {
     /// The spans of a Twig template: the names it is loaded by, the
-    /// templates, blocks, filters, functions, and variables it names, and in
-    /// a Symfony project the route names and translation keys it reads.
+    /// templates, blocks, filters, functions, and variables it names, the
+    /// route names it reads, Drupal's inside a Drupal web root and
+    /// Symfony's elsewhere in a Symfony project, and in a Symfony project
+    /// its translation keys.
     fn twig_template_spans(&self, uri: &str, content: &str, is_symfony: bool) -> Vec<SymbolSpan> {
         let roots = self.twig_roots();
         let names = crate::util::uri_to_path(uri)
             .map(|path| roots.template_names(&path))
             .unwrap_or_default();
         let mut spans = crate::twig::templates::template_declaration_spans(names);
+        // A Drupal site that requires Symfony's container is a Symfony
+        // project too, but the templates in its web root name Drupal's
+        // routes.  A Symfony application beside it keeps its own.
+        let route_kind = if self.is_in_drupal_web_root(uri) {
+            Some(StringKeyKind::DrupalRoute)
+        } else if is_symfony {
+            Some(StringKeyKind::SymfonyRoute)
+        } else if self.is_drupal_project() {
+            Some(StringKeyKind::DrupalRoute)
+        } else {
+            None
+        };
+        if let Some(kind) = route_kind {
+            let routes = crate::symfony::routes::twig_route_spans(content, kind);
+            spans.extend(crate::drupal::routing::twig_parameter_spans(
+                content, &routes,
+            ));
+            spans.extend(routes);
+        }
         if is_symfony {
-            spans.extend(crate::symfony::routes::twig_route_spans(content));
             spans.extend(crate::symfony::translations::twig_translation_spans(
                 content,
             ));

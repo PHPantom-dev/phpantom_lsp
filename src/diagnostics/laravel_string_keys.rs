@@ -47,6 +47,7 @@ enum CheckedStringKind {
     YiiView,
     YiiRoute,
     YiiRouteArgument,
+    DrupalRoute,
 }
 
 impl CheckedStringKind {
@@ -76,6 +77,7 @@ impl CheckedStringKind {
             StringKeyKind::YiiView => Self::YiiView,
             StringKeyKind::YiiRoute => Self::YiiRoute,
             StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
+            StringKeyKind::DrupalRoute => Self::DrupalRoute,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -93,8 +95,11 @@ impl CheckedStringKind {
             // template variable no render was found to pass may be passed
             // by one that builds its context at runtime.  A module can add
             // an entity type in PHP, through `hook_entity_type_build()`.
+            // Drupal sends a route parameter no path declares as the query
+            // string.
             StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
+            | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack
@@ -166,6 +171,14 @@ struct DeclaredKeys<'a> {
     messenger_buses: Vec<String>,
     /// The Yii route names the project declares, sorted.
     yii_routes: Vec<String>,
+    /// The Drupal route names the project declares, sorted.
+    drupal_routes: Vec<String>,
+    /// The shapes of the route names Drupal's route builders give the
+    /// routes they build from parts (`search.view_*`).
+    drupal_route_patterns: Vec<String>,
+    /// The `Class::method` and `Class` names Drupal gives attribute routes,
+    /// sorted.
+    drupal_route_aliases: Vec<String>,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -200,6 +213,7 @@ impl<'a> DeclaredKeys<'a> {
         });
         let has_messenger_bus = names(|kind| kind == CheckedStringKind::MessengerBus);
         let has_yii_route = names(|kind| kind == CheckedStringKind::YiiRoute);
+        let has_drupal_route = names(|kind| kind == CheckedStringKind::DrupalRoute);
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -362,6 +376,16 @@ impl<'a> DeclaredKeys<'a> {
             Vec::new()
         };
 
+        let (drupal_routes, drupal_route_patterns, drupal_route_aliases) = if has_drupal_route {
+            (
+                backend.symfony_declared_names(crate::symbol_map::StringKeyKind::DrupalRoute),
+                backend.drupal_route_patterns(),
+                backend.drupal_route_aliases(),
+            )
+        } else {
+            (Vec::new(), Vec::new(), Vec::new())
+        };
+
         Self {
             backend,
             routes,
@@ -385,6 +409,9 @@ impl<'a> DeclaredKeys<'a> {
             twig_callables,
             messenger_buses,
             yii_routes,
+            drupal_routes,
+            drupal_route_patterns,
+            drupal_route_aliases,
         }
     }
 
@@ -467,6 +494,7 @@ impl<'a> DeclaredKeys<'a> {
                 .map(|exists| (exists, "view", "invalid_yii_view")),
             CheckedStringKind::YiiRoute => self.judge_yii_route(key),
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
+            CheckedStringKind::DrupalRoute => self.judge_drupal_route(key),
         }
     }
 
@@ -506,6 +534,37 @@ impl<'a> DeclaredKeys<'a> {
             .binary_search_by(|declared| declared.as_str().cmp(key))
             .is_ok();
         Some((valid, "translation key", "invalid_symfony_translation"))
+    }
+
+    /// A Drupal route is declared by a routing file, a route attribute, or
+    /// a route builder that writes its name out.  Those a route builder
+    /// builds from parts, as core's entity route providers build
+    /// `entity.<type>.canonical`, and those Views builds for a display
+    /// (`view.<view_id>.<display_id>`) cannot be told missing, and a project
+    /// whose routing files were not read declares none at all.
+    /// A `Class::method` or `Class` name is one of the aliases attribute
+    /// route discovery gives a controller's routes.
+    fn judge_drupal_route(&self, key: &str) -> Verdict {
+        const VERDICT: (&str, &str) = ("route", "invalid_drupal_route");
+        if self.drupal_routes.is_empty() || crate::drupal::is_views_route_name(key) {
+            return None;
+        }
+        let declares = |names: &[String]| {
+            names
+                .binary_search_by(|name| name.as_str().cmp(key))
+                .is_ok()
+        };
+        if declares(&self.drupal_routes) || declares(&self.drupal_route_aliases) {
+            return Some((true, VERDICT.0, VERDICT.1));
+        }
+        if self
+            .drupal_route_patterns
+            .iter()
+            .any(|pattern| crate::drupal::matches_route_pattern(pattern, key))
+        {
+            return None;
+        }
+        Some((false, VERDICT.0, VERDICT.1))
     }
 
     /// No package Yii installs declares routes of its own, so the
@@ -804,6 +863,7 @@ impl Backend {
         let symbol_map = &ctx.symbol_map;
         let extra = self.typed_receiver_spans_for(uri, symbol_map);
         let morph_columns = self.morph_column_spans_for(uri, symbol_map);
+        let is_drupal_test_code = self.is_drupal_example_or_test_code(uri);
         let key_spans: Vec<CheckedKeySpan> = symbol_map
             .spans
             .iter()
@@ -835,6 +895,11 @@ impl Backend {
                 if kind.framework() == crate::symbol_map::KeyFramework::ServiceContainer
                     && !self.is_symfony_project()
                 {
+                    return None;
+                }
+                // Test code passes invented route names to mocks, and an
+                // `*.api.php` file's examples name invented routes too.
+                if *kind == crate::symbol_map::StringKeyKind::DrupalRoute && is_drupal_test_code {
                     return None;
                 }
                 Some((

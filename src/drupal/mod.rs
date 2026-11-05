@@ -7,19 +7,22 @@
 //! `sites/*/services.yml`.  Those are read by the same scan as Symfony's
 //! configuration (see [`crate::symfony::resources`]), so service IDs and
 //! container parameters work alike in both.  Nothing else Symfony declares
-//! (routes, translations, events) is read here: Drupal declares those its
-//! own way.
+//! (translations, events) is read here, and routes are read from Drupal's
+//! own routing files: Drupal declares those its own way.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use parking_lot::RwLock;
 
+pub(crate) mod links;
+pub(crate) mod routing;
 pub(crate) mod types;
+pub(crate) mod upcasting;
 
 use crate::Backend;
 use crate::atom::Atom;
-use crate::symbol_map::{StringKeyKind, SymbolKind};
+use crate::symbol_map::{ReceiverClass, StringKeyKind, SymbolKind};
 
 /// The web roots of the workspace's Drupal projects, and the declaration
 /// files found under them.
@@ -30,15 +33,45 @@ pub(crate) struct DrupalState {
     /// the workspace's `.gitignore` leaves out, so the walk that finds the
     /// rest of the project's YAML never reaches them.
     declaration_files: RwLock<Vec<PathBuf>>,
+    /// The project's routes by the methods they dispatch to, once read.
+    route_index: RwLock<Option<std::sync::Arc<upcasting::RouteIndex>>>,
 }
 
-/// Whether the file name at the end of `path` is one Drupal loads services
-/// from: `services.yml`, or one ending in `.services.yml` other than
-/// `default.services.yml`, the template a site's `services.yml` is copied
-/// from.
-fn is_services_file_name(path: &str) -> bool {
+/// A kind of file Drupal reads declarations from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeclarationFile {
+    /// `services.yml`, or a file ending in `.services.yml` other than
+    /// `default.services.yml`, the template a site's `services.yml` is
+    /// copied from.
+    Services,
+    /// `<extension>.routing.yml`.
+    Routing,
+    /// `<extension>.links.{menu,task,action,contextual}.yml`.
+    Links,
+}
+
+/// The kind of declaration file the file name at the end of `path` is, if
+/// any.
+fn declaration_file_kind(path: &str) -> Option<DeclarationFile> {
     let name = path.rsplit('/').next().unwrap_or(path);
-    name == "services.yml" || (name.ends_with(".services.yml") && name != "default.services.yml")
+    if name == "services.yml" || (name.ends_with(".services.yml") && name != "default.services.yml")
+    {
+        Some(DeclarationFile::Services)
+    } else if name.ends_with(".routing.yml") {
+        Some(DeclarationFile::Routing)
+    } else if [
+        ".links.menu.yml",
+        ".links.task.yml",
+        ".links.action.yml",
+        ".links.contextual.yml",
+    ]
+    .iter()
+    .any(|suffix| name.ends_with(suffix))
+    {
+        Some(DeclarationFile::Links)
+    } else {
+        None
+    }
 }
 
 /// The folders of a web root whose YAML Drupal never loads as it stands:
@@ -81,13 +114,112 @@ pub(crate) fn is_entity_query(class: &str, method: &str) -> bool {
             || method.eq_ignore_ascii_case("entityQueryAggregate"))
 }
 
+/// The argument a static call of `method` on `class`, a resolved class
+/// name, takes a route name in: the first of `Url::fromRoute()`, the second
+/// of `Link::createFromRoute()`.
+pub(crate) fn static_route_argument(class: &str, method: &str) -> Option<usize> {
+    let class = class.strip_prefix('\\').unwrap_or(class);
+    if class.eq_ignore_ascii_case("Drupal\\Core\\Url") && method.eq_ignore_ascii_case("fromRoute") {
+        Some(0)
+    } else if class.eq_ignore_ascii_case("Drupal\\Core\\Link")
+        && method.eq_ignore_ascii_case("createFromRoute")
+    {
+        Some(1)
+    } else {
+        None
+    }
+}
+
+/// The calls on a typed receiver that take a route's parameters after the
+/// route name they take first, with the receiver that confirms them.  Each
+/// one's route name is read through the receiver
+/// `symbol_map::extraction::symfony_receiver_method` gives it.
+const ROUTE_PARAMETER_CALLS: &[(&str, ReceiverClass, &str)] = &[
+    (
+        "setRedirect",
+        ReceiverClass::FormRedirectParameters,
+        "route_parameters",
+    ),
+    (
+        "redirect",
+        ReceiverClass::RouteRedirectParameters,
+        "route_parameters",
+    ),
+    (
+        "generateFromRoute",
+        ReceiverClass::UrlGeneratorParameters,
+        "parameters",
+    ),
+    (
+        "generate",
+        ReceiverClass::UrlGeneratorParameters,
+        "parameters",
+    ),
+    (
+        "checkNamedRoute",
+        ReceiverClass::AccessCheckParameters,
+        "parameters",
+    ),
+];
+
+/// The receiver that confirms the route parameters a call of `method`
+/// passes second, and the name of their argument, when the call takes
+/// them.
+pub(crate) fn route_parameter_call(method: &str) -> Option<(ReceiverClass, &'static str)> {
+    ROUTE_PARAMETER_CALLS
+        .iter()
+        .find(|(name, _, _)| method.eq_ignore_ascii_case(name))
+        .map(|(_, receiver, parameter)| (*receiver, *parameter))
+}
+
+/// Whether `class`, a resolved class name, is `Drupal\Core\Url`, whose
+/// constructor takes a route name first.
+pub(crate) fn is_url_class(class: &str) -> bool {
+    class
+        .strip_prefix('\\')
+        .unwrap_or(class)
+        .eq_ignore_ascii_case("Drupal\\Core\\Url")
+}
+
+/// Whether the route name `name` has the shape `pattern`, in which each `*`
+/// stands for any run of characters.
+pub(crate) fn matches_route_pattern(pattern: &str, name: &str) -> bool {
+    let mut parts = pattern.split('*');
+    let first = parts.next().unwrap_or_default();
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let parts: Vec<&str> = parts.collect();
+    let Some((last, middle)) = parts.split_last() else {
+        return rest.is_empty();
+    };
+    for part in middle {
+        match rest.find(part) {
+            Some(at) => rest = &rest[at + part.len()..],
+            None => return false,
+        }
+    }
+    rest.len() >= last.len() && rest.ends_with(last)
+}
+
 /// Whether `path` is a file Drupal reads declarations from.
 pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(is_services_file_name)
+        .is_some_and(|name| declaration_file_kind(name).is_some())
         && !is_test_fixture(path, web_root)
         && !is_unloaded(path, web_root)
+}
+
+/// Whether `name` has the shape of the route Views builds for a display of
+/// a view: `view.<view_id>.<display_id>`, neither ID holding a dot.
+pub(crate) fn is_views_route_name(name: &str) -> bool {
+    let mut parts = name.split('.');
+    parts.next() == Some("view")
+        && matches!(
+            (parts.next(), parts.next(), parts.next()),
+            (Some(view), Some(display), None) if !view.is_empty() && !display.is_empty()
+        )
 }
 
 /// Whether `path` lies under a `tests` folder of the web root: it belongs to
@@ -200,6 +332,68 @@ impl Backend {
         found
     }
 
+    /// The shapes of the route names the project's route builders give the
+    /// routes they build from parts, sorted.
+    pub(crate) fn drupal_route_patterns(&self) -> Vec<String> {
+        let mut patterns = Vec::new();
+        self.visit_declaring_symbol_maps(|_, map| {
+            patterns.extend(map.drupal_route_patterns.iter().cloned());
+        });
+        patterns.sort_unstable();
+        patterns.dedup();
+        patterns
+    }
+
+    /// The `Class::method` and `Class` names Drupal's attribute route
+    /// discovery gives the project's controller routes, sorted.
+    pub(crate) fn drupal_route_aliases(&self) -> Vec<String> {
+        let mut aliases = Vec::new();
+        self.visit_declaring_symbol_maps(|_, map| {
+            aliases.extend(map.drupal_route_aliases.iter().cloned());
+        });
+        aliases.sort_unstable();
+        aliases.dedup();
+        aliases
+    }
+
+    /// The paths of the routes the project names `name`, sorted.
+    pub(crate) fn drupal_route_paths(&self, name: &str) -> Vec<String> {
+        let mut paths = Vec::new();
+        self.visit_declaring_symbol_maps(|_, map| {
+            paths.extend(
+                map.drupal_routes
+                    .iter()
+                    .filter(|route| route.name == name)
+                    .map(|route| route.path.clone()),
+            );
+        });
+        paths.sort_unstable();
+        paths.dedup();
+        paths
+    }
+
+    /// Whether `uri` is code a Drupal site never runs against its own
+    /// declarations: a file under a `tests` folder of one of its web roots,
+    /// whose route names are a test module's or invented for a mock, or an
+    /// extension's `*.api.php`, which documents hooks with example code.
+    pub(crate) fn is_drupal_example_or_test_code(&self, uri: &str) -> bool {
+        if !self.is_drupal_project() {
+            return false;
+        }
+        let Some(path) = crate::util::uri_to_path(uri) else {
+            return false;
+        };
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".api.php"))
+            || self
+                .drupal
+                .web_roots
+                .read()
+                .iter()
+                .any(|root| path.starts_with(root) && is_test_fixture(&path, root))
+    }
+
     /// Whether `uri` belongs to a test module of a Drupal project and is not
     /// open: what it declares is left out, since no real site enables it.
     pub(crate) fn is_closed_drupal_test_fixture(&self, uri: &str) -> bool {
@@ -217,30 +411,39 @@ impl Backend {
             && !self.open_files.read().contains_key(uri)
     }
 
-    /// Whether `uri` is a file a Drupal project loads services from: a
-    /// services file inside one of its web roots, outside test modules
-    /// unless it is open.
+    /// Whether `uri` is inside one of the web roots of the workspace's
+    /// Drupal projects, where Drupal's own reading of a file wins over
+    /// Symfony's.
+    pub(crate) fn is_in_drupal_web_root(&self, uri: &str) -> bool {
+        self.is_drupal_project()
+            && crate::util::uri_to_path(uri).is_some_and(|path| {
+                self.drupal
+                    .web_roots
+                    .read()
+                    .iter()
+                    .any(|root| path.starts_with(root))
+            })
+    }
+
+    /// The kind of declaration file `uri` is in a Drupal project: one
+    /// inside one of its web roots, outside test modules unless it is open.
     ///
     /// Other YAML files in a Drupal project have a `services:` key with
     /// another meaning, or none at all.
-    pub(crate) fn is_drupal_services_uri(&self, uri: &str) -> bool {
-        if !self.is_drupal_project() || !is_services_file_name(uri) {
-            return false;
+    pub(crate) fn drupal_declaration_file(&self, uri: &str) -> Option<DeclarationFile> {
+        if !self.is_drupal_project() {
+            return None;
         }
-        let Some(path) = crate::util::uri_to_path(uri) else {
-            return false;
-        };
-        let Some((in_fixture, unloaded)) = self
+        let kind = declaration_file_kind(uri)?;
+        let path = crate::util::uri_to_path(uri)?;
+        let (in_fixture, unloaded) = self
             .drupal
             .web_roots
             .read()
             .iter()
             .find(|root| path.starts_with(root))
-            .map(|root| (is_test_fixture(&path, root), is_unloaded(&path, root)))
-        else {
-            return false;
-        };
-        !unloaded && (!in_fixture || self.open_files.read().contains_key(uri))
+            .map(|root| (is_test_fixture(&path, root), is_unloaded(&path, root)))?;
+        (!unloaded && (!in_fixture || self.open_files.read().contains_key(uri))).then_some(kind)
     }
 }
 
