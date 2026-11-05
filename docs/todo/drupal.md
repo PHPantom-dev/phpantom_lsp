@@ -28,35 +28,6 @@ within the same impact tier.
 
 ---
 
-## DR1. Drupal demo project and a real-world baseline
-
-**Impact: High · Complexity: Low-Medium**
-
-Every other Drupal item is measured against this one. Without a demo
-project and a baseline from real code, Drupal support would be built
-untested and could regress silently.
-
-- **`examples/drupal/`**: a `drupal/recommended-project` site with one
-  custom module and one theme, in the same shape as `examples/laravel/`
-  and `examples/symfony/`, with "Try:" comments at each site and a
-  README listing what to try. The module declares a service, a route,
-  a content entity type, a hook implementation (procedural and
-  `#[Hook]`), and a render array with a theme hook.
-- **Runtime assertions**: an `assertions.php` that checks the demo's
-  claims against real Drupal. Decide whether that bootstraps a kernel
-  (core supports SQLite, so no server is needed) or only checks what
-  can be read without booting.
-- **A real-world baseline**: run `analyze` on an actively maintained
-  contrib module and a site build, bucket the diagnostics by cause, and
-  file what Drupal-specific gaps they show. That ranks the rest of this
-  document by what actually breaks.
-- **What already works**: the Symfony support reads some of the same
-  shapes Drupal uses (event subscribers' `getSubscribedEvents()` maps,
-  `Class::method` strings in YAML). Check each against the demo and note
-  it in the README, so the items below only build what is missing.
-
----
-
 ## DR2. Service IDs from `*.services.yml`
 
 **Impact: High · Complexity: Medium**
@@ -376,3 +347,51 @@ Once Drupal service IDs complete (DR2), add
 each declaring services, routes, and hooks, and time completion of
 service IDs, route names, and hook names as each ships. Register it in
 `Cargo.toml` so `benches/ci_benchmarks.py` picks it up.
+
+---
+
+## DR16. Event subscribers
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+final class AcmeSubscriber implements EventSubscriberInterface {
+    public static function getSubscribedEvents(): array {
+        return [KernelEvents::REQUEST => 'onRequest'];
+    }
+}
+```
+
+Drupal's event subscribers are Symfony's: a service tagged
+`event_subscriber` maps event names to its own methods in
+`getSubscribedEvents()`. The Symfony support reads that map, jumps from
+a listener name to its method, and reports one that does not exist,
+but only in a Symfony project, and a Drupal site's `composer.json`
+requires none of the packages that make it one. Read the map in a
+Drupal site too, so the listener methods navigate and are checked, and
+the event names complete where Drupal's event dispatcher takes one.
+
+---
+
+## DR21. Return types core's docblocks leave wide
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$url = Url::fromRoute('acme.greeting')->toString();           // string|GeneratedUrl
+$query = $db->select('node', 'n')->extend(PagerSelectExtender::class);
+$query->limit(10);                                            // limit() not found on ExtendableInterface
+```
+
+A few core methods that Drupal code calls everywhere declare a return
+type wider than what the call gives. `Url::toString()` returns a
+`GeneratedUrl` only when `$collect_bubbleable_metadata` is `true`, and a
+`string` otherwise; PHPStan's Drupal extension ships a stub with the
+conditional return type `($collect_bubbleable_metadata is true ?
+\Drupal\Core\GeneratedUrl : string)`. `extend()` on a query returns an
+instance of the extender class it is given, but declares
+`ExtendableInterface`, so every pager or table-sort query loses its
+type. Give both the precise type, through the same mechanism as the
+other framework corrections ([E7](external-stubs.md#e7-stub-based-framework-patches)
+if it has shipped), so a `string` parameter takes the plain
+`toString()` and the extender's methods resolve.

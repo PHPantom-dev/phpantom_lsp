@@ -148,4 +148,51 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B730. A `parent::` call that returns `static` gives the parent class
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+class Base {
+    /** @return static */
+    public static function create() { return new static(); }
+}
+
+class Child extends Base {
+    public static function create() {
+        $instance = parent::create();
+        $instance->childOnly();   // Method 'childOnly' not found on class 'Base'
+        return $instance;
+    }
+    public function childOnly(): void {}
+}
+```
+
+`parent::` forwards the late static binding, so `parent::create()`
+called from `Child` returns a `Child`. The variable's type is right
+(an argument check on `$instance` reports `static(Child)`), but member
+access on it, and on `parent::create()->` directly, looks the member up
+on `Base`. A native `: static` return type behaves the same. Drupal
+leans on this shape: a form or plugin's `create()` calls
+`parent::create($container)` and then sets its own injected services on
+the instance, and each of those assignments is reported as an unknown
+property.
+
+### B731. A method that returns `new static()` without a declared type gives its own class
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+class Base {
+    public static function make() { return new static(); }
+}
+class Child extends Base {}
+
+Child::make();   // Base, should be Child
+```
+
+With no native or docblock return type, the return type inferred from
+the body binds `new static()` to the declaring class instead of keeping
+it `static`, so a call through a subclass gives the parent. Declaring
+`@return static` on the method or on an interface it implements gives
+the right type.

@@ -1,0 +1,24 @@
+<?php
+
+/**
+ * @file
+ * Procedural hook implementations, the style most contrib modules still use.
+ */
+
+declare(strict_types=1);
+
+use Drupal\Core\Routing\RouteMatchInterface;
+
+/**
+ * Implements hook_help().
+ */
+function acme_help(string $route_name, RouteMatchInterface $route_match): ?string
+{
+    // Try: complete after `$route_match->`. The methods come from core's
+    // RouteMatchInterface.
+    if ($route_name === 'help.page.acme' && $route_match->getParameter('name') === 'acme') {
+        return '<p>Greets the name in the path, for example /acme/greeting/Ada.</p>';
+    }
+
+    return null;
+}
