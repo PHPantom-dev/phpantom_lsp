@@ -213,10 +213,8 @@ impl Backend {
                 .iter()
                 .any(|prefix| uri.starts_with(prefix.as_str()));
         self.note_drupal_routes(uri, Some(map));
+        self.note_drupal_hook_declarations(uri, Some(map));
         let was_declaring = self.symfony.declaring_uris.read().contains(uri);
-        if was_declaring || declares {
-            self.forget_drupal_hook_index();
-        }
         // Only take the write lock when the answer changes.
         if was_declaring == declares {
             return;
@@ -232,8 +230,8 @@ impl Backend {
     /// Forget a file that no longer exists.
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
         self.note_drupal_routes(uri, None);
+        self.note_drupal_hook_declarations(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
-            self.forget_drupal_hook_index();
             self.symfony.declaring_uris.write().remove(uri);
         }
     }

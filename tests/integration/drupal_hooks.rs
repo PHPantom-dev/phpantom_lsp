@@ -625,6 +625,121 @@ async fn untyped_hook_parameters_take_the_documented_types() {
     }
 }
 
+/// A documented hint the `*.api.php` file imports is completed as the
+/// class it names there, written the way the implementing file reaches it.
+#[tokio::test]
+async fn completed_signatures_read_hints_with_the_api_files_imports() {
+    let api = "<?php\nuse Drupal\\Core\\Block\\BlockPluginInterface;\n\nfunction hook_block_view_alter(array &$build, BlockPluginInterface $block) {\n}\n";
+    let plain = "<?php\n\nfunction acme_bl\n";
+    let imported = "<?php\nuse Drupal\\Core\\Block\\BlockPluginInterface;\n\nfunction acme_bl\n";
+    for (module, expected) in [
+        (
+            plain,
+            "acme_block_view_alter(array &\\$build, Drupal\\\\Core\\\\Block\\\\BlockPluginInterface \\$block) {\n\t$1\n}",
+        ),
+        (
+            imported,
+            "acme_block_view_alter(array &\\$build, BlockPluginInterface \\$block) {\n\t$1\n}",
+        ),
+    ] {
+        let (backend, dir) = drupal(
+            &[
+                ("web/core/modules/block/block.api.php", api),
+                (
+                    "web/core/lib/Drupal/Core/Block/BlockPluginInterface.php",
+                    "<?php\nnamespace Drupal\\Core\\Block;\ninterface BlockPluginInterface {}\n",
+                ),
+            ],
+            &[("web/modules/custom/acme/acme.module", module)],
+        )
+        .await;
+        let module_uri = uri_for(&dir, "web/modules/custom/acme/acme.module");
+        references_at(&backend, &module_uri, position_in(module, "acme_bl", 1)).await;
+        let position = position_in(module, "acme_bl\n", 7);
+        let items = match crate::common::completion_response(
+            &backend,
+            &module_uri,
+            position.line,
+            position.character,
+            None,
+        )
+        .await
+        {
+            Some(tower_lsp_server::gen_lsp_types::CompletionResponse::CompletionItemList(
+                items,
+            )) => items,
+            Some(tower_lsp_server::gen_lsp_types::CompletionResponse::CompletionList(list)) => {
+                list.items
+            }
+            None => Vec::new(),
+        };
+        let item = items
+            .iter()
+            .find(|item| item.label == "acme_block_view_alter")
+            .expect("acme_block_view_alter offered");
+        let Some(tower_lsp_server::gen_lsp_types::CompletionItemTextEdit::TextEdit(edit)) =
+            &item.text_edit
+        else {
+            panic!("{item:?}");
+        };
+        assert_eq!(edit.new_text, expected);
+    }
+}
+
+/// An implementation of a hook documented for every entity type is passed
+/// the entity class of the type its name fills in, where the documentation
+/// names an entity interface that class implements; any other parameter
+/// keeps its documented type.
+#[tokio::test]
+async fn entity_type_hooks_take_the_entity_class_of_their_type() {
+    let api = "<?php\nfunction hook_ENTITY_TYPE_presave(\\Drupal\\Core\\Entity\\EntityInterface $entity) {\n}\nfunction hook_ENTITY_TYPE_access(\\Drupal\\Core\\Entity\\EntityInterface $entity, $operation, \\Drupal\\Core\\Session\\AccountInterface $account) {\n}\n";
+    let module = "<?php\nfunction acme_node_presave($node) {\n    $node;\n}\nfunction acme_user_access($user, $operation, $account) {\n    $user;\n    $account;\n}\n";
+    let (backend, dir) = drupal(
+        &[
+            ("web/core/lib/Drupal/Core/Entity/entity.api.php", api),
+            (
+                "web/core/lib/Drupal/Core/Entity/EntityInterface.php",
+                "<?php\nnamespace Drupal\\Core\\Entity;\ninterface EntityInterface {}\n",
+            ),
+            (
+                "web/core/lib/Drupal/Core/Session/AccountInterface.php",
+                "<?php\nnamespace Drupal\\Core\\Session;\ninterface AccountInterface {}\n",
+            ),
+            (
+                "web/core/modules/node/src/Entity/Node.php",
+                "<?php\nnamespace Drupal\\node\\Entity;\n/**\n * @ContentEntityType(\n *   id = \"node\",\n * )\n */\nclass Node implements \\Drupal\\Core\\Entity\\EntityInterface {}\n",
+            ),
+            (
+                "web/core/modules/user/src/Entity/User.php",
+                "<?php\nnamespace Drupal\\user\\Entity;\n/**\n * @ContentEntityType(\n *   id = \"user\",\n * )\n */\nclass User implements \\Drupal\\Core\\Entity\\EntityInterface, \\Drupal\\Core\\Session\\AccountInterface {}\n",
+            ),
+        ],
+        &[("web/modules/custom/acme/acme.module", module)],
+    )
+    .await;
+    let module_uri = uri_for(&dir, "web/modules/custom/acme/acme.module");
+    references_at(
+        &backend,
+        &module_uri,
+        position_in(module, "acme_node_presave", 6),
+    )
+    .await;
+    for (needle, expected, unexpected) in [
+        ("$node;", "Node", "EntityInterface"),
+        ("$user;", "User", "EntityInterface"),
+        ("$account;", "AccountInterface", "User"),
+    ] {
+        let position = position_in(module, needle, 2);
+        let text = hover_text_at(&backend, &module_uri, position.line, position.character)
+            .await
+            .unwrap_or_default();
+        assert!(
+            text.contains(expected) && !text.contains(unexpected),
+            "{needle}: {text}"
+        );
+    }
+}
+
 /// A hook implementation the editor opens before the workspace walk finds
 /// the Drupal site takes the documented types once it does.
 #[tokio::test]

@@ -105,7 +105,7 @@ pub(crate) fn seed_params<'b>(
     // A Drupal hook implementation that leaves a parameter untyped takes
     // the type its hook's documentation gives it; looked up once, when
     // there is such a parameter.
-    let mut hook_documentation: Option<Option<crate::types::FunctionInfo>> = None;
+    let mut hook_documentation: Option<Option<crate::drupal::hooks::HookDocumentation>> = None;
 
     for (index, param) in parameters.enumerate() {
         let pname = bytes_to_str(param.variable.name).to_string();
@@ -178,12 +178,8 @@ pub(crate) fn seed_params<'b>(
                     )
                 })
                 .as_ref()
-                .and_then(|function| function.parameters.get(index))
-                .and_then(|parameter| {
-                    parameter
-                        .type_hint
-                        .clone()
-                        .or_else(|| parameter.native_type_hint.clone())
+                .and_then(|documentation| {
+                    documentation.parameter_type(index, ctx.file.class_loader)
                 })
         {
             scope.seed(&pname, ctx.resolved_types_for(documented));

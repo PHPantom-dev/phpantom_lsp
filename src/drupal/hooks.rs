@@ -313,17 +313,29 @@ pub(crate) fn matches_hook_pattern(
     hook: &str,
     is_entity_type: &dyn Fn(&str) -> bool,
 ) -> bool {
-    fn rest(pieces: &[Piece<'_>], hook: &str, is_entity_type: &dyn Fn(&str) -> bool) -> bool {
+    match_hook_pattern(pattern, hook, is_entity_type).is_some()
+}
+
+/// [`matches_hook_pattern`], with the entity type ID the `ENTITY_TYPE`
+/// placeholder of `pattern` stands for in `hook`, when it has one.
+fn match_hook_pattern<'h>(
+    pattern: &str,
+    hook: &'h str,
+    is_entity_type: &dyn Fn(&str) -> bool,
+) -> Option<Option<&'h str>> {
+    fn rest<'h>(
+        pieces: &[Piece<'_>],
+        hook: &'h str,
+        is_entity_type: &dyn Fn(&str) -> bool,
+    ) -> Option<Option<&'h str>> {
         let Some((first, others)) = pieces.split_first() else {
-            return hook.is_empty();
+            return hook.is_empty().then_some(None);
         };
         match first {
-            Piece::Text(text) => hook
-                .strip_prefix(text)
-                .is_some_and(|after| rest(others, after, is_entity_type)),
+            Piece::Text(text) => rest(others, hook.strip_prefix(text)?, is_entity_type),
             Piece::Placeholder(name) => (1..=hook.len())
                 .filter(|length| hook.is_char_boundary(*length))
-                .any(|length| {
+                .find_map(|length| {
                     let (value, after) = hook.split_at(length);
                     let shaped = match *name {
                         "N" => value.bytes().all(|byte| byte.is_ascii_digit()),
@@ -331,11 +343,16 @@ pub(crate) fn matches_hook_pattern(
                             byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
                         }),
                     };
+                    if !shaped {
+                        return None;
+                    }
                     // The rest of the name is cheaper to check than whether
                     // a run is a declared entity type.
-                    shaped
-                        && rest(others, after, is_entity_type)
-                        && (*name != "ENTITY_TYPE" || is_entity_type(value))
+                    let captured = rest(others, after, is_entity_type)?;
+                    if *name != "ENTITY_TYPE" {
+                        return Some(captured);
+                    }
+                    is_entity_type(value).then_some(Some(value))
                 }),
         }
     }
@@ -366,6 +383,8 @@ pub(crate) struct HookIndex {
     patterns: Vec<String>,
     /// Every declared entity type ID.
     entity_types: std::collections::HashSet<String>,
+    /// The files the index was read from.
+    sources: std::collections::HashSet<String>,
 }
 
 impl HookIndex {
@@ -391,6 +410,53 @@ impl HookIndex {
             .binary_search_by(|known| known.as_str().cmp(hook))
             .is_ok()
             || !self.best_patterns(hook).is_empty()
+    }
+}
+
+/// The documentation function of the hook an implementation implements,
+/// and the class of the entity type a documented `ENTITY_TYPE`
+/// placeholder stands for in the implemented hook's name.
+pub(crate) struct HookDocumentation {
+    pub function: crate::types::FunctionInfo,
+    pub entity_class: Option<crate::atom::Atom>,
+}
+
+const ENTITY_INTERFACE: &str = "Drupal\\Core\\Entity\\EntityInterface";
+
+impl HookDocumentation {
+    /// The documented type of the parameter at `index`, with each entity
+    /// interface it names (`EntityInterface`, `NodeInterface`) that the
+    /// entity class of the implemented hook implements read as that class:
+    /// `hook_node_presave()` is passed a `Node`, which
+    /// `hook_ENTITY_TYPE_presave()` documents as an `EntityInterface`.
+    pub(crate) fn parameter_type(
+        &self,
+        index: usize,
+        class_loader: &crate::class_lookup::ResolvedClassLoader<'_>,
+    ) -> Option<crate::php_type::PhpType> {
+        // The effective type, which the parser resolved against the
+        // `*.api.php` file's own imports; a function's native hint is kept
+        // as written.
+        let documented = self.function.parameters.get(index)?.type_hint.clone()?;
+        let Some(entity) = self
+            .entity_class
+            .and_then(|class| class_loader(crate::class_lookup::Fqn::new(&class)))
+        else {
+            return Some(documented);
+        };
+        Some(documented.resolve_names(&|name| {
+            let is_entity_interface = name.trim_start_matches('\\') == ENTITY_INTERFACE
+                || class_loader(crate::class_lookup::Fqn::new(name)).is_some_and(|class| {
+                    crate::class_lookup::is_subtype_of(&class, ENTITY_INTERFACE, class_loader)
+                });
+            if is_entity_interface
+                && crate::class_lookup::is_subtype_of(&entity, name, class_loader)
+            {
+                entity.fqn().to_string()
+            } else {
+                name.to_string()
+            }
+        }))
     }
 }
 
@@ -684,7 +750,7 @@ impl Backend {
 
     /// What the documentation of the workspace's hooks says, read once
     /// until a declaring file changes (see
-    /// [`Backend::forget_drupal_hook_index`]).
+    /// [`Backend::note_drupal_hook_declarations`]).
     fn hook_index(&self) -> std::sync::Arc<HookIndex> {
         use crate::symbol_map::{StringKeyKind, SymbolKind};
         if let Some(index) = self.drupal.hook_index.read().as_ref() {
@@ -694,7 +760,8 @@ impl Backend {
         // The documentation is a plain span; an invocation, the other kind
         // of declaration, is a call the type engine confirms, and is left
         // out.
-        self.visit_declaring_symbol_maps(|_, map| {
+        self.visit_declaring_symbol_maps(|uri, map| {
+            let mut read = false;
             for span in &map.spans {
                 if let SymbolKind::StringKey {
                     kind,
@@ -708,9 +775,13 @@ impl Backend {
                         StringKeyKind::DrupalEntityType => {
                             index.entity_types.insert(key.clone());
                         }
-                        _ => {}
+                        _ => continue,
                     }
+                    read = true;
                 }
+            }
+            if read {
+                index.sources.insert(uri.to_string());
             }
         });
         index.documented.sort_unstable();
@@ -726,10 +797,36 @@ impl Backend {
         index
     }
 
-    /// Forget what [`Backend::hook_index`] read, once a file that declares
-    /// hooks or entity types may have changed.
-    pub(crate) fn forget_drupal_hook_index(&self) {
-        if self.drupal.hook_index.read().is_some() {
+    /// Forget what [`Backend::hook_index`] read when the file at `uri`,
+    /// now holding `map` (`None` once it is gone), documents a hook or
+    /// declares an entity type, or did when the index was read.  Any other
+    /// edit, such as one to a file that only invokes hooks, keeps it.
+    pub(crate) fn note_drupal_hook_declarations(
+        &self,
+        uri: &str,
+        map: Option<&crate::symbol_map::SymbolMap>,
+    ) {
+        use crate::symbol_map::{StringKeyKind, SymbolKind};
+        let stale = match self.drupal.hook_index.read().as_ref() {
+            None => return,
+            Some(index) => {
+                index.sources.contains(uri)
+                    || map.is_some_and(|map| {
+                        map.spans.iter().any(|span| {
+                            matches!(
+                                span.kind,
+                                SymbolKind::StringKey {
+                                    kind: StringKeyKind::DrupalHook
+                                        | StringKeyKind::DrupalEntityType,
+                                    is_write: true,
+                                    ..
+                                }
+                            )
+                        })
+                    })
+            }
+        };
+        if stale {
             *self.drupal.hook_index.write() = None;
         }
     }
@@ -804,7 +901,7 @@ impl Backend {
         decl_start: u32,
         method: Option<&str>,
         class_fqn: &str,
-    ) -> Option<crate::types::FunctionInfo> {
+    ) -> Option<HookDocumentation> {
         use crate::symbol_map::{StringKeyKind, SymbolKind};
         if !self.is_drupal_project() {
             return None;
@@ -857,16 +954,28 @@ impl Backend {
                 _ => None,
             })?;
         let index = self.hook_index();
-        let documented = if index
+        let (documented, entity_type) = if index
             .documented
             .binary_search_by(|known| known.as_str().cmp(&hook))
             .is_ok()
         {
-            hook
+            (hook.clone(), None)
         } else {
-            index.best_patterns(&hook).first()?.to_string()
+            let pattern = index.best_patterns(&hook).first()?.to_string();
+            let is_entity_type = |id: &str| index.entity_types.contains(id);
+            let entity_type = match_hook_pattern(&pattern, &hook, &is_entity_type).flatten();
+            (pattern, entity_type)
         };
-        self.find_or_load_function(&[format!("hook_{documented}").as_str()])
+        let function = self.find_or_load_function(&[format!("hook_{documented}").as_str()])?;
+        let entity_class = entity_type.and_then(|id| {
+            self.drupal_entity_types(id)
+                .first()
+                .map(|(class, _)| *class)
+        });
+        Some(HookDocumentation {
+            function,
+            entity_class,
+        })
     }
 
     /// Every hook the workspace names, implemented or documented, that the
@@ -933,6 +1042,7 @@ mod tests {
                 "theme_suggestions_HOOK_alter".to_string(),
             ],
             entity_types: Default::default(),
+            sources: Default::default(),
         };
         assert_eq!(
             index.best_patterns("theme_suggestions_node_alter"),

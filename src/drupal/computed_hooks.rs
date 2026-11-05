@@ -272,26 +272,13 @@ impl Backend {
         if storage == Storage::Any {
             return !declared.is_empty();
         }
+        let loader = self.resolved_class_loader_with(&[]);
         declared.iter().any(|(_, handler)| {
             let is_config = handler.is_some_and(|handler| {
-                let mut class = Some(handler.to_string());
-                let mut depth = 0;
-                while let Some(name) = class.take() {
-                    if name
-                        .trim_start_matches('\\')
-                        .eq_ignore_ascii_case(CONFIG_STORAGE)
-                    {
-                        return true;
-                    }
-                    depth += 1;
-                    if depth > 20 {
-                        break;
-                    }
-                    class = self
-                        .find_or_load_class(&name)
-                        .and_then(|info| info.parent_class.map(|parent| parent.to_string()));
-                }
-                false
+                self.find_or_load_class(handler.as_str())
+                    .is_some_and(|class| {
+                        crate::class_lookup::is_subtype_of(&class, CONFIG_STORAGE, &loader)
+                    })
             });
             is_config == (storage == Storage::Config)
         })

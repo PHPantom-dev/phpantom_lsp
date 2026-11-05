@@ -105,6 +105,10 @@ impl Backend {
         }
         let start_position = crate::text_position::offset_to_position(content, start);
         let mut items = Vec::new();
+        // The imports and namespace of each `*.api.php` file, which its
+        // documented hints are written against.
+        let mut api_scopes: std::collections::HashMap<String, (_, _)> =
+            std::collections::HashMap::new();
         for hook in self.drupal_documented_hooks() {
             let name = format!("{}_{hook}", procedural.extension);
             let matches_typed = name
@@ -117,7 +121,20 @@ impl Backend {
             let doc = format!("hook_{hook}");
             let parameters = self
                 .find_or_load_function(&[doc.as_str()])
-                .map(|function| self.hook_parameters(&function.parameters, ctx))
+                .map(|function| {
+                    let api_uri = self
+                        .global_functions()
+                        .read()
+                        .get(doc.as_str())
+                        .map(|(uri, _)| uri.clone())
+                        .unwrap_or_default();
+                    let (use_map, namespace) =
+                        api_scopes.entry(api_uri).or_insert_with_key(|api_uri| {
+                            let api = self.file_context(api_uri);
+                            (api.use_map, api.namespace)
+                        });
+                    self.hook_parameters(&function.parameters, (&*use_map, &*namespace), ctx)
+                })
                 .unwrap_or_default();
             let (hook_part, stops) = hook_snippet(&hook);
             let snippet = format!(
@@ -148,21 +165,27 @@ impl Backend {
     }
 
     /// The documented parameters, as an implementation writes them: the
-    /// native hints, shortened by the file's imports.
+    /// native hints, read with the imports and namespace of the `*.api.php`
+    /// file that writes them (`api`), then shortened by the implementing
+    /// file's.
     fn hook_parameters(
         &self,
         parameters: &[crate::types::ParameterInfo],
+        (api_use_map, api_namespace): (&std::collections::HashMap<String, String>, &Option<String>),
         ctx: &FileContext,
     ) -> String {
         parameters
             .iter()
             .map(|parameter| {
+                // A function's native hint is kept as written.
                 let hint = parameter
                     .native_type_hint
                     .as_ref()
                     .map(|hint| {
                         hint.resolve_names(&|name| {
-                            crate::names::shorten_from_fqn(name, &ctx.use_map, &ctx.namespace)
+                            let fqn =
+                                crate::names::resolve_to_fqn(name, api_use_map, api_namespace);
+                            crate::names::shorten_class_fqn(&fqn, &ctx.use_map, &ctx.namespace)
                         })
                         .to_string()
                     })
