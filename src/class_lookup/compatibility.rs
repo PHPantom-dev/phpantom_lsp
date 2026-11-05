@@ -108,7 +108,7 @@ pub(crate) fn undeclared_shape_keys(
     let (Some(arg), Some(param)) = (arg_type.shape_parts(), param_type.shape_parts()) else {
         return Vec::new();
     };
-    if param.tail.is_some() {
+    if param.tail.is_some() || arg_lists_keys_loosely(&arg) {
         return Vec::new();
     }
     let param_keys = shape_keys(param.entries);
@@ -262,9 +262,10 @@ fn shape_is_compatible(
         return false;
     }
     let Some((tail_key, tail_value)) = param.tail else {
-        return arg_keys
-            .iter()
-            .all(|key| param_keys.contains(key) || may_be_listed(key, &param_keys, class_loader));
+        return arg_lists_keys_loosely(arg)
+            || arg_keys.iter().all(|key| {
+                param_keys.contains(key) || may_be_listed(key, &param_keys, class_loader)
+            });
     };
 
     // The tail is judged the way the type arguments of an array are: its
@@ -286,8 +287,29 @@ fn shape_is_compatible(
         });
     extras_fit
         && arg.tail.is_none_or(|(arg_tail_key, arg_tail_value)| {
-            (any_key || key_fits(arg_tail_key)) && value_fits(arg_tail_value)
+            tail_says_nothing(arg_tail_value)
+                || ((any_key || key_fits(arg_tail_key)) && value_fits(arg_tail_value))
         })
+}
+
+/// Whether an unsealed argument's tail says nothing about the entries
+/// beyond the ones it lists, the way a plain `array` says nothing about any
+/// of them, and so might fit whatever the parameter asks of them.
+fn tail_says_nothing(tail_value: &PhpType) -> bool {
+    tail_value.is_mixed()
+}
+
+/// Whether the keys an argument shape lists are no more held to a sealed
+/// parameter shape than those of a plain `array` are.
+///
+/// A key written into a plain `array` is recorded as an entry of an
+/// unsealed shape whose tail says nothing, so it can be read back. The
+/// array was never checked against the keys a sealed shape declares, and
+/// the write does not change that; only the value of an entry the
+/// parameter does declare is held to it.
+fn arg_lists_keys_loosely(arg: &ShapeParts<'_>) -> bool {
+    arg.tail
+        .is_some_and(|(_, tail_value)| tail_says_nothing(tail_value))
 }
 
 /// Whether `key`, which `listed` does not hold as spelled, may still be one
@@ -348,10 +370,10 @@ fn shape_fits_array(
         });
     listed_fit
         && arg.tail.is_none_or(|(tail_key, tail_value)| {
-            demand
-                .key
-                .is_none_or(|key_type| is_type_compatible(tail_key, key_type, class_loader, true))
-                && demand.value.is_none_or(|value_type| {
+            tail_says_nothing(tail_value)
+                || demand.key.is_none_or(|key_type| {
+                    is_type_compatible(tail_key, key_type, class_loader, true)
+                }) && demand.value.is_none_or(|value_type| {
                     is_type_compatible(tail_value, value_type, class_loader, true)
                 })
         })

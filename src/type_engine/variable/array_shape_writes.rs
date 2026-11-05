@@ -536,6 +536,22 @@ fn shape_slot_base(base: &PhpType, key: &str) -> PhpType {
     if let Some(value) = base.shape_value_type(key) {
         return value.clone();
     }
+    // An entry of a plain `array`, or one an unsealed shape does not list,
+    // may already hold an array with keys of its own, so the inner write
+    // builds on what the tail says it holds.
+    if let Some(unsealed) = base.as_unsealed_shape() {
+        return if unsealed.value.is_mixed() {
+            PhpType::named(atom("array"))
+        } else {
+            keyed_slot_base(&PhpType::generic_array(
+                unsealed.key.clone(),
+                unsealed.value.clone(),
+            ))
+        };
+    }
+    if is_bare_array(base) {
+        return PhpType::named(atom("array"));
+    }
     // A base that tracks one value type for every key already describes
     // what sits under this one, tracked or not.
     if matches!(base.kind(), TypeKind::ArrayShape(_)) {
@@ -622,7 +638,8 @@ pub(super) fn extract_array_write_index(index: &Expression<'_>) -> Option<usize>
 /// It may hold any keys and values before a write, so it still does after
 /// one: a write leaves it as it was.
 fn is_bare_array(base: &PhpType) -> bool {
-    matches!(base.kind(), TypeKind::Named(name)
+    base.as_unsealed_shape().is_none()
+        && matches!(base.kind(), TypeKind::Named(name)
         if name.eq_ignore_ascii_case("array") || name.eq_ignore_ascii_case("non-empty-array"))
 }
 
@@ -634,6 +651,22 @@ fn is_bare_array(base: &PhpType) -> bool {
 ///
 /// Returns `PhpType::array_shape(entries)` with the merged entries.
 fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
+    // An unsealed shape keeps every entry it lists and the tail beside
+    // them; only the written entry changes.
+    if let Some(unsealed) = base.as_unsealed_shape() {
+        let shape = merge_shape_key(&unsealed.shape, key, value_type);
+        return PhpType::unsealed_shape(shape, unsealed.key.clone(), unsealed.value.clone());
+    }
+    // A plain `array` may hold any other key the caller put there, so the
+    // written entry joins them as an unsealed shape: the entry can be read
+    // back, and nothing claims it is the only one.
+    if is_bare_array(base) {
+        return PhpType::unsealed_shape(
+            merge_shape_key(&PhpType::array_shape(Vec::new()), key, value_type),
+            PhpType::named(atom("array-key")),
+            PhpType::mixed(),
+        );
+    }
     // A base that tracks key and value types instead of individual keys
     // (`array<string, int>`, `list<User>`, `User[]`) still holds whatever
     // it held before the write. Rebuilding it as a one-entry shape would
@@ -651,10 +684,6 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
             PhpType::literal_string_value(key)
         };
         return merge_keyed_type_inner(base, &key_type, value_type, true);
-    }
-    // A shape would claim the written key is the only one there.
-    if is_bare_array(base) {
-        return base.clone();
     }
 
     let mut entries: Vec<ShapeEntry> = base

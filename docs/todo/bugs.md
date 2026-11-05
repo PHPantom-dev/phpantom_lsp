@@ -67,34 +67,7 @@ seconds a rate-limit message names.
 
 ## Array types
 
-### B729. Keys written into a plain `array` cannot be read back
-
-**Impact: Low · Complexity: Medium-High**
-
-```php
-/** @param array $args */
-function add(array $args, Foo $foo): void {
-    $args['foo'] = $foo;
-    $args['foo']->  // no completion: `$args` is still a plain `array`
-}
-```
-
-A write into a plain `array` leaves it a plain `array`, since the caller
-may have passed any other keys too. That keeps it from being checked as
-if the written keys were all it held, but it also forgets what was
-written, so reading the entry back gives `mixed`. PHPStan keeps both by
-intersecting the array with `hasOffsetValue('foo', Foo)`.
-
-An unsealed shape (`array{foo: Foo, ...}`) would remember the entry, but
-the argument check then reports every written key a sealed parameter
-shape does not declare, which a plain `array` is not reported for. The
-fix needs a type that records the entries a write put there without
-claiming they are checked against a sealed shape, or an argument check
-that tells the two apart.
-
-**Where to change:** `merge_shape_key` and `is_bare_array` in
-`src/type_engine/variable/array_shape_writes.rs`, and
-`undeclared_shape_keys` in `src/class_lookup/compatibility.rs`.
+No outstanding items.
 
 ## Laravel
 

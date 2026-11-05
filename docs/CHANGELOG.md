@@ -110,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Variables passed to typed by-reference parameters.** After a call to your own function or method that takes `array &$message`, the variable now has the parameter's type instead of the shape it had before the call, so reads of keys the callee added are no longer reported.
+- **Keys written into a plain `array`.** After `$args['foo'] = $foo` on an untyped `array`, `$args['foo']` is now known to be the value written, so it completes and is checked like any other entry. The array still counts as holding whatever other keys it came with.
 - **Route groups in `bootstrap/app.php`.** Routes registered from the `then:` or `using:` callback of `withRouting()`, including route files grouped there under a name prefix, are now known by their full names and are no longer reported as unknown routes.
 - **`parent::` calls that return `static`.** The result of `parent::create()` called from a subclass is now the subclass, so its own methods and properties are no longer reported as unknown on the parent.
 - **Yii views on Windows.** Go-to-definition, hover, references and diagnostics on Yii view names now work when the project lives on a Windows drive.

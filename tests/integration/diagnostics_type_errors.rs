@@ -12319,7 +12319,7 @@ takeMatching(makeOpen());
         "got {messages:?}"
     );
     assert!(
-        messages[1].contains("expects array{foo: array<string>, ...<array-key, mixed>}"),
+        messages[1].contains("expects array{foo: array<string>, ...}"),
         "got {messages:?}"
     );
 }
@@ -12431,7 +12431,7 @@ takeMap(['foo' => 1]);
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 2, "got {messages:?}");
     assert!(
-        messages[0].contains("got array{foo: string, ...<array-key, mixed>}"),
+        messages[0].contains("got array{foo: string, ...}"),
         "got {messages:?}"
     );
     assert!(
@@ -12477,7 +12477,7 @@ takeIntKeyed(makeOpen());
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 3, "got {messages:?}");
     assert!(
-        messages[0].contains("got array{0: int, ...<array-key, mixed>}"),
+        messages[0].contains("got array{0: int, ...}"),
         "got {messages:?}"
     );
     assert!(
@@ -12485,7 +12485,7 @@ takeIntKeyed(makeOpen());
         "got {messages:?}"
     );
     assert!(
-        messages[2].contains("got array{foo: int, ...<array-key, mixed>}"),
+        messages[2].contains("got array{foo: int, ...}"),
         "got {messages:?}"
     );
 }
@@ -12559,7 +12559,7 @@ takeNames(makeNamed());
         "got {messages:?}"
     );
     assert!(
-        messages[1].contains("got array{name: string, ...<array-key, mixed>}"),
+        messages[1].contains("got array{name: string, ...}"),
         "got {messages:?}"
     );
 }
@@ -15218,6 +15218,37 @@ function add(string $id, array $args, mixed $default): void {
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
+}
+
+#[test]
+fn a_key_written_into_a_plain_array_is_read_back_and_held_to_the_parameter() {
+    let php = r#"<?php
+declare(strict_types=1);
+class Foo {}
+function takes_int(int $i): void {}
+/** @param array{settings?: string} $args */
+function add_control(array $args): void {}
+/** @param array<string, string> $map */
+function add_map(array $map): void {}
+/** @param array $args */
+function add(array $args, Foo $foo): void {
+    $args['settings'] = $foo;
+    takes_int($args['settings']);
+    add_control($args);
+    add_map($args);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(messages[0].contains("got Foo"), "got {messages:?}");
+    assert!(
+        messages[1].contains("got array{settings: Foo, ...}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[2].contains("got array{settings: Foo, ...}"),
+        "got {messages:?}"
+    );
 }
 
 #[test]
