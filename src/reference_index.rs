@@ -743,6 +743,7 @@ impl Backend {
         let reads_container = self.reads_service_container();
         let is_twig = self.is_twig_project();
         let is_yii = self.is_yii_project();
+        let is_drupal = self.is_drupal_project();
         let enabled = |kind: StringKeyKind| match kind.framework() {
             KeyFramework::Laravel => is_laravel,
             KeyFramework::ServiceContainer => reads_container,
@@ -750,6 +751,7 @@ impl Backend {
             KeyFramework::Twig => is_twig,
             KeyFramework::Yii => is_yii,
             KeyFramework::WordPress => false,
+            KeyFramework::Drupal => is_drupal,
         };
         for site in &symbol_map.typed_receiver_sites {
             if !site.receiver.names_any(enabled) {

@@ -133,11 +133,11 @@ ships, remove every row that names it.
 | DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
 | DR15 | [Benchmark for Drupal names](todo/drupal.md#dr15-benchmark-for-drupal-names) (depends on DR2) | Low-Medium | Low |
-| DR3 | [Entity storage and entity type IDs](todo/drupal.md#dr3-entity-storage-and-entity-type-ids) | High        | Medium-High |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
-| DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) (depends on DR3) | Medium-High | High        |
+| DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) | Medium-High | High        |
 | DR16 | [Event subscribers](todo/drupal.md#dr16-event-subscribers) | Medium | Low-Medium |
 | DR17 | [Warn on unknown service IDs](todo/drupal.md#dr17-warn-on-unknown-service-ids) | Medium | Low-Medium |
+| DR18 | [Warn on unknown entity type IDs](todo/drupal.md#dr18-warn-on-unknown-entity-type-ids) | Medium | Low-Medium |
 | DR21 | [Return types core's docblocks leave wide](todo/drupal.md#dr21-return-types-cores-docblocks-leave-wide) | Medium | Low-Medium |
 
 ## Yii

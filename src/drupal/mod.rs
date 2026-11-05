@@ -18,6 +18,8 @@ use parking_lot::RwLock;
 pub(crate) mod types;
 
 use crate::Backend;
+use crate::atom::Atom;
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 
 /// The web roots of the workspace's Drupal projects, and the declaration
 /// files found under them.
@@ -67,6 +69,16 @@ const READ_ONLY_DIRS: [&str; 5] = [
 pub(crate) fn is_service_lookup(class: &str, method: &str) -> bool {
     class.strip_prefix('\\').unwrap_or(class) == "Drupal"
         && (method.eq_ignore_ascii_case("service") || method.eq_ignore_ascii_case("hasService"))
+}
+
+/// Whether a static call of `method` on `class`, a resolved class name,
+/// starts an entity query on an entity type ID: `\Drupal::entityQuery()` or
+/// `\Drupal::entityQueryAggregate()`.  Only the global `Drupal` class
+/// counts.
+pub(crate) fn is_entity_query(class: &str, method: &str) -> bool {
+    class.strip_prefix('\\').unwrap_or(class) == "Drupal"
+        && (method.eq_ignore_ascii_case("entityQuery")
+            || method.eq_ignore_ascii_case("entityQueryAggregate"))
 }
 
 /// Whether `path` is a file Drupal reads declarations from.
@@ -153,6 +165,56 @@ impl Backend {
                 .iter()
                 .any(|dir| path.starts_with(root.join(dir)))
         })
+    }
+
+    /// The entity class and storage handler of each declaration of the
+    /// entity type `id`; a storage of `None` for a declaration that names
+    /// none and has no default.
+    pub(crate) fn drupal_entity_types(&self, id: &str) -> Vec<(Atom, Option<Atom>)> {
+        let mut found: Vec<(Atom, Option<Atom>)> = Vec::new();
+        self.visit_declaring_symbol_maps(|_, map| {
+            for site in &map.entity_types {
+                let at = map.spans.partition_point(|span| span.start < site.start);
+                let declares_id = map.spans[at..]
+                    .iter()
+                    .take_while(|span| span.start == site.start)
+                    .any(|span| {
+                        matches!(
+                            &span.kind,
+                            SymbolKind::StringKey {
+                                kind: StringKeyKind::DrupalEntityType,
+                                key,
+                                ..
+                            } if key == id
+                        )
+                    });
+                if declares_id
+                    && !found
+                        .iter()
+                        .any(|(class, storage)| *class == site.class && *storage == site.storage)
+                {
+                    found.push((site.class, site.storage));
+                }
+            }
+        });
+        found
+    }
+
+    /// Whether `uri` belongs to a test module of a Drupal project and is not
+    /// open: what it declares is left out, since no real site enables it.
+    pub(crate) fn is_closed_drupal_test_fixture(&self, uri: &str) -> bool {
+        if !self.is_drupal_project() {
+            return false;
+        }
+        let Some(path) = crate::util::uri_to_path(uri) else {
+            return false;
+        };
+        self.drupal
+            .web_roots
+            .read()
+            .iter()
+            .any(|root| path.starts_with(root) && is_test_fixture(&path, root))
+            && !self.open_files.read().contains_key(uri)
     }
 
     /// Whether `uri` is a file a Drupal project loads services from: a

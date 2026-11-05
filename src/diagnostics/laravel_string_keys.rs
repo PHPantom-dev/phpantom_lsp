@@ -91,8 +91,10 @@ impl CheckedStringKind {
             // since another plugin or a later core may fire it.  A block
             // name that nothing above defines starts a new block.  A
             // template variable no render was found to pass may be passed
-            // by one that builds its context at runtime.
+            // by one that builds its context at runtime.  A module can add
+            // an entity type in PHP, through `hook_entity_type_build()`.
             StringKeyKind::WordPressHook
+            | StringKeyKind::DrupalEntityType
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack

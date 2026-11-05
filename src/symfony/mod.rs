@@ -125,7 +125,8 @@ pub(crate) struct SymfonyState {
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
 /// translation key, a template, a Twig filter or function, a configuration
-/// key, an event listener, or a Messenger bus, outright or through a configurator call still to be
+/// key, an event listener, a Messenger bus, or a Drupal entity type,
+/// outright or through a configurator call still to be
 /// confirmed, or registers a Messenger handler, or imports routes, or
 /// declares a Twig loader.
 ///
@@ -139,7 +140,8 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         KeyFramework::ServiceContainer
         | KeyFramework::Symfony
         | KeyFramework::Twig
-        | KeyFramework::Yii => enabled(kind),
+        | KeyFramework::Yii
+        | KeyFramework::Drupal => enabled(kind),
         KeyFramework::Laravel | KeyFramework::WordPress => false,
     };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
@@ -184,6 +186,7 @@ impl Backend {
             KeyFramework::Symfony => self.is_symfony_project(),
             KeyFramework::Twig => self.is_twig_project(),
             KeyFramework::Yii => self.is_yii_project(),
+            KeyFramework::Drupal => self.is_drupal_project(),
             // The hook functions' names are WordPress's own, and a project
             // that calls them is a WordPress one whatever its
             // `composer.json` says, or whether it has one at all.
@@ -200,6 +203,7 @@ impl Backend {
             return;
         }
         let declares = declares_symfony_keys(map, |kind| self.string_key_kind_enabled(kind))
+            && !self.is_closed_drupal_test_fixture(uri)
             && !self
                 .workspace
                 .vendor_uri_prefixes
@@ -276,6 +280,7 @@ impl Backend {
         // Only Symfony declares names through calls the type engine has to
         // confirm; a Drupal project records none.
         let needs_typed = match kind.framework() {
+            KeyFramework::Drupal => false,
             KeyFramework::ServiceContainer => self.is_symfony_project(),
             KeyFramework::Laravel
             | KeyFramework::Symfony

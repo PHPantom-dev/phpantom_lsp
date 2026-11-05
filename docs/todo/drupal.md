@@ -3,8 +3,9 @@
 Known gaps and missing features in PHPantom's Drupal support. The web
 root is detected, core, contrib, and the Drupal file extensions
 (`.module`, `.install`, `.theme`, …) are indexed past `.gitignore`, and
-the services the `*.services.yml` files declare are read. Nothing reads
-Drupal's other declarations yet: entity types, fields, routes, or hooks.
+the services the `*.services.yml` files declare and the entity types
+entity classes declare are read. Nothing reads Drupal's other
+declarations yet: fields, routes, or hooks.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -28,34 +29,9 @@ within the same impact tier.
 
 ---
 
-## DR3. Entity storage and entity type IDs
-
-**Impact: High · Complexity: Medium-High**
-
-```php
-$storage = \Drupal::entityTypeManager()->getStorage('node');  // NodeStorageInterface
-$node = $storage->load($nid);                                  // ?NodeInterface
-```
-
-`getStorage()` returns the generic `EntityStorageInterface`, so every
-loaded entity is the generic `EntityInterface` and the methods a node
-or user has are reported as unknown. The entity type ID maps to an
-entity class and its storage handler through the entity type's
-declaration: the `#[ContentEntityType]` / `#[ConfigEntityType]`
-attribute, or the annotation older code uses. Read those statically,
-type `getStorage()`, `load()`, `loadMultiple()`, and `create()` from
-them, and complete and navigate entity type IDs. Entity queries
-(`\Drupal::entityQuery('node')`, `$storage->getQuery()`) take the same
-IDs and return IDs of that entity type.
-
-**Where to look:** PHPStan's Drupal extension (its entity data
-repository and the storage return-type extensions).
-
----
-
 ## DR4. Entity field access
 
-**Impact: Medium-High · Complexity: High** (depends on DR3)
+**Impact: Medium-High · Complexity: High**
 
 ```php
 $tags = $node->field_tags;          // FieldItemListInterface
@@ -346,6 +322,23 @@ lacks, and the container throws for it at run time. Report one where
 `\Drupal::service()` and `$container->get()` take it. A module's
 `ServiceProvider` class can register services in PHP, which no YAML file
 lists, so an ID such a provider may register must not warn.
+
+---
+
+## DR18. Warn on unknown entity type IDs
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$storage = \Drupal::entityTypeManager()->getStorage('nod');
+```
+
+An entity type ID no entity class declares is a typo or a module the
+site lacks, and the entity type manager throws for it at run time.
+Report one where `getStorage()`, `\Drupal::entityQuery()`, and the other
+calls that take an entity type ID take it. A module can add entity types
+in code from `hook_entity_type_build()`, which no class declares, so a
+site where an implementation of that hook may add one stays silent.
 
 ---
 

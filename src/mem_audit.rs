@@ -1401,6 +1401,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             sym.add(
                 sm.container_values.capacity() * size_of::<crate::symbol_map::ContainerValueSite>(),
             );
+            sym.add(sm.entity_types.capacity() * size_of::<crate::symbol_map::EntityTypeSite>());
             sym.add(sm.routes.capacity() * size_of::<crate::symbol_map::RouteSite>());
             for route in &sm.routes {
                 sym.add(route.path.as_ref().map_or(0, String::capacity));
