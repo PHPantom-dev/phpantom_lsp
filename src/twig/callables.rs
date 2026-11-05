@@ -141,7 +141,16 @@ fn read_extension_file(uri: &str, content: &str) -> Vec<TwigCallable> {
     let resolver = mago_names::resolver::NameResolver::new(&arena);
     let names = crate::names::OwnedResolvedNames::from_resolved(&resolver.resolve(program));
     let map = crate::symbol_map::extract_symbol_map_for_index(
-        program, content, &names, false, true, None,
+        program,
+        content,
+        &names,
+        crate::symbol_map::extraction::Frameworks {
+            symfony: false,
+            service_container: false,
+            drupal: false,
+            twig: true,
+        },
+        None,
     );
     map.twig_callables
         .into_iter()

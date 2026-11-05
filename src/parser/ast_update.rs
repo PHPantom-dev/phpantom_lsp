@@ -561,8 +561,12 @@ impl Backend {
                 program,
                 content,
                 &owned_resolved,
-                self.is_symfony_project(),
-                self.is_twig_project(),
+                crate::symbol_map::extraction::Frameworks {
+                    symfony: self.is_symfony_project(),
+                    service_container: self.reads_service_container(),
+                    drupal: self.is_drupal_project(),
+                    twig: self.is_twig_project(),
+                },
                 yii_dir.as_deref(),
             )
         };

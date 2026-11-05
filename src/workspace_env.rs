@@ -96,7 +96,9 @@ pub(crate) struct WorkspaceEnv {
     pub(crate) client_indexing: Arc<RwLock<config::ClientIndexingOptions>>,
     /// Whether a Composer project of the workspace is a Drupal site, so
     /// `index_filters` treats Drupal's `.module`, `.install`, … files as
-    /// PHP source in every walk, not only in the web-root class scan.
+    /// PHP source in every walk, not only in the web-root class scan, and
+    /// Drupal's own declarations, such as its services, are read (see
+    /// [`crate::drupal`]).
     pub(crate) is_drupal: Arc<AtomicBool>,
     /// The stub directory the editor extension forwarded, beside the
     /// `[stubs]` paths of `config`. Shared by `Arc` for the same reason

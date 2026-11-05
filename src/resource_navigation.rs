@@ -275,7 +275,15 @@ impl Backend {
         let mut container_values = Vec::new();
         let mut route_imports = Vec::new();
         let mut declares_twig_loader = false;
-        if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
+        // A Drupal declaration file is Drupal's, also in a Drupal site that
+        // requires Symfony's container and has a `config` directory on the
+        // way to it, as core's `config` module does.
+        if self.is_drupal_services_uri(uri) {
+            let (container_spans, values) =
+                crate::symfony::resources::container_declarations(uri, content);
+            spans = container_spans;
+            container_values = values;
+        } else if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
             declares_twig_loader = crate::symfony::tags::tags_twig_loader(content);
             // A bus is declared by a key under `config/packages/`, which is
             // a configuration key too; the bus is the one that means

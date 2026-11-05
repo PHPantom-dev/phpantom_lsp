@@ -826,6 +826,15 @@ impl Backend {
                 if *is_write || *is_optional || !self.string_key_kind_enabled(*kind) {
                     return None;
                 }
+                // Only Symfony's naming tells an application's own service
+                // IDs and parameters from the ones its bundles register;
+                // Drupal reads the same names with no such rule to judge
+                // them by.
+                if kind.framework() == crate::symbol_map::KeyFramework::ServiceContainer
+                    && !self.is_symfony_project()
+                {
+                    return None;
+                }
                 Some((
                     CheckedStringKind::of(kind)?,
                     key.as_str(),

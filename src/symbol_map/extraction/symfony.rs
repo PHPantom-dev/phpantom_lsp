@@ -21,8 +21,8 @@
 
 use super::*;
 use crate::symbol_map::{
-    ContainerValue, ContainerValueSite, MessengerHandlerSite, ReceiverClass, RouteImport,
-    SYMFONY_CONTAINER_CONFIGURATOR_NS, SYMFONY_ROUTING_CONFIGURATOR, StringKeyKind,
+    ContainerValue, ContainerValueSite, KeyFramework, MessengerHandlerSite, ReceiverClass,
+    RouteImport, SYMFONY_CONTAINER_CONFIGURATOR_NS, SYMFONY_ROUTING_CONFIGURATOR, StringKeyKind,
 };
 use crate::symfony::translations::{DEFAULT_DOMAIN, is_domain_name, translation_key};
 use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_literal_at_range};
@@ -149,7 +149,7 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     argument_list: &ArgumentList<'_>,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    if !ctx.symfony && !ctx.twig && !ctx.yii {
+    if !ctx.service_container && !ctx.twig && !ctx.yii {
         return;
     }
     if ctx.symfony && member_name.eq_ignore_ascii_case("trans") {
@@ -187,15 +187,17 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             continue;
         };
         // Outside Symfony, only the calls of the framework the project uses
-        // are left: Twig's own `render()`, or Yii's URL generator.
-        let records = |kind: StringKeyKind| {
-            if kind.is_twig() {
-                ctx.twig
-            } else if kind.is_yii() {
-                ctx.yii
-            } else {
-                ctx.symfony
-            }
+        // are left: Twig's own `render()`, Yii's URL generator, or a Drupal
+        // container lookup.  Only Symfony declares services and parameters
+        // in PHP; in Drupal a `setParameter()` is far more often a
+        // validator's or a query's than the container's.
+        let records = |kind: StringKeyKind| match kind.framework() {
+            KeyFramework::ServiceContainer if is_write => ctx.symfony,
+            KeyFramework::ServiceContainer => ctx.service_container,
+            KeyFramework::Symfony => ctx.symfony,
+            KeyFramework::Twig => ctx.twig,
+            KeyFramework::Yii => ctx.yii,
+            KeyFramework::Laravel | KeyFramework::WordPress => false,
         };
         if !receiver.names_any(records) {
             continue;
@@ -2526,7 +2528,16 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, true, true, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: true,
+                service_container: true,
+                drupal: false,
+                twig: true,
+            },
+            None,
         )
     }
 
@@ -3150,9 +3161,47 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, false, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: false,
+                twig: false,
+            },
+            None,
         );
         assert!(map.typed_receiver_sites.is_empty());
+    }
+
+    #[test]
+    fn a_drupal_project_records_container_reads_but_no_declarations() {
+        let php = "<?php\nfunction f($container, $violation) {\n    $container->get('acme.greeter');\n    $container->getParameter('acme.limit');\n    $violation->setParameter('@value', $value);\n}\n";
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: false,
+                twig: true,
+            },
+            None,
+        );
+        assert_eq!(
+            receivers(&map),
+            vec![
+                ("acme.greeter", ReceiverClass::ContainerLookup, false),
+                ("acme.limit", ReceiverClass::ParameterHolder, false),
+            ]
+        );
     }
 
     #[test]
@@ -3164,7 +3213,16 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, true, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: false,
+                twig: true,
+            },
+            None,
         );
         assert_eq!(
             receivers(&map),

@@ -55,13 +55,17 @@ impl Backend {
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
         self.ensure_workspace_index_ready_for_request();
-        self.find_references_inner(
+        let mut locations = self.find_references_inner(
             uri,
             content,
             position,
             include_declaration,
             ReferenceSearchMode::Rename,
-        )
+        )?;
+        // Drupal core and contributed extensions are references worth
+        // finding but files a rename must not edit: Composer overwrites them.
+        locations.retain(|location| !self.is_drupal_read_only_uri(location.uri.as_str()));
+        Some(locations)
     }
 
     fn find_references_inner(

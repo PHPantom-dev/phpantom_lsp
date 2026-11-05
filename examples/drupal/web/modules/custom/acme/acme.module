@@ -7,6 +7,7 @@
 
 declare(strict_types=1);
 
+use Drupal\acme\Greeter;
 use Drupal\Core\Routing\RouteMatchInterface;
 
 /**
@@ -17,7 +18,16 @@ function acme_help(string $route_name, RouteMatchInterface $route_match): ?strin
     // Try: complete after `$route_match->`. The methods come from core's
     // RouteMatchInterface.
     if ($route_name === 'help.page.acme' && $route_match->getParameter('name') === 'acme') {
-        return '<p>Greets the name in the path, for example /acme/greeting/Ada.</p>';
+        // Try: hover `$greeter`, typed by the class acme.services.yml
+        // declares, or go to the definition of 'acme.greeter'. Complete a
+        // service ID inside `\Drupal::service('')`.
+        $greeter = \Drupal::service('acme.greeter');
+        // Try: hover `$sameGreeter`. acme.services.yml also registers the
+        // service under its class name, and a lookup by class name is typed
+        // as that class.
+        $sameGreeter = \Drupal::service(Greeter::class);
+
+        return '<p>' . $greeter->greet('Ada') . ' ' . $sameGreeter->greet('Grace') . '</p>';
     }
 
     return null;

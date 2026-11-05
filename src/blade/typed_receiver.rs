@@ -126,6 +126,11 @@ impl Backend {
         content: &str,
         sites: &[TypedReceiverSite],
     ) -> Vec<SymbolSpan> {
+        // The spans are cached per file, and a caller working on a file of
+        // another Composer project (a `\Drupal::service()` lookup reading a
+        // Symfony app's configurator) would otherwise resolve this file's
+        // receivers against that project's classes.
+        let _project = self.enter_project_scope(uri);
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let _cache_guard =
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);

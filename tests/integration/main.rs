@@ -200,6 +200,8 @@ mod document_highlight;
 mod document_links;
 mod document_symbols;
 mod document_symbols_blade;
+mod drupal_mixed_workspace;
+mod drupal_services;
 mod duplicate_class_declarations;
 mod duplicate_function_declarations;
 mod expression_evaluation_order;

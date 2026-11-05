@@ -110,7 +110,16 @@ pub(crate) fn hook_firings(content: &str) -> Vec<Firing> {
     let resolver = mago_names::resolver::NameResolver::new(&arena);
     let names = crate::names::OwnedResolvedNames::from_resolved(&resolver.resolve(program));
     let map = crate::symbol_map::extract_symbol_map_for_index(
-        program, content, &names, false, false, None,
+        program,
+        content,
+        &names,
+        crate::symbol_map::extraction::Frameworks {
+            symfony: false,
+            service_container: false,
+            drupal: false,
+            twig: false,
+        },
+        None,
     );
     map.spans
         .into_iter()

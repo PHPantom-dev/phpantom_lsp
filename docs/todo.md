@@ -33,7 +33,6 @@ contributor even though it's short.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | DR9 | [Drupal directories outside `contrib` and `custom`](todo/drupal.md#dr9-drupal-directories-outside-contrib-and-custom) | Medium-High | Low-Medium |
-| DR2 | [Service IDs from `*.services.yml`](todo/drupal.md#dr2-service-ids-from-servicesyml) | High        | Medium      |
 | DR5 | [Route names](todo/drupal.md#dr5-route-names) | Medium-High | Medium      |
 | DR6 | [Hooks](todo/drupal.md#dr6-hooks) | Medium-High | Medium      |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
@@ -128,7 +127,6 @@ ships, remove every row that names it.
 | DR11 | [Form and render callbacks](todo/drupal.md#dr11-form-and-render-callbacks) | Low-Medium | Low-Medium |
 | DR12 | [Translation placeholders](todo/drupal.md#dr12-translation-placeholders) | Low-Medium | Low-Medium |
 | DR13 | [Module names and `*.info.yml`](todo/drupal.md#dr13-module-names-and-infoyml) | Low-Medium | Low-Medium |
-| DR2 | [Service IDs from `*.services.yml`](todo/drupal.md#dr2-service-ids-from-servicesyml) | High        | Medium      |
 | DR5 | [Route names](todo/drupal.md#dr5-route-names) | Medium-High | Medium      |
 | DR6 | [Hooks](todo/drupal.md#dr6-hooks) | Medium-High | Medium      |
 | DR10 | [Plugin IDs](todo/drupal.md#dr10-plugin-ids) | Medium | Medium |
@@ -139,6 +137,7 @@ ships, remove every row that names it.
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
 | DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) (depends on DR3) | Medium-High | High        |
 | DR16 | [Event subscribers](todo/drupal.md#dr16-event-subscribers) | Medium | Low-Medium |
+| DR17 | [Warn on unknown service IDs](todo/drupal.md#dr17-warn-on-unknown-service-ids) | Medium | Low-Medium |
 | DR21 | [Return types core's docblocks leave wide](todo/drupal.md#dr21-return-types-cores-docblocks-leave-wide) | Medium | Low-Medium |
 
 ## Yii

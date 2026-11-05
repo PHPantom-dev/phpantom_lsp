@@ -37,7 +37,7 @@ pub(super) fn try_resolve_container_lookup_type(
     let backend = ctx
         .file
         .backend
-        .filter(|backend| backend.is_symfony_project())?;
+        .filter(|backend| backend.reads_service_container())?;
     let Some(Argument::Positional(argument)) = argument_list.arguments.first() else {
         return None;
     };
@@ -65,6 +65,37 @@ pub(super) fn try_resolve_container_lookup_type(
         }
         _ => None,
     }
+}
+
+/// What `\Drupal::service()` returns for the service ID its literal first
+/// argument names: the class the ID is built from, as for a container's
+/// `get()`.
+///
+/// `None` for an ID the project does not declare, and for a class constant
+/// (`Foo::class`), which core's own conditional return type already reads.
+pub(super) fn try_resolve_drupal_service_type(
+    owner_fqn: &str,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if !method_name.eq_ignore_ascii_case("service") {
+        return None;
+    }
+    let backend = ctx.file.backend?;
+    let argument = crate::call_args::first_param_arg(argument_list, "id")?;
+    let (key, _, _) = crate::virtual_members::laravel::helpers::resolved_string_literal(
+        argument.value(),
+        ctx.file.content,
+    )?;
+    let classes = crate::drupal::types::service_classes(
+        backend,
+        owner_fqn,
+        method_name,
+        key,
+        ctx.file.class_loader,
+    )?;
+    Some(ResolvedType::from_classes(classes))
 }
 
 /// What Messenger's `HandleTrait::handle()` returns for the message it is
