@@ -691,6 +691,21 @@ impl PhpType {
         }
     }
 
+    /// Whether this type is `static` or `$this` (bare, nullable, or in a
+    /// union with null): the keywords late static binding decides, unlike
+    /// `self` and `parent`, which always name the declaring class's side.
+    pub fn is_late_static_bound(&self) -> bool {
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("static") || s == "$this",
+            TypeKind::Nullable(inner) => inner.is_late_static_bound(),
+            TypeKind::Union(members) => {
+                let mut non_null = members.iter().filter(|m| !m.is_null()).peekable();
+                non_null.peek().is_some() && non_null.all(PhpType::is_late_static_bound)
+            }
+            _ => false,
+        }
+    }
+
     pub fn is_self_like(&self) -> bool {
         match self.kind() {
             TypeKind::Named(s) => self.is_self_ref() || s.eq_ignore_ascii_case("parent"),

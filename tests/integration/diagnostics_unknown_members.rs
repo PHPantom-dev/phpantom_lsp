@@ -17992,3 +17992,79 @@ bindContext(fn() => $this instanceof FirstContext ? $this->firstOnly() : $this->
         "{diagnostics:?}"
     );
 }
+
+/// `parent::` forwards late static binding, so a `static` return read
+/// through it is the calling class, not the parent that declares it.
+#[test]
+fn parent_call_returning_static_resolves_to_calling_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Base {
+    /** @return static */
+    public static function create() { return new static(); }
+    public static function make(): static { return new static(); }
+    public function build(): static { return $this; }
+}
+
+class Child extends Base {
+    public ?string $service = null;
+
+    public static function create() {
+        $instance = parent::create();
+        $instance->childOnly();
+        $instance->service = 'x';
+        parent::create()->childOnly();
+        $made = parent::make();
+        $made->childOnly();
+        parent::make()->childOnly();
+        return $instance;
+    }
+
+    public function build(): static {
+        $built = parent::build();
+        $built->childOnly();
+        parent::build()->childOnly();
+        return $built;
+    }
+
+    public function childOnly(): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no diagnostics, got: {:?}",
+        diags
+    );
+}
+
+/// Positive control: a member the calling class lacks is still flagged.
+#[test]
+fn parent_call_returning_static_still_flags_missing_member() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Base {
+    /** @return static */
+    public static function create() { return new static(); }
+}
+
+class Child extends Base {
+    public static function create() {
+        $instance = parent::create();
+        $instance->missingThing();
+        return $instance;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| {
+            let m = message_text(&d.message);
+            m.contains("missingThing") && m.contains("Child")
+        }),
+        "Expected missingThing flagged on Child, got: {:?}",
+        diags
+    );
+}

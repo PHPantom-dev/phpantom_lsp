@@ -366,6 +366,42 @@ impl Backend {
             let template_subs =
                 Self::build_method_template_subs(&merged, method_name, &arg_refs, ctx);
 
+            // `parent::` forwards late static binding, so a `static`
+            // return names the calling class rather than the parent that
+            // declares it.  (`self::`/`static::` already name the caller.)
+            let target = merged.get_method_ci(method_name);
+            let lsb_caller = ctx
+                .current_class
+                .filter(|caller| !caller.name.is_empty() && class.eq_ignore_ascii_case("parent"));
+            if let Some(caller) = lsb_caller
+                && target
+                    .and_then(|m| m.return_type.as_ref())
+                    .is_some_and(PhpType::is_late_static_bound)
+            {
+                if let Some(ref mut hint_out) = return_type_hint_out
+                    && let Some(m) = target
+                    && let Some(substituted) = method_call_return_hint(
+                        m,
+                        &merged,
+                        text_args,
+                        &template_subs,
+                        &build_var_resolver(ctx),
+                        &written,
+                        ctx,
+                    )
+                {
+                    **hint_out = Some(resolve_hint_keywords(
+                        substituted,
+                        &merged,
+                        ctx.file.class_loader,
+                        |s| s.replace_self_bound(&merged.fqn(), Some(&caller.fqn())),
+                    ));
+                }
+                let caller = (ctx.file.class_loader)(Fqn::new(&caller.fqn()))
+                    .unwrap_or_else(|| Arc::new(caller.clone()));
+                return vec![caller];
+            }
+
             if let Some(ref mut hint_out) = return_type_hint_out
                 && let Some(m) = merged.get_method_ci(method_name)
                 && let Some(substituted) = method_call_return_hint(
