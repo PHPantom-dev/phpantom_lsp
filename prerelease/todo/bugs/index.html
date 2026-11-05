@@ -1038,17 +1038,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b730-a-parent-call-that-returns-static-gives-the-parent-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B730. A <code>parent::</code> call that returns <code>static</code> gives the parent class
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b731-a-method-that-returns-new-static-without-a-declared-type-gives-its-own-class" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1762,17 +1751,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b730-a-parent-call-that-returns-static-gives-the-parent-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B730. A <code>parent::</code> call that returns <code>static</code> gives the parent class
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b731-a-method-that-returns-new-static-without-a-declared-type-gives-its-own-class" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1938,39 +1916,14 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b730-a-parent-call-that-returns-static-gives-the-parent-class">B730. A <code>parent::</code> call that returns <code>static</code> gives the parent class<a class="headerlink" href="#b730-a-parent-call-that-returns-static-gives-the-parent-class" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Base {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    /** @return static */</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    public static function create() { return new static(); }</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">class Child extends Base {</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    public static function create() {</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">        $instance = parent::create();</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">        $instance-&gt;childOnly();   // Method 'childOnly' not found on class 'Base'</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">        return $instance;</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">    }</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="x">    public function childOnly(): void {}</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>parent::</code> forwards the late static binding, so <code>parent::create()</code>
-called from <code>Child</code> returns a <code>Child</code>. The variable's type is right
-(an argument check on <code>$instance</code> reports <code>static(Child)</code>), but member
-access on it, and on <code>parent::create()-&gt;</code> directly, looks the member up
-on <code>Base</code>. A native <code>: static</code> return type behaves the same. Drupal
-leans on this shape: a form or plugin's <code>create()</code> calls
-<code>parent::create($container)</code> and then sets its own injected services on
-the instance, and each of those assignments is reported as an unknown
-property.</p>
 <h3 id="b731-a-method-that-returns-new-static-without-a-declared-type-gives-its-own-class">B731. A method that returns <code>new static()</code> without a declared type gives its own class<a class="headerlink" href="#b731-a-method-that-returns-new-static-without-a-declared-type-gives-its-own-class" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Base {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    public static function make() { return new static(); }</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">}</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">class Child extends Base {}</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">Child::make();   // Base, should be Child</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Base {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    public static function make() { return new static(); }</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">}</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">class Child extends Base {}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">Child::make();   // Base, should be Child</span>
 </code></pre></div>
 <p>With no native or docblock return type, the return type inferred from
 the body binds <code>new static()</code> to the declaring class instead of keeping
@@ -1979,12 +1932,12 @@ it <code>static</code>, so a call through a subclass gives the parent. Declaring
 the right type.</p>
 <h3 id="b732-allowdynamicproperties-does-not-allow-dynamic-properties">B732. <code>#[\AllowDynamicProperties]</code> does not allow dynamic properties<a class="headerlink" href="#b732-allowdynamicproperties-does-not-allow-dynamic-properties" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">#[\AllowDynamicProperties]</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">class Extension {}</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function f(Extension $extension): int {</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    return $extension-&gt;sort;   // Property 'sort' not found on class 'Extension'</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">#[\AllowDynamicProperties]</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">class Extension {}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">function f(Extension $extension): int {</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    return $extension-&gt;sort;   // Property 'sort' not found on class 'Extension'</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>A class marked <code>#[\AllowDynamicProperties]</code> (or one extending such a
 class) takes any property, so reading or writing one it does not declare
@@ -1995,11 +1948,11 @@ the common case: <code>$module_data[$name]-&gt;sort</code> and <code>-&gt;requir
 reported about thirty times on core once its services are typed.</p>
 <h3 id="b733-a-drupal-service-a-serviceprovider-alters-keeps-the-class-its-yaml-names">B733. A Drupal service a <code>ServiceProvider</code> alters keeps the class its YAML names<a class="headerlink" href="#b733-a-drupal-service-a-serviceprovider-alters-keeps-the-class-its-yaml-names" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// core.services.yml: language_manager: { class: Drupal\Core\Language\LanguageManager }</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">// language module: LanguageServiceProvider::alter() calls</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">//   $container-&gt;getDefinition('language_manager')-&gt;setClass(ConfigurableLanguageManager::class)</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">\Drupal::service('language_manager')-&gt;getLanguageConfigOverride('fr', 'system.site');</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">// Method 'getLanguageConfigOverride' not found on class 'Drupal\Core\Language\LanguageManager'</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// core.services.yml: language_manager: { class: Drupal\Core\Language\LanguageManager }</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">// language module: LanguageServiceProvider::alter() calls</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">//   $container-&gt;getDefinition('language_manager')-&gt;setClass(ConfigurableLanguageManager::class)</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">\Drupal::service('language_manager')-&gt;getLanguageConfigOverride('fr', 'system.site');</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">// Method 'getLanguageConfigOverride' not found on class 'Drupal\Core\Language\LanguageManager'</span>
 </code></pre></div>
 <p>A module's <code>&lt;Module&gt;ServiceProvider</code> class can replace the class of a
 service another module declares, and the service is then built from the

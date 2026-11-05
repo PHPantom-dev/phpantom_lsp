@@ -5227,6 +5227,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>parent::</code> calls that return <code>static</code>.</strong> The result of <code>parent::create()</code> called from a subclass is now the subclass, so its own methods and properties are no longer reported as unknown on the parent.</li>
 <li><strong>Yii views on Windows.</strong> Go-to-definition, hover, references and diagnostics on Yii view names now work when the project lives on a Windows drive.</li>
 <li><strong><code>move</code> on Windows.</strong> The <code>move</code> command no longer refuses every file as being outside the project on Windows, and a namespace such as <code>Tests\Unit</code> is no longer mistaken for the directory of the same name.</li>
 <li><strong>Members named by a variable in a chain.</strong> <code>$row-&gt;{$column}-&gt;equals($x)</code> and <code>$obj-&gt;$getter()-&gt;format()</code> now resolve when the variable holds known strings. A variable that can hold several names reads every member they name.</li>
