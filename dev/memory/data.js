@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793891508676,
+  "lastUpdate": 1793891782290,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9922,6 +9922,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 107.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "4638858+giuseppe-esposito-87@users.noreply.github.com",
+            "name": "Giuseppe Esposito",
+            "username": "giuseppe-esposito-87"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0e08e615b89dcc613e2d026123683241d9c6e251",
+          "message": "Drupal entity types and typed entity storage (#534)",
+          "timestamp": "2026-11-05T15:48:34+01:00",
+          "tree_id": "14187b4701ba9baad6f56da8b1c2e13cc7e7269f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/0e08e615b89dcc613e2d026123683241d9c6e251"
+        },
+        "date": 1793891771643,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 44.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 84.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 138.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 106.8,
             "unit": "MiB"
           }
         ]
