@@ -109,6 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Untyped methods that return `new static()`.** Calling such a method through a subclass, or on a class that uses the trait declaring it, now gives that class instead of the one the method is declared in.
 - **`#[\AllowDynamicProperties]` classes.** Reading or writing a property such a class, or a subclass of one, does not declare is no longer reported as unknown.
 - **Variables passed to typed by-reference parameters.** After a call to your own function or method that takes `array &$message`, the variable now has the parameter's type instead of the shape it had before the call, so reads of keys the callee added are no longer reported.
 - **Keys written into a plain `array`.** After `$args['foo'] = $foo` on an untyped `array`, `$args['foo']` is now known to be the value written, so it completes and is checked like any other entry. The array still counts as holding whatever other keys it came with.

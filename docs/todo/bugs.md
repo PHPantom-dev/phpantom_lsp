@@ -121,21 +121,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B731. A method that returns `new static()` without a declared type gives its own class
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-class Base {
-    public static function make() { return new static(); }
-}
-class Child extends Base {}
-
-Child::make();   // Base, should be Child
-```
-
-With no native or docblock return type, the return type inferred from
-the body binds `new static()` to the declaring class instead of keeping
-it `static`, so a call through a subclass gives the parent. Declaring
-`@return static` on the method or on an interface it implements gives
-the right type.
+No outstanding items.

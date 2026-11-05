@@ -17290,3 +17290,38 @@ class Holder {
     assert!(hover(28).contains("$maybe = ?Foo"), "{}", hover(28));
     assert!(hover(36).contains("$untyped = mixed"), "{}", hover(36));
 }
+
+/// A method with no declared return type that returns `new static()`
+/// gives the class it is called on, not the class that declares it.
+#[tokio::test]
+async fn hover_untyped_new_static_return_binds_to_called_class() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let content = r#"<?php
+class Base {
+    public static function make() { return new static(); }
+    public function copy() { return new static(); }
+}
+class Child extends Base {}
+trait Makes {
+    public static function build() { return new static(); }
+}
+class User { use Makes; }
+function run(Child $c): void {
+    $a = Child::make();
+    $b = $c->copy();
+    $d = Base::make();
+    $u = User::build();
+}
+"#;
+    open_php(&backend, &uri, content).await;
+
+    let text = markup_hover_at(&backend, &uri, 11, 6).await;
+    assert!(text.contains("$a = Child"), "static call: {text}");
+    let text = markup_hover_at(&backend, &uri, 12, 6).await;
+    assert!(text.contains("$b = Child"), "instance call: {text}");
+    let text = markup_hover_at(&backend, &uri, 13, 6).await;
+    assert!(text.contains("$d = Base"), "declaring class: {text}");
+    let text = markup_hover_at(&backend, &uri, 14, 6).await;
+    assert!(text.contains("$u = User"), "trait method: {text}");
+}
