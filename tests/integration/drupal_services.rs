@@ -610,3 +610,106 @@ async fn a_service_fetched_by_its_interface_is_typed_as_the_interface() {
         "{labels:?}"
     );
 }
+
+const LANGUAGE_MANAGER_SERVICES: &str =
+    "services:\n  language_manager:\n    class: Drupal\\Core\\Language\\LanguageManager\n";
+
+const LANGUAGE_SERVICE_PROVIDER: &str = r#"<?php
+namespace Drupal\language;
+
+use Drupal\Core\DependencyInjection\ServiceProviderBase;
+
+class LanguageServiceProvider extends ServiceProviderBase {
+    public function alter($container) {
+        $definition = $container->getDefinition('language_manager');
+        $definition->setClass('Drupal\language\ConfigurableLanguageManager');
+    }
+}
+"#;
+
+const LANGUAGE_CONSUMER: &str = r#"<?php
+namespace Drupal\acme;
+
+final class Translated {
+    public function run(): void {
+        $manager = \Drupal::service('language_manager');
+        $manager->getLanguageConfigOverride('fr', 'system.site');
+    }
+}
+"#;
+
+const LANGUAGE_CONSUMER_PATH: &str = "web/modules/custom/acme/src/Translated.php";
+
+/// A module's service provider may build a service another module declares
+/// from its own class, so the service is either class.
+#[tokio::test]
+async fn a_service_a_provider_alters_is_typed_as_either_class() {
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in [
+        (".git/HEAD", "ref: refs/heads/main\n"),
+        (".gitignore", "/web/core/\n"),
+        ("web/core/core.services.yml", LANGUAGE_MANAGER_SERVICES),
+        (
+            "web/core/lib/Drupal/Core/Language/LanguageManager.php",
+            "<?php\nnamespace Drupal\\Core\\Language;\nclass LanguageManager {\n    public function getCurrentLanguage(): object {}\n}\n",
+        ),
+        (
+            "web/core/modules/language/src/ConfigurableLanguageManager.php",
+            "<?php\nnamespace Drupal\\language;\nclass ConfigurableLanguageManager extends \\Drupal\\Core\\Language\\LanguageManager {\n    public function getLanguageConfigOverride(string $langcode, string $name): object {}\n}\n",
+        ),
+        (
+            "web/core/modules/language/src/LanguageServiceProvider.php",
+            LANGUAGE_SERVICE_PROVIDER,
+        ),
+        // A test module's provider is not one any site loads.
+        (
+            "web/core/modules/system/tests/modules/fixture/src/FixtureServiceProvider.php",
+            "<?php\nnamespace Drupal\\fixture;\nclass FixtureServiceProvider {\n    public function alter($container) {\n        $container->getDefinition('language_manager')->setClass('Drupal\\fixture\\Fake');\n    }\n}\n",
+        ),
+    ] {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let (backend, dir) = workspace_in(dir, &[(LANGUAGE_CONSUMER_PATH, LANGUAGE_CONSUMER)]).await;
+    let php = uri_for(&dir, LANGUAGE_CONSUMER_PATH);
+    let position = position_in(LANGUAGE_CONSUMER, "$manager->", 2);
+
+    // Finding references indexes the workspace, core's YAML included.
+    references_at(
+        &backend,
+        &php,
+        position_in(LANGUAGE_CONSUMER, "service('language_manager')", 10),
+    )
+    .await;
+
+    let hover = manager_hover(&backend, &php, position).await;
+    assert!(hover.contains("ConfigurableLanguageManager"), "{hover}");
+    assert!(hover.contains("$manager = LanguageManager"), "{hover}");
+    assert!(!hover.contains("Fake"), "{hover}");
+
+    let diagnostics = crate::common::slow_diagnostic_messages(
+        &backend,
+        php.as_str(),
+        LANGUAGE_CONSUMER,
+        "unknown_member",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    // A custom module's provider is read again as it is edited.
+    let provider_path = "web/modules/custom/acme/src/AcmeServiceProvider.php";
+    let provider = "<?php\nnamespace Drupal\\acme;\nclass AcmeServiceProvider {\n    public function alter($container) {\n        $container->getDefinition('language_manager')->setClass(Greeter::class);\n    }\n}\n";
+    open_document(&backend, &uri_for(&dir, provider_path), "php", provider).await;
+    let hover = manager_hover(&backend, &php, position).await;
+    assert!(hover.contains("Greeter"), "{hover}");
+    let edited = provider.replace("setClass(Greeter::class)", "setPublic(true)");
+    backend.update_ast(uri_for(&dir, provider_path).as_str(), &edited);
+    let hover = manager_hover(&backend, &php, position).await;
+    assert!(!hover.contains("Greeter"), "{hover}");
+}
+
+async fn manager_hover(backend: &Backend, php: &Uri, position: Position) -> String {
+    hover_text_at(backend, php, position.line, position.character)
+        .await
+        .unwrap_or_default()
+}

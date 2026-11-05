@@ -46,3 +46,21 @@ function acme_help(string $route_name, RouteMatchInterface $route_match): ?strin
 
     return null;
 }
+
+/**
+ * The site name in French, when the language module translates it.
+ */
+function acme_french_site_name(): ?string
+{
+    if (!\Drupal::moduleHandler()->moduleExists('language')) {
+        return null;
+    }
+    // Try: hover `$languageManager`. core.services.yml builds
+    // language_manager from LanguageManager, and the language module's
+    // LanguageServiceProvider swaps in ConfigurableLanguageManager, so it is
+    // either class and the methods of both complete after `$languageManager->`.
+    $languageManager = \Drupal::service('language_manager');
+    $name = $languageManager->getLanguageConfigOverride('fr', 'system.site')->get('name');
+
+    return is_string($name) ? $name : null;
+}

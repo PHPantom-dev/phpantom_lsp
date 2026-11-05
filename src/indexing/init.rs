@@ -381,7 +381,8 @@ impl Backend {
             }
             let (drupal_result, declaration_files) =
                 classmap_scanner::scan_drupal_directories(&drupal_web_root, &filters, progress);
-            self.note_drupal_declaration_files(declaration_files);
+            self.note_drupal_declaration_files(declaration_files.declarations);
+            self.note_drupal_service_providers(declaration_files.service_providers);
             let drupal_count = drupal_result.classmap.len()
                 + drupal_result.function_index.len()
                 + drupal_result.constant_index.len();

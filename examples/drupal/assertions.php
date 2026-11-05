@@ -34,8 +34,11 @@ use Drupal\Core\Entity\EntityTypeManager;
 use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
 use Drupal\Core\Hook\Attribute\Hook;
+use Drupal\Core\Language\LanguageManager;
 use Drupal\Core\Link;
 use Drupal\Core\Url;
+use Drupal\language\ConfigurableLanguageManager;
+use Drupal\language\LanguageServiceProvider;
 
 $passed = 0;
 $failed = 0;
@@ -68,13 +71,16 @@ $web = __DIR__ . '/web';
 $module = "$web/modules/custom/acme";
 $theme = "$web/themes/custom/acme_theme";
 
-// The demo's classes live in the module, which only a booted site adds to
-// the autoloader.
-spl_autoload_register(static function (string $class) use ($module): void {
-    if (str_starts_with($class, 'Drupal\\acme\\')) {
-        $file = "$module/src/" . str_replace('\\', '/', substr($class, strlen('Drupal\\acme\\'))) . '.php';
-        if (is_file($file)) {
-            require $file;
+// The demo's classes live in the module, and the language module's in
+// core, which only a booted site adds to the autoloader.
+spl_autoload_register(static function (string $class) use ($module, $web): void {
+    foreach (['acme' => $module, 'language' => "$web/core/modules/language"] as $name => $dir) {
+        $prefix = "Drupal\\$name\\";
+        if (str_starts_with($class, $prefix)) {
+            $file = "$dir/src/" . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
+            if (is_file($file)) {
+                require $file;
+            }
         }
     }
 });
@@ -112,6 +118,24 @@ check('core.services.yml declares config.factory', $core->hasDefinition('config.
 check('entity_type.manager, which NoteCounter::create() looks up, is built from EntityTypeManager', $core->getDefinition('entity_type.manager')->getClass() === EntityTypeManager::class);
 check('NoteCounter takes what entity_type.manager is', is_subclass_of(EntityTypeManager::class, (string) (new ReflectionMethod(NoteCounter::class, '__construct'))->getParameters()[0]->getType()));
 check('NoteCounter is built from the container', is_subclass_of(NoteCounter::class, ContainerInjectionInterface::class));
+
+// The language module's service provider builds core's language_manager
+// from its own class. Its default language values come from the site's
+// configuration, which there is none of here.
+$altered = new ContainerBuilder();
+(new YamlFileLoader($altered))->load("$web/core/core.services.yml");
+$languageProvider = new class extends LanguageServiceProvider {
+    protected function getDefaultLanguageValues()
+    {
+        return false;
+    }
+};
+check('core.services.yml builds language_manager from LanguageManager', $altered->getDefinition('language_manager')->getClass() === LanguageManager::class);
+check('Drupal looks for the language module\'s provider under the name LanguageServiceProvider', ContainerBuilder::camelize('language') . 'ServiceProvider' === (new ReflectionClass(LanguageServiceProvider::class))->getShortName());
+$languageProvider->alter($altered);
+check('LanguageServiceProvider::alter() builds language_manager from ConfigurableLanguageManager', ltrim((string) $altered->getDefinition('language_manager')->getClass(), '\\') === ConfigurableLanguageManager::class);
+check('Only ConfigurableLanguageManager declares getLanguageConfigOverride()', method_exists(ConfigurableLanguageManager::class, 'getLanguageConfigOverride') && !method_exists(LanguageManager::class, 'getLanguageConfigOverride'));
+check('acme_french_site_name() looks up language_manager', str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('language_manager')"));
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
 

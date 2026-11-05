@@ -729,7 +729,8 @@ fn scan_drupal_directories_collects_declaration_files_outside_tests() {
         std::fs::write(full, content).unwrap();
     }
 
-    let (_, mut files) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let (_, files) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let mut files = files.declarations;
     files.sort();
     assert_eq!(
         files,

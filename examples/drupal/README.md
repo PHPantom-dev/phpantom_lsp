@@ -74,6 +74,11 @@ Run `composer install` here first. Composer puts core and contrib into
   the implementation in `src/Hook/AcmeHooks.php` and the documentation in
   `acme.api.php`. Type `function acme_` on a new line of `acme.module` to
   complete a hook with its documented signature.
+- A module's service provider may build a service from a class of its own.
+  In `acme_french_site_name()` in `web/modules/custom/acme/acme.module`,
+  hover `$languageManager`: core declares `language_manager` as
+  `LanguageManager`, and the language module's `LanguageServiceProvider`
+  swaps in `ConfigurableLanguageManager`, so it is either class.
 
 ## What the Symfony support already reads
 

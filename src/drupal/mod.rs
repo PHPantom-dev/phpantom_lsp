@@ -10,6 +10,7 @@
 //! (translations, events) is read here, and routes are read from Drupal's
 //! own routing files: Drupal declares those its own way.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
@@ -19,6 +20,7 @@ pub(crate) mod computed_hooks;
 pub(crate) mod hooks;
 pub(crate) mod links;
 pub(crate) mod routing;
+pub(crate) mod service_providers;
 pub(crate) mod types;
 pub(crate) mod upcasting;
 
@@ -44,6 +46,9 @@ pub(crate) struct DrupalState {
     extensions: RwLock<hooks::ExtensionIndex>,
     /// What the hook documentation says, until a declaring file changes.
     hook_index: RwLock<Option<std::sync::Arc<hooks::HookIndex>>>,
+    /// The services each service provider's `alter()` gives another class,
+    /// keyed by the provider's URI; see [`service_providers`].
+    service_replacements: RwLock<BTreeMap<String, Vec<(Atom, Atom)>>>,
 }
 
 /// A kind of file Drupal reads declarations from.
@@ -285,6 +290,7 @@ impl Backend {
         self.drupal.declaration_files.write().clear();
         self.drupal.hook_php_files.write().clear();
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
+        self.drupal.service_replacements.write().clear();
     }
 
     /// Remember the declaration files the Drupal walk found: the YAML for
