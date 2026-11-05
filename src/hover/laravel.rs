@@ -11,7 +11,7 @@ use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::virtual_members::laravel::config_values::{ConfigNode, ConfigValue};
 
-use super::formatting::{inline_code, make_hover};
+use super::formatting::{function_markdown, inline_code, make_hover};
 
 impl Backend {
     /// Where a Laravel string key resolves to, with the path shortened to
@@ -323,6 +323,18 @@ impl Backend {
                         crate::symfony::translations::split_translation_key(key);
                     shown = message;
                     detail = format!("Domain `{}`\n\n{}", domain, detail);
+                }
+                // A hook reads as the `hook_*()` function that documents
+                // it: its parameters and what it returns are what an
+                // implementation has to match.
+                if *kind == StringKeyKind::DrupalHook
+                    && let Some(function) = self.drupal_hook_documented_function(key)
+                {
+                    detail = format!(
+                        "{}\n\n{}",
+                        function_markdown(&function, None, None, false),
+                        detail
+                    );
                 }
                 (label, detail)
             }

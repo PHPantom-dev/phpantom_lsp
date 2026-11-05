@@ -67,7 +67,8 @@ Run `composer install` here first. Composer puts core and contrib into
   reported.
 - Hooks navigate between their documentation, the calls that fire them, and
   their implementations. In `web/modules/custom/acme/acme.module`, hover
-  `$form_state` in `acme_form_alter()`, typed by core's documentation, or go
+  `$form_state` in `acme_form_alter()`, typed by core's documentation,
+  hover the function's name to read `hook_form_alter()`'s documentation, or go
   to the definition of `form_alter` in the function's name, which lists the
   `alter()` call in core's `FormBuilder` and `hook_form_alter()`. In
   `src/Greeter.php`, go to the definition of `'acme_greeting'`, which lists

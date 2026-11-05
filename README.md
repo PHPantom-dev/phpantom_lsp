@@ -25,7 +25,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Built-in diagnostics<sup>4</sup>         | ✅       | 🚧🔒         | ✅         | 🚧          | ✅          |
 | External analyzer integration<sup>5</sup> | ✅       | ❌           | ❌         | 🚧          | 🚧          |
 | **Type Intelligence**                    |          |              |            |             |             |
-| Generics / `@template`                   | ✅       | 🚧           | ✅         | 🚧          | ✅          |
+| Generics / `@template`                   | ✅       | 🚧           | ✅         | 🚧          | 🚧          |
 | Array / object shapes                    | ✅       | ✅           | ✅         | 🚧          | 🚧          |
 | Advanced PHPDoc types<sup>6</sup>        | ✅       | 🚧🔒         | 🚧         | 🚧          | 🚧          |
 | Closure parameter inference              | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
@@ -36,7 +36,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Yii 3                                    | ✅       | ❌           | ❌         | ❌          | ❌          |
 | Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅🧩          |
 | PHPUnit & Pest                           | ✅       | ❌           | 🚧         | 🚧          | ✅          |
-| Other frameworks                         | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
+| Other frameworks                         | ❌       | 🚧           | 🚧         | 🚧          | 🧩        |
 | **Refactoring**                          |          |              |            |             |             |
 | Rename                                   | ✅       | ✅🔒         | ✅       | ✅          | ✅          |
 | Extract & generate<sup>8</sup>           | ✅       | ❌           | 🚧🔒       | 🚧          | ✅          |
@@ -86,6 +86,7 @@ Independent, re-runnable type-inference conformance results across twelve PHP en
 
 PHPantom understands Composer projects out of the box, but works without setup on non-Composer projects too:
 
+- **Frameworks need no setup.** Laravel, Symfony, WordPress, Yii, Drupal, PHPUnit, and Pest are recognised from the project itself, and their code is read from where the project already has it. There is nothing to enable, download, or point at.
 - **Autoloader-accurate results.** Completions and go-to-definition only surface classes that Composer's autoloader can actually load, avoiding false positives from internal, inaccessible, or duplicate vendor classes. You see exactly what your application can use.
 - **PSR-4 correctness.** Quick fixes for when the namespace or class name does not match their PSR-4 path.
 - **PSR-4 autoloading.** Resolves classes across files on demand.

@@ -106,6 +106,12 @@ async fn a_hook_attribute_goes_to_the_documentation() {
         .await
         .unwrap_or_default();
     assert!(hover.contains("Hook"), "{hover}");
+    assert!(
+        hover.contains("Perform alterations before a form is rendered."),
+        "{hover}"
+    );
+    assert!(hover.contains("function hook_form_alter("), "{hover}");
+    assert!(hover.contains("form.api.php"), "{hover}");
 
     // From the documentation: the implementations, not the class outside
     // `src/Hook`.
@@ -985,4 +991,43 @@ async fn a_property_hook_is_no_hook_implementation() {
         .await
         .unwrap_or_default();
     assert!(!hover.contains("array"), "{hover}");
+}
+
+/// Hover anywhere on a procedural implementation's name shows the
+/// documentation of the hook it implements, as a function's hover would,
+/// with the file that documents it.
+#[tokio::test]
+async fn hover_on_an_implementation_shows_the_hooks_documentation() {
+    let api = "<?php\n/**\n * Register a module or theme's theme implementations.\n *\n * @param array $existing\n *   An array of existing implementations.\n *\n * @return array\n *   An associative array of information about theme implementations.\n */\nfunction hook_theme($existing, $type, $theme, $path) {\n}\n";
+    let api_path = "web/core/lib/Drupal/Core/Render/theme.api.php";
+    let module = "<?php\nfunction acme_theme($existing, $type, $theme, $path) {\n    return [];\n}\nfunction acme_helper() {\n}\n";
+    let (backend, dir) = drupal(
+        &[(api_path, api)],
+        &[("web/modules/custom/acme/acme.module", module)],
+    )
+    .await;
+    let php = uri_for(&dir, "web/modules/custom/acme/acme.module");
+    references_at(&backend, &php, position_in(module, "acme_theme", 6)).await;
+
+    for at in [7, 1] {
+        let position = position_in(module, "acme_theme", at);
+        let hover = hover_text_at(&backend, &php, position.line, position.character)
+            .await
+            .unwrap_or_default();
+        for expected in [
+            "**Hook** `theme`",
+            "Register a module or theme's theme implementations.",
+            "$existing",
+            "An associative array of information about theme implementations.",
+            "function hook_theme($existing, $type, $theme, $path)",
+            "theme.api.php",
+        ] {
+            assert!(hover.contains(expected), "{at}: {expected}: {hover}");
+        }
+    }
+
+    // A helper named after its module is no implementation.
+    let position = position_in(module, "acme_helper", 1);
+    let hover = hover_text_at(&backend, &php, position.line, position.character).await;
+    assert!(hover.is_none(), "{hover:?}");
 }

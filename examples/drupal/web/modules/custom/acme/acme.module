@@ -16,7 +16,8 @@ use Drupal\Core\Routing\RouteMatchInterface;
 function acme_form_alter(array &$form, $form_state, string $form_id): void
 {
     // Try: hover `$form_state`, typed by hook_form_alter()'s documentation
-    // in core. Go to the definition of `form_alter` in the function's name,
+    // in core. Hover the function's name to read that documentation, with
+    // the hook's signature and parameters. Go to the definition of `form_alter` in the function's name,
     // which lists the alter() call in core's FormBuilder and the
     // documentation. Type `function acme_` on a new line to complete a hook.
     if ($form_id === 'user_login_form') {

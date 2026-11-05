@@ -235,6 +235,7 @@ check("AcmeHooks::greetingAlter() implements it through #[Hook('acme_greeting_al
 check("greetingAlter()'s untyped name is the documented string", $greetingAlter->getParameters()[1]->getType() === null && (string) (new ReflectionFunction('hook_acme_greeting_alter'))->getParameters()[1]->getType() === 'string');
 check('acme_form_alter() implements hook_form_alter procedurally', function_exists('acme_form_alter'));
 check("core documents hook_form_alter() with the FormStateInterface acme_form_alter() leaves untyped", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/form.api.php"), 'function hook_form_alter(&$form, \\Drupal\\Core\\Form\\FormStateInterface $form_state, $form_id)') && (new ReflectionFunction('acme_form_alter'))->getParameters()[1]->getType() === null);
+check("core documents hook_form_alter() with a docblock acme_form_alter()'s hover shows", (bool) preg_match('~/\*\*\n \* Perform alterations before a form is rendered\.\n(?: \*[^\n]*\n)* \*/\nfunction hook_form_alter\(~', (string) file_get_contents("$web/core/lib/Drupal/Core/Form/form.api.php")));
 check("core's FormBuilder::prepareForm() fires the form alter hooks", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/FormBuilder.php"), '$this->moduleHandler->alter($hooks, $form, $form_state, $form_id);'));
 
 // ─── Summary ────────────────────────────────────────────────────────────────

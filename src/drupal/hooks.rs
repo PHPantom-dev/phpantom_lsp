@@ -953,20 +953,7 @@ impl Backend {
                 } => Some(key.clone()),
                 _ => None,
             })?;
-        let index = self.hook_index();
-        let (documented, entity_type) = if index
-            .documented
-            .binary_search_by(|known| known.as_str().cmp(&hook))
-            .is_ok()
-        {
-            (hook.clone(), None)
-        } else {
-            let pattern = index.best_patterns(&hook).first()?.to_string();
-            let is_entity_type = |id: &str| index.entity_types.contains(id);
-            let entity_type = match_hook_pattern(&pattern, &hook, &is_entity_type).flatten();
-            (pattern, entity_type)
-        };
-        let function = self.find_or_load_function(&[format!("hook_{documented}").as_str()])?;
+        let (function, entity_type) = self.hook_documentation_target(&hook)?;
         let entity_class = entity_type.and_then(|id| {
             self.drupal_entity_types(id)
                 .first()
@@ -976,6 +963,65 @@ impl Backend {
             function,
             entity_class,
         })
+    }
+
+    /// The documentation function of the hook `hook`, for its hover.
+    pub(crate) fn drupal_hook_documented_function(
+        &self,
+        hook: &str,
+    ) -> Option<crate::types::FunctionInfo> {
+        self.hook_documentation_target(hook)
+            .map(|(function, _)| function)
+    }
+
+    /// The `hook_*()` function that documents `hook`: its own, else that of
+    /// the pattern that writes out most of it, with the entity type the
+    /// pattern's `ENTITY_TYPE` placeholder stands for in `hook`.
+    fn hook_documentation_target<'h>(
+        &self,
+        hook: &'h str,
+    ) -> Option<(crate::types::FunctionInfo, Option<&'h str>)> {
+        let index = self.hook_index();
+        let (documented, entity_type) = if index
+            .documented
+            .binary_search_by(|known| known.as_str().cmp(hook))
+            .is_ok()
+        {
+            (hook.to_string(), None)
+        } else {
+            let pattern = index.best_patterns(hook).first()?.to_string();
+            let is_entity_type = |id: &str| index.entity_types.contains(id);
+            let entity_type = match_hook_pattern(&pattern, hook, &is_entity_type).flatten();
+            (pattern, entity_type)
+        };
+        let function = self.find_or_load_function(&[format!("hook_{documented}").as_str()])?;
+        Some((function, entity_type))
+    }
+
+    /// The hook a procedural function's declared name implements: the hook
+    /// span that ends the name at `span`, when the name is not a helper's
+    /// (see [`Self::drupal_hook_or_function`]).
+    pub(crate) fn drupal_hook_of_function<'m>(
+        &self,
+        map: &'m crate::symbol_map::SymbolMap,
+        span: &crate::symbol_map::SymbolSpan,
+    ) -> Option<&'m crate::symbol_map::SymbolSpan> {
+        use crate::symbol_map::{StringKeyKind, SymbolKind};
+        let from = map.spans.partition_point(|other| other.start <= span.start);
+        let hook = map.spans[from..]
+            .iter()
+            .take_while(|other| other.start < span.end)
+            .find(|other| {
+                other.end == span.end
+                    && matches!(
+                        other.kind,
+                        SymbolKind::StringKey {
+                            kind: StringKeyKind::DrupalHook,
+                            ..
+                        }
+                    )
+            })?;
+        std::ptr::eq(self.drupal_hook_or_function(map, hook), hook).then_some(hook)
     }
 
     /// Every hook the workspace names, implemented or documented, that the

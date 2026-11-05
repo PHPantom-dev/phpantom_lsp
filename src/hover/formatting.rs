@@ -363,6 +363,21 @@ pub(crate) fn hover_for_function(
     provenance: Option<String>,
     is_inferred_return: bool,
 ) -> Hover {
+    make_hover(function_markdown(
+        func,
+        resolved_see,
+        provenance,
+        is_inferred_return,
+    ))
+}
+
+/// The Markdown of [`hover_for_function`].
+pub(super) fn function_markdown(
+    func: &FunctionInfo,
+    resolved_see: Option<&[ResolvedSeeRef]>,
+    provenance: Option<String>,
+    is_inferred_return: bool,
+) -> String {
     let native_params = format_native_params(&func.parameters);
 
     // Use native return type in the code block.
@@ -421,7 +436,7 @@ pub(crate) fn hover_for_function(
         lines.push(prov);
     }
 
-    make_hover(lines.join("\n\n"))
+    lines.join("\n\n")
 }
 
 /// A `@see` reference that has been resolved to an optional file location.
