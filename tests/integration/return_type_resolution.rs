@@ -347,13 +347,13 @@ async fn test_goto_definition_class_from_autoload_files() {
     let autoload_files = phpantom_lsp::composer::parse_autoload_files(dir.path(), "vendor");
     for file_path in &autoload_files {
         if let Ok(content) = fs::read_to_string(file_path) {
-            let uri = format!("file://{}", file_path.display());
+            let uri = crate::common::file_uri(file_path);
             backend.update_ast(&uri, &content);
         }
     }
 
     // Verify the Helper class was indexed
-    let helper = backend.get_classes_for_uri(&format!("file://{}", full_helpers.display()));
+    let helper = backend.get_classes_for_uri(&crate::common::file_uri(&full_helpers));
     assert!(
         helper.is_some(),
         "Helper class should be indexed from autoload file"
@@ -699,7 +699,7 @@ async fn test_goto_definition_function_return_type_cross_file() {
     let autoload_files = phpantom_lsp::composer::parse_autoload_files(dir.path(), "vendor");
     for file_path in &autoload_files {
         if let Ok(content) = fs::read_to_string(file_path) {
-            let uri = format!("file://{}", file_path.display());
+            let uri = crate::common::file_uri(file_path);
             backend.update_ast(&uri, &content);
         }
     }

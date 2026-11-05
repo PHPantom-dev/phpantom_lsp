@@ -52,6 +52,29 @@ jobs:
       # every other test target as well would only cost disk.
       - run: cargo test --features semantic-export --lib --test integration semantic_export
 
+  # Path handling differs on Windows (drive letters, `\` separators,
+  # `\\?\` canonical paths), and nothing else in CI runs there. It does not
+  # block until the suite passes there.
+  test-windows:
+    name: Test (Windows)
+    runs-on: windows-latest
+    continue-on-error: true
+    env:
+      CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
+    steps:
+      # The runner checks out with CRLF line endings, which would shift
+      # every offset the fixtures and embedded stubs are tested at.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo nextest run --no-fail-fast
+
   test-shard:
     name: Test (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest

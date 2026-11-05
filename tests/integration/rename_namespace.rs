@@ -221,10 +221,8 @@ async fn rename_namespace_updates_a_plain_use_statement_wrapped_across_lines() {
 
 #[tokio::test]
 async fn rename_namespace_updates_use_statements_in_unopened_usage_only_file() {
-    use std::path::PathBuf;
-
-    let workspace = PathBuf::from("/tmp/test_workspace_ns_usage_only");
-    let _ = std::fs::create_dir_all(&workspace);
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().to_path_buf();
 
     let backend = Backend::new_test_with_workspace(workspace.clone(), Vec::new());
     let uri_a = Uri::from_file_path(workspace.join("a.php")).unwrap();

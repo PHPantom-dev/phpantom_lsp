@@ -603,7 +603,7 @@ fn partial_passes_match_full_passes_on_a_project() {
     let Some(root) = std::env::var_os("PHPANTOM_INCREMENTAL_VERIFY_ROOT") else {
         return;
     };
-    let root = std::fs::canonicalize(root).expect("project root");
+    let root = dunce::canonicalize(root).expect("project root");
     let filter = std::env::var("PHPANTOM_INCREMENTAL_VERIFY_FILTER").unwrap_or_default();
     let max_units: usize = std::env::var("PHPANTOM_INCREMENTAL_VERIFY_UNITS")
         .ok()

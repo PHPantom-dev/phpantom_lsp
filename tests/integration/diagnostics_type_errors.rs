@@ -3142,13 +3142,10 @@ class ExplorerController {
     // Index every file up front, mirroring the CLI's eager scan so the
     // call target and its `@template` docblock are available.
     for (rel_path, php) in &files {
-        let file_uri = format!("file://{}/{}", dir.path().display(), rel_path);
+        let file_uri = crate::common::file_uri(&dir.path().join(rel_path));
         backend.update_ast(&file_uri, php);
     }
-    let uri = format!(
-        "file://{}/src/Http/ExplorerController.php",
-        dir.path().display()
-    );
+    let uri = crate::common::file_uri(&dir.path().join("src/Http/ExplorerController.php"));
     let content = files[2].1;
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
@@ -7265,7 +7262,7 @@ class TestCase {
 
     let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
     let (backend, dir) = create_psr4_workspace(composer, &files);
-    let uri = format!("file://{}/src/TestCase.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/TestCase.php"));
     let content = files[3].1;
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
@@ -9670,10 +9667,10 @@ class Caller {
     let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
     let (backend, dir) = create_psr4_workspace(composer, &files);
     for (rel_path, php) in &files {
-        let file_uri = format!("file://{}/{}", dir.path().display(), rel_path);
+        let file_uri = crate::common::file_uri(&dir.path().join(rel_path));
         backend.update_ast(&file_uri, php);
     }
-    let uri = format!("file://{}/src/Caller.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Caller.php"));
     let content = files[2].1;
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
@@ -10323,7 +10320,7 @@ class Helper {
             ),
         ],
     );
-    let uri = format!("file://{}/app/Run.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("app/Run.php"));
     let php = "<?php\n\\App\\Helper::formatPrice(new \\Acme\\Decimal\\Decimal('0.00'));\n";
     backend.update_ast(&uri, php);
     let mut out = Vec::new();
@@ -14570,7 +14567,7 @@ class Analyser
     *backend.workspace_root().write() = Some(dir.path().to_path_buf());
     *backend.psr4_mappings().write() = mappings;
 
-    let uri = format!("file://{}/src/Analyser/Analyser.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Analyser/Analyser.php"));
     let content = files[1].1;
     backend.update_ast(&uri, content);
     let mut diags = Vec::new();

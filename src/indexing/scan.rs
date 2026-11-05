@@ -390,7 +390,7 @@ impl Backend {
             }
             // Canonicalise to avoid revisiting the same file via
             // different relative paths.
-            let canonical = file_path.canonicalize().unwrap_or(file_path);
+            let canonical = dunce::canonicalize(&file_path).unwrap_or(file_path);
             if !visited.insert(canonical.clone()) {
                 continue;
             }
@@ -620,7 +620,7 @@ mod tests {
         let paths = backend.workspace.vendor_dir_paths.lock();
         assert_eq!(paths.len(), 2, "repeat registration must stay deduplicated");
         assert!(paths.contains(&aliased_vendor));
-        assert!(paths.contains(&canonical_vendor.canonicalize().unwrap()));
+        assert!(paths.contains(&dunce::canonicalize(&canonical_vendor).unwrap()));
     }
 
     #[test]
@@ -640,6 +640,6 @@ mod tests {
 
         let paths = backend.workspace.vendor_dir_paths.lock();
         assert!(paths.contains(&aliased_vendor));
-        assert!(paths.contains(&canonical_vendor.canonicalize().unwrap()));
+        assert!(paths.contains(&dunce::canonicalize(&canonical_vendor).unwrap()));
     }
 }

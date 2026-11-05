@@ -4593,10 +4593,7 @@ class FlowService {
         ],
     );
 
-    let uri = &format!(
-        "file://{}",
-        _dir.path().join("src/FlowService.php").display()
-    );
+    let uri = &crate::common::file_uri(&_dir.path().join("src/FlowService.php"));
     let diags = unknown_member_diagnostics(&backend, uri, service_php);
 
     let chained_diags: Vec<_> = diags
@@ -4746,10 +4743,7 @@ class FlowService {
         ],
     );
 
-    let uri = &format!(
-        "file://{}",
-        _dir.path().join("src/FlowService.php").display()
-    );
+    let uri = &crate::common::file_uri(&_dir.path().join("src/FlowService.php"));
     let diags = unknown_member_diagnostics(&backend, uri, service_php);
 
     let chained_diags: Vec<_> = diags

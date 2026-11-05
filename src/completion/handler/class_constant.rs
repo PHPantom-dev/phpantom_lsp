@@ -339,15 +339,23 @@ impl Backend {
     /// Extract the filename without extension from a `file://` URI.
     ///
     /// For example, `file:///home/user/Test.php` returns `Some("Test")`.
+    /// The name is read from the URI's last segment rather than from the
+    /// host path it converts to, which only exists for a URI that names a
+    /// file on this platform (`file:///Test.php` has no drive on Windows).
+    /// A segment with a percent-escape is decoded through the path.
     fn filename_class_name(uri: &str) -> Option<String> {
         let url = crate::util::parse_url(uri)?;
-        let file_path = crate::util::url_to_path(&url)?;
-        let stem = file_path.file_stem()?;
-        let name = stem.to_string_lossy();
-        if name.is_empty() {
-            return None;
-        }
-        Some(name.into_owned())
+        let segment = url.path_segments()?.next_back()?;
+        let name = if segment.contains('%') {
+            let file_path = crate::util::url_to_path(&url)?;
+            file_path.file_stem()?.to_string_lossy().into_owned()
+        } else {
+            std::path::Path::new(segment)
+                .file_stem()?
+                .to_string_lossy()
+                .into_owned()
+        };
+        (!name.is_empty()).then_some(name)
     }
 
     /// Try to offer class name, constant, and function completions.

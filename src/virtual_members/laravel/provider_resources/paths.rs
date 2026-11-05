@@ -58,7 +58,7 @@ pub(crate) fn resolve_path_arg(
         if !relative.is_empty() {
             resolved.push(relative);
         }
-        return resolved.canonicalize().ok().or(Some(resolved));
+        return dunce::canonicalize(&resolved).ok().or(Some(resolved));
     }
 
     if let Expression::Variable(Variable::Direct(dv)) = expr {
@@ -70,7 +70,7 @@ pub(crate) fn resolve_path_arg(
         expr,
         paths.file_dir,
     )?);
-    resolved.canonicalize().ok().or(Some(resolved))
+    dunce::canonicalize(&resolved).ok().or(Some(resolved))
 }
 
 /// The RHS of the last `$name = <expr>;` assignment before `offset` in the

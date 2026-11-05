@@ -796,7 +796,8 @@ fn a_real_path_event_is_respelled_through_the_link() {
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
             // Resolve system temp-directory symlinks as well as the watched link.
-            uri: Uri::from_file_path(real.join("src/Help.php").canonicalize().unwrap()).unwrap(),
+            uri: Uri::from_file_path(dunce::canonicalize(real.join("src/Help.php")).unwrap())
+                .unwrap(),
             kind: FileChangeType::Created,
         }],
     };

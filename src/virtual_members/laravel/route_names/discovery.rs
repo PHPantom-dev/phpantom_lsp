@@ -642,9 +642,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
         .route_files
         .clone();
     for route_path in &provider_route_files {
-        let canonical = route_path
-            .canonicalize()
-            .unwrap_or_else(|_| route_path.clone());
+        let canonical = dunce::canonicalize(route_path).unwrap_or_else(|_| route_path.clone());
         if !scanned.insert(canonical.clone()) {
             continue;
         }
@@ -676,7 +674,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
     subdirectory_files.sort();
     for file_uri in subdirectory_files {
         let loaded = crate::util::uri_to_path(&file_uri).is_some_and(|path| {
-            let canonical = path.canonicalize().unwrap_or(path);
+            let canonical = dunce::canonicalize(&path).unwrap_or(path);
             collector.sources.contains(&canonical)
         });
         if !loaded {
@@ -695,7 +693,9 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
     // to everything above and are discovered by their own filesystem-based
     // scan instead.
     for (route, page) in crate::virtual_members::laravel::folio::enumerate_folio_routes(backend) {
-        collector.sources.push(page.canonicalize().unwrap_or(page));
+        collector
+            .sources
+            .push(dunce::canonicalize(&page).unwrap_or(page));
         collector.routes.push(route);
     }
 
@@ -720,7 +720,7 @@ fn walk_workspace_route_file(
     };
     let path = crate::util::url_to_path(&uri);
     if let Some(ref p) = path {
-        let canonical = p.canonicalize().unwrap_or_else(|_| p.clone());
+        let canonical = dunce::canonicalize(p).unwrap_or_else(|_| p.clone());
         scanned.insert(canonical.clone());
         collector.sources.push(canonical);
     }
@@ -757,7 +757,7 @@ pub(super) fn walk_route_file(
     let open = RefCell::new(HashSet::new());
     if let Some(path) = file_path {
         open.borrow_mut()
-            .insert(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+            .insert(dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
     }
     let uri = Arc::new(uri.clone());
     let lines = LineIndex::new(content);
@@ -1175,11 +1175,8 @@ fn walk_macro(
         this_is_router: true,
         controller: group.controller,
     };
-    sink.sources.push(
-        open.path
-            .canonicalize()
-            .unwrap_or_else(|_| open.path.clone()),
-    );
+    sink.sources
+        .push(dunce::canonicalize(&open.path).unwrap_or_else(|_| open.path.clone()));
     let lines = LineIndex::new(&open.content);
     in_parsed_route_file(&open.content, b"macro.php", |program, names| {
         let sub_paths = ScanPaths {
