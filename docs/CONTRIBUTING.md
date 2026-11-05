@@ -71,13 +71,13 @@ To reproduce a paired shard locally from the repository root, replace
 benchmark_root="$PWD"
 git worktree add --detach /tmp/phpantom-bench-base BASE_COMMIT
 cargo bench --locked --manifest-path /tmp/phpantom-bench-base/Cargo.toml \
-  --benches --no-run --message-format=json > /tmp/baseline-build.jsonl
+  --bench '*' --no-run --message-format=json > /tmp/baseline-build.jsonl
 (
   cd /tmp/phpantom-bench-base
   python3 "$benchmark_root/benches/ci_benchmarks.py" prepare \
     --build-dir /tmp/phpantom-baseline --shards 1 < /tmp/baseline-build.jsonl
 )
-cargo bench --locked --benches --no-run --message-format=json > /tmp/benchmark-build.jsonl
+cargo bench --locked --bench '*' --no-run --message-format=json > /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py prepare --build-dir /tmp/phpantom-benchmarks \
   --shards 4 --baseline-dir /tmp/phpantom-baseline < /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py run --build-dir /tmp/phpantom-benchmarks \

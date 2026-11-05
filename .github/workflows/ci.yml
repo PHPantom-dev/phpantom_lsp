@@ -279,14 +279,22 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: -C link-arg=-fuse-ld=mold
-      BASE_REVISION: ${{ github.event.pull_request.base.sha }}
     outputs:
+      base-revision: ${{ steps.base.outputs.revision }}
       shards: ${{ steps.prepare.outputs.shards }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 2
           persist-credentials: false
+      # The checkout is GitHub's test merge of the PR into its base, so its
+      # first parent is exactly the base the measured head was built on.
+      # `pull_request.base.sha` is not guaranteed to be that parent.
+      - name: Find base revision
+        id: base
+        run: |
+          git rev-parse --verify --quiet HEAD^2 > /dev/null
+          echo "revision=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ env.CARGO_BUILD_TARGET }}
@@ -301,20 +309,21 @@ jobs:
         id: prepare
         env:
           SHARD_COUNT: 4
+          BASE_REVISION: ${{ steps.base.outputs.revision }}
         shell: bash
         run: |
           benchmark_root="$PWD"
           base_source="$RUNNER_TEMP/benchmark-base"
           git worktree add --detach "$base_source" "$BASE_REVISION"
           cargo bench --locked --manifest-path "$base_source/Cargo.toml" \
-            --benches --no-run --message-format=json > baseline-build.jsonl
+            --bench '*' --no-run --message-format=json > baseline-build.jsonl
           (
             cd "$base_source"
             python3 "$benchmark_root/benches/ci_benchmarks.py" prepare \
               --build-dir "$benchmark_root/baseline-build" --shards 1 \
               < "$benchmark_root/baseline-build.jsonl"
           )
-          cargo bench --locked --benches --no-run --message-format=json \
+          cargo bench --locked --bench '*' --no-run --message-format=json \
             > benchmark-build.jsonl
           python3 benches/ci_benchmarks.py prepare \
             --build-dir benchmark-build --shards "$SHARD_COUNT" \
@@ -349,11 +358,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 2
           persist-credentials: false
       - name: Check out baseline fixtures
         env:
-          BASE_REVISION: ${{ github.event.pull_request.base.sha }}
+          BASE_REVISION: ${{ needs.benchmark-build-pr.outputs.base-revision }}
         run: git worktree add --detach "$RUNNER_TEMP/benchmark-base" "$BASE_REVISION"
       - uses: actions/download-artifact@v4
         with:
@@ -416,7 +425,7 @@ jobs:
           --reports-dir benchmark-results --output output.json
       - name: Compare paired measurements
         env:
-          BASE_REVISION: ${{ github.event.pull_request.base.sha }}
+          BASE_REVISION: ${{ needs.benchmark-build-pr.outputs.base-revision }}
           HEAD_REVISION: ${{ github.sha }}
         run: |
           python3 benches/ci_benchmarks.py compare --build-dir benchmark-build \

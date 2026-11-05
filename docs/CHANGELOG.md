@@ -475,8 +475,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
-- **Comparable PR benchmarks.** Performance checks measure the base and PR revisions together on each runner, keeping the 30% regression threshold. Contributed by @shuvroroy.
-
+- **Pull request benchmarks no longer fail on a slow runner.** Each benchmark runner measures both the PR and its base, so the 30% regression check reflects the change rather than which machine ran it. Contributed by @shuvroroy. Closes #489.
 - **Faster benchmark checks on pull requests.** Latency benchmarks now run split across four runners, and benchmark alerts on fork pull requests show up in the job summary instead of failing on a permission error. Contributed by @shuvroroy.
 - **A Drupal playground.** `examples/drupal/` is a Drupal 11 site with one custom module and one theme, for trying PHPantom on Drupal code, with runtime checks of what its comments claim. Contributed by @giuseppe-esposito-87.
 
