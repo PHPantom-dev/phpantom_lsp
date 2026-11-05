@@ -157,11 +157,11 @@ impl Backend {
 /// spelling stays the client's, which is how the editor names the files
 /// it opens.
 fn distinct_extra_roots(root: &Path, folders: &[PathBuf]) -> Vec<PathBuf> {
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let candidates: Vec<(&PathBuf, PathBuf)> = folders
         .iter()
         .filter_map(|folder| {
-            let canonical = folder.canonicalize().ok()?;
+            let canonical = dunce::canonicalize(folder).ok()?;
             let unrelated = canonical.is_dir()
                 && !canonical.starts_with(&canonical_root)
                 && !canonical_root.starts_with(&canonical);

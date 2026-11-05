@@ -850,8 +850,8 @@ class Runner {
     // Register both files under their real on-disk URIs so that the
     // body-return-type inferrer can read `Factory`'s source via
     // `get_file_content` (which falls back to reading the file path).
-    let builder_uri = format!("file://{}/app/Builder.php", dir.path().display());
-    let runner_uri = format!("file://{}/app/Runner.php", dir.path().display());
+    let builder_uri = crate::common::file_uri(&dir.path().join("app/Builder.php"));
+    let runner_uri = crate::common::file_uri(&dir.path().join("app/Runner.php"));
     backend.update_ast(&builder_uri, builder_src);
     backend.update_ast(&runner_uri, runner_src);
 

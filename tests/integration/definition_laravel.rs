@@ -3583,8 +3583,7 @@ class Service {
         target
             .to_file_path()
             .unwrap()
-            .to_string_lossy()
-            .ends_with("/resources/views/redirects/create.blade.php"),
+            .ends_with("resources/views/redirects/create.blade.php"),
         "Should jump to the template, got: {target}"
     );
 }

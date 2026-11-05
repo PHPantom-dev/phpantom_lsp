@@ -60,7 +60,7 @@ class Panel {
         let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
         backend.fqn_uri_index().write().insert(
             "Filament\\Panel".to_string(),
-            format!("file://{}", vendor_class_path.display()),
+            crate::common::file_uri(&vendor_class_path),
         );
 
         // Open a file that uses the vendor class via a use-import.
@@ -1125,7 +1125,7 @@ class MyProvider {
         let dir = tempfile::tempdir().expect("failed to create temp dir");
         let dep_path = dir.path().join("Mockery.php");
         std::fs::write(&dep_path, "<?php\nclass Mockery {}\n").expect("failed to write temp file");
-        let dep_uri = format!("file://{}", dep_path.display());
+        let dep_uri = crate::common::file_uri(&dep_path);
 
         let backend = Backend::new_test();
 

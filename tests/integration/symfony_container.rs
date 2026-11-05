@@ -808,10 +808,11 @@ function greet(ContainerInterface $container): void {
     let consumer_uri = uri_for(&dir, "src/consumer.php");
     open_document(&backend, &consumer_uri, "php", consumer).await;
     let bundle_services = Uri::from_file_path(
-        dir.path()
-            .join("vendor/acme/demo-bundle/config/services.php")
-            .canonicalize()
-            .unwrap(),
+        dunce::canonicalize(
+            dir.path()
+                .join("vendor/acme/demo-bundle/config/services.php"),
+        )
+        .unwrap(),
     )
     .unwrap();
 

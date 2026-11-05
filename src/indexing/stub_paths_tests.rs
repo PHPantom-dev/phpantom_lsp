@@ -357,9 +357,7 @@ fn a_composer_stub_package_is_a_stub_path() {
     assert!(backend.find_or_load_function(&["acme_ext"]).is_some());
     assert!(backend.find_or_load_class("NotAStub").is_none());
     let stub_uri = crate::util::path_to_uri(
-        &root
-            .join("vendor/php-stubs/wordpress-stubs/wordpress-stubs.php")
-            .canonicalize()
+        &dunce::canonicalize(root.join("vendor/php-stubs/wordpress-stubs/wordpress-stubs.php"))
             .unwrap(),
     );
     assert!(backend.is_external_stub_uri(&stub_uri));

@@ -378,11 +378,10 @@ fn normalize_and_resolve(file_dir: &Path, path_str: &str) -> PathBuf {
         // Canonicalize to resolve `..` and `.` components.
         // If canonicalize fails (path doesn't exist yet), use
         // a manual normalization.
-        path.canonicalize()
-            .unwrap_or_else(|_| normalize_path(&path))
+        dunce::canonicalize(&path).unwrap_or_else(|_| normalize_path(&path))
     } else {
         let abs = file_dir.join(&path);
-        abs.canonicalize().unwrap_or_else(|_| normalize_path(&abs))
+        dunce::canonicalize(&abs).unwrap_or_else(|_| normalize_path(&abs))
     }
 }
 

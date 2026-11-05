@@ -153,11 +153,7 @@ async fn go_to_definition_opens_the_projects_own_copy() {
             .class_declaration_uri("Acme\\Lib\\Client")
             .expect("both projects installed acme/lib");
         let own_vendor = crate::util::dir_uri_prefix(
-            &dir.path()
-                .join(project)
-                .join("vendor")
-                .canonicalize()
-                .unwrap(),
+            &dunce::canonicalize(dir.path().join(project).join("vendor")).unwrap(),
         );
         assert!(
             target.starts_with(&own_vendor),

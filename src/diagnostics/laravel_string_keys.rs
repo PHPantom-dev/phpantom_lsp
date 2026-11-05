@@ -1113,7 +1113,7 @@ mod tests {
 
         // Register the unindexed file in fqn_uri_index so
         // ensure_workspace_indexed Phase 1 will try to parse it.
-        let unindexed_uri = format!("file://{}", unindexed_file.to_str().unwrap());
+        let unindexed_uri = crate::util::path_to_uri(&unindexed_file);
         backend
             .symbols
             .fqn_uri_index

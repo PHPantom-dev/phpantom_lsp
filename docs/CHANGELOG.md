@@ -105,6 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Yii views on Windows.** Go-to-definition, hover, references and diagnostics on Yii view names now work when the project lives on a Windows drive.
+- **`move` on Windows.** The `move` command no longer refuses every file as being outside the project on Windows, and a namespace such as `Tests\Unit` is no longer mistaken for the directory of the same name.
 - **Members named by a variable in a chain.** `$row->{$column}->equals($x)` and `$obj->$getter()->format()` now resolve when the variable holds known strings. A variable that can hold several names reads every member they name.
 - **Class-name keys written into an array.** A key that is a class name, such as one checked with `class_exists()`, added to an array whose keys are `Foo::class` constants no longer turns every key into a plain `string`, so passing them to `new ReflectionClass()` is no longer reported. A constant array keyed by `Foo::class` keeps its keys as class names.
 - **Keys written into a plain `array`.** Writing a key into a parameter declared as `array` no longer makes it look like it holds only the written keys, which reported an undeclared key when it was passed to a function that takes an array shape.
