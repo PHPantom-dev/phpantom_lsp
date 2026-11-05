@@ -92,6 +92,36 @@ gap as a `// SKIP: reason` in this document or `docs/todo/`.
 
 ---
 
+## TS11. Mock unions in property docblocks
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @var \Drupal\Core\Entity\EntityTypeManagerInterface|\PHPUnit\Framework\MockObject\MockObject */
+protected $entityTypeManager;
+
+protected function setUp(): void {
+    $this->entityTypeManager = $this->createMock(EntityTypeManagerInterface::class);
+}
+
+public function testLoad(): void {
+    new Loader($this->entityTypeManager);   // expects EntityTypeManagerInterface, got …|MockObject
+}
+```
+
+Before PHPUnit types could be intersections, a mock property was
+documented as a union of the mocked class and `MockObject`, and
+Drupal's tests and many older suites still are. Read as written, the
+union fails every parameter that takes the mocked class. PHPStan's
+PHPUnit extension (`MockObjectTypeNodeResolverExtension`) reads a
+docblock union that names `MockObject` or `Stub` as the intersection of
+its members, which is what the property holds. Do the same when a
+docblock type is resolved. Inside the method that assigns the mock the
+assignment already narrows it, so the reports are on the other test
+methods.
+
+---
+
 ## TS9. PHPUnit and Pest demo project
 
 **Impact: Medium · Complexity: Low-Medium**

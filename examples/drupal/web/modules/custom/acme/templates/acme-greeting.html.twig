@@ -6,6 +6,8 @@
  * Available variables:
  * - name: The name being greeted.
  * - greeting: The full greeting text.
+ * - attributes: HTML attributes for the wrapper, including the class
+ *   acme_theme adds in preprocess.
  */
 #}
-<p class="acme-greeting" data-name="{{ name }}">{{ greeting }}</p>
+<p{{ attributes.addClass('acme-greeting') }} data-name="{{ name }}">{{ greeting }}</p>

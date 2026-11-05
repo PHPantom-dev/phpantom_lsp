@@ -139,6 +139,7 @@ ships, remove every row that names it.
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
 | DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) (depends on DR3) | Medium-High | High        |
 | DR16 | [Event subscribers](todo/drupal.md#dr16-event-subscribers) | Medium | Low-Medium |
+| DR21 | [Return types core's docblocks leave wide](todo/drupal.md#dr21-return-types-cores-docblocks-leave-wide) | Medium | Low-Medium |
 
 ## Yii
 
@@ -160,6 +161,7 @@ ships, remove every row that names it.
 | TS10 | [Benchmark for test code](todo/testing.md#ts10-benchmark-for-test-code) | Low-Medium | Low |
 | TS8 | [Port PHPStan's PHPUnit and Mockery extension tests](todo/testing.md#ts8-port-phpstans-phpunit-and-mockery-extension-tests) | Medium | Low-Medium |
 | TS9 | [PHPUnit and Pest demo project](todo/testing.md#ts9-phpunit-and-pest-demo-project) | Medium | Low-Medium |
+| TS11 | [Mock unions in property docblocks](todo/testing.md#ts11-mock-unions-in-property-docblocks) | Medium | Low-Medium |
 | TS7 | [Prophecy](todo/testing.md#ts7-prophecy) | Low         | Low-Medium  |
 
 ## Laravel & Blade

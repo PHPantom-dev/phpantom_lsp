@@ -370,3 +370,28 @@ but only in a Symfony project, and a Drupal site's `composer.json`
 requires none of the packages that make it one. Read the map in a
 Drupal site too, so the listener methods navigate and are checked, and
 the event names complete where Drupal's event dispatcher takes one.
+
+---
+
+## DR21. Return types core's docblocks leave wide
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$url = Url::fromRoute('acme.greeting')->toString();           // string|GeneratedUrl
+$query = $db->select('node', 'n')->extend(PagerSelectExtender::class);
+$query->limit(10);                                            // limit() not found on ExtendableInterface
+```
+
+A few core methods that Drupal code calls everywhere declare a return
+type wider than what the call gives. `Url::toString()` returns a
+`GeneratedUrl` only when `$collect_bubbleable_metadata` is `true`, and a
+`string` otherwise; PHPStan's Drupal extension ships a stub with the
+conditional return type `($collect_bubbleable_metadata is true ?
+\Drupal\Core\GeneratedUrl : string)`. `extend()` on a query returns an
+instance of the extender class it is given, but declares
+`ExtendableInterface`, so every pager or table-sort query loses its
+type. Give both the precise type, through the same mechanism as the
+other framework corrections ([E7](external-stubs.md#e7-stub-based-framework-patches)
+if it has shipped), so a `string` parameter takes the plain
+`toString()` and the extender's methods resolve.
