@@ -42,8 +42,8 @@ pub use autoload_files::{
 };
 pub use installed::extract_path_repo_psr4_mappings;
 pub(crate) use installed::{
-    InstalledPackages, linked_package_roots, parse_installed_packages, path_repo_psr4_mappings,
-    read_installed_packages, stub_package_roots,
+    InstalledPackages, installed_package_roots, linked_package_roots, parse_installed_packages,
+    path_repo_psr4_mappings, read_installed_packages, stub_package_roots,
 };
 pub(crate) use project::{
     detect_drupal_web_root, explicit_dependency_names, has_dependency, has_laravel_aware_phpstan,

@@ -356,6 +356,45 @@ table();
     );
 }
 
+/// A name written with a leading `\` is resolved without the import table,
+/// so it does not use an import of the same name.
+#[test]
+fn a_fully_qualified_name_does_not_use_an_import() {
+    let content = r#"<?php
+namespace App;
+
+use DateTimeImmutable;
+use ArrayObject;
+use Lib\Models;
+use Countable;
+use function strlen;
+use function trim;
+use const PHP_EOL;
+use const E_ALL;
+
+final class Season implements Countable {
+    public function a(): \DateTimeImmutable {
+        echo \PHP_EOL, E_ALL;
+        trim('');
+        new \Models\User();
+        return \DateTimeImmutable::createFromMutable(new \DateTime());
+    }
+    public function b(): int { return \strlen(\ArrayObject::class); }
+    public function count(): int { return 0; }
+}
+"#;
+    assert_eq!(
+        unused_imports(content),
+        [
+            "Unused import 'ArrayObject'",
+            "Unused import 'DateTimeImmutable'",
+            "Unused import 'Lib\\Models'",
+            "Unused import 'PHP_EOL'",
+            "Unused import 'strlen'",
+        ]
+    );
+}
+
 /// Each `namespace` block's function imports are checked against the calls
 /// in that block alone.
 #[test]

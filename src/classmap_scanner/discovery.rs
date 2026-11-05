@@ -634,11 +634,14 @@ fn read_phpstorm_stubs_map(
 /// with `[indexing] exclude`, which is honored here like everywhere
 /// else; duplicate fixture classes are handled by the classmap's
 /// first-wins merge.
+///
+/// The same walk collects the files Drupal reads declarations from,
+/// returned beside the symbols.
 pub fn scan_drupal_directories(
     web_root: &Path,
     filters: &std::sync::Arc<IndexFilters>,
     progress: Option<&ScanProgress>,
-) -> WorkspaceScanResult {
+) -> (WorkspaceScanResult, DrupalDeclarationFiles) {
     use ignore::WalkBuilder;
 
     let drupal_dirs = [
@@ -652,6 +655,7 @@ pub fn scan_drupal_directories(
     ];
 
     let mut php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
+    let mut declaration_files = DrupalDeclarationFiles::default();
 
     for rel in &drupal_dirs {
         let dir = web_root.join(rel);
@@ -678,14 +682,40 @@ pub fn scan_drupal_directories(
 
         for entry in walker.flatten() {
             let path = entry.path();
-            if path.is_file() && (is_drupal_php_file(path) || filters.is_php_file(path)) {
+            if !path.is_file() {
+                continue;
+            }
+            if is_drupal_php_file(path) || filters.is_php_file(path) {
+                if crate::drupal::service_providers::is_service_provider_file(path, web_root) {
+                    declaration_files.service_providers.push(path.to_path_buf());
+                }
                 php_files.push((path.to_path_buf(), crate::ClassCompletionOrigin::Project));
+                if crate::drupal::is_hook_php_file(path, web_root) {
+                    declaration_files.declarations.push(path.to_path_buf());
+                }
+            } else if crate::drupal::is_declaration_file(path, web_root) {
+                declaration_files.declarations.push(path.to_path_buf());
             }
         }
     }
 
     progress_add_total(progress, php_files.len());
-    scan_files_parallel_full(&php_files, progress)
+    (
+        scan_files_parallel_full(&php_files, progress),
+        declaration_files,
+    )
+}
+
+/// The files a Drupal web root declares things in.
+#[derive(Default)]
+pub struct DrupalDeclarationFiles {
+    /// The YAML files Drupal reads declarations from (see
+    /// `drupal::is_declaration_file`) and the PHP files that document or
+    /// implement hooks (see `drupal::is_hook_php_file`).
+    pub declarations: Vec<PathBuf>,
+    /// The service providers whose `alter()` may give a service another
+    /// class (see `drupal::service_providers`).
+    pub service_providers: Vec<PathBuf>,
 }
 
 /// The extensions besides `.php` that Drupal treats as PHP source.

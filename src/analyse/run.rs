@@ -304,7 +304,12 @@ mod tests {
         let files = discover_user_files(&backend, root, &[]);
         let names: Vec<String> = files
             .iter()
-            .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+            .map(|p| {
+                p.strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
             .collect();
         assert!(names.contains(&"index.php".to_string()), "{names:?}");
         assert!(
@@ -345,7 +350,12 @@ mod tests {
         let names = |files: &[PathBuf]| -> Vec<String> {
             files
                 .iter()
-                .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+                .map(|p| {
+                    p.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
                 .collect()
         };
 

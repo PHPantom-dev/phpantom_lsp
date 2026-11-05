@@ -263,6 +263,7 @@ pub mod diagnostics;
 pub mod docblock;
 mod document_links;
 mod document_symbols;
+mod drupal;
 mod file_state;
 pub mod fix;
 mod folding;
@@ -465,6 +466,18 @@ pub struct BackendState {
     /// `find_implementors`).  Populated in `update_ast_inner` and
     /// `parse_and_cache_content_versioned`.
     pub(crate) parsed_uris: Arc<RwLock<HashSet<String>>>,
+    /// Files of an installed package (see
+    /// [`WorkspaceEnv::installed_package_uri_prefixes`](crate::workspace_env::WorkspaceEnv))
+    /// the workspace index has read and let go of again.
+    ///
+    /// A Drupal site holds all of core and its tests outside `vendor/`, and
+    /// keeping every one of those files' symbol maps resident cost the
+    /// better part of a gigabyte.  Such a file keeps what a vendor file
+    /// keeps (its declarations, its classes once loaded) plus its entries
+    /// in the reference index, so searches still select it, and is parsed
+    /// again when a search reads it (see
+    /// [`Backend::wake_dormant_files`]) or the editor opens it.
+    pub(crate) dormant_files: RwLock<HashSet<String>>,
     /// Set of file URIs currently being parsed by another thread.
     ///
     /// Used by [`parse_and_cache_file`](Self::parse_and_cache_file) to avoid
@@ -538,6 +551,8 @@ pub struct BackendState {
     pub(crate) yii: yii::YiiState,
     /// The files that fire or use a WordPress hook.
     pub(crate) wordpress_hooks: wordpress::hooks::HookFiles,
+    /// The web roots of the workspace's Drupal projects.
+    pub(crate) drupal: drupal::DrupalState,
     /// The `Pest.php` files of the project's test directories, read on
     /// first use and dropped when one is saved.  `None` until then.
     pub(crate) pest_configs: Arc<RwLock<Option<pest::PestConfigs>>>,

@@ -304,6 +304,10 @@ impl Backend {
             .as_ref()
             .map(composer::linked_package_roots)
             .unwrap_or_default();
+        let installed_packages = installed
+            .as_ref()
+            .map(composer::installed_package_roots)
+            .unwrap_or_default();
         let vendor_paths = if vendor_path.is_dir() {
             path_aliases(&vendor_path)
         } else {
@@ -315,6 +319,12 @@ impl Backend {
             project.stub_packages = stub_packages;
             project.vendor_paths = vendor_paths;
             project.linked_packages = linked_packages;
+            project.installed_packages = installed_packages;
+            *self.workspace.installed_package_uri_prefixes.lock() = projects
+                .iter()
+                .flat_map(|project| &project.installed_packages)
+                .map(|root| crate::util::dir_uri_prefix(root))
+                .collect();
         }
         self.workspace.forget_project_scopes();
 
@@ -390,7 +400,7 @@ impl Backend {
             }
             // Canonicalise to avoid revisiting the same file via
             // different relative paths.
-            let canonical = file_path.canonicalize().unwrap_or(file_path);
+            let canonical = dunce::canonicalize(&file_path).unwrap_or(file_path);
             if !visited.insert(canonical.clone()) {
                 continue;
             }
@@ -620,7 +630,7 @@ mod tests {
         let paths = backend.workspace.vendor_dir_paths.lock();
         assert_eq!(paths.len(), 2, "repeat registration must stay deduplicated");
         assert!(paths.contains(&aliased_vendor));
-        assert!(paths.contains(&canonical_vendor.canonicalize().unwrap()));
+        assert!(paths.contains(&dunce::canonicalize(&canonical_vendor).unwrap()));
     }
 
     #[test]
@@ -640,6 +650,6 @@ mod tests {
 
         let paths = backend.workspace.vendor_dir_paths.lock();
         assert!(paths.contains(&aliased_vendor));
-        assert!(paths.contains(&canonical_vendor.canonicalize().unwrap()));
+        assert!(paths.contains(&dunce::canonicalize(&canonical_vendor).unwrap()));
     }
 }

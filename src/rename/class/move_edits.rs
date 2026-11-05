@@ -37,11 +37,7 @@ impl Backend {
         // package, and moving one headlessly is no safer: the edits would
         // land in a tree the next `composer install` overwrites.
         if self
-            .workspace
-            .vendor_uri_prefixes
-            .lock()
-            .iter()
-            .any(|prefix| definition_uri.starts_with(prefix.as_str()))
+            .is_installed_package_uri(&definition_uri, &self.workspace.vendor_uri_prefixes.lock())
         {
             return Err(format!(
                 "`{old_fqn}` is declared in an installed package and cannot be moved."

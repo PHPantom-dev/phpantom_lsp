@@ -18,6 +18,7 @@ use crate::references::eloquent::EloquentMagicMember;
 use crate::references::member_scope::MemberScope;
 use crate::references::push_location;
 use crate::references::receivers::ReceiverWalk;
+use crate::symbol_map::DocblockMemberRef;
 use crate::symbol_map::SymbolKind;
 use crate::symbol_map::SymbolMap;
 use crate::symbol_map::SymbolSpan;
@@ -87,6 +88,8 @@ impl MemberRefKind {
         };
         Some(if *is_method_call {
             Self::Method
+        } else if *docblock_ref == DocblockMemberRef::AttributeNamedArg {
+            Self::Property
         } else if docblock_ref.is_reference() {
             Self::Either
         } else if *is_static && (span.end - span.start) as usize == member_name.len() {

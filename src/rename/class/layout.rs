@@ -212,10 +212,13 @@ impl Backend {
 
         let def_uri_str = self.symbols.fqn_uri_index.read().get(old_fqn).cloned()?;
 
+        // The file name is swapped on the URI itself, so the new URI keeps
+        // the client's spelling of the directory (a Windows client's
+        // `file:///c%3A/...` would come back from a round trip through a
+        // path as `file:///C:/...`).
         let def_url = crate::util::parse_url(&def_uri_str)?;
-        let def_path = crate::util::url_to_path(&def_url)?;
-
-        let stem = def_path.file_stem()?.to_str()?;
+        let file_name = def_url.path_segments()?.next_back()?;
+        let stem = std::path::Path::new(file_name).file_stem()?.to_str()?;
         if stem != old_short {
             return None;
         }
@@ -225,10 +228,7 @@ impl Backend {
             return None;
         }
 
-        let mut new_path = def_path.clone();
-        new_path.set_file_name(format!("{}.php", new_short_name));
-
-        let new_url = crate::util::path_to_url(&new_path)?;
+        let new_url = def_url.join(&format!("{new_short_name}.php")).ok()?;
 
         Some((def_url, new_url))
     }

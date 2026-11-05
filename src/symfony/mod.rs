@@ -48,7 +48,7 @@ use parking_lot::RwLock;
 use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::Backend;
-use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap, SymbolSpan};
+use crate::symbol_map::{KeyFramework, StringKeyKind, SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::LineIndex;
 
 /// The two formats Symfony's configuration is read from as text.
@@ -125,8 +125,9 @@ pub(crate) struct SymfonyState {
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
 /// translation key, a template, a Twig filter or function, a configuration
-/// key, an event listener, or a Messenger bus, outright or through a configurator call still to be
-/// confirmed, or registers a Messenger handler, or imports routes, or
+/// key, an event listener, a Messenger bus, a Drupal entity type, a Drupal
+/// route, or a Drupal hook, outright or through a configurator call still
+/// to be confirmed, or registers a Messenger handler, or imports routes, or
 /// declares a Twig loader.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that
@@ -135,13 +136,20 @@ pub(crate) struct SymfonyState {
 /// counted whether it has a name or not, for the arguments its handler
 /// reads from its path.
 fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> bool) -> bool {
-    let counts = |kind: StringKeyKind| {
-        (kind.is_symfony() || kind.is_yii() || kind.is_twig()) && enabled(kind)
+    let counts = |kind: StringKeyKind| match kind.framework() {
+        KeyFramework::ServiceContainer
+        | KeyFramework::Symfony
+        | KeyFramework::Twig
+        | KeyFramework::Yii
+        | KeyFramework::Drupal => enabled(kind),
+        KeyFramework::Laravel | KeyFramework::WordPress => false,
     };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
         || (map.declares_twig_loader && enabled(StringKeyKind::TwigTemplate))
+        || ((!map.drupal_route_patterns.is_empty() || !map.drupal_route_aliases.is_empty())
+            && enabled(StringKeyKind::DrupalRoute))
         || map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
@@ -174,19 +182,17 @@ impl Backend {
     /// Whether the framework a string key of `kind` belongs to is the one
     /// this project uses.
     pub(crate) fn string_key_kind_enabled(&self, kind: StringKeyKind) -> bool {
-        if kind.is_twig() {
-            self.is_twig_project()
-        } else if kind.is_wordpress() {
+        match kind.framework() {
+            KeyFramework::Laravel => self.resolved_class_cache.read().laravel().is_enabled(),
+            KeyFramework::ServiceContainer => self.reads_service_container(),
+            KeyFramework::Symfony => self.is_symfony_project(),
+            KeyFramework::Twig => self.is_twig_project(),
+            KeyFramework::Yii => self.is_yii_project(),
+            KeyFramework::Drupal => self.is_drupal_project(),
             // The hook functions' names are WordPress's own, and a project
             // that calls them is a WordPress one whatever its
             // `composer.json` says, or whether it has one at all.
-            true
-        } else if kind.is_yii() {
-            self.is_yii_project()
-        } else if kind.is_symfony() {
-            self.is_symfony_project()
-        } else {
-            self.resolved_class_cache.read().laravel().is_enabled()
+            KeyFramework::WordPress => true,
         }
     }
 
@@ -195,18 +201,22 @@ impl Backend {
     /// Dependencies are never part of the project's own configuration, so a
     /// vendor file that happens to be parsed is left out.
     pub(crate) fn note_symfony_declarations(&self, uri: &str, map: &SymbolMap) {
-        if !self.is_symfony_project() && !self.is_twig_project() && !self.is_yii_project() {
+        if !self.reads_service_container() && !self.is_twig_project() && !self.is_yii_project() {
             return;
         }
         let declares = declares_symfony_keys(map, |kind| self.string_key_kind_enabled(kind))
+            && !self.is_closed_drupal_test_fixture(uri)
             && !self
                 .workspace
                 .vendor_uri_prefixes
                 .lock()
                 .iter()
                 .any(|prefix| uri.starts_with(prefix.as_str()));
+        self.note_drupal_routes(uri, Some(map));
+        self.note_drupal_hook_declarations(uri, Some(map));
+        let was_declaring = self.symfony.declaring_uris.read().contains(uri);
         // Only take the write lock when the answer changes.
-        if self.symfony.declaring_uris.read().contains(uri) == declares {
+        if was_declaring == declares {
             return;
         }
         let mut uris = self.symfony.declaring_uris.write();
@@ -219,9 +229,17 @@ impl Backend {
 
     /// Forget a file that no longer exists.
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
+        self.note_drupal_routes(uri, None);
+        self.note_drupal_hook_declarations(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
         }
+    }
+
+    /// Whether the file at `uri` declares a name
+    /// [`Self::visit_declaring_symbol_maps`] visits it for.
+    pub(crate) fn is_declaring_uri(&self, uri: &str) -> bool {
+        self.symfony.declaring_uris.read().contains(uri)
     }
 
     /// Visit the symbol map of every file that declares a name, in a
@@ -272,11 +290,28 @@ impl Backend {
         }
         let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
         uris.sort_unstable();
+        // Only Symfony declares names through calls the type engine has to
+        // confirm.  A Drupal project records the calls that invoke its
+        // hooks, but hooks have an index of their own (see
+        // `crate::drupal::hooks`), which is not read here.
+        let needs_typed = match kind.framework() {
+            KeyFramework::Drupal => false,
+            KeyFramework::ServiceContainer => self.is_symfony_project(),
+            KeyFramework::Laravel
+            | KeyFramework::Symfony
+            | KeyFramework::Twig
+            | KeyFramework::Yii
+            | KeyFramework::WordPress => true,
+        };
         for uri in uris {
             let Some(map) = self.symbol_map_for(&uri) else {
                 continue;
             };
-            let typed = self.typed_receiver_spans_for(&uri, &map);
+            let typed = if needs_typed {
+                self.typed_receiver_spans_for(&uri, &map)
+            } else {
+                std::sync::Arc::default()
+            };
             for span in map.spans.iter().chain(typed.iter()) {
                 if let SymbolKind::StringKey {
                     kind: span_kind,

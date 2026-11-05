@@ -478,7 +478,8 @@ fn property_source(src: &PropertySource) -> Sz {
             z += vs(pivot_columns);
         }
         PropertySource::RelationshipCount { relationship } => z.add(relationship.capacity()),
-        PropertySource::Pivot | PropertySource::DocblockTag => {}
+        PropertySource::Pivot | PropertySource::DocblockTag | PropertySource::PromotedParameter => {
+        }
     }
     z
 }
@@ -1401,6 +1402,42 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             sym.add(
                 sm.container_values.capacity() * size_of::<crate::symbol_map::ContainerValueSite>(),
             );
+            sym.add(sm.entity_types.capacity() * size_of::<crate::symbol_map::EntityTypeSite>());
+            sym.add(sm.drupal_route_patterns.capacity() * size_of::<String>());
+            sym.add(sm.drupal_route_aliases.capacity() * size_of::<String>());
+            sym.add(sm.drupal_hooks.capacity() * size_of::<crate::symbol_map::HookSite>());
+            sym.add(
+                sm.drupal_computed_hooks.capacity()
+                    * size_of::<crate::symbol_map::ComputedHookSite>(),
+            );
+            for site in &sm.drupal_computed_hooks {
+                sym.add(site.shape.capacity());
+            }
+            for name in sm
+                .drupal_route_patterns
+                .iter()
+                .chain(&sm.drupal_route_aliases)
+            {
+                sym.add(name.capacity());
+            }
+            sym.add(sm.drupal_routes.capacity() * size_of::<crate::symbol_map::DrupalRouteSite>());
+            for route in &sm.drupal_routes {
+                sym.add(route.name.capacity() + route.path.capacity());
+                sym.add(route.controller.as_ref().map_or(0, String::capacity));
+                sym.add(route.title_callback.as_ref().map_or(0, String::capacity));
+                sym.add(route.entity_type.as_ref().map_or(0, String::capacity));
+                sym.add(
+                    route.parameters.capacity() * size_of::<crate::symbol_map::DeclaredParameter>(),
+                );
+                for parameter in &route.parameters {
+                    sym.add(parameter.name.capacity());
+                    sym.add(parameter.ty.as_ref().map_or(0, String::capacity));
+                }
+                sym.add(route.defaults.capacity() * size_of::<(String, bool)>());
+                for (name, _) in &route.defaults {
+                    sym.add(name.capacity());
+                }
+            }
             sym.add(sm.routes.capacity() * size_of::<crate::symbol_map::RouteSite>());
             for route in &sm.routes {
                 sym.add(route.path.as_ref().map_or(0, String::capacity));

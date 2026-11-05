@@ -67,80 +67,7 @@ seconds a rate-limit message names.
 
 ## Array types
 
-### B726. A dynamic `class-string` key written into a shape widens every key to `string`
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-private const PAIRS = [NodeTraverser::class => [...]];
-
-$pairs = self::PAIRS;
-if (class_exists($className)) {
-    $pairs[$className] = [...];
-}
-foreach (array_keys($pairs) as $class) {
-    new ReflectionClass($class);
-    // expects class-string<object>|object, got string
-}
-```
-
-`array_keys(self::PAIRS)` alone gives `list<class-string<NodeTraverser>>`,
-and `$className` is a `class-string` after the `class_exists()` check, so
-every key is a class name. Once the dynamic write turns the shape into
-`array<K, V>`, the shape's key reads as the literal `'NodeTraverser'`
-rather than a class string, and joining it with `class-string` collapses
-the key domain to `string`. A non-class literal key (`['x' => 1]` then
-`$a[$cs] = 2`) also gives `array<string, …>`, where `'x'|class-string`
-would be exact.
-
-This started to show when `new ReflectionClass()`'s
-`T|class-string<T>` parameter began rejecting a plain `string`.
-
-**Where to change:** `merge_keyed_type_inner` and `join_element_types`
-in `src/type_engine/variable/array_shape_writes.rs`. A shape key that
-names a class should become `class-string<Foo>` there, the way
-`merge_shape_key` already does through `class_name_key`, and the join
-should keep a union of `class-string` members instead of widening it to
-`string`.
-
-Found in PHPStan's own build script that collects the classes its native
-extension shadows (two sites).
-
-### B728. A key written into a plain `array` turns it into a closed shape
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @param array $args */
-function add(string $id, array $args, mixed $default): void {
-    $args['settings'] = $id;           // array{settings: string}
-    $args['defaultValue'] = $default;  // array{settings: string, defaultValue: mixed}
-    $wp_customize->add_control($id, $args);
-    // expects array{…, settings?: array, …}, got array{settings: string, defaultValue?: mixed}
-    // (undeclared key 'defaultValue')
-}
-```
-
-`$args` holds whatever keys the caller passed, so after the writes it is
-still an array with unknown keys that also has `settings` and
-`defaultValue`. The write rebuilds it as a shape holding only the written
-keys, which then gets checked as if those were all the keys there are:
-an `undeclared key` report against a closed parameter shape, where a plain
-`array` is accepted. A tracked `array<K, V>` base does not have this
-problem: `merge_shape_key` folds the write into the key/value pair. A bare
-`array` has no key type, so it falls through to the shape path meant for
-`[]`.
-
-**Where to change:** `merge_shape_key` in
-`src/type_engine/variable/array_shape_writes.rs`. A bare `array` (or
-`mixed[]`) base should keep its open key domain after the write. Ideally
-it should also remember the written keys for later reads, the way
-PHPStan's `hasOffsetValue` does. If that is not possible without an
-intersection type, it should become `non-empty-array<array-key, …>`.
-
-Found in a WordPress theme's customizer helper, which adds keys to the
-caller's control arguments before passing them to
-`WP_Customize_Manager::add_control()`.
+No outstanding items.
 
 ## Laravel
 
@@ -152,7 +79,53 @@ No outstanding items.
 
 ## Templates
 
-No outstanding items.
+### B706. A template nested in an iterable parameter's value type binds to the whole argument
+
+**Impact: Medium-High · Complexity: Medium**
+
+```php
+/**
+ * @template Tk of array-key
+ * @template Tv
+ * @param iterable<Tk, (Closure(): Tv)> $tasks
+ * @return array<Tk, Tv>
+ */
+function concurrently(iterable $tasks): array { … }
+
+[$server, $client] = concurrently([$listener->accept(...), fn(): Stream => connect()]);
+$server->writeAll('…');   // Cannot access method 'writeAll' on type 'list{Closure(): Stream, …}'
+```
+
+`Tk` is inferred from the keys, but `Tv` is bound to the whole array
+literal (`list{Closure(): Stream, Closure(): Stream}`) instead of to the
+return type of each closure in it. A lone `@param Closure(): Tv` infers
+`Tv` correctly, so the closure-return binding is there; it is not applied
+when the closure type is the value type of an `iterable`/`array`
+parameter. The values should each bind `Tv` from their return type,
+first-class callables included, and the bindings union.
+
+The same happens when the value type is a generic class rather than a
+closure:
+
+```php
+/**
+ * @template Tk of array-key
+ * @template Tv
+ * @param array<Tk, TypeInterface<Tv>> $elements
+ * @return TypeInterface<array<Tk, Tv>>
+ */
+function shape(array $elements): TypeInterface { … }
+
+shape(['x' => int(), 'label' => string()])->coerce($data);
+// array<string, array{x: TypeInterface<int>, label: TypeInterface<string>}>,
+// want array<string, int|string>
+```
+
+So the fix belongs where an argument's element types are matched against
+the parameter's value type, not in the closure-return binding.
+
+Found by `analyze` on azjezz/psl: `Async\concurrently()` and
+`Async\all()` in its tests (about 70 false positives), and `Type\shape()`.
 
 ## Framework names in strings
 
@@ -194,40 +167,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B727. A property or method named by a variable does not resolve in a chain
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @param array{price: Decimal, member_price: Decimal} $prices */
-function differences(ProductPrice $price, array $prices): void {
-    foreach ($prices as $column => $amount) {
-        $price->{$column}->equals($amount);
-        // Cannot verify method 'equals': the type of its subject could not be resolved
-    }
-}
-
-$name = 'getD';
-$p->$name()->equals($d);   // type of '$p->?()' could not be resolved
-```
-
-`$column` is `'price'|'member_price'`, so `$price->{$column}` is the
-union of those two properties' types. Even a single literal does not
-resolve as the subject of a chain, whether it is a property (`$m->$col`,
-`$m->{$col}`) or a method call (`$m->$meth()`). The symbol map records the
-member as `?`. `resolve_dynamic_member_name` in
-`src/type_engine/resolver/variable_subjects.rs` takes only the first
-literal it finds, and is only consulted from the call-return path in
-`call_resolution/return_types.rs`.
-
-The name should resolve to every literal the variable can hold, joining
-the member types, for property fetches as well as calls and wherever the
-access sits in a chain. The `dynamic_member_names` diagnostic already
-reads the same literal set.
-
-Before 2026-10-27 this site resolved `$price->{$column}` to `ProductPrice`
-itself, so `equals()` was looked up on the model and hidden by its
-`__call`. It now shows up as unresolved under `unresolved-member-access`.
-
-Found in a Laravel project's back-office tool comparing a price row's
-columns against a cached copy.
+No outstanding items.

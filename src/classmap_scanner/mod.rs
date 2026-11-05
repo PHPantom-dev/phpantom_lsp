@@ -90,8 +90,9 @@ pub(crate) use discovery::{
     scan_stub_paths,
 };
 pub use discovery::{
-    scan_directories, scan_drupal_directories, scan_include_paths, scan_psr4_directories,
-    scan_psr4_directories_with_skip, scan_workspace_fallback, scan_workspace_fallback_full,
+    DrupalDeclarationFiles, scan_directories, scan_drupal_directories, scan_include_paths,
+    scan_psr4_directories, scan_psr4_directories_with_skip, scan_workspace_fallback,
+    scan_workspace_fallback_full,
 };
 pub use filters::{FollowedLinks, IndexFilters, LinkClaims, workspace_walk_builder};
 pub use lexer::{find_classes, find_symbols};

@@ -2455,7 +2455,7 @@ function wrongValue(): array {
     let messages = messages_with_code(&diags, "type_mismatch_return");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
-        messages[0].contains("array{foo: string, ...<array-key, mixed>}"),
+        messages[0].contains("array{foo: string, ...}"),
         "got {messages:?}"
     );
 }

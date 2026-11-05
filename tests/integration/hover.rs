@@ -3,8 +3,8 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
     create_test_backend_with_full_stubs, create_test_backend_with_function_stubs,
-    create_test_backend_with_stdclass_stub, hover_at, hover_response, hover_text, markup_hover_at,
-    open_php,
+    create_test_backend_with_stdclass_stub, hover_at, hover_response, hover_text, hover_text_at,
+    markup_hover_at, open_php,
 };
 use phpantom_lsp::Backend;
 use tower_lsp_server::gen_lsp_types::*;
@@ -966,6 +966,48 @@ function test(): void {
         text.contains("$nodes = list<Node>"),
         "an `array &$` parameter must not erase the known element type: {text}"
     );
+}
+
+/// A user function is held to its declaration: what the argument held
+/// before the call does not survive a typed by-reference parameter, even
+/// when the declared type would admit it.
+#[test]
+fn hover_typed_by_reference_parameter_of_a_user_function_replaces_the_old_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///by-ref-user-shape.php";
+    let content = r#"<?php
+class Markup {}
+function mail(array &$message): void {
+    $message['body'][] = new Markup();
+}
+class Mailer {
+    public function send(array &$message): void {}
+}
+function test(Mailer $mailer): void {
+    $message = ['body' => []];
+    mail($message);
+    echo $message;
+    $other = ['body' => []];
+    $mailer->send($other);
+    echo $other;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 11, 10).expect("hover on $message");
+    let text = hover_text(&hover);
+    assert!(
+        !text.contains("array{body: array{}}"),
+        "the pre-call shape must not survive a user function's typed by-reference call: {text}"
+    );
+    assert!(text.contains("array"), "{text}");
+
+    let hover = hover_at(&backend, uri, content, 14, 10).expect("hover on $other");
+    let text = hover_text(&hover);
+    assert!(
+        !text.contains("array{body: array{}}"),
+        "the pre-call shape must not survive a user method's typed by-reference call: {text}"
+    );
+    assert!(text.contains("$other = array"), "{text}");
 }
 
 #[test]
@@ -2490,15 +2532,12 @@ class Service {
         ],
     );
 
-    let product_uri = format!(
-        "file://{}",
-        _dir.path().join("src/Models/Product.php").display()
-    );
+    let product_uri = crate::common::file_uri(&_dir.path().join("src/Models/Product.php"));
     let product_content =
         std::fs::read_to_string(_dir.path().join("src/Models/Product.php")).unwrap();
     backend.update_ast(&product_uri, &product_content);
 
-    let service_uri = format!("file://{}", _dir.path().join("src/Service.php").display());
+    let service_uri = crate::common::file_uri(&_dir.path().join("src/Service.php"));
     let service_content = std::fs::read_to_string(_dir.path().join("src/Service.php")).unwrap();
 
     // Hover on `Product` type reference (line 5: `$p = new Product()`)
@@ -2553,14 +2592,11 @@ class Handler {
         ],
     );
 
-    let item_uri = format!(
-        "file://{}",
-        _dir.path().join("src/Models/Item.php").display()
-    );
+    let item_uri = crate::common::file_uri(&_dir.path().join("src/Models/Item.php"));
     let item_content = std::fs::read_to_string(_dir.path().join("src/Models/Item.php")).unwrap();
     backend.update_ast(&item_uri, &item_content);
 
-    let handler_uri = format!("file://{}", _dir.path().join("src/Handler.php").display());
+    let handler_uri = crate::common::file_uri(&_dir.path().join("src/Handler.php"));
     let handler_content = std::fs::read_to_string(_dir.path().join("src/Handler.php")).unwrap();
 
     // Hover on `getLabel` (line 6)
@@ -2619,11 +2655,11 @@ class Worker {
         ],
     );
 
-    let job_uri = format!("file://{}", _dir.path().join("src/Job.php").display());
+    let job_uri = crate::common::file_uri(&_dir.path().join("src/Job.php"));
     let job_content_v1 = std::fs::read_to_string(_dir.path().join("src/Job.php")).unwrap();
     backend.update_ast(&job_uri, &job_content_v1);
 
-    let worker_uri = format!("file://{}", _dir.path().join("src/Worker.php").display());
+    let worker_uri = crate::common::file_uri(&_dir.path().join("src/Worker.php"));
     let worker_content = std::fs::read_to_string(_dir.path().join("src/Worker.php")).unwrap();
 
     // Initial hover shows the original description.
@@ -2692,11 +2728,11 @@ class Reader {
         ],
     );
 
-    let config_uri = format!("file://{}", _dir.path().join("src/Config.php").display());
+    let config_uri = crate::common::file_uri(&_dir.path().join("src/Config.php"));
     let config_v1 = std::fs::read_to_string(_dir.path().join("src/Config.php")).unwrap();
     backend.update_ast(&config_uri, &config_v1);
 
-    let reader_uri = format!("file://{}", _dir.path().join("src/Reader.php").display());
+    let reader_uri = crate::common::file_uri(&_dir.path().join("src/Reader.php"));
     let reader_content = std::fs::read_to_string(_dir.path().join("src/Reader.php")).unwrap();
 
     // Initial hover on $c->value shows string type.
@@ -6632,11 +6668,11 @@ class Child extends Base {
         ],
     );
 
-    let base_uri = format!("file://{}", _dir.path().join("src/Base.php").display());
+    let base_uri = crate::common::file_uri(&_dir.path().join("src/Base.php"));
     let base_content = std::fs::read_to_string(_dir.path().join("src/Base.php")).unwrap();
     backend.update_ast(&base_uri, &base_content);
 
-    let child_uri = format!("file://{}", _dir.path().join("src/Child.php").display());
+    let child_uri = crate::common::file_uri(&_dir.path().join("src/Child.php"));
     let child_content = std::fs::read_to_string(_dir.path().join("src/Child.php")).unwrap();
 
     // Hover on `process` called on `$this` inside Child (line 5).
@@ -6682,14 +6718,11 @@ class FileLogger implements Loggable {
         ],
     );
 
-    let iface_uri = format!("file://{}", _dir.path().join("src/Loggable.php").display());
+    let iface_uri = crate::common::file_uri(&_dir.path().join("src/Loggable.php"));
     let iface_content = std::fs::read_to_string(_dir.path().join("src/Loggable.php")).unwrap();
     backend.update_ast(&iface_uri, &iface_content);
 
-    let impl_uri = format!(
-        "file://{}",
-        _dir.path().join("src/FileLogger.php").display()
-    );
+    let impl_uri = crate::common::file_uri(&_dir.path().join("src/FileLogger.php"));
     let impl_content = std::fs::read_to_string(_dir.path().join("src/FileLogger.php")).unwrap();
 
     // Hover on `log` called on `$this` inside FileLogger (line 5).
@@ -7770,7 +7803,7 @@ class Brand extends Model {
 ";
     let (backend, _dir) = make_laravel_hover_workspace(&[("src/Brand.php", brand_php)]);
 
-    let uri = format!("file://{}", _dir.path().join("src/Brand.php").display());
+    let uri = crate::common::file_uri(&_dir.path().join("src/Brand.php"));
     backend.update_ast(&uri, brand_php);
 
     // Line 8:  "        $query->active();"
@@ -7830,7 +7863,7 @@ class Brand extends Model {
 ";
     let (backend, _dir) = make_laravel_hover_workspace(&[("src/Brand.php", brand_php)]);
 
-    let uri = format!("file://{}", _dir.path().join("src/Brand.php").display());
+    let uri = crate::common::file_uri(&_dir.path().join("src/Brand.php"));
     backend.update_ast(&uri, brand_php);
 
     // Line 8: "        Brand::where('active', 1)->active()->ofGenre('sci-fi')->get();"
@@ -8291,18 +8324,12 @@ fn hover_variable_narrowed_by_var_and_instanceof_with_use_import() {
     );
 
     // Parse the cross-file classes so they're in the classmap.
-    let contracts_uri = format!(
-        "file://{}",
-        _dir.path().join("contracts/Provider.php").display()
-    );
+    let contracts_uri = crate::common::file_uri(&_dir.path().join("contracts/Provider.php"));
     let contracts_content =
         std::fs::read_to_string(_dir.path().join("contracts/Provider.php")).unwrap();
     backend.update_ast(&contracts_uri, &contracts_content);
 
-    let concrete_uri = format!(
-        "file://{}",
-        _dir.path().join("concrete/Provider.php").display()
-    );
+    let concrete_uri = crate::common::file_uri(&_dir.path().join("concrete/Provider.php"));
     let concrete_content =
         std::fs::read_to_string(_dir.path().join("concrete/Provider.php")).unwrap();
     backend.update_ast(&concrete_uri, &concrete_content);
@@ -10190,17 +10217,18 @@ fn hover_inline_var_cast_applies_to_array_element_assignment() {
     let content = r#"<?php
 class Test {
     public function run(): void {
+        $row = [];
         /** @var string */
-        $GLOBALS['sql_query'] = rand(0, 1) ? 'asd' : null;
-        echo $GLOBALS;
+        $row['sql_query'] = rand(0, 1) ? 'asd' : null;
+        echo $row;
     }
 }
 "#;
 
-    // Hover on `$GLOBALS` after the annotated array-element assignment —
-    // the @var override should type the element as `string`, not the
-    // RHS's own `'asd'|null`.
-    let hover = hover_at(&backend, uri, content, 5, 14).expect("expected hover on $GLOBALS");
+    // Hover on `$row` after the annotated array-element assignment: the
+    // @var override should type the element as `string`, not the RHS's own
+    // `'asd'|null`.
+    let hover = hover_at(&backend, uri, content, 6, 14).expect("expected hover on $row");
     let text = hover_text(&hover);
     assert!(
         text.contains("sql_query: string"),
@@ -12761,14 +12789,11 @@ class Service {
         ],
     );
 
-    let order_uri = format!(
-        "file://{}",
-        _dir.path().join("src/Models/Order.php").display()
-    );
+    let order_uri = crate::common::file_uri(&_dir.path().join("src/Models/Order.php"));
     let order_content = std::fs::read_to_string(_dir.path().join("src/Models/Order.php")).unwrap();
     backend.update_ast(&order_uri, &order_content);
 
-    let service_uri = format!("file://{}", _dir.path().join("src/Service.php").display());
+    let service_uri = crate::common::file_uri(&_dir.path().join("src/Service.php"));
     let service_content = std::fs::read_to_string(_dir.path().join("src/Service.php")).unwrap();
 
     // Hover on `$order` usage at line 7 (`$order->id`, 0-indexed)
@@ -12820,15 +12845,12 @@ class Handler {
         ],
     );
 
-    let invoice_uri = format!(
-        "file://{}",
-        _dir.path().join("src/Models/Invoice.php").display()
-    );
+    let invoice_uri = crate::common::file_uri(&_dir.path().join("src/Models/Invoice.php"));
     let invoice_content =
         std::fs::read_to_string(_dir.path().join("src/Models/Invoice.php")).unwrap();
     backend.update_ast(&invoice_uri, &invoice_content);
 
-    let handler_uri = format!("file://{}", _dir.path().join("src/Handler.php").display());
+    let handler_uri = crate::common::file_uri(&_dir.path().join("src/Handler.php"));
     let handler_content = std::fs::read_to_string(_dir.path().join("src/Handler.php")).unwrap();
 
     // Hover on `$inv` usage at line 6 (`$inv->number`, 0-indexed)
@@ -15447,7 +15469,7 @@ fn hover_class_constant_array_keyed_by_class_constant() {
     let hover = hover_at(&backend, uri, content, 7, 10).expect("hover $b");
     let text = hover_text(&hover);
     assert!(
-        text.contains(r"array{'App\\Widget': 'X', stdClass: 'Y'}"),
+        text.contains(r"array{App\Widget::class: 'X', stdClass::class: 'Y'}"),
         "the constant should keep its class-name keys, got: {text}"
     );
 }
@@ -17267,4 +17289,68 @@ class Holder {
     assert!(hover(19).contains("$called = Foo"), "{}", hover(19));
     assert!(hover(28).contains("$maybe = ?Foo"), "{}", hover(28));
     assert!(hover(36).contains("$untyped = mixed"), "{}", hover(36));
+}
+
+/// A method with no declared return type that returns `new static()`
+/// gives the class it is called on, not the class that declares it.
+#[tokio::test]
+async fn hover_untyped_new_static_return_binds_to_called_class() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let content = r#"<?php
+class Base {
+    public static function make() { return new static(); }
+    public function copy() { return new static(); }
+}
+class Child extends Base {}
+trait Makes {
+    public static function build() { return new static(); }
+}
+class User { use Makes; }
+function run(Child $c): void {
+    $a = Child::make();
+    $b = $c->copy();
+    $d = Base::make();
+    $u = User::build();
+}
+"#;
+    open_php(&backend, &uri, content).await;
+
+    let text = markup_hover_at(&backend, &uri, 11, 6).await;
+    assert!(text.contains("$a = Child"), "static call: {text}");
+    let text = markup_hover_at(&backend, &uri, 12, 6).await;
+    assert!(text.contains("$b = Child"), "instance call: {text}");
+    let text = markup_hover_at(&backend, &uri, 13, 6).await;
+    assert!(text.contains("$d = Base"), "declaring class: {text}");
+    let text = markup_hover_at(&backend, &uri, 14, 6).await;
+    assert!(text.contains("$u = User"), "trait method: {text}");
+}
+
+#[tokio::test]
+async fn test_hover_attribute_named_argument() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///hover_attribute_named_arg.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "#[\\Attribute]\n",
+        "class Foo {\n",
+        "    /** The label of the thing. */\n",
+        "    private string $plain = '';\n",
+        "    public function __construct(public ?string $bar = null, string $plain = '') {}\n",
+        "}\n",
+        "#[Foo(bar: 'hello', plain: 'x')]\n",
+        "class Baz {}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let hover = hover_text_at(&backend, &uri, 7, 7)
+        .await
+        .expect("the label of a promoted parameter hovers as the property");
+    assert!(hover.contains("$bar"), "{hover}");
+
+    let hover = hover_text_at(&backend, &uri, 7, 21).await;
+    assert!(
+        hover.is_none_or(|text| !text.contains("The label of the thing")),
+        "a label naming a plain parameter is not the property of its name"
+    );
 }

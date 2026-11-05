@@ -76,6 +76,41 @@ impl OutParamCallee {
         }
     }
 
+    /// Whether the callee is declared by the embedded stubs rather than by
+    /// project or library code.
+    ///
+    /// A built-in's by-reference parameter type is often looser than what
+    /// it actually writes (`array_shift(array &$array)` keeps the element
+    /// type), while a user callee is held to its declaration.
+    pub(crate) fn is_builtin(&self, backend: &Backend) -> bool {
+        match self {
+            Self::Function(fi) => {
+                let fqn = match fi.namespace {
+                    Some(ref ns) => format!("{ns}\\{}", fi.name),
+                    None => fi.name.to_string(),
+                };
+                backend
+                    .symbols
+                    .global_functions
+                    .read()
+                    .get(fqn.as_str())
+                    .is_some_and(|(uri, _)| crate::stubs::is_embedded_stub_uri(uri))
+            }
+            Self::Method(cls, name) => {
+                let loader = |n: Fqn<'_>| backend.find_or_load_class(&n);
+                let declaring = crate::hover::find_declaring_class(
+                    cls,
+                    name,
+                    &crate::hover::MemberKindForOrigin::Method,
+                    &loader,
+                );
+                let fqn = declaring.fqn();
+                !backend.symbols.fqn_uri_index.read().contains_key(&fqn)
+                    && backend.stub_index.read().contains_key(fqn.as_str())
+            }
+        }
+    }
+
     /// The receiver's FQN, for resolving `self`/`static` inside a
     /// `@param-out` conditional's own text. `None` for a plain function,
     /// which has no such receiver.

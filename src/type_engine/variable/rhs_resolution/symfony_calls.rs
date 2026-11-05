@@ -37,7 +37,7 @@ pub(super) fn try_resolve_container_lookup_type(
     let backend = ctx
         .file
         .backend
-        .filter(|backend| backend.is_symfony_project())?;
+        .filter(|backend| backend.reads_service_container())?;
     let Some(Argument::Positional(argument)) = argument_list.arguments.first() else {
         return None;
     };

@@ -428,7 +428,7 @@ fn scan_drupal_directories_finds_php_and_module_files() {
     )
     .unwrap();
 
-    let result = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let (result, _) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
     assert!(
         result
             .classmap
@@ -471,7 +471,7 @@ fn scan_drupal_directories_indexes_test_dirs_by_default() {
     )
     .unwrap();
 
-    let result = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let (result, _) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
     assert!(
         result.classmap.contains_key("Drupal\\Tests\\UnitTestCase"),
         "core test base classes must be indexed"
@@ -485,7 +485,7 @@ fn scan_drupal_directories_indexes_test_dirs_by_default() {
 
     // Projects that want the old behaviour opt in via the exclude list.
     let filters = test_filters(dir.path(), &["tests/", "Tests/"], &[]);
-    let result = scan_drupal_directories(web_root, &filters, None);
+    let (result, _) = scan_drupal_directories(web_root, &filters, None);
     assert!(
         !result
             .classmap
@@ -502,7 +502,7 @@ fn scan_drupal_directories_indexes_test_dirs_by_default() {
 fn scan_drupal_directories_skips_nonexistent_dirs() {
     let dir = tempfile::tempdir().unwrap();
     // Empty web root — none of the expected subdirectories exist
-    let result = scan_drupal_directories(dir.path(), &IndexFilters::empty(), None);
+    let (result, _) = scan_drupal_directories(dir.path(), &IndexFilters::empty(), None);
     assert!(result.classmap.is_empty());
     assert!(result.function_index.is_empty());
     assert!(result.constant_index.is_empty());
@@ -523,7 +523,7 @@ fn scan_drupal_directories_ignores_non_php_files() {
     )
     .unwrap();
 
-    let result = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let (result, _) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
     // Only the .php file should be indexed
     assert!(
         result.function_index.contains_key("install_begin"),
@@ -701,11 +701,44 @@ fn drupal_scan_honors_exclude_globs() {
     .unwrap();
 
     let filters = test_filters(dir.path(), &["fixtures"], &[]);
-    let result = scan_drupal_directories(web_root, &filters, None);
+    let (result, _) = scan_drupal_directories(web_root, &filters, None);
 
     assert!(result.classmap.contains_key("Mymod"));
     assert!(
         !result.classmap.contains_key("FixtureClass"),
         "exclude globs should apply to the Drupal scanner too"
+    );
+}
+
+#[test]
+fn scan_drupal_directories_collects_declaration_files_outside_tests() {
+    let dir = tempfile::tempdir().unwrap();
+    let web_root = dir.path();
+    for (path, content) in [
+        ("core/core.services.yml", "services: {}\n"),
+        ("modules/contrib/token/token.services.yml", "services: {}\n"),
+        ("modules/contrib/token/token.info.yml", "name: Token\n"),
+        ("sites/default/services.yml", "parameters: {}\n"),
+        (
+            "core/modules/system/tests/modules/fixture/fixture.services.yml",
+            "services: {}\n",
+        ),
+    ] {
+        let full = web_root.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+
+    let (_, files) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let mut files = files.declarations;
+    files.sort();
+    assert_eq!(
+        files,
+        vec![
+            web_root.join("core/core.services.yml"),
+            web_root.join("modules/contrib/token/token.info.yml"),
+            web_root.join("modules/contrib/token/token.services.yml"),
+            web_root.join("sites/default/services.yml"),
+        ]
     );
 }

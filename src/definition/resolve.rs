@@ -87,7 +87,7 @@ impl Backend {
     ) -> Option<crate::symbol_map::SymbolSpan> {
         let map = self.symbol_map_for(uri)?;
         if let Some(span) = map.lookup(offset) {
-            return Some(span.clone());
+            return Some(self.drupal_hook_or_function(&map, span).clone());
         }
         if map
             .morph_column_sites
@@ -182,6 +182,30 @@ impl Backend {
             .flat_map(|classes| classes.iter())
             .flat_map(|c| c.properties.iter())
             .any(|p| p.name_offset != 0 && p.name_offset == offset)
+    }
+
+    /// Whether a member access span names a member, rather than being an
+    /// attribute's named-argument label (`#[Foo(bar: 1)]`) for a parameter
+    /// the attribute class's constructor does not promote.
+    ///
+    /// `subject` is the span's subject text, the attribute name as written
+    /// at `offset` in the file `ctx` describes.
+    pub(crate) fn member_span_names_member(
+        &self,
+        ctx: &crate::types::FileContext,
+        docblock_ref: DocblockMemberRef,
+        subject: &str,
+        offset: u32,
+        member_name: &str,
+    ) -> bool {
+        if docblock_ref != DocblockMemberRef::AttributeNamedArg {
+            return true;
+        }
+        let fqn = ctx.resolve_name_at(subject, offset);
+        let class_loader = self.resolved_class_loader_with(&ctx.classes);
+        class_loader(crate::class_lookup::Fqn::new(&fqn)).is_some_and(|class| {
+            crate::class_lookup::constructor_promotes(&class, member_name, &class_loader)
+        })
     }
 
     /// If the cursor is on a variable at its assignment definition site,
@@ -286,6 +310,16 @@ impl Backend {
                 docblock_ref,
                 ..
             } => {
+                let subject = subject_text.as_str(self.symbol_map_source(uri, content)?);
+                if !self.member_span_names_member(
+                    &self.file_context(uri),
+                    *docblock_ref,
+                    subject,
+                    cursor_offset,
+                    member_name,
+                ) {
+                    return None;
+                }
                 let access_kind = AccessKind::of_member_access(*is_static);
                 let access_hint = match MemberRefKind::of_access(symbol)? {
                     MemberRefKind::Method => MemberAccessHint::MethodCall,
@@ -296,7 +330,7 @@ impl Backend {
                 };
                 let mctx = MemberDefinitionCtx {
                     member_name,
-                    subject: subject_text.as_str(self.symbol_map_source(uri, content)?),
+                    subject,
                     access_kind,
                     access_hint,
                     mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
@@ -414,6 +448,12 @@ impl Backend {
             SymbolKind::StringKey { kind, key, .. } => {
                 if !self.string_key_kind_enabled(*kind) {
                     return None;
+                }
+                // A hook leads from where it is fired to where it is
+                // implemented, and back, as well as to its documentation.
+                if *kind == crate::symbol_map::StringKeyKind::DrupalHook {
+                    let locs = self.drupal_hook_definitions(uri, symbol.start, key);
+                    return (!locs.is_empty()).then_some(locs);
                 }
                 let locs = laravel::resolve_laravel_string_key(self, kind, key, uri);
                 if locs.is_empty() { None } else { Some(locs) }

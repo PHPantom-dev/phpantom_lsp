@@ -129,6 +129,26 @@ impl IntInterval {
         })
     }
 
+    /// This interval with `value` ruled out, when `value` sits at one of its
+    /// edges: `int<0, max>` without `0` is `int<1, max>`. The outer `None`
+    /// means `value` is not an edge (taking an inner value out would split
+    /// the interval in two, and an unbounded side has no edge to move); the
+    /// inner `None` means `value` was the only integer left.
+    pub(crate) fn without_edge(self, value: i64) -> Option<Option<Self>> {
+        match (self.min, self.max) {
+            (Some(min), Some(max)) if min == value && max == value => Some(None),
+            (Some(min), max) if min == value => Some(Some(Self {
+                min: Some(value.checked_add(1)?),
+                max,
+            })),
+            (min, Some(max)) if max == value => Some(Some(Self {
+                min,
+                max: Some(value.checked_sub(1)?),
+            })),
+            _ => None,
+        }
+    }
+
     /// The smallest interval covering all of `intervals`.
     pub(crate) fn hull_of(intervals: &[Self]) -> Self {
         intervals

@@ -520,9 +520,8 @@ async fn test_class_name_completion_fqn_prefix() {
     let text = concat!("<?php\n", "new \\Us\n",);
 
     // Open the User file so it's in ast_map
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -628,7 +627,7 @@ async fn test_class_name_completion_includes_use_imports() {
 
     // Open the Service file so it populates fqn_uri_index
     let service_path = _dir.path().join("src/Service.php");
-    let service_uri = Uri::parse(&format!("file://{}", service_path.display())).unwrap();
+    let service_uri = Uri::parse(&crate::common::file_uri(&service_path)).unwrap();
     let service_content = std::fs::read_to_string(&service_path).unwrap();
     open_php(&backend, &service_uri, &service_content).await;
 
@@ -676,7 +675,7 @@ async fn test_class_name_completion_use_import_has_higher_sort_priority() {
 
     // Open the Widget file so it populates fqn_uri_index
     let widget_path = _dir.path().join("src/Widget.php");
-    let widget_uri = Uri::parse(&format!("file://{}", widget_path.display())).unwrap();
+    let widget_uri = Uri::parse(&crate::common::file_uri(&widget_path)).unwrap();
     let widget_content = std::fs::read_to_string(&widget_path).unwrap();
     open_php(&backend, &widget_uri, &widget_content).await;
 
@@ -2199,9 +2198,8 @@ async fn test_fqn_prefix_matches_by_namespace() {
     );
 
     // Open the User file so it's in ast_map
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -2251,9 +2249,8 @@ async fn test_fqn_prefix_with_leading_backslash() {
         )],
     );
 
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -2297,9 +2294,8 @@ async fn test_fqn_prefix_skips_auto_import() {
         )],
     );
 
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -2471,11 +2467,7 @@ async fn test_fqn_prefix_same_namespace_simplifies_to_short_name() {
     );
 
     // Open the Box file so it's in ast_map.
-    let box_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Box.php").display()
-    ))
-    .unwrap();
+    let box_uri = Uri::parse(&crate::common::file_uri(&_dir.path().join("src/Box.php"))).unwrap();
     let box_content = std::fs::read_to_string(_dir.path().join("src/Box.php")).unwrap();
     open_php(&backend, &box_uri, &box_content).await;
 
@@ -2532,11 +2524,7 @@ async fn test_fqn_prefix_different_namespace_keeps_fqn() {
         )],
     );
 
-    let foo_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Foo.php").display()
-    ))
-    .unwrap();
+    let foo_uri = Uri::parse(&crate::common::file_uri(&_dir.path().join("src/Foo.php"))).unwrap();
     let foo_content = std::fs::read_to_string(_dir.path().join("src/Foo.php")).unwrap();
     open_php(&backend, &foo_uri, &foo_content).await;
 
@@ -2606,9 +2594,8 @@ async fn test_namespace_declaration_suggests_namespaces() {
     );
 
     // Open one file so its namespace appears in namespace_map.
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -2682,11 +2669,8 @@ async fn test_namespace_declaration_discovers_cached_sub_namespaces() {
     );
 
     // Open the Concerns file so its namespace enters namespace_map.
-    let concerns_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path()
-            .join("src/Models/Concerns/HasUuids.php")
-            .display()
+    let concerns_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/Concerns/HasUuids.php"),
     ))
     .unwrap();
     let concerns_content =
@@ -2758,11 +2742,7 @@ async fn test_fqn_leading_backslash_single_segment_same_namespace() {
         )],
     );
 
-    let box_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Box.php").display()
-    ))
-    .unwrap();
+    let box_uri = Uri::parse(&crate::common::file_uri(&_dir.path().join("src/Box.php"))).unwrap();
     let box_content = std::fs::read_to_string(_dir.path().join("src/Box.php")).unwrap();
     open_php(&backend, &box_uri, &box_content).await;
 
@@ -2961,9 +2941,8 @@ async fn test_namespace_declaration_excludes_non_psr4_namespaces() {
     );
 
     // Open User so its namespace enters namespace_map.
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -3019,9 +2998,8 @@ async fn test_namespace_declaration_psr4_and_cached_only() {
     );
 
     // Open the USD file so its namespace is cached.
-    let usd_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Money/USD.php").display()
+    let usd_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Money/USD.php"),
     ))
     .unwrap();
     let usd_content = std::fs::read_to_string(_dir.path().join("src/Money/USD.php")).unwrap();
@@ -3101,11 +3079,8 @@ async fn test_namespace_declaration_replaces_full_prefix() {
     );
 
     // Open the file so its namespace enters namespace_map / ast_map.
-    let file_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path()
-            .join("tests/Feature/Domain/SomeTest.php")
-            .display()
+    let file_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("tests/Feature/Domain/SomeTest.php"),
     ))
     .unwrap();
     let file_content =
@@ -3927,8 +3902,7 @@ async fn test_namespace_segments_in_use_import() {
         "src/Models/Post.php",
         "src/Services/AuthService.php",
     ] {
-        let file_uri =
-            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+        let file_uri = Uri::parse(&crate::common::file_uri(&_dir.path().join(relpath))).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
         open_php(&backend, &file_uri, &content).await;
     }
@@ -3994,8 +3968,7 @@ async fn test_namespace_segments_sort_above_classes() {
     );
 
     for relpath in &["src/Models/User.php", "src/Helper.php"] {
-        let file_uri =
-            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+        let file_uri = Uri::parse(&crate::common::file_uri(&_dir.path().join(relpath))).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
         open_php(&backend, &file_uri, &content).await;
     }
@@ -4039,9 +4012,8 @@ async fn test_namespace_segments_no_semicolon_in_use_context() {
         )],
     );
 
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -4101,8 +4073,7 @@ async fn test_namespace_segments_with_leading_backslash() {
     );
 
     for relpath in &["src/Models/User.php", "src/Services/Auth.php"] {
-        let file_uri =
-            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+        let file_uri = Uri::parse(&crate::common::file_uri(&_dir.path().join(relpath))).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
         open_php(&backend, &file_uri, &content).await;
     }
@@ -4146,9 +4117,8 @@ async fn test_namespace_segments_in_type_hint() {
         )],
     );
 
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -4192,8 +4162,7 @@ async fn test_namespace_segments_filtered_by_partial() {
     );
 
     for relpath in &["src/Models/User.php", "src/Services/Auth.php"] {
-        let file_uri =
-            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+        let file_uri = Uri::parse(&crate::common::file_uri(&_dir.path().join(relpath))).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
         open_php(&backend, &file_uri, &content).await;
     }
@@ -4261,8 +4230,7 @@ async fn test_namespace_segments_deep_nesting() {
         "src/Http/Controllers/Api/AuthController.php",
         "src/Http/Middleware/AuthMiddleware.php",
     ] {
-        let file_uri =
-            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+        let file_uri = Uri::parse(&crate::common::file_uri(&_dir.path().join(relpath))).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
         open_php(&backend, &file_uri, &content).await;
     }
@@ -4330,9 +4298,8 @@ async fn test_namespace_segments_same_namespace_simplifies() {
         )],
     );
 
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -4449,9 +4416,8 @@ async fn test_namespace_segments_text_edit_replaces_full_prefix() {
         )],
     );
 
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -4521,9 +4487,8 @@ async fn test_namespace_segments_in_new_context() {
         )],
     );
 
-    let user_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/User.php").display()
+    let user_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/User.php"),
     ))
     .unwrap();
     let user_content = fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
@@ -4582,8 +4547,7 @@ async fn test_namespace_segments_deduplicated() {
         "src/Models/Post.php",
         "src/Models/Comment.php",
     ] {
-        let file_uri =
-            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+        let file_uri = Uri::parse(&crate::common::file_uri(&_dir.path().join(relpath))).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
         open_php(&backend, &file_uri, &content).await;
     }
@@ -4629,9 +4593,8 @@ async fn test_class_name_completion_label_is_short_name_in_method_body() {
     );
 
     // Open the Order file so it's in ast_map
-    let order_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/Order.php").display()
+    let order_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/Order.php"),
     ))
     .unwrap();
     let order_content = std::fs::read_to_string(_dir.path().join("src/Models/Order.php")).unwrap();
@@ -4683,9 +4646,8 @@ async fn test_class_name_completion_label_is_fqn_in_use_import() {
     );
 
     // Open the Order file so it's in ast_map
-    let order_uri = Uri::parse(&format!(
-        "file://{}",
-        _dir.path().join("src/Models/Order.php").display()
+    let order_uri = Uri::parse(&crate::common::file_uri(
+        &_dir.path().join("src/Models/Order.php"),
     ))
     .unwrap();
     let order_content = std::fs::read_to_string(_dir.path().join("src/Models/Order.php")).unwrap();

@@ -95,6 +95,14 @@ impl Backend {
                 continue;
             }
 
+            // A name written with a leading `\` bypasses the import table,
+            // so `\DateTime` does not use `use DateTime;`.
+            if matches!(span.kind, SymbolKind::ClassReference { is_fqn: true, .. })
+                || source.text().as_bytes().get(span.start as usize) == Some(&b'\\')
+            {
+                continue;
+            }
+
             // Which import table a bare name is looked up in.  A qualified
             // name's first segment is always a namespace, imported with a
             // class-style `use`.
@@ -112,6 +120,7 @@ impl Backend {
                     // Static access: `Foo::bar()` — subject_text is `"Foo"`
                     let trimmed = subject_text.as_str(source).trim();
                     if trimmed.starts_with('$')
+                        || trimmed.starts_with('\\')
                         || trimmed == "self"
                         || trimmed == "static"
                         || trimmed == "parent"

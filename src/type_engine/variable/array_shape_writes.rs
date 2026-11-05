@@ -536,6 +536,22 @@ fn shape_slot_base(base: &PhpType, key: &str) -> PhpType {
     if let Some(value) = base.shape_value_type(key) {
         return value.clone();
     }
+    // An entry of a plain `array`, or one an unsealed shape does not list,
+    // may already hold an array with keys of its own, so the inner write
+    // builds on what the tail says it holds.
+    if let Some(unsealed) = base.as_unsealed_shape() {
+        return if unsealed.value.is_mixed() {
+            PhpType::named(atom("array"))
+        } else {
+            keyed_slot_base(&PhpType::generic_array(
+                unsealed.key.clone(),
+                unsealed.value.clone(),
+            ))
+        };
+    }
+    if is_bare_array(base) {
+        return PhpType::named(atom("array"));
+    }
     // A base that tracks one value type for every key already describes
     // what sits under this one, tracked or not.
     if matches!(base.kind(), TypeKind::ArrayShape(_)) {
@@ -616,6 +632,17 @@ pub(super) fn extract_array_write_index(index: &Expression<'_>) -> Option<usize>
     None
 }
 
+/// Whether `base` is a plain `array` that names neither its keys nor its
+/// values.
+///
+/// It may hold any keys and values before a write, so it still does after
+/// one: a write leaves it as it was.
+fn is_bare_array(base: &PhpType) -> bool {
+    base.as_unsealed_shape().is_none()
+        && matches!(base.kind(), TypeKind::Named(name)
+        if name.eq_ignore_ascii_case("array") || name.eq_ignore_ascii_case("non-empty-array"))
+}
+
 /// Merge a `(key, value_type)` pair into an existing `PhpType` to
 /// produce an `ArrayShape`.
 ///
@@ -624,6 +651,22 @@ pub(super) fn extract_array_write_index(index: &Expression<'_>) -> Option<usize>
 ///
 /// Returns `PhpType::array_shape(entries)` with the merged entries.
 fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
+    // An unsealed shape keeps every entry it lists and the tail beside
+    // them; only the written entry changes.
+    if let Some(unsealed) = base.as_unsealed_shape() {
+        let shape = merge_shape_key(&unsealed.shape, key, value_type);
+        return PhpType::unsealed_shape(shape, unsealed.key.clone(), unsealed.value.clone());
+    }
+    // A plain `array` may hold any other key the caller put there, so the
+    // written entry joins them as an unsealed shape: the entry can be read
+    // back, and nothing claims it is the only one.
+    if is_bare_array(base) {
+        return PhpType::unsealed_shape(
+            merge_shape_key(&PhpType::array_shape(Vec::new()), key, value_type),
+            PhpType::named(atom("array-key")),
+            PhpType::mixed(),
+        );
+    }
     // A base that tracks key and value types instead of individual keys
     // (`array<string, int>`, `list<User>`, `User[]`) still holds whatever
     // it held before the write. Rebuilding it as a one-entry shape would
@@ -989,6 +1032,9 @@ fn push_any_number(base: &PhpType, value: &PhpType) -> PhpType {
 /// `value_type` is stored as given, literals included; a caller writing
 /// from a loop body widens it first.
 pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
+    if is_bare_array(base) {
+        return base.clone();
+    }
     // A base that already holds string keys stays a keyed array: an append
     // adds an integer key beside them, it does not make the value a list.
     if base.is_array_like()
@@ -1104,18 +1150,37 @@ fn merge_keyed_type_inner(
     value_type: &PhpType,
     union_values: bool,
 ) -> PhpType {
+    if is_bare_array(base) {
+        return base.clone();
+    }
     // Normalizing rebuilds a key through `kind()`, which sees straight
     // through the benevolence marker, so the leniency decision below reads
     // the types as they arrived rather than as they normalize.
     // `T[]` and `array<T>` leave their key domain open; the `int` that
     // iterating them answers is a guess a write must not refine.
-    let existing_key = base.iterable_key_type().map(|key| {
-        if base.has_open_key_domain() {
-            PhpType::named(atom("array-key"))
-        } else {
-            key
-        }
-    });
+    //
+    // A shape's own keys are literals. They widen to their base type when
+    // the shape becomes `array<K, V>`, except under a write through a key
+    // such as `class-string`, which the widened `string` would swallow
+    // whole: `'x'|class-string` keeps both what was there and what was
+    // written.
+    let non_numeric_write = !key_type.is_empty()
+        && key_type
+            .union_members()
+            .iter()
+            .all(|member| is_non_numeric_string_domain(member));
+    let existing_key = non_numeric_write
+        .then(|| shape_literal_key_type(base))
+        .flatten()
+        .or_else(|| {
+            base.iterable_key_type().map(|key| {
+                if base.has_open_key_domain() {
+                    PhpType::named(atom("array-key"))
+                } else {
+                    key
+                }
+            })
+        });
     // A key domain spelled out as literals (`array<'a'|'b', V>`) is kept
     // as literals, so a write under one of them leaves it as it was and one
     // under a new literal adds just that key. Any other domain is already
@@ -1294,6 +1359,48 @@ pub(super) fn infer_array_key_type(index: &Expression<'_>, resolved: &[ResolvedT
     PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::string()]))
 }
 
+/// Whether `ty` is a string type none of whose values is a decimal integer,
+/// such as a class name, so PHP keeps every one of them as a string key.
+fn is_non_numeric_string_domain(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => true,
+        TypeKind::Named(name) => matches!(
+            name.to_ascii_lowercase().as_str(),
+            "class-string"
+                | "interface-string"
+                | "trait-string"
+                | "enum-string"
+                | "callable-string"
+        ),
+        TypeKind::Generic(generic) => matches!(
+            generic.name.to_ascii_lowercase().as_str(),
+            "class-string" | "interface-string"
+        ),
+        _ => false,
+    }
+}
+
+/// The keys of a shape as the literals they are, `Foo::class` keys as
+/// `class-string<Foo>`, or `None` when a key is not known by its value.
+fn shape_literal_key_type(base: &PhpType) -> Option<PhpType> {
+    let TypeKind::ArrayShape(entries) = base.kind() else {
+        return None;
+    };
+    let keys = runtime_shape_keys(entries)?;
+    if keys.is_empty()
+        || keys
+            .iter()
+            .any(|key| crate::php_type::is_opaque_shape_key(key))
+    {
+        return None;
+    }
+    Some(PhpType::union(
+        keys.iter()
+            .map(|key| crate::php_type::shape_key_type(key))
+            .collect(),
+    ))
+}
+
 /// Normalize every possible runtime array-key branch to `int` or `string`.
 ///
 /// PHP truncates float keys and coerces bool keys to int, while null becomes
@@ -1307,25 +1414,6 @@ pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
 /// string literal stays the literal key it names, a decimal-integer string
 /// becoming the integer PHP stores it as.
 fn normalize_key_type(ty: &PhpType, keep_literals: bool) -> Option<PhpType> {
-    fn is_non_numeric_string_domain(ty: &PhpType) -> bool {
-        match ty.kind() {
-            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => true,
-            TypeKind::Named(name) => matches!(
-                name.to_ascii_lowercase().as_str(),
-                "class-string"
-                    | "interface-string"
-                    | "trait-string"
-                    | "enum-string"
-                    | "callable-string"
-            ),
-            TypeKind::Generic(generic) => matches!(
-                generic.name.to_ascii_lowercase().as_str(),
-                "class-string" | "interface-string"
-            ),
-            _ => false,
-        }
-    }
-
     fn is_kept_key_refinement(ty: &PhpType) -> bool {
         match ty.kind() {
             TypeKind::Named(name) => matches!(

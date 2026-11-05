@@ -418,6 +418,7 @@ pub(super) fn resolve_owner_method_call(
         backend: ctx.file.backend,
         template_subs,
         var_resolver: Some(&var_resolver),
+        arg_type_resolver: Some(&arg_ty_resolver),
         cache: ctx.resolved_class_cache,
         calling_class_name: Some(ctx.current_class.fqn().as_str()),
         written_class: Some(&written),

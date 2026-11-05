@@ -1,0 +1,10 @@
+/vendor/
+# Composer installs core and contrib, and scaffolds the rest of the web root.
+/web/*
+!/web/modules/
+/web/modules/*
+!/web/modules/custom/
+!/web/themes/
+/web/themes/*
+!/web/themes/custom/
+/recipes/

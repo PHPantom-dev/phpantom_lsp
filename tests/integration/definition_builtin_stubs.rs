@@ -155,7 +155,7 @@ fn location(response: Option<DefinitionResponse>) -> Location {
 
 fn assert_lands_in(response: Option<DefinitionResponse>, file: &Path, line: u32) {
     let location = location(response);
-    let expected = Uri::from_file_path(file.canonicalize().unwrap()).unwrap();
+    let expected = Uri::from_file_path(dunce::canonicalize(file).unwrap()).unwrap();
     assert_eq!(location.uri, expected, "jumped to the wrong file");
     assert_eq!(location.range.start.line, line, "jumped to the wrong line");
 }

@@ -34,18 +34,42 @@ impl Backend {
         composer_package: Option<composer::ComposerPackage>,
         progress: Option<&crate::progress::ScanProgress>,
     ) {
+        let was_drupal = self.is_drupal_project();
         if composer_package.is_some() {
             self.init_single_project(root, php_version, composer_package, progress)
                 .await;
-            return;
-        }
-
-        let subprojects = composer::discover_subproject_roots(root);
-        if subprojects.is_empty() {
-            self.init_no_composer(root, php_version, progress).await;
         } else {
-            self.init_monorepo(root, &subprojects, php_version, progress)
-                .await;
+            let subprojects = composer::discover_subproject_roots(root);
+            if subprojects.is_empty() {
+                self.init_no_composer(root, php_version, progress).await;
+            } else {
+                self.init_monorepo(root, &subprojects, php_version, progress)
+                    .await;
+            }
+        }
+        // The editor opens files while the walk runs, and a file read
+        // before the walk found a Drupal site was read without Drupal's
+        // names in it.
+        if !was_drupal && self.is_drupal_project() {
+            self.reparse_open_files();
+        }
+    }
+
+    /// Read every open file again from its buffer, as opening it does.
+    fn reparse_open_files(&self) {
+        let open: Vec<(String, std::sync::Arc<String>)> = self
+            .open_files
+            .read()
+            .iter()
+            .map(|(uri, text)| (uri.clone(), std::sync::Arc::clone(text)))
+            .collect();
+        for (uri, text) in open {
+            if self.is_resource_uri(&uri) {
+                self.update_resource_symbol_index(&uri, &text);
+            } else {
+                self.update_ast(&uri, &text);
+            }
+            self.schedule_diagnostics(uri);
         }
     }
 
@@ -134,6 +158,7 @@ impl Backend {
                 .filter_map(composer::locked_phpunit_major)
                 .min(),
         );
+        self.clear_drupal_web_roots();
 
         // A permission package answers authorization checks from the database,
         // so the abilities this project uses are not written in its source and
@@ -350,11 +375,14 @@ impl Backend {
         // depend on.  detect_drupal_web_root() returns None for
         // non-Drupal projects so this block is a no-op in that case.
         if let Some(drupal_web_root) = drupal_web_root {
+            self.note_drupal_web_root(&drupal_web_root);
             if let Some(p) = progress {
                 p.set_scope(at(55), at(59), "Scanning Drupal directories");
             }
-            let drupal_result =
+            let (drupal_result, declaration_files) =
                 classmap_scanner::scan_drupal_directories(&drupal_web_root, &filters, progress);
+            self.note_drupal_declaration_files(declaration_files.declarations);
+            self.note_drupal_service_providers(declaration_files.service_providers);
             let drupal_count = drupal_result.classmap.len()
                 + drupal_result.function_index.len()
                 + drupal_result.constant_index.len();
@@ -460,6 +488,7 @@ impl Backend {
         let mut any_twig = false;
         let mut any_yii = false;
         let mut phpunit_major: Option<u8> = None;
+        self.clear_drupal_web_roots();
 
         for (sub_idx, (sub_root, _)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;

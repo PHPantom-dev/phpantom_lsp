@@ -9,7 +9,7 @@ use super::{LaravelConfigResource, SymbolKind, SymbolMap, SymbolSpan};
 ///
 /// One flat list for every framework: each variant names what its key
 /// resolves against, so a framework's kinds sit beside the others rather
-/// than behind a per-framework wrapper. [`Self::is_symfony`] says which
+/// than behind a per-framework wrapper. [`Self::framework`] says which
 /// framework a variant belongs to.
 ///
 /// Adding a new string-key navigation feature only requires adding a variant
@@ -155,6 +155,28 @@ pub(crate) enum StringKeyKind {
     /// `wordpress::hooks`), which a literal name matches by its literal
     /// parts.
     WordPressHook,
+    /// A Drupal entity type ID: declared by the `id` of an entity class's
+    /// `#[ContentEntityType]`-family attribute or annotation, and read by
+    /// the entity type manager's `getStorage()` and the other methods that
+    /// take one.
+    DrupalEntityType,
+    /// A Drupal route name: declared by a top-level key of a routing file,
+    /// and read by `Url::fromRoute()`, `Link::createFromRoute()`, a form
+    /// state's `setRedirect()`, a controller's or form's `redirect()`, and
+    /// the URL generator, access manager, and route provider methods that
+    /// take one.
+    DrupalRoute,
+    /// A parameter of a Drupal route, keyed by the route as well as the
+    /// name (see `drupal::routing::route_parameter_key`): a `{node}` only
+    /// means something under its route.  Declared by each placeholder of
+    /// the route's path, and read by the keys of the parameters a route
+    /// call or a links file's `route_parameters:` passes.
+    DrupalRouteParameter,
+    /// A Drupal hook name: declared by the `hook_<name>()` function that
+    /// documents it in an `*.api.php` file and by the module handler's and
+    /// theme manager's calls that invoke it, and read by the implementations
+    /// a `#[Hook]` attribute or a procedural function's name make.
+    DrupalHook,
 }
 
 impl StringKeyKind {
@@ -168,45 +190,44 @@ impl StringKeyKind {
         matches!(self, Self::SymfonyTranslation | Self::TranslationDomain)
     }
 
-    /// Whether this key belongs to Symfony rather than to Laravel.
-    pub(crate) const fn is_symfony(self) -> bool {
-        matches!(
-            self,
-            Self::ServiceId
-                | Self::ContainerParameter
-                | Self::SymfonyRoute
-                | Self::SymfonyTranslation
-                | Self::TranslationDomain
-                | Self::TwigTemplate
-                | Self::SymfonyConfigKey
-                | Self::SymfonyEvent
-                | Self::MessengerBus
-        )
-    }
-
-    /// Whether this key belongs to Twig, whatever the framework around it.
-    pub(crate) const fn is_twig(self) -> bool {
-        matches!(
-            self,
+    /// The framework whose declarations this key resolves against.
+    ///
+    /// Exhaustive on purpose: a new kind has to say which framework turns
+    /// it on.
+    pub(crate) const fn framework(self) -> KeyFramework {
+        match self {
+            Self::Config
+            | Self::ConfigResource(_)
+            | Self::View
+            | Self::Route
+            | Self::Trans
+            | Self::Command
+            | Self::MorphAlias
+            | Self::Section
+            | Self::Stack
+            | Self::GateAbility
+            | Self::ContainerBinding
+            | Self::Middleware
+            | Self::Env => KeyFramework::Laravel,
+            Self::ServiceId | Self::ContainerParameter => KeyFramework::ServiceContainer,
+            Self::SymfonyRoute
+            | Self::SymfonyTranslation
+            | Self::TranslationDomain
+            | Self::SymfonyConfigKey
+            | Self::SymfonyEvent
+            | Self::MessengerBus => KeyFramework::Symfony,
             Self::TwigTemplate
-                | Self::TwigBlock
-                | Self::TwigFilter
-                | Self::TwigFunction
-                | Self::TwigVariable
-        )
-    }
-
-    /// Whether this key belongs to Yii.
-    pub(crate) const fn is_yii(self) -> bool {
-        matches!(
-            self,
-            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument
-        )
-    }
-
-    /// Whether this key belongs to WordPress.
-    pub(crate) const fn is_wordpress(self) -> bool {
-        matches!(self, Self::WordPressHook)
+            | Self::TwigBlock
+            | Self::TwigFilter
+            | Self::TwigFunction
+            | Self::TwigVariable => KeyFramework::Twig,
+            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument => KeyFramework::Yii,
+            Self::WordPressHook => KeyFramework::WordPress,
+            Self::DrupalEntityType
+            | Self::DrupalRoute
+            | Self::DrupalRouteParameter
+            | Self::DrupalHook => KeyFramework::Drupal,
+        }
     }
 
     /// The bit a [`LookupGuards`] mask holds this kind under: the kinds a
@@ -297,6 +318,27 @@ pub(crate) fn declares_another_name(kept: &SymbolSpan, next: &SymbolSpan) -> boo
             },
         ) if kept_kind == next_kind && kept_key != next_key
     )
+}
+
+/// The framework a [`StringKeyKind`] belongs to, which is what decides
+/// whether a project reads keys of that kind at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyFramework {
+    Laravel,
+    /// Symfony's service IDs and container parameters, which any project
+    /// that builds a Symfony service container declares.
+    ServiceContainer,
+    /// The rest of Symfony: routes, translations, bundle configuration,
+    /// events, and Messenger.
+    Symfony,
+    /// Twig's template, block, filter, function, and variable names,
+    /// read in any project that uses Twig.
+    Twig,
+    Yii,
+    /// WordPress's hook names, read wherever the hook functions are called.
+    WordPress,
+    /// Drupal's own declarations, read in a Drupal project.
+    Drupal,
 }
 
 /// A workspace symbol whose presence suppresses an otherwise-valid framework
@@ -577,6 +619,64 @@ pub(crate) struct ContainerValueSite {
     pub value: ContainerValue,
 }
 
+/// What a Drupal hook span is, keyed back to its [`SymbolKind::StringKey`]
+/// span by `start`.  A hook span with no site is the documentation.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HookSite {
+    pub start: u32,
+    pub role: HookRole,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum HookRole {
+    /// An implementation, for `extension`.  Whether that extension is a
+    /// theme is known for a procedural function, whose file says, and
+    /// looked up by name for a hook class.  An implementation Drupal does
+    /// not collect (an install-time hook, an update function) only links
+    /// to its documentation.
+    Implementation {
+        extension: Atom,
+        is_theme: Option<bool>,
+        collected: bool,
+    },
+    /// An invocation, limited to `extension` when it names one.
+    Invocation { extension: Option<Atom> },
+}
+
+/// An invoking call inside one of the core methods that fire hooks under
+/// computed names (see `drupal::computed_hooks`), with the shape of the
+/// name it builds: `*` for each part not written out, and `_alter` after
+/// an alter type.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ComputedHookSite {
+    /// The method the call is in.
+    pub method: Atom,
+    /// The byte range of the call's hook argument.
+    pub start: u32,
+    pub end: u32,
+    pub shape: String,
+    /// The call is an alter call.
+    pub alter: bool,
+    /// The call reaches themes (a theme manager's) or modules (a module
+    /// handler's), when its receiver says which.
+    pub themes: Option<bool>,
+}
+
+/// What a Drupal entity type declaration gives its ID: the entity class,
+/// and the storage handler that loads it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct EntityTypeSite {
+    /// Byte offset of the ID's first character, matching the declaration's
+    /// [`SymbolKind::StringKey`] span.
+    pub start: u32,
+    /// The class the attribute or annotation is written on.
+    pub class: crate::atom::Atom,
+    /// The `storage` handler the declaration names, or the default storage
+    /// of its kind of entity type; `None` when it names none and has no
+    /// default.
+    pub storage: Option<crate::atom::Atom>,
+}
+
 /// The value a container declaration gives, read by the kind of name it
 /// turns out to declare.
 #[derive(Debug, Clone, PartialEq)]
@@ -618,6 +718,73 @@ pub(crate) struct RouteSite {
     /// The handler the route dispatches to, as
     /// `yii::routes::handler_key` spells it, when it names one.
     pub handler: Option<String>,
+}
+
+/// A route a Drupal routing file or `#[Route]` declares, with what Drupal
+/// reads from it besides its name to upcast its parameters (see
+/// `drupal::upcasting`): the path, the controller and title callback, the
+/// parameters its `options` declare, the values its `defaults` give, and
+/// the entity type an `_entity_view` or `_entity_form` default names.
+///
+/// Kept beside the spans, which hold the name and the path's parameters,
+/// since only the type engine and hover read the rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DrupalRouteSite {
+    pub name: String,
+    pub path: String,
+    /// The method the route dispatches to, as `Class::method` without the
+    /// leading `\`: its `_form`'s `buildForm()`, else its `_controller`
+    /// (a class alone is its `__invoke()`).  `None` for a controller
+    /// written as `service:method`, whose class only the container knows.
+    pub controller: Option<String>,
+    /// The `_title_callback`, spelled like [`Self::controller`].
+    pub title_callback: Option<String>,
+    /// Each parameter `options.parameters` declares, with or without a
+    /// `type`.
+    pub parameters: Vec<DeclaredParameter>,
+    /// Each `defaults` key that is not one of Drupal's own (`_controller`,
+    /// `_title`, …), with whether its value is `NULL`.  Drupal converts a
+    /// parameter only when the path or a default gives it a value.
+    pub defaults: Vec<(String, bool)>,
+    /// The entity type the `_entity_view` default names, else the
+    /// `_entity_form` one.
+    pub entity_type: Option<String>,
+}
+
+/// A parameter a route's `options.parameters` declares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeclaredParameter {
+    pub name: String,
+    /// The `type` it declares, as written (`entity:node`).
+    pub ty: Option<String>,
+    /// Whether it names a `converter` or a `tempstore`, which convert it
+    /// some other way than Drupal's entity converter.
+    pub converted_otherwise: bool,
+}
+
+impl DrupalRouteSite {
+    /// What `options.parameters` declares for the parameter `name`.
+    pub(crate) fn declared(&self, name: &str) -> Option<&DeclaredParameter> {
+        self.parameters
+            .iter()
+            .find(|parameter| parameter.name == name)
+    }
+
+    /// Whether Drupal gives the parameter `name` a value to convert: the
+    /// path declares it, or a default gives it one.
+    pub(crate) fn passes(&self, name: &str) -> bool {
+        crate::drupal::routing::path_parameter_names(&self.path)
+            .any(|placeholder| placeholder == name)
+            || self.defaults.iter().any(|(default, _)| default == name)
+    }
+
+    /// Whether a default gives the parameter `name` the value `NULL`, which
+    /// Drupal leaves as it is.
+    pub(crate) fn defaults_to_null(&self, name: &str) -> bool {
+        self.defaults
+            .iter()
+            .any(|(default, is_null)| *is_null && default == name)
+    }
 }
 
 /// One `{name}` in a route's path.
@@ -689,6 +856,17 @@ const YII_WEB_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\Renderer\\WebViewRender
 /// The renderer before `yiisoft/yii-view-renderer` 7 moved it.
 const YII_LEGACY_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\ViewRenderer";
 const YII_VIEW: &str = "Yiisoft\\View\\ViewInterface";
+pub(crate) const DRUPAL_ENTITY_TYPE_MANAGER: &str =
+    "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
+const DRUPAL_URL_GENERATOR: &str = "Drupal\\Core\\Routing\\UrlGeneratorInterface";
+const DRUPAL_FORM_STATE: &str = "Drupal\\Core\\Form\\FormStateInterface";
+const DRUPAL_CONTROLLER_BASE: &str = "Drupal\\Core\\Controller\\ControllerBase";
+const DRUPAL_FORM_BASE: &str = "Drupal\\Core\\Form\\FormBase";
+const DRUPAL_ENTITY_CONTROLLER: &str = "Drupal\\Core\\Entity\\Controller\\EntityController";
+const DRUPAL_ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterface";
+const DRUPAL_ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
+pub(crate) const DRUPAL_MODULE_HANDLER: &str = "Drupal\\Core\\Extension\\ModuleHandlerInterface";
+pub(crate) const DRUPAL_THEME_MANAGER: &str = "Drupal\\Core\\Theme\\ThemeManagerInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -738,14 +916,16 @@ pub(crate) enum ReceiverClass {
     /// The container builder a kernel, a bundle, an extension, or a
     /// compiler pass defines services on: `register()`, `autowire()`,
     /// `setDefinition()`, and `setAlias()` declare a service ID, and the
-    /// rest of its definition API looks one up.
+    /// rest of its definition API looks one up, `getDefinition()` and
+    /// `hasDefinition()` through [`Self::DefinitionLookup`].
     ContainerBuilder,
     /// What `generateUrl()` and `redirectToRoute()` take a route name in:
     /// the shortcuts a Symfony controller inherits.
     ControllerRouting,
     /// A URL generator, the router included, whose `generate()` takes a
-    /// route name: Symfony's, and Yii's, whose `generateAbsolute()` takes
-    /// one too and whose `generateFromCurrent()` takes a fallback.
+    /// route name: Symfony's, Drupal's, whose `generateFromRoute()` takes
+    /// one too, and Yii's, whose `generateAbsolute()` takes one too and
+    /// whose `generateFromCurrent()` takes a fallback.
     UrlGenerator,
     /// A PHP routing configurator, a collection of one, or the route one
     /// of them just added, whose `add()` declares a route.
@@ -774,6 +954,45 @@ pub(crate) enum ReceiverClass {
     /// What renders a Yii view by its first argument: a view renderer's
     /// `render()` family, and a view's own `render()` inside a template.
     YiiViewRenderer,
+    /// Drupal's entity type manager, whose `getStorage()` and the other
+    /// handler getters take an entity type ID first, `getDefinition()` and
+    /// `hasDefinition()` through [`Self::DefinitionLookup`].
+    EntityTypeManager,
+    /// The definition lookups, `getDefinition()` and `hasDefinition()`, that
+    /// both Symfony's container builder and Drupal's entity type manager
+    /// have: the one takes a service ID, the other an entity type ID.
+    DefinitionLookup,
+    /// A Drupal form state, whose `setRedirect()` takes a route name.
+    FormRedirect,
+    /// What has Drupal's `redirect()` shortcut, which takes a route name: a
+    /// controller or a form.
+    RouteRedirect,
+    /// Drupal's access manager, whose `checkNamedRoute()` takes a route
+    /// name.
+    AccessCheck,
+    /// Drupal's route provider, whose `getRouteByName()` takes a route
+    /// name.
+    RouteLookup,
+    /// A Drupal form state again, for the route parameters its
+    /// `setRedirect()` takes after the route name.
+    FormRedirectParameters,
+    /// What has Drupal's `redirect()` shortcut again, for the route
+    /// parameters it takes after the route name.
+    RouteRedirectParameters,
+    /// Drupal's URL generator, for the route parameters its
+    /// `generateFromRoute()` and `generate()` take after the route name.
+    UrlGeneratorParameters,
+    /// Drupal's access manager, for the route parameters its
+    /// `checkNamedRoute()` takes after the route name.
+    AccessCheckParameters,
+    /// Drupal's module handler, whose `invokeAll()`, `alter()`, and the
+    /// rest invoke the hooks of modules and install profiles.
+    ModuleHooks,
+    /// Drupal's theme manager, whose `invoke()`, `alter()`, and the rest
+    /// invoke the hooks of themes.
+    ThemeHooks,
+    /// Either of the two, for the methods they share.
+    Hooks,
 }
 
 impl ReceiverClass {
@@ -822,7 +1041,10 @@ impl ReceiverClass {
             Self::ConfiguratorArgument => &[(SYMFONY_ABSTRACT_CONFIGURATOR, ContainerParameter)],
             Self::ContainerBuilder => &[(SYMFONY_CONTAINER_BUILDER, ServiceId)],
             Self::ControllerRouting => &[(SYMFONY_ABSTRACT_CONTROLLER, SymfonyRoute)],
+            // Drupal's generator extends Symfony's, so it has to be asked
+            // about first.
             Self::UrlGenerator => &[
+                (DRUPAL_URL_GENERATOR, StringKeyKind::DrupalRoute),
                 (SYMFONY_URL_GENERATOR, SymfonyRoute),
                 (YII_URL_GENERATOR, YiiRoute),
             ],
@@ -851,6 +1073,44 @@ impl ReceiverClass {
                 (YII_VIEW_RENDERER, YiiView),
                 (YII_LEGACY_VIEW_RENDERER, YiiView),
                 (YII_VIEW, YiiView),
+            ],
+            Self::EntityTypeManager => {
+                &[(DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType)]
+            }
+            Self::DefinitionLookup => &[
+                (SYMFONY_CONTAINER_BUILDER, ServiceId),
+                (DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType),
+            ],
+            Self::FormRedirect => &[(DRUPAL_FORM_STATE, StringKeyKind::DrupalRoute)],
+            Self::RouteRedirect => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalRoute),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalRoute),
+                (DRUPAL_ENTITY_CONTROLLER, StringKeyKind::DrupalRoute),
+            ],
+            Self::AccessCheck => &[(DRUPAL_ACCESS_MANAGER, StringKeyKind::DrupalRoute)],
+            Self::RouteLookup => &[(DRUPAL_ROUTE_PROVIDER, StringKeyKind::DrupalRoute)],
+            Self::FormRedirectParameters => {
+                &[(DRUPAL_FORM_STATE, StringKeyKind::DrupalRouteParameter)]
+            }
+            Self::RouteRedirectParameters => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalRouteParameter),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalRouteParameter),
+                (
+                    DRUPAL_ENTITY_CONTROLLER,
+                    StringKeyKind::DrupalRouteParameter,
+                ),
+            ],
+            Self::UrlGeneratorParameters => {
+                &[(DRUPAL_URL_GENERATOR, StringKeyKind::DrupalRouteParameter)]
+            }
+            Self::AccessCheckParameters => {
+                &[(DRUPAL_ACCESS_MANAGER, StringKeyKind::DrupalRouteParameter)]
+            }
+            Self::ModuleHooks => &[(DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook)],
+            Self::ThemeHooks => &[(DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook)],
+            Self::Hooks => &[
+                (DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook),
+                (DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook),
             ],
         }
     }

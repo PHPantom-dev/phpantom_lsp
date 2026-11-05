@@ -11,7 +11,7 @@ use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::virtual_members::laravel::config_values::{ConfigNode, ConfigValue};
 
-use super::formatting::{inline_code, make_hover};
+use super::formatting::{function_markdown, inline_code, make_hover};
 
 impl Backend {
     /// Where a Laravel string key resolves to, with the path shortened to
@@ -290,15 +290,24 @@ impl Backend {
             | StringKeyKind::ContainerParameter
             | StringKeyKind::SymfonyRoute
             | StringKeyKind::SymfonyTranslation
-            | StringKeyKind::TranslationDomain => {
+            | StringKeyKind::TranslationDomain
+            | StringKeyKind::DrupalEntityType
+            | StringKeyKind::DrupalRoute
+            | StringKeyKind::DrupalHook => {
                 let label = match kind {
                     StringKeyKind::ServiceId => "Service",
+                    StringKeyKind::DrupalEntityType => "Entity type",
+                    StringKeyKind::DrupalHook => "Hook",
                     StringKeyKind::ContainerParameter => "Parameter",
-                    StringKeyKind::SymfonyRoute => "Route",
+                    StringKeyKind::SymfonyRoute | StringKeyKind::DrupalRoute => "Route",
                     StringKeyKind::SymfonyTranslation => "Translation",
                     _ => "Translation domain",
                 };
-                let declared = self.symfony_declaration_locations(*kind, key);
+                let declared = if *kind == StringKeyKind::DrupalHook {
+                    self.drupal_hook_documentation(key)
+                } else {
+                    self.symfony_declaration_locations(*kind, key)
+                };
                 let mut detail = match declared
                     .first()
                     .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
@@ -314,6 +323,18 @@ impl Backend {
                         crate::symfony::translations::split_translation_key(key);
                     shown = message;
                     detail = format!("Domain `{}`\n\n{}", domain, detail);
+                }
+                // A hook reads as the `hook_*()` function that documents
+                // it: its parameters and what it returns are what an
+                // implementation has to match.
+                if *kind == StringKeyKind::DrupalHook
+                    && let Some(function) = self.drupal_hook_documented_function(key)
+                {
+                    detail = format!(
+                        "{}\n\n{}",
+                        function_markdown(&function, None, None, false),
+                        detail
+                    );
                 }
                 (label, detail)
             }
@@ -369,6 +390,21 @@ impl Backend {
                         .join("\n\n")
                 };
                 ("Route argument", detail)
+            }
+            // A parameter is shown by its name, under the paths of its
+            // route.
+            StringKeyKind::DrupalRouteParameter => {
+                let (route, name) = crate::drupal::routing::split_route_parameter_key(key);
+                shown = name;
+                let mut detail = format!("Route `{}`", route);
+                let paths = self.drupal_route_paths(route);
+                if paths.is_empty() {
+                    detail.push_str("\n\nNot declared in the project's routing files");
+                }
+                for path in paths {
+                    detail.push_str(&format!("\n\nPath `{}`", path));
+                }
+                ("Route parameter", detail)
             }
             // An installed bundle's schema is not read, so a key no schema
             // of the project's declares is only not one of its own.

@@ -81,9 +81,7 @@ async fn monorepo_subprojects_register_path_repository_mappings() {
     let module = mapping_base(&backend, "Demo\\Common\\")
         .expect("the path-repository module's namespace must be mapped");
     assert!(
-        module
-            .trim_end_matches('/')
-            .ends_with("app/modules/common/src"),
+        Path::new(&module).ends_with("app/modules/common/src"),
         "got {module}"
     );
     let own = mapping_base(&backend, "App\\").expect("the subproject's own namespace");

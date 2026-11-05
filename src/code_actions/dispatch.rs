@@ -136,6 +136,7 @@ static COLLECTORS: &[Collector] = &[
     ),
     offer(QUICKFIX, Backend::collect_implement_methods_actions),
     offer(QUICKFIX, Backend::collect_replace_deprecated_actions),
+    offer(QUICKFIX, Backend::collect_explicit_nullable_actions),
     skip_in_template(QUICKFIX, Backend::collect_phpstan_actions),
     skip_in_template(QUICKFIX, Backend::collect_data_provider_actions),
     skip_in_template(QUICKFIX, Backend::collect_parent_call_actions),

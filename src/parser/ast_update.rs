@@ -15,7 +15,7 @@ use crate::ParseErrorEntry;
 use crate::atom::atom;
 use crate::blade::call_site_inference::BladeScope;
 use crate::names::OwnedResolvedNames;
-use crate::symbol_map::{SymbolMap, extract_symbol_map_for_index};
+use crate::symbol_map::SymbolMap;
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan};
 
 use mago_allocator::LocalArena;
@@ -142,6 +142,10 @@ impl Backend {
         // Keep the filesystem disk type coherent with edits to `config/` and
         // to files that register a `Storage::extend()` driver.
         self.refresh_laravel_storage_drivers(uri, content);
+
+        // Keep the classes Drupal service providers give services coherent
+        // with edits to the providers.
+        self.refresh_drupal_service_provider(uri, content);
 
         // Keep the reverse pivot index coherent with edits to files that
         // declare (or previously declared) a many-to-many relationship.
@@ -557,13 +561,18 @@ impl Backend {
             } else {
                 None
             };
-            extract_symbol_map_for_index(
+            crate::symbol_map::extraction::extract_symbol_map_for_file(
                 program,
                 content,
                 &owned_resolved,
-                self.is_symfony_project(),
-                self.is_twig_project(),
+                crate::symbol_map::extraction::Frameworks {
+                    symfony: self.is_symfony_project(),
+                    service_container: self.reads_service_container(),
+                    drupal: self.is_drupal_project(),
+                    twig: self.is_twig_project(),
+                },
                 yii_dir.as_deref(),
+                self.drupal_file(uri),
             )
         };
         // A router that loads its routes from somewhere else than the

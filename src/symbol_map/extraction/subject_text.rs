@@ -163,12 +163,9 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
 
         Expression::Call(Call::StaticMethod(sc)) => {
             let class = expr_to_subject_expr(sc.class)?;
-            let (method, args_text) = match &sc.method {
-                ClassLikeMemberSelector::Identifier(ident) => (
-                    bytes_to_str(ident.value).to_string(),
-                    format_all_call_args(&sc.argument_list.arguments),
-                ),
-                _ => ("?".to_string(), String::new()),
+            let (method, args_text) = match selector_member_name(&sc.method) {
+                Some(name) => (name, format_all_call_args(&sc.argument_list.arguments)),
+                None => ("?".to_string(), String::new()),
             };
             Some(SubjectExpr::CallExpr {
                 callee: Box::new(SubjectExpr::StaticMethodCall {
@@ -360,11 +357,11 @@ fn lower_invoked_callable(pa: &PartialApplication<'_>, args_text: String) -> Opt
         PartialApplication::Function(fpa) => expr_to_subject_expr(fpa.function)?,
         PartialApplication::Method(mpa) => SubjectExpr::MethodCall {
             base: Box::new(expr_to_subject_expr(mpa.object)?),
-            method: member_selector_name(&mpa.method)?,
+            method: selector_member_name(&mpa.method)?,
         },
         PartialApplication::StaticMethod(spa) => SubjectExpr::StaticMethodCall {
             class: expr_to_subject_expr(spa.class)?.to_subject_text(),
-            method: member_selector_name(&spa.method)?,
+            method: selector_member_name(&spa.method)?,
         },
     };
     Some(SubjectExpr::CallExpr {
@@ -373,45 +370,70 @@ fn lower_invoked_callable(pa: &PartialApplication<'_>, args_text: String) -> Opt
     })
 }
 
-/// The name a member selector spells, when it is a plain identifier.
-fn member_selector_name(selector: &ClassLikeMemberSelector<'_>) -> Option<String> {
-    match selector {
-        ClassLikeMemberSelector::Identifier(ident) => Some(bytes_to_str(ident.value).to_string()),
+/// The member name a selector is lowered to: the identifier it spells,
+/// the name a braced string literal spells (`$obj->{'name'}`), or the
+/// `$variable` a dynamic name reads (`$obj->$name`, `$obj->{$name}`),
+/// which the resolver expands to the literals the variable holds.  Any
+/// other expression has no representation.
+fn selector_member_name(selector: &ClassLikeMemberSelector<'_>) -> Option<String> {
+    let variable = match selector {
+        ClassLikeMemberSelector::Identifier(ident) => {
+            return Some(bytes_to_str(ident.value).to_string());
+        }
+        ClassLikeMemberSelector::Variable(variable) => variable,
+        ClassLikeMemberSelector::Expression(braced) => {
+            match crate::parser::unwrap_parens(braced.expression) {
+                Expression::Variable(variable) => variable,
+                // Only a name that reads back as one: the subject text
+                // has no quoting to keep `->` or `(` inside a name.
+                Expression::Literal(Literal::String(literal)) => {
+                    return literal
+                        .value
+                        .filter(|value| {
+                            !value.is_empty()
+                                && value
+                                    .iter()
+                                    .all(|&b| b == b'_' || b.is_ascii_alphanumeric())
+                        })
+                        .map(|value| bytes_to_str(value).to_string());
+                }
+                _ => return None,
+            }
+        }
+        ClassLikeMemberSelector::Missing(_) => return None,
+    };
+    match variable {
+        Variable::Direct(dv) => Some(bytes_to_str(dv.name).to_string()),
         _ => None,
     }
 }
 
 /// Add a property access (`base->property` or `base?->property`) to an
-/// already-lowered base.  A dynamic property name (`$obj->{$name}`,
-/// `$obj->$name`) has no subject representation: the value is whichever
-/// property the name picks, not the base object.
+/// already-lowered base.  A property name with no representation has no
+/// subject either: the value is whichever property the name picks, not
+/// the base object.
 fn lower_property(
     base: SubjectExpr,
     property: &ClassLikeMemberSelector<'_>,
 ) -> Option<SubjectExpr> {
-    let ClassLikeMemberSelector::Identifier(ident) = property else {
-        return None;
-    };
     Some(SubjectExpr::PropertyChain {
         base: Box::new(base),
-        property: bytes_to_str(ident.value).to_string(),
+        property: selector_member_name(property)?,
     })
 }
 
 /// Add an instance method call (`base->method(args)` or the null-safe form)
-/// to an already-lowered base.  A dynamic method name lowers to a `?` method
-/// with no arguments, since the type engine cannot resolve it either way.
+/// to an already-lowered base.  A method name with no representation
+/// lowers to a `?` method with no arguments, since the type engine cannot
+/// resolve it either way.
 fn lower_method_call(
     base: SubjectExpr,
     method: &ClassLikeMemberSelector<'_>,
     args: &TokenSeparatedSequence<'_, Argument<'_>>,
 ) -> SubjectExpr {
-    let (method, args_text) = match method {
-        ClassLikeMemberSelector::Identifier(ident) => (
-            bytes_to_str(ident.value).to_string(),
-            format_all_call_args(args),
-        ),
-        _ => ("?".to_string(), String::new()),
+    let (method, args_text) = match selector_member_name(method) {
+        Some(name) => (name, format_all_call_args(args)),
+        None => ("?".to_string(), String::new()),
     };
     SubjectExpr::CallExpr {
         callee: Box::new(SubjectExpr::MethodCall {

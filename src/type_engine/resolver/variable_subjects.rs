@@ -174,36 +174,51 @@ fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>>
     (!resolved.is_empty()).then_some(resolved)
 }
 
-/// A member name written as `$variable` — a dynamic method/property
-/// access such as `$obj->$name()`, `Class::$name()`, or their first-class
-/// callable forms — resolves through whatever literal string that
-/// variable holds at the call site: `$name = 'length'; $obj->$name()`
-/// calls `length()` exactly as `$obj->length()` would.
+/// The member names a member selector can stand for.
 ///
-/// Returns `member` unchanged when it is not a bare `$variable`
-/// reference, or when the variable's resolved type carries no known
-/// literal string value (the caller then keeps its normal, currently
-/// unresolvable, behaviour for a truly dynamic name).
-pub(crate) fn resolve_dynamic_member_name<'a>(
+/// A plain identifier names itself.  A name written as `$variable` (a
+/// dynamic access such as `$obj->$name`, `$obj->{$name}()`,
+/// `Class::$name()`, or their first-class callable forms) names every
+/// literal string the variable can hold where it is read:
+/// `$col = 'price'; $row->$col` reads `price` exactly as `$row->price`
+/// would, and a `$col` of `'price'|'member_price'` reads both.
+///
+/// Returns no names when the variable can hold a string that is not a
+/// known literal, since the member it picks is then unknown.
+pub(crate) fn resolve_dynamic_member_names<'a>(
     member: &'a str,
     ctx: &ResolutionCtx<'_>,
-) -> std::borrow::Cow<'a, str> {
-    if !member.starts_with('$') || !is_bare_variable(member) {
-        return std::borrow::Cow::Borrowed(member);
+) -> Vec<std::borrow::Cow<'a, str>> {
+    use std::borrow::Cow;
+
+    let variable = member
+        .strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .map_or(member, str::trim);
+    if !variable.starts_with('$') {
+        return vec![Cow::Borrowed(member)];
     }
-    resolve_variable_fallback(member, AccessKind::Arrow, ctx)
-        .into_iter()
-        .find_map(|rt| match rt.type_string.kind() {
-            TypeKind::Literal(literal) => match &**literal {
-                crate::php_type::LiteralValue::String(raw) => {
-                    crate::util::unescape_php_string_literal(raw)
-                }
-                _ => None,
-            },
-            _ => None,
-        })
-        .map(std::borrow::Cow::Owned)
-        .unwrap_or(std::borrow::Cow::Borrowed(member))
+    if !is_bare_variable(variable) {
+        return Vec::new();
+    }
+    let mut names: Vec<Cow<'a, str>> = Vec::new();
+    for rt in resolve_variable_fallback(variable, AccessKind::Arrow, ctx) {
+        for ty in rt.type_string.union_members() {
+            let TypeKind::Literal(literal) = ty.kind() else {
+                return Vec::new();
+            };
+            let crate::php_type::LiteralValue::String(raw) = &**literal else {
+                return Vec::new();
+            };
+            let Some(name) = crate::util::unescape_php_string_literal(raw) else {
+                return Vec::new();
+            };
+            if !names.iter().any(|known| *known == name) {
+                names.push(Cow::Owned(name));
+            }
+        }
+    }
+    names
 }
 
 /// Resolve a bare `$var` subject to its classes.

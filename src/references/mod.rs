@@ -123,6 +123,11 @@ impl Backend {
         &self,
         candidate_uris: Option<&HashSet<Arc<str>>>,
     ) -> Vec<(String, Arc<SymbolMap>)> {
+        // A file the index let go of is read the way the editor would
+        // have it, which takes its parse.
+        if let Some(uris) = candidate_uris {
+            self.wake_dormant_files(uris.iter().map(|uri| &**uri));
+        }
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
 
         let maps = self.files.read();

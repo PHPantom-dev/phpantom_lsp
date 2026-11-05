@@ -982,13 +982,11 @@ fn unsealed_shape_round_trips() {
     for spelling in [
         "array{name: string, ...<string, int>}",
         "list{string, ...<int>}",
+        "array{name: string, ...}",
+        "list{string, ...}",
     ] {
         assert_eq!(PhpType::parse(spelling).to_string(), spelling);
     }
-    assert_eq!(
-        PhpType::parse("array{name: string, ...}").to_string(),
-        "array{name: string, ...<array-key, mixed>}"
-    );
     assert_eq!(
         PhpType::parse("array{name: string, ...<int>}").to_string(),
         "array{name: string, ...<array-key, int>}"

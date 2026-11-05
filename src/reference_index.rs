@@ -18,7 +18,7 @@ use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
 use crate::backend::file_access::namespace_in_spans;
 use crate::names::resolve_to_fqn;
-use crate::symbol_map::{SelfStaticParentKind, StringKeyKind, SymbolKind, SymbolMap};
+use crate::symbol_map::{KeyFramework, SelfStaticParentKind, StringKeyKind, SymbolKind, SymbolMap};
 use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, short_name, strip_fqn_prefix};
 
@@ -492,6 +492,31 @@ impl Backend {
         Some(uris)
     }
 
+    /// Every key of a `kind` string key some file of the workspace names,
+    /// in no particular order.
+    ///
+    /// `None` means the workspace index cannot answer yet.
+    pub(crate) fn indexed_string_keys(&self, kind: StringKeyKind) -> Option<Vec<String>> {
+        if self.skip_reference_index || !self.workspace_index.indexed.load(Ordering::Acquire) {
+            return None;
+        }
+        let index = self.reference_index.read();
+        Some(
+            index
+                .by_key
+                .iter()
+                .filter_map(|(key, uris)| match key {
+                    ReferenceIndexKey::StringKey { kind: found, key }
+                        if *found == kind && !uris.is_empty() =>
+                    {
+                        Some(key.clone())
+                    }
+                    _ => None,
+                })
+                .collect(),
+        )
+    }
+
     /// Candidate files for method names, matching PHP's case-insensitive
     /// lookup across static and instance calls. Existing member keys retain
     /// their spelling because property and constant names are case-sensitive.
@@ -740,18 +765,18 @@ impl Backend {
         // `$x->prop === 'literal'`, so skip them there.
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let is_symfony = self.is_symfony_project();
+        let reads_container = self.reads_service_container();
         let is_twig = self.is_twig_project();
         let is_yii = self.is_yii_project();
-        let enabled = |kind: StringKeyKind| {
-            if kind.is_twig() {
-                is_twig
-            } else if kind.is_yii() {
-                is_yii
-            } else if kind.is_symfony() {
-                is_symfony
-            } else {
-                is_laravel
-            }
+        let is_drupal = self.is_drupal_project();
+        let enabled = |kind: StringKeyKind| match kind.framework() {
+            KeyFramework::Laravel => is_laravel,
+            KeyFramework::ServiceContainer => reads_container,
+            KeyFramework::Symfony => is_symfony,
+            KeyFramework::Twig => is_twig,
+            KeyFramework::Yii => is_yii,
+            KeyFramework::WordPress => false,
+            KeyFramework::Drupal => is_drupal,
         };
         for site in &symbol_map.typed_receiver_sites {
             if !site.receiver.names_any(enabled) {

@@ -51,7 +51,7 @@ pub(crate) use context::{
 pub(crate) use subject_outcome::{
     SubjectOutcome, UnionBranch, UnionBranches, resolve_subject_outcome,
 };
-pub(crate) use variable_subjects::resolve_dynamic_member_name;
+pub(crate) use variable_subjects::resolve_dynamic_member_names;
 pub(in crate::type_engine) use written_names::WrittenNames;
 
 use std::sync::Arc;
@@ -529,9 +529,21 @@ fn resolve_property_chain_subject(
     // to has already been consulted by the spine walk in
     // `resolve_target_classes_expr`, which reads it before
     // resolving anything below the property.
+    let names = variable_subjects::resolve_dynamic_member_names(property, ctx);
+    if names.is_empty() {
+        return Vec::new();
+    }
     let base_arcs = resolved_to_arcs(
         receiver.unwrap_or_else(|| resolve_target_classes_expr(base, access_kind, ctx)),
     );
+    // Every property the name can pick, on every class the base can be.
+    let property_hints = || {
+        base_arcs.iter().flat_map(|cls| {
+            names.iter().filter_map(move |property| {
+                resolve_property_type_hint(cls, property, class_loader).map(|hint| (cls, hint))
+            })
+        })
+    };
     let mut arc_results: Vec<Arc<ClassInfo>> = Vec::new();
     // The generic members of the property's hint, e.g.
     // `Collection<int, Post>`.  The classes resolved from it carry
@@ -543,10 +555,7 @@ fn resolve_property_chain_subject(
     // alternatives `Foo|MockObject`, so each is tagged with the whole
     // intersection below the way a call's return type is.
     let mut intersection_hints: Vec<PhpType> = Vec::new();
-    for cls in &base_arcs {
-        let Some(hint) = resolve_property_type_hint(cls, property, class_loader) else {
-            continue;
-        };
+    for (cls, hint) in property_hints() {
         let resolved = super::type_resolution::type_hint_to_classes_typed(
             &hint,
             &cls.fqn(),
@@ -579,12 +588,9 @@ fn resolve_property_chain_subject(
     // static members against `T` instead of leaving
     // `arc_results` empty.
     if arc_results.is_empty() && access_kind == AccessKind::DoubleColon {
-        for cls in &base_arcs {
-            if let Some(raw_type) = resolve_property_type_hint(cls, property, class_loader) {
-                let classes =
-                    classes_named_by_type(&raw_type, &cls.fqn(), all_classes, class_loader);
-                ClassInfo::extend_unique_arc(&mut arc_results, classes);
-            }
+        for (cls, raw_type) in property_hints() {
+            let classes = classes_named_by_type(&raw_type, &cls.fqn(), all_classes, class_loader);
+            ClassInfo::extend_unique_arc(&mut arc_results, classes);
         }
     }
 

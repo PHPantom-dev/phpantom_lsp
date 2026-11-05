@@ -44,7 +44,7 @@ quick-fixes and refactoring actions use different code paths.
 
 ### When to implement
 
-Do this when the next batch of code actions is added (A25, A28, etc.).
+Do this when the next batch of code actions is added (A25 and the like).
 The refactoring pays for itself by making each subsequent action
 cheaper to add: write one function, append it to an array.
 
@@ -132,26 +132,6 @@ offset has different semantics).
 
 **Code action kind:** `refactor.rewrite`.
 **Guard:** `php_version >= 8.0`.
-
----
-
-### A28. Explicit nullable parameter type (PHP 8.4 deprecation)
-
-**Impact: Medium · Complexity: Low**
-
-Convert implicit nullable parameters to explicit nullable syntax:
-`function foo(string $p = null)` → `function foo(?string $p = null)`.
-
-PHP 8.4 deprecates the implicit nullable form. PHPStorm flags this.
-PHP-CS-Fixer's `NullableTypeDeclarationForDefaultNullValueFixer`
-handles union types, intersection types (DNF), and constructor
-property promotion.
-
-Only offer when the parameter has a type hint, a `= null` default, and
-the type does not already include `null` (no `?` prefix, no `|null`
-in a union).
-
-**Code action kind:** `quickfix`.
 
 ---
 
@@ -419,3 +399,46 @@ something to produce as output.
   `Simplification` enum rather than a new module.
 
 **Code action kind:** `refactor.rewrite`.
+
+---
+
+### A46. Convert nested calls to the pipe operator (PHP 8.5+)
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$slug = strtolower(trim(str_replace(' ', '-', $title)));
+// →
+$slug = $title
+    |> (fn($x) => str_replace(' ', '-', $x))
+    |> trim(...)
+    |> strtolower(...);
+```
+
+PhpStorm offers this on any call nested in another call's sole or first
+argument. A call whose only argument is the inner result becomes a
+first-class callable (`trim(...)`); one with other arguments becomes an
+arrow function, since `|>` passes exactly one argument. Offer it only when
+the project's PHP version is 8.5 or later, and the reverse ("Inline pipe
+into nested calls") on a `|>` chain.
+
+---
+
+### A47. Convert a getter or setter method into a property hook (PHP 8.4+)
+
+**Impact: Low · Complexity: Medium**
+
+```php
+private string $name;
+public function getName(): string { return strtoupper($this->name); }
+// →
+public string $name { get => strtoupper($this->name); }
+```
+
+"Generate property hooks" (`src/code_actions/generate_property_hooks.rs`)
+adds an empty hook to a property. PhpStorm also offers the migration: when
+a method only returns (or only assigns) one property, move its body into
+the property's hook, make the property public, and rewrite the callers
+(`$x->getName()` → `$x->name`) through the rename machinery. Skip it when
+the method is part of an interface or overrides a parent, since the
+callers through that contract cannot be rewritten.

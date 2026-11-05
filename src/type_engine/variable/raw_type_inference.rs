@@ -379,9 +379,9 @@ pub(in crate::type_engine) fn spread_entries(
         .iter()
         .zip(keys)
         .map(|(entry, key)| {
-            // A class-constant key is stored as its spelling, which says
-            // nothing about the key it evaluates to.
-            if entry.optional || key.contains("::") {
+            // A class-constant key other than `Foo::class` is stored as its
+            // spelling, which says nothing about the key it evaluates to.
+            if entry.optional || crate::php_type::is_opaque_shape_key(&key) {
                 return None;
             }
             let key = crate::php_type::canonical_int_key(&key)

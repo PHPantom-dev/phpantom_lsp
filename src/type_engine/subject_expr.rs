@@ -574,9 +574,20 @@ impl SubjectExpr {
                     out.push(class_name.clone());
                     break;
                 }
-                SubjectExpr::PropertyChain { base, .. }
-                | SubjectExpr::MethodCall { base, .. }
-                | SubjectExpr::ArrayAccess { base, .. } => base,
+                // A member named by a variable (`$obj->$name`) reads that
+                // variable as well, and is set aside with the arguments.
+                SubjectExpr::PropertyChain {
+                    base,
+                    property: member,
+                }
+                | SubjectExpr::MethodCall {
+                    base,
+                    method: member,
+                } => {
+                    pending_args.push(member);
+                    base
+                }
+                SubjectExpr::ArrayAccess { base, .. } => base,
                 SubjectExpr::CallExpr { callee, args_text } => {
                     pending_args.push(args_text);
                     callee

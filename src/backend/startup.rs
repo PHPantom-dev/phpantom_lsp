@@ -656,6 +656,16 @@ impl Backend {
                     .await;
             }
 
+            // A Drupal file opened before the index finished was judged
+            // against the route names read so far, and the route builders
+            // of core and contributed extensions are only read here.
+            if progress_backend.is_drupal_project() {
+                let open: Vec<String> =
+                    progress_backend.open_files.read().keys().cloned().collect();
+                for uri in open {
+                    progress_backend.schedule_diagnostics(uri);
+                }
+            }
             progress_backend.request_diagnostic_refresh().await;
 
             // Files opened before the index finished were annotated from a

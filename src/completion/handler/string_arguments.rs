@@ -95,13 +95,26 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Drupal route parameters ─────────────────────────────
+        // The keys of `Url::fromRoute('entity.node.canonical', ['|' => …])`
+        // are the placeholders of the named route's path.  Asked first, so
+        // that a key after a comma is not read as an argument of the call.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_drupal_route_parameter_completion(content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
         // ── Symfony and Yii names ───────────────────────────────
         // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`,
         // `$translator->trans('|')`, in any project that uses Twig,
         // `$twig->render('|')`, and in a Yii one `$urls->generate('|')` and
         // `#[RouteArgument('|')]`.
         if matches!(string_ctx, StringContext::InStringLiteral)
-            && (self.is_symfony_project() || self.is_twig_project() || self.is_yii_project())
+            && (self.reads_service_container() || self.is_twig_project() || self.is_yii_project())
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_symfony_string_key_completion(uri, content, position, code, ctx)

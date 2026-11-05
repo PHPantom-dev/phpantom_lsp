@@ -63,7 +63,7 @@ impl Backend {
         }
         let roots = self.laravel_view_roots();
         for (prefix, path) in paths {
-            let path = path.canonicalize().unwrap_or(path);
+            let path = dunce::canonicalize(&path).unwrap_or(path);
             let directory = roots.iter().find_map(|root| {
                 let root = root.canonical.as_ref().unwrap_or(&root.path);
                 let rel = path.strip_prefix(root).ok()?;

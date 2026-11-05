@@ -453,6 +453,7 @@ impl Backend {
         // not just open ones, so a deleted or renamed one would stay in the
         // template lists the Blade refresh passes enumerate.
         self.files.write().remove(uri);
+        self.dormant_files.write().remove(uri);
         self.evict_typed_receiver_spans(uri);
         // Another file's entry is stamped with the class-lookup generation,
         // which a class this file withdraws bumps, so only this file's own

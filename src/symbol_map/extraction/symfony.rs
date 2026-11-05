@@ -21,8 +21,8 @@
 
 use super::*;
 use crate::symbol_map::{
-    ContainerValue, ContainerValueSite, MessengerHandlerSite, ReceiverClass, RouteImport,
-    SYMFONY_CONTAINER_CONFIGURATOR_NS, SYMFONY_ROUTING_CONFIGURATOR, StringKeyKind,
+    ContainerValue, ContainerValueSite, KeyFramework, MessengerHandlerSite, ReceiverClass,
+    RouteImport, SYMFONY_CONTAINER_CONFIGURATOR_NS, SYMFONY_ROUTING_CONFIGURATOR, StringKeyKind,
 };
 use crate::symfony::translations::{DEFAULT_DOMAIN, is_domain_name, translation_key};
 use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_literal_at_range};
@@ -75,7 +75,7 @@ pub(crate) fn symfony_receiver_method(
     // turned away on a single byte.
     if !matches!(
         member_name.as_bytes().first().map(u8::to_ascii_lowercase),
-        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f')
+        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f' | b'c')
     ) {
         return None;
     }
@@ -86,9 +86,12 @@ pub(crate) fn symfony_receiver_method(
             Some((ReceiverClass::ContainerBuilder, true))
         }
         1 if is("setAlias") => Some((ReceiverClass::ContainerBuilder, false)),
-        0 if is("getDefinition")
-            || is("findDefinition")
-            || is("hasDefinition")
+        // Symfony's container builder and Drupal's entity type manager both
+        // have these two, each for its own kind of name.
+        0 if is("getDefinition") || is("hasDefinition") => {
+            Some((ReceiverClass::DefinitionLookup, false))
+        }
+        0 if is("findDefinition")
             || is("removeDefinition")
             || is("getAlias")
             || is("hasAlias")
@@ -99,7 +102,13 @@ pub(crate) fn symfony_receiver_method(
         0 if is("generateUrl") || is("redirectToRoute") => {
             Some((ReceiverClass::ControllerRouting, false))
         }
-        0 if is("generate") || is("generateAbsolute") => Some((ReceiverClass::UrlGenerator, false)),
+        0 if is("generate") || is("generateAbsolute") || is("generateFromRoute") => {
+            Some((ReceiverClass::UrlGenerator, false))
+        }
+        0 if is("setRedirect") => Some((ReceiverClass::FormRedirect, false)),
+        0 if is("redirect") => Some((ReceiverClass::RouteRedirect, false)),
+        0 if is("checkNamedRoute") => Some((ReceiverClass::AccessCheck, false)),
+        0 if is("getRouteByName") => Some((ReceiverClass::RouteLookup, false)),
         3 if is("generateFromCurrent") => Some((ReceiverClass::UrlGenerator, false)),
         0 if is("add") => Some((ReceiverClass::RoutingConfigurator, true)),
         0 if is("getParameter") || is("hasParameter") => {
@@ -128,6 +137,17 @@ pub(crate) fn symfony_receiver_method(
             Some((ReceiverClass::TemplatedEmail, false))
         }
         1 if is("dispatch") => Some((ReceiverClass::EventDispatcher, false)),
+        0 if is("getStorage")
+            || is("getAccessControlHandler")
+            || is("getViewBuilder")
+            || is("getListBuilder")
+            || is("getFormObject")
+            || is("getRouteProviders")
+            || is("hasHandler")
+            || is("getHandler") =>
+        {
+            Some((ReceiverClass::EntityTypeManager, false))
+        }
         0 if is("addListener") => Some((ReceiverClass::EventListeners, true)),
         0 if is("removeListener")
             || is("hasListeners")
@@ -149,7 +169,7 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     argument_list: &ArgumentList<'_>,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    if !ctx.symfony && !ctx.twig && !ctx.yii {
+    if !ctx.service_container && !ctx.twig && !ctx.yii {
         return;
     }
     if ctx.symfony && member_name.eq_ignore_ascii_case("trans") {
@@ -187,15 +207,18 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             continue;
         };
         // Outside Symfony, only the calls of the framework the project uses
-        // are left: Twig's own `render()`, or Yii's URL generator.
-        let records = |kind: StringKeyKind| {
-            if kind.is_twig() {
-                ctx.twig
-            } else if kind.is_yii() {
-                ctx.yii
-            } else {
-                ctx.symfony
-            }
+        // are left: Twig's own `render()`, Yii's URL generator, or a Drupal
+        // container lookup.  Only Symfony declares services and parameters
+        // in PHP; in Drupal a `setParameter()` is far more often a
+        // validator's or a query's than the container's.
+        let records = |kind: StringKeyKind| match kind.framework() {
+            KeyFramework::ServiceContainer if is_write => ctx.symfony,
+            KeyFramework::ServiceContainer => ctx.service_container,
+            KeyFramework::Symfony => ctx.symfony,
+            KeyFramework::Twig => ctx.twig,
+            KeyFramework::Yii => ctx.yii,
+            KeyFramework::Drupal => ctx.drupal,
+            KeyFramework::Laravel | KeyFramework::WordPress => false,
         };
         if !receiver.names_any(records) {
             continue;
@@ -1413,7 +1436,7 @@ pub(in crate::symbol_map::extraction) fn emit_template_attribute_span(
 
 /// Whether `class_name`, as resolved, is Symfony's `#[Route]`, under its
 /// current name or the `Annotation` one older applications import.
-fn is_route_attribute(class_name: &str) -> bool {
+pub(in crate::symbol_map::extraction) fn is_route_attribute(class_name: &str) -> bool {
     let class_name = class_name.trim_start_matches('\\');
     ROUTE_ATTRIBUTES
         .iter()
@@ -1421,7 +1444,7 @@ fn is_route_attribute(class_name: &str) -> bool {
 }
 
 /// A route's name, as its declaration writes it.
-enum RouteName {
+pub(in crate::symbol_map::extraction) enum RouteName {
     /// No name: Symfony derives one from the class and the method.
     Absent,
     /// A literal, with the byte range of its text.
@@ -1432,8 +1455,8 @@ enum RouteName {
 
 /// One `#[Route]` attribute or `@Route` annotation, by what bears on the
 /// names it declares.
-struct RouteDeclaration {
-    name: RouteName,
+pub(in crate::symbol_map::extraction) struct RouteDeclaration {
+    pub(in crate::symbol_map::extraction) name: RouteName,
     /// The byte range a derived name spans: the path, or the whole
     /// declaration when the path is not a literal.
     at: (usize, usize),
@@ -1515,7 +1538,7 @@ fn route_name_value(
 /// The routes the `#[Route]` attributes in `attribute_lists` declare, and
 /// the `@Route` annotations in `docblock` (its text and offset), on `class`
 /// or one of its methods.
-fn route_declarations(
+pub(in crate::symbol_map::extraction) fn route_declarations(
     attribute_lists: &Sequence<'_, AttributeList<'_>>,
     docblock: Option<(&str, u32)>,
     class: &Class<'_>,
@@ -1895,7 +1918,12 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
         if action.count == 1
             && let Some(class) = derive
         {
-            declare_route(&mut spans, format!("{class}::{method_name}"), action.at);
+            declare_route(
+                &mut spans,
+                StringKeyKind::SymfonyRoute,
+                format!("{class}::{method_name}"),
+                action.at,
+            );
         }
         count += action.count;
         last_at = action.at;
@@ -1919,19 +1947,34 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
         && count == 1
         && let Some(class) = derive
     {
-        declare_route(&mut spans, class.to_string(), last_at);
-        declare_route(&mut spans, format!("{class}::__invoke"), last_at);
+        declare_route(
+            &mut spans,
+            StringKeyKind::SymfonyRoute,
+            class.to_string(),
+            last_at,
+        );
+        declare_route(
+            &mut spans,
+            StringKeyKind::SymfonyRoute,
+            format!("{class}::__invoke"),
+            last_at,
+        );
     }
     ctx.spans.extend(spans);
 }
 
-/// Declare the route `key` over the byte range `at`.
-fn declare_route(spans: &mut Vec<SymbolSpan>, key: String, at: (usize, usize)) {
+/// Declare the route `key`, a `kind` key, over the byte range `at`.
+fn declare_route(
+    spans: &mut Vec<SymbolSpan>,
+    kind: StringKeyKind,
+    key: String,
+    at: (usize, usize),
+) {
     spans.push(SymbolSpan {
         start: at.0 as u32,
         end: at.1 as u32,
         kind: SymbolKind::StringKey {
-            kind: StringKeyKind::SymfonyRoute,
+            kind,
             key,
             is_write: true,
             is_optional: false,
@@ -2315,7 +2358,7 @@ pub(in crate::symbol_map::extraction) fn emit_messenger_handler_sites(
 
 /// The message class a `handles:` names: `Foo::class`, or a class name
 /// written out as a string.
-fn message_class(handles: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<String> {
+pub(super) fn message_class(handles: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<String> {
     if let Some(identifier) = crate::parser::class_fetch_identifier(handles) {
         let written = bytes_to_str(identifier.value());
         let resolved = ctx
@@ -2392,32 +2435,40 @@ fn push_action_route_spans(
         } else {
             &route.locales
         };
-        action.unreadable |= push_route_spans(route, prefix, derived, locales, spans);
+        action.unreadable |= push_route_spans(
+            route,
+            prefix,
+            derived,
+            StringKeyKind::SymfonyRoute,
+            locales,
+            spans,
+        );
         action.count += locales.len().max(1);
         action.at = route.at;
     }
     action
 }
 
-/// The spans one route declares: its name, or the `derived` one, and its
-/// aliases, each under every one of its `locales`.  A localized route's own
+/// The spans one route declares as `kind` keys: its name, or the `derived`
+/// one, and its aliases, each under every one of its `locales`.  A localized route's own
 /// name still generates the current locale's route; an alias's does not.
 /// Whether its name cannot be read.
-fn push_route_spans(
+pub(in crate::symbol_map::extraction) fn push_route_spans(
     route: &RouteDeclaration,
     prefix: &str,
     derived: Option<String>,
+    kind: StringKeyKind,
     locales: &[String],
     spans: &mut Vec<SymbolSpan>,
 ) -> bool {
     let localized = |spans: &mut Vec<SymbolSpan>, name: &str, at: (usize, usize)| {
         for locale in locales {
-            declare_route(spans, format!("{name}.{locale}"), at);
+            declare_route(spans, kind, format!("{name}.{locale}"), at);
         }
     };
     let declare = |spans: &mut Vec<SymbolSpan>, name: String, at: (usize, usize)| {
         localized(spans, &name, at);
-        declare_route(spans, name, at);
+        declare_route(spans, kind, name, at);
     };
     let unreadable = match &route.name {
         RouteName::Literal(name, start, end) => {
@@ -2434,7 +2485,7 @@ fn push_route_spans(
     };
     for (alias, start, end) in &route.aliases {
         if locales.is_empty() {
-            declare_route(spans, alias.clone(), (*start, *end));
+            declare_route(spans, kind, alias.clone(), (*start, *end));
         } else {
             localized(spans, alias, (*start, *end));
         }
@@ -2526,7 +2577,16 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, true, true, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: true,
+                service_container: true,
+                drupal: false,
+                twig: true,
+            },
+            None,
         )
     }
 
@@ -2555,6 +2615,92 @@ mod tests {
                 ("app.mailer", ReceiverClass::ConfiguratorAlias, false),
             ]
         );
+    }
+
+    /// Each `(method, argument)` Drupal code reads a name from through
+    /// `symfony_receiver_method`, with the Drupal class and kind the
+    /// receiver it gets must offer, so that a same-named arm placed before
+    /// Drupal's takes nothing away from it.
+    const DRUPAL_RECEIVER_METHODS: &[(&str, usize, &str, crate::symbol_map::StringKeyKind)] = &[
+        ("getStorage", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("getDefinition", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("hasDefinition", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        (
+            "getAccessControlHandler",
+            0,
+            ENTITY_TYPE_MANAGER,
+            ENTITY_TYPE,
+        ),
+        ("getViewBuilder", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("getListBuilder", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("getFormObject", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("getRouteProviders", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("hasHandler", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("getHandler", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("generate", 0, URL_GENERATOR, ROUTE),
+        ("generateFromRoute", 0, URL_GENERATOR, ROUTE),
+        ("setRedirect", 0, FORM_STATE, ROUTE),
+        ("redirect", 0, CONTROLLER_BASE, ROUTE),
+        ("redirect", 0, FORM_BASE, ROUTE),
+        ("redirect", 0, ENTITY_CONTROLLER, ROUTE),
+        ("checkNamedRoute", 0, ACCESS_MANAGER, ROUTE),
+        ("getRouteByName", 0, ROUTE_PROVIDER, ROUTE),
+    ];
+
+    const ENTITY_TYPE_MANAGER: &str = "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
+    const ENTITY_TYPE: crate::symbol_map::StringKeyKind =
+        crate::symbol_map::StringKeyKind::DrupalEntityType;
+    const URL_GENERATOR: &str = "Drupal\\Core\\Routing\\UrlGeneratorInterface";
+    const FORM_STATE: &str = "Drupal\\Core\\Form\\FormStateInterface";
+    const CONTROLLER_BASE: &str = "Drupal\\Core\\Controller\\ControllerBase";
+    const FORM_BASE: &str = "Drupal\\Core\\Form\\FormBase";
+    const ENTITY_CONTROLLER: &str = "Drupal\\Core\\Entity\\Controller\\EntityController";
+    const ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterface";
+    const ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
+    const ROUTE: crate::symbol_map::StringKeyKind = crate::symbol_map::StringKeyKind::DrupalRoute;
+
+    #[test]
+    fn every_drupal_receiver_method_reaches_its_drupal_class() {
+        for &(method, index, class, kind) in DRUPAL_RECEIVER_METHODS {
+            let (receiver, _) =
+                crate::symbol_map::extraction::symfony_receiver_method(method, index)
+                    .unwrap_or_else(|| panic!("{method}#{index} names no receiver"));
+            assert!(
+                receiver.targets().contains(&(class, kind)),
+                "{method}#{index}: {receiver:?} has no {class} target of {kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_container_builders_definition_lookups_name_a_service() {
+        let php = "<?php\nfunction f($container) {\n    $container->getDefinition('app.a');\n    $container->hasDefinition('app.b');\n}\n";
+        let map = map_of(php);
+        assert_eq!(
+            receivers(&map),
+            vec![
+                ("app.a", ReceiverClass::DefinitionLookup, false),
+                ("app.b", ReceiverClass::DefinitionLookup, false),
+            ]
+        );
+        // A receiver confirmed as a container builder names a service ID.
+        let (_, kind) = ReceiverClass::DefinitionLookup
+            .targets()
+            .iter()
+            .find(|(class, _)| {
+                *class == "Symfony\\Component\\DependencyInjection\\ContainerBuilder"
+            })
+            .expect("the container builder is a target");
+        let span = map.typed_receiver_sites[0].to_span(*kind);
+        assert!(matches!(
+            &span.kind,
+            crate::symbol_map::SymbolKind::StringKey {
+                kind: crate::symbol_map::StringKeyKind::ServiceId,
+                key,
+                is_write: false,
+                ..
+            } if key == "app.a"
+        ));
     }
 
     #[test]
@@ -3150,9 +3296,47 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, false, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: false,
+                twig: false,
+            },
+            None,
         );
         assert!(map.typed_receiver_sites.is_empty());
+    }
+
+    #[test]
+    fn a_drupal_project_records_container_reads_but_no_declarations() {
+        let php = "<?php\nfunction f($container, $violation) {\n    $container->get('acme.greeter');\n    $container->getParameter('acme.limit');\n    $violation->setParameter('@value', $value);\n}\n";
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: false,
+                twig: true,
+            },
+            None,
+        );
+        assert_eq!(
+            receivers(&map),
+            vec![
+                ("acme.greeter", ReceiverClass::ContainerLookup, false),
+                ("acme.limit", ReceiverClass::ParameterHolder, false),
+            ]
+        );
     }
 
     #[test]
@@ -3164,7 +3348,16 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, true, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: false,
+                twig: true,
+            },
+            None,
         );
         assert_eq!(
             receivers(&map),

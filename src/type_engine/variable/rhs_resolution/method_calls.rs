@@ -202,6 +202,24 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
         };
     }
 
+    // A load on an entity storage `getStorage()` tagged with its entity
+    // class.  The entity type rides on the receiver's type argument, not on
+    // any owner class.
+    if let Some(result) =
+        super::drupal_calls::try_resolve_entity_load_type(&method_name, &receiver_resolved, ctx)
+    {
+        return result;
+    }
+    // An entity query on a tagged storage, and the count and the IDs a
+    // tagged query gives.
+    if let Some(result) = super::drupal_calls::try_resolve_entity_query_call_type(
+        &method_name,
+        &receiver_resolved,
+        ctx,
+    ) {
+        return result;
+    }
+
     // Laravel validated input: the rules that guard this request describe the
     // array it hands back, so `$data = $request->validated()` gets a shape
     // rather than plain `array`.  Classifying the call does not depend on the
@@ -242,6 +260,14 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             if let Some(result) =
                 try_resolve_container_lookup_type(owner, &method_name, argument_list, ctx)
             {
+                return result;
+            }
+            if let Some(result) = super::drupal_calls::try_resolve_entity_storage_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
                 return result;
             }
             if let Some(result) =

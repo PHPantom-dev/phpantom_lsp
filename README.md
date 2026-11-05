@@ -25,7 +25,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Built-in diagnostics<sup>4</sup>         | ✅       | 🚧🔒         | ✅         | 🚧          | ✅          |
 | External analyzer integration<sup>5</sup> | ✅       | ❌           | ❌         | 🚧          | 🚧          |
 | **Type Intelligence**                    |          |              |            |             |             |
-| Generics / `@template`                   | ✅       | 🚧           | ✅         | 🚧          | ✅          |
+| Generics / `@template`                   | ✅       | 🚧           | ✅         | 🚧          | 🚧          |
 | Array / object shapes                    | ✅       | ✅           | ✅         | 🚧          | 🚧          |
 | Advanced PHPDoc types<sup>6</sup>        | ✅       | 🚧🔒         | 🚧         | 🚧          | 🚧          |
 | Closure parameter inference              | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
@@ -36,7 +36,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Yii 3                                    | ✅       | ❌           | ❌         | ❌          | ❌          |
 | Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅🧩          |
 | PHPUnit & Pest                           | ✅       | ❌           | 🚧         | 🚧          | ✅          |
-| Other frameworks                         | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
+| Other frameworks                         | ❌       | 🚧           | 🚧         | 🚧          | 🧩        |
 | **Refactoring**                          |          |              |            |             |             |
 | Rename                                   | ✅       | ✅🔒         | ✅       | ✅          | ✅          |
 | Extract & generate<sup>8</sup>           | ✅       | ❌           | 🚧🔒       | 🚧          | ✅          |
@@ -86,6 +86,7 @@ Independent, re-runnable type-inference conformance results across twelve PHP en
 
 PHPantom understands Composer projects out of the box, but works without setup on non-Composer projects too:
 
+- **Frameworks need no setup.** Laravel, Symfony, WordPress, Yii, Drupal, PHPUnit, and Pest are recognised from the project itself, and their code is read from where the project already has it. There is nothing to enable, download, or point at.
 - **Autoloader-accurate results.** Completions and go-to-definition only surface classes that Composer's autoloader can actually load, avoiding false positives from internal, inaccessible, or duplicate vendor classes. You see exactly what your application can use.
 - **PSR-4 correctness.** Quick fixes for when the namespace or class name does not match their PSR-4 path.
 - **PSR-4 autoloading.** Resolves classes across files on demand.
@@ -104,6 +105,7 @@ PHPantom stands on the shoulders of:
 - **[Mago](https://github.com/carthage-software/mago):** the PHP parser that powers all of PHPantom's AST analysis.
 - **[PHPStan](https://phpstan.org/) and [Psalm](https://psalm.dev/):** for their pioneering work in PHP static analysis and shaping the type ecosystem. PHPantom builds on PHPStan-informed type experience, with full support for `@phpstan-*` annotations.
 - **[JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs):** type information for the entire PHP standard library, embedded directly into the binary.
+- **[Viktor Szépe (@szepeviktor)](https://github.com/szepeviktor):** for [wordpress-stubs](https://github.com/php-stubs/wordpress-stubs), which supplies PHPantom's knowledge of WordPress core, and [phpstan-wordpress](https://github.com/szepeviktor/phpstan-wordpress), whose return-type rules and test fixtures shaped PHPantom's WordPress support.
 - **[Phpactor](https://github.com/phpactor/phpactor):** the PHP language server whose comprehensive test suite and benchmark fixtures informed PHPantom's own test coverage. Many of PHPantom's type inference fixtures were adapted from Phpactor's reflection tests.
 
 ## License
