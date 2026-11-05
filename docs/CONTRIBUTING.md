@@ -54,21 +54,34 @@ reports are uploaded together to Codecov. To reproduce one shard locally
 cargo llvm-cov nextest --partition hash:1/6 --lcov --output-path lcov.info
 ```
 
-PR latency benchmarks build once, then distribute the discovered benchmark
-cases across four runners. Each runner measures its cases sequentially with
-Criterion's usual sampling settings. The `Benchmark (PR comparison)` check
-compares the combined results only after every shard passes and every case
-is accounted for. To reproduce a shard locally from the repository root:
+PR latency benchmarks build the base and PR revisions with the same toolchain
+and settings, then distribute the cases across four runners. Each runner
+runs both revisions sequentially with Criterion's usual sampling settings
+and each revision's own fixtures. One shared assignment
+keeps matching cases on the same runner even when a PR adds benchmarks.
+The `Benchmark (PR comparison)` check compares the paired results only after
+every shard passes and every case is accounted for. New cases are reported
+without a baseline; removed cases are listed explicitly. Main-branch
+measurements continue to populate the historical dashboard.
+
+To reproduce a paired shard locally from the repository root, replace
+`BASE_COMMIT` with the PR's base revision:
 
 ```bash
-cargo bench --bench completion --bench references --bench laravel_completion \
-  --bench custom_builder --bench symfony_completion --bench yii_completion \
-  --bench wordpress_completion \
-  --no-run --message-format=json > /tmp/benchmark-build.jsonl
+benchmark_root="$PWD"
+git worktree add --detach /tmp/phpantom-bench-base BASE_COMMIT
+cargo bench --locked --manifest-path /tmp/phpantom-bench-base/Cargo.toml \
+  --bench '*' --no-run --message-format=json > /tmp/baseline-build.jsonl
+(
+  cd /tmp/phpantom-bench-base
+  python3 "$benchmark_root/benches/ci_benchmarks.py" prepare \
+    --build-dir /tmp/phpantom-baseline --shards 1 < /tmp/baseline-build.jsonl
+)
+cargo bench --locked --bench '*' --no-run --message-format=json > /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py prepare --build-dir /tmp/phpantom-benchmarks \
-  --shards 4 < /tmp/benchmark-build.jsonl
+  --shards 4 --baseline-dir /tmp/phpantom-baseline < /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py run --build-dir /tmp/phpantom-benchmarks \
-  --shard 1 --output /tmp/shard-1.json
+  --baseline-source /tmp/phpantom-bench-base --shard 1 --output /tmp/shard-1.json
 ```
 
 CI uses static musl binaries; these commands use your local Cargo target.
@@ -76,9 +89,10 @@ Run the sharding helper's tests with
 `python3 -m unittest discover -s benches -p 'test_ci_benchmarks.py'`.
 
 Latency and memory benchmark comparisons appear in the job summaries.
-A regression over 30% fails the comparison check. Alerts also leave a PR
-comment for same-repository PRs, except Dependabot runs; fork and Dependabot
-PRs use the summaries so they do not need permission to post a review.
+A regression over 30% fails the comparison check. Latency compares the raw
+paired measurements and reports both timings and their ratio. Memory alerts
+also leave a PR comment for same-repository PRs, except Dependabot runs;
+fork and Dependabot PRs use the summaries.
 
 - Integration tests go in `tests/integration/`, one file per feature area (`completion_*.rs`, `definition_*.rs`, `code_action_*.rs`, ...)
 - Use `create_test_backend()` from `tests/integration/common/mod.rs` for same-file tests
