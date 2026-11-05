@@ -60,9 +60,10 @@ final class NoteCounter implements ContainerInjectionInterface
      */
     public function ids(): array
     {
-        // Try: hover `$ids`, the IDs of the notes keyed by revision ID, as a
-        // content entity's are. Go to the definition of 'acme_note', or
-        // complete an entity type ID inside `\Drupal::entityQuery('')`.
+        // Try: hover `$ids`, the IDs of the notes, which a content entity
+        // query gives as strings under integer keys. Go to the definition of
+        // 'acme_note', or complete an entity type ID inside
+        // `\Drupal::entityQuery('')`.
         $ids = \Drupal::entityQuery('acme_note')->accessCheck(false)->execute();
 
         return $ids;

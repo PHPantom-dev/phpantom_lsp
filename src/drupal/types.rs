@@ -87,21 +87,32 @@ pub(crate) fn storage_type(
 
 /// How many entities a storage method returns, if it returns any.
 enum Loads {
-    /// `load()`, `loadUnchanged()`, `loadRevision()`: one, or `null`.
+    /// `load()`, `loadUnchanged()`, `loadRevision()`, and the other single
+    /// loads: one, or `null`.
     MaybeOne,
-    /// `create()`: one.
+    /// `create()`, `createWithSampleValues()`: one.
     One,
-    /// `loadMultiple()`, `loadByProperties()`: an array keyed by ID.
+    /// `loadMultiple()`, `loadByProperties()`, and the other multiple
+    /// loads: an array keyed by ID, or by revision ID.
     Many,
 }
 
 fn loads(method_name: &str) -> Option<Loads> {
     let is = |name: &str| method_name.eq_ignore_ascii_case(name);
-    if is("load") || is("loadUnchanged") || is("loadRevision") {
+    if is("load")
+        || is("loadUnchanged")
+        || is("loadRevision")
+        || is("loadRevisionUnchanged")
+        || is("loadOverrideFree")
+    {
         Some(Loads::MaybeOne)
-    } else if is("create") {
+    } else if is("create") || is("createWithSampleValues") {
         Some(Loads::One)
-    } else if is("loadMultiple") || is("loadByProperties") {
+    } else if is("loadMultiple")
+        || is("loadByProperties")
+        || is("loadMultipleRevisions")
+        || is("loadMultipleOverrideFree")
+    {
         Some(Loads::Many)
     } else {
         None
@@ -211,9 +222,9 @@ pub(crate) fn entity_query_type(
 ///   with the same entities;
 /// - `count()` on a tagged query: the query, now counting;
 /// - `execute()` on a tagged query: the number of matches when it counts,
-///   otherwise the IDs, keyed by revision ID (`array<int, string>`) for a
-///   content entity and by ID (`array<string, string>`) for a
-///   configuration entity.
+///   otherwise the IDs, keyed by revision ID, or by ID for an entity type
+///   without revisions (`array<int, string>`), for a content entity and by
+///   ID (`array<string, string>`) for a configuration entity.
 ///
 /// `None` for another call or an untagged receiver, and for the IDs of an
 /// entity class that is not found, is neither a content nor a configuration

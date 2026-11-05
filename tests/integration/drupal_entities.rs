@@ -132,11 +132,11 @@ const STORAGE_STUBS: &[(&str, &str)] = &[
     ),
     (
         "web/core/lib/Drupal/Core/Entity/EntityStorageInterface.php",
-        "<?php\nnamespace Drupal\\Core\\Entity;\ninterface EntityStorageInterface {\n    public function load($id): ?EntityInterface;\n    public function loadMultiple(?array $ids = null): array;\n    public function create(array $values = []): EntityInterface;\n}\n",
+        "<?php\nnamespace Drupal\\Core\\Entity;\ninterface EntityStorageInterface {\n    public function load($id): ?EntityInterface;\n    public function loadMultiple(?array $ids = null): array;\n    public function create(array $values = []): EntityInterface;\n    public function createWithSampleValues($bundle = false, array $values = []): EntityInterface;\n    public function loadMultipleRevisions(array $revision_ids): array;\n}\n",
     ),
     (
         "web/core/lib/Drupal/Core/Entity/Sql/SqlContentEntityStorage.php",
-        "<?php\nnamespace Drupal\\Core\\Entity\\Sql;\nclass SqlContentEntityStorage implements \\Drupal\\Core\\Entity\\EntityStorageInterface {\n    public function load($id): ?\\Drupal\\Core\\Entity\\EntityInterface {}\n    public function loadMultiple(?array $ids = null): array {}\n    public function create(array $values = []): \\Drupal\\Core\\Entity\\EntityInterface {}\n}\n",
+        "<?php\nnamespace Drupal\\Core\\Entity\\Sql;\nclass SqlContentEntityStorage implements \\Drupal\\Core\\Entity\\EntityStorageInterface {\n    public function load($id): ?\\Drupal\\Core\\Entity\\EntityInterface {}\n    public function loadMultiple(?array $ids = null): array {}\n    public function create(array $values = []): \\Drupal\\Core\\Entity\\EntityInterface {}\n    public function createWithSampleValues($bundle = false, array $values = []): \\Drupal\\Core\\Entity\\EntityInterface {}\n    public function loadMultipleRevisions(array $revision_ids): array {}\n}\n",
     ),
 ];
 
@@ -159,6 +159,10 @@ final class Loader {
         $created;
         $unknown = $this->manager->getStorage('nope')->load(1);
         $unknown;
+        $sample = $storage->createWithSampleValues();
+        $sample;
+        $revisions = $storage->loadMultipleRevisions([1]);
+        $revisions;
     }
 }
 "#;
@@ -202,6 +206,10 @@ async fn storage_and_loads_are_typed_by_the_entity_type() {
     assert!(created.contains("= Note"), "{created}");
     let unknown = hover("$unknown;").await;
     assert!(unknown.contains("EntityInterface"), "{unknown}");
+    let sample = hover("$sample;").await;
+    assert!(sample.contains("= Note"), "{sample}");
+    let revisions = hover("$revisions;").await;
+    assert!(revisions.contains("array<int|string, Note>"), "{revisions}");
 }
 
 /// A load or a service lookup called straight on the call before it, with

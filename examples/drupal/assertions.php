@@ -26,6 +26,8 @@ use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\DependencyInjection\YamlFileLoader;
 use Drupal\Core\Entity\Attribute\ContentEntityType;
 use Drupal\Core\Entity\ContentEntityBase;
+use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\ContentEntityTypeInterface;
 use Drupal\Core\Entity\EntityTypeManager;
 use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
@@ -132,7 +134,8 @@ $noteAttribute->setClass(Note::class);
 $noteDefinition = $noteAttribute->get();
 check("acme_note's storage, which NoteCounter::first() loads from, is core's SQL storage", $noteDefinition->getStorageClass() === SqlContentEntityStorage::class);
 check('acme_note loads Note', $noteDefinition->getClass() === Note::class);
-check("NoteCounter::ids() starts an entity query on acme_note, a content entity type", str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "\\Drupal::entityQuery('acme_note')") && $note->isSubclassOf(ContentEntityBase::class));
+check("NoteCounter::ids() starts an entity query on acme_note", str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "\\Drupal::entityQuery('acme_note')"));
+check('acme_note is a content entity type, whose entity query gives IDs under integer keys', $noteDefinition instanceof ContentEntityTypeInterface && $noteDefinition->entityClassImplements(ContentEntityInterface::class));
 check('NoteCounter::count() counts the entity query it starts from the storage', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "->getQuery()") && str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "->count()"));
 check('NoteCounter::first() asks for acme_note', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "getStorage('acme_note');"));
 
