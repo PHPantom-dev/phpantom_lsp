@@ -1059,6 +1059,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b732-allowdynamicproperties-does-not-allow-dynamic-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B732. <code>#[\AllowDynamicProperties]</code> does not allow dynamic properties
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b733-a-drupal-service-a-serviceprovider-alters-keeps-the-class-its-yaml-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B733. A Drupal service a <code>ServiceProvider</code> alters keeps the class its YAML names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1761,6 +1783,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b732-allowdynamicproperties-does-not-allow-dynamic-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B732. <code>#[\AllowDynamicProperties]</code> does not allow dynamic properties
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b733-a-drupal-service-a-serviceprovider-alters-keeps-the-class-its-yaml-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B733. A Drupal service a <code>ServiceProvider</code> alters keeps the class its YAML names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1933,6 +1977,38 @@ the body binds <code>new static()</code> to the declaring class instead of keepi
 it <code>static</code>, so a call through a subclass gives the parent. Declaring
 <code>@return static</code> on the method or on an interface it implements gives
 the right type.</p>
+<h3 id="b732-allowdynamicproperties-does-not-allow-dynamic-properties">B732. <code>#[\AllowDynamicProperties]</code> does not allow dynamic properties<a class="headerlink" href="#b732-allowdynamicproperties-does-not-allow-dynamic-properties" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">#[\AllowDynamicProperties]</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">class Extension {}</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function f(Extension $extension): int {</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    return $extension-&gt;sort;   // Property 'sort' not found on class 'Extension'</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>A class marked <code>#[\AllowDynamicProperties]</code> (or one extending such a
+class) takes any property, so reading or writing one it does not declare
+is no unknown member. The attribute is only read by class-name
+completion today. PHPStan's <code>ClassReflection::allowsDynamicProperties()</code>
+walks the parent chain for the attribute. Drupal core's <code>Extension</code> is
+the common case: <code>$module_data[$name]-&gt;sort</code> and <code>-&gt;requires</code> are
+reported about thirty times on core once its services are typed.</p>
+<h3 id="b733-a-drupal-service-a-serviceprovider-alters-keeps-the-class-its-yaml-names">B733. A Drupal service a <code>ServiceProvider</code> alters keeps the class its YAML names<a class="headerlink" href="#b733-a-drupal-service-a-serviceprovider-alters-keeps-the-class-its-yaml-names" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// core.services.yml: language_manager: { class: Drupal\Core\Language\LanguageManager }</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">// language module: LanguageServiceProvider::alter() calls</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">//   $container-&gt;getDefinition('language_manager')-&gt;setClass(ConfigurableLanguageManager::class)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">\Drupal::service('language_manager')-&gt;getLanguageConfigOverride('fr', 'system.site');</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">// Method 'getLanguageConfigOverride' not found on class 'Drupal\Core\Language\LanguageManager'</span>
+</code></pre></div>
+<p>A module's <code>&lt;Module&gt;ServiceProvider</code> class can replace the class of a
+service another module declares, and the service is then built from the
+replacement whenever that module is enabled. <code>\Drupal::service()</code> and
+<code>$container-&gt;get()</code> are typed by the YAML class alone, so a call that
+only the replacement declares is reported: about ninety times on core,
+all for <code>language_manager</code>. Read the literal <code>setClass()</code> calls in
+<code>ServiceProvider::alter()</code> methods and type the service as the union of
+the declared class and every replacement.</p>
 
 
 
