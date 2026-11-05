@@ -1246,17 +1246,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#dr1-drupal-demo-project-and-a-real-world-baseline" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        DR1. Drupal demo project and a real-world baseline
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#dr2-service-ids-from-servicesyml" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1410,6 +1399,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#dr16-event-subscribers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR16. Event subscribers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr21-return-types-cores-docblocks-leave-wide" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR21. Return types core's docblocks leave wide
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1471,32 +1482,6 @@ within the same impact tier.</p>
 </tr>
 </tbody>
 </table>
-<hr />
-<h2 id="dr1-drupal-demo-project-and-a-real-world-baseline">DR1. Drupal demo project and a real-world baseline<a class="headerlink" href="#dr1-drupal-demo-project-and-a-real-world-baseline" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Complexity: Low-Medium</strong></p>
-<p>Every other Drupal item is measured against this one. Without a demo
-project and a baseline from real code, Drupal support would be built
-untested and could regress silently.</p>
-<ul>
-<li><strong><code>examples/drupal/</code></strong>: a <code>drupal/recommended-project</code> site with one
-  custom module and one theme, in the same shape as <code>examples/laravel/</code>
-  and <code>examples/symfony/</code>, with "Try:" comments at each site and a
-  README listing what to try. The module declares a service, a route,
-  a content entity type, a hook implementation (procedural and
-  <code>#[Hook]</code>), and a render array with a theme hook.</li>
-<li><strong>Runtime assertions</strong>: an <code>assertions.php</code> that checks the demo's
-  claims against real Drupal. Decide whether that bootstraps a kernel
-  (core supports SQLite, so no server is needed) or only checks what
-  can be read without booting.</li>
-<li><strong>A real-world baseline</strong>: run <code>analyze</code> on an actively maintained
-  contrib module and a site build, bucket the diagnostics by cause, and
-  file what Drupal-specific gaps they show. That ranks the rest of this
-  document by what actually breaks.</li>
-<li><strong>What already works</strong>: the Symfony support reads some of the same
-  shapes Drupal uses (event subscribers' <code>getSubscribedEvents()</code> maps,
-  <code>Class::method</code> strings in YAML). Check each against the demo and note
-  it in the README, so the items below only build what is missing.</li>
-</ul>
 <hr />
 <h2 id="dr2-service-ids-from-servicesyml">DR2. Service IDs from <code>*.services.yml</code><a class="headerlink" href="#dr2-service-ids-from-servicesyml" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: High · Complexity: Medium</strong></p>
@@ -1730,6 +1715,42 @@ Once Drupal service IDs complete (DR2), add
 each declaring services, routes, and hooks, and time completion of
 service IDs, route names, and hook names as each ships. Register it in
 <code>Cargo.toml</code> so <code>benches/ci_benchmarks.py</code> picks it up.</p>
+<hr />
+<h2 id="dr16-event-subscribers">DR16. Event subscribers<a class="headerlink" href="#dr16-event-subscribers" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">final class AcmeSubscriber implements EventSubscriberInterface {</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    public static function getSubscribedEvents(): array {</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">        return [KernelEvents::REQUEST =&gt; 'onRequest'];</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">    }</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>Drupal's event subscribers are Symfony's: a service tagged
+<code>event_subscriber</code> maps event names to its own methods in
+<code>getSubscribedEvents()</code>. The Symfony support reads that map, jumps from
+a listener name to its method, and reports one that does not exist,
+but only in a Symfony project, and a Drupal site's <code>composer.json</code>
+requires none of the packages that make it one. Read the map in a
+Drupal site too, so the listener methods navigate and are checked, and
+the event names complete where Drupal's event dispatcher takes one.</p>
+<hr />
+<h2 id="dr21-return-types-cores-docblocks-leave-wide">DR21. Return types core's docblocks leave wide<a class="headerlink" href="#dr21-return-types-cores-docblocks-leave-wide" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$url = Url::fromRoute('acme.greeting')-&gt;toString();           // string|GeneratedUrl</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$query = $db-&gt;select('node', 'n')-&gt;extend(PagerSelectExtender::class);</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">$query-&gt;limit(10);                                            // limit() not found on ExtendableInterface</span>
+</code></pre></div>
+<p>A few core methods that Drupal code calls everywhere declare a return
+type wider than what the call gives. <code>Url::toString()</code> returns a
+<code>GeneratedUrl</code> only when <code>$collect_bubbleable_metadata</code> is <code>true</code>, and a
+<code>string</code> otherwise; PHPStan's Drupal extension ships a stub with the
+conditional return type <code>($collect_bubbleable_metadata is true ?
+\Drupal\Core\GeneratedUrl : string)</code>. <code>extend()</code> on a query returns an
+instance of the extender class it is given, but declares
+<code>ExtendableInterface</code>, so every pager or table-sort query loses its
+type. Give both the precise type, through the same mechanism as the
+other framework corrections (<a href="../external-stubs/#e7-stub-based-framework-patches">E7</a>
+if it has shipped), so a <code>string</code> parameter takes the plain
+<code>toString()</code> and the extender's methods resolve.</p>
 
 
 
