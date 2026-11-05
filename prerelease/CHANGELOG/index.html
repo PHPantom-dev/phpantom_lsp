@@ -5231,6 +5231,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Closures that capture by reference the variable they are assigned to.</strong> In <code>$lock = new Lock(function () use (&amp;$lock) { ... })</code>, <code>$lock</code> inside the closure is now what the assignment stores, <code>@var</code> included, instead of <code>null</code>.</li>
 <li><strong>Ruling out a range's edge value.</strong> After a guard like <code>if (0 === $id) { throw ...; }</code>, an <code>int&lt;0, max&gt;</code> variable or property is now <code>int&lt;1, max&gt;</code>, so passing it where a positive integer is expected is no longer reported.</li>
 <li><strong>Code examples in hover.</strong> A multi-line <code>&lt;code&gt;</code> or <code>&lt;pre&gt;</code> example in a docblock, as in Doctrine's query builder, now shows as a code block instead of running together on one line.</li>
 <li><strong>Imports only fully qualified names refer to.</strong> <code>use DateTime;</code> is now reported as unused when the file only ever writes <code>\DateTime</code>, and the same goes for function and constant imports.</li>

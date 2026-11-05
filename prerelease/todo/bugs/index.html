@@ -1034,23 +1034,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b707-a-closure-capturing-by-reference-the-variable-it-is-assigned-to-sees-it-as-null" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B707. A closure capturing by reference the variable it is assigned to sees it as <code>null</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1725,23 +1708,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b707-a-closure-capturing-by-reference-the-variable-it-is-assigned-to-sees-it-as-null" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B707. A closure capturing by reference the variable it is assigned to sees it as <code>null</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1888,21 +1854,7 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b707-a-closure-capturing-by-reference-the-variable-it-is-assigned-to-sees-it-as-null">B707. A closure capturing by reference the variable it is assigned to sees it as <code>null</code><a class="headerlink" href="#b707-a-closure-capturing-by-reference-the-variable-it-is-assigned-to-sees-it-as-null" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @var KeyedSemaphore&lt;string, string, string&gt; */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">$ks = new KeyedSemaphore(1, function (string $key) use (&amp;$ks): string {</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    return $ks-&gt;waitFor($key, 'inner');   // Cannot access method 'waitFor' on type 'null'</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">});</span>
-</code></pre></div>
-<p><code>use (&amp;$ks)</code> captures the variable, not its value, so when the closure
-runs <code>$ks</code> holds what the outer scope assigned it afterwards, here the
-semaphore. We type the capture as <code>null</code>, its value at the point the
-closure is created, with or without the <code>@var</code>, and whether or not <code>$ks</code>
-was assigned before. A by-reference capture should take the types the
-outer variable is assigned after the capture (the <code>@var</code> included), not
-the one it had before.</p>
-<p>Found by <code>analyze</code> on azjezz/psl (<code>KeyedSemaphoreTest</code>, 21 false positives).</p>
+<p>No outstanding items.</p>
 
 
 
