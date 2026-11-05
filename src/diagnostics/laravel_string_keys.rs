@@ -100,6 +100,7 @@ impl CheckedStringKind {
             StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRouteParameter
+            | StringKeyKind::DrupalHook
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack

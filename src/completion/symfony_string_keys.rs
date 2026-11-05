@@ -90,6 +90,36 @@ impl Backend {
                 position,
             );
         }
+        if kind == StringKeyKind::DrupalHook {
+            // An alter call names its hook without the `_alter`.
+            let alter = detect_string_call_context(content, cursor, code)
+                .and_then(|call| {
+                    crate::symbol_map::extraction::hook_invocation(
+                        &call.method_name,
+                        call.arg_index,
+                    )
+                })
+                .is_some_and(|(_, alter)| alter);
+            let hooks = self
+                .drupal_documented_hooks()
+                .into_iter()
+                .filter_map(|hook| {
+                    if alter {
+                        hook.strip_suffix("_alter").map(str::to_string)
+                    } else {
+                        Some(hook)
+                    }
+                })
+                .collect();
+            return self.symfony_names_response(
+                kind,
+                hooks,
+                content,
+                prefix_start,
+                cursor,
+                position,
+            );
+        }
         if kind == StringKeyKind::SymfonyTranslation {
             let domain = self.translation_domain_at(uri, content, literal_start);
             let messages = self.symfony_translation_messages(&domain);
@@ -254,6 +284,18 @@ impl Backend {
                 == Some(call.arg_index))
             .then_some(StringKeyKind::DrupalRoute);
         }
+        if self.is_drupal_project()
+            && let Some((receiver, _)) =
+                crate::symbol_map::extraction::hook_invocation(&call.method_name, call.arg_index)
+        {
+            return self.receiver_key_for(
+                subject,
+                (receiver, &call.method_name, call.arg_index),
+                content,
+                cursor,
+                ctx,
+            );
+        }
         self.receiver_call_key(
             subject,
             &call.method_name,
@@ -276,6 +318,19 @@ impl Backend {
         ctx: &FileContext,
     ) -> Option<StringKeyKind> {
         let (receiver, _) = symfony_receiver_method(method, index)?;
+        self.receiver_key_for(subject, (receiver, method, index), content, cursor, ctx)
+    }
+
+    /// What the argument `index` of a call of `method` on `subject` names
+    /// when the type engine confirms the subject is a `receiver`.
+    fn receiver_key_for(
+        &self,
+        subject: &str,
+        (receiver, method, index): (crate::symbol_map::ReceiverClass, &str, usize),
+        content: &str,
+        cursor: usize,
+        ctx: &FileContext,
+    ) -> Option<StringKeyKind> {
         let loaders = self.file_loaders(ctx);
         let class_loader = loaders.resolved_class_loader();
         let rctx = loaders.resolution_ctx_at(content, cursor as u32);
@@ -525,6 +580,13 @@ fn attribute_key(
             ArgumentSlot::Named("name") | ArgumentSlot::Positional(0)
         )
         .then_some((StringKeyKind::YiiRouteArgument, literal_start));
+    }
+    if attribute.trim_start_matches('\\') == "Drupal\\Core\\Hook\\Attribute\\Hook" {
+        return matches!(
+            slot,
+            ArgumentSlot::Named("hook") | ArgumentSlot::Positional(0)
+        )
+        .then_some((StringKeyKind::DrupalHook, literal_start));
     }
     if is_message_handler_attribute(&attribute) {
         return matches!(

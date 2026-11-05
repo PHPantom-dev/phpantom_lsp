@@ -65,6 +65,15 @@ Run `composer install` here first. Composer puts core and contrib into
   the same route's title callback: both are a `Note`. A controller hint
   unrelated to the entity class, which leaves Drupal passing the raw ID, is
   reported.
+- Hooks navigate between their documentation, the calls that fire them, and
+  their implementations. In `web/modules/custom/acme/acme.module`, hover
+  `$form_state` in `acme_form_alter()`, typed by core's documentation, or go
+  to the definition of `form_alter` in the function's name, which lists the
+  `alter()` call in core's `FormBuilder` and `hook_form_alter()`. In
+  `src/Greeter.php`, go to the definition of `'acme_greeting'`, which lists
+  the implementation in `src/Hook/AcmeHooks.php` and the documentation in
+  `acme.api.php`. Type `function acme_` on a new line of `acme.module` to
+  complete a hook with its documented signature.
 
 ## What the Symfony support already reads
 

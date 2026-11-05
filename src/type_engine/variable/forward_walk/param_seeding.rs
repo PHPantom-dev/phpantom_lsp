@@ -65,6 +65,7 @@ pub(crate) fn seed_body_scope<'b>(
         span_start,
         owner.method_name,
         owner.has_scope_attr,
+        true,
         ctx,
     );
     seed_superglobals(&mut scope);
@@ -87,6 +88,7 @@ pub(crate) fn seed_params<'b>(
     method_span_start: u32,
     method_name: Option<&str>,
     has_scope_attr: bool,
+    can_implement_hook: bool,
     ctx: &ForwardWalkCtx<'_>,
 ) {
     // While a body is being read for its return type, the call site that
@@ -100,6 +102,10 @@ pub(crate) fn seed_params<'b>(
     // The parameters Drupal upcasts to an entity before a controller runs,
     // looked up once, when there is a parameter it could be.
     let mut drupal_upcasts: Option<Vec<(String, crate::atom::Atom, bool)>> = None;
+    // A Drupal hook implementation that leaves a parameter untyped takes
+    // the type its hook's documentation gives it; looked up once, when
+    // there is such a parameter.
+    let mut hook_documentation: Option<Option<crate::drupal::hooks::HookDocumentation>> = None;
 
     for (index, param) in parameters.enumerate() {
         let pname = bytes_to_str(param.variable.name).to_string();
@@ -150,6 +156,34 @@ pub(crate) fn seed_params<'b>(
                 scope.seed(&pname, results);
                 continue;
             }
+        }
+
+        if native_type.is_none()
+            && can_implement_hook
+            && let Some(backend) = ctx.file.backend
+            && backend.is_drupal_project()
+            && super::super::resolution::declared_param_docblock_type(
+                ctx.file.content,
+                method_span_start as usize,
+                &pname,
+            )
+            .is_none()
+            && let Some(documented) = hook_documentation
+                .get_or_insert_with(|| {
+                    backend.drupal_hook_documentation_function(
+                        ctx.file.content,
+                        method_span_start,
+                        method_name,
+                        &ctx.current_class.fqn(),
+                    )
+                })
+                .as_ref()
+                .and_then(|documentation| {
+                    documentation.parameter_type(index, ctx.file.class_loader)
+                })
+        {
+            scope.seed(&pname, ctx.resolved_types_for(documented));
+            continue;
         }
 
         let param_results = resolve_param_type(
@@ -334,6 +368,7 @@ pub(crate) fn seed_property_hook_scope(
             params.parameters.iter(),
             hook.span().start.offset,
             None,
+            false,
             false,
             ctx,
         );

@@ -48,7 +48,6 @@ mod string_keys;
 pub(crate) use call_sites::*;
 #[cfg(test)]
 pub(crate) use extraction::extract_symbol_map;
-pub(crate) use extraction::extract_symbol_map_for_index;
 pub(crate) use laravel_spans::*;
 pub(crate) use map::*;
 pub(crate) use morph_columns::{MorphColumnReceiver, MorphColumnSite};

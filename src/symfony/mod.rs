@@ -125,9 +125,9 @@ pub(crate) struct SymfonyState {
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
 /// translation key, a template, a Twig filter or function, a configuration
-/// key, an event listener, a Messenger bus, a Drupal entity type, or a
-/// Drupal route, outright or through a configurator call still to be
-/// confirmed, or registers a Messenger handler, or imports routes, or
+/// key, an event listener, a Messenger bus, a Drupal entity type, a Drupal
+/// route, or a Drupal hook, outright or through a configurator call still
+/// to be confirmed, or registers a Messenger handler, or imports routes, or
 /// declares a Twig loader.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that
@@ -213,8 +213,10 @@ impl Backend {
                 .iter()
                 .any(|prefix| uri.starts_with(prefix.as_str()));
         self.note_drupal_routes(uri, Some(map));
+        self.note_drupal_hook_declarations(uri, Some(map));
+        let was_declaring = self.symfony.declaring_uris.read().contains(uri);
         // Only take the write lock when the answer changes.
-        if self.symfony.declaring_uris.read().contains(uri) == declares {
+        if was_declaring == declares {
             return;
         }
         let mut uris = self.symfony.declaring_uris.write();
@@ -228,6 +230,7 @@ impl Backend {
     /// Forget a file that no longer exists.
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
         self.note_drupal_routes(uri, None);
+        self.note_drupal_hook_declarations(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
         }
@@ -282,7 +285,9 @@ impl Backend {
         let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
         uris.sort_unstable();
         // Only Symfony declares names through calls the type engine has to
-        // confirm; a Drupal project records none.
+        // confirm.  A Drupal project records the calls that invoke its
+        // hooks, but hooks have an index of their own (see
+        // `crate::drupal::hooks`), which is not read here.
         let needs_typed = match kind.framework() {
             KeyFramework::Drupal => false,
             KeyFramework::ServiceContainer => self.is_symfony_project(),

@@ -289,7 +289,7 @@ mod tests {
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = crate::names::OwnedResolvedNames::from_resolved(&resolver.resolve(program));
-        crate::symbol_map::extract_symbol_map_for_index(
+        crate::symbol_map::extraction::extract_symbol_map_for_index(
             program,
             php,
             &names,

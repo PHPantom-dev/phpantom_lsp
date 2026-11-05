@@ -83,6 +83,33 @@ pub(crate) async fn workspace_in(
     (backend, dir)
 }
 
+/// [`workspace_in`] with `files` opened while the workspace walk runs, the
+/// way an editor restores its tabs: after the handshake, before indexing
+/// ends.
+pub(crate) async fn workspace_opened_early(
+    dir: tempfile::TempDir,
+    files: &[(&str, &str)],
+) -> (Backend, tempfile::TempDir) {
+    std::fs::write(dir.path().join("composer.json"), COMPOSER).unwrap();
+    for (path, content) in STUBS.iter().chain(files) {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let backend = Backend::new_test();
+    #[allow(deprecated)] // `root_uri` is what this generation of clients sends
+    let params = InitializeParams {
+        root_uri: Some(Uri::from_file_path(dir.path()).unwrap()),
+        ..Default::default()
+    };
+    backend.initialize(params).await.unwrap();
+    for (path, content) in files {
+        open_document(&backend, &uri_for(&dir, path), "php", content).await;
+    }
+    backend.initialized(InitializedParams {}).await;
+    (backend, dir)
+}
+
 pub(crate) fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
     Uri::from_file_path(dir.path().join(rel)).unwrap()
 }

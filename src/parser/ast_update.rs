@@ -15,7 +15,7 @@ use crate::ParseErrorEntry;
 use crate::atom::atom;
 use crate::blade::call_site_inference::BladeScope;
 use crate::names::OwnedResolvedNames;
-use crate::symbol_map::{SymbolMap, extract_symbol_map_for_index};
+use crate::symbol_map::SymbolMap;
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan};
 
 use mago_allocator::LocalArena;
@@ -557,7 +557,7 @@ impl Backend {
             } else {
                 None
             };
-            extract_symbol_map_for_index(
+            crate::symbol_map::extraction::extract_symbol_map_for_file(
                 program,
                 content,
                 &owned_resolved,
@@ -568,6 +568,7 @@ impl Backend {
                     twig: self.is_twig_project(),
                 },
                 yii_dir.as_deref(),
+                self.drupal_file(uri),
             )
         };
         // A router that loads its routes from somewhere else than the

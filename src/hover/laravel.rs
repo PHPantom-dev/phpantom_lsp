@@ -292,16 +292,22 @@ impl Backend {
             | StringKeyKind::SymfonyTranslation
             | StringKeyKind::TranslationDomain
             | StringKeyKind::DrupalEntityType
-            | StringKeyKind::DrupalRoute => {
+            | StringKeyKind::DrupalRoute
+            | StringKeyKind::DrupalHook => {
                 let label = match kind {
                     StringKeyKind::ServiceId => "Service",
                     StringKeyKind::DrupalEntityType => "Entity type",
+                    StringKeyKind::DrupalHook => "Hook",
                     StringKeyKind::ContainerParameter => "Parameter",
                     StringKeyKind::SymfonyRoute | StringKeyKind::DrupalRoute => "Route",
                     StringKeyKind::SymfonyTranslation => "Translation",
                     _ => "Translation domain",
                 };
-                let declared = self.symfony_declaration_locations(*kind, key);
+                let declared = if *kind == StringKeyKind::DrupalHook {
+                    self.drupal_hook_documentation(key)
+                } else {
+                    self.symfony_declaration_locations(*kind, key)
+                };
                 let mut detail = match declared
                     .first()
                     .and_then(|location| self.workspace_relative_path(location.uri.as_str()))

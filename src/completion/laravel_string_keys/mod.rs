@@ -44,7 +44,9 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::DrupalEntityType => CompletionItemKind::Class,
         StringKeyKind::ContainerParameter => CompletionItemKind::Property,
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
-        StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook => CompletionItemKind::Event,
+        StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook | StringKeyKind::DrupalHook => {
+            CompletionItemKind::Event
+        }
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
         StringKeyKind::YiiRouteArgument | StringKeyKind::DrupalRouteParameter => {
             CompletionItemKind::Field
@@ -191,6 +193,9 @@ impl Backend {
             StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
                 self.twig_callable_names(*kind).into()
             }
+            // Only the documentation, not the invocations the type engine
+            // would have to confirm in every file that fires a hook.
+            StringKeyKind::DrupalHook => self.drupal_documented_hooks().into(),
             // A translation key is completed in the domain it is looked up
             // in, a configuration key under the key it is nested in, which
             // only the Symfony completion knows, and a route argument from

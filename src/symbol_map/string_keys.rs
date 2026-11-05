@@ -172,6 +172,11 @@ pub(crate) enum StringKeyKind {
     /// the route's path, and read by the keys of the parameters a route
     /// call or a links file's `route_parameters:` passes.
     DrupalRouteParameter,
+    /// A Drupal hook name: declared by the `hook_<name>()` function that
+    /// documents it in an `*.api.php` file and by the module handler's and
+    /// theme manager's calls that invoke it, and read by the implementations
+    /// a `#[Hook]` attribute or a procedural function's name make.
+    DrupalHook,
 }
 
 impl StringKeyKind {
@@ -218,9 +223,10 @@ impl StringKeyKind {
             | Self::TwigVariable => KeyFramework::Twig,
             Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
-            Self::DrupalEntityType | Self::DrupalRoute | Self::DrupalRouteParameter => {
-                KeyFramework::Drupal
-            }
+            Self::DrupalEntityType
+            | Self::DrupalRoute
+            | Self::DrupalRouteParameter
+            | Self::DrupalHook => KeyFramework::Drupal,
         }
     }
 
@@ -613,6 +619,49 @@ pub(crate) struct ContainerValueSite {
     pub value: ContainerValue,
 }
 
+/// What a Drupal hook span is, keyed back to its [`SymbolKind::StringKey`]
+/// span by `start`.  A hook span with no site is the documentation.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HookSite {
+    pub start: u32,
+    pub role: HookRole,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum HookRole {
+    /// An implementation, for `extension`.  Whether that extension is a
+    /// theme is known for a procedural function, whose file says, and
+    /// looked up by name for a hook class.  An implementation Drupal does
+    /// not collect (an install-time hook, an update function) only links
+    /// to its documentation.
+    Implementation {
+        extension: Atom,
+        is_theme: Option<bool>,
+        collected: bool,
+    },
+    /// An invocation, limited to `extension` when it names one.
+    Invocation { extension: Option<Atom> },
+}
+
+/// An invoking call inside one of the core methods that fire hooks under
+/// computed names (see `drupal::computed_hooks`), with the shape of the
+/// name it builds: `*` for each part not written out, and `_alter` after
+/// an alter type.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ComputedHookSite {
+    /// The method the call is in.
+    pub method: Atom,
+    /// The byte range of the call's hook argument.
+    pub start: u32,
+    pub end: u32,
+    pub shape: String,
+    /// The call is an alter call.
+    pub alter: bool,
+    /// The call reaches themes (a theme manager's) or modules (a module
+    /// handler's), when its receiver says which.
+    pub themes: Option<bool>,
+}
+
 /// What a Drupal entity type declaration gives its ID: the entity class,
 /// and the storage handler that loads it.
 #[derive(Debug, Clone, PartialEq)]
@@ -816,6 +865,8 @@ const DRUPAL_FORM_BASE: &str = "Drupal\\Core\\Form\\FormBase";
 const DRUPAL_ENTITY_CONTROLLER: &str = "Drupal\\Core\\Entity\\Controller\\EntityController";
 const DRUPAL_ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterface";
 const DRUPAL_ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
+pub(crate) const DRUPAL_MODULE_HANDLER: &str = "Drupal\\Core\\Extension\\ModuleHandlerInterface";
+pub(crate) const DRUPAL_THEME_MANAGER: &str = "Drupal\\Core\\Theme\\ThemeManagerInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -934,6 +985,14 @@ pub(crate) enum ReceiverClass {
     /// Drupal's access manager, for the route parameters its
     /// `checkNamedRoute()` takes after the route name.
     AccessCheckParameters,
+    /// Drupal's module handler, whose `invokeAll()`, `alter()`, and the
+    /// rest invoke the hooks of modules and install profiles.
+    ModuleHooks,
+    /// Drupal's theme manager, whose `invoke()`, `alter()`, and the rest
+    /// invoke the hooks of themes.
+    ThemeHooks,
+    /// Either of the two, for the methods they share.
+    Hooks,
 }
 
 impl ReceiverClass {
@@ -1047,6 +1106,12 @@ impl ReceiverClass {
             Self::AccessCheckParameters => {
                 &[(DRUPAL_ACCESS_MANAGER, StringKeyKind::DrupalRouteParameter)]
             }
+            Self::ModuleHooks => &[(DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook)],
+            Self::ThemeHooks => &[(DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook)],
+            Self::Hooks => &[
+                (DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook),
+                (DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook),
+            ],
         }
     }
 

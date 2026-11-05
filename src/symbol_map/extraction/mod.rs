@@ -108,6 +108,13 @@ struct ExtractionCtx<'a> {
     drupal_route_aliases: Vec<String>,
     /// The Drupal routes the file's `#[Route]` attributes declare.
     drupal_routes: Vec<crate::symbol_map::DrupalRouteSite>,
+    drupal_hooks: Vec<crate::symbol_map::HookSite>,
+    drupal_computed_hooks: Vec<crate::symbol_map::ComputedHookSite>,
+    /// What the file holds of Drupal hooks, which its path says.
+    drupal_file: crate::drupal::hooks::DrupalFile,
+    /// A procedural function with `#[ProceduralHookScanStop]` was read:
+    /// Drupal's hook collector reads no function after it.
+    drupal_hook_scan_stopped: bool,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -345,6 +352,7 @@ use wordpress::*;
 use yii::*;
 use yii_routes::*;
 
+pub(crate) use drupal::hook_invocation;
 pub(crate) use symfony::{
     configurator_function_kind, is_autowire_attribute, is_bus_name_stamp,
     is_event_listener_attribute, is_message_handler_attribute, is_template_attribute,
@@ -403,7 +411,14 @@ impl Frameworks {
 /// every navigable symbol occurrence.
 #[cfg(test)]
 pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> SymbolMap {
-    extract_symbol_map_inner(program, content, None, Frameworks::ALL, None)
+    extract_symbol_map_inner(
+        program,
+        content,
+        None,
+        Frameworks::ALL,
+        None,
+        crate::drupal::hooks::DrupalFile::Other,
+    )
 }
 
 /// Build a [`SymbolMap`] using the semantic names produced by `mago-names`.
@@ -419,6 +434,7 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
         Some(resolved_names),
         Frameworks::ALL,
         None,
+        crate::drupal::hooks::DrupalFile::Other,
     );
     map.refresh_conditional_string_key_spans(None, |_| false);
     map
@@ -429,6 +445,7 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
 ///
 /// `frameworks` says which frameworks' names to record, and `yii_dir` is the
 /// file's directory when the project is a Yii application.
+#[cfg(test)]
 pub(crate) fn extract_symbol_map_for_index(
     program: &Program<'_>,
     content: &str,
@@ -436,7 +453,34 @@ pub(crate) fn extract_symbol_map_for_index(
     frameworks: Frameworks,
     yii_dir: Option<&std::path::Path>,
 ) -> SymbolMap {
-    extract_symbol_map_inner(program, content, Some(resolved_names), frameworks, yii_dir)
+    extract_symbol_map_inner(
+        program,
+        content,
+        Some(resolved_names),
+        frameworks,
+        yii_dir,
+        crate::drupal::hooks::DrupalFile::Other,
+    )
+}
+
+/// [`extract_symbol_map_for_index`] for a file whose path says what it
+/// holds of Drupal hooks.
+pub(crate) fn extract_symbol_map_for_file(
+    program: &Program<'_>,
+    content: &str,
+    resolved_names: &OwnedResolvedNames,
+    frameworks: Frameworks,
+    yii_dir: Option<&std::path::Path>,
+    drupal_file: crate::drupal::hooks::DrupalFile,
+) -> SymbolMap {
+    extract_symbol_map_inner(
+        program,
+        content,
+        Some(resolved_names),
+        frameworks,
+        yii_dir,
+        drupal_file,
+    )
 }
 
 fn extract_symbol_map_inner(
@@ -445,6 +489,7 @@ fn extract_symbol_map_inner(
     resolved_names: Option<&OwnedResolvedNames>,
     frameworks: Frameworks,
     yii_dir: Option<&std::path::Path>,
+    drupal_file: crate::drupal::hooks::DrupalFile,
 ) -> SymbolMap {
     let Frameworks {
         symfony,
@@ -484,6 +529,10 @@ fn extract_symbol_map_inner(
         drupal_route_patterns: Vec::new(),
         drupal_route_aliases: Vec::new(),
         drupal_routes: Vec::new(),
+        drupal_hooks: Vec::new(),
+        drupal_computed_hooks: Vec::new(),
+        drupal_file,
+        drupal_hook_scan_stopped: false,
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
@@ -636,6 +685,8 @@ fn extract_symbol_map_inner(
     ctx.morph_column_sites.sort_by_key(|s| s.start);
     ctx.container_values.sort_by_key(|s| s.start);
     ctx.entity_types.sort_by_key(|s| s.start);
+    ctx.drupal_hooks.sort_by_key(|s| s.start);
+    ctx.drupal_hooks.dedup_by_key(|s| s.start);
     ctx.routes.shrink_to_fit();
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
@@ -680,6 +731,8 @@ fn extract_symbol_map_inner(
         drupal_route_patterns: ctx.drupal_route_patterns,
         drupal_route_aliases: ctx.drupal_route_aliases,
         drupal_routes: ctx.drupal_routes,
+        drupal_hooks: ctx.drupal_hooks,
+        drupal_computed_hooks: ctx.drupal_computed_hooks,
         routes: ctx.routes,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx

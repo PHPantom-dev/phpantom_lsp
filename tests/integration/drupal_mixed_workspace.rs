@@ -158,6 +158,27 @@ const SYMFONY_TEMPLATE: &str = "<a href=\"{{ path('app_home') }}\">Home</a>\n";
 const SYMFONY_ROUTES_PATH: &str = "symfony/config/routes.yaml";
 const SYMFONY_TEMPLATE_PATH: &str = "symfony/templates/home.html.twig";
 
+/// A Drupal hook documented under the name a WordPress hook of the plugin
+/// has, and a module file with a class in it.
+const HOOK_FILES: &[(&str, &str)] = &[
+    (DRUPAL_API_PATH, DRUPAL_API),
+    (DRUPAL_MODULE_PATH, DRUPAL_MODULE),
+];
+
+const DRUPAL_API: &str = "<?php\n\nfunction hook_acme_order_placed($order) {}\n";
+const DRUPAL_MODULE: &str = r#"<?php
+
+class AcmeHelper {
+    public function greet(): string { return ''; }
+
+    public function run(): void {
+        $this->gre
+    }
+}
+"#;
+const DRUPAL_API_PATH: &str = "drupal/web/modules/custom/acme/acme.api.php";
+const DRUPAL_MODULE_PATH: &str = "drupal/web/modules/custom/acme/acme.module";
+
 // ─── Symfony, in `symfony/` ─────────────────────────────────────────────────
 
 const SYMFONY_COMPOSER: &str = r#"{
@@ -335,13 +356,14 @@ fn mixed_files() -> Vec<(String, &'static str)> {
         ENTITY_FILES
             .iter()
             .chain(ROUTE_FILES)
+            .chain(HOOK_FILES)
             .map(|(path, content)| (path.to_string(), *content)),
     );
     files
 }
 
-/// An initialized workspace holding `files`, with every PHP, YAML, and
-/// Twig file among them open.
+/// An initialized workspace holding `files`, with every PHP (`.module`
+/// files included), YAML, and Twig file among them open.
 async fn workspace(files: &[(String, &str)]) -> (Backend, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     for (path, content) in files {
@@ -352,7 +374,7 @@ async fn workspace(files: &[(String, &str)]) -> (Backend, tempfile::TempDir) {
     let backend = Backend::new_test();
     initialize_with_options(&backend, dir.path(), None).await;
     for (path, content) in files {
-        let language = if path.ends_with(".php") {
+        let language = if path.ends_with(".php") || path.ends_with(".module") {
             "php"
         } else if path.ends_with(".yml") || path.ends_with(".yaml") {
             "yaml"
@@ -652,6 +674,43 @@ async fn drupal_templates_work_in_the_drupal_site() {
     )
     .await;
     assert!(labels.contains(&"acme_shout".to_string()), "{labels:?}");
+}
+
+/// The plugin's hook reaches the plugin's calls only, though a Drupal
+/// module documents a hook of the same name.
+#[tokio::test]
+async fn wordpress_hooks_stay_wordpress_beside_drupal_hooks() {
+    let (backend, dir) = workspace(&mixed_files()).await;
+    let fires = uri_for(&dir, WORDPRESS_FIRES_PATH);
+    let listens = uri_for(&dir, WORDPRESS_LISTENS_PATH);
+    let found = references(
+        &backend,
+        &listens,
+        position_in(WORDPRESS_LISTENS, "'acme_order_placed'", 3),
+    )
+    .await;
+    let mut expected = vec![
+        (fires, line_of(WORDPRESS_FIRES, "do_action(")),
+        (listens, line_of(WORDPRESS_LISTENS, "add_action(")),
+    ];
+    expected.sort();
+    assert_eq!(found, expected);
+}
+
+/// In a module file, a method's body still gets the ordinary completion.
+#[tokio::test]
+async fn a_module_files_methods_complete_as_usual() {
+    let (backend, dir) = workspace(&mixed_files()).await;
+    let labels = completion_labels(
+        &backend,
+        &uri_for(&dir, DRUPAL_MODULE_PATH),
+        position_in(DRUPAL_MODULE, "$this->gre", 10),
+    )
+    .await;
+    assert!(
+        labels.iter().any(|label| label.starts_with("greet")),
+        "{labels:?}"
+    );
 }
 
 /// A Drupal lookup reads every project's service declarations, the
