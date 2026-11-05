@@ -109,6 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Route groups in `bootstrap/app.php`.** Routes registered from the `then:` or `using:` callback of `withRouting()`, including route files grouped there under a name prefix, are now known by their full names and are no longer reported as unknown routes.
 - **`parent::` calls that return `static`.** The result of `parent::create()` called from a subclass is now the subclass, so its own methods and properties are no longer reported as unknown on the parent.
 - **Yii views on Windows.** Go-to-definition, hover, references and diagnostics on Yii view names now work when the project lives on a Windows drive.
 - **`move` on Windows.** The `move` command no longer refuses every file as being outside the project on Windows, and a namespace such as `Tests\Unit` is no longer mistaken for the directory of the same name.
