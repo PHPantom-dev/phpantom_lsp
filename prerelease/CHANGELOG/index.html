@@ -5597,6 +5597,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Pull request benchmarks no longer fail on a slow runner.</strong> Each benchmark runner measures both the PR and its base, so the 30% regression check reflects the change rather than which machine ran it. Contributed by @shuvroroy. Closes #489.</li>
 <li><strong>Faster benchmark checks on pull requests.</strong> Latency benchmarks now run split across four runners, and benchmark alerts on fork pull requests show up in the job summary instead of failing on a permission error. Contributed by @shuvroroy.</li>
 <li><strong>A Drupal playground.</strong> <code>examples/drupal/</code> is a Drupal 11 site with one custom module and one theme, for trying PHPantom on Drupal code, with runtime checks of what its comments claim. Contributed by @giuseppe-esposito-87.</li>
 </ul>
