@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793905992587,
+  "lastUpdate": 1793917276289,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10123,6 +10123,60 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 106,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "79287b58cb9acf9524809a110ec71612814df69b",
+          "message": "Chained calls on conditional return types",
+          "timestamp": "2026-11-05T22:52:29+01:00",
+          "tree_id": "a9b61ae5b550002189424ba3bf616dcfd5b18eba",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/79287b58cb9acf9524809a110ec71612814df69b"
+        },
+        "date": 1793917263781,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 424.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 44.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 87.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 75.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 101.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 95.5,
             "unit": "MiB"
           }
         ]
