@@ -5230,6 +5230,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Variables passed to typed by-reference parameters.</strong> After a call to your own function or method that takes <code>array &amp;$message</code>, the variable now has the parameter's type instead of the shape it had before the call, so reads of keys the callee added are no longer reported.</li>
 <li><strong>Route groups in <code>bootstrap/app.php</code>.</strong> Routes registered from the <code>then:</code> or <code>using:</code> callback of <code>withRouting()</code>, including route files grouped there under a name prefix, are now known by their full names and are no longer reported as unknown routes.</li>
 <li><strong><code>parent::</code> calls that return <code>static</code>.</strong> The result of <code>parent::create()</code> called from a subclass is now the subclass, so its own methods and properties are no longer reported as unknown on the parent.</li>
 <li><strong>Yii views on Windows.</strong> Go-to-definition, hover, references and diagnostics on Yii view names now work when the project lives on a Windows drive.</li>
