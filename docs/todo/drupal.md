@@ -20,6 +20,14 @@ Drupal extension (`mglaman/phpstan-drupal`) is the checklist of what a
 Drupal developer expects from types; PhpStorm's built-in Drupal support
 is what they expect from an editor.
 
+**Benchmarks.** `benches/memory_usage.py` measures memory on a site that
+installs core into `web/core` through Composer (`memory_drupal_module`),
+next to the other framework scenarios. `benches/drupal_completion.rs`
+measures completion of service IDs, route names, entity type IDs, hook
+names, and hook implementations over a generated site with many custom
+modules. Every item that adds a name Drupal declares adds its case to
+it.
+
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
@@ -214,20 +222,6 @@ their `*.services.yml` as the project. Until DR2 to DR4 ship most
 assertions are a `// SKIP` pointing at the item that covers them; file
 any that no item does. Rules about Drupal's own deprecations are listed
 in the README as not ported.
-
----
-
-## DR15. Benchmark for Drupal names
-
-**Impact: Low-Medium · Complexity: Low** (depends on DR2)
-
-Laravel, Symfony, and Yii have Criterion benchmarks in `benches/`.
-Once Drupal service IDs complete (DR2), add
-`benches/drupal_completion.rs` in the shape of
-`benches/symfony_completion.rs`: generate a site with many modules,
-each declaring services, routes, and hooks, and time completion of
-service IDs, route names, and hook names as each ships. Register it in
-`Cargo.toml` so `benches/ci_benchmarks.py` picks it up.
 
 ---
 

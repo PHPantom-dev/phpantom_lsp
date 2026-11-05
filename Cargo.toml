@@ -145,3 +145,7 @@ harness = false
 [[bench]]
 name = "wordpress_completion"
 harness = false
+
+[[bench]]
+name = "drupal_completion"
+harness = false

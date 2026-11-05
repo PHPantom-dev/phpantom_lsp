@@ -20,6 +20,37 @@ against that bar.
 
 ---
 
+## P88. A Drupal site takes over a gigabyte once indexed
+
+**Impact: High · Complexity: Medium-High**
+
+The `memory_drupal_module` scenario of `benches/memory_usage.py` (a
+Drupal 11.4 site with core in `web/core`, one custom module open) settles
+at 1,138 MiB after indexing, against 138 MiB for the WordPress plugin
+scenario and 87 MiB for symfony/demo (release build, 2026-11-05). Every
+Drupal user pays it as soon as the site is opened.
+
+It is not the Drupal readers: the same tree with Drupal detection turned
+off (no `drupal-scaffold` web root, no `drupal/core` requirement) settles
+at 1,144 MiB. It is core's own size. `web/core` holds 11,462 PHP files
+outside `vendor/`, so they are indexed as project code, and 6,093 of them
+are under `tests/` directories. Deleting those directories brings the
+site down to 350 MiB, so core's tests alone account for about 780 MiB.
+
+They cannot simply be skipped: a site's own tests extend
+`BrowserTestBase` and `KernelTestBase` and use traits such as
+`NodeCreationTrait`, which live under core's `tests/` directories. Find
+which store keeps that much per file (the symbol maps, the parsed
+classes, or a peak the allocator never returns), and make a file that is
+only on the classmap cost what a vendor file costs until something opens
+or reads it.
+
+**Where to look:** the workspace walk in `src/indexing/`,
+`scan_drupal_directories` in `src/classmap_scanner/discovery.rs`, and
+`src/mem_audit.rs` for attributing the bytes.
+
+---
+
 ## P86. A Symfony app's generated `config/reference.php` is slow to parse
 
 **Impact: Medium · Complexity: Medium**
