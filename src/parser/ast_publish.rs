@@ -489,7 +489,10 @@ impl Backend {
         if any_signature_changed {
             // A class can become a model or validation rule through an
             // ancestor, even if it was not part of the previous catalog.
-            self.laravel.string_key_cache.write().validation_rules = None;
+            let mut cache = self.laravel.string_key_cache.write();
+            cache.validation_rules = None;
+            // A newly resolvable provider may delegate registrations to helpers.
+            cache.rate_limiters = None;
         }
         if structural_changed {
             self.invalidate_signature_dependents(&changed_names);

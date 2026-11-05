@@ -155,7 +155,7 @@ impl LiteralValue {
 /// `.5`/`5.`, and an optional exponent. Source-literal features such as
 /// underscores and hexadecimal prefixes are not part of runtime numeric
 /// strings.
-fn is_php_numeric_string(content: &str) -> bool {
+pub(crate) fn is_php_numeric_string(content: &str) -> bool {
     let bytes = content.as_bytes();
     let mut start = 0;
     let mut end = bytes.len();

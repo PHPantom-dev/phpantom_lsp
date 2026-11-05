@@ -8,6 +8,9 @@ use std::sync::Arc;
 /// and dropped again when an edit could change it.
 #[derive(Default)]
 pub(crate) struct LaravelStringKeyCache {
+    /// Named rate limiters registered by service providers and their helpers.
+    pub rate_limiters:
+        Option<Arc<crate::virtual_members::laravel::rate_limiters::RateLimiterCatalog>>,
     /// Installed validation rules and the project's custom registrations.
     pub validation_rules:
         Option<Arc<crate::virtual_members::laravel::validation_strings::catalog::RuleCatalog>>,
@@ -76,6 +79,8 @@ pub(crate) struct LaravelStringKeyCache {
 /// view names wait out an unrelated route-name build.
 #[derive(Default)]
 pub(crate) struct LaravelStringKeyBuildLocks {
+    /// Serializes discovery of provider-defined rate limiters.
+    pub rate_limiters: parking_lot::Mutex<()>,
     /// Serializes discovery of installed and application validation rules.
     pub validation_rules: parking_lot::Mutex<()>,
     pub routes: parking_lot::Mutex<()>,
@@ -92,6 +97,19 @@ pub(crate) struct LaravelStringKeyBuildLocks {
 
 impl LaravelStringKeyCache {
     pub(crate) fn invalidate_for_uri(&mut self, uri: &str, content: &str) {
+        if let Some(catalog) = &self.rate_limiters
+            && (catalog.reads(uri)
+                || uri.ends_with("/bootstrap/providers.php")
+                || uri.ends_with("/config/app.php")
+                || uri.ends_with("/composer.json")
+                || uri.ends_with("/composer.lock")
+                || uri.ends_with("/composer/installed.json")
+                || crate::virtual_members::laravel::rate_limiters::may_register_rate_limiter(
+                    content,
+                ))
+        {
+            self.rate_limiters = None;
+        }
         if self
             .validation_rules
             .as_ref()

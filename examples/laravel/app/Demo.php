@@ -42,6 +42,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Middleware\RateLimited;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Env;
@@ -1233,10 +1234,27 @@ class Demo
         // Try: hover `storefront` to list the middleware the group runs.
         Route::middleware('storefront')->get('/storefront', fn () => 'shop');
 
-        // Unknown middleware name → `invalid_laravel_middleware` diagnostic.
-        Route::get('/closed', fn () => 'closed')->withoutMiddleware('bakery.closed');
+        // Try: change bakery.open to bakery.closed for an
+        // `invalid_laravel_middleware` diagnostic.
+        Route::get('/closed', fn () => 'closed')->withoutMiddleware('bakery.open');
     }
 
+
+    // ── Named rate limiters ─────────────────────────────────────────────
+
+    public function rateLimiterNames(): RateLimited
+    {
+        // Try: complete or Ctrl+Click `bakery-uploads` to find its
+        // RateLimiter::for() registration in DemoServiceProvider.
+        Route::middleware('throttle:bakery-uploads')->get('/bakery/uploads', fn () => 'upload');
+
+        // Inline limits remain numeric values, not limiter names.
+        Route::middleware('throttle:60,1')->get('/bakery/inline-limit', fn () => 'ok');
+
+        // Try: the same name completes and navigates in queue middleware.
+        // Misspell it to see an unknown rate limiter diagnostic.
+        return new RateLimited('bakery-uploads');
+    }
 
     // ── Cache::remember() — closure return type binding ─────────────────
 

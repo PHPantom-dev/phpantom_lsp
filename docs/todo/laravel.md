@@ -545,19 +545,6 @@ literals seen elsewhere in the project and connect those occurrences for
 navigation and references, but do not diagnose a name merely because the
 static index has not seen it.
 
-#### L58. Laravel rate limiter names
-
-**Impact: Medium · Complexity: Medium**
-
-Rate limiter names are registered through `RateLimiter::for('name', …)` in
-service providers. Scan literal registrations using the same provider-aware
-shape as the macro scanner, then complete, navigate, and validate
-`throttle:name` middleware parameters and `new RateLimited('name')` against
-the discovered set. Numeric inline limits such as `throttle:60,1` remain
-values rather than named registrations. Keep the world open when no
-registration source can be read so a partial index does not create false
-diagnostics.
-
 #### L39. Unused view and translation key detection
 
 **Impact: Low · Complexity: Medium**

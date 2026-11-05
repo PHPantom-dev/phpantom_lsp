@@ -209,6 +209,21 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     ctx: &mut ExtractionCtx<'a>,
 ) {
     let laravel_span_start = ctx.spans.len();
+    if semantic_subject
+        .eq_ignore_ascii_case(crate::virtual_members::laravel::rate_limiters::RATE_LIMITER_FACADE)
+        && member_name.eq_ignore_ascii_case("for")
+        && let Some(name) =
+            crate::virtual_members::laravel::rate_limiters::registration_name(argument_list)
+    {
+        push_laravel_string_span(
+            crate::symbol_map::StringKeyKind::RateLimiter,
+            true,
+            false,
+            name,
+            ctx.content,
+            &mut ctx.spans,
+        );
+    }
     if is_config_facade_name(clean_subject) && is_config_repository_method(member_name) {
         try_emit_laravel_config_key_span(member_name, argument_list, ctx.content, &mut ctx.spans);
     }

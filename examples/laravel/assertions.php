@@ -2330,6 +2330,33 @@ check(
     (new ReflectionMethod(\App\Http\Middleware\EnsureBakeryIsOpen::class, 'handle'))->getParameters()[2]->getName() === 'day'
 );
 
+// ─── Named rate limiters ────────────────────────────────────────────────────
+
+$limiterContainer = \Illuminate\Container\Container::getInstance();
+$limiter = new \Illuminate\Cache\RateLimiter(new \Illuminate\Cache\Repository(new \Illuminate\Cache\ArrayStore()));
+$previousLimiter = \Illuminate\Support\Facades\RateLimiter::getFacadeRoot();
+$previousRouter = \Illuminate\Support\Facades\Route::getFacadeRoot();
+\Illuminate\Support\Facades\RateLimiter::swap($limiter);
+$limiterContainer->instance(\Illuminate\Cache\RateLimiter::class, $limiter);
+$limiterRouter = new \Illuminate\Routing\Router(new \Illuminate\Events\Dispatcher());
+\Illuminate\Support\Facades\Route::swap($limiterRouter);
+(new \App\Providers\DemoServiceProvider($limiterContainer))->registerRateLimiters();
+$queueLimiter = (new \App\Demo())->rateLimiterNames();
+$uploadLimit = $limiter->limiter('bakery-uploads');
+check('The provider registers bakery-uploads with ten attempts per minute',
+    $uploadLimit !== null && $uploadLimit()->maxAttempts === 10 && $uploadLimit()->decaySeconds === 60);
+$throttles = [];
+foreach ($limiterRouter->getRoutes() as $route) {
+    $throttles[$route->uri()] = $route->middleware();
+}
+check('The route names the registered limiter', ($throttles['bakery/uploads'] ?? []) === ['throttle:bakery-uploads']);
+check('The numeric throttle stays an inline limit', ($throttles['bakery/inline-limit'] ?? []) === ['throttle:60,1']);
+check('The queue middleware uses the same named limiter',
+    (new ReflectionProperty($queueLimiter, 'limiterName'))->getValue($queueLimiter) === 'bakery-uploads');
+\Illuminate\Support\Facades\RateLimiter::swap($previousLimiter);
+\Illuminate\Support\Facades\Route::swap($previousRouter);
+$limiterContainer->forgetInstance(\Illuminate\Cache\RateLimiter::class);
+
 // ─── Routes on controller methods ───────────────────────────────────────────
 
 // BakeryController's "Try:" comment counts the routes routes/web.php points
