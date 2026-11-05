@@ -968,6 +968,48 @@ function test(): void {
     );
 }
 
+/// A user function is held to its declaration: what the argument held
+/// before the call does not survive a typed by-reference parameter, even
+/// when the declared type would admit it.
+#[test]
+fn hover_typed_by_reference_parameter_of_a_user_function_replaces_the_old_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///by-ref-user-shape.php";
+    let content = r#"<?php
+class Markup {}
+function mail(array &$message): void {
+    $message['body'][] = new Markup();
+}
+class Mailer {
+    public function send(array &$message): void {}
+}
+function test(Mailer $mailer): void {
+    $message = ['body' => []];
+    mail($message);
+    echo $message;
+    $other = ['body' => []];
+    $mailer->send($other);
+    echo $other;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 11, 10).expect("hover on $message");
+    let text = hover_text(&hover);
+    assert!(
+        !text.contains("array{body: array{}}"),
+        "the pre-call shape must not survive a user function's typed by-reference call: {text}"
+    );
+    assert!(text.contains("array"), "{text}");
+
+    let hover = hover_at(&backend, uri, content, 14, 10).expect("hover on $other");
+    let text = hover_text(&hover);
+    assert!(
+        !text.contains("array{body: array{}}"),
+        "the pre-call shape must not survive a user method's typed by-reference call: {text}"
+    );
+    assert!(text.contains("$other = array"), "{text}");
+}
+
 #[test]
 fn hover_ambiguous_variable_shows_union_type() {
     let backend = create_test_backend();

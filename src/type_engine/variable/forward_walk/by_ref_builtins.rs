@@ -323,6 +323,10 @@ pub(super) fn seed_by_ref_parameters<'b>(
     // type (`TargetClass<ContainerExtension>[]`) with an array of a name
     // nothing can resolve, so the variable is left as it was instead.
     let callee_templates = template_owner.template_params();
+    let callee_is_builtin = ctx
+        .file
+        .backend
+        .is_none_or(|backend| template_owner.is_builtin(backend));
 
     for (param_index, (param, arg_expr)) in parameters.iter().zip(bound.iter()).enumerate() {
         let arg_expr = match arg_expr {
@@ -349,10 +353,12 @@ pub(super) fn seed_by_ref_parameters<'b>(
 
         let already_in_scope = !scope.get(&var_name).is_empty();
         // An explicit `@param-out` states what the callee writes, so the
-        // argument's type from before the call has no say in the result. A
-        // plain hint only bounds what the callee may write, and precision
-        // it does not contradict survives the call.
-        let keep_existing = param.param_out_type.is_none();
+        // argument's type from before the call has no say in the result.
+        // Neither has it after a user callee: its declared type, sharpened
+        // by what its body writes, is the contract. Only a built-in's plain
+        // hint is a loose bound that precision it does not contradict
+        // survives (`array_shift(array &$array)` on a `Node[]`).
+        let keep_existing = param.param_out_type.is_none() && callee_is_builtin;
         let mut seeded = false;
         if let Some(out_hint) =
             effective_out_type(param, param_index, template_owner, ctx.file.backend)

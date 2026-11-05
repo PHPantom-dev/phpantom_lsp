@@ -187,27 +187,3 @@ completion today. PHPStan's `ClassReflection::allowsDynamicProperties()`
 walks the parent chain for the attribute. Drupal core's `Extension` is
 the common case: `$module_data[$name]->sort` and `->requires` are
 reported about thirty times on core once its services are typed.
-
-### B734. Passing a variable to a typed by-reference parameter leaves its old type
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-function mail(array &$message): void {
-    $message['body'][] = new Markup();
-}
-
-$message = ['body' => []];
-mail($message);
-$message['body'][0];   // null, should be mixed (or Markup)
-```
-
-After a call, a variable passed to a by-reference parameter keeps the
-type it had before the call when the parameter declares a type, native
-or `@param`, and no `@param-out`. An untyped by-reference parameter
-takes the type the callee's body writes into it, so only the typed case
-is wrong. PHPStan gives the variable the parameter's declared type when
-there is no `@param-out`. A test of Drupal's update module reports
-`Cannot access method 'render' on type 'never'` after calling a
-`hook_mail()` implementation, which reads `$message` as `array` from the
-hook's documentation.
