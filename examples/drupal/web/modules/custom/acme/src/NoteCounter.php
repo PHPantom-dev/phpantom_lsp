@@ -20,8 +20,8 @@ final class NoteCounter implements ContainerInjectionInterface
     public static function create(ContainerInterface $container): static
     {
         // Try: go to the definition of 'entity_type.manager', which lands in
-        // core's core.services.yml, or hover `get()` to see the class it
-        // returns. Complete a service ID inside `$container->get('')`.
+        // core's core.services.yml. Complete a service ID inside
+        // `$container->get('')`.
         return new static($container->get('entity_type.manager'));
     }
 

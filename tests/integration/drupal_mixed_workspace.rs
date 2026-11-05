@@ -438,6 +438,51 @@ async fn drupal_services_work_in_the_drupal_site() {
     );
 }
 
+/// A Drupal lookup reads every project's service declarations, the
+/// Symfony application's PHP configurator among them; confirming its calls
+/// from the Drupal site must not resolve them against the Drupal site's
+/// classes, which leave Symfony's configurator out.
+#[tokio::test]
+async fn a_drupal_lookup_leaves_the_symfony_configurator_readable() {
+    let dir = tempfile::tempdir().unwrap();
+    let files = mixed_files();
+    for (path, content) in &files {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let backend = Backend::new_test();
+    initialize_with_options(&backend, dir.path(), None).await;
+    let drupal_services = uri_for(&dir, DRUPAL_SERVICES_PATH);
+    open_document(&backend, &drupal_services, "yaml", DRUPAL_SERVICES).await;
+    let drupal_consumer = uri_for(&dir, DRUPAL_CONSUMER_PATH);
+    open_document(&backend, &drupal_consumer, "php", DRUPAL_CONSUMER).await;
+    let symfony_config = uri_for(&dir, SYMFONY_PHP_PATH);
+    open_document(&backend, &symfony_config, "php", SYMFONY_SERVICES_PHP).await;
+
+    let hover = hover_at(
+        &backend,
+        &drupal_consumer,
+        position_in(DRUPAL_CONSUMER, "$greeter;", 2),
+    )
+    .await;
+    assert!(hover.contains("Greeter"), "{hover}");
+
+    let found = definitions(
+        &backend,
+        &symfony_config,
+        position_in(SYMFONY_SERVICES_PHP, "'app.php_mailer'", 3),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![(
+            symfony_config.clone(),
+            line_of(SYMFONY_SERVICES_PHP, "set('app.php_mailer'")
+        )]
+    );
+}
+
 // ─── A Symfony application alone ───────────────────────────────────────────
 
 /// The class `\Drupal` a Symfony application may hold without being a
