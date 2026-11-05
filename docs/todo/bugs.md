@@ -139,24 +139,3 @@ the body binds `new static()` to the declaring class instead of keeping
 it `static`, so a call through a subclass gives the parent. Declaring
 `@return static` on the method or on an interface it implements gives
 the right type.
-
-### B732. `#[\AllowDynamicProperties]` does not allow dynamic properties
-
-**Impact: Medium · Complexity: Low**
-
-```php
-#[\AllowDynamicProperties]
-class Extension {}
-
-function f(Extension $extension): int {
-    return $extension->sort;   // Property 'sort' not found on class 'Extension'
-}
-```
-
-A class marked `#[\AllowDynamicProperties]` (or one extending such a
-class) takes any property, so reading or writing one it does not declare
-is no unknown member. The attribute is only read by class-name
-completion today. PHPStan's `ClassReflection::allowsDynamicProperties()`
-walks the parent chain for the attribute. Drupal core's `Extension` is
-the common case: `$module_data[$name]->sort` and `->requires` are
-reported about thirty times on core once its services are typed.

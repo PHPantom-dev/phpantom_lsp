@@ -2350,6 +2350,92 @@ $f->create()->name;
     );
 }
 
+// ── #[\AllowDynamicProperties] ──────────────────────────────────────────
+
+/// A class marked `#[\AllowDynamicProperties]` takes any property, read
+/// or written, but its methods are still checked.
+#[test]
+fn allow_dynamic_properties_accepts_undeclared_properties() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+#[\AllowDynamicProperties]
+class Extension {}
+
+function f(Extension $extension): void {
+    $extension->sort = 1;
+    echo $extension->sort;
+    $extension->missing();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "Only the method call is unknown, got: {diags:?}"
+    );
+    assert!(
+        message_text(&diags[0].message).contains("missing"),
+        "got: {diags:?}"
+    );
+}
+
+/// The attribute is inherited: PHP checks it on every ancestor.
+#[test]
+fn allow_dynamic_properties_is_inherited() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+#[\AllowDynamicProperties]
+class Base {}
+class Child extends Base {}
+class GrandChild extends Child {}
+
+function f(GrandChild $c): void {
+    echo $c->sort;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "got: {diags:?}");
+}
+
+/// An unimported bare `AllowDynamicProperties` inside a namespace names
+/// `App\AllowDynamicProperties`, not the built-in; an imported one is the
+/// built-in.
+#[test]
+fn allow_dynamic_properties_name_resolves_through_namespace_and_imports() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+#[AllowDynamicProperties]
+class NotDynamic {}
+
+function f(NotDynamic $o): void {
+    echo $o->sort;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+
+    let backend = create_test_backend();
+    let text = r#"<?php
+namespace App;
+
+use AllowDynamicProperties;
+
+#[AllowDynamicProperties]
+class Dynamic {}
+
+function f(Dynamic $o): void {
+    echo $o->sort;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "got: {diags:?}");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Method return → array access: $c->items()[0]->getLabel()
 // ═══════════════════════════════════════════════════════════════════════════
