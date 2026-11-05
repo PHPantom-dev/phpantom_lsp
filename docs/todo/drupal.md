@@ -324,6 +324,15 @@ them. Read them from where Drupal builds them: each entity type's link
 templates (`entity.<type>.<link>`) and each view's displays
 (`view.<view_id>.<display_id>`).
 
+The same reading would narrow what goes unreported. Any `view.<a>.<b>`
+is accepted by its shape alone, so a misspelt view or display is not
+reported. And a route builder that adds a route under a name held in a
+variable or returned by a call (`$collection->add($route_name, $route)`,
+as Views and JSON:API do) leaves every name under its extension
+(`views.*`, `jsonapi.*`) unjudged. Following the variable to the string
+the method assigns it (`"view.$view_id.$display_id"`) would keep only that
+shape.
+
 ---
 
 ## DR21. Return types core's docblocks leave wide

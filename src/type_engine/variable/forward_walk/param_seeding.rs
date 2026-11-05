@@ -167,6 +167,7 @@ pub(crate) fn seed_params<'b>(
         if let Some(entity) = drupal_upcast_entity(
             &pname,
             native_type.as_ref(),
+            &param_results,
             crate::parser::param_default_is_null(param),
             method_name,
             &mut drupal_upcasts,
@@ -203,10 +204,13 @@ pub(crate) fn seed_params<'b>(
 /// it (see [`crate::drupal::upcasting`]) and its native hint, if any,
 /// accepts the entity: the entity class, or `null` too when the hint is
 /// nullable, the parameter defaults to `null`, or a route's default leaves
-/// it `NULL`.  `upcasts` caches the method's upcast parameters.
+/// it `NULL`.  `None` when `declared`, the type the signature or the
+/// docblock gives it, already names a subclass of the entity class, such as
+/// a bundle class.  `upcasts` caches the method's upcast parameters.
 fn drupal_upcast_entity(
     name: &str,
     native_type: Option<&PhpType>,
+    declared: &[ResolvedType],
     defaults_to_null: bool,
     method_name: Option<&str>,
     upcasts: &mut Option<Vec<(String, crate::atom::Atom, bool)>>,
@@ -229,6 +233,20 @@ fn drupal_upcast_entity(
         .iter()
         .find(|(parameter, _, _)| parameter.as_str() == name)
         .map(|(_, entity, route_null)| (*entity, *route_null))?;
+    let narrower = |resolved: &ResolvedType| {
+        resolved.type_string.is_null()
+            || resolved.class_info.as_ref().is_some_and(|class| {
+                class.fqn().trim_start_matches('\\') != entity.trim_start_matches('\\')
+                    && crate::class_lookup::is_subtype_of(class, &entity, ctx.file.class_loader)
+            })
+    };
+    if declared
+        .iter()
+        .any(|resolved| !resolved.type_string.is_null())
+        && declared.iter().all(narrower)
+    {
+        return None;
+    }
     let mut nullable = route_null || defaults_to_null;
     if let Some(written) = native_type {
         // A builtin or union hint takes no entity, nor a class the entity's

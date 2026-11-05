@@ -457,7 +457,8 @@ enum BuiltName {
 /// Record the routes a route builder adds: a class or trait whose file
 /// uses Symfony's routing component, as the classes a routing file's
 /// `route_callbacks` name, route subscribers, entity route providers, and
-/// the traits they share do.  `$collection->add(NAME, $route)`,
+/// the traits they share do, or core's entity routing, as an entity route
+/// provider that extends core's does.  `$collection->add(NAME, $route)`,
 /// `$routes[NAME] = new Route(…)` (or a variable holding one), and an
 /// array literal's `NAME => new Route(…)` add the route `NAME`: written
 /// out, it is declared; built from parts, its shape is kept as a pattern.
@@ -469,7 +470,13 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_builder_spans(
     name_offset: u32,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    if !ctx.drupal || !ctx.content.contains("Symfony\\Component\\Routing\\") {
+    // An entity route provider that extends core's renames the routes it
+    // inherits with `$routes->add('node.add', $route)`, and needs no
+    // Symfony import to do it.
+    if !ctx.drupal
+        || !(ctx.content.contains("Symfony\\Component\\Routing\\")
+            || ctx.content.contains("Drupal\\Core\\Entity\\Routing\\"))
+    {
         return;
     }
     let mut found = BuilderSites::default();
@@ -501,13 +508,18 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_builder_spans(
         _ => false,
     };
     // A route collection's `add()` takes the route second: a `new Route`,
-    // or a variable holding one, a parameter included, which the file
-    // alone cannot type.  Any other `add()` adds something else.
+    // or a variable or a call holding one (`static::getEntryPointRoute()`),
+    // a parameter included, which the file alone cannot type.  Any other
+    // `add()` adds something else.
     let mut names: Vec<&Expression<'_>> = found
         .added
         .into_iter()
         .filter(|(_, route)| {
-            holds_route(route) || matches!(route, Expression::Variable(Variable::Direct(_)))
+            holds_route(route)
+                || matches!(
+                    route,
+                    Expression::Variable(Variable::Direct(_)) | Expression::Call(_)
+                )
         })
         .map(|(name, _)| name)
         .collect();
@@ -1062,6 +1074,7 @@ class SearchPageRoutes {
         $routes["search.view_$id"] = new Route('/search/' . $id);
         $routes['search.help_' . $id] = new Route('/help');
         $collection->add('search.literal', new Route('/x'));
+        $collection->add('search.called', static::route($id));
         $collection->add("{$name}.bc", new Route('/y'));
         $collection->add($name, new Route('/z'));
         $routes['not_a_route'] = new \ArrayObject();
@@ -1075,7 +1088,7 @@ class SearchPageRoutes {
         let (mut declared, mut patterns) = built(php);
         declared.sort();
         patterns.sort();
-        assert_eq!(declared, ["search.literal", "search.view"]);
+        assert_eq!(declared, ["search.called", "search.literal", "search.view"]);
         // `"{$name}.bc"` and `$name` start with no written-out text, so
         // they stand for the extension's own routes.
         assert_eq!(patterns, ["search.*", "search.help_*", "search.view_*"]);
@@ -1396,6 +1409,25 @@ final class About {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn an_entity_route_provider_declares_the_routes_it_renames() {
+        let php = r#"<?php
+namespace Drupal\node\Entity;
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Entity\Routing\DefaultHtmlRouteProvider;
+class NodeRouteProvider extends DefaultHtmlRouteProvider {
+    public function getRoutes(EntityTypeInterface $entity_type) {
+        $routes = parent::getRoutes($entity_type);
+        $addFormRoute = $routes->get('entity.node.add_form');
+        $routes->remove('entity.node.add_form');
+        $routes->add('node.add', $addFormRoute);
+        return $routes;
+    }
+}
+"#;
+        assert_eq!(built(php), (vec!["node.add".to_string()], Vec::new()));
     }
 
     #[test]

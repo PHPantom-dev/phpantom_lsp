@@ -263,6 +263,7 @@ impl Backend {
                     );
                     let parameters = crate::drupal::routing::twig_parameter_spans(content, &spans);
                     spans.extend(parameters);
+                    spans.sort_by_key(|span| span.start);
                     spans
                 } else {
                     Vec::new()

@@ -1424,6 +1424,18 @@ async fn a_bundle_class_hint_is_not_reported() {
     assert_eq!(found, Vec::<Position>::new());
 }
 
+/// A docblock that names a bundle class of the entity says more than the
+/// entity class Drupal's upcasting gives, and is kept.
+#[tokio::test]
+async fn a_bundle_class_docblock_wins_over_the_upcast_entity() {
+    let routing = "acme_check.view:\n  path: '/check/{acme_note}'\n  defaults:\n    _controller: '\\Drupal\\acme_check\\Controller\\CheckController::view'\n    _title_callback: '\\Drupal\\acme_check\\Controller\\CheckController::title'\n";
+    let methods = "    /** @param Memo $acme_note */\n    public function view(EntityInterface $acme_note): array {\n        $acme_note; // view\n        return [];\n    }\n    /** @param Memo $acme_note */\n    public function title($acme_note): string {\n        $acme_note; // title\n        return '';\n    }\n";
+    for marker in ["$acme_note; // view", "$acme_note; // title"] {
+        let text = check_hover(routing, methods, marker).await;
+        assert!(text.contains("$acme_note = Memo\n"), "{marker}: {text}");
+    }
+}
+
 /// A title callback is never reported, nor reflected by core.
 #[tokio::test]
 async fn a_title_callback_is_not_reported() {
