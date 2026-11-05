@@ -1031,17 +1031,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b732-allowdynamicproperties-does-not-allow-dynamic-properties" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B732. <code>#[\AllowDynamicProperties]</code> does not allow dynamic properties
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1716,17 +1705,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b732-allowdynamicproperties-does-not-allow-dynamic-properties" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B732. <code>#[\AllowDynamicProperties]</code> does not allow dynamic properties
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1853,22 +1831,6 @@ the body binds <code>new static()</code> to the declaring class instead of keepi
 it <code>static</code>, so a call through a subclass gives the parent. Declaring
 <code>@return static</code> on the method or on an interface it implements gives
 the right type.</p>
-<h3 id="b732-allowdynamicproperties-does-not-allow-dynamic-properties">B732. <code>#[\AllowDynamicProperties]</code> does not allow dynamic properties<a class="headerlink" href="#b732-allowdynamicproperties-does-not-allow-dynamic-properties" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">#[\AllowDynamicProperties]</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">class Extension {}</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">function f(Extension $extension): int {</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    return $extension-&gt;sort;   // Property 'sort' not found on class 'Extension'</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>A class marked <code>#[\AllowDynamicProperties]</code> (or one extending such a
-class) takes any property, so reading or writing one it does not declare
-is no unknown member. The attribute is only read by class-name
-completion today. PHPStan's <code>ClassReflection::allowsDynamicProperties()</code>
-walks the parent chain for the attribute. Drupal core's <code>Extension</code> is
-the common case: <code>$module_data[$name]-&gt;sort</code> and <code>-&gt;requires</code> are
-reported about thirty times on core once its services are typed.</p>
 
 
 
