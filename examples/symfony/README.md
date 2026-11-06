@@ -79,6 +79,9 @@ catalogues together, the way a real Symfony project does.
   the `email` field, go to the definition of `'help'`, or misspell it to see
   it reported. A constraint's options are its constructor's parameters, so a
   misspelled `max` in `Length(max: 180)` is reported too.
+- Constraint options complete and are checked in validation mappings too. In
+  `config/validator/User.yaml`, complete an option of `Length` on a new line
+  under `max`, or misspell `min` to see it reported.
 - Serializer groups navigate between the `#[Groups]` that put a member in
   them and the contexts that serialize with them. In `DemoController`, go to
   the definition of `user:list` in `profile()` to reach

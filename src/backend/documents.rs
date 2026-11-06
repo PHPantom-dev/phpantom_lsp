@@ -42,7 +42,7 @@ impl Backend {
         if self.is_resource_uri(&uri) {
             self.update_resource_symbol_index(&uri, &text);
             self.rediagnose_template_namers(template_names);
-            if self.is_twig_template_uri(&uri) {
+            if self.has_resource_diagnostics(&uri) {
                 self.schedule_diagnostics(uri.clone());
             }
             self.log(MessageType::Info, format!("Opened resource file: {}", uri))
@@ -153,12 +153,12 @@ impl Backend {
         // service loop for every keystroke would stall interactive
         // requests, and refreshing lenses per keystroke would make the
         // client re-pull them faster than it can render them.  A
-        // template's names are judged against the scan, so its diagnostics
-        // follow it.
+        // template's names and a validation mapping's options are judged
+        // against the scan, so their diagnostics follow it.
         if self.is_resource_uri(&uri) {
             if self.sync_ast_updates {
                 self.update_resource_symbol_index(&uri, &text);
-                if self.is_twig_template_uri(&uri) {
+                if self.has_resource_diagnostics(&uri) {
                     self.schedule_diagnostics(uri);
                 }
                 return;
@@ -176,7 +176,7 @@ impl Backend {
                         return false;
                     }
                     backend.update_resource_symbol_index(&uri, &text);
-                    if backend.is_twig_template_uri(&uri) {
+                    if backend.has_resource_diagnostics(&uri) {
                         backend.schedule_diagnostics(uri);
                     }
                     true

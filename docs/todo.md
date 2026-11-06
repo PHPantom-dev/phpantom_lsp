@@ -37,7 +37,6 @@ contributor even though it's short.
 | D41 | [A thrown exception nothing catches or documents is not reported](todo/diagnostics.md#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported) | Medium      | Medium      |
 | L66 | [Related-file navigation for models, events, and listeners](todo/laravel.md#l66-related-file-navigation-for-models-events-and-listeners) | Medium | Medium |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (assets, Inertia) | Medium | Medium |
-| F67 | [Symfony constraint options in YAML and XML validation mappings](todo/lsp-features.md#f67-symfony-constraint-options-in-yaml-and-xml-validation-mappings) | Low         | Low-Medium  |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
 | T63 | [A Doctrine query's result is not typed by its DQL](todo/type-inference.md#t63-a-doctrine-querys-result-is-not-typed-by-its-dql) | Medium      | High        |
@@ -99,7 +98,6 @@ ships, remove every row that names it.
 | F41 | [Symfony forms and validation beyond a form type's own data class](todo/lsp-features.md#f41-symfony-forms-and-validation-beyond-a-form-types-own-data-class) | Low-Medium  | Medium      |
 | F47 | [Symfony Messenger transports](todo/lsp-features.md#f47-symfony-messenger-transports) | Low-Medium  | Medium      |
 | F49 | [Symfony security names](todo/lsp-features.md#f49-symfony-security-names) | Low-Medium  | Medium      |
-| F67 | [Symfony constraint options in YAML and XML validation mappings](todo/lsp-features.md#f67-symfony-constraint-options-in-yaml-and-xml-validation-mappings) | Low         | Low-Medium  |
 | D31 | [Doctrine mappings that disagree with the entity are not reported](todo/diagnostics.md#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported) | Low-Medium  | Medium-High |
 | D40 | [A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties](todo/diagnostics.md#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties) | Low         | Medium      |
 | T56 | [A DBAL result's row count ignores the connection's driver](todo/type-inference.md#t56-a-dbal-results-row-count-ignores-the-connections-driver) | Low         | Low-Medium  |

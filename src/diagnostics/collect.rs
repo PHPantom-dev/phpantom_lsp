@@ -211,9 +211,10 @@ pub(crate) type SlowDiagnosticObserver<'a> =
 impl Backend {
     /// Returns `true` if the URI should be skipped for diagnostics: stub
     /// files (embedded or under a stub path), and resource documents (YAML,
-    /// XML, and XLIFF files), which are not PHP.  A Twig template is a
-    /// resource document too, but the names it holds are judged (see
-    /// [`Self::collect_template_diagnostics`]).  Vendor files are
+    /// XML, and XLIFF files), which are not PHP.  A Twig template and a
+    /// Symfony validation mapping are resource documents too, but what they
+    /// hold is judged (see [`Self::collect_resource_diagnostics`]).  Vendor
+    /// files are
     /// not skipped here: users
     /// working in monorepos or with `--prefer-source` packages
     /// legitimately edit vendor files, so the live per-file pass
@@ -223,7 +224,30 @@ impl Backend {
     pub(super) fn should_skip_diagnostics(&self, uri_str: &str) -> bool {
         crate::stubs::is_stub_uri(uri_str)
             || self.is_external_stub_uri(uri_str)
-            || (self.is_resource_uri(uri_str) && !self.is_twig_template_uri(uri_str))
+            || (self.is_resource_uri(uri_str) && !self.has_resource_diagnostics(uri_str))
+    }
+
+    /// Whether the resource document at `uri` is one whose contents are
+    /// judged: a Twig template, or a Symfony validation mapping.
+    pub(crate) fn has_resource_diagnostics(&self, uri: &str) -> bool {
+        self.is_twig_template_uri(uri)
+            || (crate::symfony::validation::is_validation_mapping_uri(uri)
+                && self.is_symfony_project())
+    }
+
+    /// Collect the diagnostics of a resource document that has them (see
+    /// [`Self::has_resource_diagnostics`]).
+    pub fn collect_resource_diagnostics(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        if self.is_twig_template_uri(uri_str) {
+            self.collect_template_diagnostics(uri_str, content, out);
+        } else {
+            self.collect_constraint_option_diagnostics(uri_str, content, out);
+        }
     }
 
     /// Collect the diagnostics of a Twig template: the template, route,

@@ -3,5 +3,8 @@ App\Entity\User:
     email:
       - NotBlank: ~
     displayName:
+      # Try: complete an option of Length on a new line under max, or
+      # misspell min to see it reported.
       - Length:
           min: 2
+          max: 50

@@ -315,6 +315,9 @@ foreach ($violations as $violation) {
 sort($paths);
 check('NotBlank on email and Length on displayName both apply', $paths === ['displayName', 'email']);
 check('A valid user has no violations', count($validator->validate(new User('ada@example.com', 'Ada'))) === 0);
+// The option keys the mapping gives Length are options it takes.
+$length = $validator->getMetadataFor(User::class)->getPropertyMetadata('displayName')[0]->getConstraints()[0];
+check('Length takes min and max from the mapping', $length instanceof Length && $length->min === 2 && $length->max === 50);
 
 // ─── Doctrine mapping ───────────────────────────────────────────────────────
 

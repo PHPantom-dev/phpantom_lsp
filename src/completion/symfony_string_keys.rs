@@ -505,8 +505,9 @@ impl Backend {
     }
 
     /// Complete a service reference or parameter placeholder in a YAML or
-    /// XML configuration file, or a route name, translation key, template
-    /// name, block name, filter, or function in a Twig template.
+    /// XML configuration file, a constraint's option in a validation
+    /// mapping, or a route name, translation key, template name, block
+    /// name, filter, or function in a Twig template.
     pub(crate) fn try_symfony_resource_completion(
         &self,
         uri: &str,
@@ -629,6 +630,31 @@ impl Backend {
             }
         } else if !is_symfony {
             return None;
+        } else if crate::symfony::validation::is_validation_mapping_uri(uri)
+            && let Some((constraint, start, given)) =
+                crate::symfony::validation::option_key_at(uri, content, cursor)
+        {
+            // An option of a constraint, which the constraint's class
+            // names; the options it is already given are left out.
+            let options = self.constraint_options(&constraint)?;
+            let prefix = content.get(start..cursor)?.as_bytes();
+            let names: Vec<String> = options
+                .offered()
+                .filter(|name| !given.iter().any(|given| given == name))
+                .filter(|name| {
+                    name.as_bytes()
+                        .get(..prefix.len())
+                        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+                })
+                .map(str::to_string)
+                .collect();
+            return string_key_response(
+                names,
+                tower_lsp_server::gen_lsp_types::CompletionItemKind::Property,
+                content,
+                start,
+                position,
+            );
         } else if crate::symfony::resources::is_container_config_uri(uri) {
             match config_slot_at(uri, content, cursor).or_else(|| resource_key_at(content, cursor))
             {

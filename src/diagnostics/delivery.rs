@@ -46,8 +46,8 @@ impl Backend {
             return;
         }
 
-        if self.is_twig_template_uri(uri_str) {
-            self.publish_template_diagnostics(uri_str, content).await;
+        if self.is_resource_uri(uri_str) {
+            self.publish_resource_diagnostics(uri_str, content).await;
             return;
         }
 
@@ -203,20 +203,20 @@ impl Backend {
         self.assemble_and_refresh(uri_str).await;
     }
 
-    /// [`Self::publish_diagnostics_for_file`] for a Twig template, which
-    /// has no PHP to parse or walk: only the names it holds are judged, on
-    /// the blocking pool since enumerating what the project declares can
-    /// read other files.
-    async fn publish_template_diagnostics(&self, uri_str: &str, content: &Arc<String>) {
+    /// [`Self::publish_diagnostics_for_file`] for a Twig template or a
+    /// validation mapping, which has no PHP to parse or walk: only the names
+    /// it holds are judged, on the blocking pool since enumerating what the
+    /// project declares can read other files.
+    async fn publish_resource_diagnostics(&self, uri_str: &str, content: &Arc<String>) {
         let backend = self.clone_for_blocking();
         let uri = uri_str.to_string();
         let content = Arc::clone(content);
         let diagnostics =
-            crate::server::run_blocking_cancel_safe("template diagnostics", move || {
+            crate::server::run_blocking_cancel_safe("resource diagnostics", move || {
                 let _project_guard = backend.enter_project_scope(&uri);
-                crate::util::catch_panic_unwind_safe("template diagnostics", &uri, None, || {
+                crate::util::catch_panic_unwind_safe("resource diagnostics", &uri, None, || {
                     let mut out = Vec::new();
-                    backend.collect_template_diagnostics(&uri, &content, &mut out);
+                    backend.collect_resource_diagnostics(&uri, &content, &mut out);
                     out
                 })
             })

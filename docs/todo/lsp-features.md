@@ -1148,27 +1148,3 @@ When the domain has no catalogue yet, offer to create
 **Where to look:** `src/code_actions/insert_translation_key.rs`,
 `src/symfony/translations.rs` (`catalogue_spans`, `scan_yaml`,
 `scan_xliff`).
-
----
-
-## F67. Symfony constraint options in YAML and XML validation mappings
-
-**Impact: Low · Complexity: Low-Medium**
-
-```yaml
-App\Entity\User:
-    properties:
-        displayName:
-            - Length: { mni: 2 }   # a typo, not reported
-```
-
-A constraint's options are its constructor's parameters, which a named
-argument in PHP is checked against and completes from. The option keys of
-a constraint in a validation mapping, the YAML mapping's and the
-`<option name="…">` of the XML one, neither complete nor get checked. The
-mapping already knows each constraint's class (see
-`src/symfony/validation.rs`), so its constructor's parameters are a class
-load away.
-
-**Where to look:** `src/symfony/validation.rs` (`scan_yaml`, `scan_xml`),
-and the named-argument check in `src/diagnostics/argument_count.rs`.

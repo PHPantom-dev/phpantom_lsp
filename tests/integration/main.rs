@@ -310,6 +310,7 @@ mod signature_from_call_site;
 mod signature_help;
 mod smoke;
 mod stub_paths;
+mod symfony_constraint_options;
 mod symfony_container;
 mod symfony_container_types;
 mod symfony_events;
