@@ -2468,29 +2468,28 @@ PHPStan's Symfony extension (<code>Rules/Symfony/Undefined*Rule</code>,
 <code>Rules/Symfony/Invalid*DefaultValueRule</code>,
 <code>Type/Symfony/InputInterface*Extension</code>).</p>
 <hr />
-<h2 id="f67-dql-variables-joined-through-an-association">F67. DQL variables joined through an association<a class="headerlink" href="#f67-dql-variables-joined-through-an-association" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$qb-&gt;from(User::class, 'u')-&gt;join('u.team', 't')-&gt;where('t.name = :n');</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$em-&gt;createQuery('SELECT u FROM App\Entity\User u WHERE x.id = 1');</span>
+<h2 id="f70-dql-variables-a-query-builder-declares-on-some-branches">F70. DQL variables a query builder declares on some branches<a class="headerlink" href="#f70-dql-variables-a-query-builder-declares-on-some-branches" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$qb = $em-&gt;createQueryBuilder()-&gt;from(User::class, 'u')-&gt;andWhere('t.id = 1');</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">if ($withTeam) {</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    $qb-&gt;join('u.team', 't');</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">}</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">$qb-&gt;getQuery(); // `t` is not declared when `$withTeam` is false</span>
 </code></pre></div>
-<p>A DQL variable declared by an entity class, <code>X::class</code>, or a repository's
-<code>createQueryBuilder('u')</code> stands for its entity, so its fields complete,
-navigate, and are checked. One joined through an association (<code>t</code> above)
-stands for nothing, because the association's target entity is not
-recorded: the field after the variable is silent. A variable nothing
-declares (<code>x</code>) is not reported either, though PHPStan's Doctrine extension
-reports it as <code>'x' is not defined</code>.</p>
-<p>Record each association's target on the mapping (<code>targetEntity:</code> on the
-attribute, the property's type for a to-one association, <code>target-entity</code>
-in a mapping file), and let a join's variable stand for the target of the
-path it joins. A field span's subject is a single subject text today, so a
-path needs a way to say "the target of this association of that entity".</p>
-<p>The fixtures are <code>query_builder_dql_branches.fixture</code> and
-<code>query_builder_dql_branching_performance.fixture</code> in
+<p>A DQL variable nothing in a query or a function body declares is
+reported. A query builder's variables are read for the whole function
+body at once, so one declared on any branch counts as declared on all of
+them, and PHPStan's Doctrine extension reports the case above where
+PHPantom does not. Nor is anything reported for a builder that comes from
+a parameter, a property, or another method, or is passed to one, since
+its variables may be declared out of sight.</p>
+<p>Both need the builder's calls replayed in order along each path to its
+<code>getQuery()</code>, the way the type engine already replays a single fluent
+chain to type the query it builds (see T64).</p>
+<p>The fixture is <code>query_builder_dql_branches.fixture</code> in
 <code>tests/fixtures/phpstan_doctrine/</code>.</p>
-<p><strong>Where to look:</strong> <code>src/symbol_map/extraction/doctrine_dql.rs</code>,
-<code>src/doctrine/dql.rs</code>, <code>src/parser/attributes.rs</code> (the Doctrine mapping),
-<code>src/doctrine/mapping_files.rs</code>.</p>
+<p><strong>Where to look:</strong> <code>src/symbol_map/extraction/doctrine_dql.rs</code>
+(<code>report_undeclared</code>), <code>src/doctrine/query.rs</code> (<code>QueryBuilderState</code>).</p>
 <hr />
 <h2 id="f69-dql-in-expression-objects-and-other-methods-query-builders">F69. DQL in expression objects and other methods' query builders<a class="headerlink" href="#f69-dql-in-expression-objects-and-other-methods-query-builders" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
