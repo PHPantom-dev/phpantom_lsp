@@ -17,6 +17,7 @@ use std::sync::atomic::Ordering;
 use parking_lot::RwLock;
 
 pub(crate) mod computed_hooks;
+pub(crate) mod config;
 pub(crate) mod hooks;
 pub(crate) mod links;
 pub(crate) mod permissions;
@@ -50,6 +51,14 @@ pub(crate) struct DrupalState {
     /// The services each service provider's `alter()` gives another class,
     /// keyed by the provider's URI; see [`service_providers`].
     service_replacements: RwLock<BTreeMap<String, Vec<(Atom, Atom)>>>,
+    /// The default configuration files of every extension, which are
+    /// never parsed: their names are configuration names.
+    default_config_files: RwLock<Vec<PathBuf>>,
+    /// The configuration schema files, read when a configuration name is
+    /// first asked for.
+    config_schema_files: RwLock<Vec<PathBuf>>,
+    /// The configuration names read from both, until one of them changes.
+    config_index: RwLock<Option<std::sync::Arc<config::ConfigIndex>>>,
 }
 
 /// A kind of file Drupal reads declarations from.
@@ -121,6 +130,22 @@ const READ_ONLY_DIRS: [&str; 5] = [
 pub(crate) fn is_service_lookup(class: &str, method: &str) -> bool {
     class.strip_prefix('\\').unwrap_or(class) == "Drupal"
         && (method.eq_ignore_ascii_case("service") || method.eq_ignore_ascii_case("hasService"))
+}
+
+/// Whether a static call of `method` on `class`, a resolved class name,
+/// reads a configuration object by its name: `\Drupal::config()`.  Only
+/// the global `Drupal` class counts.
+pub(crate) fn is_config_lookup(class: &str, method: &str) -> bool {
+    class.strip_prefix('\\').unwrap_or(class) == "Drupal" && method.eq_ignore_ascii_case("config")
+}
+
+/// Whether `class`, a resolved class name, is `Drupal\Core\Form\ConfigTarget`,
+/// whose constructor takes a configuration name first.
+pub(crate) fn is_config_target_class(class: &str) -> bool {
+    class
+        .strip_prefix('\\')
+        .unwrap_or(class)
+        .eq_ignore_ascii_case("Drupal\\Core\\Form\\ConfigTarget")
 }
 
 /// Whether a static call of `method` on `class`, a resolved class name,
@@ -296,6 +321,9 @@ impl Backend {
         self.drupal.hook_php_files.write().clear();
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
+        self.drupal.default_config_files.write().clear();
+        self.drupal.config_schema_files.write().clear();
+        *self.drupal.config_index.write() = None;
     }
 
     /// Remember the declaration files the Drupal walk found: the YAML for

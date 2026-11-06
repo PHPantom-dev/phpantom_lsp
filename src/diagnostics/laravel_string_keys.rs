@@ -99,12 +99,14 @@ impl CheckedStringKind {
             // string.  A serializer group nothing puts a member in selects
             // nothing, which is no error either.  A module can declare
             // permissions in PHP, through a permissions file's
-            // `permission_callbacks`.
+            // `permission_callbacks`.  Configuration is created at runtime
+            // too, by the configuration a site exports and by code.
             StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalHook
             | StringKeyKind::DrupalPermission
+            | StringKeyKind::DrupalConfigName
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack

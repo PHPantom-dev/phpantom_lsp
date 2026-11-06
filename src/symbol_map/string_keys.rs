@@ -187,6 +187,13 @@ pub(crate) enum StringKeyKind {
     /// `hasPermission()`, the access result helpers, a route's
     /// `_permission` requirement, and an entity type's `admin_permission`.
     DrupalPermission,
+    /// A Drupal configuration name: declared by a default configuration
+    /// file's name and by a configuration schema entry (see
+    /// `drupal::config`), and read by `\Drupal::config()`, the config
+    /// factory, the `config()` shortcut of controllers and forms, a config
+    /// form's `getEditableConfigNames()`, and a form element's
+    /// `#config_target`.
+    DrupalConfigName,
 }
 
 impl StringKeyKind {
@@ -238,7 +245,8 @@ impl StringKeyKind {
             | Self::DrupalRoute
             | Self::DrupalRouteParameter
             | Self::DrupalHook
-            | Self::DrupalPermission => KeyFramework::Drupal,
+            | Self::DrupalPermission
+            | Self::DrupalConfigName => KeyFramework::Drupal,
         }
     }
 
@@ -879,6 +887,7 @@ const DRUPAL_ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterfac
 const DRUPAL_ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
 pub(crate) const DRUPAL_MODULE_HANDLER: &str = "Drupal\\Core\\Extension\\ModuleHandlerInterface";
 pub(crate) const DRUPAL_THEME_MANAGER: &str = "Drupal\\Core\\Theme\\ThemeManagerInterface";
+pub(crate) const DRUPAL_CONFIG_FACTORY: &str = "Drupal\\Core\\Config\\ConfigFactoryInterface";
 const DRUPAL_ACCOUNT: &str = "Drupal\\Core\\Session\\AccountInterface";
 const DRUPAL_ROLE: &str = "Drupal\\user\\RoleInterface";
 const DRUPAL_PERMISSION_CHECKER: &str = "Drupal\\Core\\Session\\PermissionCheckerInterface";
@@ -914,7 +923,8 @@ pub(crate) enum ReceiverClass {
     MailTemplate,
     /// What `get()` and `has()` look a name up in: a service container, or
     /// one of Symfony's parameter bags, whose same two methods take a
-    /// parameter name instead.
+    /// parameter name instead, or Drupal's config factory, whose `get()`
+    /// takes a configuration name.
     ContainerLookup,
     /// What `getParameter()`, `hasParameter()`, and `setParameter()` take a
     /// container parameter name in: the container itself, and the
@@ -1021,6 +1031,13 @@ pub(crate) enum ReceiverClass {
     /// A Drupal role, whose `grantPermission()` and `revokePermission()`
     /// take a permission name.
     RolePermissions,
+    /// Drupal's config factory, whose `getEditable()` takes a
+    /// configuration name and `loadMultiple()` a list of them; its `get()`
+    /// is a [`Self::ContainerLookup`].
+    ConfigFactory,
+    /// What has Drupal's `config()` shortcut, which takes a configuration
+    /// name: a controller or a form, a config form included.
+    ConfigShortcut,
     /// Symfony's serializer, normalizers, and denormalizers, whose
     /// `serialize()`, `deserialize()`, `normalize()`, and `denormalize()`
     /// take a context whose `groups` name serializer groups.
@@ -1050,6 +1067,7 @@ impl ReceiverClass {
             // A container bag is a PSR container too, so it has to be asked
             // about first.
             Self::ContainerLookup => &[
+                (DRUPAL_CONFIG_FACTORY, StringKeyKind::DrupalConfigName),
                 (SYMFONY_CONTAINER_BAG, ContainerParameter),
                 (SYMFONY_PARAMETER_BAG, ContainerParameter),
                 (PSR_CONTAINER, ServiceId),
@@ -1157,6 +1175,11 @@ impl ReceiverClass {
                 ),
             ],
             Self::RolePermissions => &[(DRUPAL_ROLE, StringKeyKind::DrupalPermission)],
+            Self::ConfigFactory => &[(DRUPAL_CONFIG_FACTORY, StringKeyKind::DrupalConfigName)],
+            Self::ConfigShortcut => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalConfigName),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalConfigName),
+            ],
             Self::Serializer => &[
                 (SYMFONY_SERIALIZER, StringKeyKind::SerializerGroup),
                 (SYMFONY_NORMALIZER, StringKeyKind::SerializerGroup),

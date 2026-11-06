@@ -79,6 +79,7 @@ pub mod array_shape;
 pub(crate) mod builder;
 pub(crate) mod command_params;
 mod doctrine_fields;
+mod drupal_config;
 pub(crate) mod drupal_hooks;
 mod drupal_permissions;
 mod drupal_route_params;

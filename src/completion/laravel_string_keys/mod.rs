@@ -36,6 +36,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         }
         StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
         StringKeyKind::DrupalPermission => CompletionItemKind::Constant,
+        StringKeyKind::DrupalConfigName => CompletionItemKind::File,
         StringKeyKind::TranslationDomain => CompletionItemKind::Module,
         StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
         StringKeyKind::Middleware => CompletionItemKind::Class,
@@ -193,7 +194,8 @@ impl Backend {
             | StringKeyKind::YiiRoute
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRoute
-            | StringKeyKind::DrupalPermission => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::DrupalPermission
+            | StringKeyKind::DrupalConfigName => self.symfony_declared_names(*kind).into(),
             StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
                 self.twig_callable_names(*kind).into()
             }

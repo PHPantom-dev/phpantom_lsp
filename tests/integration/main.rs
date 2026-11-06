@@ -205,6 +205,7 @@ mod document_highlight;
 mod document_links;
 mod document_symbols;
 mod document_symbols_blade;
+mod drupal_config;
 mod drupal_directories;
 mod drupal_entities;
 mod drupal_hooks;

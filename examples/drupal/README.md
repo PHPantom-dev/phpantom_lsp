@@ -84,6 +84,14 @@ Run `composer install` here first. Composer puts core and contrib into
   `hasPermission('')`. Each part of the `_permission` of `acme.note` in
   `acme.routing.yml` and the `admin_permission` of `Note` navigate and
   complete too.
+- Configuration names navigate to the default configuration that ships them
+  and the schema entry that describes them. In
+  `web/modules/custom/acme/src/Form/SettingsForm.php`, go to the definition
+  of `'acme.settings'` in `getEditableConfigNames()` or in the
+  `#config_target`, which lists `config/install/acme.settings.yml` and the
+  entry in `config/schema/acme.schema.yml`, or complete a configuration name
+  inside `['']`. In `web/modules/custom/acme/src/Greeter.php`, go to the
+  definition of `'system.site'`, which core ships.
 - A module's service provider may build a service from a class of its own.
   In `acme_french_site_name()` in `web/modules/custom/acme/acme.module`,
   hover `$languageManager`: core declares `language_manager` as

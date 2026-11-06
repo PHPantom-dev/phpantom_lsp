@@ -242,10 +242,12 @@ pub(super) fn extract_from_expression<'a>(
         // ── Array ──
         Expression::Array(array) => {
             try_emit_array_callable_span(&array.elements, ctx.content, &mut ctx.spans);
+            emit_drupal_config_target_entry_spans(&array.elements, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::LegacyArray(array) => {
             try_emit_array_callable_span(&array.elements, ctx.content, &mut ctx.spans);
+            emit_drupal_config_target_entry_spans(&array.elements, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::List(list) => {

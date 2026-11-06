@@ -7,14 +7,16 @@ use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
 /// Custom modules in the generated site, each declaring `SERVICES`
-/// services, `ROUTES` routes, `ENTITY_TYPES` entity types, and
-/// `PERMISSIONS` permissions, and documenting `HOOKS` hooks, and
+/// services, `ROUTES` routes, `ENTITY_TYPES` entity types, `PERMISSIONS`
+/// permissions, and `CONFIGS` configuration objects, with their default
+/// configuration and schema, and documenting `HOOKS` hooks, and
 /// implementing the hooks the module before it documents.
 const MODULES: usize = 30;
 const SERVICES: usize = 10;
 const ROUTES: usize = 10;
 const ENTITY_TYPES: usize = 3;
 const PERMISSIONS: usize = 10;
+const CONFIGS: usize = 10;
 const HOOKS: usize = 10;
 
 const COMPOSER: &str = r#"{
@@ -28,7 +30,7 @@ const COMPOSER: &str = r#"{
 const STUBS: &[(&str, &str)] = &[
     (
         "web/core/lib/Drupal.php",
-        "<?php\nclass Drupal {\n    public static function service(string $id): object {}\n    public static function hasService(string $id): bool {}\n}\n",
+        "<?php\nclass Drupal {\n    public static function service(string $id): object {}\n    public static function hasService(string $id): bool {}\n    public static function config($name) {}\n}\n",
     ),
     (
         "web/core/lib/Drupal/Core/Url.php",
@@ -83,6 +85,7 @@ final class Consumer
         $this->manager->getStorage('mod1_');
         $this->modules->invokeAll('mod1_');
         $this->account->hasPermission('administer mod1 ');
+        \Drupal::config('mod1.');
     }
 }
 "#;
@@ -137,6 +140,19 @@ fn generate_site() -> Vec<(String, String)> {
             );
         }
         files.push((format!("{dir}/mod{m}.permissions.yml"), permissions));
+
+        let mut schema = String::new();
+        for c in 0..CONFIGS {
+            files.push((
+                format!("{dir}/config/install/mod{m}.setting{c}.yml"),
+                "enabled: true\n".to_string(),
+            ));
+            let _ = writeln!(
+                schema,
+                "mod{m}.setting{c}:\n  type: config_object\n  label: 'Setting {c} of module {m}'"
+            );
+        }
+        files.push((format!("{dir}/config/schema/mod{m}.schema.yml"), schema));
 
         for e in 0..ENTITY_TYPES {
             files.push((
@@ -299,6 +315,13 @@ fn bench_drupal_name_completion(c: &mut Criterion) {
             CONSUMER_PHP,
             "hasPermission('administer mod1 '",
             "administer mod1 thing7",
+        ),
+        (
+            "config_name",
+            &consumer,
+            CONSUMER_PHP,
+            "config('mod1.'",
+            "mod1.setting7",
         ),
         (
             "hook_name_invoke_all",

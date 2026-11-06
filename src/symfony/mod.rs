@@ -385,6 +385,10 @@ impl Backend {
         kind: StringKeyKind,
         except: Option<(&str, u32)>,
     ) -> Vec<String> {
+        // Configuration names are declared by files no symbol map reads.
+        if kind == StringKeyKind::DrupalConfigName {
+            return self.drupal_config_names();
+        }
         let mut names = Vec::new();
         if kind == StringKeyKind::TranslationDomain {
             self.visit_symfony_declarations(

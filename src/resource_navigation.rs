@@ -163,6 +163,7 @@ impl Backend {
     /// one.
     pub(crate) fn update_resource_symbol_index(&self, uri: &str, content: &str) {
         self.note_twig_source(uri, content);
+        self.note_drupal_config_document(uri);
         if self.is_resource_uri(uri) {
             self.publish_resource_symbol_index(uri, content);
         } else if self.symbol_map_for(uri).is_some() {

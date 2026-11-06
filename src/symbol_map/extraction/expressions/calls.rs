@@ -46,6 +46,7 @@ pub(super) fn extract_instantiation_expr<'a>(
         emit_twig_callable_instantiation(inst.class, args, ctx);
         emit_drupal_url_spans(inst.class, args, ctx);
         emit_drupal_route_permission_spans(inst.class, args, ctx);
+        emit_drupal_config_target_spans(inst.class, args, ctx);
         if !class_text.is_empty() {
             emit_call_site(
                 format!("new {}", class_text),
@@ -493,6 +494,7 @@ fn extract_method_call<'a>(
         record_drupal_route_parameter_sites(&member_name, argument_list, ctx);
         record_drupal_hook_invocations(&member_name, argument_list, ctx);
         emit_drupal_requirement_permission_spans(&member_name, argument_list, ctx);
+        record_drupal_config_list_sites(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
         emit_entity_field_spans(object, &member_name, argument_list, ctx);
@@ -617,6 +619,14 @@ fn extract_static_method_call<'a>(
         if ctx.drupal && crate::drupal::is_service_lookup(semantic_subject, &member_name) {
             try_emit_laravel_string_span(
                 crate::symbol_map::StringKeyKind::ServiceId,
+                &static_call.argument_list,
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
+        if ctx.drupal && crate::drupal::is_config_lookup(semantic_subject, &member_name) {
+            try_emit_laravel_string_span(
+                crate::symbol_map::StringKeyKind::DrupalConfigName,
                 &static_call.argument_list,
                 ctx.content,
                 &mut ctx.spans,

@@ -365,6 +365,9 @@ impl Backend {
                 if call.arg_index == 0 && crate::drupal::is_url_class(&class) {
                     return Some(StringKeyKind::DrupalRoute);
                 }
+                if call.arg_index == 0 && crate::drupal::is_config_target_class(&class) {
+                    return Some(StringKeyKind::DrupalConfigName);
+                }
                 is_translatable_message(&class)
             } else {
                 let function = resolve_function_name(ctx, written, offset);
@@ -392,6 +395,9 @@ impl Backend {
                 }
                 if crate::drupal::is_entity_query(&class, &call.method_name) {
                     return Some(StringKeyKind::DrupalEntityType);
+                }
+                if crate::drupal::is_config_lookup(&class, &call.method_name) {
+                    return Some(StringKeyKind::DrupalConfigName);
                 }
             }
             return (crate::drupal::static_route_argument(&class, &call.method_name)

@@ -77,7 +77,7 @@ pub(crate) fn symfony_receiver_method(
     // turned away on a single byte.
     if !matches!(
         member_name.as_bytes().first().map(u8::to_ascii_lowercase),
-        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f' | b'c')
+        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f' | b'c' | b'l')
     ) {
         return None;
     }
@@ -151,6 +151,8 @@ pub(crate) fn symfony_receiver_method(
             Some((ReceiverClass::EntityTypeManager, false))
         }
         0 if is("hasPermission") => Some((ReceiverClass::PermissionCheck, false)),
+        0 if is("getEditable") || is("loadMultiple") => Some((ReceiverClass::ConfigFactory, false)),
+        0 if is("config") => Some((ReceiverClass::ConfigShortcut, false)),
         0 if is("grantPermission") || is("revokePermission") => {
             Some((ReceiverClass::RolePermissions, false))
         }
@@ -176,6 +178,11 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     ctx: &mut ExtractionCtx<'_>,
 ) {
     if !ctx.service_container && !ctx.twig && !ctx.yii {
+        return;
+    }
+    // Only Drupal's config factory has a method starting with `l` the
+    // table names, so elsewhere the one byte still turns those away.
+    if !ctx.drupal && matches!(member_name.as_bytes().first(), Some(b'l' | b'L')) {
         return;
     }
     if ctx.symfony && member_name.eq_ignore_ascii_case("trans") {
