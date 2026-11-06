@@ -2468,28 +2468,28 @@ PHPStan's Symfony extension (<code>Rules/Symfony/Undefined*Rule</code>,
 <code>Rules/Symfony/Invalid*DefaultValueRule</code>,
 <code>Type/Symfony/InputInterface*Extension</code>).</p>
 <hr />
-<h2 id="f70-dql-variables-a-query-builder-declares-on-some-branches">F70. DQL variables a query builder declares on some branches<a class="headerlink" href="#f70-dql-variables-a-query-builder-declares-on-some-branches" title="Permanent link">&para;</a></h2>
+<h2 id="f71-dql-variables-of-a-query-builder-other-code-handles">F71. DQL variables of a query builder other code handles<a class="headerlink" href="#f71-dql-variables-of-a-query-builder-other-code-handles" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$qb = $em-&gt;createQueryBuilder()-&gt;from(User::class, 'u')-&gt;andWhere('t.id = 1');</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">if ($withTeam) {</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    $qb-&gt;join('u.team', 't');</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">}</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">$qb-&gt;getQuery(); // `t` is not declared when `$withTeam` is false</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$qb = $this-&gt;createQb();                  // `e` declared in createQb()</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$qb-&gt;andWhere('t.id = 1')-&gt;getQuery();    // `t` declared nowhere</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">$qb = $em-&gt;createQueryBuilder()-&gt;from(User::class, 'u');</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">$this-&gt;joinTeams($qb);</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">$qb-&gt;andWhere('t.id = 1')-&gt;getQuery();</span>
 </code></pre></div>
-<p>A DQL variable nothing in a query or a function body declares is
-reported. A query builder's variables are read for the whole function
-body at once, so one declared on any branch counts as declared on all of
-them, and PHPStan's Doctrine extension reports the case above where
-PHPantom does not. Nor is anything reported for a builder that comes from
-a parameter, a property, or another method, or is passed to one, since
-its variables may be declared out of sight.</p>
-<p>Both need the builder's calls replayed in order along each path to its
-<code>getQuery()</code>, the way the type engine already replays a single fluent
-chain to type the query it builds (see T64).</p>
-<p>The fixture is <code>query_builder_dql_branches.fixture</code> in
-<code>tests/fixtures/phpstan_doctrine/</code>.</p>
+<p>A DQL variable a query builder uses but never declares, on some path
+through the function body that builds it, is reported. Nothing is
+reported for a builder that comes from a parameter, a property, or
+another method, or that is passed to one, since its variables may be
+declared out of sight. PHPStan's Doctrine extension reads the body of a
+method that returns a builder, so it reports the first case above.</p>
+<p>A builder another method of the project returns can be read from that
+method's body, the way the type engine replays a single fluent chain to
+type the query it builds (see T64). One passed to a method is harder: the
+method may join anything onto it.</p>
 <p><strong>Where to look:</strong> <code>src/symbol_map/extraction/doctrine_dql.rs</code>
-(<code>report_undeclared</code>), <code>src/doctrine/query.rs</code> (<code>QueryBuilderState</code>).</p>
+(<code>report_undeclared</code>, <code>is_closed</code>), <code>src/doctrine/query.rs</code>
+(<code>QueryBuilderState</code>).</p>
 <hr />
 <h2 id="f69-dql-in-expression-objects-and-other-methods-query-builders">F69. DQL in expression objects and other methods' query builders<a class="headerlink" href="#f69-dql-in-expression-objects-and-other-methods-query-builders" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
