@@ -2326,6 +2326,17 @@ class PenIndex
 class NotFoundException extends \RuntimeException {}
 class ValidationException extends \RuntimeException {}
 class AuthorizationException extends \RuntimeException {}
+class StorageException extends \Exception {}
+
+/** @throws StorageException */
+function readStorageFile(string $path): string
+{
+    $contents = is_file($path) ? file_get_contents($path) : false;
+    if ($contents === false) {
+        throw new StorageException("Cannot read {$path}");
+    }
+    return $contents;
+}
 
 // ─── Standalone Functions ───────────────────────────────────────────────────
 

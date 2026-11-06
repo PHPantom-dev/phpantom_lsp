@@ -530,7 +530,7 @@ D31 also needs) and `src/diagnostics/uninitialized_properties.rs`.
 
 ---
 
-## D41. A thrown exception nothing catches or documents is not reported
+## D47. `JSON_THROW_ON_ERROR` does not make `json_decode()` throw `JsonException`
 
 **Impact: Medium · Complexity: Medium**
 
@@ -539,34 +539,48 @@ D31 also needs) and `src/diagnostics/uninitialized_properties.rs`.
 function load(string $path): array
 {
     return json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
-    // JsonException is neither caught nor in a @throws tag
+    // JsonException is neither caught nor in a @throws tag: not reported
 }
 ```
 
-PhpStorm's "Unhandled exception" inspection is one of the checks its users
-rely on most: an exception the body throws, or a callee's `@throws`
-propagates, that no `try` catches and the function's own `@throws` does not
-list. PHPantom already computes exactly that set, since typing `@` in a
-docblock suggests `@throws` for each uncaught exception and "Update
-docblock" adds the missing tags, but nothing reports it. Report it as an
-opt-in diagnostic (it is a documentation contract, not a runtime failure,
-so Hint by the severity philosophy above), with "Update docblock" as its
-quick fix.
+The opt-in `unhandled_exception` diagnostic reports what a callee declares
+with `@throws`. `json_decode()` and `json_encode()` only throw
+`JsonException` when their flags include `JSON_THROW_ON_ERROR`, so the stub
+cannot declare it, and nothing is reported. `@throws` completion and
+"Update docblock" miss it the same way, and so does a `catch (JsonException
+$e)` the reachability check judges.
 
-PhpStorm treats `\RuntimeException` and `\Error` subclasses as unchecked by
-default, and so does PHPStan's `missingCheckedExceptionInThrows`; follow
-that, and make the unchecked list configurable the way both tools do.
-
-On a mid-sized Symfony API it was PhpStorm's most frequent real finding (60
-unhandled exceptions, 22 incomplete `@throws`, mostly `random_bytes()`'s
-`RandomException` and Doctrine's `ORMException`), where PHPantom reported
-nothing. The same set also tells a `catch` whose `try` cannot throw the
-class it catches, which PhpStorm reports as well; PHPStan's
-`catch.neverThrown` fix (H24) would then work without PHPStan.
+What a call throws needs to depend on its arguments, the way PHPStan's
+`DynamicFunctionThrowTypeExtension`s let the flags decide. Read the flags
+argument by position or by name, as a constant or a `|` of constants.
 
 **Where to look:** `src/completion/source/throws_analysis/uncaught.rs`
-(the uncaught set), `src/code_actions/update_docblock/` (the fix), and
-PHPStan's `MissingCheckedExceptionInThrowsCheck`.
+(`function_call`), `src/type_engine/variable/forward_walk/throw_points.rs`,
+and PHPStan's `JsonThrowTypeExtension`.
+
+---
+
+## D48. A `catch` its `try` cannot reach is not reported
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+try {
+    $this->repo->save($user);        // @throws ORMException only
+} catch (JsonException $e) {         // can never run: not reported
+}
+```
+
+PhpStorm reports a `catch` whose class nothing in the `try` body can throw,
+and so does PHPStan (`catch.neverThrown`). The reachability check already
+works out what a `try` body can throw (`ThrowPoints` in
+`src/type_engine/variable/forward_walk/throw_points.rs`), and treats a
+catch no exception can reach as dead code for variable flow, but nothing
+reports the clause itself. With a diagnostic for it, PHPStan's fix (H24)
+would work without PHPStan.
+
+Only a body whose every call declares what it throws can rule a catch
+out, so this stays quiet wherever an undeclared call could throw anything.
 
 ---
 

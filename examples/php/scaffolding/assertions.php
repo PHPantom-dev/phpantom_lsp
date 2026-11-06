@@ -2184,6 +2184,16 @@ function runDemoAssertions(): void
     assert(Scaffolding\Priority::tryFrom(4) === null, 'no Priority case is backed by 4');
     assert(Scaffolding\Status::from('pending') === Scaffolding\Status::Pending, "'pending' backs Status::Pending");
 
+    $unhandled = new UnhandledExceptionDemo();
+    assert($unhandled->caught('/nonexistent/demo.txt') === '', 'caught() handles the StorageException');
+    try {
+        $unhandled->load('/nonexistent/demo.txt');
+        assert(false, 'load() lets the StorageException escape');
+    } catch (Scaffolding\StorageException) {
+    }
+    assert(!is_subclass_of(Scaffolding\StorageException::class, \RuntimeException::class), 'StorageException is a checked exception');
+    assert(is_subclass_of(\InvalidArgumentException::class, \LogicException::class), 'InvalidArgumentException is unchecked');
+
     echo "All assertions passed.\n";
 }
 

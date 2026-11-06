@@ -144,6 +144,7 @@ static COLLECTORS: &[Collector] = &[
     skip_in_template(QUICKFIX, Backend::collect_phpstan_actions),
     skip_in_template(QUICKFIX, Backend::collect_data_provider_actions),
     skip_in_template(QUICKFIX, Backend::collect_parent_call_actions),
+    skip_in_template(QUICKFIX, Backend::collect_unhandled_exception_actions),
     skip_in_template(QUICKFIX, Backend::collect_mago_fix_actions),
     offer(
         &["quickfix", "refactor.rewrite"],
@@ -474,6 +475,7 @@ impl Backend {
 
                 edit
             }
+            "phpantom.addThrows" => self.resolve_add_throws(data, content),
             "phpstan.removeThrows" => self.resolve_remove_throws(data, content),
             "phpstan.addOverride" | "phpstan.addReturnTypeWillChange" => {
                 self.resolve_add_attribute(data, content)

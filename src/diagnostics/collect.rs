@@ -115,6 +115,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_trait_property_conflict_diagnostics_with_context,
     ),
     always(
+        "unhandled_exception",
+        Backend::collect_unhandled_exception_diagnostics,
+    ),
+    always(
         "deprecated_usage",
         Backend::collect_deprecated_diagnostics_with_context,
     ),

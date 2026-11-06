@@ -91,6 +91,11 @@
 //!   unresolved-member-access = true` in `.phpantom.toml`.  Uses
 //!   `Severity::HINT` to surface type-coverage gaps without drowning
 //!   the editor in warnings.
+//! - **Unhandled exception diagnostics** (opt-in) — report a `throw`, or
+//!   a call whose callee declares `@throws`, whose checked exception no
+//!   enclosing `try` catches and the function's own `@throws` does not
+//!   cover.  Off by default; enable via `[diagnostics]
+//!   unhandled-exceptions = true`.
 //! - **Argument count diagnostics** — report calls where the number of
 //!   arguments does not match the function/method signature.
 //! - **Implementation error diagnostics** — report concrete classes that
@@ -294,6 +299,7 @@ mod syntax_errors;
 mod trait_property_conflicts;
 mod type_errors;
 pub(crate) mod undefined_variables;
+pub(crate) mod unhandled_exceptions;
 mod uninitialized_properties;
 mod uninitialized_reads;
 pub(crate) mod unknown_classes;

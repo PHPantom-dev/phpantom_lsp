@@ -232,6 +232,46 @@ class PartialUnionMembersDemo
 }
 
 
+// ── Diagnostic: Unhandled Exceptions (opt-in) ───────────────────────────────
+// An exception a method throws, or a callee's @throws passes on, that no
+// `try` catches and the method's own @throws does not list.  Exceptions
+// extending RuntimeException, LogicException or Error are not reported.
+// Enable it in .phpantom.toml:
+//
+//   [diagnostics]
+//   unhandled-exceptions = true
+
+class UnhandledExceptionDemo
+{
+    public function load(string $path): string
+    {
+        // With the diagnostic enabled, a hint appears on the next line.
+        // Try: the "Add @throws StorageException" quick fix on it.
+        return Scaffolding\readStorageFile($path);
+    }
+
+    /** @throws Scaffolding\StorageException */
+    public function documented(string $path): string
+    {
+        return Scaffolding\readStorageFile($path);     // fine: listed in @throws
+    }
+
+    public function caught(string $path): string
+    {
+        try {
+            return Scaffolding\readStorageFile($path); // fine: caught below
+        } catch (Scaffolding\StorageException) {
+            return '';
+        }
+    }
+
+    public function unchecked(): never
+    {
+        throw new \InvalidArgumentException('no');      // fine: a LogicException
+    }
+}
+
+
 // ── Diagnostic: Argument Count ──────────────────────────────────────────────
 // PHPantom flags calls that pass too few or too many arguments.  Variadic
 // parameters accept unlimited trailing args.  Argument unpacking (`...$args`)
