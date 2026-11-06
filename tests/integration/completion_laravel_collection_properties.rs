@@ -87,6 +87,14 @@ class User extends \Illuminate\Database\Eloquent\Model {
                 "<?php namespace App; class Profile { public int $id; public string $name; }",
             ),
             (
+                "app/HasId.php",
+                "<?php namespace App; /** @property-read int $id */ interface HasId {}",
+            ),
+            (
+                "app/HasName.php",
+                "<?php namespace App; /** @property-read string $name */ interface HasName {}",
+            ),
+            (
                 "app/Box.php",
                 "<?php namespace App; /** @template T */ class Box { /** @var T */ public $item; }",
             ),
@@ -336,6 +344,28 @@ $nested = $users->keyBy('email')->groupBy(['active', 'email'], true);
                 "Collection<int, Users<string, Users<string, User>>>",
             ),
         ],
+    );
+}
+
+#[test]
+fn collection_projection_reads_each_intersection_member_and_handles_missing_properties() {
+    assert_projection(
+        "\\Illuminate\\Support\\Collection<int, \\App\\HasId&\\App\\HasName>",
+        r#"
+$ids = $users->pluck('id');
+$names = $users->pluck('name');
+$unknown = $users->pluck('missing');
+"#,
+        &[
+            ("$ids", "Collection<int, int>"),
+            ("$names", "Collection<int, string>"),
+            ("$unknown", "Collection<int, mixed>"),
+        ],
+    );
+    assert_projection(
+        "\\Illuminate\\Support\\Collection<int, int>",
+        "$unknown = $users->pluck('missing');",
+        &[("$unknown", "Collection<int, mixed>")],
     );
 }
 
