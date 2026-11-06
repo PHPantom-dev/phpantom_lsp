@@ -25,12 +25,12 @@ class QueryBuilderGetQuery
 	public function addAndWhereAndGetQuery(EntityManagerInterface $em): void
 	{
 		$qb = $this->getQueryBuilderMany($em)->andWhere('m.intColumn = 1');
-		assertType('list<QueryResult\Entities\Many>', $qb->getQuery()->getResult()); // SKIP: a query builder held in a variable or returned by a method is not followed
+		assertType('list<QueryResult\Entities\Many>', $qb->getQuery()->getResult());
 	}
 
 	public function getQueryDirectly(EntityManagerInterface $em): void
 	{
-		assertType('list<QueryResult\Entities\Many>', $this->getQueryBuilderMany($em)->getQuery()->getResult()); // SKIP: a query builder held in a variable or returned by a method is not followed
+		assertType('list<QueryResult\Entities\Many>', $this->getQueryBuilderMany($em)->getQuery()->getResult());
 	}
 
 	public function testQueryTypeParametersAreInfered(EntityManagerInterface $em): void
@@ -118,14 +118,17 @@ class QueryBuilderGetQuery
 		}
 		$query = $qb->from(Many::class, 'm')->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, array{intColumn: int}>|Doctrine\ORM\Query<null, array{intColumn: int, stringNullColumn: string|null}>', $query); // SKIP: a query builder held in a variable or returned by a method is not followed
+		assertType('Doctrine\ORM\Query<null, array{intColumn: int}>|Doctrine\ORM\Query<null, array{intColumn: int, stringNullColumn: string|null}>', $query);
 	}
 
 	public function testQueryResultTypeIsMixedWhenDQLIsNotKnown(QueryBuilder $builder): void
 	{
 		$query = $builder->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, mixed>', $query); // SKIP: a query builder held in a variable or returned by a method is not followed
+		// Upstream expects `Query<null, mixed>`. DQL that is not known may
+		// index its rows by anything, so the key is no more known than the
+		// row, the way `createQuery()` with unknown DQL has it.
+		assertType('Doctrine\ORM\Query<mixed, mixed>', $query);
 	}
 
 	public function testQueryResultTypeIsMixedWhenDQLIsInvalid(EntityManagerInterface $em): void
@@ -149,7 +152,9 @@ class QueryBuilderGetQuery
 			->from(get_class($vehicle), 'v')
 			->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, mixed>', $query); // SKIP: a query from an interface reads as `Query<mixed, mixed>`, not `Query<null, mixed>`
+		// Upstream expects `Query<null, mixed>`; an interface is no entity,
+		// so the DQL is not read, as above.
+		assertType('Doctrine\ORM\Query<mixed, mixed>', $query);
 	}
 
 	public function testQueryResultTypeIsVoidWithDeleteOrUpdate(EntityManagerInterface $em): void
@@ -206,7 +211,7 @@ class QueryBuilderGetQuery
 			->getQuery()
 			->getResult();
 
-		assertType('list<array{stringNullColumn: string|null}>', $result); // SKIP: a query builder's `add()` is not replayed
+		assertType('list<array{stringNullColumn: string|null}>', $result);
 
 		$result = $em->createQueryBuilder()
 			->select(['m.intColumn', 'm.stringNullColumn'])

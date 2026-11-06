@@ -512,10 +512,14 @@ fn resolve_call_subject(
             TypeKind::Union(members) => members.iter().any(is_closure_signature),
             _ => is_closure_signature(&h),
         };
+        // A Doctrine query builder carries the DQL it has built, which the
+        // class alone has lost.
+        let carries_dql = h.has_dql_builder();
         if is_intersection
             || classes.iter().any(|c| !c.template_params.is_empty())
             || hint_names_a_class
             || carries_closure_signature
+            || carries_dql
         {
             return ResolvedType::from_classes_with_hint(classes, h);
         }

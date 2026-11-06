@@ -107,6 +107,15 @@ impl PhpType {
                     _ => mapped,
                 }
             }
+            // Resolving the class's name leaves it the same builder;
+            // anything else a map makes of it has lost what it built.
+            TypeKind::DqlBuilder(class, state) => {
+                let mapped = map(class);
+                match mapped.raw_kind() {
+                    TypeKind::Named(_) => PhpType::dql_builder(mapped, (**state).clone()),
+                    _ => mapped,
+                }
+            }
             TypeKind::ListShape(inner) => PhpType::as_list_shape(map(inner)),
             TypeKind::TemplateParam(name, bound) => PhpType::template_param(*name, map(bound)),
             TypeKind::UnsealedShape(unsealed) => PhpType::unsealed_shape(
@@ -463,6 +472,7 @@ impl PhpType {
             | TypeKind::TemplateParam(_, inner)
             | TypeKind::ClassNameLiteral(inner)
             | TypeKind::EnumCase(inner, _)
+            | TypeKind::DqlBuilder(inner, _)
             | TypeKind::Nullable(inner)
             | TypeKind::Array(inner)
             | TypeKind::KeyOf(inner)
@@ -576,7 +586,8 @@ impl PhpType {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
             | TypeKind::ClassNameLiteral(inner)
-            | TypeKind::EnumCase(inner, _) => inner.contains_name_matching(pred),
+            | TypeKind::EnumCase(inner, _)
+            | TypeKind::DqlBuilder(inner, _) => inner.contains_name_matching(pred),
             TypeKind::Named(s) => pred(s),
             // The widened form names every type the parts do.
             TypeKind::UnsealedShape(unsealed) => unsealed.widened.contains_name_matching(pred),
@@ -933,7 +944,8 @@ impl PhpType {
             | TypeKind::ListShape(inner)
             | TypeKind::TemplateParam(_, inner)
             | TypeKind::ClassNameLiteral(inner)
-            | TypeKind::EnumCase(inner, _) => inner.collect_class_names(names),
+            | TypeKind::EnumCase(inner, _)
+            | TypeKind::DqlBuilder(inner, _) => inner.collect_class_names(names),
             TypeKind::UnsealedShape(unsealed) => {
                 unsealed.shape.collect_class_names(names);
                 unsealed.key.collect_class_names(names);

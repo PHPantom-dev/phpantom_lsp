@@ -695,7 +695,7 @@ fn is_objects(result: &PhpType) -> bool {
 // ─── Replaying a query builder ──────────────────────────────────────────────
 
 /// What a query builder's statement does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) enum StatementKind {
     #[default]
     Select,
@@ -705,7 +705,7 @@ pub(crate) enum StatementKind {
 
 /// A range declaration a builder's `from()` adds, with the joins attached
 /// to it.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 struct FromPart {
     entity: String,
     alias: String,
@@ -723,6 +723,11 @@ pub(crate) enum BuilderArg {
     Strings(Vec<String>),
     /// `null`.
     Null,
+    /// `true` or `false`.
+    Bool(bool),
+    /// An object `new` makes of the class `class` with the arguments
+    /// `args`: an expression object `add()` takes.
+    New { class: String, args: Vec<CallArg> },
     /// A value that is not known.
     Unknown,
 }
@@ -733,6 +738,9 @@ impl BuilderArg {
     pub(crate) fn of_type(ty: &PhpType) -> Self {
         if ty.is_null() {
             return BuilderArg::Null;
+        }
+        if ty.is_true() || ty.is_false() {
+            return BuilderArg::Bool(ty.is_true());
         }
         if let TypeKind::ClassString(Some(inner)) = ty.kind()
             && let TypeKind::Named(class) = inner.kind()
@@ -772,7 +780,7 @@ impl BuilderArg {
 
 /// An argument of a builder call as written: its name when it is named,
 /// whether it is spread, and what it holds.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CallArg {
     pub(crate) name: Option<String>,
     pub(crate) spread: bool,
@@ -823,8 +831,8 @@ pub(crate) fn builder_args(method: &str, args: Vec<CallArg>) -> Option<Vec<Optio
 
 /// The parts of the DQL a query builder has built so far that decide its
 /// result.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct QueryBuilderState {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct QueryBuilderState {
     kind: StatementKind,
     select: Vec<String>,
     from: Vec<FromPart>,
@@ -879,6 +887,7 @@ pub(crate) fn builder_parameters(method: &str) -> Option<Option<&'static [&'stat
         ("indexBy", Some(&["alias", "indexBy"])),
         ("delete", Some(&["delete", "alias"])),
         ("update", Some(&["update", "alias"])),
+        ("add", Some(&["dqlPartName", "dqlPart", "append"])),
     ];
     METHODS
         .iter()
@@ -891,6 +900,37 @@ pub(crate) fn is_result_neutral(method: &str) -> bool {
     RESULT_NEUTRAL_METHODS
         .iter()
         .any(|name| name.eq_ignore_ascii_case(method))
+}
+
+/// Whether `method` is a builder method [`QueryBuilderState::apply`]
+/// replays: one that returns the builder it was called on, changed or not.
+pub(crate) fn is_replayed(method: &str) -> bool {
+    is_result_neutral(method) || builder_parameters(method).is_some()
+}
+
+/// The DQL parts `add()` sets that only filter, order, or group the rows.
+const RESULT_NEUTRAL_PARTS: &[&str] = &["distinct", "set", "where", "groupBy", "having", "orderBy"];
+
+/// `Doctrine\ORM\Query\Expr\Select`, which `add('select', …)` takes.
+const EXPR_SELECT: &str = "Doctrine\\ORM\\Query\\Expr\\Select";
+
+/// `Doctrine\ORM\Query\Expr\From`, which `add('from', …)` takes.
+const EXPR_FROM: &str = "Doctrine\\ORM\\Query\\Expr\\From";
+
+/// Whether `arg` is an object `new` makes of `class`, and with which
+/// arguments.
+fn new_of<'a>(arg: &'a BuilderArg, class: &str) -> Option<&'a [CallArg]> {
+    match arg {
+        BuilderArg::New { class: name, args }
+            if name
+                .strip_prefix('\\')
+                .unwrap_or(name)
+                .eq_ignore_ascii_case(class) =>
+        {
+            Some(args)
+        }
+        _ => None,
+    }
 }
 
 impl QueryBuilderState {
@@ -981,6 +1021,71 @@ impl QueryBuilderState {
             } else {
                 StatementKind::Update
             };
+        } else if is("add") {
+            return self.add(&required(0)?, arg(1)?, arg(2));
+        } else {
+            return None;
+        }
+        Some(())
+    }
+
+    /// Apply `add($part, $dqlPart, $append)`: an expression object, or the
+    /// text of a select expression, for the DQL part `part`.
+    fn add(
+        &mut self,
+        part: &str,
+        dql_part: &BuilderArg,
+        append: Option<&BuilderArg>,
+    ) -> Option<()> {
+        if RESULT_NEUTRAL_PARTS
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(part))
+        {
+            return Some(());
+        }
+        let append = match append {
+            None | Some(BuilderArg::Null) => false,
+            Some(BuilderArg::Bool(append)) => *append,
+            Some(_) => return None,
+        };
+        if part == "select" {
+            let selects = match dql_part {
+                BuilderArg::Strings(strings) => strings.clone(),
+                _ => {
+                    let args = bind(new_of(dql_part, EXPR_SELECT)?.to_vec(), &["args"])?;
+                    match args.into_iter().next().flatten() {
+                        None => Vec::new(),
+                        Some(BuilderArg::Strings(strings)) => strings,
+                        Some(_) => return None,
+                    }
+                }
+            };
+            self.kind = StatementKind::Select;
+            if !append {
+                self.select.clear();
+            }
+            self.select.extend(selects);
+        } else if part == "from" {
+            let args = bind(
+                new_of(dql_part, EXPR_FROM)?.to_vec(),
+                &["from", "alias", "indexBy"],
+            )?;
+            let arg = |i: usize| args.get(i).and_then(Option::as_ref);
+            let from = FromPart {
+                entity: arg(0)?.single_string()?,
+                alias: arg(1)?.single_string()?,
+                index_by: BuilderArg::optional_string(arg(2))?,
+                ..FromPart::default()
+            };
+            if !append {
+                // The joins are kept apart from the ranges they hang off,
+                // so replacing the ranges under them is not followed.
+                if self.from.iter().any(|f| !f.joins.is_empty()) {
+                    return None;
+                }
+                self.from.clear();
+            }
+            self.from.push(from);
         } else {
             return None;
         }
@@ -1010,26 +1115,19 @@ impl QueryBuilderState {
     }
 }
 
-/// The state of the builder `createQueryBuilder()` returns on a receiver
-/// whose classes are `owners`, `generic_args` the type arguments the
-/// receiver carries, given the call's arguments: an empty builder from an
-/// entity manager, or one selecting the entity from a repository.
+/// The state of the builder `createQueryBuilder()` returns on `owner`,
+/// `generic_args` the type arguments the receiver carries, given the call's
+/// arguments: an empty builder from an entity manager, or one selecting the
+/// entity from a repository.
 pub(crate) fn root_state(
-    owners: &[Arc<ClassInfo>],
+    owner: &ClassInfo,
     generic_args: &[PhpType],
     args: Vec<CallArg>,
     class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<QueryBuilderState> {
-    if !owners.is_empty()
-        && owners
-            .iter()
-            .all(|owner| crate::class_lookup::is_subtype_of(owner, ENTITY_MANAGER, class_loader))
-    {
+    if crate::class_lookup::is_subtype_of(owner, ENTITY_MANAGER, class_loader) {
         return args.is_empty().then(QueryBuilderState::default);
     }
-    let [owner] = owners else {
-        return None;
-    };
     let entity = super::repository_entity_type(owner, generic_args, class_loader)?;
     let TypeKind::Named(entity) = entity.kind() else {
         return None;
@@ -1248,5 +1346,73 @@ mod tests {
                 .is_none()
         );
         assert!(state.apply("expr", &[]).is_none());
+    }
+
+    #[test]
+    fn builder_add_replay() {
+        let s = |v: &str| Some(BuilderArg::Strings(vec![v.to_string()]));
+        let arg = |v: &str| CallArg {
+            name: None,
+            spread: false,
+            value: BuilderArg::Strings(vec![v.to_string()]),
+        };
+        let mut state = QueryBuilderState::default();
+        state.apply("select", &[s("u.email")]).unwrap();
+        let from = BuilderArg::New {
+            class: format!("\\{EXPR_FROM}"),
+            args: vec![arg("App\\User"), arg("u")],
+        };
+        state
+            .apply(
+                "add",
+                &[s("from"), Some(from), Some(BuilderArg::Bool(true))],
+            )
+            .unwrap();
+        state
+            .apply("add", &[s("where"), Some(BuilderArg::Unknown), None])
+            .unwrap();
+        assert_eq!(
+            builder_query_type(&state, &Model).to_string(),
+            "Doctrine\\ORM\\Query<null, array{email: string}>"
+        );
+        state.apply("add", &[s("select"), s("u"), None]).unwrap();
+        assert_eq!(
+            builder_query_type(&state, &Model).to_string(),
+            "Doctrine\\ORM\\Query<null, App\\User>"
+        );
+        assert!(
+            state
+                .apply("add", &[s("join"), Some(BuilderArg::Unknown), None])
+                .is_none()
+        );
+        assert!(
+            state
+                .apply("add", &[s("select"), s("u"), Some(BuilderArg::Unknown)])
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn builders_of_different_dql_are_different_values() {
+        let class = PhpType::named(atom(QUERY_BUILDER));
+        let s = |v: &str| Some(BuilderArg::Strings(vec![v.to_string()]));
+        let mut first = QueryBuilderState::default();
+        first.apply("select", &[s("u")]).unwrap();
+        let mut second = first.clone();
+        second.apply("from", &[s("App\\User"), s("u")]).unwrap();
+        let a = PhpType::dql_builder(class.clone(), first.clone());
+        let b = PhpType::dql_builder(class.clone(), second);
+
+        assert_eq!(a.to_string(), QUERY_BUILDER);
+        assert_eq!(a, PhpType::dql_builder(class.clone(), first));
+        assert_eq!(
+            PhpType::union(vec![a.clone(), b.clone()])
+                .union_members()
+                .len(),
+            2
+        );
+        assert!(a.is_subset_of(&class));
+        assert!(!class.is_subset_of(&a));
+        assert!(!a.is_subset_of(&b));
     }
 }

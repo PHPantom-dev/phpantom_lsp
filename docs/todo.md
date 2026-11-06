@@ -38,7 +38,6 @@ contributor even though it's short.
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (assets, Inertia) | Medium | Medium |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
-| T64 | [A query builder held in a variable is not typed by its DQL](todo/type-inference.md#t64-a-query-builder-held-in-a-variable-is-not-typed-by-its-dql) | Medium      | Medium      |
 | T66 | [A DQL aggregate or function is typed `mixed`](todo/type-inference.md#t66-a-dql-aggregate-or-function-is-typed-mixed) | Low-Medium  | Medium      |
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
 | F70 | [DQL variables a query builder declares on some branches](todo/lsp-features.md#f70-dql-variables-a-query-builder-declares-on-some-branches) | Low-Medium  | Medium-High |
@@ -81,7 +80,6 @@ ships, remove every row that names it.
 | F34 | [Template names a PHP wrapper builds](todo/lsp-features.md#f34-template-names-a-php-wrapper-builds) | Medium      | Medium-High |
 | F38 | [Twig components](todo/lsp-features.md#f38-twig-components) | Low-Medium  | Medium-High |
 | F56 | [Live components](todo/lsp-features.md#f56-live-components) (depends on F38) | Low-Medium  | Medium-High |
-| T64 | [A query builder held in a variable is not typed by its DQL](todo/type-inference.md#t64-a-query-builder-held-in-a-variable-is-not-typed-by-its-dql) | Medium      | Medium      |
 | T66 | [A DQL aggregate or function is typed `mixed`](todo/type-inference.md#t66-a-dql-aggregate-or-function-is-typed-mixed) | Low-Medium  | Medium      |
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
 | F70 | [DQL variables a query builder declares on some branches](todo/lsp-features.md#f70-dql-variables-a-query-builder-declares-on-some-branches) | Low-Medium  | Medium-High |

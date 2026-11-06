@@ -593,37 +593,6 @@ extension's fixtures declare theirs that way, in
 
 ---
 
-## T64. A query builder held in a variable is not typed by its DQL
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-$qb = $this->createQueryBuilder('u');
-$qb->andWhere('u.active = 1');
-$users = $qb->getQuery()->getResult(); // mixed, not list<User>
-```
-
-A query builder chain written in one expression, from
-`createQueryBuilder()` to `getQuery()`, is replayed into the DQL it builds
-and its query is typed by it. A builder held in a variable, or returned by
-a method (`$this->getQueryBuilder()->getQuery()`), keeps the declared
-`Query`, because a call on the variable changes the builder without
-changing what the variable was assigned. PHPStan's Doctrine extension
-carries the builder's calls in its type: each call statement on the
-variable updates it, a branch gives a union, and a method returning a
-builder is read from its body. A builder's `add()` with an expression
-object (`add('from', new Expr\From(...))`) is not replayed either.
-
-The fixtures are the SKIP lines of `queryBuilderGetQuery.php` and
-`queryBuilderExpressionTypeResolver.php` in
-`tests/phpstan_doctrine/data/QueryResult/`.
-
-**Where to look:** `src/doctrine/query.rs` (`QueryBuilderState`),
-`src/type_engine/variable/rhs_resolution/doctrine_calls.rs`, the forward
-walker, and PHPStan's Doctrine extension (`Type/Doctrine/QueryBuilder/`).
-
----
-
 ## T65. The expression builder's fragments are not literal strings
 
 **Impact: Low · Complexity: Low-Medium**

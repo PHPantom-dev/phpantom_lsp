@@ -105,6 +105,7 @@ use property_access::resolve_rhs_property_access;
 use scope_reads::{narrowed_call, narrowed_subject_from_scope};
 use unary_prefix::stepped_numeric_type;
 
+pub(in crate::type_engine) use doctrine_calls::try_resolve_dql_builder_call;
 pub(crate) use literal_text::{
     infer_array_literal_type, infer_type_from_constant_value,
     infer_type_from_constant_value_resolved,

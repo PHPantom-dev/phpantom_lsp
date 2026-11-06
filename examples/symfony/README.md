@@ -129,7 +129,9 @@ catalogues together, the way a real Symfony project does.
 - In `UserRepository::named()`, hover `$byBuilder` or `$byQuery`: a query
   is typed by what its DQL selects, so both are a `list<User>`. In
   `displayNamesByEmail()`, hover `$rows`, a shape of the selected fields
-  keyed by the `INDEX BY` field.
+  keyed by the `INDEX BY` field. In `search()`, hover `$users`: the
+  builder `byEmail()` returns carries its DQL into a variable and through
+  a branch, so the result is still a `list<User>`.
 
 ## Getting started
 

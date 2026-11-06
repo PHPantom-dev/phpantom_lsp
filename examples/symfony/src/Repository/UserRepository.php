@@ -4,6 +4,7 @@ namespace App\Repository;
 
 use App\Entity\User;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\ORM\QueryBuilder;
 
 /**
  * @extends ServiceEntityRepository<User>
@@ -74,5 +75,27 @@ final class UserRepository extends ServiceEntityRepository
             ->getResult();
 
         return array_map(static fn (array $row): string => $row['displayName'], $rows);
+    }
+
+    /**
+     * @return list<User>
+     */
+    public function search(?string $name): array
+    {
+        // Try: hover $users. The builder byEmail() sets up carries its DQL
+        // into $builder, and through the call the `if` makes on it, so the
+        // result is still a list<User>.
+        $builder = $this->byEmail();
+        if ($name !== null) {
+            $builder->andWhere('u.displayName = :name')->setParameter('name', $name);
+        }
+        $users = $builder->getQuery()->getResult();
+
+        return $users;
+    }
+
+    private function byEmail(): QueryBuilder
+    {
+        return $this->createQueryBuilder('u')->orderBy('u.email', 'ASC');
     }
 }

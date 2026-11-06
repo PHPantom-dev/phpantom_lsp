@@ -1,6 +1,7 @@
 //! A Doctrine query typed by its DQL: `createQuery()` with the query's
-//! text, or `getQuery()` at the end of a query builder chain, gives a
-//! `Query<TKey, TResult>`, and the result methods hydrate `TResult`.
+//! text, or `getQuery()` on a query builder, gives a `Query<TKey, TResult>`,
+//! and the result methods hydrate `TResult`.  A builder carries the DQL its
+//! calls build through a variable, a branch, and a method that returns it.
 
 use crate::common::{
     complete_labels_at_opened, create_psr4_workspace, hover_text_at, open_document, split_cursor,
@@ -51,9 +52,15 @@ class QueryBuilder {
     public function andWhere(mixed ...$where): static {}
     public function setParameter(string|int $key, mixed $value): static {}
     public function delete(?string $delete = null, ?string $alias = null): static {}
+    public function add(string $dqlPartName, string|object|array $dqlPart, bool $append = false): static {}
+    public function resetDQLPart(string $part): static {}
     public function getQuery(): Query {}
 }
 ",
+    ),
+    (
+        "stubs/orm/Query/Expr/From.php",
+        "<?php\nnamespace Doctrine\\ORM\\Query\\Expr;\nclass From {\n    public function __construct(protected string $from, protected string $alias, protected ?string $indexBy = null) {}\n}\n",
     ),
     (
         "stubs/orm/EntityManagerInterface.php",
@@ -114,6 +121,11 @@ namespace App\\Repository;
 use App\\Entity\\User;
 /** @extends \\Doctrine\\ORM\\EntityRepository<User> */
 class UserRepository extends \\Doctrine\\ORM\\EntityRepository {
+    public function named(): \\Doctrine\\ORM\\QueryBuilder {
+        $qb = $this->createQueryBuilder('u')->select('u.name');
+        $qb->andWhere('u.name IS NOT NULL');
+        return $qb;
+    }
     public function active(): void {
         $users = $this->createQueryBuilder('u')->andWhere('u.name IS NOT NULL')->getQuery()->getResult();
         $us§ers;
@@ -287,12 +299,12 @@ async fn a_query_builder_chain_is_typed_by_the_dql_it_builds() {
 }
 
 #[tokio::test]
-async fn a_builder_call_with_unknown_arguments_keeps_the_declared_query() {
+async fn a_builder_call_with_unknown_arguments_gives_a_mixed_query() {
     let hover = hover(
         "        $query = $em->createQueryBuilder()->select('u')->from($dql, 'u')->getQuery();\n        $qu§ery;",
     )
     .await;
-    assert!(shows(&hover, "Query"), "{hover}");
+    assert!(shows(&hover, "Query<mixed, mixed>"), "{hover}");
 }
 
 #[tokio::test]
@@ -350,4 +362,51 @@ async fn a_chained_builder_result_completes_the_entity_members() {
     .await;
     let labels = complete_labels_at_opened(&backend, &uri, position.line, position.character).await;
     assert!(labels.iter().any(|l| l.starts_with("greet")), "{labels:?}");
+}
+
+#[tokio::test]
+async fn a_builder_in_a_variable_takes_the_calls_made_on_it() {
+    let hover = hover(
+        "        $qb = $em->createQueryBuilder();\n        $qb->select('u')->from(User::class, 'u');\n        $qb->andWhere('u.id = 1');\n        $users = $qb->getQuery()->getResult();\n        $us§ers;",
+    )
+    .await;
+    assert!(shows(&hover, "list<User>"), "{hover}");
+}
+
+#[tokio::test]
+async fn a_builder_changed_in_a_branch_gives_a_query_for_each() {
+    let hover = hover(
+        "        $qb = $em->createQueryBuilder();\n        if ($dql) {\n            $qb->select('u.id');\n        } else {\n            $qb->select('u.id', 'u.email');\n        }\n        $query = $qb->from(User::class, 'u')->getQuery();\n        $qu§ery;",
+    )
+    .await;
+    assert!(shows(&hover, "Query<null, array{id: int}>"), "{hover}");
+    assert!(
+        shows(&hover, "Query<null, array{id: int, email: string}>"),
+        "{hover}"
+    );
+}
+
+#[tokio::test]
+async fn a_builder_a_method_returns_carries_its_dql() {
+    let hover =
+        hover("        $rows = $users->named()->getQuery()->getResult();\n        $ro§ws;").await;
+    assert!(shows(&hover, "list<array{name: ?string}>"), "{hover}");
+}
+
+#[tokio::test]
+async fn a_call_that_is_not_replayed_forgets_the_dql() {
+    let hover = hover(
+        "        $qb = $users->createQueryBuilder('u');\n        $qb->resetDQLPart('select');\n        $query = $qb->getQuery();\n        $qu§ery;",
+    )
+    .await;
+    assert!(shows(&hover, "Query<mixed, mixed>"), "{hover}");
+}
+
+#[tokio::test]
+async fn an_expression_object_added_to_a_builder_is_replayed() {
+    let hover = hover(
+        "        $rows = $em->createQueryBuilder()\n            ->select('u.email')\n            ->add('from', new \\Doctrine\\ORM\\Query\\Expr\\From(User::class, 'u'), true)\n            ->getQuery()\n            ->getResult();\n        $ro§ws;",
+    )
+    .await;
+    assert!(shows(&hover, "list<array{email: string}>"), "{hover}");
 }

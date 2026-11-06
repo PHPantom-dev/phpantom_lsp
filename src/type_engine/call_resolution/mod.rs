@@ -94,7 +94,9 @@ pub(crate) use array_callable::array_callable_return_type;
 pub(crate) use callable_target::invoked_value_types;
 pub(crate) use closure_invoke::{closure_invoke_return, is_closure_invoke_call};
 pub(crate) use constant_operands::evaluate_constant_operands;
-pub(crate) use doctrine_query::query_at_call;
+pub(crate) use doctrine_query::{
+    builder_owner_call, builder_returned_by, dql_builder_call, query_at_call,
+};
 pub(crate) use doctrine_repository::repository_at_call;
 pub(crate) use facade_owner::facade_concrete_owner;
 pub(crate) use reflection::{

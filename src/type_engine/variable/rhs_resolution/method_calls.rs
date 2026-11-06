@@ -229,6 +229,18 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
     {
         return result;
     }
+    // A Doctrine query builder that carries the DQL it has built: the next
+    // call on it adds to that DQL, and `getQuery()` is typed by it.
+    if let Some(argument_list) = argument_list
+        && let Some(result) = super::doctrine_calls::try_resolve_dql_builder_call(
+            &method_name,
+            &receiver_resolved,
+            argument_list,
+            ctx,
+        )
+    {
+        return result;
+    }
 
     // Laravel validated input: the rules that guard this request describe the
     // array it hands back, so `$data = $request->validated()` gets a shape
@@ -280,10 +292,11 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             ) {
                 return result;
             }
-            if let Some(result) = super::doctrine_calls::try_resolve_builder_query_type(
+            if let Some(result) = super::doctrine_calls::try_resolve_builder_owner_call(
                 owner,
+                &receiver_resolved,
                 &method_name,
-                object,
+                argument_list,
                 ctx,
             ) {
                 return result;

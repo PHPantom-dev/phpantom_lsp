@@ -1,21 +1,19 @@
 //! Doctrine query calls whose type the DQL decides (see
-//! [`crate::doctrine::query`]): `createQuery()` on an entity manager,
-//! `getQuery()` at the end of a query builder chain, and the result methods
-//! of the query they give.
+//! [`crate::doctrine::query`]), read from the AST: `createQuery()` on an
+//! entity manager, the query builder `createQueryBuilder()` starts and each
+//! call on it, and the result methods of the query a builder gives.
 
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
 use crate::doctrine::query::{
-    self, BuilderArg, CallArg, ENTITY_MANAGER, HYDRATION_MODE_PARAMETER, QUERY_BUILDER,
-    ResolverModel,
+    self, BuilderArg, CallArg, ENTITY_MANAGER, HYDRATION_MODE_PARAMETER, ResolverModel,
 };
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
 
-use super::method_calls::resolve_method_receiver;
 use super::{peel_type_transparent, resolve_rhs_expression};
 
 fn resolved(ty: PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
@@ -100,71 +98,56 @@ fn argument_at<'b>(
     None
 }
 
-/// What `getQuery()` returns at the end of a query builder chain that
-/// starts at `createQueryBuilder()`, written in the one expression: the
-/// query typed by the DQL the chain builds.  `object` is the receiver of
-/// `getQuery()`.
-///
-/// A builder held in a variable is not followed, since a call on the
-/// variable may change the builder without changing what the variable is
-/// assigned.
-pub(super) fn try_resolve_builder_query_type(
-    owner: &ClassInfo,
+/// What the call of `method_name` on `receiver` gives when the receiver is
+/// one or more query builders that carry the DQL they have built (see
+/// [`crate::type_engine::call_resolution::dql_builder_call`]).
+pub(in crate::type_engine) fn try_resolve_dql_builder_call(
     method_name: &str,
-    object: &Expression<'_>,
+    receiver: &[ResolvedType],
+    argument_list: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    if !method_name.eq_ignore_ascii_case("getQuery")
-        || !crate::class_lookup::is_subtype_of(owner, QUERY_BUILDER, ctx.file.class_loader)
-    {
+    if !receiver.iter().any(|rt| rt.type_string.has_dql_builder()) {
         return None;
     }
-    let mut links: Vec<(&str, &ArgumentList<'_>)> = Vec::new();
-    let mut current = object;
-    let (root, root_args) = loop {
-        let (inner, method, argument_list) = match peel_type_transparent(current) {
-            Expression::Call(Call::Method(call)) => {
-                (call.object, &call.method, &call.argument_list)
-            }
-            Expression::Call(Call::NullSafeMethod(call)) => {
-                (call.object, &call.method, &call.argument_list)
-            }
-            _ => return None,
-        };
-        let ClassLikeMemberSelector::Identifier(name) = method else {
-            return None;
-        };
-        let name = bytes_to_str(name.value);
-        if name.eq_ignore_ascii_case("createQueryBuilder") {
-            break (inner, argument_list);
-        }
-        links.push((name, argument_list));
-        current = inner;
-    };
+    let receiver = ResolvedType::types_joined(receiver);
+    let rctx = ctx.as_resolution_ctx();
+    let ty = crate::type_engine::call_resolution::dql_builder_call(
+        method_name,
+        &receiver,
+        || call_args(argument_list, ctx),
+        &rctx,
+    )?;
+    Some(resolved(ty, ctx))
+}
 
-    let (owners, receiver_types) = resolve_method_receiver(root, ctx);
-    let generic_args: &[PhpType] = match receiver_types.as_slice() {
+/// What the call of `method_name` on `owner` gives when it starts a query
+/// builder, or asks a builder whose DQL is not known for its query (see
+/// [`crate::type_engine::call_resolution::builder_owner_call`]).
+/// `receiver` is what the receiver resolved to, whose type arguments name a
+/// repository's entity.
+pub(super) fn try_resolve_builder_owner_call(
+    owner: &ClassInfo,
+    receiver: &[ResolvedType],
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let generic_args: &[PhpType] = match receiver {
         [only] => match only.type_string.kind() {
             TypeKind::Generic(generic) => &generic.args,
             _ => &[],
         },
         _ => &[],
     };
-    let mut state = query::root_state(
-        &owners,
-        generic_args,
-        call_args(root_args, ctx),
-        ctx.file.class_loader,
-    )?;
-    for (method, argument_list) in links.iter().rev() {
-        if query::is_result_neutral(method) {
-            continue;
-        }
-        let args = query::builder_args(method, call_args(argument_list, ctx))?;
-        state.apply(method, &args)?;
-    }
     let rctx = ctx.as_resolution_ctx();
-    let ty = query::builder_query_type(&state, &ResolverModel::new(&rctx));
+    let ty = crate::type_engine::call_resolution::builder_owner_call(
+        owner,
+        generic_args,
+        method_name,
+        || call_args(argument_list, ctx),
+        &rctx,
+    )?;
     Some(resolved(ty, ctx))
 }
 
@@ -188,8 +171,22 @@ fn call_args(argument_list: &ArgumentList<'_>, ctx: &VarResolutionCtx<'_>) -> Ve
 }
 
 /// What a builder method's argument holds: the strings of a string, a
-/// class string, or an array of strings.
+/// class string, or an array of strings, or the expression object a `new`
+/// makes.
 fn builder_arg(value: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> BuilderArg {
+    if let Expression::Instantiation(instantiation) = peel_type_transparent(value) {
+        let class = expression_type(value, ctx);
+        return match (
+            class.as_ref().map(PhpType::kind),
+            &instantiation.argument_list,
+        ) {
+            (Some(TypeKind::Named(class)), Some(argument_list)) => BuilderArg::New {
+                class: class.to_string(),
+                args: call_args(argument_list, ctx),
+            },
+            _ => BuilderArg::Unknown,
+        };
+    }
     let elements = match peel_type_transparent(value) {
         Expression::Array(array) => Some(&array.elements),
         Expression::LegacyArray(array) => Some(&array.elements),

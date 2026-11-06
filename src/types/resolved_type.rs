@@ -195,6 +195,9 @@ impl ResolvedType {
                                 (Some(new), Some(old)) => *new == old,
                                 _ => true,
                             }
+                            && (existing.type_string == rt.type_string
+                                || existing.type_string.as_dql_builder().is_none()
+                                || rt.type_string.as_dql_builder().is_none())
                     }
                     (None, None) => existing.type_string == rt.type_string,
                     _ => false,
@@ -205,6 +208,13 @@ impl ResolvedType {
             Some(existing) => {
                 existing.factory_count = existing.factory_count.join(rt.factory_count);
                 if rt_case.is_none() && enum_case_value(&existing.type_string).is_some() {
+                    existing.type_string = rt.type_string.clone();
+                }
+                // A builder whose DQL is not known may be one that built
+                // anything, so it speaks for one that built known DQL.
+                if rt.type_string.as_dql_builder().is_none()
+                    && existing.type_string.as_dql_builder().is_some()
+                {
                     existing.type_string = rt.type_string.clone();
                 }
                 // `Foo` and `?Foo` share a class, but the merged entry has

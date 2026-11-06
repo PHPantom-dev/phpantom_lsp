@@ -130,7 +130,6 @@ impl Backend {
 
         // Doctrine: a query typed by its DQL, and its results.
         if let Some(ty) = crate::type_engine::call_resolution::query_at_call(
-            base,
             method_name,
             text_args,
             &lhs_resolved,

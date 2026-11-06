@@ -384,6 +384,10 @@ $users = $entityManager->createQuery('SELECT u FROM App\Entity\User u WHERE u.di
     ->setParameter('name', 'Ada')
     ->getResult();
 check('named() gets a list of User', array_is_list($users) && $users[0] instanceof User);
+$builder = $entityManager->createQueryBuilder()->select('u')->from(User::class, 'u')->orderBy('u.email', 'ASC');
+$builder->andWhere('u.displayName = :name')->setParameter('name', 'Ada');
+$users = $builder->getQuery()->getResult();
+check('search() gets a list of User from the builder byEmail() sets up and the branch changes', array_is_list($users) && $users[0] instanceof User);
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 
