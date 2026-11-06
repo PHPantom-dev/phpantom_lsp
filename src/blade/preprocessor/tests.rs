@@ -638,7 +638,7 @@ fn test_preprocess_vite_and_fonts_optional_argument() {
 
     let (php, _) = preprocess("@vite(['resources/js/app.js'])\n<p>after</p>");
     assert!(
-        php.contains("blade_directive (['resources/js/app.js']);"),
+        php.contains("blade_vite_directive (['resources/js/app.js']);"),
         "@vite(...) should type-check its argument: {}",
         php
     );

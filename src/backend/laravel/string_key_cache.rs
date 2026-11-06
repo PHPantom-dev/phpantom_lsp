@@ -62,6 +62,9 @@ pub(crate) struct LaravelStringKeyCache {
     /// The listeners Laravel's event discovery registers, for the code
     /// lenses that link an event and its listeners.
     pub discovered_listeners: Option<Arc<[super::related::DiscoveredListener]>>,
+    /// Where Inertia looks for the pages a render names, read from
+    /// `config/inertia.php`.
+    pub inertia_pages: Option<Arc<crate::virtual_members::laravel::InertiaPages>>,
 }
 
 /// Compute-once guards for the entries of [`LaravelStringKeyCache`].
@@ -92,6 +95,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub shared_view_vars: parking_lot::Mutex<()>,
     pub gate_abilities: parking_lot::Mutex<()>,
     pub discovered_listeners: parking_lot::Mutex<()>,
+    pub inertia_pages: parking_lot::Mutex<()>,
 }
 
 impl LaravelStringKeyCache {
@@ -144,6 +148,9 @@ impl LaravelStringKeyCache {
         if uri.contains("/config/") {
             self.config_keys = None;
             self.config_trees = None;
+        }
+        if uri.ends_with("/config/inertia.php") {
+            self.inertia_pages = None;
         }
         // View roots are configurable via `config/view.php`, so a Blade
         // file may live outside `resources/views/`. Invalidate on any

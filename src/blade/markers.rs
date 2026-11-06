@@ -35,6 +35,10 @@ pub(crate) const EACH: &str = "blade_each_directive";
 /// extraction as the PHP forms.
 pub(crate) const CAN: &str = "blade_can_directive";
 
+/// `@vite`, so the entry points it names reach the same extraction as
+/// `Vite::asset()`.
+pub(crate) const VITE: &str = "blade_vite_directive";
+
 /// A section-naming directive.
 ///
 /// A marker of its own rather than the generic [`DIRECTIVE`]: symbol
@@ -67,6 +71,7 @@ const MARKER_FUNCTIONS: &[(&str, Option<&str>)] = &[
     (COMPONENT, None),
     (EACH, None),
     (CAN, Some("bool")),
+    (VITE, None),
     (SECTION, Some("bool")),
     (STACK, Some("bool")),
     (PUSH_IF, None),

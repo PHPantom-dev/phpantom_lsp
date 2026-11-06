@@ -238,6 +238,7 @@ mod indexing_phar;
 mod indexing_workspace_folders;
 mod inlay_hints;
 mod laravel_app_facade_container;
+mod laravel_assets;
 mod laravel_binding_precedence;
 mod laravel_commands;
 mod laravel_config_keys;

@@ -196,6 +196,22 @@ impl Backend {
                 };
                 ("View", detail)
             }
+            StringKeyKind::Asset
+            | StringKeyKind::MixAsset
+            | StringKeyKind::ViteAsset
+            | StringKeyKind::InertiaPage => {
+                let (label, missing) = match kind {
+                    StringKeyKind::Asset => ("Asset", "Not found under `public/`"),
+                    StringKeyKind::MixAsset => ("Mix asset", "Not in `public/mix-manifest.json`"),
+                    StringKeyKind::ViteAsset => ("Vite asset", "Not found in the project"),
+                    _ => ("Inertia page", "Not found in the page directories"),
+                };
+                let detail = self
+                    .asset_file(*kind, key)
+                    .and_then(|file| self.workspace_relative_path(&crate::util::path_to_uri(&file)))
+                    .map_or_else(|| missing.to_string(), |path| format!("`{path}`"));
+                (label, detail)
+            }
             StringKeyKind::TwigTemplate => {
                 let detail = self
                     .symfony_declaration_locations(*kind, key)

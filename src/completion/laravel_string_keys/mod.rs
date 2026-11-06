@@ -8,6 +8,9 @@
 //! - `view('|')` / `View::make('|')` → view names
 //! - `__('|')` / `trans('|')` / `Lang::get('|')` → translation keys
 //! - `env('|')` / `Env::get('|')` → environment variables
+//! - `asset('|')` / `@vite('|')` → files, a directory at a time
+//! - `mix('|')` → Mix manifest entries
+//! - `Inertia::render('|')` / `inertia('|')` → Inertia pages
 
 use std::sync::Arc;
 
@@ -31,9 +34,13 @@ pub(crate) use context::{ArgumentSlot, attribute_class_start, scalar_argument_at
 pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
         StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::Property,
-        StringKeyKind::View | StringKeyKind::TwigTemplate | StringKeyKind::YiiView => {
-            CompletionItemKind::File
-        }
+        StringKeyKind::View
+        | StringKeyKind::TwigTemplate
+        | StringKeyKind::YiiView
+        | StringKeyKind::Asset
+        | StringKeyKind::MixAsset
+        | StringKeyKind::ViteAsset
+        | StringKeyKind::InertiaPage => CompletionItemKind::File,
         StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
         StringKeyKind::DrupalPermission => CompletionItemKind::Constant,
         StringKeyKind::DrupalConfigName => CompletionItemKind::File,
@@ -120,7 +127,8 @@ impl Backend {
 
     /// Every name a string key of `kind` could be, unfiltered.
     ///
-    /// Four kinds have no list to offer. A Blade section or stack name is
+    /// A public or Vite asset path is completed a directory at a time
+    /// instead, and four more kinds have no list to offer. A Blade section or stack name is
     /// completed from the raw template instead
     /// (`crate::completion::handler::blade_block_name`): what a name may be
     /// depends on the layouts above the file, and the edit has to land in
@@ -188,6 +196,8 @@ impl Backend {
             StringKeyKind::GateAbility => self.cached_gate_abilities(),
             StringKeyKind::Middleware => self.laravel.middleware.read().all_names().into(),
             StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
+            StringKeyKind::MixAsset => self.mix_manifest_keys(typed_prefix).into(),
+            StringKeyKind::InertiaPage => self.inertia_pages().page_names().into(),
             StringKeyKind::ServiceId
             | StringKeyKind::ContainerParameter
             | StringKeyKind::SymfonyRoute
@@ -231,6 +241,9 @@ impl Backend {
             | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
             | StringKeyKind::YiiView => Arc::new([]),
+            // A path is completed a directory at a time from the files on
+            // disk (see `try_laravel_string_key_completion_inner`).
+            StringKeyKind::Asset | StringKeyKind::ViteAsset => Arc::new([]),
         }
     }
 
@@ -287,6 +300,18 @@ impl Backend {
             indexed_function_exists,
             indexed_class_exists,
         )?;
+
+        // `public/` and the project root hold far too much to list whole, so
+        // a path is offered one directory at a time, like a path helper's.
+        if let Some(base) = self.asset_completion_base(ctx.kind) {
+            return crate::completion::laravel_paths::directory_entry_completion(
+                &base,
+                ctx.prefix,
+                ctx.content_start_offset,
+                content,
+                position,
+            );
+        }
 
         // The candidate lists are shared with every other consumer, so only
         // the names the typed prefix keeps are copied out of them.

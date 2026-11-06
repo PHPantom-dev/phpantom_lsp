@@ -66,6 +66,21 @@ pub(crate) enum StringKeyKind {
     /// `Env::get('APP_NAME')` reads, resolving to the line that declares it
     /// in the project's `.env`.
     Env,
+    /// A public asset: the path under `public/` that `asset('css/app.css')`,
+    /// `secure_asset()`, `URL::asset()`, and `url()->asset()` link to.
+    Asset,
+    /// A Laravel Mix asset: the key of `public/mix-manifest.json` that
+    /// `mix('js/app.js')` looks up.
+    MixAsset,
+    /// A Vite entry point or asset: the source file, relative to the project
+    /// root, that `@vite('resources/js/app.js')`, `Vite::asset()`, and
+    /// `Vite::content()` name.
+    ViteAsset,
+    /// An Inertia page: the component under the page directories
+    /// `config/inertia.php` configures (`resources/js/Pages` by default)
+    /// that `Inertia::render('Users/Index')`, `inertia()`, and
+    /// `Route::inertia()` render, named without its extension.
+    InertiaPage,
     /// A Symfony service ID: the key a service is declared under in
     /// `services.yaml`, `services.xml`, or a PHP configurator's `->set()`,
     /// and the string `$container->get()`, `service()`, or
@@ -252,7 +267,11 @@ impl StringKeyKind {
             | Self::GateAbility
             | Self::ContainerBinding
             | Self::Middleware
-            | Self::Env => KeyFramework::Laravel,
+            | Self::Env
+            | Self::Asset
+            | Self::MixAsset
+            | Self::ViteAsset
+            | Self::InertiaPage => KeyFramework::Laravel,
             Self::ServiceId | Self::ContainerParameter => KeyFramework::ServiceContainer,
             Self::SymfonyRoute
             | Self::SymfonyTranslation
@@ -427,11 +446,12 @@ impl StringKeyDependency {
             .iter()
             .any(|alias| name.eq_ignore_ascii_case(alias))
             || match name.len() {
-                3 => name.eq_ignore_ascii_case("App"),
+                3 => name.eq_ignore_ascii_case("App") || name.eq_ignore_ascii_case("URL"),
                 4 => {
                     name.eq_ignore_ascii_case("Gate")
                         || name.eq_ignore_ascii_case("Lang")
                         || name.eq_ignore_ascii_case("View")
+                        || name.eq_ignore_ascii_case("Vite")
                 }
                 5 => name.eq_ignore_ascii_case("Route"),
                 6 => name.eq_ignore_ascii_case("Config"),

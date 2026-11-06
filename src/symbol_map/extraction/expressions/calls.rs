@@ -410,6 +410,20 @@ fn extract_function_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                // `@vite(['resources/css/app.css', 'resources/js/app.js'])`
+                // names every entry point it loads.
+                Some(kind @ crate::symbol_map::StringKeyKind::ViteAsset) => {
+                    try_emit_laravel_string_spans_listed(
+                        kind,
+                        &func_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // A second argument points `mix()` at the manifest of
+                // another build directory, which is not the one read.
+                Some(crate::symbol_map::StringKeyKind::MixAsset)
+                    if func_call.argument_list.arguments.len() > 1 => {}
                 Some(kind) => {
                     try_emit_laravel_string_span(
                         kind,

@@ -5,8 +5,8 @@
 //! against what the project actually registers (routes, config keys,
 //! views, translation keys, console commands, morph aliases, middleware, gate
 //! abilities, Symfony service IDs, container parameters, routes, translation
-//! keys and Twig templates, Yii views, routes, and the route arguments a handler reads),
-//! and report the ones nothing declares.
+//! keys and Twig templates, Yii views, routes, and the route arguments a handler reads,
+//! asset paths, and Inertia pages), and report the ones nothing declares.
 
 use std::sync::Arc;
 
@@ -50,6 +50,10 @@ enum CheckedStringKind {
     DrupalRoute,
     DrupalRenderElement,
     DrupalLibrary,
+    Asset,
+    MixAsset,
+    ViteAsset,
+    InertiaPage,
 }
 
 impl CheckedStringKind {
@@ -82,6 +86,10 @@ impl CheckedStringKind {
             StringKeyKind::DrupalRoute => Self::DrupalRoute,
             StringKeyKind::DrupalRenderElement => Self::DrupalRenderElement,
             StringKeyKind::DrupalLibrary => Self::DrupalLibrary,
+            StringKeyKind::Asset => Self::Asset,
+            StringKeyKind::MixAsset => Self::MixAsset,
+            StringKeyKind::ViteAsset => Self::ViteAsset,
+            StringKeyKind::InertiaPage => Self::InertiaPage,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -133,6 +141,11 @@ impl CheckedStringKind {
 
 /// A key the pass judges: its kind, the key, and its byte range.
 type CheckedKeySpan<'a> = (CheckedStringKind, &'a str, u32, u32);
+
+/// Whether any of `spans` is a key of `kind`.
+fn names_checked(spans: &[CheckedKeySpan], kind: CheckedStringKind) -> bool {
+    spans.iter().any(|span| span.0 == kind)
+}
 
 /// What a key check concluded: `None` when the key cannot be judged, else
 /// whether the project declares it, with the label and diagnostic code an
@@ -204,6 +217,9 @@ struct DeclaredKeys<'a> {
     drupal_libraries: Vec<String>,
     /// The extensions that build libraries in code, sorted.
     drupal_library_builders: Vec<String>,
+    /// What the filesystem holds for the asset paths and Inertia pages the
+    /// file names.
+    assets: crate::virtual_members::laravel::AssetWorld,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -242,6 +258,9 @@ impl<'a> DeclaredKeys<'a> {
         let has_drupal_render_element =
             names(|kind| kind == CheckedStringKind::DrupalRenderElement);
         let has_drupal_library = names(|kind| kind == CheckedStringKind::DrupalLibrary);
+        let assets = backend.asset_world(|kind| {
+            CheckedStringKind::of(&kind).is_some_and(|checked| names_checked(spans, checked))
+        });
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -465,6 +484,7 @@ impl<'a> DeclaredKeys<'a> {
             drupal_render_elements,
             drupal_libraries,
             drupal_library_builders,
+            assets,
         }
     }
 
@@ -555,6 +575,22 @@ impl<'a> DeclaredKeys<'a> {
                 key,
             )
             .map(|valid| (valid, "library", "invalid_drupal_library")),
+            CheckedStringKind::Asset => self
+                .assets
+                .judge(crate::symbol_map::StringKeyKind::Asset, key)
+                .map(|valid| (valid, "asset", "invalid_laravel_asset")),
+            CheckedStringKind::MixAsset => self
+                .assets
+                .judge(crate::symbol_map::StringKeyKind::MixAsset, key)
+                .map(|valid| (valid, "Mix asset", "invalid_laravel_mix_asset")),
+            CheckedStringKind::ViteAsset => self
+                .assets
+                .judge(crate::symbol_map::StringKeyKind::ViteAsset, key)
+                .map(|valid| (valid, "Vite asset", "invalid_laravel_vite_asset")),
+            CheckedStringKind::InertiaPage => self
+                .assets
+                .judge(crate::symbol_map::StringKeyKind::InertiaPage, key)
+                .map(|valid| (valid, "Inertia page", "invalid_inertia_page")),
         }
     }
 

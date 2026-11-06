@@ -104,6 +104,7 @@
 mod accessors;
 mod aliases;
 pub(crate) mod array_file;
+mod assets;
 mod auth;
 mod builder;
 mod builder_injection;
@@ -164,6 +165,7 @@ mod view_names;
 pub(crate) mod where_property;
 
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
+pub(crate) use assets::{AssetWorld, InertiaPages, resolve_asset_definitions};
 pub(crate) use auth::{
     AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type,
 };

@@ -68,6 +68,10 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::Middleware => resolve_middleware_definitions(backend, key),
         StringKeyKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
         StringKeyKind::Env => super::env_vars::resolve_env_definitions(backend, key),
+        StringKeyKind::Asset
+        | StringKeyKind::MixAsset
+        | StringKeyKind::ViteAsset
+        | StringKeyKind::InertiaPage => super::resolve_asset_definitions(backend, *kind, key),
         StringKeyKind::ServiceId
         | StringKeyKind::ContainerParameter
         | StringKeyKind::SymfonyRoute
@@ -312,7 +316,11 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::GateAbility
         | StringKeyKind::Middleware
         | StringKeyKind::ContainerBinding
-        | StringKeyKind::Env => find_string_key_usages(kind, key, backend, snapshot, true),
+        | StringKeyKind::Env
+        | StringKeyKind::Asset
+        | StringKeyKind::MixAsset
+        | StringKeyKind::ViteAsset
+        | StringKeyKind::InertiaPage => find_string_key_usages(kind, key, backend, snapshot, true),
         // A Symfony declaration is a span in a configuration file's (or a
         // template's) map like any use, so the usages already hold it.
         StringKeyKind::ServiceId
