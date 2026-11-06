@@ -202,7 +202,7 @@ impl Backend {
         let new_import_alias = if needs_new_import
             && has_import_collision(&file.use_map, mv.old_fqn, mv.new_short_name)
         {
-            Some(pick_collision_alias(mv.new_short_name, &file.use_map))
+            Some(pick_collision_alias(mv.new_fqn, &file.use_map))
         } else {
             None
         };
@@ -210,17 +210,12 @@ impl Backend {
         let rewrite = file.reference_rewrite(
             mv.old_fqn,
             mv.old_short_name,
-            mv.new_short_name,
+            mv.new_fqn,
             new_import_alias.as_deref(),
         );
 
-        let use_statement_edit = file.use_statement_edit(
-            mv.old_fqn,
-            mv.new_fqn,
-            mv.new_short_name,
-            &rewrite,
-            file_namespace.as_deref(),
-        );
+        let use_statement_edit =
+            file.use_statement_edit(mv.old_fqn, mv.new_fqn, &rewrite, file_namespace.as_deref());
 
         // A qualified reference is rewritten in full, keeping its
         // leading backslash when it has one.

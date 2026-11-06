@@ -7,8 +7,10 @@ use std::collections::HashMap;
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
-use crate::completion::builder::{build_use_edit, use_import_conflicts};
 use crate::completion::use_edit;
+use crate::completion::use_edit::{
+    build_aliased_use_edit, import_alias, import_name_taken, use_import_conflicts,
+};
 use crate::types::*;
 
 use super::ranking::class_sort_text;
@@ -156,6 +158,9 @@ pub(in crate::completion) struct ClassItemTexts {
     pub(in crate::completion) base_name: String,
     pub(in crate::completion) filter: String,
     pub(in crate::completion) use_import: Option<String>,
+    /// The alias `use_import` is imported under, when its short name is
+    /// already bound to another class in the file.
+    pub(in crate::completion) use_alias: Option<String>,
 }
 
 impl ClassItemCtx<'_> {
@@ -181,19 +186,25 @@ impl ClassItemCtx<'_> {
         if tier <= '1' {
             use_import = None;
         }
-        self.apply_import_fixups(&mut base_name, &mut use_import, was_shortened);
+        let use_alias = self.apply_import_fixups(&mut base_name, &mut use_import, was_shortened);
         ClassItemTexts {
             base_name,
             filter,
             use_import,
+            use_alias,
         }
     }
 
     /// Fix up `base_name` and `use_import` after `class_edit_texts`
-    /// to handle import conflicts and FQN alias collisions.
+    /// to handle import conflicts and FQN alias collisions, returning the
+    /// alias `use_import` must be imported under, if any.
     ///
-    /// - If the short name conflicts with an existing import, falls back
-    ///   to a fully-qualified reference (prepends `\`).
+    /// - If the short name of a namespaced class is already imported for
+    ///   another class, the class is imported under an alias
+    ///   ([`import_alias`]) and the alias is inserted.
+    /// - Any other conflict (a global class, or a leading namespace
+    ///   segment that matches an import) falls back to a fully-qualified
+    ///   reference (prepends `\`).
     /// - In FQN mode, if the first namespace segment matches an existing
     ///   alias (and the name wasn't intentionally shortened through that
     ///   alias), prepends `\` so PHP resolves from the global namespace.
@@ -202,12 +213,23 @@ impl ClassItemCtx<'_> {
         base_name: &mut String,
         use_import: &mut Option<String>,
         was_shortened: bool,
-    ) {
+    ) -> Option<String> {
+        let mut use_alias = None;
         if let Some(ref import_fqn) = *use_import
             && use_import_conflicts(import_fqn, self.file_use_map)
         {
-            *base_name = format!("\\{}", import_fqn);
-            *use_import = None;
+            if import_fqn.contains('\\')
+                && import_name_taken(crate::util::short_name(import_fqn), self.file_use_map)
+            {
+                let alias = import_alias(import_fqn, |candidate| {
+                    import_name_taken(candidate, self.file_use_map)
+                });
+                base_name.clone_from(&alias);
+                use_alias = Some(alias);
+            } else {
+                *base_name = format!("\\{}", import_fqn);
+                *use_import = None;
+            }
         }
         if self.is_fqn_prefix
             && !was_shortened
@@ -220,6 +242,7 @@ impl ClassItemCtx<'_> {
         {
             *base_name = format!("\\{}", base_name);
         }
+        use_alias
     }
 
     /// Build a `CompletionItem` for a class name completion.
@@ -348,7 +371,12 @@ impl ClassItemCtx<'_> {
                 })
             }),
             additional_text_edits: texts.use_import.as_ref().and_then(|import_fqn| {
-                build_use_edit(import_fqn, &self.use_block, self.file_namespace)
+                build_aliased_use_edit(
+                    import_fqn,
+                    texts.use_alias.as_deref(),
+                    &self.use_block,
+                    self.file_namespace,
+                )
             }),
             data,
             ..CompletionItem::default()

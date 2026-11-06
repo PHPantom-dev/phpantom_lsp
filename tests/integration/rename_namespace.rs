@@ -1263,12 +1263,12 @@ async fn rename_class_move_aliases_added_import_on_short_name_collision() {
         result_usage
     );
     assert!(
-        result_usage.contains("use App\\Helpers\\Widget as WidgetAlias;"),
+        result_usage.contains("use App\\Helpers\\Widget as HelpersWidget;"),
         "The moved class must be imported under an alias; got:\n{}",
         result_usage
     );
     assert!(
-        result_usage.contains("new WidgetAlias()"),
+        result_usage.contains("new HelpersWidget()"),
         "The moved class's references must use the alias; got:\n{}",
         result_usage
     );

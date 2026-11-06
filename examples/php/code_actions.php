@@ -105,6 +105,27 @@ class SortUseStatementsDemo
 }
 
 
+// ── Code Action: Alias Or Unalias An Import ─────────────────────────────────
+// Place cursor on `use SplQueue as Line;` below and press Ctrl+. → "Remove
+// alias `Line`" turns it into `use SplQueue;` and every `Line` in this file
+// into `SplQueue`. On an import without an alias, such as `use Closure;` at
+// the top, the action is "Alias `Closure` as `GlobalClosure`" instead.
+// Completing a class whose short name another import already holds imports
+// it under an alias the same way, e.g. `EloquentCollection`.
+
+use SplQueue as Line;
+
+class ImportAliasDemo
+{
+    public function demo(): Line
+    {
+        $line = new Line();
+        $line->enqueue('first');
+        return $line;
+    }
+}
+
+
 // ── PHPDoc Block Generation ─────────────────────────────────────────────────
 // Typing `/**` above a declaration generates a docblock skeleton.  Tags are
 // only emitted when the native type hint needs enrichment: missing types get

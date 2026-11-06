@@ -263,14 +263,14 @@ async fn rename_class_with_collision_adds_alias() {
 
     // The renamed import should get an alias to avoid collision.
     assert!(
-        result.contains("use Ns\\A\\NewName as NewNameAlias;"),
+        result.contains("use Ns\\A\\NewName as ANewName;"),
         "Renamed import should get an alias; got:\n{}",
         result
     );
 
     // In-code references to the renamed class should use the alias.
     assert!(
-        result.contains("NewNameAlias $a"),
+        result.contains("ANewName $a"),
         "In-code references should use the alias; got:\n{}",
         result
     );
@@ -1100,9 +1100,9 @@ async fn rename_class_rewrites_each_namespace_blocks_own_import() {
             "    function first(NewName $a): void {}\n",
             "}\n",
             "namespace Second {\n",
-            "    use Ns\\A\\NewName as NewNameAlias;\n",
+            "    use Ns\\A\\NewName as ANewName;\n",
             "    use Ns\\B\\NewName;\n",
-            "    function second(NewNameAlias $a, NewName $b): void {}\n",
+            "    function second(ANewName $a, NewName $b): void {}\n",
             "}\n",
         )
     );

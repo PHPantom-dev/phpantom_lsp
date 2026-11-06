@@ -47,6 +47,7 @@ mod code_action_generate_constructor;
 mod code_action_generate_getter_setter;
 mod code_action_generate_property_hooks;
 mod code_action_implement_methods;
+mod code_action_import_alias;
 mod code_action_import_class;
 mod code_action_inline_variable;
 mod code_action_insert_translation_key;

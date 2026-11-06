@@ -3384,12 +3384,20 @@ async fn test_undiscovered_use_import_still_shown() {
 
 // ─── Use-import conflict resolution ────────────────────────────────────────
 
+/// The use statement a completion item adds, if any.
+fn added_import(item: &CompletionItem) -> Option<&str> {
+    item.additional_text_edits
+        .as_ref()
+        .and_then(|edits| edits.first())
+        .map(|edit| edit.new_text.trim())
+}
+
 /// When the file already has `use Cassandra\Exception;` and a class_index
 /// class `App\Exception` is suggested, the LSP must NOT insert a second
-/// `use ... Exception;`.  Instead it should insert `\App\Exception` at
-/// the usage site.
+/// `use ... Exception;`.  Instead it imports the class under an alias
+/// built from its namespace and inserts the alias.
 #[tokio::test]
-async fn test_conflicting_use_import_class_index_falls_back_to_fqn() {
+async fn test_conflicting_use_import_class_index_imports_under_alias() {
     let backend = create_test_backend_with_stubs();
 
     {
@@ -3415,25 +3423,51 @@ async fn test_conflicting_use_import_class_index_falls_back_to_fqn() {
         .find(|i| i.detail.as_deref() == Some("App\\Exception"))
         .expect("Should have App\\Exception completion");
 
-    // Must NOT have additional_text_edits (no `use` statement).
-    assert!(
-        app_exc.additional_text_edits.is_none(),
-        "Conflicting import should not produce a use statement, got: {:?}",
-        app_exc.additional_text_edits
+    assert_eq!(
+        added_import(app_exc),
+        Some("use App\\Exception as AppException;")
     );
-
-    // Insert text should be the FQN with leading backslash.
     let insert = app_exc.insert_text.as_deref().unwrap_or("");
     assert!(
-        insert.starts_with("\\App\\Exception"),
-        "Should insert FQN with leading backslash, got: {:?}",
+        insert.starts_with("AppException"),
+        "Should insert the alias, got: {:?}",
         insert
+    );
+}
+
+/// The alias skips names the file already binds.
+#[tokio::test]
+async fn test_conflicting_use_import_alias_skips_taken_names() {
+    let backend = create_test_backend_with_stubs();
+    backend.fqn_uri_index().write().insert(
+        "Illuminate\\Database\\Eloquent\\Collection".to_string(),
+        "file:///vendor/Collection.php".to_string(),
+    );
+
+    let uri = Uri::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Controllers;\n",
+        "use Illuminate\\Support\\Collection;\n",
+        "use App\\Other\\Thing as EloquentCollection;\n",
+        "\n",
+        "new Collec\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 5, 10).await;
+    let item = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("Illuminate\\Database\\Eloquent\\Collection"))
+        .expect("Should have the Eloquent collection");
+    assert_eq!(
+        added_import(item),
+        Some("use Illuminate\\Database\\Eloquent\\Collection as EloquentCollection2;")
     );
 }
 
 /// Same conflict scenario but with the class coming from the classmap.
 #[tokio::test]
-async fn test_conflicting_use_import_classmap_falls_back_to_fqn() {
+async fn test_conflicting_use_import_classmap_imports_under_alias() {
     let dir = tempfile::tempdir().expect("failed to create temp dir");
     fs::write(
         dir.path().join("composer.json"),
@@ -3479,16 +3513,14 @@ async fn test_conflicting_use_import_classmap_falls_back_to_fqn() {
         .find(|i| i.detail.as_deref() == Some("App\\Exception"))
         .expect("Should have App\\Exception completion from classmap");
 
-    assert!(
-        app_exc.additional_text_edits.is_none(),
-        "Conflicting classmap import should not produce a use statement, got: {:?}",
-        app_exc.additional_text_edits
+    assert_eq!(
+        added_import(app_exc),
+        Some("use App\\Exception as AppException;")
     );
-
     let insert = app_exc.insert_text.as_deref().unwrap_or("");
     assert!(
-        insert.starts_with("\\App\\Exception"),
-        "Classmap conflict should insert FQN with leading backslash, got: {:?}",
+        insert.starts_with("AppException"),
+        "Classmap conflict should insert the alias, got: {:?}",
         insert
     );
 }
@@ -3579,9 +3611,9 @@ async fn test_no_conflict_auto_import_still_works() {
     assert_eq!(edits[0].new_text, "use App\\Services\\PaymentService;\n",);
 }
 
-/// Conflict resolution with `new` keyword should produce `\FQN()` snippet.
+/// Conflict resolution with `new` keyword should produce an `Alias()` snippet.
 #[tokio::test]
-async fn test_conflicting_use_import_with_new_keyword_inserts_fqn_snippet() {
+async fn test_conflicting_use_import_with_new_keyword_inserts_alias_snippet() {
     let backend = create_test_backend_with_stubs();
 
     {
@@ -3610,13 +3642,13 @@ async fn test_conflicting_use_import_with_new_keyword_inserts_fqn_snippet() {
     let insert = app_exc.insert_text.as_deref().unwrap_or("");
     // In new context, the insert text should include parentheses.
     assert!(
-        insert.starts_with("\\App\\Exception("),
-        "new + conflict should insert \\FQN() snippet, got: {:?}",
+        insert.starts_with("AppException("),
+        "new + conflict should insert Alias() snippet, got: {:?}",
         insert
     );
-    assert!(
-        app_exc.additional_text_edits.is_none(),
-        "Conflict with new keyword should not produce a use statement"
+    assert_eq!(
+        added_import(app_exc),
+        Some("use App\\Exception as AppException;")
     );
 }
 
@@ -3663,9 +3695,10 @@ async fn test_same_fqn_already_imported_is_not_a_conflict() {
 }
 
 /// Multiple conflicting classes: both App\Exception and Domain\Exception
-/// should each fall back to FQN when Cassandra\Exception is imported.
+/// are each imported under their own alias when Cassandra\Exception is
+/// imported.
 #[tokio::test]
-async fn test_multiple_conflicting_classes_all_use_fqn() {
+async fn test_multiple_conflicting_classes_each_get_an_alias() {
     let backend = create_test_backend_with_stubs();
 
     {
@@ -3691,25 +3724,18 @@ async fn test_multiple_conflicting_classes_all_use_fqn() {
 
     let items = complete_at(&backend, &uri, text, 4, 3).await;
 
-    for fqn in &["App\\Exception", "Domain\\Exception"] {
+    for (fqn, alias) in [
+        ("App\\Exception", "AppException"),
+        ("Domain\\Exception", "DomainException"),
+    ] {
         let item = items
             .iter()
-            .find(|i| i.detail.as_deref() == Some(*fqn))
+            .find(|i| i.detail.as_deref() == Some(fqn))
             .unwrap_or_else(|| panic!("Should have {} completion", fqn));
 
-        assert!(
-            item.additional_text_edits.is_none(),
-            "{} should not produce a use statement",
-            fqn
-        );
-
-        let insert = item.insert_text.as_deref().unwrap_or("");
-        assert!(
-            insert.starts_with(&format!("\\{}", fqn)),
-            "{} should insert FQN with leading backslash, got: {:?}",
-            fqn,
-            insert
-        );
+        let import = format!("use {fqn} as {alias};");
+        assert_eq!(added_import(item), Some(import.as_str()));
+        assert_eq!(item.insert_text.as_deref(), Some(alias));
     }
 }
 
