@@ -1279,17 +1279,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#dr9-drupal-directories-outside-contrib-and-custom" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        DR9. Drupal directories outside <code>contrib</code> and <code>custom</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#dr10-plugin-ids" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1437,8 +1426,9 @@
 
 <h1 id="phpantom-drupal">PHPantom — Drupal<a class="headerlink" href="#phpantom-drupal" title="Permanent link">&para;</a></h1>
 <p>Known gaps and missing features in PHPantom's Drupal support. The web
-root is detected, core, contrib, and the Drupal file extensions
-(<code>.module</code>, <code>.install</code>, <code>.theme</code>, …) are indexed past <code>.gitignore</code>, and
+root is detected with or without a <code>composer.json</code>. Core and every
+module, theme, and profile, with the Drupal file extensions (<code>.module</code>,
+<code>.install</code>, <code>.theme</code>, …), are indexed past <code>.gitignore</code>, and
 the services the <code>*.services.yml</code> files declare, the entity types
 entity classes declare, the routes the routing files, route attributes,
 and route builders declare, and the hooks the <code>*.api.php</code> files document
@@ -1528,26 +1518,6 @@ variables would be one more source of them (see <code>src/twig/variables.rs</cod
 permission callbacks), configuration objects in <code>config/install</code> and
 <code>config/schema</code>. Complete and navigate both, and complete the keys
 <code>get()</code> reads from the schema.</p>
-<hr />
-<h2 id="dr9-drupal-directories-outside-contrib-and-custom">DR9. Drupal directories outside <code>contrib</code> and <code>custom</code><a class="headerlink" href="#dr9-drupal-directories-outside-contrib-and-custom" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Complexity: Low-Medium</strong></p>
-<p>The scan that bypasses <code>.gitignore</code> covers <code>core</code>, <code>modules/contrib</code>,
-<code>modules/custom</code>, <code>themes/contrib</code>, <code>themes/custom</code>, <code>profiles</code>, and
-<code>sites</code> under the web root. Sites also group modules by vendor
-(<code>modules/acme/</code>) or keep them directly under <code>modules/</code>, and profiles
-carry their own <code>modules/</code> and <code>themes/</code>; a module a site's <code>.gitignore</code>
-hides in any of those places is not indexed, and its classes read as
-unknown. Scan <code>modules</code>, <code>themes</code>, and <code>profiles</code> whole.</p>
-<p>The scan also runs only when the Drupal site is the workspace's Composer
-root. A workspace that holds the site beside other Composer projects, or
-opens a Drupal tree without a <code>composer.json</code>, gets none of it. Run it
-for each Composer project in the workspace that requires <code>drupal/core</code>,
-and give the scanned classes the same origin (project, vendor) other
-classes get, so completion ranks and filters them the same way.</p>
-<p><strong>Where to look:</strong> <code>scan_drupal_directories</code> in
-<code>src/classmap_scanner/discovery.rs</code>, its caller in
-<code>src/indexing/init.rs</code>, and how per-project Composer roots are handled
-there.</p>
 <hr />
 <h2 id="dr10-plugin-ids">DR10. Plugin IDs<a class="headerlink" href="#dr10-plugin-ids" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
