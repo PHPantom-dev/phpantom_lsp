@@ -2076,6 +2076,12 @@ those still need a restart to fully apply.</p>
 <td>Report a type mismatch on an argument, return value or property assignment when the only members that fail are <code>null</code> or <code>false</code>, such as a <code>string\|false</code> passed to a <code>string</code> parameter. Matches PHPStan's <code>checkUnionTypes</code> and <code>checkNullables</code>.</td>
 </tr>
 <tr>
+<td><code>partial-union-mismatches</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Report a type mismatch on an argument, return value or property assignment when some members of the value's union fit, such as an <code>array\|string</code> passed to a <code>string</code> parameter. Set to <code>false</code> to only report values no member of which fits, which also leaves out what <code>possibly-empty-mismatches</code> covers.</td>
+</tr>
+<tr>
 <td><code>docblock-type-mismatches</code></td>
 <td>bool</td>
 <td><code>true</code></td>
