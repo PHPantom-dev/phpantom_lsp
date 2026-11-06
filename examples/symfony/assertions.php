@@ -35,6 +35,7 @@ use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\Mapping\Driver\SimplifiedXmlDriver;
 use Doctrine\ORM\ORMSetup;
 use Doctrine\ORM\Query\QueryException;
+use Doctrine\ORM\Tools\SchemaTool;
 use Symfony\Bridge\Twig\Extension\RoutingExtension;
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
 use Symfony\Bundle\FrameworkBundle\DependencyInjection\Configuration as FrameworkConfiguration;
@@ -345,6 +346,20 @@ $dqlParses = static function (string $dql) use ($entityManager): bool {
 };
 check('The DQL in UserRepository::named() names the User entity and its mapped fields', $dqlParses('SELECT u FROM App\Entity\User u WHERE u.displayName = :name ORDER BY u.email ASC'));
 check('A field the mapping does not map fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE u.nickname = :name'));
+(new SchemaTool($entityManager))->createSchema([$entityManager->getClassMetadata(User::class)]);
+$entityManager->persist(new User('ada@example.com', 'Ada'));
+$entityManager->flush();
+$rows = $entityManager->createQueryBuilder()
+    ->select('u')
+    ->from(User::class, 'u', 'u.email')
+    ->select('u.email', 'u.displayName')
+    ->getQuery()
+    ->getResult();
+check('displayNamesByEmail() gets a shape of the fields keyed by email', $rows === ['ada@example.com' => ['email' => 'ada@example.com', 'displayName' => 'Ada']]);
+$users = $entityManager->createQuery('SELECT u FROM App\Entity\User u WHERE u.displayName = :name')
+    ->setParameter('name', 'Ada')
+    ->getResult();
+check('named() gets a list of User', array_is_list($users) && $users[0] instanceof User);
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

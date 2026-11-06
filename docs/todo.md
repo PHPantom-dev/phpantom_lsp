@@ -39,7 +39,9 @@ contributor even though it's short.
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (assets, Inertia) | Medium | Medium |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
-| T63 | [A Doctrine query's result is not typed by its DQL](todo/type-inference.md#t63-a-doctrine-querys-result-is-not-typed-by-its-dql) | Medium      | High        |
+| T64 | [A query builder held in a variable is not typed by its DQL](todo/type-inference.md#t64-a-query-builder-held-in-a-variable-is-not-typed-by-its-dql) | Medium      | Medium      |
+| T66 | [A DQL aggregate or function is typed `mixed`](todo/type-inference.md#t66-a-dql-aggregate-or-function-is-typed-mixed) | Low-Medium  | Medium      |
+| T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
 | F67 | [DQL variables joined through an association](todo/lsp-features.md#f67-dql-variables-joined-through-an-association) | Medium      | Medium      |
 | F69 | [DQL in expression objects and other methods' query builders](todo/lsp-features.md#f69-dql-in-expression-objects-and-other-methods-query-builders) | Low-Medium  | Medium      |
 | F68 | [DQL syntax errors](todo/lsp-features.md#f68-dql-syntax-errors) | Low-Medium  | High        |
@@ -81,7 +83,9 @@ ships, remove every row that names it.
 | F34 | [Template names a PHP wrapper builds](todo/lsp-features.md#f34-template-names-a-php-wrapper-builds) | Medium      | Medium-High |
 | F38 | [Twig components](todo/lsp-features.md#f38-twig-components) | Low-Medium  | Medium-High |
 | F56 | [Live components](todo/lsp-features.md#f56-live-components) (depends on F38) | Low-Medium  | Medium-High |
-| T63 | [A Doctrine query's result is not typed by its DQL](todo/type-inference.md#t63-a-doctrine-querys-result-is-not-typed-by-its-dql) | Medium      | High        |
+| T64 | [A query builder held in a variable is not typed by its DQL](todo/type-inference.md#t64-a-query-builder-held-in-a-variable-is-not-typed-by-its-dql) | Medium      | Medium      |
+| T66 | [A DQL aggregate or function is typed `mixed`](todo/type-inference.md#t66-a-dql-aggregate-or-function-is-typed-mixed) | Low-Medium  | Medium      |
+| T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
 | F67 | [DQL variables joined through an association](todo/lsp-features.md#f67-dql-variables-joined-through-an-association) | Medium      | Medium      |
 | F69 | [DQL in expression objects and other methods' query builders](todo/lsp-features.md#f69-dql-in-expression-objects-and-other-methods-query-builders) | Low-Medium  | Medium      |
 | F68 | [DQL syntax errors](todo/lsp-features.md#f68-dql-syntax-errors) | Low-Medium  | High        |

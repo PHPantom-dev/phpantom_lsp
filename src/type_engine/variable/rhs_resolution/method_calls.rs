@@ -217,6 +217,19 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
         return result;
     }
 
+    // A Doctrine query's result methods: the row type rides on the query's
+    // type arguments, which its DQL decided.
+    if let Some(argument_list) = argument_list
+        && let Some(result) = super::doctrine_calls::try_resolve_query_result_type(
+            &method_name,
+            &receiver_resolved,
+            argument_list,
+            ctx,
+        )
+    {
+        return result;
+    }
+
     // Laravel validated input: the rules that guard this request describe the
     // array it hands back, so `$data = $request->validated()` gets a shape
     // rather than plain `array`.  Classifying the call does not depend on the
@@ -257,6 +270,22 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             if let Some(result) =
                 try_resolve_container_lookup_type(owner, &method_name, argument_list, ctx)
             {
+                return result;
+            }
+            if let Some(result) = super::doctrine_calls::try_resolve_create_query_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
+                return result;
+            }
+            if let Some(result) = super::doctrine_calls::try_resolve_builder_query_type(
+                owner,
+                &method_name,
+                object,
+                ctx,
+            ) {
                 return result;
             }
             if let Some(ty) = crate::type_engine::call_resolution::repository_at_call(

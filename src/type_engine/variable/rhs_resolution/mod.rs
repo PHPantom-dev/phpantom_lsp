@@ -72,6 +72,7 @@ mod assignment_value;
 mod branches;
 mod calls;
 mod constant_access;
+mod doctrine_calls;
 mod drupal_calls;
 mod function_calls;
 mod instantiation;
@@ -233,7 +234,7 @@ pub(in crate::type_engine) fn resolve_rhs_expression<'b>(
 /// only affects how the *target* is bound, which is the forward walker's
 /// concern (`process_expr` / `process_assignment_expr`),
 /// not this read-only pipeline's.
-fn peel_type_transparent<'b>(mut expr: &'b Expression<'b>) -> &'b Expression<'b> {
+pub(super) fn peel_type_transparent<'b>(mut expr: &'b Expression<'b>) -> &'b Expression<'b> {
     loop {
         match expr {
             Expression::Parenthesized(parenthesized) => expr = parenthesized.expression,
@@ -474,8 +475,8 @@ fn resolve_rhs_expression_inner<'b>(
                 ))];
             }
             let rhs = resolve_rhs_expression(binary.rhs, ctx);
-            let folded = scalar_fold::single_scalar(&lhs)
-                .zip(scalar_fold::single_scalar(&rhs))
+            let folded = scalar_fold::concat_operand_scalar(binary.lhs, &lhs)
+                .zip(scalar_fold::concat_operand_scalar(binary.rhs, &rhs))
                 .and_then(|(l, r)| scalar_fold::fold_concat(&l, &r));
             vec![ResolvedType::from_type_string(
                 folded.unwrap_or_else(|| scalar_fold::concat_result(&lhs, || rhs)),

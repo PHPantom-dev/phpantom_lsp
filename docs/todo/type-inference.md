@@ -593,29 +593,81 @@ extension's fixtures declare theirs that way, in
 
 ---
 
-## T63. A Doctrine query's result is not typed by its DQL
+## T64. A query builder held in a variable is not typed by its DQL
 
-**Impact: Medium · Complexity: High**
+**Impact: Medium · Complexity: Medium**
 
 ```php
-$users = $em->createQuery('SELECT u FROM App\Entity\User u')->getResult(); // mixed, not list<User>
-$names = $qb->select('u.name')->from(User::class, 'u')->getQuery()->getArrayResult();
+$qb = $this->createQueryBuilder('u');
+$qb->andWhere('u.active = 1');
+$users = $qb->getQuery()->getResult(); // mixed, not list<User>
 ```
 
-The entity classes and fields a query names are read for navigation and
-diagnostics, but `getResult()` and its siblings stay `mixed`. PHPStan's
-Doctrine extension types a query as `Query<TKey, TResult>` from what its
-`SELECT` returns (an entity, a list of them, an array shape for a scalar
-select) and follows the query builder's chain into `getQuery()`; it also
-reads the expression builder's methods as the fragments they build.
+A query builder chain written in one expression, from
+`createQueryBuilder()` to `getQuery()`, is replayed into the DQL it builds
+and its query is typed by it. A builder held in a variable, or returned by
+a method (`$this->getQueryBuilder()->getQuery()`), keeps the declared
+`Query`, because a call on the variable changes the builder without
+changing what the variable was assigned. PHPStan's Doctrine extension
+carries the builder's calls in its type: each call statement on the
+variable updates it, a branch gives a union, and a method returning a
+builder is read from its body. A builder's `add()` with an expression
+object (`add('from', new Expr\From(...))`) is not replayed either.
 
-The fixtures are the `assertType()` files in
+The fixtures are the SKIP lines of `queryBuilderGetQuery.php` and
+`queryBuilderExpressionTypeResolver.php` in
 `tests/phpstan_doctrine/data/QueryResult/`.
 
-**Where to look:** `src/doctrine/dql.rs`,
-`src/type_engine/call_resolution/doctrine_repository.rs` (how
-`getRepository()` is typed), and PHPStan's Doctrine extension
-(`Type/Doctrine/Query/`, `Type/Doctrine/QueryBuilder/`).
+**Where to look:** `src/doctrine/query.rs` (`QueryBuilderState`),
+`src/type_engine/variable/rhs_resolution/doctrine_calls.rs`, the forward
+walker, and PHPStan's Doctrine extension (`Type/Doctrine/QueryBuilder/`).
+
+---
+
+## T65. The expression builder's fragments are not literal strings
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$qb->expr()->isNull('u.name'); // string, not 'u.name IS NULL'
+```
+
+The expression builder's methods that build a DQL fragment as a string
+(`isNull()`, `between()`, `countDistinct()`, …) return `string`. PHPStan's
+Doctrine extension folds them into the literal string they build when
+their arguments are literal, so the fragment is known where a builder or
+a query takes it.
+
+The fixtures are the SKIP lines of `expressionBuilderGetQuery.php` and
+`expressionBuilderGetQueryNoObjectManager.php` in
+`tests/phpstan_doctrine/data/QueryResult/`.
+
+**Where to look:** PHPStan's Doctrine extension
+(`Type/Doctrine/QueryBuilder/Expr/`).
+
+---
+
+## T66. A DQL aggregate or function is typed `mixed`
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$em->createQuery('SELECT COUNT(u.id) AS total FROM App\Entity\User u')
+    ->getResult(); // list<array{total: mixed}>
+```
+
+A query's selected entities and fields are typed, but any other `SELECT`
+expression (an aggregate, a function, arithmetic, a literal, a `CASE`) is
+`mixed`, and without a result variable it leaves the whole query
+`Query<mixed, mixed>`. So does `NEW Dto(...)`. A field is typed by the
+type its entity declares for the property, not by its column's Doctrine
+type, which can differ (`bigint` is `int|string` on DBAL 4). PHPStan's
+Doctrine extension types each expression by the function and the
+connection's driver.
+
+**Where to look:** `src/doctrine/query.rs` (`result_types`), and PHPStan's
+Doctrine extension (`Type/Doctrine/Query/QueryResultTypeWalker.php`,
+`Type/Doctrine/Descriptors/`).
 
 ---
 

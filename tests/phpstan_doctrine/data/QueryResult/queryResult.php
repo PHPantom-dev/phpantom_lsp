@@ -17,14 +17,14 @@ class QueryResultTest
 			FROM		QueryResult\Entities\Many m
 		');
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $query);
 
 		$query = $em->createQuery('
 			SELECT		m.intColumn, m.stringNullColumn
 			FROM		QueryResult\Entities\Many m
 		');
 
-		assertType('Doctrine\ORM\Query<null, array{intColumn: int, stringNullColumn: string|null}>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, array{intColumn: int, stringNullColumn: string|null}>', $query);
 
 	}
 
@@ -41,11 +41,11 @@ class QueryResultTest
 			FROM		QueryResult\Entities\Many m
 		');
 
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<QueryResult\Entities\Many>',
 			$query->getResult()
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'iterable<int, QueryResult\Entities\Many>',
 			$query->toIterable()
 		);
@@ -83,31 +83,31 @@ class QueryResultTest
 			FROM		QueryResult\Entities\Many m
 		');
 
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<QueryResult\Entities\Many>',
 			$query->getResult(AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'iterable<int, QueryResult\Entities\Many>',
 			$query->toIterable([], AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<QueryResult\Entities\Many>',
 			$query->execute(null, AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<QueryResult\Entities\Many>',
 			$query->executeIgnoreQueryCache(null, AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<QueryResult\Entities\Many>',
 			$query->executeUsingQueryCache(null, AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'QueryResult\Entities\Many',
 			$query->getSingleResult(AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'QueryResult\Entities\Many|null',
 			$query->getOneOrNullResult(AbstractQuery::HYDRATE_OBJECT)
 		);
@@ -117,27 +117,27 @@ class QueryResultTest
 			FROM		QueryResult\Entities\Many m
 		');
 
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<array{intColumn: int, stringNullColumn: string|null}>',
 			$query->getResult(AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<array{intColumn: int, stringNullColumn: string|null}>',
 			$query->execute(null, AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<array{intColumn: int, stringNullColumn: string|null}>',
 			$query->executeIgnoreQueryCache(null, AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<array{intColumn: int, stringNullColumn: string|null}>',
 			$query->executeUsingQueryCache(null, AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'array{intColumn: int, stringNullColumn: string|null}',
 			$query->getSingleResult(AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'array{intColumn: int, stringNullColumn: string|null}|null',
 			$query->getOneOrNullResult(AbstractQuery::HYDRATE_OBJECT)
 		);
@@ -203,31 +203,31 @@ class QueryResultTest
 			FROM		QueryResult\Entities\Many m
 		');
 
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<QueryResult\Entities\Many>',
 			$query->getResult(AbstractQuery::HYDRATE_SIMPLEOBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'iterable<int, QueryResult\Entities\Many>',
 			$query->toIterable([], AbstractQuery::HYDRATE_SIMPLEOBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<QueryResult\Entities\Many>',
 			$query->execute(null, AbstractQuery::HYDRATE_SIMPLEOBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<QueryResult\Entities\Many>',
 			$query->executeIgnoreQueryCache(null, AbstractQuery::HYDRATE_SIMPLEOBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<QueryResult\Entities\Many>',
 			$query->executeUsingQueryCache(null, AbstractQuery::HYDRATE_SIMPLEOBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'QueryResult\Entities\Many',
 			$query->getSingleResult(AbstractQuery::HYDRATE_SIMPLEOBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'QueryResult\Entities\Many|null',
 			$query->getOneOrNullResult(AbstractQuery::HYDRATE_SIMPLEOBJECT)
 		);
@@ -395,31 +395,31 @@ class QueryResultTest
 	 */
 	public function testReturnTypeOfQueryMethodsWithReturnTypeIsNonVoidTemplate(EntityManagerInterface $em, Query $query): void
 	{
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<T of array|object (method QueryResult\queryResult\QueryResultTest::testReturnTypeOfQueryMethodsWithReturnTypeIsNonVoidTemplate(), argument)>',
 			$query->getResult(AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'iterable<int, T of array|object (method QueryResult\queryResult\QueryResultTest::testReturnTypeOfQueryMethodsWithReturnTypeIsNonVoidTemplate(), argument)>',
 			$query->toIterable([], AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<T of array|object (method QueryResult\queryResult\QueryResultTest::testReturnTypeOfQueryMethodsWithReturnTypeIsNonVoidTemplate(), argument)>',
 			$query->execute(null, AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<T of array|object (method QueryResult\queryResult\QueryResultTest::testReturnTypeOfQueryMethodsWithReturnTypeIsNonVoidTemplate(), argument)>',
 			$query->executeIgnoreQueryCache(null, AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'list<T of array|object (method QueryResult\queryResult\QueryResultTest::testReturnTypeOfQueryMethodsWithReturnTypeIsNonVoidTemplate(), argument)>',
 			$query->executeUsingQueryCache(null, AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'T of array|object (method QueryResult\queryResult\QueryResultTest::testReturnTypeOfQueryMethodsWithReturnTypeIsNonVoidTemplate(), argument)',
 			$query->getSingleResult(AbstractQuery::HYDRATE_OBJECT)
 		);
-		assertType( // SKIP: Doctrine DQL and query builder result types are not read
+		assertType(
 			'(T of array|object (method QueryResult\queryResult\QueryResultTest::testReturnTypeOfQueryMethodsWithReturnTypeIsNonVoidTemplate(), argument))|null',
 			$query->getOneOrNullResult(AbstractQuery::HYDRATE_OBJECT)
 		);
@@ -429,17 +429,17 @@ class QueryResultTest
 	{
 		$q = 'SELECT m FROM QueryResult\Entities\Many m';
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setLockMode(LockMode::NONE)); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setParameter(1, 1)); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setMaxResults(10)); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setCacheable(true)); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setLifetime(1)); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->disableResultCache()); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->enableResultCache(1)); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setResultCacheLifetime(1)); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setResultCacheProfile(null)); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setHint('name', 1)); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setHydrationMode(AbstractQuery::HYDRATE_OBJECT)); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setLockMode(LockMode::NONE));
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setParameter(1, 1));
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setMaxResults(10));
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setCacheable(true));
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setLifetime(1));
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->disableResultCache());
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->enableResultCache(1));
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setResultCacheLifetime(1));
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setResultCacheProfile(null));
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setHint('name', 1));
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $em->createQuery($q)->setHydrationMode(AbstractQuery::HYDRATE_OBJECT));
 	}
 
 }

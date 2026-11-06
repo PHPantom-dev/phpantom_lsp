@@ -199,6 +199,7 @@ mod diagnostics_unused_variables;
 mod docblock_types;
 mod doctrine_dql;
 mod doctrine_entity_fields;
+mod doctrine_queries;
 mod doctrine_repositories;
 mod document_highlight;
 mod document_links;

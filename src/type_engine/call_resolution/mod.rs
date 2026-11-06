@@ -76,6 +76,7 @@ mod callable_target;
 mod closure_invoke;
 mod closure_returns;
 mod constant_operands;
+mod doctrine_query;
 mod doctrine_repository;
 mod facade_owner;
 mod if_this_is;
@@ -93,6 +94,7 @@ pub(crate) use array_callable::array_callable_return_type;
 pub(crate) use callable_target::invoked_value_types;
 pub(crate) use closure_invoke::{closure_invoke_return, is_closure_invoke_call};
 pub(crate) use constant_operands::evaluate_constant_operands;
+pub(crate) use doctrine_query::query_at_call;
 pub(crate) use doctrine_repository::repository_at_call;
 pub(crate) use facade_owner::facade_concrete_owner;
 pub(crate) use reflection::{

@@ -20,6 +20,7 @@
 
 pub(crate) mod dql;
 pub(crate) mod mapping_files;
+pub(crate) mod query;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

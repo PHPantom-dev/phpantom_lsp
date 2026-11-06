@@ -121,7 +121,7 @@ pub(crate) fn resolve_declared_arg_indices(
 /// The named-argument `name:` prefix is distinguished from a `::` static
 /// access and from a ternary `?:` by requiring a leading identifier followed
 /// by a single `:` (not `::`). Both returned slices are trimmed.
-fn split_named_text_arg(arg: &str) -> (Option<&str>, &str) {
+pub(crate) fn split_named_text_arg(arg: &str) -> (Option<&str>, &str) {
     let trimmed = arg.trim();
     let bytes = trimmed.as_bytes();
     let mut i = 0;

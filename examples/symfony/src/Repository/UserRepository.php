@@ -41,4 +41,20 @@ final class UserRepository extends ServiceEntityRepository
 
         return [...$byBuilder, ...$byQuery];
     }
+
+    /**
+     * @return array<string, string>
+     */
+    public function displayNamesByEmail(): array
+    {
+        // Try: hover $rows. The query is typed by what its DQL selects, a
+        // shape of the two fields, keyed by the email it is indexed by:
+        // array<string, array{email: string, displayName: string}>.
+        $rows = $this->createQueryBuilder('u', 'u.email')
+            ->select('u.email', 'u.displayName')
+            ->getQuery()
+            ->getResult();
+
+        return array_map(static fn (array $row): string => $row['displayName'], $rows);
+    }
 }

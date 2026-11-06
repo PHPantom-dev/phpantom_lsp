@@ -58,7 +58,7 @@ pub(crate) struct DqlScan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tok {
+pub(super) enum Tok {
     Ident,
     Dynamic,
     Dot,
@@ -71,10 +71,10 @@ enum Tok {
 }
 
 #[derive(Debug, Clone)]
-struct Token {
-    kind: Tok,
-    start: usize,
-    end: usize,
+pub(super) struct Token {
+    pub(super) kind: Tok,
+    pub(super) start: usize,
+    pub(super) end: usize,
 }
 
 fn is_ident_start(c: char) -> bool {
@@ -85,7 +85,7 @@ fn is_ident_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '\\' || c == DYNAMIC
 }
 
-fn tokenize(text: &str) -> Vec<Token> {
+pub(super) fn tokenize(text: &str) -> Vec<Token> {
     let bytes = text.as_bytes();
     let mut tokens = Vec::new();
     let mut i = 0;
@@ -166,7 +166,7 @@ const KEYWORDS: &[&str] = &[
     "WHEN", "WHERE", "WITH",
 ];
 
-fn is_keyword(word: &str) -> bool {
+pub(super) fn is_keyword(word: &str) -> bool {
     KEYWORDS.iter().any(|k| k.eq_ignore_ascii_case(word))
 }
 
