@@ -52,14 +52,9 @@ pub(crate) struct DrupalState {
     /// The services each service provider's `alter()` gives another class,
     /// keyed by the provider's URI; see [`service_providers`].
     service_replacements: RwLock<BTreeMap<String, Vec<(Atom, Atom)>>>,
-    /// The default configuration files of every extension, which are
-    /// never parsed: their names are configuration names.
-    default_config_files: RwLock<Vec<PathBuf>>,
-    /// The configuration schema files, read when a configuration name is
-    /// first asked for.
-    config_schema_files: RwLock<Vec<PathBuf>>,
-    /// The configuration names read from both, until one of them changes.
-    config_index: RwLock<Option<std::sync::Arc<config::ConfigIndex>>>,
+    /// The default configuration files and configuration schema files of
+    /// every extension, and the configuration names read from them.
+    config: config::ConfigSources,
 }
 
 /// A kind of file Drupal reads declarations from.
@@ -322,9 +317,7 @@ impl Backend {
         self.drupal.hook_php_files.write().clear();
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
-        self.drupal.default_config_files.write().clear();
-        self.drupal.config_schema_files.write().clear();
-        *self.drupal.config_index.write() = None;
+        self.drupal.config.clear();
     }
 
     /// Remember the declaration files the Drupal walk found: the YAML for

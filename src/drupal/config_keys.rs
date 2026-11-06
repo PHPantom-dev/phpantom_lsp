@@ -5,11 +5,9 @@
 //!
 //! A key's span is keyed by the configuration name as well as the key
 //! (see [`config_key`]): `enabled` only means something under its object.
-//! The schema files are read when a key is first asked for, and kept with
-//! the configuration index (see [`super::config::ConfigIndex`]), which a
-//! changed schema file drops.
-
-use std::sync::Arc;
+//! A schema file is read as a tree when a key is first asked for, and kept
+//! with the file's entries in the configuration index (see
+//! [`super::config::ConfigIndex`]) until its text changes.
 
 use tower_lsp_server::gen_lsp_types::{Location, Range};
 
@@ -131,25 +129,18 @@ fn is_named_type(ty: &str) -> bool {
     !matches!(ty, "mapping" | "sequence") && !ty.contains(['[', '%'])
 }
 
-impl Backend {
-    /// The parsed schema file at `uri`, read once per configuration index.
-    fn schema_tree(
-        &self,
-        index: &super::config::ConfigIndex,
-        uri: &str,
-    ) -> Option<Arc<Vec<YamlNode>>> {
-        if let Some(tree) = index.trees.lock().get(uri) {
-            return Some(Arc::clone(tree));
-        }
-        let content = self.get_file_content_arc(uri)?;
-        let tree = Arc::new(yaml_tree(&content));
-        index
-            .trees
-            .lock()
-            .insert(uri.to_string(), Arc::clone(&tree));
-        Some(tree)
-    }
+/// The top-level node of `tree` the schema entry `entry`, under `key`, was
+/// read from: none when the tree was read from other text.
+fn entry_node<'a>(
+    tree: &'a [YamlNode],
+    key: &str,
+    entry: &super::config::SchemaEntry,
+) -> Option<&'a YamlNode> {
+    tree.iter()
+        .find(|node| node.start == entry.start as usize && node.key == key)
+}
 
+impl Backend {
     /// The top-level node of the schema entry `key`.
     fn schema_node(
         &self,
@@ -157,12 +148,9 @@ impl Backend {
         key: &str,
     ) -> Option<(String, YamlNode)> {
         let entry = index.schema_named(key)?;
-        let tree = self.schema_tree(index, &entry.uri)?;
-        let node = tree
-            .iter()
-            .find(|node| node.start == entry.start as usize)?
-            .clone();
-        Some((entry.uri.clone(), node))
+        let tree = index.tree(&entry.uri, |uri| self.get_file_content_arc(uri))?;
+        let node = entry_node(&tree, key, entry)?.clone();
+        Some((entry.uri.to_string(), node))
     }
 
     /// The keys `node`, written in the file at `uri`, maps: its own, then
@@ -325,6 +313,25 @@ mod tests {
         assert_eq!(&yaml[email.start..email.start + 5], "email");
         assert_eq!(email.setting("type"), Some("email"));
         assert_eq!(tree[0].setting("label"), Some("Acme"));
+    }
+
+    /// A tree read from newer text than the entries may hold another key
+    /// where the entry's key was.
+    #[test]
+    fn an_entry_is_found_only_under_its_own_key() {
+        let tree = yaml_tree("acme.other:\n  type: config_object\n");
+        let entry = super::super::config::SchemaEntry {
+            uri: std::sync::Arc::from("file:///acme.schema.yml"),
+            start: 0,
+            end: 13,
+            ty: Some("config_object".to_string()),
+            label: None,
+        };
+        assert!(entry_node(&tree, "acme.settings", &entry).is_none());
+        assert_eq!(
+            entry_node(&tree, "acme.other", &entry).map(|node| node.key.as_str()),
+            Some("acme.other")
+        );
     }
 
     #[test]
