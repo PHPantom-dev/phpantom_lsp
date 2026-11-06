@@ -121,7 +121,7 @@ impl Backend {
             file_namespace: None,
             backed_type: None,
             attribute_targets: 0,
-            doctrine_repository: None,
+            doctrine: None,
             method_index: Default::default(),
             indexed_method_count: 0,
             laravel: None,

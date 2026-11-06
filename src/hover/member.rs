@@ -374,6 +374,13 @@ impl Backend {
                     &resolved_class_loader,
                 );
             }
+            DocblockMemberRef::EntityField => {
+                candidates = crate::doctrine::managed_entity_classes(
+                    candidates,
+                    &resolved_class_loader,
+                    &self.resolved_class_cache,
+                );
+            }
             DocblockMemberRef::AttributeNamedArg => candidates.retain(|class| {
                 crate::class_lookup::constructor_promotes(
                     class,

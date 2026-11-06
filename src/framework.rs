@@ -102,11 +102,24 @@ impl Backend {
         } else {
             doctrine_repositories.insert(uri.to_string(), Arc::new(mappings));
         }
+        drop(doctrine_repositories);
+        // A repository resolved before the change carries the finders of
+        // the fields the entity mapped then.
+        if crate::doctrine::mapping_files::index_mapping_file(
+            &self.doctrine_mapping_files,
+            uri,
+            content,
+        ) {
+            self.clear_resolved_class_cache();
+        }
     }
 
     pub(crate) fn remove_framework_uri(&self, uri: &str) {
         self.framework_references.write().remove(uri);
         self.framework_doctrine_repositories.write().remove(uri);
+        if self.doctrine_mapping_files.write().remove(uri).is_some() {
+            self.clear_resolved_class_cache();
+        }
     }
 
     /// Whether the project uses Doctrine; see

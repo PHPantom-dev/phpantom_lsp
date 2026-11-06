@@ -100,6 +100,10 @@ catalogues together, the way a real Symfony project does.
 - In `DemoController`, hover `$users`. `getRepository(User::class)` returns
   the `UserRepository` the Doctrine mapping names, so its own
   `withEmail()` completes.
+- Below it, complete after `$users->findOneBy`. The repository answers a
+  `findBy<Field>()`, `findOneBy<Field>()`, and `countBy<Field>()` for each
+  field `config/doctrine/User.orm.xml` maps, and the keys of `findBy()`
+  complete those fields and jump to their properties.
 
 ## Getting started
 

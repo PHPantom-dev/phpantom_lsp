@@ -34,6 +34,10 @@ pub(super) struct MemberAccessSite<'a> {
     /// Whether the member is the method a mock expectation names, which
     /// is checked on the mocked class (see [`crate::mock_methods`]).
     pub(super) mock_expectation: bool,
+    /// Whether the member is a field a Doctrine repository call names,
+    /// which is checked against the entity's mapping rather than looked up
+    /// on the subject (see [`crate::doctrine`]).
+    pub(super) entity_field: bool,
     /// The class the access is written in.
     pub(super) current_class: Option<&'a ClassInfo>,
 }
@@ -141,6 +145,7 @@ impl<'a> MemberAccessSite<'a> {
             is_docblock_ref: docblock_ref.is_reference(),
             is_nullsafe: *is_nullsafe,
             mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
+            entity_field: *docblock_ref == DocblockMemberRef::EntityField,
             current_class,
         })
     }

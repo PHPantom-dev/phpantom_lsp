@@ -268,6 +268,16 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Doctrine repository field names ─────────────────────
+        // `$repository->findBy(['|' => …])` and its siblings key their
+        // criteria and order by the entity's mapped fields.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_entity_field_completion(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
         // ── Laravel route controller method completion ─────────
         // Inside `Route::controller(X::class)->group(fn(){…})`,
         // the 2nd argument string of Route::get/post/patch/… is a

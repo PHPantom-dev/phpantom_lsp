@@ -261,6 +261,7 @@ pub mod config;
 mod definition;
 pub mod diagnostics;
 pub mod docblock;
+mod doctrine;
 mod document_links;
 mod document_symbols;
 mod drupal;
@@ -411,6 +412,10 @@ pub struct BackendState {
     /// Doctrine entity-to-repository pairs from YAML/XML mappings, keyed by
     /// source URI so a watched change replaces one file's entries.
     pub(crate) framework_doctrine_repositories: framework::DoctrineRepositoryIndex,
+    /// The fields Doctrine's XML and YAML mapping files map, keyed by
+    /// source URI.  Shared with the resolved-class cache, which gives a
+    /// repository its entity's magic finders from it.
+    pub(crate) doctrine_mapping_files: doctrine::MappingFileIndex,
     /// Cross-file candidate index for find-references.
     ///
     /// Maintained from each file's symbol map (see [`files`](Self::files)) during parsing.

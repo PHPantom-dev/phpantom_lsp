@@ -470,8 +470,10 @@ impl Backend {
             .map(|i| atom(&resolve_to_fqn(i, use_map, namespace)))
             .collect();
 
-        if let Some(ref repository) = class.doctrine_repository {
-            class.doctrine_repository = Some(atom(&resolve_to_fqn(repository, use_map, namespace)));
+        if let Some(doctrine) = class.doctrine.as_deref_mut()
+            && let Some(ref repository) = doctrine.repository
+        {
+            doctrine.repository = Some(atom(&resolve_to_fqn(repository, use_map, namespace)));
         }
 
         // Resolve the `@phpstan-require-extends` base class to its

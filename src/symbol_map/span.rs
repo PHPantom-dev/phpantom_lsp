@@ -153,6 +153,16 @@ pub(crate) enum DocblockMemberRef {
     /// resolves the subject keeps only what [`crate::mock_methods`]
     /// accepts as a mock, and drops the span otherwise.
     MockedMethod,
+    /// A field name a Doctrine repository call keys its criteria or order
+    /// by, `$users->findBy(['email' => $email])`, with the repository as
+    /// the subject.
+    ///
+    /// The name is the property of the repository's entity that the field
+    /// maps.  A consumer that resolves the subject swaps each repository for
+    /// the entity it manages (see
+    /// [`crate::doctrine::managed_entity_classes`]), and drops the span
+    /// when there is none.
+    EntityField,
     /// A named argument's label in an attribute, `#[Foo(bar: 1)]`, with the
     /// attribute class as the subject.
     ///

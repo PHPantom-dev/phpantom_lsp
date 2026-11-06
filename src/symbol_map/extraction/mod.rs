@@ -321,6 +321,7 @@ impl<'a> ExtractionCtx<'a> {
 }
 
 mod class_like;
+mod doctrine_fields;
 mod drupal;
 mod expressions;
 mod keywords;
@@ -337,6 +338,7 @@ mod yii;
 mod yii_routes;
 
 use class_like::*;
+use doctrine_fields::*;
 use drupal::*;
 use expressions::*;
 use keywords::*;

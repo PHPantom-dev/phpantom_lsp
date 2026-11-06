@@ -75,6 +75,14 @@ impl BackendState {
     /// Each public constructor customises only the fields that differ.
     fn defaults_with(workspace: WorkspaceEnv, stubs: StubIndices) -> Self {
         let (laravel_aliases, resolved_class_cache) = new_alias_slot_and_cache();
+        let is_doctrine = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let doctrine_mapping_files = crate::doctrine::new_mapping_file_index();
+        resolved_class_cache
+            .write()
+            .set_doctrine(crate::doctrine::DoctrineCacheState::new(
+                Arc::clone(&is_doctrine),
+                Arc::clone(&doctrine_mapping_files),
+            ));
         Self {
             name: "PHPantom".to_string(),
             version: env!("PHPANTOM_GIT_VERSION").to_string(),
@@ -83,6 +91,7 @@ impl BackendState {
             files: Arc::new(RwLock::new(HashMap::new())),
             framework_references: framework::new_framework_reference_index(),
             framework_doctrine_repositories: framework::new_doctrine_repository_index(),
+            doctrine_mapping_files,
             reference_index: reference_index::new_reference_index(),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
@@ -104,7 +113,7 @@ impl BackendState {
             laravel: crate::backend::laravel::LaravelState::new(laravel_aliases),
             blade: blade::state::BladeState::default(),
             is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            is_doctrine: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            is_doctrine,
             is_symfony: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             symfony: crate::symfony::SymfonyState::default(),
             is_twig: Arc::new(std::sync::atomic::AtomicBool::new(true)),

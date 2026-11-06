@@ -795,39 +795,6 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ---
 
-## F43. Doctrine entity fields in repository calls
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-$users->findByEmail($email);                    // unknown method
-$users->findBy(['emial' => $email], ['name' => 'ASC']); // a typo, not reported
-```
-
-An entity's repository answers `findBy<Field>()`, `findOneBy<Field>()`, and
-`countBy<Field>()` for each of the entity's fields, and its `findBy()`,
-`findOneBy()`, `count()`, and `findBy()`'s `$orderBy` take field names as
-array keys. None of the magic methods resolve, and the keys neither
-complete, navigate, nor get checked. The magic methods are virtual members
-of the repository, the way Eloquent's are, keyed on the entity
-`getRepository()` binds or the repository's own `@extends`. The keys are member references to the entity's mapped
-properties, the same member spans a form field and a validation mapping
-record.
-
-The fields come from the entity's mapping: `#[ORM\Column]`,
-`#[ORM\Id]`, and the relation attributes, or the XML mapping the CodeLens
-already reads.
-
-The extension's fixtures are `magic_repository_method_call.fixture` and
-`repository_method_call.fixture` in `tests/fixtures/phpstan_doctrine/`.
-
-**Where to look:** `src/virtual_members/`, `src/framework.rs` (the
-Doctrine mapping index), and PHPStan's Doctrine extension
-(`Reflection/Doctrine/EntityRepositoryClassReflectionExtension`,
-`Rules/Doctrine/ORM/RepositoryMethodCallRule`).
-
----
-
 ## F44. Doctrine DQL and query builder strings
 
 **Impact: Medium · Complexity: High**

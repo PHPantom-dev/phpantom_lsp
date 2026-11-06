@@ -64,10 +64,12 @@ pub(super) struct MemberDefinitionCtx<'a> {
     pub access_kind: AccessKind,
     /// Hint about whether the site looks like a method call or property access.
     pub access_hint: MemberAccessHint,
-    /// Whether the member is the method a mock expectation names, which
-    /// is looked up on the mocked class rather than on the subject
-    /// itself (see [`crate::mock_methods`]).
-    pub mock_expectation: bool,
+    /// What kind of name the member is when it is not written as an
+    /// access.  The method a mock expectation names is looked up on the
+    /// mocked class (see [`crate::mock_methods`]), and a field a
+    /// repository call names on the repository's entity (see
+    /// [`crate::doctrine`]), rather than on the subject itself.
+    pub docblock_ref: crate::symbol_map::DocblockMemberRef,
 }
 
 /// The kind of class member being resolved.
@@ -226,12 +228,22 @@ impl Backend {
                 mctx.access_kind,
                 &loaders.resolution_ctx_at(content, cursor_offset),
             ));
-        if mctx.mock_expectation {
-            candidates = crate::mock_methods::mocked_classes(
-                candidates,
-                mctx.access_kind == AccessKind::DoubleColon,
-                class_loader,
-            );
+        match mctx.docblock_ref {
+            crate::symbol_map::DocblockMemberRef::MockedMethod => {
+                candidates = crate::mock_methods::mocked_classes(
+                    candidates,
+                    mctx.access_kind == AccessKind::DoubleColon,
+                    class_loader,
+                );
+            }
+            crate::symbol_map::DocblockMemberRef::EntityField => {
+                candidates = crate::doctrine::managed_entity_classes(
+                    candidates,
+                    class_loader,
+                    &self.resolved_class_cache,
+                );
+            }
+            _ => {}
         }
         let first = candidates.first()?;
 

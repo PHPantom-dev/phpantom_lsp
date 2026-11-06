@@ -166,6 +166,8 @@ pub(super) fn export_span(
                     return;
                 }
                 OccurrenceKind::Property
+            } else if *docblock_ref == DocblockMemberRef::EntityField {
+                OccurrenceKind::Property
             } else {
                 member_occurrence_kind(&source.source, range, *is_static, *is_method_call)
             };
@@ -181,11 +183,18 @@ pub(super) fn export_span(
                 span.start,
                 member_name,
                 kind,
-                *docblock_ref == DocblockMemberRef::MockedMethod,
+                *docblock_ref,
             );
             // A string naming no method of a mock is an ordinary argument
-            // (`$gate->allows('update')`), not an occurrence of anything.
-            if target.is_none() && *docblock_ref == DocblockMemberRef::MockedMethod {
+            // (`$gate->allows('update')`), not an occurrence of anything,
+            // and so is a key of an array passed to something other than a
+            // repository.
+            if target.is_none()
+                && matches!(
+                    docblock_ref,
+                    DocblockMemberRef::MockedMethod | DocblockMemberRef::EntityField
+                )
+            {
                 return;
             }
             output.occurrences.push(ExportOccurrence {

@@ -333,7 +333,7 @@ impl Backend {
                     subject,
                     access_kind,
                     access_hint,
-                    mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
+                    docblock_ref: *docblock_ref,
                 };
 
                 self.resolve_member_definition_with(uri, content, position, &mctx)
@@ -409,7 +409,7 @@ impl Backend {
                             MemberKind::Method => MemberAccessHint::MethodCall,
                             _ => MemberAccessHint::PropertyAccess,
                         },
-                        mock_expectation: false,
+                        docblock_ref: DocblockMemberRef::No,
                     };
                     if let Some(loc) =
                         self.resolve_member_definition_with(uri, content, position, &mctx)

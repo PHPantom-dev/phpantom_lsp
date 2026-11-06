@@ -29,6 +29,8 @@ use App\Service\WelcomeMailer;
 use App\Twig\AppExtension;
 use App\Twig\Badges;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\ORM\Mapping\ClassMetadata;
+use Doctrine\ORM\Mapping\Driver\SimplifiedXmlDriver;
 use Symfony\Bridge\Twig\Extension\RoutingExtension;
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
 use Symfony\Bundle\FrameworkBundle\DependencyInjection\Configuration as FrameworkConfiguration;
@@ -282,6 +284,9 @@ $repository = (string) $mapping->entity['repository-class'];
 check('The XML mapping names the User entity', $entity === User::class);
 check('The XML mapping names a ServiceEntityRepository', is_subclass_of($repository, ServiceEntityRepository::class));
 check('The mapped repository declares withEmail()', method_exists($repository, 'withEmail'));
+$metadata = new ClassMetadata(User::class);
+(new SimplifiedXmlDriver(["$config/doctrine" => 'App\Entity'], '.orm.xml'))->loadMetadataForClass(User::class, $metadata);
+check('The XML mapping maps email and displayName, which findOneByEmail() and findBy() take', $metadata->hasField('email') && $metadata->hasField('displayName'));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

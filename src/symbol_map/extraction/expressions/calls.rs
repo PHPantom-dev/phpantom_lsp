@@ -492,6 +492,7 @@ fn extract_method_call<'a>(
         record_drupal_hook_invocations(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
+        emit_entity_field_spans(object, &member_name, argument_list, ctx);
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
         emit_call_site(

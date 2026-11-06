@@ -53,6 +53,12 @@ final class DemoController extends AbstractController
         // repository, so getRepository() returns it, not EntityRepository.
         $users = $this->entityManager->getRepository(User::class);
         $users->withEmail('ada@example.com');
+        // Try: complete after $users->findOneBy, or inside the keys of
+        // findBy(). The mapping maps email and displayName, so the
+        // repository answers findOneByEmail(), a key jumps to the property
+        // it maps, and a key the mapping does not map is reported.
+        $users->findOneByEmail('ada@example.com');
+        $users->findBy(['displayName' => 'Ada'], ['email' => 'ASC']);
         // Try: complete a route name inside generateUrl('').
         $this->generateUrl('app_demo', ['userId' => $userId]);
         // Try: go-to-definition on a translation key, or complete one inside

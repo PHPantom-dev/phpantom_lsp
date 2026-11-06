@@ -84,7 +84,7 @@ fn entity_argument<'a>(args: &[&'a str]) -> Option<&'a str> {
 /// The repository `entity` names in its `#[ORM\Entity]` attribute, else the
 /// one a YAML or XML mapping pairs it with when exactly one does.
 fn repository_for(entity: &ClassInfo, ctx: &ResolutionCtx<'_>) -> Option<Atom> {
-    if let Some(repository) = entity.doctrine_repository {
+    if let Some(repository) = entity.doctrine_repository() {
         return Some(repository);
     }
     let backend = ctx.file.backend?;
