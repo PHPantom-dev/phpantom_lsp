@@ -65,16 +65,19 @@ fn incomplete_collection_generics_keep_the_declared_return() {
         None,
         0,
     );
-    assert!(
-        collection_property_return(
-            &owner,
-            Some(&PhpType::generic(COLLECTION, vec![PhpType::string()])),
-            ProjectionMethod::Pluck,
-            &["'name'"],
-            &ctx,
-        )
-        .is_none()
-    );
+    let incomplete = PhpType::generic(COLLECTION, vec![PhpType::string()]);
+    for receiver in [None, Some(&incomplete)] {
+        assert!(
+            collection_property_return(
+                &owner,
+                receiver,
+                ProjectionMethod::Pluck,
+                &["'name'"],
+                &ctx,
+            )
+            .is_none()
+        );
+    }
 }
 
 #[test]
