@@ -40,7 +40,10 @@ contributor even though it's short.
 | F67 | [Symfony constraint options in YAML and XML validation mappings](todo/lsp-features.md#f67-symfony-constraint-options-in-yaml-and-xml-validation-mappings) | Low         | Low-Medium  |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
-| F44 | [Doctrine DQL and query builder strings](todo/lsp-features.md#f44-doctrine-dql-and-query-builder-strings) | Medium      | High        |
+| T63 | [A Doctrine query's result is not typed by its DQL](todo/type-inference.md#t63-a-doctrine-querys-result-is-not-typed-by-its-dql) | Medium      | High        |
+| F67 | [DQL variables joined through an association](todo/lsp-features.md#f67-dql-variables-joined-through-an-association) | Medium      | Medium      |
+| F69 | [DQL in expression objects and other methods' query builders](todo/lsp-features.md#f69-dql-in-expression-objects-and-other-methods-query-builders) | Low-Medium  | Medium      |
+| F68 | [DQL syntax errors](todo/lsp-features.md#f68-dql-syntax-errors) | Low-Medium  | High        |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -79,7 +82,10 @@ ships, remove every row that names it.
 | F34 | [Template names a PHP wrapper builds](todo/lsp-features.md#f34-template-names-a-php-wrapper-builds) | Medium      | Medium-High |
 | F38 | [Twig components](todo/lsp-features.md#f38-twig-components) | Low-Medium  | Medium-High |
 | F56 | [Live components](todo/lsp-features.md#f56-live-components) (depends on F38) | Low-Medium  | Medium-High |
-| F44 | [Doctrine DQL and query builder strings](todo/lsp-features.md#f44-doctrine-dql-and-query-builder-strings) | Medium      | High        |
+| T63 | [A Doctrine query's result is not typed by its DQL](todo/type-inference.md#t63-a-doctrine-querys-result-is-not-typed-by-its-dql) | Medium      | High        |
+| F67 | [DQL variables joined through an association](todo/lsp-features.md#f67-dql-variables-joined-through-an-association) | Medium      | Medium      |
+| F69 | [DQL in expression objects and other methods' query builders](todo/lsp-features.md#f69-dql-in-expression-objects-and-other-methods-query-builders) | Low-Medium  | Medium      |
+| F68 | [DQL syntax errors](todo/lsp-features.md#f68-dql-syntax-errors) | Low-Medium  | High        |
 | F48 | [Symfony environment variables](todo/lsp-features.md#f48-symfony-environment-variables) | Medium      | Low-Medium  |
 | F24 | [Doctrine lenses miss attribute mappings and generic repositories](todo/lsp-features.md#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories) | Medium      | Medium      |
 | F25 | [Names a PHP configurator spells as strings](todo/lsp-features.md#f25-names-a-php-configurator-spells-as-strings) | Medium      | Medium      |

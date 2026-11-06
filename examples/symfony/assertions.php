@@ -29,8 +29,12 @@ use App\Service\WelcomeMailer;
 use App\Twig\AppExtension;
 use App\Twig\Badges;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\DBAL\DriverManager;
+use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\Mapping\Driver\SimplifiedXmlDriver;
+use Doctrine\ORM\ORMSetup;
+use Doctrine\ORM\Query\QueryException;
 use Symfony\Bridge\Twig\Extension\RoutingExtension;
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
 use Symfony\Bundle\FrameworkBundle\DependencyInjection\Configuration as FrameworkConfiguration;
@@ -323,6 +327,21 @@ check('The mapped repository declares withEmail()', method_exists($repository, '
 $metadata = new ClassMetadata(User::class);
 (new SimplifiedXmlDriver(["$config/doctrine" => 'App\Entity'], '.orm.xml'))->loadMetadataForClass(User::class, $metadata);
 check('The XML mapping maps email and displayName, which findOneByEmail() and findBy() take', $metadata->hasField('email') && $metadata->hasField('displayName'));
+$entityManager = new EntityManager(
+    DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]),
+    ORMSetup::createXMLMetadataConfiguration(["$config/doctrine"], true),
+);
+$entityManager->getConfiguration()->setMetadataDriverImpl(new SimplifiedXmlDriver(["$config/doctrine" => 'App\Entity'], '.orm.xml'));
+$dqlParses = static function (string $dql) use ($entityManager): bool {
+    try {
+        $entityManager->createQuery($dql)->getSQL();
+        return true;
+    } catch (QueryException) {
+        return false;
+    }
+};
+check('The DQL in UserRepository::named() names the User entity and its mapped fields', $dqlParses('SELECT u FROM App\Entity\User u WHERE u.displayName = :name ORDER BY u.email ASC'));
+check('A field the mapping does not map fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE u.nickname = :name'));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

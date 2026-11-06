@@ -92,7 +92,7 @@ impl ImportBatch {
 fn symbol_name_and_kind(span: &SymbolSpan) -> Option<(&str, ImportKind)> {
     match &span.kind {
         SymbolKind::ClassReference { name, context, .. }
-            if !matches!(context, ClassRefContext::UseImport) =>
+            if !matches!(context, ClassRefContext::UseImport | ClassRefContext::Dql) =>
         {
             Some((name, ImportKind::Class))
         }

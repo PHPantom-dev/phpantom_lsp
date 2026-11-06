@@ -18,6 +18,7 @@
 //! Where neither maps the entity, its fields are not known, and nothing
 //! here claims anything about it.
 
+pub(crate) mod dql;
 pub(crate) mod mapping_files;
 
 use std::sync::Arc;
@@ -95,10 +96,7 @@ pub(crate) fn entity_fields(
     class_loader: &ResolvedClassLoader<'_>,
     state: &DoctrineCacheState,
 ) -> Option<Vec<Atom>> {
-    let attribute_entity = entity.doctrine.as_ref().is_some_and(|d| d.is_entity);
-    let file_entity = mapping_files::mapped_fields(&state.mapping_files, &entity.fqn())
-        .is_some_and(|(is_entity, _)| is_entity);
-    if !attribute_entity && !file_entity {
+    if !is_entity(entity, state) {
         return None;
     }
 
@@ -337,10 +335,19 @@ fn ucfirst(field: &str) -> String {
     }
 }
 
-/// The entity classes the repositories among `receivers` manage, for a
-/// field name written against them: the names a repository's criteria and
-/// order take.  A receiver that is no repository with a known entity gives
-/// nothing.
+/// Whether `class` is mapped as an entity, by an attribute or a mapping
+/// file.
+pub(crate) fn is_entity(class: &ClassInfo, state: &DoctrineCacheState) -> bool {
+    class.doctrine.as_ref().is_some_and(|d| d.is_entity)
+        || mapping_files::mapped_fields(&state.mapping_files, &class.fqn())
+            .is_some_and(|(is_entity, _)| is_entity)
+}
+
+/// The entity classes a field name written against `receivers` names a
+/// field of: the entities the repositories among them manage, for the
+/// names a repository's criteria and order take, and the entities among
+/// them themselves, for the fields a DQL variable names.  A receiver that
+/// is neither gives nothing.
 ///
 /// `cache` is the backend's resolved-class cache, which holds the mapping
 /// files a receiver's resolution reads.
@@ -349,8 +356,15 @@ pub(crate) fn managed_entity_classes(
     class_loader: &ResolvedClassLoader<'_>,
     cache: &ResolvedClassCache,
 ) -> Vec<Arc<ClassInfo>> {
+    let state = cache.read().doctrine().clone();
     let mut out: Vec<Arc<ClassInfo>> = Vec::new();
     for receiver in receivers {
+        if is_entity(&receiver, &state) {
+            if !out.iter().any(|known| known.fqn() == receiver.fqn()) {
+                out.push(receiver);
+            }
+            continue;
+        }
         // A receiver typed by its own repository class may come back as
         // parsed; its entity is recorded on the resolved class.
         let receiver = if receiver.doctrine.is_none() && receiver.parent_class.is_some() {

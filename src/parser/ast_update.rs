@@ -570,6 +570,7 @@ impl Backend {
                     service_container: self.reads_service_container(),
                     drupal: self.is_drupal_project(),
                     twig: self.is_twig_project(),
+                    doctrine: self.is_doctrine_project(),
                 },
                 yii_dir.as_deref(),
                 self.drupal_file(uri),

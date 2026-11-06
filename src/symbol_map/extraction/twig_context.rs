@@ -358,6 +358,7 @@ mod tests {
                 service_container: symfony,
                 drupal: false,
                 twig: true,
+                doctrine: false,
             },
             None,
         )

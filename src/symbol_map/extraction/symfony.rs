@@ -2635,6 +2635,7 @@ mod tests {
                 service_container: true,
                 drupal: false,
                 twig: true,
+                doctrine: false,
             },
             None,
         )
@@ -3354,6 +3355,7 @@ mod tests {
                 service_container: false,
                 drupal: false,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -3377,6 +3379,7 @@ mod tests {
                 service_container: true,
                 drupal: false,
                 twig: true,
+                doctrine: false,
             },
             None,
         );
@@ -3406,6 +3409,7 @@ mod tests {
                 service_container: false,
                 drupal: false,
                 twig: true,
+                doctrine: false,
             },
             None,
         );

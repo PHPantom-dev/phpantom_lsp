@@ -289,6 +289,22 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Doctrine DQL field names ────────────────────────────
+        // `'… WHERE u.|'` in a query or a query builder fragment names a
+        // field of the entity the variable stands for.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_dql_field_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_dql_entity_completion(uri, content, position, code)
+        {
+            return Some(response);
+        }
+
         // ── Laravel route controller method completion ─────────
         // Inside `Route::controller(X::class)->group(fn(){…})`,
         // the 2nd argument string of Route::get/post/patch/… is a

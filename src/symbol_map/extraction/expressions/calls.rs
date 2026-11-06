@@ -493,6 +493,7 @@ fn extract_method_call<'a>(
         record_yii_view_sites(object, &member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
         emit_entity_field_spans(object, &member_name, argument_list, ctx);
+        record_dql_call(object, &member_name, argument_list, ctx, scope_start);
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
         emit_call_site(
@@ -722,6 +723,7 @@ mod tests {
                 service_container: true,
                 drupal,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -766,6 +768,7 @@ mod tests {
                 service_container: true,
                 drupal: false,
                 twig: true,
+                doctrine: false,
             },
             None,
         );

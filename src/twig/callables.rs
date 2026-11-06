@@ -149,6 +149,7 @@ fn read_extension_file(uri: &str, content: &str) -> Vec<TwigCallable> {
             service_container: false,
             drupal: false,
             twig: true,
+            doctrine: false,
         },
         None,
         crate::drupal::hooks::DrupalFile::Other,

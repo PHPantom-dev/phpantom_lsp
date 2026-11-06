@@ -329,6 +329,10 @@ pub(crate) struct SymbolMap {
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,
+    /// The DQL identification variables the file's queries and query
+    /// builders declare, with what each stands for.  Empty for every file
+    /// that declares none.
+    pub dql_aliases: Vec<DqlAliasSite>,
     /// Whether the file declares a Twig loader of the project's own: a
     /// class that is one, or a service tagged `twig.loader`.  Such a loader
     /// can serve any template name, so no name can be told missing.
@@ -726,5 +730,30 @@ impl SymbolMap {
     /// Returns `true` when `offset` falls inside a `static` method body.
     pub fn is_in_static_method(&self, offset: u32) -> bool {
         Self::offset_in_sorted_ranges(&self.static_method_scopes, offset)
+    }
+}
+
+/// A DQL identification variable a query or the query builder calls of a
+/// function body declare, and what it stands for.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DqlAliasSite {
+    /// Where the variable can be used: the query, or the function body.
+    pub start: u32,
+    pub end: u32,
+    pub alias: crate::atom::Atom,
+    /// The subject text of what the variable stands for: an entity class,
+    /// or a repository whose entity it is.
+    pub subject: Box<str>,
+}
+
+impl SymbolMap {
+    /// What the DQL variable `alias` stands for at `offset`, as a subject
+    /// text.
+    pub(crate) fn dql_alias_subject(&self, alias: &str, offset: u32) -> Option<&str> {
+        self.dql_aliases
+            .iter()
+            .filter(|site| site.start <= offset && offset <= site.end && site.alias == alias)
+            .min_by_key(|site| site.end - site.start)
+            .map(|site| &*site.subject)
     }
 }

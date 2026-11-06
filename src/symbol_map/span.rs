@@ -99,6 +99,10 @@ pub(crate) enum ClassRefContext {
     /// backed enum (`value-of<Suit>`) is the one genuine class operand, so
     /// the reference is still recorded and still navigable.
     TypeOperatorOperand,
+    /// As a class name in Doctrine Query Language text, which DQL always
+    /// writes fully qualified.  The name lives in a string, so it is never
+    /// shortened to an import.
+    Dql,
     /// As the target of a `@see` or `{@see …}` docblock tag.
     ///
     /// `@see` legally carries URIs, prose, and naming suggestions in
@@ -155,13 +159,14 @@ pub(crate) enum DocblockMemberRef {
     MockedMethod,
     /// A field name a Doctrine repository call keys its criteria or order
     /// by, `$users->findBy(['email' => $email])`, with the repository as
-    /// the subject.
+    /// the subject, or one a DQL variable names, `u.email`, with the entity
+    /// or the repository the variable stands for as the subject.
     ///
-    /// The name is the property of the repository's entity that the field
-    /// maps.  A consumer that resolves the subject swaps each repository for
-    /// the entity it manages (see
+    /// The name is the property of the entity that the field maps.  A
+    /// consumer that resolves the subject swaps each repository for the
+    /// entity it manages and keeps each entity (see
     /// [`crate::doctrine::managed_entity_classes`]), and drops the span
-    /// when there is none.
+    /// when there is neither.
     EntityField,
     /// A named argument's label in an attribute, `#[Foo(bar: 1)]`, with the
     /// attribute class as the subject.

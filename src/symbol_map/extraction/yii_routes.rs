@@ -400,6 +400,7 @@ mod tests {
                 service_container: false,
                 drupal: false,
                 twig: false,
+                doctrine: false,
             },
             Some(std::path::Path::new("/p")),
         )

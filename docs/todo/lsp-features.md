@@ -795,38 +795,80 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ---
 
-## F44. Doctrine DQL and query builder strings
+## F67. DQL variables joined through an association
 
-**Impact: Medium · Complexity: High**
+**Impact: Medium · Complexity: Medium**
 
 ```php
-$em->createQuery('SELECT u FROM App\Entity\User u WHERE u.emial = :e');
-$qb->select('u')->from(User::class, 'u')->where('u.email = :e')->getQuery()->getResult();
+$qb->from(User::class, 'u')->join('u.team', 't')->where('t.name = :n');
+$em->createQuery('SELECT u FROM App\Entity\User u WHERE x.id = 1');
 ```
 
-DQL names entity classes and their fields in strings, directly or through
-a query builder's `select()`, `from()`, `join()`, and `where()`. Nothing in
-them completes or navigates, an unknown entity or field is not reported,
-and `getResult()` is `mixed` where the query settles it (`list<User>`, or
-an array shape for a scalar select). PHPStan's Doctrine extension parses the
-DQL with Doctrine's own parser and the booted metadata; PHPantom would need
-a DQL reader of its own over the static mapping, with the query builder's
-chain followed the way `getRepository()`'s repository is.
+A DQL variable declared by an entity class, `X::class`, or a repository's
+`createQueryBuilder('u')` stands for its entity, so its fields complete,
+navigate, and are checked. One joined through an association (`t` above)
+stands for nothing, because the association's target entity is not
+recorded: the field after the variable is silent. A variable nothing
+declares (`x`) is not reported either, though PHPStan's Doctrine extension
+reports it as `'x' is not defined`.
 
-Navigation and completion of the entity and field names are the cheaper
-half and the one an editor user notices; result types follow. The extension
-also types a query as `Query<TKey, TResult>`, so `getResult()` and its
-siblings follow from a `Query` passed in with its result type, and reads
-the expression builder's methods (`expr()->isNull('u.email')`) as the DQL
-fragment they build.
+Record each association's target on the mapping (`targetEntity:` on the
+attribute, the property's type for a to-one association, `target-entity`
+in a mapping file), and let a join's variable stand for the target of the
+path it joins. A field span's subject is a single subject text today, so a
+path needs a way to say "the target of this association of that entity".
 
-The extension's fixtures are `tests/phpstan_doctrine/data/QueryResult/`
-for the types and the `dql*.fixture` and `query_builder_dql*.fixture`
-fixtures in `tests/fixtures/phpstan_doctrine/` for the checks.
+The fixtures are `query_builder_dql_branches.fixture` and
+`query_builder_dql_branching_performance.fixture` in
+`tests/fixtures/phpstan_doctrine/`.
 
-**Where to look:** `src/framework.rs` (the Doctrine mapping index), and
-PHPStan's Doctrine extension (`Rules/Doctrine/ORM/DqlRule`,
-`QueryBuilderDqlRule`, `Type/Doctrine/Query/`, `Type/Doctrine/QueryBuilder/`).
+**Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`,
+`src/doctrine/dql.rs`, `src/parser/attributes.rs` (the Doctrine mapping),
+`src/doctrine/mapping_files.rs`.
+
+---
+
+## F68. DQL syntax errors
+
+**Impact: Low-Medium · Complexity: High**
+
+```php
+$em->createQuery('SELECT e FROM App\Entity\User'); // no identification variable
+$qb->andWhere('e.id = 1)');
+```
+
+The DQL reader picks the names out of a query without checking its
+grammar, so a query that does not parse is not reported. PHPStan's
+Doctrine extension reports Doctrine's own parser error. Checking it here
+means a DQL grammar of our own, over the whole query a builder assembles.
+
+The fixtures are `dql.fixture` and `query_builder_dql.fixture` in
+`tests/fixtures/phpstan_doctrine/`.
+
+**Where to look:** `src/doctrine/dql.rs`, and Doctrine ORM's
+`Query/Parser.php` for the grammar.
+
+---
+
+## F69. DQL in expression objects and other methods' query builders
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$qb->add('orderBy', new Expr\OrderBy('e.name', 'ASC'));
+$this->createQb()->andWhere('e.nonexistent = 1'); // `e` declared in createQb()
+```
+
+The DQL a query builder method or an `expr()` call takes is read, with the
+variables the builder calls of the same function body declare. The DQL an
+expression object is constructed with (`new Expr\OrderBy()`, `new
+Expr\Andx()`) is not, and neither is a fragment added to a builder that
+another method returns, whose variables that method declares.
+
+The fixture is `query_builder_dql.fixture` in
+`tests/fixtures/phpstan_doctrine/`.
+
+**Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`.
 
 ---
 

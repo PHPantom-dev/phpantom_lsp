@@ -1502,6 +1502,7 @@ mod tests {
                 service_container: false,
                 drupal: true,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -1547,6 +1548,7 @@ mod tests {
                 service_container: true,
                 drupal: true,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -1635,6 +1637,7 @@ trait LayoutRoutes {
                 service_container: true,
                 drupal: true,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -1721,6 +1724,7 @@ abstract class Base {
                 service_container: true,
                 drupal: true,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -1862,6 +1866,7 @@ final class About {
                 service_container: true,
                 drupal: true,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -1958,6 +1963,7 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
                     service_container: true,
                     drupal: true,
                     twig: false,
+                    doctrine: false,
                 },
                 None,
                 file,

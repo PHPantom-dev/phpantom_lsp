@@ -1,4 +1,5 @@
-//! Completion of the entity fields a Doctrine repository call takes.
+//! Completion of the entity fields a Doctrine repository call or a DQL
+//! variable names.
 //!
 //! Inside `$users->findBy(['|' => …])`, `->findOneBy()`, `->count()`, and
 //! the `$orderBy` of the first two, offer the fields the repository's
@@ -69,8 +70,139 @@ impl Backend {
             AccessKind::Arrow,
             &loaders.resolution_ctx_at(content, cursor),
         ));
-        let entities = crate::doctrine::managed_entity_classes(
+        let prefix = content.get(quote + 1..cursor_offset)?;
+        let edit_range = Range {
+            start: offset_to_position(content, quote + 1),
+            end: position,
+        };
+        self.entity_field_items(
             resolved,
+            class_loader,
+            prefix,
+            edit_range,
+            &argument.used_keys,
+        )
+    }
+
+    /// Complete a field name in DQL after the variable it belongs to:
+    /// `'… WHERE u.|'` in a query or a query builder fragment.  What the
+    /// variable stands for is what the file's symbol map records for it.
+    pub(crate) fn try_dql_field_completion(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        ctx: &FileContext,
+        code: &CodeContext<'_>,
+    ) -> Option<CompletionResponse> {
+        let (quote, _) = code.open_string?;
+        let cursor_offset = position_to_offset(content, position) as usize;
+        let text = content.get(quote + 1..cursor_offset)?;
+        let (alias, field_start) = crate::doctrine::dql::path_before(text, text.len())?;
+        let map = self.symbol_map_for(uri)?;
+        let cursor = cursor_offset as u32;
+        let subject = SubjectExpr::parse(map.dql_alias_subject(alias, cursor)?);
+        let loaders = self.file_loaders(ctx);
+        let class_loader = loaders.resolved_class_loader();
+        let resolved = ResolvedType::into_arced_classes(resolve_target_classes_expr(
+            &subject,
+            AccessKind::Arrow,
+            &loaders.resolution_ctx_at(content, cursor),
+        ));
+        let start = quote + 1 + field_start;
+        let edit_range = Range {
+            start: offset_to_position(content, start),
+            end: position,
+        };
+        self.entity_field_items(
+            resolved,
+            class_loader,
+            &text[field_start..],
+            edit_range,
+            &[],
+        )
+    }
+
+    /// Complete an entity class name in DQL where a range or a join names
+    /// one: `'SELECT u FROM App\Entity\U|'`.  DQL names classes by their
+    /// fully-qualified name, so that is what is inserted, and only classes
+    /// mapped as entities are offered.
+    pub(crate) fn try_dql_entity_completion(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        code: &CodeContext<'_>,
+    ) -> Option<CompletionResponse> {
+        if !self.is_doctrine_project() {
+            return None;
+        }
+        let (quote, _) = code.open_string?;
+        let cursor_offset = position_to_offset(content, position) as usize;
+        let text = content.get(quote + 1..cursor_offset)?;
+        let prefix_start = text
+            .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '\\'))
+            .map_or(0, |i| i + 1);
+        let prefix = &text[prefix_start..];
+        let before = text[..prefix_start].trim_end();
+        if before.len() == text[..prefix_start].len() {
+            return None;
+        }
+        let keyword_start = before
+            .rfind(|c: char| !c.is_ascii_alphabetic())
+            .map_or(0, |i| i + 1);
+        let keyword = &before[keyword_start..];
+        if !["FROM", "JOIN", "UPDATE", "DELETE"]
+            .iter()
+            .any(|k| k.eq_ignore_ascii_case(keyword))
+        {
+            return None;
+        }
+
+        let no_imports = std::collections::HashMap::new();
+        let (items, _) = self.build_class_name_completions(
+            crate::completion::context::class_completion::ClassCompletionParams {
+                file_use_map: &no_imports,
+                file_namespace: &None,
+                prefix,
+                content,
+                context: crate::completion::context::class_completion::ClassNameContext::UseImport,
+                position,
+                affinity_table_override: None,
+                uri,
+            },
+        );
+        let state = self.resolved_class_cache.read().doctrine().clone();
+        let items: Vec<CompletionItem> = items
+            .into_iter()
+            .filter(|item| {
+                item.detail
+                    .as_deref()
+                    .and_then(|fqn| self.find_or_load_class(fqn))
+                    .is_some_and(|class| crate::doctrine::is_entity(&class, &state))
+            })
+            .collect();
+        (!items.is_empty()).then_some(CompletionResponse::CompletionList(CompletionList {
+            is_incomplete: true,
+            items,
+            apply_kind: None,
+            item_defaults: None,
+        }))
+    }
+
+    /// The fields every entity `receivers` stands for maps, starting with
+    /// `prefix` and not among `used`, as completion items replacing
+    /// `edit_range`.
+    fn entity_field_items(
+        &self,
+        receivers: Vec<std::sync::Arc<crate::types::ClassInfo>>,
+        class_loader: &crate::class_lookup::ResolvedClassLoader<'_>,
+        prefix: &str,
+        edit_range: Range,
+        used: &[String],
+    ) -> Option<CompletionResponse> {
+        let entities = crate::doctrine::managed_entity_classes(
+            receivers,
             class_loader,
             &self.resolved_class_cache,
         );
@@ -94,17 +226,12 @@ impl Backend {
             Some(&self.resolved_class_cache),
         );
 
-        let prefix = content.get(quote + 1..cursor_offset)?;
         let prefix_lower = prefix.to_lowercase();
-        let edit_range = Range {
-            start: offset_to_position(content, quote + 1),
-            end: position,
-        };
         let items: Vec<CompletionItem> = fields?
             .into_iter()
             .filter(|field| {
                 field.to_lowercase().starts_with(&prefix_lower)
-                    && !argument.used_keys.iter().any(|used| used == field.as_str())
+                    && !used.iter().any(|used| used == field.as_str())
             })
             .enumerate()
             .map(|(i, field)| {

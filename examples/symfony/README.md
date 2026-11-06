@@ -114,6 +114,10 @@ catalogues together, the way a real Symfony project does.
   `findBy<Field>()`, `findOneBy<Field>()`, and `countBy<Field>()` for each
   field `config/doctrine/User.orm.xml` maps, and the keys of `findBy()`
   complete those fields and jump to their properties.
+- In `UserRepository::named()`, complete after `u.` in the query builder
+  or the DQL string. The fields of the entity the variable stands for
+  complete and jump to their properties, the entity class in `FROM` jumps
+  to the class, and a field the mapping does not map is reported.
 
 ## Getting started
 

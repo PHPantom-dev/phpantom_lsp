@@ -593,6 +593,32 @@ extension's fixtures declare theirs that way, in
 
 ---
 
+## T63. A Doctrine query's result is not typed by its DQL
+
+**Impact: Medium · Complexity: High**
+
+```php
+$users = $em->createQuery('SELECT u FROM App\Entity\User u')->getResult(); // mixed, not list<User>
+$names = $qb->select('u.name')->from(User::class, 'u')->getQuery()->getArrayResult();
+```
+
+The entity classes and fields a query names are read for navigation and
+diagnostics, but `getResult()` and its siblings stay `mixed`. PHPStan's
+Doctrine extension types a query as `Query<TKey, TResult>` from what its
+`SELECT` returns (an entity, a list of them, an array shape for a scalar
+select) and follows the query builder's chain into `getQuery()`; it also
+reads the expression builder's methods as the fragments they build.
+
+The fixtures are the `assertType()` files in
+`tests/phpstan_doctrine/data/QueryResult/`.
+
+**Where to look:** `src/doctrine/dql.rs`,
+`src/type_engine/call_resolution/doctrine_repository.rs` (how
+`getRepository()` is typed), and PHPStan's Doctrine extension
+(`Type/Doctrine/Query/`, `Type/Doctrine/QueryBuilder/`).
+
+---
+
 ## T56. A DBAL result's row count ignores the connection's driver
 
 **Impact: Low · Complexity: Low-Medium**

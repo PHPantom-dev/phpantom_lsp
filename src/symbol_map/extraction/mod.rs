@@ -221,6 +221,12 @@ struct ExtractionCtx<'a> {
     yii_read_chains: Vec<(u32, u32)>,
     /// The routes the file declares.
     routes: Vec<crate::symbol_map::RouteSite>,
+    /// Whether the project uses Doctrine, which gates reading DQL.
+    doctrine: bool,
+    /// The DQL variables and fields read so far (see [`doctrine_dql`]).
+    dql: doctrine_dql::DqlPending,
+    /// The DQL variables settled once the file is read.
+    dql_aliases: Vec<crate::symbol_map::DqlAliasSite>,
 }
 
 /// A variable token's name without its `$`.
@@ -321,6 +327,7 @@ impl<'a> ExtractionCtx<'a> {
 }
 
 mod class_like;
+mod doctrine_dql;
 mod doctrine_fields;
 mod drupal;
 mod expressions;
@@ -338,6 +345,7 @@ mod yii;
 mod yii_routes;
 
 use class_like::*;
+use doctrine_dql::*;
 use doctrine_fields::*;
 use drupal::*;
 use expressions::*;
@@ -394,6 +402,8 @@ pub(crate) struct Frameworks {
     pub drupal: bool,
     /// The project uses Twig.
     pub twig: bool,
+    /// The project uses Doctrine.
+    pub doctrine: bool,
 }
 
 #[cfg(test)]
@@ -404,6 +414,7 @@ impl Frameworks {
         service_container: true,
         drupal: true,
         twig: true,
+        doctrine: true,
     };
 }
 
@@ -498,6 +509,7 @@ fn extract_symbol_map_inner(
         service_container,
         drupal,
         twig,
+        doctrine,
     } = frameworks;
     let mut ctx = ExtractionCtx {
         spans: Vec::new(),
@@ -565,12 +577,16 @@ fn extract_symbol_map_inner(
         names_yii_router: None,
         yii_read_chains: Vec::new(),
         routes: Vec::new(),
+        doctrine,
+        dql: Default::default(),
+        dql_aliases: Vec::new(),
     };
 
     for stmt in program.statements.iter() {
         extract_from_statement(stmt, &mut ctx, 0);
     }
     apply_lookup_guards(&mut ctx);
+    finish_dql(&mut ctx);
 
     // ── Sweep all docblock trivia for floating references ───────────
     // Docblocks attached to classes, functions, methods, properties, and
@@ -736,6 +752,7 @@ fn extract_symbol_map_inner(
         drupal_hooks: ctx.drupal_hooks,
         drupal_computed_hooks: ctx.drupal_computed_hooks,
         routes: ctx.routes,
+        dql_aliases: ctx.dql_aliases,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx
             .route_imports
