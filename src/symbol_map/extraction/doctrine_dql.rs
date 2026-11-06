@@ -19,12 +19,18 @@
 //! through an association, and one a dynamic part of the text declares,
 //! stand for nothing either.
 //!
+//! Each query, and each fragment whose place in the query is known, is also
+//! checked against DQL's grammar.  Where one stops following it is recorded
+//! with the call it was read from, for the diagnostic pass to report once
+//! the type engine confirms the call is Doctrine's.
+//!
 //! Only a Doctrine project's files are read: builder methods such as
 //! `where()` and `from()` are common names elsewhere.
 
 use std::ops::Range;
 
 use crate::doctrine::dql::{self, DYNAMIC, DeclRoot, DqlRef};
+use crate::doctrine::dql_syntax::{self, Grammar};
 
 use super::*;
 
@@ -301,8 +307,9 @@ fn php_root(expr: &Expression<'_>) -> Root {
 /// What a query builder method's arguments hold, by position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Arg {
-    /// A fragment of DQL, or an array of them.
-    Fragment,
+    /// A fragment of DQL, or an array of them, of the part of the grammar
+    /// its place in the query gives it.
+    Fragment(Grammar),
     /// An entity class, declared with the variable the next argument names.
     Entity,
     /// An association path or an entity, joined with the variable the next
@@ -321,32 +328,100 @@ enum Arg {
 /// variadic one.  `None` for a method that takes no DQL.
 fn builder_args(method: &str) -> Option<(&'static [Arg], bool)> {
     use Arg::*;
-    const VARIADIC: &[&str] = &[
-        "select",
-        "addSelect",
-        "where",
-        "andWhere",
-        "orWhere",
-        "having",
-        "andHaving",
-        "orHaving",
-        "groupBy",
-        "addGroupBy",
-    ];
-    if VARIADIC.iter().any(|m| m.eq_ignore_ascii_case(method)) {
-        return Some((&[Fragment], true));
-    }
     let args: &'static [Arg] = match method.to_ascii_lowercase().as_str() {
-        "orderby" | "addorderby" => &[Fragment],
-        "from" => &[Entity, Alias, Fragment],
-        "join" | "innerjoin" | "leftjoin" => &[Join, Alias, Skip, Fragment, Fragment],
+        "select" | "addselect" => return Some((&[Fragment(Grammar::SelectList)], true)),
+        "where" | "andwhere" | "orwhere" | "having" | "andhaving" | "orhaving" => {
+            return Some((&[Fragment(Grammar::Condition)], true));
+        }
+        "groupby" | "addgroupby" => return Some((&[Fragment(Grammar::GroupBy)], true)),
+        "orderby" | "addorderby" => &[Fragment(Grammar::OrderBy)],
+        "from" => &[Entity, Alias, Fragment(Grammar::Path)],
+        "join" | "innerjoin" | "leftjoin" => &[
+            Join,
+            Alias,
+            Skip,
+            Fragment(Grammar::Condition),
+            Fragment(Grammar::Path),
+        ],
         "update" | "delete" => &[Entity, Alias],
-        "set" => &[Fragment, Fragment],
-        "indexby" => &[Skip, Fragment],
-        "createquerybuilder" => &[RepositoryAlias, Fragment],
+        "set" => &[Fragment(Grammar::Path), Fragment(Grammar::NewValue)],
+        "indexby" => &[Skip, Fragment(Grammar::Path)],
+        "createquerybuilder" => &[RepositoryAlias, Fragment(Grammar::Path)],
         _ => return None,
     };
     Some((args, false))
+}
+
+/// The part of the grammar the argument at `index` of the expression
+/// builder method `method` is, for the methods whose arguments are known.
+fn expr_grammar(method: &str, index: usize) -> Option<Grammar> {
+    Some(match method.to_ascii_lowercase().as_str() {
+        "andx" | "orx" | "not" => Grammar::Condition,
+        "count" | "countdistinct" | "avg" | "max" | "min" => Grammar::Aggregate,
+        "exists" | "all" | "some" | "any" => Grammar::Subselect,
+        "in" | "notin" if index == 1 => Grammar::InList,
+        "isinstanceof" if index == 1 => return None,
+        "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "notin" | "isnull" | "isnotnull"
+        | "between" | "like" | "notlike" | "ismemberof" | "isinstanceof" | "sum" | "diff"
+        | "prod" | "quot" | "abs" | "sqrt" | "mod" | "lower" | "upper" | "length" | "trim"
+        | "concat" | "substring" => Grammar::Operand,
+        "asc" | "desc" => Grammar::OrderBy,
+        _ => return None,
+    })
+}
+
+/// The classes whose methods take DQL, which the receiver of a call that
+/// does must be for its text to be judged.
+const QUERY_BUILDER: &str = "Doctrine\\ORM\\QueryBuilder";
+const EXPRESSION_BUILDER: &str = "Doctrine\\ORM\\Query\\Expr";
+const ENTITY_MANAGER: &str = "Doctrine\\ORM\\EntityManagerInterface";
+const QUERY: &str = "Doctrine\\ORM\\Query";
+const REPOSITORY: &str = "Doctrine\\ORM\\EntityRepository";
+
+/// The call DQL is read from: where its method name starts, and the class
+/// its receiver must be.
+#[derive(Debug, Clone, Copy)]
+struct DqlCall {
+    method_start: u32,
+    receiver: &'static str,
+}
+
+impl DqlCall {
+    fn with(self, receiver: &'static str) -> Self {
+        Self { receiver, ..self }
+    }
+}
+
+/// Record where the DQL `source`, read from `expr`, stops following the
+/// part of the grammar `grammar`, if it does.  Text a dynamic part runs
+/// through is not judged.
+fn check_syntax(
+    source: &DqlSource,
+    expr: &Expression<'_>,
+    grammar: Grammar,
+    call: DqlCall,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if source.text.contains(DYNAMIC) {
+        return;
+    }
+    let Some(error) = dql_syntax::check(&source.text, grammar) else {
+        return;
+    };
+    let span = expr.span();
+    let (start, end) = error
+        .range
+        .as_ref()
+        .and_then(|range| source.source_range(range))
+        .unwrap_or((span.start.offset, span.end.offset));
+    ctx.dql_syntax_errors
+        .push(crate::symbol_map::DqlSyntaxSite {
+            start,
+            end,
+            message: error.message.into_boxed_str(),
+            call: call.method_start,
+            receiver: call.receiver,
+        });
 }
 
 /// The parameter names of a query builder method's arguments, for a call
@@ -382,6 +457,7 @@ fn is_expression_builder(object: &Expression<'_>) -> bool {
 pub(super) fn record_dql_call(
     object: &Expression<'_>,
     method: &str,
+    method_start: u32,
     arguments: &ArgumentList<'_>,
     ctx: &mut ExtractionCtx<'_>,
     scope_start: u32,
@@ -389,7 +465,12 @@ pub(super) fn record_dql_call(
     if !ctx.doctrine {
         return;
     }
-    if method.eq_ignore_ascii_case("createQuery") || method.eq_ignore_ascii_case("setDQL") {
+    let call = DqlCall {
+        method_start,
+        receiver: QUERY_BUILDER,
+    };
+    let create_query = method.eq_ignore_ascii_case("createQuery");
+    if create_query || method.eq_ignore_ascii_case("setDQL") {
         let Some(argument) = argument_at(arguments, 0, "dql") else {
             return;
         };
@@ -400,6 +481,14 @@ pub(super) fn record_dql_call(
         if source.literal {
             ctx.dql.queries.push((span.start.offset, span.end.offset));
             read_source(&source, table, ctx);
+            let receiver = if create_query { ENTITY_MANAGER } else { QUERY };
+            check_syntax(
+                &source,
+                argument,
+                Grammar::Statement,
+                call.with(receiver),
+                ctx,
+            );
         }
         return;
     }
@@ -410,11 +499,27 @@ pub(super) fn record_dql_call(
         if method.eq_ignore_ascii_case("literal") {
             return;
         }
-        for argument in arguments.arguments.iter() {
-            read_fragment(argument.value(), table, ctx);
+        for (index, argument) in arguments.arguments.iter().enumerate() {
+            let grammar = match argument {
+                Argument::Positional(positional) if positional.ellipsis.is_none() => {
+                    expr_grammar(method, index)
+                }
+                _ => None,
+            };
+            read_fragment(
+                argument.value(),
+                table,
+                grammar.map(|grammar| (grammar, call.with(EXPRESSION_BUILDER))),
+                ctx,
+            );
         }
         return;
     }
+    let call = if method.eq_ignore_ascii_case("createQueryBuilder") {
+        call.with(REPOSITORY)
+    } else {
+        call
+    };
     let Some((roles, variadic)) = builder_args(method) else {
         return;
     };
@@ -446,15 +551,15 @@ pub(super) fn record_dql_call(
             continue;
         };
         match role_at(index) {
-            Arg::Fragment => match crate::parser::array_literal_elements(argument) {
+            Arg::Fragment(grammar) => match crate::parser::array_literal_elements(argument) {
                 Some(elements) => {
                     for element in elements.iter() {
                         if let Some(value) = crate::parser::array_element_value(element) {
-                            read_fragment(value, table, ctx);
+                            read_fragment(value, table, Some((grammar, call)), ctx);
                         }
                     }
                 }
-                None => read_fragment(argument, table, ctx),
+                None => read_fragment(argument, table, Some((grammar, call)), ctx),
             },
             role @ (Arg::Entity | Arg::Join) => {
                 // Without the variable it declares the call is no query
@@ -522,11 +627,21 @@ fn string_literal_text<'a>(expr: &Expression<'a>) -> Option<&'a str> {
     }
 }
 
-fn read_fragment(expr: &Expression<'_>, table: DqlTable, ctx: &mut ExtractionCtx<'_>) {
+/// Read the DQL fragment `expr`, and check it against `grammar`'s part
+/// of the grammar when one is given.
+fn read_fragment(
+    expr: &Expression<'_>,
+    table: DqlTable,
+    grammar: Option<(Grammar, DqlCall)>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
     let mut source = DqlSource::new();
     source.push_expr(expr, ctx.content);
     if source.literal {
         read_source(&source, table, ctx);
+        if let Some((grammar, call)) = grammar {
+            check_syntax(&source, expr, grammar, call, ctx);
+        }
     }
 }
 

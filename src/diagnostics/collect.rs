@@ -162,6 +162,7 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         "unknown_form_option",
         Backend::collect_form_option_diagnostics,
     ),
+    always("dql_syntax_error", Backend::collect_dql_syntax_diagnostics),
     always(
         "invalid_drupal_route_parameter",
         Backend::collect_drupal_route_parameter_diagnostics,

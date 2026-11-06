@@ -26,7 +26,8 @@ final class UserRepository extends ServiceEntityRepository
         // Try: complete after `u.`, or go-to-definition on displayName or on
         // the entity class. The query builder's `u` stands for the
         // repository's own entity, and a field the mapping does not map is
-        // reported.
+        // reported. Delete the `u` after the entity class in the DQL string,
+        // or add a `)` to the `where()`, and the syntax error is reported.
         $byBuilder = $this->createQueryBuilder('u')
             ->where('u.displayName = :name')
             ->orderBy('u.email', 'ASC')

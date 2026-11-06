@@ -120,7 +120,9 @@ catalogues together, the way a real Symfony project does.
 - In `UserRepository::named()`, complete after `u.` in the query builder
   or the DQL string. The fields of the entity the variable stands for
   complete and jump to their properties, the entity class in `FROM` jumps
-  to the class, and a field the mapping does not map is reported.
+  to the class, and a field the mapping does not map is reported. DQL
+  that Doctrine cannot parse, such as a query whose entity class has no
+  identification variable, is reported too.
 - In `UserRepository::named()`, hover `$byBuilder` or `$byQuery`: a query
   is typed by what its DQL selects, so both are a `list<User>`. In
   `displayNamesByEmail()`, hover `$rows`, a shape of the selected fields

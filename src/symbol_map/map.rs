@@ -333,6 +333,10 @@ pub(crate) struct SymbolMap {
     /// builders declare, with what each stands for.  Empty for every file
     /// that declares none.
     pub dql_aliases: Vec<DqlAliasSite>,
+    /// Where the DQL the file's queries and query builders hold stops
+    /// following the grammar, in source order.  Empty for every file whose
+    /// DQL parses.
+    pub dql_syntax_errors: Vec<DqlSyntaxSite>,
     /// Whether the file declares a Twig loader of the project's own: a
     /// class that is one, or a service tagged `twig.loader`.  Such a loader
     /// can serve any template name, so no name can be told missing.
@@ -744,6 +748,21 @@ pub(crate) struct DqlAliasSite {
     /// The subject text of what the variable stands for: an entity class,
     /// or a repository whose entity it is.
     pub subject: Box<str>,
+}
+
+/// Where a piece of DQL stops following the grammar.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DqlSyntaxSite {
+    /// The token the grammar does not allow, or the whole argument when
+    /// the text ends too early or the token is not written out.
+    pub start: u32,
+    pub end: u32,
+    pub message: Box<str>,
+    /// Where the method name of the call that takes the DQL starts.
+    pub call: u32,
+    /// The class the call's receiver must be for the DQL to be judged: a
+    /// method of that name on anything else takes something else.
+    pub receiver: &'static str,
 }
 
 impl SymbolMap {

@@ -12,7 +12,8 @@ const COMPOSER: &str = r#"{
     "require": { "doctrine/orm": "^3.0" },
     "autoload": { "psr-4": {
         "App\\": "src/",
-        "Doctrine\\ORM\\": "stubs/orm/"
+        "Doctrine\\ORM\\": "stubs/orm/",
+        "Doctrine\\DBAL\\": "stubs/dbal/"
     } }
 }"#;
 
@@ -60,8 +61,22 @@ class QueryBuilder {
     public function leftJoin(string $join, string $alias, ?string $conditionType = null, mixed $condition = null, ?string $indexBy = null): static {}
     public function where(mixed ...$predicates): static {}
     public function andWhere(mixed ...$where): static {}
+    public function groupBy(string ...$groupBy): static {}
+    public function having(mixed ...$having): static {}
+    public function set(string $key, mixed $value): static {}
     public function orderBy(string $sort, ?string $order = null): static {}
     public function getQuery(): Query {}
+}
+",
+    ),
+    (
+        "stubs/dbal/Query/QueryBuilder.php",
+        "<?php
+namespace Doctrine\\DBAL\\Query;
+class QueryBuilder {
+    public function select(string ...$expressions): static {}
+    public function from(string $table, ?string $alias = null): static {}
+    public function where(mixed ...$predicates): static {}
 }
 ",
     ),
@@ -71,6 +86,9 @@ class QueryBuilder {
 namespace Doctrine\\ORM\\Query;
 class Expr {
     public function isNull(string $x): string {}
+    public function in(string $x, mixed $y): object {}
+    public function exists(mixed $subquery): object {}
+    public function orX(mixed ...$x): object {}
     public function eq(mixed $x, mixed $y): object {}
     public function literal(mixed $literal): object {}
 }
@@ -435,4 +453,111 @@ async fn an_entity_name_in_dql_is_not_offered_an_import() {
         crate::common::find_action_containing(&actions, "Import").is_none(),
         "{actions:?}"
     );
+}
+
+/// The DQL syntax errors reported for a service whose method body is
+/// `body`: the text each covers and its message.
+async fn syntax_errors(body: &str) -> Vec<(String, String)> {
+    let (backend, _dir, uri, content, _) = open_service(&format!("{body}§")).await;
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), &content, &mut out);
+    let lines: Vec<&str> = content.lines().collect();
+    out.iter()
+        .filter(|d| d.code == Some(Code::String("dql_syntax_error".into())))
+        .map(|d| {
+            let line = lines[d.range.start.line as usize];
+            let covered = if d.range.start.line == d.range.end.line {
+                line[d.range.start.character as usize..d.range.end.character as usize].to_string()
+            } else {
+                line[d.range.start.character as usize..].to_string()
+            };
+            (covered, message_text(&d.message).to_string())
+        })
+        .collect()
+}
+
+fn pair(covered: &str, message: &str) -> (String, String) {
+    (covered.to_string(), format!("DQL syntax error: {message}"))
+}
+
+#[tokio::test]
+async fn a_query_that_does_not_parse_is_reported() {
+    let errors = syntax_errors(
+        "        $em->createQuery('SELECT u FROM App\\Entity\\User');
+        $em->createQuery('SELECT u FROM App\\Entity\\User u WHERE u.email = :e)');
+        $em->createQuery('SELECT u FROM ' . User::class . ' u WHERE u.email');
+        $em->createQuery()->setDQL('SELEC u FROM App\\Entity\\User u');",
+    )
+    .await;
+    assert_eq!(
+        errors,
+        vec![
+            pair(
+                "'SELECT u FROM App\\Entity\\User'",
+                "expected an identification variable, got end of string"
+            ),
+            pair(")", "expected end of string, got ')'"),
+            pair(
+                "'SELECT u FROM ' . User::class . ' u WHERE u.email'",
+                "expected =, <, <=, <>, >, >= or !=, got end of string"
+            ),
+            pair("SELEC", "expected SELECT, UPDATE or DELETE, got 'SELEC'"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_query_builder_fragment_that_does_not_parse_is_reported() {
+    let errors = syntax_errors(
+        "        $qb = $em->createQueryBuilder();
+        $qb->select('u.id u.email')->from(User::class, 'u')->leftJoin('u.team', 't', 'WITH', 't.id = = 1');
+        $qb->andWhere('u.id = 1)')->andWhere($qb->expr()->isNull('u.email)'));
+        $qb->groupBy('u.id,')->having('COUNT(u.id > 1')->orderBy('u.email DESC DESC');
+        $users->createQueryBuilder('x')->where(['x.id IN :ids']);",
+    )
+    .await;
+    assert_eq!(
+        errors,
+        vec![
+            pair(".", "expected end of string, got '.'"),
+            pair("=", "expected a literal, got '='"),
+            pair(")", "expected end of string, got ')'"),
+            pair(")", "expected end of string, got ')'"),
+            pair(
+                "'u.id,'",
+                "expected an identification variable, got end of string"
+            ),
+            pair("'COUNT(u.id > 1'", "expected ')', got end of string"),
+            pair("DESC", "expected end of string, got 'DESC'"),
+            pair(":ids", "expected '(', got ':ids'"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn dql_that_parses_is_not_reported() {
+    let errors = syntax_errors(
+        "        $em->createQuery('SELECT u, t FROM App\\Entity\\User u LEFT JOIN u.team t WITH t.name LIKE :n WHERE u.id IN (SELECT u2.id FROM App\\Entity\\User u2) AND u.email IS NOT NULL ORDER BY u.email DESC');
+        $em->createQuery(\"UPDATE App\\\\Entity\\\\User u SET u.email = 'x' WHERE u.id = ?1\");
+        $qb = $em->createQueryBuilder();
+        $qb->select('u', 'COUNT(t.id) AS HIDDEN teams')->from(User::class, 'u', 'u.id')->join('u.team', 't', 'WITH', 't.id > 0');
+        $qb->where($qb->expr()->orX('u.id = 1', $qb->expr()->in('u.id', 'SELECT u3.id FROM App\\Entity\\User u3')));
+        $qb->andWhere($qb->expr()->exists('SELECT t2 FROM App\\Entity\\Team t2'));
+        $qb->groupBy('u.id')->having('COUNT(t.id) > 1')->orderBy('u.email', 'ASC')->set('u.email', ':e');
+        $qb->andWhere('DATE_FORMAT(u.created, :format) = :day');",
+    )
+    .await;
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[tokio::test]
+async fn dql_whose_call_is_not_doctrine_s_or_whose_text_is_dynamic_is_not_reported() {
+    let errors = syntax_errors(
+        "        $sql = new \\Doctrine\\DBAL\\Query\\QueryBuilder();
+        $sql->select('u.*')->from('users', 'u')->where('u.flags & 4 = 4');
+        $em->createQuery('SELECT u FROM App\\Entity\\User u WHERE u.id = ' . $id . ')');
+        $em->createQueryBuilder()->select('u')->from(User::class, 'u')->where('u.id IN (' . implode(',', $ids));",
+    )
+    .await;
+    assert!(errors.is_empty(), "{errors:?}");
 }

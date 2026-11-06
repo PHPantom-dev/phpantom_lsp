@@ -19,6 +19,7 @@
 //! here claims anything about it.
 
 pub(crate) mod dql;
+pub(crate) mod dql_syntax;
 pub(crate) mod mapping_files;
 pub(crate) mod query;
 

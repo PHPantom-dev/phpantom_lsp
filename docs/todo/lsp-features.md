@@ -828,28 +828,6 @@ The fixtures are `query_builder_dql_branches.fixture` and
 
 ---
 
-## F68. DQL syntax errors
-
-**Impact: Low-Medium · Complexity: High**
-
-```php
-$em->createQuery('SELECT e FROM App\Entity\User'); // no identification variable
-$qb->andWhere('e.id = 1)');
-```
-
-The DQL reader picks the names out of a query without checking its
-grammar, so a query that does not parse is not reported. PHPStan's
-Doctrine extension reports Doctrine's own parser error. Checking it here
-means a DQL grammar of our own, over the whole query a builder assembles.
-
-The fixtures are `dql.fixture` and `query_builder_dql.fixture` in
-`tests/fixtures/phpstan_doctrine/`.
-
-**Where to look:** `src/doctrine/dql.rs`, and Doctrine ORM's
-`Query/Parser.php` for the grammar.
-
----
-
 ## F69. DQL in expression objects and other methods' query builders
 
 **Impact: Low-Medium · Complexity: Medium**

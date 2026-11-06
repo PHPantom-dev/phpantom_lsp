@@ -227,6 +227,8 @@ struct ExtractionCtx<'a> {
     dql: doctrine_dql::DqlPending,
     /// The DQL variables settled once the file is read.
     dql_aliases: Vec<crate::symbol_map::DqlAliasSite>,
+    /// Where the DQL the file holds stops following the grammar.
+    dql_syntax_errors: Vec<crate::symbol_map::DqlSyntaxSite>,
 }
 
 /// A variable token's name without its `$`.
@@ -580,6 +582,7 @@ fn extract_symbol_map_inner(
         doctrine,
         dql: Default::default(),
         dql_aliases: Vec::new(),
+        dql_syntax_errors: Vec::new(),
     };
 
     for stmt in program.statements.iter() {
@@ -753,6 +756,7 @@ fn extract_symbol_map_inner(
         drupal_computed_hooks: ctx.drupal_computed_hooks,
         routes: ctx.routes,
         dql_aliases: ctx.dql_aliases,
+        dql_syntax_errors: ctx.dql_syntax_errors,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx
             .route_imports

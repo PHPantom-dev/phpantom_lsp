@@ -43,7 +43,6 @@ contributor even though it's short.
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
 | F67 | [DQL variables joined through an association](todo/lsp-features.md#f67-dql-variables-joined-through-an-association) | Medium      | Medium      |
 | F69 | [DQL in expression objects and other methods' query builders](todo/lsp-features.md#f69-dql-in-expression-objects-and-other-methods-query-builders) | Low-Medium  | Medium      |
-| F68 | [DQL syntax errors](todo/lsp-features.md#f68-dql-syntax-errors) | Low-Medium  | High        |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -87,7 +86,6 @@ ships, remove every row that names it.
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
 | F67 | [DQL variables joined through an association](todo/lsp-features.md#f67-dql-variables-joined-through-an-association) | Medium      | Medium      |
 | F69 | [DQL in expression objects and other methods' query builders](todo/lsp-features.md#f69-dql-in-expression-objects-and-other-methods-query-builders) | Low-Medium  | Medium      |
-| F68 | [DQL syntax errors](todo/lsp-features.md#f68-dql-syntax-errors) | Low-Medium  | High        |
 | F48 | [Symfony environment variables](todo/lsp-features.md#f48-symfony-environment-variables) | Medium      | Low-Medium  |
 | F24 | [Doctrine lenses miss attribute mappings and generic repositories](todo/lsp-features.md#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories) | Medium      | Medium      |
 | F25 | [Names a PHP configurator spells as strings](todo/lsp-features.md#f25-names-a-php-configurator-spells-as-strings) | Medium      | Medium      |

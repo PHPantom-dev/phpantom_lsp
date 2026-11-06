@@ -3,24 +3,24 @@
 // Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testRule.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/query-builder-dql.php
-// codes: unknown_class, unknown_entity_field
+// codes: unknown_class, unknown_entity_field, dql_syntax_error
 // PHPantom reports a name on the line its string spells it, where upstream reports the line the call starts on.
-// expect_diagnostic: 31: QueryBuilder: [Syntax Error] line 0, col 66: Error: Expected end of string, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = 1) // SKIP: DQL syntax is not checked
-// expect_diagnostic: 43: QueryBuilder: [Syntax Error] line 0, col 68: Error: Expected end of string, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = :id) // SKIP: DQL syntax is not checked
-// expect_diagnostic: 55: QueryBuilder: [Syntax Error] line 0, col 68: Error: Expected end of string, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = :id) // SKIP: DQL syntax is not checked
+// expect_diagnostic: 34: DQL syntax error: expected end of string, got ')'
+// expect_diagnostic: 43: DQL syntax error: expected end of string, got ')'
+// expect_diagnostic: 53: DQL syntax error: expected end of string, got ')'
 // expect_diagnostic: 65: Field 'transient' is not mapped on entity 'PHPStan\Rules\Doctrine\ORM\MyEntity'
 // expect_diagnostic: 73: Class 'Foo' not found
 // expect_diagnostic: 99: Could not analyse QueryBuilder with dynamic arguments. // SKIP: a query builder with dynamic arguments is not reported
 // expect_diagnostic: 110: Field 'transient' is not mapped on entity 'PHPStan\Rules\Doctrine\ORM\MyEntity'
-// expect_diagnostic: 129: QueryBuilder: [Syntax Error] line 0, col 82: Error: Expected end of string, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = 1 ORDER BY e.name) ASC // SKIP: DQL syntax is not checked
+// expect_diagnostic: 129: QueryBuilder: [Syntax Error] line 0, col 82: Error: Expected end of string, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = 1 ORDER BY e.name) ASC // SKIP: the DQL an expression object is constructed with is not read
 // expect_diagnostic: 139: QueryBuilder: [Semantical Error] line 0, col 78 near 'name ASC': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named name // SKIP: the DQL an expression object is constructed with is not read
 // expect_diagnostic: 160: QueryBuilder: [Semantical Error] line 0, col 78 near 'name ASC': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named name // SKIP: the DQL an expression object is constructed with is not read
 // expect_diagnostic: 170: QueryBuilder: [Semantical Error] line 0, col 60 near 'transient = 1': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named transient // SKIP: the DQL an expression object is constructed with is not read
 // expect_diagnostic: 198: Field 'nickname' is not mapped on entity 'PHPStan\Rules\Doctrine\ORM\MyEntity'
 // expect_diagnostic: 210: Field 'nickname' is not mapped on entity 'PHPStan\Rules\Doctrine\ORM\MyEntity'
-// expect_diagnostic: 218: QueryBuilder: [Syntax Error] line 0, col 80: Error: Expected =, <, <=, <>, >, >=, !=, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = 1 OR e.nickname) IS NULL // SKIP: DQL syntax is not checked
+// expect_diagnostic: 222: DQL syntax error: expected end of string, got ')'
 // expect_diagnostic: 222: Field 'nickname' is not mapped on entity 'PHPStan\Rules\Doctrine\ORM\MyEntity'
 // expect_diagnostic: 232: Field 'transient' is not mapped on entity 'PHPStan\Rules\Doctrine\ORM\MyEntity'
 // expect_diagnostic: 251: QueryBuilder: [Semantical Error] line 0, col 60 near 'nonexistent =': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named nonexistent // SKIP: a query builder from another method is not read
-// expect_diagnostic: 281: QueryBuilder: [Syntax Error] line 0, col -1: Error: Expected =, <, <=, <>, >, >=, !=, got end of string.\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE foo // SKIP: DQL syntax is not checked
+// expect_diagnostic: 281: QueryBuilder: [Syntax Error] line 0, col -1: Error: Expected =, <, <=, <>, >, >=, !=, got end of string.\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE foo // SKIP: the DQL a method returns is not read
 ---

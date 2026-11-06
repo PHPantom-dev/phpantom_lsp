@@ -346,6 +346,8 @@ $dqlParses = static function (string $dql) use ($entityManager): bool {
 };
 check('The DQL in UserRepository::named() names the User entity and its mapped fields', $dqlParses('SELECT u FROM App\Entity\User u WHERE u.displayName = :name ORDER BY u.email ASC'));
 check('A field the mapping does not map fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE u.nickname = :name'));
+check('An entity class without its identification variable fails DQL', !$dqlParses('SELECT u FROM App\Entity\User WHERE u.displayName = :name'));
+check('A stray parenthesis in the where() fragment fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE u.displayName = :name)'));
 (new SchemaTool($entityManager))->createSchema([$entityManager->getClassMetadata(User::class)]);
 $entityManager->persist(new User('ada@example.com', 'Ada'));
 $entityManager->flush();
