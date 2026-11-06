@@ -10,6 +10,9 @@ use mago_syntax::cst::*;
 use crate::atom::bytes_to_str;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
+use crate::virtual_members::laravel::collection_projection::{
+    ProjectionMethod, collection_property_return,
+};
 use crate::virtual_members::laravel::validated_shape;
 
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -390,54 +393,64 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             .iter()
             .all(|rt| matches!(rt.type_string.kind(), TypeKind::Intersection(_)));
     let mut intersected_results: Vec<Vec<ResolvedType>> = Vec::new();
+    let projection = argument_list.and_then(|_| ProjectionMethod::from_name(&method_name));
 
     for (idx, owner) in owner_classes.iter().enumerate() {
-        // Build class-level template substitutions from the receiver's
-        // generic type string (e.g. `Collection<int, User>` maps
-        // `TKey => int, TValue => User`), merge in method-level
-        // substitutions bound from the call's arguments, then override
-        // with any `@psalm-if-this-is` inference from the receiver's
-        // concrete type.
         let receiver_type = receiver_resolved
             .get(idx)
             .or_else(|| receiver_resolved.first())
             .map(|rt| &rt.type_string);
-        let template_subs = crate::type_engine::call_resolution::build_call_template_subs(
-            owner,
-            &method_name,
-            &arg_refs,
-            receiver_type,
-            &rctx,
-        );
+        let projected = projection.and_then(|method| {
+            collection_property_return(owner, receiver_type, method, &arg_refs, &rctx)
+        });
+        let mut owner_results = if let Some(hint) = projected {
+            crate::type_engine::type_resolution::resolved_types_for_hint(
+                hint,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            )
+        } else {
+            // Only the declared return type needs template substitution;
+            // a property projection already has the concrete result.
+            let template_subs = crate::type_engine::call_resolution::build_call_template_subs(
+                owner,
+                &method_name,
+                &arg_refs,
+                receiver_type,
+                &rctx,
+            );
 
-        // When the return type contains `static`/`self`/`$this` and the
-        // receiver was resolved with generic parameters, use the
-        // receiver's full type (e.g. `Builder<Article>`) for
-        // substitution so the generics are preserved; otherwise fall
-        // back to a plain FQN swap.
-        let owner_key = owner.fqn();
-        let receiver_intersection = receiver_intersection_for_owner(&receiver_resolved, &owner_key);
-        let self_replace =
-            |ty: &PhpType| match receiver_type_for_owner(&receiver_resolved, &owner_key) {
-                Some(rt) => ty.replace_self_with_type(&rt),
-                // An intersection receiver keeps every member: whichever
-                // class late static binding lands on satisfies all of them,
-                // not only the one that declared the method.
-                None => match receiver_intersection {
-                    Some(ref inter) => ty.replace_self_over_type(&owner_key, inter),
-                    None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
-                },
-            };
+            // When the return type contains `static`/`self`/`$this` and the
+            // receiver was resolved with generic parameters, use the
+            // receiver's full type (e.g. `Builder<Article>`) for
+            // substitution so the generics are preserved; otherwise fall
+            // back to a plain FQN swap.
+            let owner_key = owner.fqn();
+            let receiver_intersection =
+                receiver_intersection_for_owner(&receiver_resolved, &owner_key);
+            let self_replace =
+                |ty: &PhpType| match receiver_type_for_owner(&receiver_resolved, &owner_key) {
+                    Some(rt) => ty.replace_self_with_type(&rt),
+                    // An intersection receiver keeps every member: whichever
+                    // class late static binding lands on satisfies all of them,
+                    // not only the one that declared the method.
+                    None => match receiver_intersection {
+                        Some(ref inter) => ty.replace_self_over_type(&owner_key, inter),
+                        None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
+                    },
+                };
 
-        let mut owner_results = resolve_owner_method_call(
-            owner,
-            &method_name,
-            argument_list,
-            ctx,
-            is_static,
-            &template_subs,
-            &self_replace,
-        );
+            resolve_owner_method_call(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+                is_static,
+                &template_subs,
+                &self_replace,
+            )
+        };
         if let Some(count) = fluent_count {
             crate::virtual_members::laravel::carry_factory_count(
                 &mut owner_results,

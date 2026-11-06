@@ -459,8 +459,11 @@ async fn the_root_vendor_wins_over_a_bin_namespace() {
         "<?php\nnamespace PHPUnit\\Framework;\nclass TestCase {}\n",
     );
     let root_copy = crate::util::path_to_uri(
-        &dir.path()
-            .join("vendor/phpunit/phpunit/src/Framework/TestCase.php"),
+        &dunce::canonicalize(
+            dir.path()
+                .join("vendor/phpunit/phpunit/src/Framework/TestCase.php"),
+        )
+        .unwrap(),
     );
 
     let backend = index_root_project(dir.path()).await;

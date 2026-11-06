@@ -194,6 +194,27 @@ pub(crate) fn bind_text_args_to_params(
     text_args: &[&str],
 ) -> Vec<Option<String>> {
     let mut bound: Vec<Option<String>> = vec![None; params.len()];
+    bind_text_args_into(params, text_args, &mut bound, str::to_owned);
+    bound
+}
+
+/// Borrow the arguments bound to the first `N` parameters without allocating.
+/// Binding still uses the full declaration, including its variadic parameter.
+pub(crate) fn bind_text_args_to_param_prefix<'a, const N: usize>(
+    params: &[ParameterInfo],
+    text_args: &[&'a str],
+) -> [Option<&'a str>; N] {
+    let mut bound = [None; N];
+    bind_text_args_into(params, text_args, &mut bound, |value| value);
+    bound
+}
+
+fn bind_text_args_into<'a, T>(
+    params: &[ParameterInfo],
+    text_args: &[&'a str],
+    bound: &mut [Option<T>],
+    mut convert: impl FnMut(&'a str) -> T,
+) {
     let variadic_idx = params.iter().position(|p| p.is_variadic);
     let mut next_positional = 0usize;
 
@@ -207,21 +228,22 @@ pub(crate) fn bind_text_args_to_params(
                     variadic_idx
                 };
                 if let Some(idx) = target
-                    && bound[idx].is_none()
+                    && let Some(slot) = bound.get_mut(idx)
+                    && slot.is_none()
                 {
-                    bound[idx] = Some(value.to_string());
+                    *slot = Some(convert(value));
                 }
                 next_positional += 1;
             }
             Some(n) => {
-                if let Some(idx) = params.iter().position(|p| param_name_bare(p) == n) {
-                    bound[idx] = Some(value.to_string());
+                if let Some(idx) = params.iter().position(|p| param_name_bare(p) == n)
+                    && let Some(slot) = bound.get_mut(idx)
+                {
+                    *slot = Some(convert(value));
                 }
             }
         }
     }
-
-    bound
 }
 
 /// The positional arguments a variadic parameter collects after the first,
@@ -470,6 +492,44 @@ mod tests {
             "$flag ? 'a:b' : 'c:d'"
         );
         assert_eq!(text_arg_value("'key: value'"), "'key: value'");
+    }
+
+    #[test]
+    fn borrowed_argument_prefix_binds_declared_names_and_variadics() {
+        let mut rest = param("$rest", false);
+        rest.is_variadic = true;
+        let params = [param("$selector", true), rest];
+        for (args, expected) in [
+            (
+                vec![" 'email' ", " true ", "false"],
+                [Some("'email'"), Some("true")],
+            ),
+            (
+                vec!["rest: true", "selector: 'id'"],
+                [Some("'id'"), Some("true")],
+            ),
+            (vec!["other: 'id'"], [None, None]),
+            (vec!["'id'", "selector: 'email'"], [Some("'email'"), None]),
+            (vec!["selector: 'email'", "'id'"], [Some("'email'"), None]),
+        ] {
+            assert_eq!(bind_text_args_to_param_prefix(&params, &args), expected);
+            assert_eq!(
+                bind_text_args_to_params(&params, &args),
+                expected.map(|value| value.map(str::to_owned)),
+            );
+            assert_eq!(
+                bind_text_args_to_param_prefix::<1>(&params, &args),
+                [expected[0]],
+            );
+        }
+        assert_eq!(
+            bind_text_args_to_param_prefix::<2>(&[param("$selector", true)], &["'id'", "true"]),
+            [Some("'id'"), None],
+        );
+        assert_eq!(
+            bind_text_args_to_param_prefix::<2>(&[], &["'id'"]),
+            [None, None]
+        );
     }
 
     #[test]

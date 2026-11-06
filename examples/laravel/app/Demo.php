@@ -454,10 +454,29 @@ class Demo
             ->keyBy(static fn (Review $review): string => $review->getTitle())
             ->get('Sourdough');             // → ReviewCollection<string, Review>
 
-        // Keying by a column name can only promise an array key.
+        // Try: hover the keyBy() result; the title cast supplies string keys.
         Review::query()->get()
             ->keyBy('title')
-            ->get('Sourdough');             // → ReviewCollection<array-key, Review>
+            ->get('Sourdough');             // keyBy() → ReviewCollection<string, Review>
+    }
+
+    /** @param ReviewCollection<string, Review> $reviews */
+    public function collectionPropertyTypes(ReviewCollection $reviews): void
+    {
+        // Try: hover each result. Literal paths use the model's property types.
+        $byTitle = $reviews->keyBy('title');        // ReviewCollection<string, Review>
+        $byRelatedId = $reviews->keyBy('reviewable.id'); // ReviewCollection<int, Review>
+        $titles = $reviews->pluck('title', 'id');   // Collection<int, string>
+
+        // Try: compare the innermost keys with and without preserveKeys.
+        $groups = $reviews->groupBy('rating');     // ReviewCollection<int, ReviewCollection<int, Review>>
+        $preserved = $reviews->groupBy('rating', preserveKeys: true); // ReviewCollection<int, ReviewCollection<string, Review>>
+        $nested = $reviews->groupBy(['rating', 'title'], true); // Collection<int, ReviewCollection<string, ReviewCollection<string, Review>>>
+
+        // Try: the property proxy and the argument form agree on string keys.
+        $proxy = $reviews->keyBy->title;           // ReviewCollection<string, Review>
+        echo count($byTitle), count($byRelatedId), count($titles),
+            count($groups), count($preserved), count($nested), count($proxy);
     }
 
     /**
@@ -509,8 +528,8 @@ class Demo
         $reviews->sortBy->getRating();      // → Collection<int, Review>
         $reviews->unique->getTitle();       // → Collection<int, Review>
 
-        $reviews->keyBy->getTitle();        // → Collection<array-key, Review>
-        $reviews->groupBy->getTitle();      // → Collection<array-key, Collection<int, Review>>
+        $reviews->keyBy->getTitle();        // → Collection<string, Review>
+        $reviews->groupBy->getTitle();      // → Collection<string, Collection<int, Review>>
         $reviews->partition->getRating();   // → Collection<int, Collection<int, Review>>
 
         $reviews->first->getRating();       // → Review|null

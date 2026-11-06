@@ -11,6 +11,9 @@ use crate::type_engine::call_resolution::{
     facade_concrete_owner, is_reflected_property_call, is_reflected_property_class,
     resolve_reflected_property_at_call, resolve_reflected_property_at_new,
 };
+use crate::virtual_members::laravel::collection_projection::{
+    ProjectionMethod, collection_property_return,
+};
 
 impl Backend {
     /// `base->method(…)`: the instance method call arm of
@@ -242,12 +245,42 @@ impl Backend {
         // type gets flattened into ClassInfo.
         let mut hint_captured = false;
         let mut results = Vec::new();
+        let projection = ProjectionMethod::from_name(method_name);
+        let split_args = std::cell::LazyCell::new(|| split_top_level_commas(text_args));
 
         for rt in &lhs_resolved {
             let owner = match &rt.class_info {
                 Some(ci) => Arc::clone(ci),
                 None => continue,
             };
+
+            if let Some(method) = projection
+                && let Some(hint) = collection_property_return(
+                    &owner,
+                    Some(&rt.type_string),
+                    method,
+                    &split_args,
+                    ctx,
+                )
+            {
+                ClassInfo::extend_unique_arc(
+                    &mut results,
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &hint,
+                        "",
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
+                    ),
+                );
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(match hint_out.take() {
+                        Some(previous) if hint_captured => PhpType::union(vec![previous, hint]),
+                        _ => hint,
+                    });
+                    hint_captured = true;
+                }
+                continue;
+            }
 
             // Extract class-level generic type arguments from the
             // resolved type string (e.g. `Collection<Product>` →
@@ -272,9 +305,8 @@ impl Backend {
                 _ => HashMap::new(),
             };
 
-            let split_args = split_top_level_commas(text_args);
-            let arg_refs = split_args.to_vec();
-            let method_subs = Self::build_method_template_subs(&owner, method_name, &arg_refs, ctx);
+            let arg_refs = split_args.as_slice();
+            let method_subs = Self::build_method_template_subs(&owner, method_name, arg_refs, ctx);
 
             // Merge class-level generic substitutions with
             // method-level template substitutions.  Class-level
