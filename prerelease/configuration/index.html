@@ -2088,6 +2088,18 @@ those still need a restart to fully apply.</p>
 <td>Check arguments, return values and property assignments against the types docblocks declare. Set to <code>false</code> to only report values that break the native type, for legacy code whose docblocks have drifted from what the code does.</td>
 </tr>
 <tr>
+<td><code>unhandled-exceptions</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Report a <code>throw</code>, or a call whose callee declares <code>@throws</code>, when the exception is neither caught nor covered by a <code>@throws</code> tag of the function or method it is in. Offers an "Add @throws" quick fix. Matches PhpStorm's "Unhandled exception" inspection and PHPStan's checked exceptions.</td>
+</tr>
+<tr>
+<td><code>unchecked-exceptions</code></td>
+<td>string[]</td>
+<td><code>["Error", "LogicException", "RuntimeException"]</code></td>
+<td>Exception classes, fully qualified, that <code>unhandled-exceptions</code> does not report, along with every class that extends them. The default is the list PhpStorm treats as unchecked.</td>
+</tr>
+<tr>
 <td><code>workspace</code></td>
 <td>bool</td>
 <td><code>false</code></td>

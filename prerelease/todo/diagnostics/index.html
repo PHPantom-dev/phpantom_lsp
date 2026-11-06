@@ -1101,10 +1101,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported" class="md-nav__link">
+  <a href="#d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        D41. A thrown exception nothing catches or documents is not reported
+        D47. <code>JSON_THROW_ON_ERROR</code> does not make <code>json_decode()</code> throw <code>JsonException</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d48-a-catch-its-try-cannot-reach-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D48. A <code>catch</code> its <code>try</code> cannot reach is not reported
       </span>
     </span>
   </a>
@@ -1786,10 +1797,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported" class="md-nav__link">
+  <a href="#d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        D41. A thrown exception nothing catches or documents is not reported
+        D47. <code>JSON_THROW_ON_ERROR</code> does not make <code>json_decode()</code> throw <code>JsonException</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d48-a-catch-its-try-cannot-reach-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D48. A <code>catch</code> its <code>try</code> cannot reach is not reported
       </span>
     </span>
   </a>
@@ -2315,40 +2337,48 @@ same.</p>
 <p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index, which
 D31 also needs) and <code>src/diagnostics/uninitialized_properties.rs</code>.</p>
 <hr />
-<h2 id="d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported">D41. A thrown exception nothing catches or documents is not reported<a class="headerlink" href="#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported" title="Permanent link">&para;</a></h2>
+<h2 id="d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception">D47. <code>JSON_THROW_ON_ERROR</code> does not make <code>json_decode()</code> throw <code>JsonException</code><a class="headerlink" href="#d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** Loads the settings. */</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">function load(string $path): array</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">{</span>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    return json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    // JsonException is neither caught nor in a @throws tag</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    // JsonException is neither caught nor in a @throws tag: not reported</span>
 <a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">}</span>
 </code></pre></div>
-<p>PhpStorm's "Unhandled exception" inspection is one of the checks its users
-rely on most: an exception the body throws, or a callee's <code>@throws</code>
-propagates, that no <code>try</code> catches and the function's own <code>@throws</code> does not
-list. PHPantom already computes exactly that set, since typing <code>@</code> in a
-docblock suggests <code>@throws</code> for each uncaught exception and "Update
-docblock" adds the missing tags, but nothing reports it. Report it as an
-opt-in diagnostic (it is a documentation contract, not a runtime failure,
-so Hint by the severity philosophy above), with "Update docblock" as its
-quick fix.</p>
-<p>PhpStorm treats <code>\RuntimeException</code> and <code>\Error</code> subclasses as unchecked by
-default, and so does PHPStan's <code>missingCheckedExceptionInThrows</code>; follow
-that, and make the unchecked list configurable the way both tools do.</p>
-<p>On a mid-sized Symfony API it was PhpStorm's most frequent real finding (60
-unhandled exceptions, 22 incomplete <code>@throws</code>, mostly <code>random_bytes()</code>'s
-<code>RandomException</code> and Doctrine's <code>ORMException</code>), where PHPantom reported
-nothing. The same set also tells a <code>catch</code> whose <code>try</code> cannot throw the
-class it catches, which PhpStorm reports as well; PHPStan's
-<code>catch.neverThrown</code> fix (H24) would then work without PHPStan.</p>
+<p>The opt-in <code>unhandled_exception</code> diagnostic reports what a callee declares
+with <code>@throws</code>. <code>json_decode()</code> and <code>json_encode()</code> only throw
+<code>JsonException</code> when their flags include <code>JSON_THROW_ON_ERROR</code>, so the stub
+cannot declare it, and nothing is reported. <code>@throws</code> completion and
+"Update docblock" miss it the same way, and so does a <code>catch (JsonException
+$e)</code> the reachability check judges.</p>
+<p>What a call throws needs to depend on its arguments, the way PHPStan's
+<code>DynamicFunctionThrowTypeExtension</code>s let the flags decide. Read the flags
+argument by position or by name, as a constant or a <code>|</code> of constants.</p>
 <p><strong>Where to look:</strong> <code>src/completion/source/throws_analysis/uncaught.rs</code>
-(the uncaught set), <code>src/code_actions/update_docblock/</code> (the fix), and
-PHPStan's <code>MissingCheckedExceptionInThrowsCheck</code>.</p>
+(<code>function_call</code>), <code>src/type_engine/variable/forward_walk/throw_points.rs</code>,
+and PHPStan's <code>JsonThrowTypeExtension</code>.</p>
+<hr />
+<h2 id="d48-a-catch-its-try-cannot-reach-is-not-reported">D48. A <code>catch</code> its <code>try</code> cannot reach is not reported<a class="headerlink" href="#d48-a-catch-its-try-cannot-reach-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">try {</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    $this-&gt;repo-&gt;save($user);        // @throws ORMException only</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">} catch (JsonException $e) {         // can never run: not reported</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">}</span>
+</code></pre></div>
+<p>PhpStorm reports a <code>catch</code> whose class nothing in the <code>try</code> body can throw,
+and so does PHPStan (<code>catch.neverThrown</code>). The reachability check already
+works out what a <code>try</code> body can throw (<code>ThrowPoints</code> in
+<code>src/type_engine/variable/forward_walk/throw_points.rs</code>), and treats a
+catch no exception can reach as dead code for variable flow, but nothing
+reports the clause itself. With a diagnostic for it, PHPStan's fix (H24)
+would work without PHPStan.</p>
+<p>Only a body whose every call declares what it throws can rule a catch
+out, so this stays quiet wherever an undeclared call could throw anything.</p>
 <hr />
 <h2 id="d43-unknown-named-arguments-to-methods-and-functions-are-not-reported">D43. Unknown named arguments to methods and functions are not reported<a class="headerlink" href="#d43-unknown-named-arguments-to-methods-and-functions-are-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$mailer-&gt;send(to: $user, subjct: 'Hi');   // Error: Unknown named parameter $subjct</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$mailer-&gt;send(to: $user, subjct: 'Hi');   // Error: Unknown named parameter $subjct</span>
 </code></pre></div>
 <p>A named argument no parameter of a constructor takes is reported
 (<code>unknown_named_argument</code>), in <code>new</code> and in attributes alike. A method or
@@ -2364,11 +2394,11 @@ whether the target is a virtual method.</p>
 <hr />
 <h2 id="d44-a-function-that-can-end-without-returning-a-value-is-not-reported">D44. A function that can end without returning a value is not reported<a class="headerlink" href="#d44-a-function-that-can-end-without-returning-a-value-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">function score(int $x): int {</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    if ($x &gt; 0) {</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">        return 1;</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">    }</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">}   // TypeError: score(): Return value must be of type int, none returned</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">function score(int $x): int {</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    if ($x &gt; 0) {</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">        return 1;</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">    }</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">}   // TypeError: score(): Return value must be of type int, none returned</span>
 </code></pre></div>
 <p>When the end of a function or method body is reachable and its declared
 return type does not accept the implicit <code>null</code> (anything but <code>void</code>,
@@ -2384,11 +2414,11 @@ decides whether a statement list can complete normally) and
 <hr />
 <h2 id="d45-an-object-without-__tostring-used-as-a-string-is-not-reported">D45. An object without <code>__toString()</code> used as a string is not reported<a class="headerlink" href="#d45-an-object-without-__tostring-used-as-a-string-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">final class Invoice {}</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">echo $invoice;                // Error: Object of class Invoice could not be converted to string</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">$label = 'No. ' . $invoice;   // same</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">$text = "Invoice $invoice";   // same</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">final class Invoice {}</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">echo $invoice;                // Error: Object of class Invoice could not be converted to string</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">$label = 'No. ' . $invoice;   // same</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">$text = "Invoice $invoice";   // same</span>
 </code></pre></div>
 <p><code>echo</code>, <code>print</code>, concatenation, interpolation, a <code>(string)</code> cast and
 string functions all convert their operand, and an object whose class has
@@ -2404,9 +2434,9 @@ and non-final classes.</p>
 <hr />
 <h2 id="d46-the-result-of-a-void-call-is-used">D46. The result of a <code>void</code> call is used<a class="headerlink" href="#d46-the-result-of-a-void-call-is-used" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$sent = $mailer-&gt;send($message);   // send(): void, so $sent is always null</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">if ($logger-&gt;flush()) { … }        // never true</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">return $this-&gt;log($event);         // in a non-void function: returns null</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">$sent = $mailer-&gt;send($message);   // send(): void, so $sent is always null</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">if ($logger-&gt;flush()) { … }        // never true</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">return $this-&gt;log($event);         // in a non-void function: returns null</span>
 </code></pre></div>
 <p>A function or method declared <code>void</code> (or <code>never</code>) returns nothing, so using
 its result is a mistake: the caller expected a value it will never get, or
