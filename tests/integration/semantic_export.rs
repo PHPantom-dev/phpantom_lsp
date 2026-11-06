@@ -246,3 +246,42 @@ fn define_inside_namespace_stays_global() {
             && occurrence.resolved_symbol.as_deref() == Some("GLOBAL_NAME")
     }));
 }
+
+/// A label that fills a promoted constructor parameter is an occurrence of
+/// the property that parameter declares, in an attribute as in a `new`.
+#[test]
+fn a_label_is_an_occurrence_of_the_property_it_fills() {
+    let batch = SemanticExporter::new("/workspace")
+        .export([source(
+            "file:///workspace/labels.php",
+            "<?php\n#[\\Attribute]\nclass Field { public function __construct(public string $name = '', string $other = '') {} }\n#[Field(name: 'a', other: 'b')]\nclass Page {}\n$page = new Field(name: 'c', other: 'd');\n",
+        )])
+        .unwrap();
+
+    let properties: Vec<(String, Option<String>)> = batch.documents[0]
+        .occurrences
+        .iter()
+        .filter(|occurrence| {
+            occurrence.kind == OccurrenceKind::Property && !occurrence.is_definition
+        })
+        .map(|occurrence| (occurrence.name.clone(), occurrence.resolved_symbol.clone()))
+        .collect();
+
+    let fills_promoted = properties
+        .iter()
+        .filter(|(name, symbol)| {
+            name == "name"
+                && symbol
+                    .as_deref()
+                    .is_some_and(|s| s.ends_with("Field::name"))
+        })
+        .count();
+    assert_eq!(
+        fills_promoted, 2,
+        "one for the attribute's label and one for the `new` label: {properties:?}"
+    );
+    assert!(
+        !properties.iter().any(|(name, _)| name == "other"),
+        "a label filling a plain parameter names no property: {properties:?}"
+    );
+}

@@ -5,11 +5,17 @@ use super::*;
 // ─── Call site emission ─────────────────────────────────────────────────────
 
 /// Build and push a [`CallSite`] from an argument list and its call expression string.
+///
+/// Each named argument the list writes also gets a [`SymbolKind::NamedArgument`]
+/// span over its label, pointing back at the site recorded here: the label is
+/// the only spelling of a parameter at a call site, so it has to be as
+/// navigable and as renameable as the parameter itself.
 pub(super) fn emit_call_site(
     call_expression: String,
     argument_list: &ArgumentList<'_>,
     call_sites: &mut CallSites,
     untyped_closure_sites: &mut Vec<UntypedClosureSite>,
+    spans: &mut Vec<SymbolSpan>,
 ) {
     if call_expression.is_empty() {
         return;
@@ -52,14 +58,47 @@ pub(super) fn emit_call_site(
         };
         collect_untyped_closure_site(expr, &call_expression, arg_idx, untyped_closure_sites);
     }
+
+    emit_named_argument_spans(
+        argument_list.arguments.iter().filter_map(|arg| match arg {
+            Argument::Positional(_) => None,
+            Argument::Named(named) => Some(&named.name),
+        }),
+        argument_list.left_parenthesis.end.offset,
+        spans,
+    );
+}
+
+/// Record a [`SymbolKind::NamedArgument`] span over each label, covering the
+/// label alone and not its `:`.
+fn emit_named_argument_spans<'i>(
+    labels: impl Iterator<Item = &'i LocalIdentifier<'i>>,
+    call_args_start: u32,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    for label in labels {
+        spans.push(SymbolSpan {
+            start: label.span.start.offset,
+            end: label.span.end.offset,
+            kind: SymbolKind::NamedArgument {
+                name: crate::atom::atom_bytes(label.value),
+                call_args_start,
+            },
+        });
+    }
 }
 
 /// Build and push a [`CallSite`] from a partial argument list and its call expression string.
+///
+/// A partial argument list is an attribute's, and `#[C(bar: 1)]` constructs `C`
+/// exactly as `new C(bar: 1)` does, so its labels get the same
+/// [`SymbolKind::NamedArgument`] spans as any other call's.
 pub(in crate::symbol_map::extraction) fn emit_partial_call_site(
     call_expression: String,
     argument_list: &PartialArgumentList<'_>,
     call_sites: &mut CallSites,
     untyped_closure_sites: &mut Vec<UntypedClosureSite>,
+    spans: &mut Vec<SymbolSpan>,
 ) {
     let args = argument_list
         .arguments
@@ -112,6 +151,19 @@ pub(in crate::symbol_map::extraction) fn emit_partial_call_site(
         };
         collect_untyped_closure_site(value, &call_expression, index, untyped_closure_sites);
     }
+
+    emit_named_argument_spans(
+        argument_list
+            .arguments
+            .iter()
+            .filter_map(|argument| match argument {
+                PartialArgument::Named(argument) => Some(&argument.name),
+                PartialArgument::NamedPlaceholder(argument) => Some(&argument.name),
+                _ => None,
+            }),
+        argument_list.left_parenthesis.end.offset,
+        spans,
+    );
 }
 
 /// If `expr` is a closure or arrow function, collect an [`UntypedClosureSite`]

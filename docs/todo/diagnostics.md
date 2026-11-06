@@ -384,3 +384,31 @@ before the diagnostic runs, or a separate workspace-wide pass.
 
 **Where to look:** `src/diagnostics/unused_parameters.rs` (`can_be_overridden`)
 and `src/definition/implementation.rs` (`find_implementors`).
+
+---
+
+## D45. A promoted parameter's own `@deprecated` does not deprecate the property
+
+**Impact: Low · Complexity: Low**
+
+```php
+class Field
+{
+    public function __construct(
+        /** @deprecated Use `$name` instead. */ public string $old = '',
+    ) {}
+}
+
+echo $field->old;                  // nothing reported
+new Field(old: 'x');               // …nor the label
+```
+
+A property a constructor parameter promotes carries no deprecation at all:
+the parser writes `deprecation_message: None` for it, so no use of one is
+ever reported whichever spelling it is written in. PHP itself cannot help —
+`#[\Deprecated]` does not target a parameter — so the docblock the parameter
+carries is the only place an author can say it. Note that the engine already
+reads that same docblock for the property's type.
+
+**Where to look:** `src/parser/classes/methods.rs`
+(`push_promoted_properties`), `src/diagnostics/deprecated.rs`.

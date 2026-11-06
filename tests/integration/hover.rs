@@ -17431,10 +17431,13 @@ async fn test_hover_attribute_named_argument() {
         .expect("the label of a promoted parameter hovers as the property");
     assert!(hover.contains("$bar"), "{hover}");
 
-    let hover = hover_text_at(&backend, &uri, 7, 21).await;
+    let hover = hover_text_at(&backend, &uri, 7, 21)
+        .await
+        .expect("a label naming a plain parameter hovers the parameter it fills");
+    assert!(hover.contains("$plain"), "{hover}");
     assert!(
-        hover.is_none_or(|text| !text.contains("The label of the thing")),
-        "a label naming a plain parameter is not the property of its name"
+        !hover.contains("The label of the thing"),
+        "a label naming a plain parameter is not the property of its name: {hover}"
     );
 }
 
@@ -17456,4 +17459,67 @@ function size(array $data): void {
     assert!(value.contains("$datum = int"), "{value}");
     let key = crate::common::hover_last(&backend, php, "$key;");
     assert!(key.contains("$key = string"), "{key}");
+}
+
+/// A label at a built-in's function, or at a class the bundled stubs
+/// describe, hovers the parameter it fills even though the declaration has
+/// no text to open: what a label is worth showing is the parameter's type
+/// and description, and the engine has those from the callee.
+#[tokio::test]
+async fn test_hover_label_at_builtin_declarations() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = Uri::parse("file:///hover_builtin_labels.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$filtered = array_filter(array: [1, 2], callback: null);\n",
+        "$zone = new DateTimeZone(timezone: 'UTC');\n",
+        "$formatted = $zone->format(timezone: 'UTC');\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let hover = crate::common::hover_on(&backend, &uri, text, "array: [1, 2]").await;
+    assert!(
+        hover.contains("$array"),
+        "a built-in function's label: {hover}"
+    );
+
+    let hover =
+        crate::common::hover_on(&backend, &uri, text, "timezone: 'UTC');\n$formatted").await;
+    assert!(
+        hover.contains("$timezone"),
+        "a built-in class's label: {hover}"
+    );
+}
+
+/// The same, for a function of the file's own namespace: the hover shows the
+/// declared type, the by-reference and variadic marks the parameter was
+/// written with, and its default.
+#[tokio::test]
+async fn test_hover_label_at_standalone_function() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///hover_function_label.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "/**\n",
+        " * @param string[] $names The names to greet.\n",
+        " */\n",
+        "function greet(string $greeting, array $names = []): string\n",
+        "{\n",
+        "    return $greeting;\n",
+        "}\n",
+        "\n",
+        "greet(greeting: 'Hi', names: []);\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let hover = crate::common::hover_on(&backend, &uri, text, "greeting: 'Hi'").await;
+    assert!(hover.contains("$greeting"), "{hover}");
+    assert!(hover.contains("string"), "{hover}");
+
+    let hover = crate::common::hover_on(&backend, &uri, text, "names: []").await;
+    assert!(hover.contains("$names"), "{hover}");
+    assert!(hover.contains("The names to greet"), "{hover}");
+    assert!(hover.contains("= []"), "{hover}");
 }

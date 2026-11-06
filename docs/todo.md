@@ -216,6 +216,7 @@ ships, remove every row that names it.
 | D20 | [`Foo::$bar` and `Foo::bar` are the same span](todo/diagnostics.md#d20-foobar-and-foobar-are-the-same-span)                                                                  | Low         | Medium      |
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |
 | D50 | [`unused-parameters` skips methods a subclass can override](todo/diagnostics.md#d50-unused-parameters-skips-methods-a-subclass-can-override) | Low         | Medium-High |
+| D45 | [A promoted parameter's own `@deprecated` does not deprecate the property](todo/diagnostics.md#d45-a-promoted-parameters-own-deprecated-does-not-deprecate-the-property) | Low         | Low         |
 
 ## Code Generation & Refactoring
 
@@ -265,6 +266,8 @@ ships, remove every row that names it.
 | C3  | Go-to-definition for array shape keys via bracket access                                                                                                                    | Low-Medium  | Medium      |
 | C10 | [Deprecation markers on class-name completions from all sources](todo/completion.md#c10-deprecation-markers-on-class-name-completions-from-all-sources)                     | Low         | Medium      |
 | C12 | [The implicit `$value` of a `set` hook is not offered by variable completion](todo/completion.md#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion) | Low         | Medium      |
+| F70 | [A label at a call with no signature to bind](todo/lsp-features.md#f70-a-label-at-a-call-with-no-signature-to-bind) | Low-Medium  | Medium      |
+| F71 | [Hover on a parameter at its declaration](todo/lsp-features.md#f71-hover-on-a-parameter-at-its-declaration) | Low         | Low         |
 | S4  | Named argument awareness in active parameter                                                                                                                                | Low         | Medium      |
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Medium      |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |

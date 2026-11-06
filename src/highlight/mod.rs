@@ -23,7 +23,29 @@ use crate::Backend;
 use crate::references::MemberRefKind;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, SymbolSpan, VarDefKind};
 use crate::text_position::byte_range_to_lsp_range;
+use crate::type_engine::call_resolution::NamedArgumentDeclaration;
 use crate::util::build_fqn;
+
+/// The file a label scan reads: the three things every label resolution of
+/// one file needs, bundled so the scan itself stays short.
+struct FileLabels<'a> {
+    uri: &'a str,
+    content: &'a str,
+    symbol_map: &'a SymbolMap,
+}
+
+/// Which labels of a name a highlight scan should resolve.
+///
+/// A promoted property is only ever filled by a call that builds an object —
+/// `new C(…)` or the attribute `#[C(…)]` — while a parameter is filled by any
+/// call, so a property search can leave the rest unresolved.  Resolving a
+/// label costs a call-target resolution, and a file of `render:` labels should
+/// not pay for one per label.
+#[derive(Clone, Copy)]
+enum Labels {
+    OfAnyCall,
+    OfConstructionsOnly,
+}
 
 impl Backend {
     /// Collect document highlights for the symbol under the cursor.
@@ -55,7 +77,7 @@ impl Backend {
                     symbol_map.var_def_kind_at(name, span.start),
                     Some(VarDefKind::Property)
                 ) || self.is_promoted_property_param(uri, span.start);
-                if is_property {
+                let mut highlights = if is_property {
                     self.highlight_member_name(
                         uri,
                         symbol_map,
@@ -65,20 +87,64 @@ impl Backend {
                     )
                 } else {
                     self.highlight_variable(symbol_map, content, name, span.start)
+                };
+                // A parameter is written again at every call that hands it a
+                // value by name, so the label that fills this token highlights
+                // with it.  Nothing else a `Variable` span can be — a local, a
+                // foreach binding, a property declared in the class body — has
+                // a label of its own at a call.
+                if symbol_map
+                    .var_def_kind_at(name, span.start)
+                    .is_some_and(|kind| *kind == VarDefKind::Parameter)
+                {
+                    let file = FileLabels {
+                        uri,
+                        content,
+                        symbol_map,
+                    };
+                    let token = (span.start, span.end);
+                    self.push_label_highlights(
+                        &file,
+                        name,
+                        &mut highlights,
+                        Labels::OfAnyCall,
+                        &move |declaration| declaration.name_token == Some(token),
+                    );
                 }
+                highlights.sort_by(cmp_highlight_range);
+                highlights
             }
             kind @ (SymbolKind::ClassReference { .. } | SymbolKind::ClassDeclaration { .. }) => {
                 let ctx = self.file_context(uri);
                 let fqn = class_span_fqn(kind, span.start, &ctx)?;
                 self.highlight_class(symbol_map, content, &fqn, &ctx)
             }
-            SymbolKind::MemberAccess { member_name, .. } => self.highlight_member_name(
-                uri,
-                symbol_map,
-                content,
-                member_name,
-                MemberRefKind::of_access(&span).unwrap_or(MemberRefKind::Either),
-            ),
+            SymbolKind::MemberAccess { member_name, .. } => {
+                let mut highlights = self.highlight_member_name(
+                    uri,
+                    symbol_map,
+                    content,
+                    member_name,
+                    MemberRefKind::of_access(&span).unwrap_or(MemberRefKind::Either),
+                );
+                // The label that fills a promoted property is another spelling
+                // of the member this access names.  An access carries no
+                // declaration token, so the match is by name, as the
+                // name-only highlight it joins has always been.
+                self.push_label_highlights(
+                    &FileLabels {
+                        uri,
+                        content,
+                        symbol_map,
+                    },
+                    member_name,
+                    &mut highlights,
+                    Labels::OfConstructionsOnly,
+                    &|declaration| declaration.promotes_property,
+                );
+                highlights.sort_by(cmp_highlight_range);
+                highlights
+            }
             SymbolKind::MemberDeclaration {
                 name,
                 is_static,
@@ -104,6 +170,9 @@ impl Backend {
                 key,
                 ..
             } => self.wordpress_hook_highlights(symbol_map, content, key),
+            SymbolKind::NamedArgument { name, .. } => {
+                self.highlight_named_argument(uri, content, symbol_map, &span, name)
+            }
             SymbolKind::NamespaceDeclaration { .. }
             | SymbolKind::StringKey { .. }
             | SymbolKind::LaravelMacroString { .. }
@@ -117,6 +186,106 @@ impl Backend {
             None
         } else {
             Some(highlights)
+        }
+    }
+
+    /// Highlight every label that binds the same parameter as the one under
+    /// the cursor, and what that parameter is used for elsewhere.
+    ///
+    /// Labels of the same name are not enough: which parameter a label names
+    /// is the callee's, so `field:` at one call and `field:` at another can
+    /// name two different parameters.
+    fn highlight_named_argument(
+        &self,
+        uri: &str,
+        content: &str,
+        symbol_map: &SymbolMap,
+        cursor: &SymbolSpan,
+        name: &crate::atom::Atom,
+    ) -> Vec<DocumentHighlight> {
+        let file = FileLabels {
+            uri,
+            content,
+            symbol_map,
+        };
+        let Some(declaration) = self.named_argument_location(uri, content, cursor) else {
+            return Vec::new();
+        };
+        // A label fills a promoted property, so the property's own accesses
+        // light up with it, as the labels of its name do; a plain parameter's
+        // uses are the ones inside the function that declares it, which are in
+        // the declaring file only.
+        let mut highlights = if declaration.promotes_property {
+            self.highlight_member_name(
+                uri,
+                symbol_map,
+                content,
+                name.as_str(),
+                MemberRefKind::Property,
+            )
+        } else if let Some(token) = declaration.name_token {
+            if &*declaration.uri == uri {
+                self.highlight_variable(symbol_map, content, name.as_str(), token.0)
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+        self.push_label_highlights(
+            &file,
+            name.as_str(),
+            &mut highlights,
+            Labels::OfAnyCall,
+            &|other| other.is_same_declaration(&declaration),
+        );
+        highlights.sort_by(cmp_highlight_range);
+        highlights
+    }
+
+    /// Append a read highlight for every label of `name` in the file whose
+    /// declaration `keep` accepts.
+    fn push_label_highlights(
+        &self,
+        file: &FileLabels<'_>,
+        name: &str,
+        highlights: &mut Vec<DocumentHighlight>,
+        which: Labels,
+        keep: &dyn Fn(&NamedArgumentDeclaration) -> bool,
+    ) {
+        let name_atom = crate::atom::atom(name);
+        for &index in file.symbol_map.named_argument_indices(name) {
+            if matches!(which, Labels::OfConstructionsOnly)
+                && !file.symbol_map.label_constructs(index)
+            {
+                continue;
+            }
+            let span = &file.symbol_map.spans[index];
+            let SymbolKind::NamedArgument {
+                call_args_start, ..
+            } = &span.kind
+            else {
+                continue;
+            };
+            let Some(declaration) = self.named_argument_location_at(
+                file.uri,
+                file.content,
+                *call_args_start,
+                &name_atom,
+            ) else {
+                continue;
+            };
+            if !keep(&declaration) {
+                continue;
+            }
+            highlights.push(DocumentHighlight {
+                range: byte_range_to_lsp_range(
+                    file.content,
+                    span.start as usize,
+                    span.end as usize,
+                ),
+                kind: Some(DocumentHighlightKind::Read),
+            });
         }
     }
 

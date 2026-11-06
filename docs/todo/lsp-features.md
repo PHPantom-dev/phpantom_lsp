@@ -1071,3 +1071,70 @@ When the domain has no catalogue yet, offer to create
 **Where to look:** `src/code_actions/insert_translation_key.rs`,
 `src/symfony/translations.rs` (`catalogue_spans`, `scan_yaml`,
 `scan_xliff`).
+
+---
+
+## F70. A label at a call with no signature to bind
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+/** @method void notify(string $message) */
+class Notifier {}
+
+$render = function (string $field): string { return $field; };
+$render(field: 'x');
+
+$n = new Notifier();
+$n->notify(mesage: 'hello');
+```
+
+A named-argument label navigates, renames, and is checked by resolving the
+call's callee and reading the parameter it binds. Two kinds of callee have no
+signature to bind to, so their labels do nothing: no go-to-definition, no
+references, no rename, and no report for a misspelled name.
+
+- A closure literal, a variable holding a callable, or a `callable`-typed
+  parameter resolves to a type, not to a declaration token. For a variable
+  assigned the closure, the closure's own parameters have tokens in the file,
+  so binding through the callable's type to that parameter is what is missing
+  — the forward walker already carries a closure's parameter types this way.
+  A call of a value whose type is written as a callable (`callable(string):
+  string`) is the same case seen from the other end: the type names no
+  parameter, so nothing a label there spells can be held against it, and the
+  engine reads its parameter list from the type's positions instead.
+- A method the engine synthesized (an `@method` tag, a macro, a facade or
+  builder forwarder) documents what `__call` receives instead of bounding it,
+  and `__call` collects any label into its arguments array, so nothing the tag
+  lists can prove a call is wrong. Reading the same tag as a signature that
+  *does* bound the call — the way PHPStan reads it, and the way
+  `argument_count_mismatch` already reads it — is what would let a misspelled
+  label there be reported.
+
+A call whose callee the bundled stubs describe is a third case in spirit: it
+is checked, but against the stub's spelling of a parameter rather than PHP's,
+and tracked as
+[`D44`](diagnostics.md#d44-a-named-argument-at-phps-own-functions-and-classes-is-checked-against-the-stub-not-against-php).
+
+**Where to look:** `src/type_engine/call_resolution/named_arguments.rs`
+(`resolve_named_argument`), `src/type_engine/call_resolution/callable_target.rs`
+(`callable_type_as_target`, `method_target_on_receiver`),
+`src/diagnostics/argument_count.rs` (`report_unknown_named_arguments`),
+`src/scope_collector/`.
+
+---
+
+## F71. Hover on a parameter at its declaration
+
+**Impact: Low · Complexity: Low**
+
+Hovering a function's or method's own parameter where it is declared shows
+nothing, though the engine has its type there.  A named-argument label is
+covered — it hovers the property the parameter promotes, or the parameter
+itself — but only from what the declaration carries, so `#[\NoDiscard]`'s
+reason and a template type substituted at the call are still missing on both
+spellings.
+
+**Where to look:** `src/hover/mod.rs` (`hover_from_symbol`, which has no
+parameter arm, and `parameter_hover_body`, which spells the label's hover
+from the declared parameter), `src/hover/variable.rs`.

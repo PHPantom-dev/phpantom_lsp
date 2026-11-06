@@ -585,15 +585,7 @@ impl SymbolMap {
             self.spans.sort_by_key(|span| span.start);
         }
         if changed {
-            self.member_access_indices.clear();
-            for (index, span) in self.spans.iter().enumerate() {
-                if let SymbolKind::MemberAccess { member_name, .. } = &span.kind {
-                    self.member_access_indices
-                        .entry(*member_name)
-                        .or_default()
-                        .push(index);
-                }
-            }
+            self.rebuild_span_indices();
         }
         changed
     }

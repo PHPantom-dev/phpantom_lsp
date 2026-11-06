@@ -120,6 +120,13 @@ pub(crate) struct VarDefSite {
     pub block_end: u32,
 }
 
+impl VarDefSite {
+    /// `[start, end)` of the `$name` token this definition declares.
+    pub(crate) fn token_range(&self) -> (u32, u32) {
+        (self.offset, self.offset + 1 + self.name.len() as u32)
+    }
+}
+
 /// A closure or arrow function passed as an argument to a callable-typed
 /// parameter.  Used by inlay hints to show:
 /// - **Parameter type hints** for untyped closure parameters when the type
@@ -193,6 +200,13 @@ pub(crate) struct SymbolMap {
     /// This lets references/rename jump straight to relevant `->name` /
     /// `::name` spans without rescanning the full `spans` vec for each file.
     pub member_access_indices: crate::atom::AtomMap<Vec<usize>>,
+    /// Named-argument label span indices keyed by label.
+    ///
+    /// The parallel of [`Self::member_access_indices`] for the labels a call
+    /// writes (`name:` in `new Field(name: 1)`): a reference search for the
+    /// parameter or promoted property a label names jumps to those spans
+    /// instead of rescanning the file.
+    pub named_argument_indices: crate::atom::AtomMap<Vec<usize>>,
     /// Variable definition sites, sorted by `(scope_start, offset)`.
     pub var_defs: Vec<VarDefSite>,
     /// Indices into [`Self::var_defs`] sorted by `(scope_start, name,
@@ -223,6 +237,15 @@ pub(crate) struct SymbolMap {
     /// variable resolution needs the full `fn`..`end` range for arrow
     /// function parameter lookups.
     pub body_scopes: Vec<(u32, u32)>,
+    /// `(name token, body start)` of every named function-like in the file,
+    /// sorted by name token.
+    ///
+    /// A parameter is written between its function's name and its body, and
+    /// a closure in a parameter's default value declares parameters of its
+    /// own in that same stretch, so the body's start offset is what binds a
+    /// parameter to the function that declares it.  Closures and arrow
+    /// functions, which have no name to be asked by, are left out.
+    pub named_function_bodies: Vec<(u32, u32)>,
     /// Narrowing block boundaries `(start_offset, end_offset)` for
     /// if-body, elseif-body, else-body, match-arm, and switch-case
     /// blocks.  Sorted by start offset.
@@ -438,12 +461,128 @@ impl SymbolMap {
         self.matches_source(content) && self.source_hash == Some(Self::hash_source(content))
     }
 
+    /// Rebuild [`Self::member_access_indices`] and
+    /// [`Self::named_argument_indices`] from [`Self::spans`].
+    ///
+    /// Both the extractor, which builds a map from scratch, and the
+    /// string-key pass, which rewrites spans in place, have to keep the two
+    /// in step with the spans they hold.
+    pub(crate) fn rebuild_span_indices(&mut self) {
+        self.member_access_indices.clear();
+        self.named_argument_indices.clear();
+        for (index, span) in self.spans.iter().enumerate() {
+            match &span.kind {
+                SymbolKind::MemberAccess { member_name, .. } => {
+                    self.member_access_indices
+                        .entry(*member_name)
+                        .or_default()
+                        .push(index);
+                }
+                SymbolKind::NamedArgument { name, .. } => {
+                    self.named_argument_indices
+                        .entry(*name)
+                        .or_default()
+                        .push(index);
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Indices into [`Self::spans`] for member accesses named `name`.
     pub fn member_access_indices(&self, name: &str) -> &[usize] {
         self.member_access_indices
             .get(&crate::atom::atom(name))
             .map(Vec::as_slice)
             .unwrap_or(&[])
+    }
+
+    /// Indices into [`Self::spans`] for named-argument labels written `name`.
+    pub fn named_argument_indices(&self, name: &str) -> &[usize] {
+        self.named_argument_indices
+            .get(&crate::atom::atom(name))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// The body scope start of the named function-like whose name token is at
+    /// `name_offset`, `None` when this file declares no such function-like.
+    fn named_function_body_start(&self, name_offset: u32) -> Option<u32> {
+        let index = self
+            .named_function_bodies
+            .binary_search_by_key(&name_offset, |(offset, _)| *offset)
+            .ok()?;
+        Some(self.named_function_bodies[index].1)
+    }
+
+    /// The parameter named `name` (without its `$`) of the function whose body
+    /// starts at `body_start`.
+    ///
+    /// PHP allows one parameter of a name per function-like, so the run of
+    /// definitions of that name in that scope holds at most one.
+    pub(crate) fn parameter_in_scope(&self, body_start: u32, name: &str) -> Option<&VarDefSite> {
+        let key = |index: &u32| {
+            let def = &self.var_defs[*index as usize];
+            (def.scope_start, def.name.as_str())
+        };
+        let first = self
+            .var_defs_by_name
+            .partition_point(|index| key(index) < (body_start, name));
+        self.var_defs_by_name[first..]
+            .iter()
+            .take_while(|index| key(index) == (body_start, name))
+            .map(|&index| &self.var_defs[index as usize])
+            .find(|def| def.kind == VarDefKind::Parameter)
+    }
+
+    /// The parameter `name` of the function-like whose name token sits at
+    /// `name_offset`, `None` when this file declares no such function-like or
+    /// that one has no parameter of the name.
+    ///
+    /// A parameter is written between its function's name and that function's
+    /// body, so the body's opening brace is what separates one function's
+    /// parameter list from a closure written in a default value, or from the
+    /// next function declared.  A body-less declaration — an interface or
+    /// abstract method — opens no scope, so its parameters are the definitions
+    /// of the top-level scope that follow its own name, the first of which is
+    /// the one it declares.
+    pub(crate) fn function_parameter_definition(
+        &self,
+        name_offset: u32,
+        name: &str,
+    ) -> Option<&VarDefSite> {
+        if name_offset == 0 {
+            return None;
+        }
+        let body_start = self.named_function_body_start(name_offset)?;
+        if body_start != 0 {
+            return self.parameter_in_scope(body_start, name);
+        }
+        self.var_defs
+            .iter()
+            .filter(|def| def.kind == VarDefKind::Parameter && def.scope_start == 0)
+            .filter(|def| def.name == name && def.offset > name_offset)
+            .min_by_key(|def| def.offset)
+    }
+
+    /// Whether the label at `span_index` is written at a call that constructs
+    /// an object — `new C(...)`, or the attribute `#[C(...)]`, whose arguments
+    /// the engine records as the same `new` call.
+    ///
+    /// Only such a call can name a property, because only its labels bind a
+    /// constructor parameter, which is what promotion turns into a property.
+    /// A search for a member can therefore skip the labels that are not these
+    /// without resolving what they bind.
+    pub(crate) fn label_constructs(&self, span_index: usize) -> bool {
+        let Some(SymbolKind::NamedArgument {
+            call_args_start, ..
+        }) = self.spans.get(span_index).map(|span| &span.kind)
+        else {
+            return false;
+        };
+        self.call_sites
+            .site_at(*call_args_start)
+            .is_some_and(|site| site.call_expression.starts_with("new "))
     }
 
     /// The model a gate check named, for the ability span starting at
@@ -503,6 +642,34 @@ impl SymbolMap {
     /// Whether the scope starting at `scope_start` is an arrow function's.
     pub fn is_arrow_fn_scope(&self, scope_start: u32) -> bool {
         self.arrow_fn_scopes.binary_search(&scope_start).is_ok()
+    }
+
+    /// The parameter of an enclosing function-like that a variable use at
+    /// `cursor_offset` reads, as the `VarDefSite` that declares it.
+    ///
+    /// A parameter is declared before the body its uses live in, so the
+    /// search walks outward through the enclosing scopes.  Only a parameter
+    /// answers: its name is the one a caller can write as a named argument,
+    /// which is what the caller of this asks for.
+    pub(crate) fn enclosing_parameter_for_use(
+        &self,
+        var_name: &str,
+        cursor_offset: u32,
+    ) -> Option<&VarDefSite> {
+        let mut scope = self.find_variable_scope(var_name, cursor_offset);
+        loop {
+            if let Some(def) = self.parameter_in_scope(scope, var_name) {
+                return Some(def);
+            }
+            if scope == 0 {
+                return None;
+            }
+            let parent = self.find_enclosing_scope(scope.saturating_sub(1));
+            if parent == scope {
+                return None;
+            }
+            scope = parent;
+        }
     }
 
     /// Determine the effective scope for a variable reference at `offset`.

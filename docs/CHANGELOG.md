@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Editing and navigation
 
+- **Named arguments follow the parameter they name.** A label such as `name:` in `new SelectField(name: 'x')` or `$field->render(name: 'x')` jumps to the parameter it fills, hovers as it, highlights with it, shows up in its references, and renames with it. When that parameter promotes a property, the label moves with the property as well. Contributed by @AbyssWaIker.
 - **Expected argument values.** Inside an argument whose parameter declares `#[ExpectedValues]`, as `pathinfo()`, `phpinfo()`, `extract()` and many other built-in functions do, the values it expects are offered first. A flag argument keeps offering the flags it does not combine yet after each `|`, and a string argument offers its expected strings inside the quotes.
 - **Make a parameter explicitly nullable.** A typed parameter with a `null` default, which PHP 8.4 deprecates, gets a quick fix that writes the `null` into its type: `?string` for a single type, `int|string|null` for a union. It also fixes PHPStan's `parameter.implicitlyNullable` report from anywhere on the line.
 - **Go to declaration.** On a method call or a method's own declaration, go-to-declaration jumps to the interface or abstract method it implements. Where there is none, it lands where go-to-definition does.

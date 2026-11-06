@@ -1041,7 +1041,7 @@ function run(Service $service): void {
         !backend.member_accesses_ruled_out(
             CONSUMER_URI,
             &consumer_map,
-            &[(save, &other_hierarchy)]
+            &[(save, &other_hierarchy, MemberRefKind::Method)],
         ),
         "with nothing resolved yet the variable receiver keeps the file"
     );
@@ -1057,7 +1057,11 @@ function run(Service $service): void {
     assert_eq!(locations.len(), 1, "the consumer calls Service::save");
 
     assert!(
-        backend.member_accesses_ruled_out(CONSUMER_URI, &consumer_map, &[(save, &other_hierarchy)]),
+        backend.member_accesses_ruled_out(
+            CONSUMER_URI,
+            &consumer_map,
+            &[(save, &other_hierarchy, MemberRefKind::Method)],
+        ),
         "the entry says the only `save` here is on Service, so a search for \
          Other::save can drop the file without reading it"
     );
@@ -1068,7 +1072,7 @@ function run(Service $service): void {
         !backend.member_accesses_ruled_out(
             CONSUMER_URI,
             &consumer_map,
-            &[(save, &service_hierarchy)]
+            &[(save, &service_hierarchy, MemberRefKind::Method)],
         ),
         "the same entry keeps the file for the class it did resolve to"
     );
@@ -1129,7 +1133,7 @@ function elsewhere(Service $service): void {
         backend.member_accesses_ruled_out(
             CONSUMER_URI,
             &consumer_map,
-            &[(purge, &other_hierarchy)]
+            &[(purge, &other_hierarchy, MemberRefKind::Method)],
         ),
         "the recorded receiver is a Service, so a search for Other::purge \
          drops the file unread"
@@ -1138,7 +1142,7 @@ function elsewhere(Service $service): void {
         !backend.member_accesses_ruled_out(
             CONSUMER_URI,
             &consumer_map,
-            &[(purge, &service_hierarchy)]
+            &[(purge, &service_hierarchy, MemberRefKind::Method)],
         ),
         "the same entry keeps the file for the class it did resolve to"
     );
