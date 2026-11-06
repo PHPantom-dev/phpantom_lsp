@@ -1112,17 +1112,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d42-from-with-a-literal-no-enum-case-backs-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D42. <code>from()</code> with a literal no enum case backs is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d43-unknown-named-arguments-to-methods-and-functions-are-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1775,17 +1764,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d42-from-with-a-literal-no-enum-case-backs-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D42. <code>from()</code> with a literal no enum case backs is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d43-unknown-named-arguments-to-methods-and-functions-are-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2293,23 +2271,9 @@ class it catches, which PhpStorm reports as well; PHPStan's
 (the uncaught set), <code>src/code_actions/update_docblock/</code> (the fix), and
 PHPStan's <code>MissingCheckedExceptionInThrowsCheck</code>.</p>
 <hr />
-<h2 id="d42-from-with-a-literal-no-enum-case-backs-is-not-reported">D42. <code>from()</code> with a literal no enum case backs is not reported<a class="headerlink" href="#d42-from-with-a-literal-no-enum-case-backs-is-not-reported" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">enum Status: string { case Active = 'active'; }</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">Status::from('Active');      // ValueError at runtime</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">Status::tryFrom('Active');   // always null</span>
-</code></pre></div>
-<p>When the argument is a literal and the enum is known, whether a case backs
-it is decidable, and <code>from()</code> throwing a <code>ValueError</code> is a crash, so Error
-severity. <code>tryFrom()</code> with such a literal always returns <code>null</code>, which is
-worth a Warning. PhpStorm reports both.</p>
-<p><strong>Where to look:</strong> <code>src/diagnostics/enum_errors.rs</code>, and the enum's case
-values on <code>ClassInfo</code>.</p>
-<hr />
 <h2 id="d43-unknown-named-arguments-to-methods-and-functions-are-not-reported">D43. Unknown named arguments to methods and functions are not reported<a class="headerlink" href="#d43-unknown-named-arguments-to-methods-and-functions-are-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$mailer-&gt;send(to: $user, subjct: 'Hi');   // Error: Unknown named parameter $subjct</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$mailer-&gt;send(to: $user, subjct: 'Hi');   // Error: Unknown named parameter $subjct</span>
 </code></pre></div>
 <p>A named argument no parameter of a constructor takes is reported
 (<code>unknown_named_argument</code>), in <code>new</code> and in attributes alike. A method or
