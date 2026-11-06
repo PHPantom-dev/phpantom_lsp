@@ -1410,6 +1410,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#dr25-warn-on-unknown-plugin-ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR25. Warn on unknown plugin IDs
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr26-annotation-class-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR26. Annotation class names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1707,6 +1729,40 @@ implementation cannot be read, would silence every site. Report a name
 only once those hooks are read, or with a rule that knows which names
 such an implementation can add. A suggestion such as
 <code>acme_greeting__compact</code> is valid when its base hook is.</p>
+<hr />
+<h2 id="dr25-warn-on-unknown-plugin-ids">DR25. Warn on unknown plugin IDs<a class="headerlink" href="#dr25-warn-on-unknown-plugin-ids" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">$fields['total'] = BaseFieldDefinition::create('decimel');</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">$block = $this-&gt;blockManager-&gt;createInstance('acme_order_sumary');</span>
+</code></pre></div>
+<p>A plugin ID that no plugin of its type declares is a typo or a module the
+site lacks. The plugin manager throws for it, except for widgets and
+formatters, which silently fall back to the field type's default. Report
+one wherever <a href="#dr10-plugin-ids">DR10</a> reads plugin IDs: field types,
+widgets and formatters, constraints, and a plugin manager's
+<code>createInstance()</code>. A derivative ID (<code>system_menu_block:main</code>) is known
+only at run time, so an ID whose base plugin has a deriver must not
+warn. This depends on DR10.</p>
+<hr />
+<h2 id="dr26-annotation-class-names">DR26. Annotation class names<a class="headerlink" href="#dr26-annotation-class-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">/**</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x"> * @Block(</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x"> *   id = "acme_order_summary",</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x"> *   admin_label = @Translation("Order summary"),</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x"> * )</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x"> */</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="x">final class OrderSummaryBlock extends BlockBase { … }</span>
+</code></pre></div>
+<p>Plugins written before Drupal 10.2 declare themselves in a docblock
+annotation, and many contributed modules still do. <code>@Block</code> and
+<code>@Translation</code> name annotation classes, but Drupal's annotated plugin
+discovery finds them without a <code>use</code> import: it reads a plugin type's
+annotation class and namespaces from its plugin manager, not from the
+file. Once <a href="../bugs/#b707-a-docblock-annotation-does-not-name-its-class">B707</a>
+reads annotations through the imports, resolve a name the imports don't
+cover through the namespaces of the plugin type the class is discovered
+for, so that go-to-definition, hover, and references reach the class.</p>
 
 
 
