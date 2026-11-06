@@ -644,6 +644,38 @@ class VoidResultDemo
 }
 
 
+// ── Diagnostic: Missing Return ──────────────────────────────────────────────
+// Running off the end of a function returns `null`, which a return type that
+// does not accept it turns into a `TypeError`.
+
+class MissingReturnDemo
+{
+    // Error on the closing brace — a negative `$x` falls off the end:
+    public function sign(int $x): int
+    {
+        if ($x > 0) {
+            return 1;
+        } elseif ($x === 0) {
+            return 0;
+        }
+    }
+
+    // No diagnostic — every way out returns or throws:
+    public function parse(string $raw): int
+    {
+        if (is_numeric($raw)) {
+            return (int) $raw;
+        }
+        $this->fail($raw);
+    }
+
+    private function fail(string $raw): never
+    {
+        throw new \InvalidArgumentException($raw);
+    }
+}
+
+
 // ── Diagnostic: Unhandled Match Values ──────────────────────────────────────
 // A `match` without a `default` arm throws `UnhandledMatchError` for any value
 // none of its arms names.  When the subject is an enum, a `bool`, or a set of

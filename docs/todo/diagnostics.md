@@ -584,33 +584,6 @@ out, so this stays quiet wherever an undeclared call could throw anything.
 
 ---
 
-## D44. A function that can end without returning a value is not reported
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-function score(int $x): int {
-    if ($x > 0) {
-        return 1;
-    }
-}   // TypeError: score(): Return value must be of type int, none returned
-```
-
-When the end of a function or method body is reachable and its declared
-return type does not accept the implicit `null` (anything but `void`,
-`never`, `mixed`, `null` or a nullable type), PHP throws a `TypeError`
-there, so Error severity. A generator, an abstract or interface method,
-and a body that ends in `throw`, `exit` or a `never`-returning call are not
-affected; the reachability flow `unreachable_code` already computes
-answers whether the end is reachable. PhpStorm reports this as "Missing
-'return' statement", and PHPStan as `return.missing`.
-
-**Where to look:** `src/diagnostics/unreachable_code.rs` (the flow that
-decides whether a statement list can complete normally) and
-`src/diagnostics/return_type_errors.rs` (the declared return type).
-
----
-
 ## D45. An object without `__toString()` used as a string is not reported
 
 **Impact: Medium · Complexity: Low-Medium**

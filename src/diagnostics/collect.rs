@@ -96,6 +96,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_return_type_diagnostics_with_context,
     ),
     always(
+        "missing_return",
+        Backend::collect_missing_return_diagnostics,
+    ),
+    always(
         "type_mismatch_property",
         Backend::collect_property_type_diagnostics_with_context,
     ),

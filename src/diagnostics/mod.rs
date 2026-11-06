@@ -282,6 +282,7 @@ mod laravel_string_keys;
 mod match_type_errors;
 pub(crate) mod member_lookup;
 pub(crate) mod member_visibility;
+mod missing_return;
 pub(crate) mod namespace_mismatch;
 mod override_attribute;
 pub(crate) mod parent_calls;

@@ -177,6 +177,7 @@ mod diagnostics_incompatible_override;
 mod diagnostics_invalid_class_kind;
 mod diagnostics_match_type_errors;
 mod diagnostics_member_visibility;
+mod diagnostics_missing_return;
 mod diagnostics_override_attribute;
 mod diagnostics_parent_calls;
 mod diagnostics_partial_union_members;

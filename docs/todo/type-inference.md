@@ -32,7 +32,13 @@ in `tests/psalm_assertions/const_values.php` and
 
 Falling back to the native hint is not harmless. A method declared
 `@return self::STATUS_*` over a native `int` reads as `int`, so passing its
-result to a parameter typed `1|2` is reported.
+result to a parameter typed `1|2` is reported. Likewise a `switch` over a
+`@param self::*` value with a `case` for every constant and no `default`
+cannot be seen to cover every value, so a method that returns from every
+case is reported as `missing_return` (twice in phpstan-src:
+`ClassNameUsageLocation::createMessage()`, and the variance closure in
+`TypeNodeResolver::resolveGenericTypeNode()`, whose parameter is inferred
+from a `(self::VARIANCE_*)[]` property).
 
 The wildcard form resolves a pattern like `Foo::BAR_*` to the union of all
 matching constant types on the class. PHPStan supports this syntax in
