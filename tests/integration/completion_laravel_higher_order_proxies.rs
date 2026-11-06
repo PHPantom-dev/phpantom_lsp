@@ -247,7 +247,7 @@ fn probe_source(collection_type: &str, expression: &str) -> String {
 fn hover_markdown(collection_type: &str, expression: &str) -> String {
     let (backend, dir) = workspace();
     let content = probe_source(collection_type, expression);
-    let uri = format!("file://{}/src/Probe.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Probe.php"));
     backend.update_ast(&uri, &content);
 
     let hover = backend
@@ -516,7 +516,7 @@ fn completion_labels(collection_type: &str, prefix_expression: &str) -> Vec<Stri
         "<?php\nnamespace App;\n\n/** @var {} $items */\n$items = null;\n{}\n",
         collection_type, prefix_expression
     );
-    let uri = format!("file://{}/src/Probe.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Probe.php"));
     let url = Uri::parse(&uri).unwrap();
 
     let response = tokio::runtime::Builder::new_current_thread()
@@ -566,7 +566,7 @@ fn completion_after_a_proxy_offers_item_members() {
 fn unknown_member_messages(expression: &str) -> Vec<String> {
     let (backend, dir) = workspace();
     let content = probe_source(SUPPORT, expression);
-    let uri = format!("file://{}/src/Probe.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Probe.php"));
     backend.update_ast(&uri, &content);
 
     let mut diagnostics = Vec::new();

@@ -3142,13 +3142,10 @@ class ExplorerController {
     // Index every file up front, mirroring the CLI's eager scan so the
     // call target and its `@template` docblock are available.
     for (rel_path, php) in &files {
-        let file_uri = format!("file://{}/{}", dir.path().display(), rel_path);
+        let file_uri = crate::common::file_uri(&dir.path().join(rel_path));
         backend.update_ast(&file_uri, php);
     }
-    let uri = format!(
-        "file://{}/src/Http/ExplorerController.php",
-        dir.path().display()
-    );
+    let uri = crate::common::file_uri(&dir.path().join("src/Http/ExplorerController.php"));
     let content = files[2].1;
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
@@ -7265,7 +7262,7 @@ class TestCase {
 
     let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
     let (backend, dir) = create_psr4_workspace(composer, &files);
-    let uri = format!("file://{}/src/TestCase.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/TestCase.php"));
     let content = files[3].1;
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
@@ -9670,10 +9667,10 @@ class Caller {
     let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
     let (backend, dir) = create_psr4_workspace(composer, &files);
     for (rel_path, php) in &files {
-        let file_uri = format!("file://{}/{}", dir.path().display(), rel_path);
+        let file_uri = crate::common::file_uri(&dir.path().join(rel_path));
         backend.update_ast(&file_uri, php);
     }
-    let uri = format!("file://{}/src/Caller.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Caller.php"));
     let content = files[2].1;
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
@@ -10323,7 +10320,7 @@ class Helper {
             ),
         ],
     );
-    let uri = format!("file://{}/app/Run.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("app/Run.php"));
     let php = "<?php\n\\App\\Helper::formatPrice(new \\Acme\\Decimal\\Decimal('0.00'));\n";
     backend.update_ast(&uri, php);
     let mut out = Vec::new();
@@ -12322,7 +12319,7 @@ takeMatching(makeOpen());
         "got {messages:?}"
     );
     assert!(
-        messages[1].contains("expects array{foo: array<string>, ...<array-key, mixed>}"),
+        messages[1].contains("expects array{foo: array<string>, ...}"),
         "got {messages:?}"
     );
 }
@@ -12434,7 +12431,7 @@ takeMap(['foo' => 1]);
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 2, "got {messages:?}");
     assert!(
-        messages[0].contains("got array{foo: string, ...<array-key, mixed>}"),
+        messages[0].contains("got array{foo: string, ...}"),
         "got {messages:?}"
     );
     assert!(
@@ -12480,7 +12477,7 @@ takeIntKeyed(makeOpen());
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 3, "got {messages:?}");
     assert!(
-        messages[0].contains("got array{0: int, ...<array-key, mixed>}"),
+        messages[0].contains("got array{0: int, ...}"),
         "got {messages:?}"
     );
     assert!(
@@ -12488,7 +12485,7 @@ takeIntKeyed(makeOpen());
         "got {messages:?}"
     );
     assert!(
-        messages[2].contains("got array{foo: int, ...<array-key, mixed>}"),
+        messages[2].contains("got array{foo: int, ...}"),
         "got {messages:?}"
     );
 }
@@ -12562,7 +12559,7 @@ takeNames(makeNamed());
         "got {messages:?}"
     );
     assert!(
-        messages[1].contains("got array{name: string, ...<array-key, mixed>}"),
+        messages[1].contains("got array{name: string, ...}"),
         "got {messages:?}"
     );
 }
@@ -14570,7 +14567,7 @@ class Analyser
     *backend.workspace_root().write() = Some(dir.path().to_path_buf());
     *backend.psr4_mappings().write() = mappings;
 
-    let uri = format!("file://{}/src/Analyser/Analyser.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Analyser/Analyser.php"));
     let content = files[1].1;
     backend.update_ast(&uri, content);
     let mut diags = Vec::new();
@@ -15202,6 +15199,87 @@ function g(array $wider): void {
         messages
             .iter()
             .all(|m| m.contains("(undeclared key 'buz')")),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn a_key_written_into_a_plain_array_leaves_its_other_keys_open() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{settings?: string, label?: string} $args */
+function add_control(array $args): void {}
+/** @param array $args */
+function add(string $id, array $args, mixed $default): void {
+    $args['settings'] = $id;
+    $args['defaultValue'] = $default;
+    add_control($args);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+#[test]
+fn a_key_written_into_a_plain_array_is_read_back_and_held_to_the_parameter() {
+    let php = r#"<?php
+declare(strict_types=1);
+class Foo {}
+function takes_int(int $i): void {}
+/** @param array{settings?: string} $args */
+function add_control(array $args): void {}
+/** @param array<string, string> $map */
+function add_map(array $map): void {}
+/** @param array $args */
+function add(array $args, Foo $foo): void {
+    $args['settings'] = $foo;
+    takes_int($args['settings']);
+    add_control($args);
+    add_map($args);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(messages[0].contains("got Foo"), "got {messages:?}");
+    assert!(
+        messages[1].contains("got array{settings: Foo, ...}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[2].contains("got array{settings: Foo, ...}"),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn a_class_string_key_written_into_a_constant_shape_keeps_its_keys_class_names() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace App;
+class NodeTraverser {}
+function takes_int(int $i): void {}
+final class Builder {
+    private const PAIRS = [NodeTraverser::class => ['a']];
+    public function run(string $className): void {
+        $pairs = self::PAIRS;
+        if (class_exists($className)) {
+            $pairs[$className] = ['b'];
+        }
+        foreach (array_keys($pairs) as $class) {
+            new \ReflectionClass($class);
+        }
+        $a = ['x' => 1];
+        if (class_exists($className)) {
+            $a[$className] = 2;
+        }
+        takes_int($a);
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("got non-empty-array<'x'|class-string, 1|2>"),
         "got {messages:?}"
     );
 }
@@ -17172,4 +17250,226 @@ function f(array $data, Dog $actual): void {
 }"#,
     );
     assert_eq!(got, ["Dog"]);
+}
+
+// ─── Mismatches against docblock types (docblock-type-mismatches) ───────────
+
+/// Every kind of type mismatch in `php`, with `docblock-type-mismatches`
+/// as given; `None` leaves it unset.
+fn docblock_type_mismatches(php: &str, docblock_types: Option<bool>) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///docblock_types.php";
+    let mut cfg = backend.config();
+    cfg.diagnostics.docblock_type_mismatches = docblock_types;
+    backend.set_config(cfg);
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    backend.collect_return_type_diagnostics(uri, php, &mut diags);
+    backend.collect_property_type_diagnostics(uri, php, &mut diags);
+    diags
+}
+
+/// Each mismatch here breaks only a docblock type: the native type, where
+/// there is one, accepts the value.
+const DOCBLOCK_ONLY: &str = r#"<?php
+declare(strict_types=1);
+
+class Response {}
+
+/** @param Response $r */
+function takes_response($r): void {}
+
+/** @param Response $r */
+function takes_response_or_string(Response|string $r): void {}
+
+/** @return string */
+function untyped_return() {
+    return new Response();
+}
+
+/** @return Response */
+function narrowed_return(): Response|string {
+    return 'plain text';
+}
+
+class Holder {
+    /** @var Response */
+    public $untyped;
+
+    /** @var Response */
+    public Response|string $narrowed;
+
+    public function run(): void {
+        takes_response('x');
+        takes_response_or_string('x');
+        $this->untyped = 'x';
+        $this->narrowed = 'x';
+    }
+}
+"#;
+
+#[test]
+fn docblock_types_are_checked_by_default() {
+    let diags = docblock_type_mismatches(DOCBLOCK_ONLY, None);
+    assert_eq!(diags.len(), 6, "got {diags:?}");
+}
+
+#[test]
+fn switching_docblock_types_off_checks_only_native_types() {
+    let diags = docblock_type_mismatches(DOCBLOCK_ONLY, Some(false));
+    assert!(diags.is_empty(), "got {diags:?}");
+}
+
+#[test]
+fn native_mismatches_are_reported_with_docblock_types_off() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Response {}
+
+/** @param Response $r */
+function takes_response(Response $r): void {}
+
+/** @return Response */
+function wrong_return(): Response {
+    return 'many';
+}
+
+class Holder {
+    /** @var Response */
+    public Response $prop;
+
+    public function run(): void {
+        takes_response('x');
+        $this->prop = 'x';
+    }
+}
+"#;
+    let diags = docblock_type_mismatches(php, Some(false));
+    let codes: Vec<_> = diags
+        .iter()
+        .map(|d| match &d.code {
+            Some(Code::String(code)) => code.as_str(),
+            other => panic!("unexpected code {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        codes,
+        vec![
+            "type_mismatch_argument",
+            "type_mismatch_return",
+            "type_mismatch_property",
+        ],
+        "got {diags:?}"
+    );
+}
+
+/// A method's own parameters and return go through the class's
+/// `MethodInfo` rather than the function index.
+#[test]
+fn methods_are_checked_against_native_types_with_docblock_types_off() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Response {}
+
+class Controller {
+    /** @param Response $module */
+    public function __construct($id, $module) {}
+
+    /** @return string */
+    public function actionIndex() {
+        return new Response();
+    }
+
+    /** @return Response */
+    public function actionSave(): Response|string {
+        return 'plain text';
+    }
+
+    /** @return Response */
+    public function actionBroken(): Response {
+        return 'plain text';
+    }
+}
+
+new Controller('test', []);
+"#;
+    assert_eq!(docblock_type_mismatches(php, None).len(), 4);
+    let diags = docblock_type_mismatches(php, Some(false));
+    assert_eq!(diags.len(), 1, "got {diags:?}");
+    assert_eq!(
+        diags[0].code,
+        Some(Code::String("type_mismatch_return".into())),
+        "got {diags:?}"
+    );
+}
+
+// ─── Unions some members of which fit (partial-union-mismatches) ────────────
+
+/// Every kind of type mismatch in `php`, with `partial-union-mismatches`
+/// as given; `None` leaves it unset.
+fn partial_union_mismatches(php: &str, partial_union: Option<bool>) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///partial_union.php";
+    let mut cfg = backend.config();
+    cfg.diagnostics.partial_union_mismatches = partial_union;
+    backend.set_config(cfg);
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    backend.collect_return_type_diagnostics(uri, php, &mut diags);
+    backend.collect_property_type_diagnostics(uri, php, &mut diags);
+    diags
+}
+
+const PARTIAL_UNION: &str = r#"<?php
+declare(strict_types=1);
+function label(string $text): void {}
+
+class Holder {
+    public string $name = '';
+
+    public function run(array|string $a, array|string $b, int|string $c, ?string $d): string {
+        label($a);
+        $this->name = $b;
+        label($d);
+        return $c;
+    }
+}
+"#;
+
+#[test]
+fn a_union_some_members_of_which_fit_is_reported_by_default() {
+    // `possibly-empty-mismatches` is on in the test environment, so the
+    // `?string` argument is reported too.
+    let diags = partial_union_mismatches(PARTIAL_UNION, None);
+    assert_eq!(diags.len(), 4, "got {diags:?}");
+}
+
+#[test]
+fn switching_partial_union_mismatches_off_leaves_them_out() {
+    let diags = partial_union_mismatches(PARTIAL_UNION, Some(false));
+    assert!(diags.is_empty(), "got {diags:?}");
+}
+
+/// No member fits, so there is no value for which the code works.
+#[test]
+fn a_union_no_member_of_which_fits_is_always_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+function label(string $text): void {}
+
+class Holder {
+    public string $name = '';
+
+    public function run(array|int $a, array|float $b, int|float $c): string {
+        label($a);
+        $this->name = $b;
+        return $c;
+    }
+}
+"#;
+    assert_eq!(partial_union_mismatches(php, Some(false)).len(), 3);
 }

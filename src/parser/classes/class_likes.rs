@@ -230,6 +230,10 @@ pub(super) fn extract_class<'a>(
         is_final: class.modifiers.contains_final(),
         is_abstract: class.modifiers.contains_abstract(),
         is_readonly: class.modifiers.contains_readonly(),
+        allows_dynamic_properties: crate::parser::has_allow_dynamic_properties_attribute(
+            &class.attribute_lists,
+            doc_ctx,
+        ),
         deprecation_message: class_depr.message,
         deprecated_replacement: class_depr.replacement,
         links: doc_info.links,
@@ -370,6 +374,7 @@ pub(super) fn extract_trait<'a>(
         trait_def,
         &methods,
         doc_ctx.map_or("", |ctx| ctx.content),
+        doc_ctx,
     );
     ClassInfo {
         kind: ClassLikeKind::Trait,

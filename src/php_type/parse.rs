@@ -849,8 +849,9 @@ pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
                 .enumerate()
                 .map(|(position, e)| match e.key.as_deref() {
                     None => PhpType::literal_int(position.to_string()),
-                    Some(key) if is_canonical_int_key(key) => PhpType::literal_int(key.to_string()),
-                    Some(key) => PhpType::literal_string_value(key),
+                    Some(key) => {
+                        shape_key_literal(key).unwrap_or_else(|| PhpType::named(atom("array-key")))
+                    }
                 })
                 .collect();
             dedup_types(&mut keys);

@@ -143,12 +143,15 @@ fn key_domain(ty: &PhpType) -> Option<PhpType> {
         // A shape spells out every key it has, so iterating it hands out
         // exactly those (`'psr-4'|'classmap'`), which is what lets a
         // comparison on the key pick out the entry being visited.  A
-        // class-constant key is only known by its spelling, not its value.
+        // class-constant key other than `Foo::class` is only known by its
+        // spelling, not its value.
         TypeKind::ArrayShape(entries)
             if !entries.is_empty()
-                && !entries
-                    .iter()
-                    .any(|e| e.key.as_deref().is_some_and(|k| k.contains("::"))) =>
+                && !entries.iter().any(|e| {
+                    e.key
+                        .as_deref()
+                        .is_some_and(crate::php_type::is_opaque_shape_key)
+                }) =>
         {
             Some(crate::php_type::evaluate_key_of(ty))
         }

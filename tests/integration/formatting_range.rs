@@ -4,9 +4,9 @@ mod tests {
     use tower_lsp_server::LanguageServer;
     use tower_lsp_server::gen_lsp_types::*;
 
-    async fn format_range(uri: &str, text: &str, start_line: u32, end_line: u32) -> String {
+    async fn format_range(relative: &str, text: &str, start_line: u32, end_line: u32) -> String {
         let backend = create_test_backend();
-        let uri = Uri::parse(uri).unwrap();
+        let uri = crate::common::absolute_uri(relative);
         open_document(&backend, &uri, "php", text).await;
 
         let edits = backend
@@ -43,7 +43,7 @@ mod tests {
             "}\n",
         );
 
-        let result = format_range("file:///range.php", text, 6, 8).await;
+        let result = format_range("range.php", text, 6, 8).await;
 
         assert_eq!(
             result,
@@ -70,7 +70,7 @@ mod tests {
             "function b( $y ){ return $y; }\n",
         );
 
-        let result = format_range("file:///range.php", text, 2, 2).await;
+        let result = format_range("range.php", text, 2, 2).await;
 
         assert_eq!(
             result,
@@ -97,7 +97,7 @@ mod tests {
             "}\n",
         );
 
-        let result = format_range("file:///range.php", text, 5, 5).await;
+        let result = format_range("range.php", text, 5, 5).await;
 
         assert_eq!(
             result,
@@ -117,7 +117,7 @@ mod tests {
     async fn test_range_formatting_blade_template() {
         let text = "@if($x)\n<p>a</p>\n<p>b</p>\n@endif\n";
 
-        let result = format_range("file:///resources/views/view.blade.php", text, 2, 2).await;
+        let result = format_range("resources/views/view.blade.php", text, 2, 2).await;
 
         assert_eq!(result, "@if($x)\n<p>a</p>\n    <p>b</p>\n@endif\n");
     }
@@ -126,7 +126,7 @@ mod tests {
     async fn test_range_formatting_already_formatted_returns_nothing() {
         let text = "<?php\n\nfunction a($x)\n{\n    return $x;\n}\n";
 
-        let result = format_range("file:///range.php", text, 2, 5).await;
+        let result = format_range("range.php", text, 2, 5).await;
 
         assert_eq!(result, text);
     }

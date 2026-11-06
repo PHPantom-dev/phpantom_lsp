@@ -617,6 +617,24 @@ pub(crate) fn has_no_discard_attribute(
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
     ctx: Option<&DocblockCtx<'_>>,
 ) -> bool {
+    has_global_attribute(attribute_lists, ctx, "NoDiscard")
+}
+
+/// Whether a class carries PHP 8.2's native `#[\AllowDynamicProperties]`
+/// attribute, read the same way as [`has_no_discard_attribute`].
+pub(crate) fn has_allow_dynamic_properties_attribute(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    ctx: Option<&DocblockCtx<'_>>,
+) -> bool {
+    has_global_attribute(attribute_lists, ctx, "AllowDynamicProperties")
+}
+
+/// Whether one of the attributes names the global class `fqn`.
+fn has_global_attribute(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    ctx: Option<&DocblockCtx<'_>>,
+    fqn: &str,
+) -> bool {
     attribute_lists
         .iter()
         .flat_map(|list| list.attributes.iter())
@@ -624,11 +642,11 @@ pub(crate) fn has_no_discard_attribute(
             let raw = bytes_to_str(attr.name.value());
             match ctx {
                 Some(ctx) => crate::names::resolve_to_fqn(raw, &ctx.use_map, &ctx.namespace)
-                    .eq_ignore_ascii_case("NoDiscard"),
+                    .eq_ignore_ascii_case(fqn),
                 None => raw
                     .strip_prefix('\\')
                     .unwrap_or(raw)
-                    .eq_ignore_ascii_case("NoDiscard"),
+                    .eq_ignore_ascii_case(fqn),
             }
         })
 }

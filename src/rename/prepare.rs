@@ -97,6 +97,9 @@ impl Backend {
         if self.is_resource_uri(uri) {
             return Ok(self.handle_framework_prepare_rename(uri, content, position));
         }
+        if let Some(alias) = self.alias_rename_at(uri, content, position) {
+            return Ok(Some(alias.prepare(content)));
+        }
         let Some((span, response)) = self.prepare_rename_response(uri, content, position) else {
             return Ok(None);
         };
@@ -251,6 +254,9 @@ impl Backend {
         // occurrences are reached from the declaration instead.
         if self.is_resource_uri(uri) {
             return self.handle_framework_rename(uri, content, position, new_name);
+        }
+        if let Some(alias) = self.alias_rename_at(uri, content, position) {
+            return alias.rename(uri, new_name);
         }
 
         let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
@@ -735,7 +741,8 @@ impl Backend {
     }
 
     /// Check whether the symbol under the cursor is defined in a vendor
-    /// file.
+    /// file, or in Drupal core or a contributed extension, which Composer
+    /// installs into the web root instead.
     ///
     /// We check this by resolving the definition location.  If the
     /// definition URI starts with the vendor prefix, the rename is
@@ -743,21 +750,13 @@ impl Backend {
     fn is_vendor_symbol(&self, uri: &str, content: &str, position: Position) -> bool {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
 
-        if vendor_prefixes.is_empty() {
+        if vendor_prefixes.is_empty() && !self.is_drupal_project() {
             return false;
         }
 
-        for loc in self.resolve_definition(uri, content, position) {
-            let def_uri = loc.uri.to_string();
-            if vendor_prefixes
-                .iter()
-                .any(|p| def_uri.starts_with(p.as_str()))
-            {
-                return true;
-            }
-        }
-
-        false
+        self.resolve_definition(uri, content, position)
+            .iter()
+            .any(|loc| self.is_installed_package_uri(loc.uri.as_str(), &vendor_prefixes))
     }
 
     /// Determine whether this rename targets a property (as opposed to

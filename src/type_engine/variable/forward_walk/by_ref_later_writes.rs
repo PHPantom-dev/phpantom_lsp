@@ -13,6 +13,13 @@
 //!     $f();
 //! }
 //! ```
+//!
+//! That includes the assignment the closure is written inside of, which
+//! stores its value only once the closure exists:
+//!
+//! ```php
+//! $ks = new Semaphore(function () use (&$ks) { $ks->wait(); });   // not null
+//! ```
 
 use std::collections::HashSet;
 
@@ -31,7 +38,13 @@ use crate::parser::with_parsed_program;
 /// A closure that provably runs where it is written (called on the spot,
 /// or handed to a callee that invokes it before returning) is left alone,
 /// since nothing after it can run first.  Each write is evaluated against
-/// `outer`, the scope the closure is created in.
+/// `outer`, the scope the closure is created in, along with any `@var`
+/// written above it.
+///
+/// An assignment holding the closure on its right-hand side replaces the
+/// capture's incoming type rather than widening it: the closure was not
+/// run while that side was evaluated, so it can only ever see what the
+/// assignment stores or a later write.
 pub(crate) fn widen_by_ref_captures_by_later_writes(
     closure: &Closure<'_>,
     closure_scope: &mut ScopeState,
@@ -90,10 +103,24 @@ pub(crate) fn widen_by_ref_captures_by_later_writes(
             let probe_ctx = ctx.with_cursor_offset(u32::MAX);
             let _suspend = suspend_snapshot_recording();
             let _barrier = suspend_return_edges(ctx.flow);
-            let mut widened: Vec<(String, Option<Vec<ResolvedType>>)> = Vec::new();
+            let mut widened: Vec<Widened> = Vec::new();
             for (expr, written) in writes.found {
                 let mut probe = outer.clone();
-                process_assignment_expr(expr, &mut probe, &probe_ctx);
+                if let VarOverrideResult::None = try_process_inline_var_override(
+                    expr,
+                    expr.span().start.offset,
+                    &mut probe,
+                    &probe_ctx,
+                ) {
+                    process_assignment_expr(expr, &mut probe, &probe_ctx);
+                }
+                let replaces = match expr {
+                    Expression::Assignment(assignment) => {
+                        let rhs = assignment.rhs.span();
+                        rhs.start.offset <= target.0 && target.1 <= rhs.end.offset
+                    }
+                    _ => false,
+                };
                 for name in written {
                     let types = probe.get(name);
                     // A call that takes the variable by value, or a write
@@ -103,13 +130,19 @@ pub(crate) fn widen_by_ref_captures_by_later_writes(
                     {
                         continue;
                     }
-                    let entry = match widened.iter_mut().find(|(n, _)| n == name) {
-                        Some((_, entry)) => entry,
+                    let widening = match widened.iter_mut().position(|w| w.name == name) {
+                        Some(idx) => &mut widened[idx],
                         None => {
-                            widened.push((name.to_string(), Some(Vec::new())));
-                            &mut widened.last_mut().expect("just pushed").1
+                            widened.push(Widened {
+                                name: name.to_string(),
+                                types: Some(Vec::new()),
+                                replaces: false,
+                            });
+                            widened.last_mut().expect("just pushed")
                         }
                     };
+                    widening.replaces |= replaces;
+                    let entry = &mut widening.types;
                     // A write whose value cannot be resolved leaves the
                     // capture unknown rather than keeping a narrowing it may
                     // have undone.
@@ -125,18 +158,39 @@ pub(crate) fn widen_by_ref_captures_by_later_writes(
         },
     );
 
-    for (name, types) in widened {
+    for Widened {
+        name,
+        types,
+        replaces,
+    } in widened
+    {
         closure_scope.invalidate_dependent_keys(&name);
         closure_scope.invalidate_proofs(&name);
         match types {
             Some(types) => {
-                let mut combined = closure_scope.get(&name).to_vec();
+                let mut combined = if replaces {
+                    Vec::new()
+                } else {
+                    closure_scope.get(&name).to_vec()
+                };
                 ResolvedType::extend_unique(&mut combined, types);
                 closure_scope.set(&name, combined);
             }
             None => closure_scope.set_empty(&name),
         }
     }
+}
+
+/// What the writes after a closure is created store to one of its
+/// by-reference captures.
+struct Widened {
+    name: String,
+    /// The types written, or `None` when one of the writes could not be
+    /// resolved.
+    types: Option<Vec<ResolvedType>>,
+    /// Whether one of the writes is an assignment the closure is written
+    /// inside of, so the capture never sees the type it had before.
+    replaces: bool,
 }
 
 /// The function-like body a closure is written in.
@@ -346,7 +400,11 @@ impl<'ast, 'arena, 'n> Walker<'ast, 'arena, Writes<'ast, 'arena, 'n>> for WriteC
         expr: &'ast Expression<'arena>,
         writes: &mut Writes<'ast, 'arena, 'n>,
     ) {
-        if writes.enclosing_loops == 0 && expr.span().start.offset < writes.target.1 {
+        // An assignment holding the closure stores its value once the
+        // closure exists, so it runs after it like any later write.
+        let encloses = matches!(expr, Expression::Assignment(assignment)
+            if writes.holds_target(assignment.rhs.span()));
+        if writes.enclosing_loops == 0 && expr.span().start.offset < writes.target.1 && !encloses {
             return;
         }
         let mut vars = HashSet::new();

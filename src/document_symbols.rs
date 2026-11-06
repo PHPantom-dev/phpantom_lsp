@@ -260,7 +260,10 @@ fn class_to_symbol(class: &ClassInfo, idx: &LineIndex<'_>) -> Option<DocumentSym
         ClassLikeKind::Enum => SymbolKind::Enum,
     };
 
-    let range_start = idx.position(class.keyword_offset as usize);
+    let range_start = idx.position(declaration_start(
+        idx.content(),
+        class.keyword_offset as usize,
+    ));
     let range_end = idx.position(class.end_offset as usize);
     let full_range = Range::new(range_start, range_end);
 
@@ -302,7 +305,7 @@ fn class_to_symbol(class: &ClassInfo, idx: &LineIndex<'_>) -> Option<DocumentSym
         if method.is_virtual {
             continue;
         }
-        if let Some(sym) = method_to_symbol(method, idx) {
+        if let Some(sym) = method_to_symbol(method, class.kind, idx) {
             children.push(sym);
         }
     }
@@ -386,10 +389,12 @@ fn statement_declaration_end(content: &str, name_offset: usize, name_len: usize)
 /// Build a leaf `DocumentSymbol` for a member declaration.
 ///
 /// The selection range covers the name, which is what an editor
-/// highlights and jumps to; the full range covers the whole declaration,
-/// so folding the outline entry folds the member. `declaration_end` says
-/// where that declaration finishes, since a callable ends at its body's
-/// brace and a property or constant at its `;`.
+/// highlights and jumps to; the full range covers the whole declaration
+/// from its first modifier, so folding the outline entry folds the member
+/// and a client that labels entries with their source text (Zed) shows
+/// `private function charge` rather than a bare `charge`.
+/// `declaration_end` says where that declaration finishes, since a
+/// callable ends at its body's brace and a property or constant at its `;`.
 ///
 /// A member with no recorded offset was synthesised rather than written,
 /// so it has no place in the outline and yields `None`.
@@ -406,8 +411,9 @@ fn member_symbol(
     if name_offset == 0 {
         return None;
     }
-    let start = idx.position(name_offset as usize);
-    let selection_range = Range::new(start, idx.position(name_offset as usize + name_len));
+    let name_start = idx.position(name_offset as usize);
+    let selection_range = Range::new(name_start, idx.position(name_offset as usize + name_len));
+    let decl_start = declaration_start(idx.content(), name_offset as usize);
     let decl_end = declaration_end(idx.content(), name_offset as usize, name_len);
     Some(DocumentSymbol {
         name,
@@ -415,7 +421,7 @@ fn member_symbol(
         kind,
         tags: deprecated.then(|| vec![SymbolTag::Deprecated]),
         deprecated: None,
-        range: Range::new(start, idx.position(decl_end)),
+        range: Range::new(idx.position(decl_start), idx.position(decl_end)),
         selection_range,
         children: None,
     })
@@ -423,7 +429,11 @@ fn member_symbol(
 
 /// Convert a `MethodInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
-fn method_to_symbol(method: &MethodInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
+fn method_to_symbol(
+    method: &MethodInfo,
+    owner_kind: ClassLikeKind,
+    idx: &LineIndex<'_>,
+) -> Option<DocumentSymbol> {
     let kind = if method.name == "__construct" {
         SymbolKind::Constructor
     } else {
@@ -436,7 +446,7 @@ fn method_to_symbol(method: &MethodInfo, idx: &LineIndex<'_>) -> Option<Document
             method.name.len(),
         ),
         kind,
-        build_method_detail(method),
+        build_method_detail(method, owner_kind),
         method.deprecation_message().is_some(),
         idx,
         callable_declaration_end,
@@ -454,7 +464,7 @@ fn property_to_symbol(prop: &PropertyInfo, idx: &LineIndex<'_>) -> Option<Docume
             prop.name.len() + 1,
         ),
         SymbolKind::Property,
-        prop.type_hint_str(),
+        Some(build_property_detail(prop)),
         prop.deprecation_message.is_some(),
         idx,
         statement_declaration_end,
@@ -467,10 +477,7 @@ fn constant_to_symbol(constant: &ConstantInfo, idx: &LineIndex<'_>) -> Option<Do
     let (kind, detail) = if constant.is_enum_case {
         (SymbolKind::EnumMember, constant.enum_value.clone())
     } else {
-        (
-            SymbolKind::Constant,
-            constant.type_hint_str().or_else(|| constant.value.clone()),
-        )
+        (SymbolKind::Constant, Some(build_constant_detail(constant)))
     };
 
     member_symbol(
@@ -502,9 +509,37 @@ fn function_to_symbol(func: &FunctionInfo, idx: &LineIndex<'_>) -> Option<Docume
 
 // ── Detail string builders ──────────────────────────────────────────
 
-/// Build a detail string for a class (e.g. "extends BaseClass implements Foo, Bar").
+// Every detail string leads with the declaration's modifiers, visibility
+// spelled out even when public, the way PHP tooling conventionally fills
+// this field. The protocol has no structured field for visibility, so
+// clients that group or order an outline by it read it from here.
+
+fn visibility_keyword(visibility: Visibility) -> &'static str {
+    match visibility {
+        Visibility::Public => "public",
+        Visibility::Protected => "protected",
+        Visibility::Private => "private",
+    }
+}
+
+/// Build a detail string for a class
+/// (e.g. "final extends BaseClass implements Foo, Bar").
 fn build_class_detail(class: &ClassInfo) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
+
+    // Interfaces, traits and enums take no class modifiers; an enum is
+    // recorded as final, but that is implicit, not something written.
+    if class.kind == ClassLikeKind::Class {
+        if class.is_abstract {
+            parts.push("abstract".to_string());
+        }
+        if class.is_final {
+            parts.push("final".to_string());
+        }
+        if class.is_readonly {
+            parts.push("readonly".to_string());
+        }
+    }
 
     if let Some(ref parent) = class.parent_class {
         parts.push(format!("extends {}", short_name(parent)));
@@ -527,23 +562,57 @@ fn build_class_detail(class: &ClassInfo) -> Option<String> {
     }
 }
 
-/// Build a detail string for a method showing its signature.
-fn build_method_detail(method: &MethodInfo) -> Option<String> {
+/// Build a detail string for a method: its modifiers, then its signature
+/// (e.g. "abstract protected static (int $id): Foo").
+fn build_method_detail(method: &MethodInfo, owner_kind: ClassLikeKind) -> Option<String> {
     let mut detail = String::new();
 
-    // Visibility prefix.
-    match method.visibility {
-        Visibility::Public => {}
-        Visibility::Protected => detail.push_str("protected "),
-        Visibility::Private => detail.push_str("private "),
+    // Interface methods are abstract implicitly; PHP forbids writing it.
+    if method.is_abstract && owner_kind != ClassLikeKind::Interface {
+        detail.push_str("abstract ");
     }
-
+    if method.is_final {
+        detail.push_str("final ");
+    }
+    detail.push_str(visibility_keyword(method.visibility));
+    detail.push(' ');
     if method.is_static {
         detail.push_str("static ");
     }
 
     push_signature(&mut detail, &method.parameters, method.return_type.as_ref());
     Some(detail)
+}
+
+/// Build a detail string for a property: its modifiers, then its type
+/// (e.g. "private readonly Gateway").
+fn build_property_detail(prop: &PropertyInfo) -> String {
+    let mut detail = visibility_keyword(prop.visibility).to_string();
+    if prop.is_static {
+        detail.push_str(" static");
+    }
+    if prop.is_readonly {
+        detail.push_str(" readonly");
+    }
+    if let Some(type_hint) = prop.type_hint_str() {
+        detail.push(' ');
+        detail.push_str(&type_hint);
+    }
+    detail
+}
+
+/// Build a detail string for a class constant: its visibility, then its
+/// type, or its value when it has none (e.g. "public int", "private = 60").
+fn build_constant_detail(constant: &ConstantInfo) -> String {
+    let mut detail = visibility_keyword(constant.visibility).to_string();
+    if let Some(type_hint) = constant.type_hint_str() {
+        detail.push(' ');
+        detail.push_str(&type_hint);
+    } else if let Some(value) = &constant.value {
+        detail.push_str(" = ");
+        detail.push_str(value);
+    }
+    detail
 }
 
 /// Build a detail string for a standalone function showing its signature.
@@ -572,6 +641,74 @@ fn push_signature(detail: &mut String, params: &[ParameterInfo], return_type: Op
     if let Some(ret) = return_type {
         let _ = write!(detail, ": {ret}");
     }
+}
+
+/// Keywords that can open a declaration the outline lists.
+const DECLARATION_KEYWORDS: &[&str] = &[
+    "abstract",
+    "case",
+    "const",
+    "final",
+    "function",
+    "private",
+    "protected",
+    "public",
+    "readonly",
+    "static",
+    "var",
+];
+
+/// Byte offset where the declaration whose name (or class keyword) sits
+/// at `anchor` begins: its first modifier or keyword on the same line,
+/// so `public static function foo` starts at `public`.
+///
+/// Scans back over the modifiers and any type between them and the name
+/// (including DNF groups and `private(set)`), stopping at anything a
+/// declaration cannot contain, such as a line break, `;`, a brace, the
+/// `(` or `,` before a promoted constructor property, or the `]` of an
+/// attribute. Returns `anchor` when no keyword precedes it there.
+///
+/// Only the same line is considered: a modifier on an earlier line is
+/// rare, and a range starting on the name's own line is what clients that
+/// label outline entries from the source text expect.
+fn declaration_start(content: &str, anchor: usize) -> usize {
+    let bytes = content.as_bytes();
+    let is_word_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
+
+    let mut start = anchor.min(bytes.len());
+    let mut paren_depth = 0u32;
+    while start > 0 {
+        match bytes[start - 1] {
+            b')' => paren_depth += 1,
+            b'(' if paren_depth > 0 => paren_depth -= 1,
+            b' ' | b'\t' | b'?' | b'|' | b'&' | b'\\' => {}
+            b if is_word_byte(b) => {}
+            _ => break,
+        }
+        start -= 1;
+    }
+
+    // The scan can take in a stray word (the `php` of `<?php function f`),
+    // so the declaration starts at the first keyword, not the first word.
+    let mut i = start;
+    while i < anchor {
+        if !is_word_byte(bytes[i]) {
+            i += 1;
+            continue;
+        }
+        let word_start = i;
+        while i < anchor && is_word_byte(bytes[i]) {
+            i += 1;
+        }
+        let word = &bytes[word_start..i];
+        if DECLARATION_KEYWORDS
+            .iter()
+            .any(|kw| word.eq_ignore_ascii_case(kw.as_bytes()))
+        {
+            return word_start;
+        }
+    }
+    anchor
 }
 
 /// Find the start of a class/interface/trait/enum name token after the
@@ -675,8 +812,102 @@ mod tests {
     #[test]
     fn build_method_detail_simple() {
         let method = make_method("foo", Some("void"));
-        let detail = build_method_detail(&method);
-        assert_eq!(detail, Some("(): void".to_string()));
+        let detail = build_method_detail(&method, ClassLikeKind::Class);
+        assert_eq!(detail, Some("public (): void".to_string()));
+    }
+
+    #[test]
+    fn build_method_detail_abstract_and_final() {
+        let mut method = make_method("run", None);
+        method.is_abstract = true;
+        assert_eq!(
+            build_method_detail(&method, ClassLikeKind::Class),
+            Some("abstract public ()".to_string())
+        );
+        // An interface method is abstract without saying so.
+        assert_eq!(
+            build_method_detail(&method, ClassLikeKind::Interface),
+            Some("public ()".to_string())
+        );
+
+        method.is_abstract = false;
+        method.is_final = true;
+        method.visibility = Visibility::Protected;
+        assert_eq!(
+            build_method_detail(&method, ClassLikeKind::Class),
+            Some("final protected ()".to_string())
+        );
+    }
+
+    #[test]
+    fn class_detail_leads_with_modifiers() {
+        let class = ClassInfo {
+            is_final: true,
+            is_readonly: true,
+            parent_class: Some(atom("Base")),
+            ..make_class("Foo")
+        };
+        assert_eq!(
+            build_class_detail(&class),
+            Some("final readonly extends Base".to_string())
+        );
+
+        // Enums are recorded as final, but nobody writes it.
+        let enum_class = ClassInfo {
+            kind: ClassLikeKind::Enum,
+            is_final: true,
+            ..make_class("Suit")
+        };
+        assert_eq!(build_class_detail(&enum_class), None);
+    }
+
+    /// The text from `declaration_start` to `anchor`, where `anchor` is
+    /// the start of `name` in `line`.
+    fn declaration_prefix<'a>(line: &'a str, name: &str) -> &'a str {
+        let anchor = line.rfind(name).expect("name is in the line");
+        &line[declaration_start(line, anchor)..anchor]
+    }
+
+    #[test]
+    fn declaration_start_takes_in_the_modifiers() {
+        assert_eq!(
+            declaration_prefix("    public static function &build(", "build"),
+            "public static function &"
+        );
+        assert_eq!(
+            declaration_prefix("    final public const int LIMIT = 3;", "LIMIT"),
+            "final public const int "
+        );
+        assert_eq!(
+            declaration_prefix("    public private(set) (A&B)|null $x;", "$x"),
+            "public private(set) (A&B)|null "
+        );
+        assert_eq!(declaration_prefix("    case Hearts;", "Hearts"), "case ");
+        assert_eq!(
+            declaration_prefix("final readonly class Point", "class"),
+            "final readonly "
+        );
+    }
+
+    #[test]
+    fn declaration_start_stops_at_the_enclosing_construct() {
+        // A promoted property starts after the constructor's `(` or `,`.
+        assert_eq!(
+            declaration_prefix(
+                "    public function __construct(private int $a, protected ?B $b)",
+                "$b"
+            ),
+            "protected ?B "
+        );
+        assert_eq!(
+            declaration_prefix("#[Pure] public function f()", "f"),
+            "public function "
+        );
+        assert_eq!(declaration_prefix("$x = 1; function g()", "g"), "function ");
+        assert_eq!(declaration_prefix("<?php function h()", "h"), "function ");
+        // Nothing to take in: the range starts at the name.
+        assert_eq!(declaration_prefix("    $second;", "$second"), "");
+        assert_eq!(declaration_prefix("class Plain", "class"), "");
     }
 
     #[test]
@@ -690,7 +921,7 @@ mod tests {
         );
         method.is_static = true;
         method.visibility = Visibility::Protected;
-        let detail = build_method_detail(&method);
+        let detail = build_method_detail(&method, ClassLikeKind::Class);
         assert_eq!(
             detail,
             Some("protected static (string $input, array ...$items): int".to_string())

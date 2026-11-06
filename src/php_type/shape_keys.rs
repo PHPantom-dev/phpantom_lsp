@@ -118,3 +118,25 @@ pub(crate) fn shape_key_type(key: &str) -> PhpType {
         PhpType::literal_string_value(key)
     }
 }
+
+/// The exact key a runtime shape key stands for: the integer or string
+/// literal it spells, or the class name a `Foo::class` key names.
+///
+/// `None` for any other class-constant key, whose value is not read here.
+pub(crate) fn shape_key_literal(key: &str) -> Option<PhpType> {
+    if is_canonical_int_key(key) {
+        Some(PhpType::literal_int(key))
+    } else if let Some(class) = class_name_key(key) {
+        Some(PhpType::class_name_literal(atom(class)))
+    } else if class_constant_key(key).is_some() {
+        None
+    } else {
+        Some(PhpType::literal_string_value(key))
+    }
+}
+
+/// Whether a shape key is only known by its spelling: a class constant
+/// other than `Foo::class`, whose value is not read here.
+pub(crate) fn is_opaque_shape_key(key: &str) -> bool {
+    class_name_key(key).is_none() && class_constant_key(key).is_some()
+}

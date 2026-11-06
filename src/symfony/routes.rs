@@ -56,7 +56,9 @@ pub(crate) fn routing_declarations(
     let mut spans = Vec::new();
     let mut imports = Vec::new();
     match super::config_format(uri) {
-        Some(super::ConfigFormat::Yaml) => scan_yaml(content, &mut spans, &mut imports),
+        Some(super::ConfigFormat::Yaml) => {
+            scan_yaml(content, SYMFONY_ROUTES, &mut spans, &mut imports);
+        }
         Some(super::ConfigFormat::Xml) => scan_xml(content, &mut spans, &mut imports),
         None => {}
     }
@@ -64,12 +66,48 @@ pub(crate) fn routing_declarations(
     (spans, imports)
 }
 
+/// The route-name spans of a Drupal routing file, sorted by offset.
+pub(crate) fn drupal_routing_spans(content: &str) -> Vec<SymbolSpan> {
+    let mut spans = Vec::new();
+    let mut imports = Vec::new();
+    scan_yaml(content, DRUPAL_ROUTES, &mut spans, &mut imports);
+    spans.sort_by_key(|span| (span.start, span.end));
+    spans
+}
+
+/// The kind of key a routing file declares, what a name of that kind may
+/// look like, and whether the file can import other routes.
+#[derive(Clone, Copy)]
+struct RouteNaming {
+    kind: StringKeyKind,
+    is_name: fn(&str) -> bool,
+    /// Whether a `resource:` imports routes: true for Symfony's routing
+    /// files, false for Drupal's, which have no imports.
+    reads_imports: bool,
+}
+
+const SYMFONY_ROUTES: RouteNaming = RouteNaming {
+    kind: StringKeyKind::SymfonyRoute,
+    is_name: is_route_name,
+    reads_imports: true,
+};
+
+const DRUPAL_ROUTES: RouteNaming = RouteNaming {
+    kind: StringKeyKind::DrupalRoute,
+    is_name: is_drupal_route_name,
+    reads_imports: false,
+};
+
 fn route_span(key: &str, start: usize, is_write: bool) -> SymbolSpan {
+    route_span_of(StringKeyKind::SymfonyRoute, key, start, is_write)
+}
+
+fn route_span_of(kind: StringKeyKind, key: &str, start: usize, is_write: bool) -> SymbolSpan {
     SymbolSpan {
         start: start as u32,
         end: (start + key.len()) as u32,
         kind: SymbolKind::StringKey {
-            kind: StringKeyKind::SymfonyRoute,
+            kind,
             key: key.to_string(),
             is_write,
             is_optional: false,
@@ -84,6 +122,17 @@ fn is_route_name(name: &str) -> bool {
         && name
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
+}
+
+/// Whether `name` can be a Drupal route name.  Drupal's own routes include
+/// `<front>` and `<none>`, and a route attribute's alias is a class name
+/// (`Drupal\acme\Controller\Foo::bar`), so only what YAML or PHP could not
+/// hold in a plain name is ruled out.
+pub(crate) fn is_drupal_route_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace() || matches!(byte, b'\'' | b'"' | b'{' | b'}'))
 }
 
 // ─── YAML ───────────────────────────────────────────────────────────────────
@@ -128,7 +177,12 @@ fn yaml_lines(content: &str) -> Vec<YamlLine<'_>> {
 /// The route declarations of a routing YAML file: every top-level key, and
 /// every key under a top-level `when@env:`, whose mapping has a `path:` or
 /// an `alias:` rather than a `resource:`, which imports other routes.
-fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>, imports: &mut Vec<RouteImport>) {
+fn scan_yaml(
+    content: &str,
+    naming: RouteNaming,
+    spans: &mut Vec<SymbolSpan>,
+    imports: &mut Vec<RouteImport>,
+) {
     let lines = yaml_lines(content);
     // The indentation of the entries of the `when@env:` section the scan is
     // in, from its first one.
@@ -148,7 +202,7 @@ fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>, imports: &mut Vec<Route
                 continue;
             }
         }
-        scan_yaml_route(line, &lines[index + 1..], spans, imports);
+        scan_yaml_route(line, &lines[index + 1..], naming, spans, imports);
     }
 }
 
@@ -163,10 +217,11 @@ fn yaml_scalar(value: &str) -> &str {
 fn scan_yaml_route(
     entry: &YamlLine<'_>,
     rest: &[YamlLine<'_>],
+    naming: RouteNaming,
     spans: &mut Vec<SymbolSpan>,
     imports: &mut Vec<RouteImport>,
 ) {
-    if !is_route_name(entry.key) {
+    if !(naming.is_name)(entry.key) {
         return;
     }
     let mut is_route = false;
@@ -226,7 +281,7 @@ fn scan_yaml_route(
         }
     }
 
-    if let Some(mut import) = import {
+    if let Some(mut import) = import.filter(|_| naming.reads_imports) {
         import.loader = loader
             .filter(|loader| !loader.is_empty())
             .map(str::to_string);
@@ -239,14 +294,14 @@ fn scan_yaml_route(
         let trimmed = value.trim_start();
         let leading = value.len() - trimmed.len();
         let (name, (quote, _)) = crate::framework::strip_yaml_quotes(trimmed.trim_end());
-        is_route_name(name).then(|| (name, value_start + leading + quote))
+        (naming.is_name)(name).then(|| (name, value_start + leading + quote))
     });
     if !(is_route || alias.is_some()) {
         return;
     }
-    spans.push(route_span(entry.key, entry.key_start, true));
+    spans.push(route_span_of(naming.kind, entry.key, entry.key_start, true));
     if let Some((name, start)) = alias {
-        spans.push(route_span(name, start, false));
+        spans.push(route_span_of(naming.kind, name, start, false));
     }
 }
 
@@ -327,8 +382,9 @@ fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>, imports: &mut Vec<RouteI
 // ─── Twig ───────────────────────────────────────────────────────────────────
 
 /// The route names a Twig template's `path('…')` and `url('…')` calls
-/// read, sorted by offset.
-pub(crate) fn twig_route_spans(content: &str) -> Vec<SymbolSpan> {
+/// read, as `kind` keys (Symfony's and Drupal's Twig both have the two
+/// functions), sorted by offset.
+pub(crate) fn twig_route_spans(content: &str, kind: StringKeyKind) -> Vec<SymbolSpan> {
     let bytes = content.as_bytes();
     let mut spans = Vec::new();
     let mut cursor = 0usize;
@@ -362,8 +418,12 @@ pub(crate) fn twig_route_spans(content: &str) -> Vec<SymbolSpan> {
             break;
         };
         let name = &content[start..start + len];
-        if is_route_name(name) {
-            spans.push(route_span(name, start, false));
+        let is_name = match kind {
+            StringKeyKind::DrupalRoute => is_drupal_route_name(name),
+            _ => is_route_name(name),
+        };
+        if is_name {
+            spans.push(route_span_of(kind, name, start, false));
         }
         cursor = start + len + 1;
     }
@@ -386,10 +446,28 @@ fn route_function_before(before: &str) -> Option<&str> {
 /// Where the route name a Twig `path('` or `url('` the cursor is in starts,
 /// when the name typed so far runs up to `cursor`.
 pub(crate) fn twig_route_name_start(content: &str, cursor: usize) -> Option<usize> {
+    twig_route_name_start_where(content, cursor, |byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-')
+    })
+}
+
+/// [`twig_route_name_start`] for a Drupal route name, which may be one of
+/// the angle-bracketed routes such as `<front>`.
+pub(crate) fn drupal_twig_route_name_start(content: &str, cursor: usize) -> Option<usize> {
+    twig_route_name_start_where(content, cursor, |byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-' | b'<' | b'>')
+    })
+}
+
+fn twig_route_name_start_where(
+    content: &str,
+    cursor: usize,
+    is_name_byte: impl Fn(u8) -> bool,
+) -> Option<usize> {
     let before = content.get(..cursor)?;
     let name_start = before
         .bytes()
-        .rposition(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-')))
+        .rposition(|byte| !is_name_byte(byte))
         .map_or(0, |index| index + 1);
     let before_name = before[..name_start].strip_suffix(['\'', '"'])?;
     let before_paren = before_name.trim_end().strip_suffix('(')?;
@@ -432,6 +510,27 @@ mod tests {
                 ("inline_alias".to_string(), true),
                 ("quoted_route".to_string(), false),
                 ("app_debug".to_string(), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_drupal_entry_with_a_resource_and_a_path_is_a_route() {
+        let yaml = "acme.export:\n  path: '/acme/export'\n  resource: 'not an import'\n";
+        assert_eq!(
+            routes(&drupal_routing_spans(yaml), yaml),
+            vec![("acme.export".to_string(), true)]
+        );
+    }
+
+    #[test]
+    fn drupal_routing_files_declare_their_keys_with_a_path() {
+        let yaml = "'<front>':\n  path: '/<front>'\nacme.greeting:\n  path: '/acme/greeting/{name}'\n  defaults:\n    _controller: '\\Drupal\\acme\\Controller\\GreetingController::greet'\n\nroute_callbacks:\n  - '\\Drupal\\acme\\Routing\\Routes::routes'\n";
+        assert_eq!(
+            routes(&drupal_routing_spans(yaml), yaml),
+            vec![
+                ("<front>".to_string(), true),
+                ("acme.greeting".to_string(), true),
             ]
         );
     }
@@ -498,12 +597,19 @@ mod tests {
     fn twig_reads_path_and_url_calls() {
         let twig = "{# path('commented') #}\n<a href=\"{{ path('blog_index') }}\">{{ url( \"blog_post\", {slug: post.slug}) }}</a>\n{{ app.request.path('not_a_route') }}{{ asset_path('nor_this') }}\n";
         assert_eq!(
-            routes(&twig_route_spans(twig), twig),
+            routes(&twig_route_spans(twig, StringKeyKind::SymfonyRoute), twig),
             vec![
                 ("blog_index".to_string(), false),
                 ("blog_post".to_string(), false),
             ]
         );
+    }
+
+    #[test]
+    fn drupal_twig_completion_reads_angle_brackets() {
+        let twig = "{{ path('<fr";
+        assert_eq!(drupal_twig_route_name_start(twig, twig.len()), Some(9));
+        assert_eq!(twig_route_name_start(twig, twig.len()), None);
     }
 
     #[test]

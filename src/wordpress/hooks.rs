@@ -273,6 +273,11 @@ impl Backend {
         }
     }
 
+    /// Whether the project file at `uri` holds a hook span.
+    pub(crate) fn holds_wordpress_hooks(&self, uri: &str) -> bool {
+        self.wordpress_hooks.uris.read().contains(uri)
+    }
+
     /// Visit the hook spans of every file that holds one, file by file in a
     /// stable order: the project's own files, then the places the installed
     /// WordPress packages fire a hook. `external` is set for a file of one

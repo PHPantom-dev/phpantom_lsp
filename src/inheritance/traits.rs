@@ -12,7 +12,8 @@ use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MAX_TRAIT_DEPTH};
 use crate::virtual_members::laravel::{
-    extends_eloquent_model, is_has_factory_trait, model_to_factory_fqn,
+    extends_eloquent_model, inherit_model_column_attributes, is_has_factory_trait,
+    model_to_factory_fqn,
 };
 use crate::virtual_members::{
     TransformFingerprint, intern_transformed_method, intern_transformed_property,
@@ -58,6 +59,17 @@ pub(crate) fn merge_traits_into(
         } else {
             continue;
         };
+
+        // Laravel examines only the traits directly used at each class level.
+        if depth == 0
+            && let Some(metadata) = trait_info.laravel()
+            && metadata.declared
+                & (crate::types::model_declaration::COLUMN_ATTRIBUTES
+                    | crate::types::model_declaration::UNGUARDED_ATTRIBUTE)
+                != 0
+        {
+            inherit_model_column_attributes(merged.laravel_mut(), metadata);
+        }
 
         // Build a substitution map for this trait if the using class
         // declared `@use TraitName<Type1, Type2>` and the trait has

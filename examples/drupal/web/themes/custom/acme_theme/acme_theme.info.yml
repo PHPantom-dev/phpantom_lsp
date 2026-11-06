@@ -1,0 +1,6 @@
+name: Acme Theme
+type: theme
+description: 'Theme for the PHPantom Drupal playground.'
+package: PHPantom
+core_version_requirement: ^11
+base theme: false

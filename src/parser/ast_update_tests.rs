@@ -495,6 +495,33 @@ public function roles(): BelongsToMany {
     assert_eq!(pivots[0].columns, vec!["expires_at", "active"]);
 }
 
+/// An opened model's imported `#[Table]` and `#[Connection]` attributes are
+/// read through the file's imports, as the lazily loaded copy's are.
+#[test]
+fn reads_imported_table_and_connection_attributes() {
+    let backend = Backend::new_test();
+    let uri = "file:///app/Models/Flight.php";
+    let content = "<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Attributes\\{Connection, Table};
+#[Table('flight_records')]
+#[Connection('archive')]
+class Flight extends Model {}
+";
+    backend.update_ast(uri, content);
+    let classes = backend.symbols.uri_classes_index.read();
+    let flight = classes
+        .get(uri)
+        .and_then(|c| c.iter().find(|c| c.name == "Flight"))
+        .expect("Flight class should be indexed");
+    let laravel = flight
+        .laravel()
+        .expect("Flight should have Laravel metadata");
+    assert_eq!(laravel.table_name.as_deref(), Some("flight_records"));
+    assert_eq!(laravel.connection_name.as_deref(), Some("archive"));
+}
+
 #[test]
 fn marks_dynamic_pivot_accessor_as_unknown() {
     let backend = Backend::new_test();
@@ -782,60 +809,74 @@ fn reparsing_a_class_does_not_duplicate_its_inheritance_edges() {
     }
 }
 
-/// The diagnostic pass an edit schedules reads the parse the edit made
-/// for the index instead of parsing the buffer again.
+/// The diagnostic pass an edit schedules, and every request against the
+/// same text after it, read the parse the edit made for the index instead
+/// of parsing the buffer again.
 #[test]
-fn open_file_parse_is_handed_to_its_diagnostic_pass() {
+fn open_file_parse_is_read_by_every_pass_over_its_text() {
     let backend = Backend::new_test();
     let uri = "file:///project/src/Widget.php";
-    let content = "<?php\nclass Widget {\n    public function run(): int { return 1; }\n}\n";
+    // Unfinished at the end of the file, which is parsed more than once.
+    let content = "<?php\nclass Widget {\n    public function run(): int { return 1; }\n}\n$w = new Widget();\n$w->";
+    let text = std::sync::Arc::new(content.to_string());
     backend
         .open_files
         .write()
-        .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+        .insert(uri.to_string(), std::sync::Arc::clone(&text));
     backend.update_ast(uri, content);
 
-    let parsed = backend
-        .take_parsed_for_diagnostics(uri, content)
-        .expect("the open file's parse is kept");
-    let kept_program = std::ptr::from_ref(parsed.program()) as usize;
-    let text = std::sync::Arc::clone(parsed.content());
-    let _guard = crate::parser::with_parsed_file_cache(parsed);
-    let read_program = crate::parser::with_parsed_program(&text, "test", |program, _| {
-        std::ptr::from_ref(program) as usize
-    });
-    assert_eq!(read_program, kept_program, "the pass reparsed the file");
-    assert!(
-        backend.take_parsed_for_diagnostics(uri, content).is_none(),
-        "a parse is handed over once"
-    );
+    let kept_program = {
+        let parsed = backend
+            .kept_parse(uri, &text)
+            .expect("the open file's parse is kept");
+        std::ptr::from_ref(parsed.program()) as usize
+    };
+    for _pass in 0..2 {
+        let _guard = backend.enter_parse_cache(uri, std::sync::Arc::clone(&text));
+        let read_program = crate::parser::with_parsed_program(&text, "test", |program, _| {
+            std::ptr::from_ref(program) as usize
+        });
+        assert_eq!(read_program, kept_program, "the pass reparsed the file");
+    }
+
+    backend.forget_kept_parse(uri);
+    assert!(backend.kept_parse(uri, &text).is_none());
 }
 
 #[test]
 fn a_parse_is_only_kept_for_the_text_and_file_it_read() {
     let backend = Backend::new_test();
     let uri = "file:///project/src/Widget.php";
-    let before = "<?php\nclass Widget {}\n";
-    let after = "<?php\nclass Widget { const A = 1; }\n";
+    let before = std::sync::Arc::new("<?php\nclass Widget {}\n".to_string());
+    let after = std::sync::Arc::new("<?php\nclass Widget { const A = 1; }\n".to_string());
 
     // A file that is not open is not diagnosed after its parse.
-    backend.update_ast(uri, before);
-    assert!(backend.take_parsed_for_diagnostics(uri, before).is_none());
+    backend.update_ast(uri, &before);
+    assert!(backend.kept_parse(uri, &before).is_none());
 
     backend
         .open_files
         .write()
-        .insert(uri.to_string(), std::sync::Arc::new(before.to_string()));
-    backend.update_ast(uri, before);
+        .insert(uri.to_string(), std::sync::Arc::clone(&before));
+    backend.update_ast(uri, &before);
     assert!(
         backend
-            .take_parsed_for_diagnostics("file:///project/src/Other.php", before)
+            .kept_parse("file:///project/src/Other.php", &before)
             .is_none(),
         "another file's pass does not get this parse"
     );
     assert!(
-        backend.take_parsed_for_diagnostics(uri, after).is_none(),
+        backend.kept_parse(uri, &after).is_none(),
         "a pass over newer text does not get the older parse"
+    );
+    assert!(
+        backend.kept_parse(uri, &before).is_some(),
+        "a pass over other text leaves the parse for the passes over its own"
+    );
+    backend.forget_kept_parse("file:///project/src/Other.php");
+    assert!(
+        backend.kept_parse(uri, &before).is_some(),
+        "closing another file keeps this file's parse"
     );
 }
 

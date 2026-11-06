@@ -1876,10 +1876,7 @@ class UserService {
         ],
     );
 
-    let user_uri = format!(
-        "file://{}",
-        _dir.path().join("src/UserService.php").display()
-    );
+    let user_uri = crate::common::file_uri(&_dir.path().join("src/UserService.php"));
     backend.update_ast(&user_uri, user_php);
 
     // ── Cold run: populates the resolved-class cache ────────────────────

@@ -1,0 +1,18 @@
+<?php
+
+/**
+ * @file
+ * Theme functions for the Acme theme.
+ */
+
+declare(strict_types=1);
+
+/**
+ * Implements hook_preprocess_HOOK() for the acme_greeting theme hook.
+ *
+ * @param array<string, mixed> $variables
+ */
+function acme_theme_preprocess_acme_greeting(array &$variables): void
+{
+    $variables['attributes']['class'][] = 'acme-theme-greeting';
+}

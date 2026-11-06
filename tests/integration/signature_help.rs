@@ -2057,3 +2057,21 @@ async fn no_help_inside_arrow_fn_body_no_inner_call() {
         "Expected signature help for each() before the arrow fn starts",
     );
 }
+
+#[tokio::test]
+async fn sig_help_self_call_in_union_bound_closure_finds_the_declaring_class() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///sig_closure_this_union.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class FirstContext {}\n",
+        "class SecondContext { public static function secondOnly(int $count): void {} }\n",
+        "/** @param-closure-this FirstContext|SecondContext $callback */\n",
+        "function bindContext(\\Closure $callback): void {}\n",
+        "bindContext(function () { self::secondOnly(); });\n",
+    );
+    let sh = sig_help_at(&backend, &uri, text, 5, 43)
+        .await
+        .expect("expected signature help for self::secondOnly(");
+    assert!(sig_label(&sh).contains("int $count"), "{}", sig_label(&sh));
+}

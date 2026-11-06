@@ -1,0 +1,8 @@
+# On Windows the standard library canonicalizes to a verbatim `\\?\C:\...`
+# path, which never compares equal to the same file reached through a URI
+# or the workspace root. `dunce::canonicalize` returns the ordinary form
+# whenever one exists and is the standard library's on other platforms.
+disallowed-methods = [
+    { path = "std::path::Path::canonicalize", reason = "use dunce::canonicalize, which avoids Windows' verbatim \\\\?\\ paths" },
+    { path = "std::fs::canonicalize", reason = "use dunce::canonicalize, which avoids Windows' verbatim \\\\?\\ paths" },
+]

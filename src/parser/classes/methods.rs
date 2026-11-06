@@ -287,7 +287,7 @@ fn push_promoted_properties<'a>(
             deprecated_replacement: None,
             see_refs: Vec::new(),
             is_virtual: false,
-            source: None,
+            source: Some(PropertySource::PromotedParameter),
         });
     }
 }

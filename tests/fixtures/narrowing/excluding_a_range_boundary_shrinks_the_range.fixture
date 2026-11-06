@@ -1,0 +1,52 @@
+// test: ruling out the value at a range's edge moves that edge inward
+// feature: hover
+// expect_hover: $positive => $positive = int<1, max>
+// expect_hover: $fromProperty => $fromProperty = int<1, max>
+// expect_hover: $below => $below = int<min, -1>
+// expect_hover: $named => $named = int<1, max>
+// expect_hover: $single => $single = 1
+// expect_hover: $inner => $inner = int<0, 10>
+// expect_hover: $plain => $plain = int
+---
+<?php
+
+class Frame
+{
+    /** @var int<0, max> */
+    public int $streamId = 0;
+}
+
+/**
+ * @param int<0, max> $v
+ * @param int<min, 0> $w
+ * @param non-negative-int $n
+ * @param int<0, 1> $bit
+ * @param int<0, 10> $r
+ */
+function test(int $v, int $w, int $n, int $bit, int $r, int $i, Frame $frame): void {
+    if (0 === $v) {
+        throw new Exception();
+    }
+    $positive = $v;
+    if ($frame->streamId === 0) {
+        return;
+    }
+    $fromProperty = $frame->streamId;
+    if ($w !== 0) {
+        $below = $w;
+    }
+    if ($n === 0) {
+        return;
+    }
+    $named = $n;
+    if ($bit !== 0) {
+        $single = $bit;
+    }
+    if ($r !== 5) {
+        $inner = $r;
+    }
+    if ($i !== 0) {
+        $plain = $i;
+    }
+    $<>plain;
+}

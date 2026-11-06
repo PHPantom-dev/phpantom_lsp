@@ -20,7 +20,9 @@ use super::*;
 use crate::document_links::try_evaluate_path_expr;
 use crate::symbol_map::{ReceiverClass, StringKeyKind};
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
-use crate::yii::views::{controller_name, is_view_render_method, normalize_view_path, view_key};
+use crate::yii::views::{
+    controller_name, is_absolute_view_path, is_view_render_method, normalize_view_path, view_key,
+};
 
 /// Where the render calls being extracted are written, which says what a
 /// view name in them is relative to.
@@ -93,7 +95,7 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
         let Some(path) = try_evaluate_path_expr(argument.value, dir) else {
             return;
         };
-        if !path.starts_with('/') {
+        if !is_absolute_view_path(&path) {
             return;
         }
         let Some((_, start, end)) = resolved_string_literal(binary.rhs, ctx.content) else {
@@ -252,10 +254,11 @@ impl ViewPathCalls {
 fn view_path_value(value: &Expression<'_>, dir: &Path) -> Option<String> {
     if let Expression::Literal(Literal::String(literal)) = value {
         let text = literal.value.and_then(crate::atom::literal_bytes_to_str)?;
-        return (text.starts_with('@') || text.starts_with('/')).then(|| normalize_view_path(text));
+        return (text.starts_with('@') || is_absolute_view_path(text))
+            .then(|| normalize_view_path(text));
     }
     let path = try_evaluate_path_expr(value, dir)?;
-    path.starts_with('/').then(|| normalize_view_path(&path))
+    is_absolute_view_path(&path).then(|| normalize_view_path(&path))
 }
 
 /// Finds the `with…()` calls that set up a class's renderer.

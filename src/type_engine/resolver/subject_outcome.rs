@@ -14,7 +14,8 @@ use crate::virtual_members::resolve_class_fully_maybe_cached;
 
 use super::context::resolved_to_arcs;
 use super::{
-    ResolutionCtx, resolve_static_owner_class, resolve_target_classes, resolve_target_classes_expr,
+    ResolutionCtx, resolve_static_owner_classes, resolve_target_classes,
+    resolve_target_classes_expr,
 };
 
 /// Whether every non-null member of `ty` is the bare `string` type.
@@ -316,15 +317,19 @@ pub(crate) fn resolve_subject_outcome(
     // For property chains, check the property's type hint.
     if let SubjectExpr::PropertyChain { base, property } = &expr {
         let base_arcs = resolved_to_arcs(resolve_target_classes_expr(base, access_kind, ctx));
+        let names = super::variable_subjects::resolve_dynamic_member_names(property, ctx);
         for cls in &base_arcs {
             let merged = resolve_class_fully_maybe_cached(
                 cls,
                 ctx.file.class_loader,
                 ctx.resolved_class_cache,
             );
-            if let Some(parsed) =
-                resolve_property_type_hint(&merged, property, ctx.file.class_loader)
-            {
+            let hints: Vec<PhpType> = names
+                .iter()
+                .filter_map(|name| resolve_property_type_hint(&merged, name, ctx.file.class_loader))
+                .collect();
+            if !hints.is_empty() {
+                let parsed = PhpType::union(hints);
                 if parsed.all_members_primitive_scalar() {
                     let scalar = parsed.non_null_type().unwrap_or(parsed);
                     if access_kind != AccessKind::DoubleColon || !is_all_string_type(&scalar) {
@@ -419,8 +424,8 @@ fn declared_call_return_type(
         }
         // Static method call: Foo::getInt()
         SubjectExpr::StaticMethodCall { class, method } => {
-            let cls = resolve_static_owner_class(class, ctx);
-            declared_return_type_of(cls.as_slice(), method, ctx, accept)
+            let classes = resolve_static_owner_classes(class, ctx);
+            declared_return_type_of(&classes, method, ctx, accept)
         }
         _ => None,
     }

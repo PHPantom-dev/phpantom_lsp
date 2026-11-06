@@ -242,6 +242,25 @@ impl Backend {
             loaders: &loaders,
         };
 
+        // A Drupal hook implementation's name, outside the hook part the
+        // map gives its own span, still names the hook.
+        if let SymbolKind::FunctionCall {
+            is_definition: true,
+            ..
+        } = symbol.kind
+            && let Some(map) = self.symbol_map_for(uri)
+            && let Some(SymbolSpan {
+                kind: SymbolKind::StringKey { kind, key, .. },
+                start,
+                ..
+            }) = self.drupal_hook_of_function(&map, symbol)
+        {
+            return self
+                .string_key_kind_enabled(*kind)
+                .then(|| self.hover_laravel_string_key(kind, key, uri, *start))
+                .flatten();
+        }
+
         match &symbol.kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 self.hover_variable_symbol(&site, symbol, name)
@@ -258,7 +277,7 @@ impl Backend {
                 member_name,
                 *is_static,
                 MemberRefKind::of_access(symbol)?,
-                *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod,
+                *docblock_ref,
             ),
             SymbolKind::ClassReference {
                 name,

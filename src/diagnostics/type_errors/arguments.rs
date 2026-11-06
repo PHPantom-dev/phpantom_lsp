@@ -31,7 +31,8 @@ use super::super::helpers::{
     make_diagnostic,
 };
 use super::{
-    TYPE_MISMATCH_ARGUMENT_CODE, fails_only_on_empty, has_strict_types, is_type_compatible,
+    TYPE_MISMATCH_ARGUMENT_CODE, fails_only_on_empty, fits_partially, has_strict_types,
+    is_type_compatible,
 };
 
 // ── Resolved argument info ──────────────────────────────────────────────────
@@ -315,6 +316,8 @@ impl Backend {
             // Read once for the whole file, so the flag cannot change
             // mid-pass.
             report_possibly_empty: self.possibly_empty_mismatches_enabled(),
+            report_partial_union: self.partial_union_mismatches_enabled(),
+            docblock_types: self.docblock_type_mismatches_enabled(),
         };
 
         // Call-expression resolution cache: avoids re-resolving the
@@ -568,6 +571,10 @@ struct ArgumentCheck<'a> {
     class_loader: &'a ResolvedClassLoader<'a>,
     strict_types: bool,
     report_possibly_empty: bool,
+    report_partial_union: bool,
+    /// Whether an argument is checked against the parameter's docblock
+    /// type, or only its native one.
+    docblock_types: bool,
 }
 
 /// One call site's callee and resolved arguments.
@@ -666,9 +673,9 @@ impl ArgumentCheck<'_> {
         // Its template's `of` bound is still a constraint, so that is
         // what the argument is checked against instead.
         let self_bound_type = match call.target.self_bound_params.get(&param.name) {
-            Some(None) => return,
+            Some(None) if self.docblock_types => return,
             Some(Some(bound)) => Some(bound),
-            None => None,
+            Some(None) | None => None,
         };
 
         // An out-parameter's declared type describes what the
@@ -687,8 +694,14 @@ impl ArgumentCheck<'_> {
             return;
         }
 
-        // Skip if parameter has no type hint.
-        let param_type = match self_bound_type.or(param.type_hint.as_ref()) {
+        // Skip if parameter has no type hint. A template's bound is a
+        // docblock type too.
+        let declared = if self.docblock_types {
+            self_bound_type.or(param.type_hint.as_ref())
+        } else {
+            param.native_type_hint.as_ref()
+        };
+        let param_type = match declared {
             Some(t) if !t.is_untyped() && !t.is_mixed() => t,
             _ => return,
         };
@@ -760,6 +773,19 @@ impl ArgumentCheck<'_> {
             && missing_keys.is_empty()
             && !breaks_list_order
             && fails_only_on_empty(
+                arg_type,
+                effective_param_type,
+                self.class_loader,
+                self.strict_types,
+            )
+        {
+            return;
+        }
+
+        if !self.report_partial_union
+            && missing_keys.is_empty()
+            && !breaks_list_order
+            && fits_partially(
                 arg_type,
                 effective_param_type,
                 self.class_loader,

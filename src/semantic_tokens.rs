@@ -328,7 +328,13 @@ impl Backend {
                     // Telling a mock's `allows('update')` from any other
                     // object's takes the type engine, which tokens do not
                     // run for a variable, so the string keeps its colour.
-                    if *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod {
+                    // An attribute's named-argument label names a parameter
+                    // first, and keeps the colour the editor gives one.
+                    if matches!(
+                        docblock_ref,
+                        crate::symbol_map::DocblockMemberRef::MockedMethod
+                            | crate::symbol_map::DocblockMemberRef::AttributeNamedArg
+                    ) {
                         continue;
                     }
                     let static_property_syntax = *is_static

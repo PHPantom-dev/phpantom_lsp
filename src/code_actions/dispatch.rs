@@ -122,6 +122,10 @@ const fn offer_in_resource(kinds: &'static [&'static str], collect: CollectFn) -
 static COLLECTORS: &[Collector] = &[
     offer(QUICKFIX, Backend::collect_import_class_actions),
     offer(REWRITE, Backend::collect_replace_fqcn_actions),
+    skip_in_template(
+        &["refactor.rewrite", "refactor.inline"],
+        Backend::collect_import_alias_actions,
+    ),
     offer(
         ADD_MISSING_IMPORTS,
         Backend::collect_import_all_classes_action,
@@ -136,6 +140,7 @@ static COLLECTORS: &[Collector] = &[
     ),
     offer(QUICKFIX, Backend::collect_implement_methods_actions),
     offer(QUICKFIX, Backend::collect_replace_deprecated_actions),
+    offer(QUICKFIX, Backend::collect_explicit_nullable_actions),
     skip_in_template(QUICKFIX, Backend::collect_phpstan_actions),
     skip_in_template(QUICKFIX, Backend::collect_data_provider_actions),
     skip_in_template(QUICKFIX, Backend::collect_parent_call_actions),

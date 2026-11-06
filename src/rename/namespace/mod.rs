@@ -87,6 +87,26 @@ impl Backend {
             return Err(conflict);
         }
 
+        // In a Drupal site, a namespace core or a contributed extension
+        // declares cannot be renamed in part: the declarations there would
+        // be left behind, and Composer overwrites them anyway.  Vendor
+        // packages are skipped below, in every project.
+        if self.is_drupal_project() {
+            let member_prefix = format!("{old_prefix}\\");
+            let installed = self.symbols.fqn_uri_index.read().iter().any(|(fqn, uri)| {
+                fqn.len() > member_prefix.len()
+                    && fqn
+                        .get(..member_prefix.len())
+                        .is_some_and(|start| start.eq_ignore_ascii_case(&member_prefix))
+                    && self.is_drupal_read_only_uri(uri)
+            });
+            if installed {
+                return Err(format!(
+                    "The namespace `{old_prefix}` is declared in installed code, Drupal core or a contributed extension, and cannot be renamed."
+                ));
+            }
+        }
+
         let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
 
         // Scan all known files. The live per-file maps only contain files
@@ -124,10 +144,7 @@ impl Backend {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
 
         for file_uri in &all_uris {
-            if vendor_prefixes
-                .iter()
-                .any(|p| file_uri.starts_with(p.as_str()))
-            {
+            if self.is_installed_package_uri(file_uri, &vendor_prefixes) {
                 continue;
             }
             // A YAML/XML occurrence may be spelled the escaped `App\\Foo`

@@ -12,7 +12,7 @@ use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::references::MemberRefKind;
-use crate::symbol_map::SubjectText;
+use crate::symbol_map::{DocblockMemberRef, SubjectText};
 use crate::types::*;
 use crate::util::short_name;
 
@@ -69,7 +69,7 @@ fn format_attribute_default_details(source: &AttributeDefaultSource) -> Vec<Stri
 
 pub(super) fn format_property_source(source: &PropertySource) -> Vec<String> {
     match source {
-        PropertySource::DeclaredDefault { .. } => Vec::new(),
+        PropertySource::DeclaredDefault { .. } | PropertySource::PromotedParameter => Vec::new(),
         PropertySource::DatabaseColumn {
             column,
             attribute_default,
@@ -345,7 +345,7 @@ impl Backend {
         member_name: &str,
         is_static: bool,
         kind: MemberRefKind,
-        mock_expectation: bool,
+        docblock_ref: DocblockMemberRef,
     ) -> Option<Hover> {
         let HoverSite {
             uri,
@@ -366,9 +366,22 @@ impl Backend {
                 access_kind,
                 &rctx,
             ));
-        if mock_expectation {
-            candidates =
-                crate::mock_methods::mocked_classes(candidates, is_static, &resolved_class_loader);
+        match docblock_ref {
+            DocblockMemberRef::MockedMethod => {
+                candidates = crate::mock_methods::mocked_classes(
+                    candidates,
+                    is_static,
+                    &resolved_class_loader,
+                );
+            }
+            DocblockMemberRef::AttributeNamedArg => candidates.retain(|class| {
+                crate::class_lookup::constructor_promotes(
+                    class,
+                    member_name,
+                    &resolved_class_loader,
+                )
+            }),
+            _ => {}
         }
 
         // Collect hover results from all union candidates,

@@ -803,17 +803,17 @@ mod tests {
             r#"{{"issues": [
                 {{"level": "Warning", "code": "some-rule", "message": "Msg",
                   "annotations": [{{"kind": "Primary", "span": {{
-                      "file_id": {{"name": "A.php", "path": "{}"}},
+                      "file_id": {{"name": "A.php", "path": {}}},
                       "start": {{"offset": 6, "line": 2}},
                       "end": {{"offset": 8, "line": 2}}}}}}]}},
                 {{"level": "Error", "code": "other-rule", "message": "Gone",
                   "annotations": [{{"kind": "Primary", "span": {{
-                      "file_id": {{"name": "Missing.php", "path": "{}/Missing.php"}},
+                      "file_id": {{"name": "Missing.php", "path": {}}},
                       "start": {{"offset": 0, "line": 1}},
                       "end": {{"offset": 1, "line": 1}}}}}}]}}
             ]}}"#,
-            file.display(),
-            dir.path().display(),
+            serde_json::Value::from(file.to_string_lossy()),
+            serde_json::Value::from(dir.path().join("Missing.php").to_string_lossy()),
         );
 
         let map = parse_mago_json_workspace(&json, dir.path(), "mago-lint").unwrap();

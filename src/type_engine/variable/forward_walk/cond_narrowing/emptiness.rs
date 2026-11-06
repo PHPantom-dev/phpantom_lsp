@@ -264,7 +264,30 @@ pub(super) fn strip_literal_from_type(ty: &PhpType, excluded: &PhpType) -> Optio
     if let Some(kept) = strip_array_literal_from_shape(ty, excluded) {
         return kept;
     }
+    if let Some(kept) = strip_int_literal_from_range_edge(ty, excluded) {
+        return kept;
+    }
     (!ty.is_subtype_of(excluded)).then(|| ty.clone())
+}
+
+/// Rule the integer literal `excluded` out of the range `ty` (written as
+/// `int<a, b>` or as one of the named refinements like `non-negative-int`)
+/// by moving the edge it sits on: `int<0, max>` without `0` is
+/// `int<1, max>`, which is what `if (0 === $id) { throw; }` leaves behind.
+///
+/// The outer `None` means the rule does not apply: `excluded` is not an
+/// integer literal, `ty` is not a bounded range, or the value is not one of
+/// its edges. The inner `None` means nothing is left.
+fn strip_int_literal_from_range_edge(ty: &PhpType, excluded: &PhpType) -> Option<Option<PhpType>> {
+    let TypeKind::Literal(literal) = excluded.kind() else {
+        return None;
+    };
+    if !matches!(**literal, LiteralValue::Int(_)) || matches!(ty.kind(), TypeKind::Literal(_)) {
+        return None;
+    }
+    let value = literal.parse_i64()?;
+    let kept = IntInterval::of_int(ty)?.without_edge(value)?;
+    Some(kept.map(IntInterval::into_type))
 }
 
 /// Rule the array literal `excluded` out of the sealed shape `ty`.

@@ -582,7 +582,10 @@ fn joined_callable_return(types: &[ResolvedType]) -> Option<PhpType> {
 }
 
 /// What calling a value whose callable type returns `ret_type` produces.
-fn callable_return_resolution(ret_type: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
+pub(super) fn callable_return_resolution(
+    ret_type: &PhpType,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
     if ret_type.is_empty() {
         return vec![];
     }

@@ -164,8 +164,7 @@ pub(crate) mod where_property;
 
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use auth::{
-    AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, is_computing_auth_model, patch_auth_user_class,
-    resolve_auth_user_type,
+    AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type,
 };
 pub(crate) use cache_state::LaravelCacheState;
 pub(crate) use collections::{
@@ -197,8 +196,8 @@ pub(crate) use macros::{
 pub(crate) use middleware::{LaravelMiddlewareIndex, MiddlewareTarget};
 pub(crate) use model_extraction::{
     attribute_entry_offset, extract_laravel_metadata, extract_laravel_trait_metadata,
-    has_inheritable_model_metadata, has_scope_attribute, inherit_model_metadata,
-    relationship_return_type,
+    has_inheritable_model_metadata, has_scope_attribute, inherit_model_column_attributes,
+    inherit_model_metadata, relationship_return_type,
 };
 pub(crate) use model_type::{expand_model_type, has_model_type_operator};
 pub(crate) use morph_columns::is_morph_type_column;

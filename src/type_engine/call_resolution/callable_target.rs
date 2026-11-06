@@ -321,16 +321,32 @@ impl Backend {
     /// Resolve a static class reference + method name to a
     /// [`ResolvedCallableTarget`].
     ///
-    /// Resolves the class via [`crate::type_engine::resolver::resolve_static_owner_class`], merges
-    /// via `resolve_class_fully`, and looks up `method_name`.
+    /// Resolves the class via [`crate::type_engine::resolver::resolve_static_owner_classes`],
+    /// merges via `resolve_class_fully`, and looks up `method_name`.  A
+    /// `self::` call inside a closure bound to several classes targets the
+    /// first of them that declares the method.
     pub(crate) fn resolve_static_method_callable(
         class: &str,
         method_name: &str,
         rctx: &ResolutionCtx<'_>,
         args_text: Option<&str>,
     ) -> Option<ResolvedCallableTarget> {
-        let owner = crate::type_engine::resolver::resolve_static_owner_class(class, rctx)?;
+        crate::type_engine::resolver::resolve_static_owner_classes(class, rctx)
+            .iter()
+            .find_map(|owner| {
+                Self::static_method_target_on_owner(owner, class, method_name, rctx, args_text)
+            })
+    }
 
+    /// The method `method_name` on one class a static reference names, as
+    /// a [`ResolvedCallableTarget`].
+    fn static_method_target_on_owner(
+        owner: &ClassInfo,
+        class: &str,
+        method_name: &str,
+        rctx: &ResolutionCtx<'_>,
+        args_text: Option<&str>,
+    ) -> Option<ResolvedCallableTarget> {
         // When the class has template params, try to substitute them with
         // concrete types. For `parent::` calls, use the child's @extends
         // generics to get the concrete type arguments. Otherwise fall back
@@ -338,20 +354,20 @@ impl Backend {
         let merged = if !owner.template_params.is_empty() {
             let type_args = if class.eq_ignore_ascii_case("parent") {
                 rctx.current_class
-                    .and_then(|child| crate::inheritance::extends_type_args(child, &owner))
+                    .and_then(|child| crate::inheritance::extends_type_args(child, owner))
             } else {
                 None
             };
-            let args = type_args.unwrap_or_else(|| crate::inheritance::default_type_args(&owner));
+            let args = type_args.unwrap_or_else(|| crate::inheritance::default_type_args(owner));
             crate::virtual_members::resolve_class_fully_with_type_args(
-                &owner,
+                owner,
                 rctx.file.class_loader,
                 rctx.resolved_class_cache,
                 &args,
             )
         } else {
             crate::virtual_members::resolve_class_fully_maybe_cached(
-                &owner,
+                owner,
                 rctx.file.class_loader,
                 rctx.resolved_class_cache,
             )

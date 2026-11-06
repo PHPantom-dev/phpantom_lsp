@@ -1,0 +1,27 @@
+// test: a void closure in an iterable parameter's value type binds the template to null
+// feature: hover
+// expect: $received = null|string
+// expect_absent: void
+---
+<?php
+
+class Client {
+    public function writeAll(string $data): void {}
+    public function read(): string { return ''; }
+}
+
+/**
+ * @template Tk of array-key
+ * @template Tv
+ * @param iterable<Tk, (Closure(): Tv)> $tasks
+ * @return array<Tk, Tv>
+ */
+function concurrently(iterable $tasks): array { return []; }
+
+function test(Client $client): void {
+    [, $received] = concurrently([
+        static fn() => $client->writeAll('x'),
+        static fn(): string => $client->read(),
+    ]);
+    $rec<>eived;
+}

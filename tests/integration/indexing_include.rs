@@ -255,7 +255,7 @@ async fn include_does_not_shadow_composer_autoload_files() {
         .cloned();
     assert_eq!(
         indexed.as_deref(),
-        Some(functions.canonicalize().unwrap().as_path())
+        Some(dunce::canonicalize(&functions).unwrap().as_path())
     );
 }
 

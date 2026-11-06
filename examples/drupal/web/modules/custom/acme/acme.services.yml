@@ -1,0 +1,13 @@
+parameters:
+  acme.greeting_format: 'Hello @name, welcome to @site.'
+
+services:
+  acme.greeter:
+    # Try: go to the definition of Greeter, or find its references: this
+    # line is one of them.
+    class: Drupal\acme\Greeter
+    # Try: go to the definition of `@config.factory`, which core declares,
+    # or of `%acme.greeting_format%`. Complete a service ID after `@`.
+    arguments: ['@config.factory', '%acme.greeting_format%']
+  # Lets controllers and hook classes autowire the greeter by its class.
+  Drupal\acme\Greeter: '@acme.greeter'

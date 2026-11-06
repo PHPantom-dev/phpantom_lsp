@@ -112,6 +112,29 @@ pub(crate) fn narrow_to_null_in_scope(var_name: &str, scope: &mut ScopeState) {
     narrow_to_in_scope(var_name, scope, PhpType::null(), PhpType::accepts_null);
 }
 
+/// Narrow a subject `isset()` rejected to what reading it yields.
+///
+/// A variable or property `isset()` rejects held `null`, so one whose type
+/// has no `null` in it is left alone, as [`narrow_to_null_in_scope`] does.
+/// An array element is different: a failed `isset()` is also how a missing
+/// key shows, and reading a missing key yields `null` whatever the array's
+/// value type.  Leaving the element its value type would let the run where
+/// the key is missing widen back whatever a check alongside the `isset()`
+/// ruled out: `isset($a[$k]) && !is_array($a[$k])` failing leaves an array
+/// or nothing at all.
+pub(crate) fn narrow_unset_to_null_in_scope(var_name: &str, scope: &mut ScopeState) {
+    if condition_facts::split_trailing_bracket(var_name).is_some()
+        && !scope.get(var_name).is_empty()
+    {
+        scope.set(
+            var_name,
+            vec![ResolvedType::from_type_string(PhpType::null())],
+        );
+        return;
+    }
+    narrow_to_null_in_scope(var_name, scope);
+}
+
 /// Narrow a variable in scope to `false` only.
 ///
 /// Mirrors [`narrow_to_null_in_scope`] but for `false`: used when a

@@ -16,6 +16,7 @@ use mago_formatter::settings::FormatSettings;
 use crate::config::FormattingConfig;
 use crate::types::PhpVersion;
 
+use super::blade_formatter::BINARY;
 use super::reindent::{Options, reindent};
 use super::{
     BladeFormattingStrategy, format_blade_content, is_whitespace_sensitive, options_from_lsp,
@@ -1378,7 +1379,7 @@ fn pint_runs_in_the_workspace_root_with_the_blade_flag() {
     )
     .unwrap()
     .unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
     assert!(
         output.contains(&format!("cwd={}", root.display())),
         "{output}"
@@ -1447,7 +1448,7 @@ fn pint_failure_is_an_error_not_an_edit() {
 fn blade_formatter_workspace(body: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("node_modules/.bin")).unwrap();
-    let binary = dir.path().join("node_modules/.bin/blade-formatter");
+    let binary = dir.path().join("node_modules/.bin").join(BINARY);
     std::fs::write(&binary, format!("#!/bin/sh\n{body}\n")).unwrap();
     #[cfg(unix)]
     {
@@ -1487,16 +1488,13 @@ fn blade_strategy_detects_blade_formatter() {
     // Each of the dependency, the config file, and the installed binary
     // is needed: without the config file the project may be handing the
     // CLI its settings with `--config`, which a run on stdin would miss.
+    let binary = format!("node_modules/.bin/{BINARY}");
     let without = |path: &str| {
         let dir = blade_formatter_workspace("cat");
         std::fs::remove_file(dir.path().join(path)).unwrap();
         resolve_in(dir.path(), &config)
     };
-    for path in [
-        "package.json",
-        ".bladeformatterrc.json",
-        "node_modules/.bin/blade-formatter",
-    ] {
+    for path in ["package.json", ".bladeformatterrc.json", binary.as_str()] {
         assert!(
             matches!(without(path), BladeFormattingStrategy::BuiltIn(_)),
             "without {path}"
@@ -1526,7 +1524,7 @@ fn blade_strategy_detects_blade_formatter() {
 fn blade_strategy_prefers_pint_when_its_blade_rule_is_on() {
     let (dir, composer) = pint_workspace("cat");
     std::fs::create_dir_all(dir.path().join("node_modules/.bin")).unwrap();
-    std::fs::write(dir.path().join("node_modules/.bin/blade-formatter"), "").unwrap();
+    std::fs::write(dir.path().join("node_modules/.bin").join(BINARY), "").unwrap();
     std::fs::write(dir.path().join(".bladeformatterrc"), "{}").unwrap();
     std::fs::write(
         dir.path().join("package.json"),
@@ -1599,7 +1597,7 @@ fn blade_formatter_runs_on_stdin_in_the_workspace_root() {
     )
     .unwrap()
     .unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
     assert_eq!(
         output,
         format!(

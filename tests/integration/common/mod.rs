@@ -774,6 +774,20 @@ pub fn workspace_path(backend: &Backend, relative: &str) -> PathBuf {
     root.join(relative)
 }
 
+/// The `file://` URI of `path`, spelled the way an editor sends it on every
+/// platform (`file:///C:/...` on Windows), unlike `format!("file://{}", ...)`.
+pub fn file_uri(path: &std::path::Path) -> String {
+    Uri::from_file_path(path).unwrap().to_string()
+}
+
+/// The URI of `relative` under the filesystem root (`file:///relative`,
+/// or `file:///C:/relative` on Windows), for a test whose file need not
+/// exist but must name an absolute path on the platform it runs on.
+pub fn absolute_uri(relative: &str) -> Uri {
+    let root = if cfg!(windows) { "C:\\" } else { "/" };
+    Uri::from_file_path(std::path::Path::new(root).join(relative)).unwrap()
+}
+
 /// [`workspace_path`] as the URI an editor would open the file under.
 pub fn workspace_uri(backend: &Backend, relative: &str) -> Uri {
     Uri::from_file_path(workspace_path(backend, relative)).unwrap()

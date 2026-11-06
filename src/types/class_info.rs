@@ -372,6 +372,13 @@ pub struct ClassInfo {
     /// The per-property [`PropertyInfo::is_readonly`] stays `false` for
     /// these: the keyword is not repeatable in a subclass.
     pub is_readonly: bool,
+    /// Whether the class carries `#[\AllowDynamicProperties]`, or inherits
+    /// it from an ancestor.
+    ///
+    /// Such a class takes any property, so reading or writing one it does
+    /// not declare is no unknown member.  Like [`Self::is_readonly`], the
+    /// inheritance merge propagates the flag down the parent chain.
+    pub allows_dynamic_properties: bool,
     /// Deprecation message from the `@deprecated` PHPDoc tag.
     ///
     /// `None` means not deprecated. `Some("")` means deprecated without a
@@ -799,6 +806,7 @@ impl ClassInfo {
             || self.is_final != other.is_final
             || self.is_abstract != other.is_abstract
             || self.is_readonly != other.is_readonly
+            || self.allows_dynamic_properties != other.allows_dynamic_properties
             || self.deprecation_message != other.deprecation_message
             || self.deprecated_replacement != other.deprecated_replacement
             || self.attribute_targets != other.attribute_targets

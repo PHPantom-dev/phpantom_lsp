@@ -1,5 +1,5 @@
 use super::aliases::Aliases;
-use super::views::{controller_name, normalize_view_path, view_key};
+use super::views::{controller_name, is_absolute_view_path, normalize_view_path, view_key};
 
 #[test]
 fn controller_names_follow_the_renderer() {
@@ -54,6 +54,25 @@ fn view_names_join_the_path_they_are_relative_to() {
     assert_eq!(view_key("./_card", base, None), None);
     assert_eq!(view_key("index", None, None), None);
     assert_eq!(normalize_view_path("@views/../x"), "@views/x");
+}
+
+#[test]
+fn windows_drive_paths_are_absolute_view_paths() {
+    let dir = Some(r"C:\app\resources\views\blog");
+    assert_eq!(
+        view_key("../shared/menu", None, dir).as_deref(),
+        Some("C:/app/resources/views/shared/menu")
+    );
+    assert_eq!(
+        view_key(r"D:\abs\view", None, None).as_deref(),
+        Some("D:/abs/view")
+    );
+    assert!(is_absolute_view_path(r"C:\app"));
+    assert!(is_absolute_view_path("c:/app"));
+    assert!(!is_absolute_view_path("app/views"));
+    assert!(!is_absolute_view_path("@views/x"));
+    // `..` never climbs past the drive.
+    assert_eq!(normalize_view_path("C:/../x"), "C:/x");
 }
 
 #[test]

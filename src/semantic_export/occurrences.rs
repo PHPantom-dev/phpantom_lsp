@@ -152,8 +152,23 @@ pub(super) fn export_span(
             is_array_callable,
             ..
         } => {
-            let kind = member_occurrence_kind(&source.source, range, *is_static, *is_method_call);
             let subject = subject_text.as_str(export_context.mapped_source);
+            // An attribute's named-argument label is an occurrence of the
+            // property its constructor promotes, and of nothing otherwise.
+            let kind = if *docblock_ref == DocblockMemberRef::AttributeNamedArg {
+                if !backend.member_span_names_member(
+                    context,
+                    *docblock_ref,
+                    subject,
+                    span.start,
+                    member_name,
+                ) {
+                    return;
+                }
+                OccurrenceKind::Property
+            } else {
+                member_occurrence_kind(&source.source, range, *is_static, *is_method_call)
+            };
             let target = MemberTargetResolver {
                 backend,
                 context,

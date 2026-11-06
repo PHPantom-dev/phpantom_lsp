@@ -34,18 +34,42 @@ impl Backend {
         composer_package: Option<composer::ComposerPackage>,
         progress: Option<&crate::progress::ScanProgress>,
     ) {
+        let was_drupal = self.is_drupal_project();
         if composer_package.is_some() {
             self.init_single_project(root, php_version, composer_package, progress)
                 .await;
-            return;
-        }
-
-        let subprojects = composer::discover_subproject_roots(root);
-        if subprojects.is_empty() {
-            self.init_no_composer(root, php_version, progress).await;
         } else {
-            self.init_monorepo(root, &subprojects, php_version, progress)
-                .await;
+            let subprojects = composer::discover_subproject_roots(root);
+            if subprojects.is_empty() {
+                self.init_no_composer(root, php_version, progress).await;
+            } else {
+                self.init_monorepo(root, &subprojects, php_version, progress)
+                    .await;
+            }
+        }
+        // The editor opens files while the walk runs, and a file read
+        // before the walk found a Drupal site was read without Drupal's
+        // names in it.
+        if !was_drupal && self.is_drupal_project() {
+            self.reparse_open_files();
+        }
+    }
+
+    /// Read every open file again from its buffer, as opening it does.
+    fn reparse_open_files(&self) {
+        let open: Vec<(String, std::sync::Arc<String>)> = self
+            .open_files
+            .read()
+            .iter()
+            .map(|(uri, text)| (uri.clone(), std::sync::Arc::clone(text)))
+            .collect();
+        for (uri, text) in open {
+            if self.is_resource_uri(&uri) {
+                self.update_resource_symbol_index(&uri, &text);
+            } else {
+                self.update_ast(&uri, &text);
+            }
+            self.schedule_diagnostics(uri);
         }
     }
 
@@ -62,7 +86,9 @@ impl Backend {
         root: &Path,
         composer_json: Option<&composer::ComposerPackage>,
     ) -> (String, PathBuf) {
-        self.register_composer_project_paths(root, composer_json, false)
+        let (vendor_dir, vendor_path, _) =
+            self.register_composer_project_paths(root, composer_json, false);
+        (vendor_dir, vendor_path)
     }
 
     /// Initialize a single-project workspace (root `composer.json` exists).
@@ -84,30 +110,53 @@ impl Backend {
         // dependencies, which the root's autoloader knows nothing about.
         // They are indexed the way a monorepo's subprojects are, and
         // classify the workspace alongside the root the same way too.
+        // The root's bin namespaces are not among them: they install the
+        // root's own tools, and are indexed as part of it.
         let root_vendor = root.join(
             composer_json
                 .as_ref()
                 .map(composer::get_vendor_dir)
                 .unwrap_or_else(|| "vendor".to_string()),
         );
+        let skip: Vec<PathBuf> = std::iter::once(root_vendor)
+            .chain(
+                composer_json
+                    .as_ref()
+                    .and_then(|pkg| composer::bin_target_directory(root, pkg)),
+            )
+            .collect();
         let subprojects: Vec<(PathBuf, Option<composer::ComposerPackage>)> =
-            composer::discover_installed_subprojects(root, &root_vendor)
+            composer::discover_installed_subprojects(root, &skip)
                 .into_iter()
                 .map(|(sub_root, _)| {
                     let package = composer::read_composer_package(&sub_root);
                     (sub_root, package)
                 })
                 .collect();
+        let bin_namespaces = composer_json
+            .as_ref()
+            .map(|pkg| composer::bin_namespaces(root, pkg))
+            .unwrap_or_default();
         let packages = || {
             composer_json
                 .iter()
                 .chain(subprojects.iter().filter_map(|(_, pkg)| pkg.as_ref()))
         };
+        // The frameworks a bin namespace installs are the root's tools'
+        // too, so they classify the workspace the way the root's own
+        // dependencies do.
+        let tool_packages = || {
+            packages().chain(
+                bin_namespaces
+                    .iter()
+                    .filter_map(|namespace| namespace.package.as_ref()),
+            )
+        };
 
         // Classify the project so Laravel-specific resolution (Eloquent
         // members, config/view/route keys, contract bindings, patches) is
         // skipped when no Laravel/Illuminate dependency is present.
-        let is_laravel = packages().any(composer::is_laravel_project);
+        let is_laravel = tool_packages().any(composer::is_laravel_project);
         self.resolved_class_cache
             .write()
             .laravel_mut()
@@ -124,16 +173,23 @@ impl Backend {
                     .any(|dir| dir.join("artisan").is_file()),
         );
 
-        self.set_is_doctrine(packages().any(composer::is_doctrine_project));
-        self.set_is_symfony(packages().any(composer::is_symfony_project));
-        self.set_is_twig(packages().any(composer::is_twig_project));
-        self.set_is_yii(packages().any(composer::is_yii_project));
+        self.set_is_doctrine(tool_packages().any(composer::is_doctrine_project));
+        self.set_is_symfony(tool_packages().any(composer::is_symfony_project));
+        self.set_is_twig(tool_packages().any(composer::is_twig_project));
+        self.set_is_yii(tool_packages().any(composer::is_yii_project));
+        // PHPUnit is often one of the tools a bin namespace installs.
         self.set_phpunit_major(
             std::iter::once(root)
                 .chain(subprojects.iter().map(|(sub_root, _)| sub_root.as_path()))
+                .chain(
+                    bin_namespaces
+                        .iter()
+                        .map(|namespace| namespace.root.as_path()),
+                )
                 .filter_map(composer::locked_phpunit_major)
                 .min(),
         );
+        self.clear_drupal_web_roots();
 
         // A permission package answers authorization checks from the database,
         // so the abilities this project uses are not written in its source and
@@ -219,9 +275,9 @@ impl Backend {
         let (lo, hi) = percent_range;
         let at = |share: u32| lo + (hi - lo) * share / 70;
 
-        let (vendor_dir, vendor_path) =
+        let (vendor_dir, vendor_path, bin_namespaces) =
             self.register_composer_project_paths(root, composer_json, subproject);
-        let vendor_paths = path_aliases(&vendor_path);
+        let mut vendor_paths = path_aliases(&vendor_path);
 
         // ── Build the classmap ──────────────────────────────────────
         let strategy = self.config().indexing.strategy();
@@ -280,6 +336,11 @@ impl Backend {
                 // so that third-party classes are still indexed.
                 let mut skip_dirs = HashSet::new();
                 skip_dirs.insert(vendor_path.clone());
+                skip_dirs.extend(
+                    bin_namespaces
+                        .iter()
+                        .map(composer::BinNamespace::vendor_path),
+                );
                 if let Some(p) = progress {
                     p.begin_phase(0.0, 0.3, "Scanning workspace files");
                 }
@@ -331,6 +392,15 @@ impl Backend {
             }
         };
 
+        // The tools the project's bin namespaces install, behind the
+        // project's own vendor.
+        for namespace in &bin_namespaces {
+            let mut namespace_scan = self.scan_bin_namespace(namespace, strategy, &filters);
+            scan.package_roots.append(&mut namespace_scan.package_roots);
+            scan.absorb_missing(namespace_scan);
+            vendor_paths.extend(path_aliases(&namespace.vendor_path()));
+        }
+
         // The classes no scan labelled (Composer's classmap, the project's
         // PSR-4 sources) are classified by where their file lives.
         let package_roots = std::mem::take(&mut scan.package_roots);
@@ -350,11 +420,14 @@ impl Backend {
         // depend on.  detect_drupal_web_root() returns None for
         // non-Drupal projects so this block is a no-op in that case.
         if let Some(drupal_web_root) = drupal_web_root {
+            self.note_drupal_web_root(&drupal_web_root);
             if let Some(p) = progress {
                 p.set_scope(at(55), at(59), "Scanning Drupal directories");
             }
-            let drupal_result =
+            let (drupal_result, declaration_files) =
                 classmap_scanner::scan_drupal_directories(&drupal_web_root, &filters, progress);
+            self.note_drupal_declaration_files(declaration_files.declarations);
+            self.note_drupal_service_providers(declaration_files.service_providers);
             let drupal_count = drupal_result.classmap.len()
                 + drupal_result.function_index.len()
                 + drupal_result.constant_index.len();
@@ -372,6 +445,13 @@ impl Backend {
         // Scan the listed directories and merge discovered classes into
         // the classmap so they are resolvable via `find_or_load_class`.
         let mut psr0_cm = composer::parse_autoload_namespaces(root, &vendor_dir);
+        for namespace in &bin_namespaces {
+            for (fqn, path) in
+                composer::parse_autoload_namespaces(&namespace.root, &namespace.vendor_dir)
+            {
+                psr0_cm.entry(fqn).or_insert(path);
+            }
+        }
         filters.retain_unexcluded(&mut psr0_cm);
         if !psr0_cm.is_empty() {
             let count = psr0_cm.len();
@@ -401,8 +481,65 @@ impl Backend {
         }
 
         self.scan_autoload_files(root, &vendor_dir, progress);
+        for namespace in &bin_namespaces {
+            self.scan_autoload_files(&namespace.root, &namespace.vendor_dir, None);
+        }
 
         source_label
+    }
+
+    /// The classes, functions and constants the vendor directory of one
+    /// bin namespace holds, read the way `[indexing] strategy` reads the
+    /// project's own vendor directory, with their package roots.
+    fn scan_bin_namespace(
+        &self,
+        namespace: &composer::BinNamespace,
+        strategy: IndexingStrategy,
+        filters: &std::sync::Arc<classmap_scanner::IndexFilters>,
+    ) -> WorkspaceScanResult {
+        let explicit_deps = namespace
+            .package
+            .as_ref()
+            .map(composer::explicit_dependency_names)
+            .unwrap_or_default();
+        let composer_classmap = || {
+            let mut classmap =
+                composer::parse_autoload_classmap(&namespace.root, &namespace.vendor_dir);
+            filters.retain_unexcluded(&mut classmap);
+            classmap
+        };
+        let scan_packages = |skip: &HashSet<PathBuf>| {
+            classmap_scanner::scan_vendor_packages_with_skip(
+                &namespace.root,
+                &namespace.vendor_dir,
+                skip,
+                &explicit_deps,
+                filters,
+                None,
+                Some(self.followed_links()),
+            )
+        };
+        match strategy {
+            IndexingStrategy::None => WorkspaceScanResult {
+                classmap: composer_classmap(),
+                package_roots: classmap_scanner::vendor_package_roots(
+                    &namespace.root,
+                    &namespace.vendor_dir,
+                    &explicit_deps,
+                ),
+                ..Default::default()
+            },
+            IndexingStrategy::SelfScan | IndexingStrategy::Full => scan_packages(&HashSet::new()),
+            IndexingStrategy::Composer => {
+                let classmap = composer_classmap();
+                let skip: HashSet<PathBuf> = classmap.values().cloned().collect();
+                let mut packages = scan_packages(&skip);
+                let mut scan = WorkspaceScanResult::from_classmap(classmap);
+                scan.package_roots = std::mem::take(&mut packages.package_roots);
+                scan.absorb_missing(packages);
+                scan
+            }
+        }
     }
 
     /// Initialize a monorepo workspace (no root `composer.json`, but
@@ -460,6 +597,7 @@ impl Backend {
         let mut any_twig = false;
         let mut any_yii = false;
         let mut phpunit_major: Option<u8> = None;
+        self.clear_drupal_web_roots();
 
         for (sub_idx, (sub_root, _)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;
@@ -484,13 +622,23 @@ impl Backend {
 
             let composer_json = composer::read_composer_package(sub_root);
             if let Some(pkg) = &composer_json {
-                any_laravel |= composer::is_laravel_project(pkg);
                 any_runtime_permissions |= composer::has_runtime_permission_package(pkg);
-                any_doctrine |= composer::is_doctrine_project(pkg);
-                any_symfony |= composer::is_symfony_project(pkg);
-                any_twig |= composer::is_twig_project(pkg);
-                any_yii |= composer::is_yii_project(pkg);
-                if let Some(major) = composer::locked_phpunit_major(sub_root) {
+                // A subproject's bin namespaces install its tools, which
+                // classify it as its own dependencies do.
+                let bin_namespaces = composer::bin_namespaces(sub_root, pkg);
+                for tool_pkg in std::iter::once(pkg)
+                    .chain(bin_namespaces.iter().filter_map(|ns| ns.package.as_ref()))
+                {
+                    any_laravel |= composer::is_laravel_project(tool_pkg);
+                    any_doctrine |= composer::is_doctrine_project(tool_pkg);
+                    any_symfony |= composer::is_symfony_project(tool_pkg);
+                    any_twig |= composer::is_twig_project(tool_pkg);
+                    any_yii |= composer::is_yii_project(tool_pkg);
+                }
+                for major in std::iter::once(sub_root.as_path())
+                    .chain(bin_namespaces.iter().map(|ns| ns.root.as_path()))
+                    .filter_map(composer::locked_phpunit_major)
+                {
                     phpunit_major =
                         Some(phpunit_major.map_or(major, |lowest: u8| lowest.min(major)));
                 }

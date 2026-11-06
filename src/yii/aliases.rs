@@ -172,7 +172,7 @@ impl Aliases {
 fn alias_path(value: &Expression<'_>, dir: &Path) -> Option<String> {
     if let Expression::Literal(Literal::String(literal)) = value
         && let Some(text) = literal.value.and_then(crate::atom::literal_bytes_to_str)
-        && (text.starts_with('@') || text.starts_with('/'))
+        && (text.starts_with('@') || super::views::is_absolute_view_path(text))
     {
         return Some(text.to_string());
     }

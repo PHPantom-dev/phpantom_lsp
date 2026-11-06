@@ -15,7 +15,7 @@ use crate::ParseErrorEntry;
 use crate::atom::atom;
 use crate::blade::call_site_inference::BladeScope;
 use crate::names::OwnedResolvedNames;
-use crate::symbol_map::{SymbolMap, extract_symbol_map_for_index};
+use crate::symbol_map::SymbolMap;
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan};
 
 use mago_allocator::LocalArena;
@@ -143,6 +143,10 @@ impl Backend {
         // to files that register a `Storage::extend()` driver.
         self.refresh_laravel_storage_drivers(uri, content);
 
+        // Keep the classes Drupal service providers give services coherent
+        // with edits to the providers.
+        self.refresh_drupal_service_provider(uri, content);
+
         // Keep the reverse pivot index coherent with edits to files that
         // declare (or previously declared) a many-to-many relationship.
         self.refresh_laravel_pivots(uri, content);
@@ -189,7 +193,8 @@ impl Backend {
     /// and publishes the resulting single-file update.
     ///
     /// An open file's parse is kept for the diagnostic pass this edit
-    /// schedules (see [`Backend::take_parsed_for_diagnostics`]).
+    /// schedules and the requests that follow it (see
+    /// [`Backend::kept_parse`]).
     fn update_ast_inner(
         &self,
         uri: &str,
@@ -219,7 +224,7 @@ impl Backend {
         update.blade = blade;
         let changed = self.apply_ast_index_updates_batch(vec![update]);
         if let Some(parsed) = parsed {
-            self.keep_parsed_for_diagnostics(uri, parsed);
+            self.keep_parse(uri, parsed);
         }
         changed
     }
@@ -556,13 +561,18 @@ impl Backend {
             } else {
                 None
             };
-            extract_symbol_map_for_index(
+            crate::symbol_map::extraction::extract_symbol_map_for_file(
                 program,
                 content,
                 &owned_resolved,
-                self.is_symfony_project(),
-                self.is_twig_project(),
+                crate::symbol_map::extraction::Frameworks {
+                    symfony: self.is_symfony_project(),
+                    service_container: self.reads_service_container(),
+                    drupal: self.is_drupal_project(),
+                    twig: self.is_twig_project(),
+                },
                 yii_dir.as_deref(),
+                self.drupal_file(uri),
             )
         };
         // A router that loads its routes from somewhere else than the

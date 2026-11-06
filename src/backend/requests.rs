@@ -57,7 +57,58 @@ impl Backend {
         uri: &str,
         content: Arc<String>,
     ) -> RequestScope<'static> {
-        self.request_scope_with(uri, || crate::parser::with_parse_cache_arc(content))
+        self.request_scope_with(uri, || self.enter_parse_cache(uri, content))
+    }
+
+    /// Activate the parse cache for a pass over `content`, the text `uri`
+    /// is analysed as, reading the parse [`Self::kept_parse`] holds for it
+    /// rather than parsing it again.
+    pub(crate) fn enter_parse_cache(
+        &self,
+        uri: &str,
+        content: Arc<String>,
+    ) -> crate::parser::ParseCacheGuard<'static> {
+        match self.kept_parse(uri, &content) {
+            Some(parsed) => crate::parser::with_parsed_file_cache(parsed, content),
+            None => crate::parser::with_parse_cache_arc(content),
+        }
+    }
+
+    /// Keep `parsed`, the parse of the open file `uri`, for the passes over
+    /// the same text, in place of whichever file's parse was kept before.
+    pub(crate) fn keep_parse(&self, uri: &str, parsed: crate::parser::ParsedFile) {
+        // The replaced parse is freed once the lock is released, or once
+        // the last pass reading it ends.
+        let _replaced = self
+            .kept_parse
+            .lock()
+            .replace((uri.to_string(), Arc::new(parsed)));
+    }
+
+    /// The parse [`Self::keep_parse`] kept for `uri`, if it is a parse of
+    /// `content`.
+    ///
+    /// A parse of other text stays: it is either newer than `content`, read
+    /// by a request that raced the edit's parse, or an edit's parse is
+    /// about to replace it.
+    pub(crate) fn kept_parse(
+        &self,
+        uri: &str,
+        content: &Arc<String>,
+    ) -> Option<Arc<crate::parser::ParsedFile>> {
+        let parsed = match self.kept_parse.lock().as_ref() {
+            Some((kept, parsed)) if kept == uri => Arc::clone(parsed),
+            _ => return None,
+        };
+        (Arc::ptr_eq(parsed.content(), content) || parsed.content() == content).then_some(parsed)
+    }
+
+    /// Drop the parse kept for `uri`, which has been closed.
+    pub(crate) fn forget_kept_parse(&self, uri: &str) {
+        let mut slot = self.kept_parse.lock();
+        if slot.as_ref().is_some_and(|(kept, _)| kept == uri) {
+            *slot = None;
+        }
     }
 
     /// [`enter_request_scope`](Self::enter_request_scope) for a caller

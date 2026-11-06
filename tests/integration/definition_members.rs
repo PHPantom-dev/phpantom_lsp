@@ -4406,3 +4406,42 @@ async fn test_goto_definition_virtual_property_in_its_own_classs_docblock() {
         "Second's tag, got {location:?}"
     );
 }
+
+#[tokio::test]
+async fn test_goto_definition_attribute_named_argument() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "#[\\Attribute]\n",
+        "class Foo {\n",
+        "    private string $plain = '';\n",
+        "    public function __construct(public ?string $bar = null, string $plain = '') {}\n",
+        "}\n",
+        "#[Foo(bar: 'hello', plain: 'x')]\n",
+        "class Baz {}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    match goto_definition_at(&backend, &uri, 6, 7).await {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                (location.range.start.line, location.range.start.character),
+                (4, 48),
+                "the label jumps to the promoted parameter"
+            );
+        }
+        other => panic!("Expected a location, got: {:?}", other),
+    }
+
+    // A label naming a plain parameter is not the property of its name.
+    match goto_definition_at(&backend, &uri, 6, 21).await {
+        None => {}
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => assert_ne!(
+            location.range.start.line, 3,
+            "the label must not jump to the unrelated property"
+        ),
+        other => panic!("Unexpected response: {:?}", other),
+    }
+}

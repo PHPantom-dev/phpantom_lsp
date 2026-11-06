@@ -15,6 +15,47 @@ fn find_use_insert_position(content: &str) -> Position {
     }
 }
 
+// ── import_alias ────────────────────────────────────────────────
+
+#[test]
+fn alias_joins_parent_segment_and_short_name() {
+    assert_eq!(
+        import_alias("Illuminate\\Database\\Eloquent\\Collection", |_| false),
+        "EloquentCollection"
+    );
+}
+
+#[test]
+fn alias_of_a_contract_takes_a_contract_suffix() {
+    assert_eq!(
+        import_alias("Illuminate\\Contracts\\Support\\Jsonable", |_| false),
+        "JsonableContract"
+    );
+    assert_eq!(
+        import_alias("App\\Contracts\\RepositoryInterface", |_| false),
+        "ContractsRepositoryInterface"
+    );
+}
+
+#[test]
+fn alias_of_a_global_class_is_prefixed() {
+    assert_eq!(import_alias("Exception", |_| false), "GlobalException");
+}
+
+#[test]
+fn alias_is_numbered_when_taken() {
+    let use_map = HashMap::from([
+        ("EloquentCollection".to_string(), "A\\B".to_string()),
+        ("eloquentcollection2".to_string(), "A\\C".to_string()),
+    ]);
+    assert_eq!(
+        import_alias("Illuminate\\Database\\Eloquent\\Collection", |name| {
+            import_name_taken(name, &use_map)
+        }),
+        "EloquentCollection3"
+    );
+}
+
 // ── use_import_conflicts ────────────────────────────────────────
 
 #[test]

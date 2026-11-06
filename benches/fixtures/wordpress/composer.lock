@@ -1,0 +1,145 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "e6236c77f80dc340f359d7cd65d64c06",
+    "packages": [],
+    "packages-dev": [
+        {
+            "name": "php-stubs/wordpress-stubs",
+            "version": "v7.1.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/php-stubs/wordpress-stubs.git",
+                "reference": "6926c5156431a3ff909d43faa16a92a0bc0c2428"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/php-stubs/wordpress-stubs/zipball/6926c5156431a3ff909d43faa16a92a0bc0c2428",
+                "reference": "6926c5156431a3ff909d43faa16a92a0bc0c2428",
+                "shasum": ""
+            },
+            "conflict": {
+                "phpdocumentor/reflection-docblock": "5.6.1"
+            },
+            "require-dev": {
+                "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+                "nikic/php-parser": "^5.5",
+                "php": "^7.4 || ^8.0",
+                "php-stubs/generator": "^0.9",
+                "phpdocumentor/reflection-docblock": "^6.0",
+                "phpstan/phpstan": "^2.2",
+                "phpunit/phpunit": "^9.5",
+                "symfony/polyfill-php80": "*",
+                "szepeviktor/phpcs-psr-12-neutron-hybrid-ruleset": "^1.2",
+                "wp-coding-standards/wpcs": "3.4.1 as 2.3.0"
+            },
+            "suggest": {
+                "paragonie/sodium_compat": "Pure PHP implementation of libsodium",
+                "symfony/polyfill-php80": "Symfony polyfill backporting some PHP 8.0+ features to lower PHP versions",
+                "szepeviktor/phpstan-wordpress": "WordPress extensions for PHPStan"
+            },
+            "type": "library",
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "WordPress function and class declaration stubs for static analysis.",
+            "homepage": "https://github.com/php-stubs/wordpress-stubs",
+            "keywords": [
+                "PHPStan",
+                "static analysis",
+                "wordpress"
+            ],
+            "support": {
+                "issues": "https://github.com/php-stubs/wordpress-stubs/issues",
+                "source": "https://github.com/php-stubs/wordpress-stubs/tree/v7.1.2"
+            },
+            "time": "2026-10-06T06:59:21+00:00"
+        },
+        {
+            "name": "roots/wordpress-no-content",
+            "version": "7.1.4",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/WordPress/WordPress.git",
+                "reference": "7.1.4"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://downloads.w.org/release/wordpress-7.1.4-no-content.zip",
+                "reference": "7.1.4",
+                "shasum": "1dd4bfa7b13dec725c0062a3fb62ba0536cb8699"
+            },
+            "require": {
+                "php": ">= 7.4"
+            },
+            "provide": {
+                "wordpress/core-implementation": "7.1.4"
+            },
+            "suggest": {
+                "ext-curl": "Performs remote request operations.",
+                "ext-dom": "Used to validate Text Widget content and to automatically configuring IIS7+.",
+                "ext-exif": "Works with metadata stored in images.",
+                "ext-fileinfo": "Used to detect mimetype of file uploads.",
+                "ext-hash": "Used for hashing, including passwords and update packages.",
+                "ext-imagick": "Provides better image quality for media uploads.",
+                "ext-json": "Used for communications with other servers.",
+                "ext-libsodium": "Validates Signatures and provides securely random bytes.",
+                "ext-mbstring": "Used to properly handle UTF8 text.",
+                "ext-mysqli": "Connects to MySQL for database interactions.",
+                "ext-openssl": "Permits SSL-based connections to other hosts.",
+                "ext-pcre": "Increases performance of pattern matching in code searches.",
+                "ext-xml": "Used for XML parsing, such as from a third-party site.",
+                "ext-zip": "Used for decompressing Plugins, Themes, and WordPress update packages."
+            },
+            "type": "wordpress-core",
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "GPL-2.0-or-later"
+            ],
+            "authors": [
+                {
+                    "name": "WordPress Community",
+                    "homepage": "https://wordpress.org/about/"
+                }
+            ],
+            "description": "WordPress is open source software you can use to create a beautiful website, blog, or app.",
+            "homepage": "https://wordpress.org/",
+            "keywords": [
+                "blog",
+                "cms",
+                "wordpress"
+            ],
+            "support": {
+                "docs": "https://developer.wordpress.org/",
+                "forum": "https://wordpress.org/support/",
+                "irc": "irc://irc.freenode.net/wordpress",
+                "issues": "https://core.trac.wordpress.org/",
+                "rss": "https://wordpress.org/news/feed/",
+                "source": "https://core.trac.wordpress.org/browser",
+                "wiki": "https://codex.wordpress.org/"
+            },
+            "funding": [
+                {
+                    "url": "https://wordpressfoundation.org/donate/",
+                    "type": "other"
+                }
+            ],
+            "time": "2026-10-28T17:15:58+00:00"
+        }
+    ],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {},
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {},
+    "platform-dev": {},
+    "platform-overrides": {
+        "php": "8.2.0"
+    },
+    "plugin-api-version": "2.9.0"
+}

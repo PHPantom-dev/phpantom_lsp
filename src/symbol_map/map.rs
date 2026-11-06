@@ -304,6 +304,28 @@ pub(crate) struct SymbolMap {
     /// parameter declarations give, sorted by `start`.  Empty for every file
     /// that declares none.
     pub container_values: Vec<ContainerValueSite>,
+    /// The entity types the file's entity classes declare, sorted by
+    /// `start`.  Empty for every file that declares none.
+    pub entity_types: Vec<EntityTypeSite>,
+    /// The shapes of the Drupal route names the file's route builders give
+    /// routes they build from parts, `*` for each part that is not
+    /// written out (`search.view_*`).  Empty for every file that builds
+    /// none.
+    pub drupal_route_patterns: Vec<String>,
+    /// The `Class::method` and `Class` names Drupal's attribute route
+    /// discovery gives the file's controller routes besides their own,
+    /// which no text of the file spells out.  Empty for every file that
+    /// declares none.
+    pub drupal_route_aliases: Vec<String>,
+    /// The Drupal routes the file declares, in source order.  Empty for
+    /// every file that declares none.
+    pub drupal_routes: Vec<DrupalRouteSite>,
+    /// What each Drupal hook implementation and invocation of the file is,
+    /// sorted by `start`.  Empty for every file that has none.
+    pub drupal_hooks: Vec<HookSite>,
+    /// The invoking calls of the core methods that fire hooks under
+    /// computed names.  Empty for every other file.
+    pub drupal_computed_hooks: Vec<ComputedHookSite>,
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,

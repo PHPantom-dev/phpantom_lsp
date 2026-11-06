@@ -527,7 +527,7 @@ impl Backend {
     /// had.
     fn publish_file_states(&self, prepared: &mut [PreparedAstIndexUpdate]) {
         let mut files = self.files.write();
-        for update in prepared {
+        for update in prepared.iter_mut() {
             let blade = match update.blade.take() {
                 Some(blade) => Some(crate::file_state::BladeFileState {
                     virtual_php: blade.virtual_php,
@@ -548,6 +548,13 @@ impl Backend {
                 blade,
             };
             files.insert(update.uri.clone(), Arc::new(state));
+        }
+        drop(files);
+        if !self.dormant_files.read().is_empty() {
+            let mut dormant = self.dormant_files.write();
+            for update in prepared.iter() {
+                dormant.remove(&update.uri);
+            }
         }
     }
 

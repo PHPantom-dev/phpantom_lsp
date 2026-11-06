@@ -720,8 +720,8 @@ const MAX_KEY_ALTERNATIVES: usize = 32;
 /// literal PHP stores it and paired with whether its entry is optional.
 ///
 /// `None` unless every alternative is a single array shape whose keys can be
-/// spelled as literals. A class-constant key only records the constant's
-/// name, not the value it stands for.
+/// spelled as literals. A class-constant key other than `Foo::class` only
+/// records the constant's name, not the value it stands for.
 fn shape_key_alternatives(ty: &PhpType) -> Option<Vec<Vec<(PhpType, bool)>>> {
     ty.union_members()
         .into_iter()
@@ -729,14 +729,7 @@ fn shape_key_alternatives(ty: &PhpType) -> Option<Vec<Vec<(PhpType, bool)>>> {
             explicit_key_shape_entries(member)?
                 .into_iter()
                 .map(|entry| {
-                    let key = entry.key?;
-                    if key.contains("::") {
-                        return None;
-                    }
-                    let literal = match canonical_int_key(&key) {
-                        Some(_) => PhpType::literal_int(key),
-                        None => PhpType::literal_string_value(key),
-                    };
+                    let literal = crate::php_type::shape_key_literal(entry.key.as_deref()?)?;
                     Some((literal, entry.optional))
                 })
                 .collect()

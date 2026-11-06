@@ -264,12 +264,22 @@ impl SpineKeys {
         let mut discriminator: Option<(usize, Option<std::rc::Rc<str>>)> = None;
 
         for index in (0..spine.len()).rev() {
-            if index < base_index
-                && let SubjectExpr::CallExpr { args_text, .. } = spine[index].0
-            {
-                crate::type_engine::subject_expr::collect_text_local_variables(
-                    args_text, &mut vars,
-                );
+            if index < base_index {
+                // A link reads the variables its arguments name, and the
+                // one its member name is read from (`$obj->$name`).
+                let (member, args_text) = match spine[index].0 {
+                    SubjectExpr::CallExpr { callee, args_text } => match callee.as_ref() {
+                        SubjectExpr::MethodCall { method, .. } => {
+                            (method.as_str(), args_text.as_str())
+                        }
+                        _ => ("", args_text.as_str()),
+                    },
+                    SubjectExpr::PropertyChain { property, .. } => (property.as_str(), ""),
+                    _ => ("", ""),
+                };
+                for text in [member, args_text] {
+                    crate::type_engine::subject_expr::collect_text_local_variables(text, &mut vars);
+                }
             }
             let Some(shared) = cacheable[index] else {
                 continue;

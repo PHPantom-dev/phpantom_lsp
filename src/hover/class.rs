@@ -12,6 +12,7 @@ use tower_lsp_server::gen_lsp_types::Hover;
 use crate::Backend;
 use crate::class_lookup::Fqn;
 use crate::docblock::extract_template_params_full;
+use crate::php_type::TypeKind;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind};
 use crate::types::*;
 use crate::util::short_name;
@@ -92,10 +93,18 @@ impl Backend {
 
         let resolved = match ssp_kind {
             SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => current_class.cloned(),
-            SelfStaticParentKind::This => self
-                .resolve_closure_this_override(uri, content, cursor_offset)
-                .map(Arc::unwrap_or_clone)
-                .or_else(|| current_class.cloned()),
+            SelfStaticParentKind::This => {
+                let bound = self.resolve_closure_this_types(uri, content, cursor_offset);
+                if bound.len() > 1 {
+                    return Some(make_hover(bound_this_hover(&bound)));
+                }
+                bound
+                    .into_iter()
+                    .next()
+                    .and_then(ResolvedType::into_class_info)
+                    .map(Arc::unwrap_or_clone)
+                    .or_else(|| current_class.cloned())
+            }
             SelfStaticParentKind::Parent => current_class
                 .and_then(|cc| cc.parent_class.as_ref())
                 .and_then(|parent_name| {
@@ -383,4 +392,48 @@ fn build_trait_summary_body(cls: &ClassInfo) -> String {
     }
 
     body
+}
+
+/// Hover text for `$this` bound to several classes, as a union or an
+/// intersection, named relative to their namespace when they share one.
+fn bound_this_hover(bound: &[ResolvedType]) -> String {
+    let classes: Vec<&ClassInfo> = bound
+        .iter()
+        .filter_map(|rt| rt.class_info.as_deref())
+        .collect();
+    // The members of an intersection binding all carry the intersection
+    // as their `type_string`; anything else is a union of alternatives.
+    let separator = match bound.first().map(|rt| &rt.type_string) {
+        Some(first)
+            if matches!(first.kind(), TypeKind::Intersection(_))
+                && bound.iter().all(|rt| &rt.type_string == first) =>
+        {
+            "&"
+        }
+        _ => "|",
+    };
+    let namespace = classes
+        .first()
+        .and_then(|cls| cls.file_namespace.as_deref());
+    let shared_namespace = classes
+        .iter()
+        .all(|cls| cls.file_namespace.as_deref() == namespace);
+    let names: Vec<String> = if shared_namespace {
+        classes.iter().map(|cls| cls.name.to_string()).collect()
+    } else {
+        classes
+            .iter()
+            .map(|cls| format!("\\{}", cls.fqn()))
+            .collect()
+    };
+    let ns_line = if shared_namespace {
+        namespace_line(namespace)
+    } else {
+        String::new()
+    };
+    format!(
+        "```php\n<?php\n{}$this = {}\n```",
+        ns_line,
+        names.join(separator)
+    )
 }

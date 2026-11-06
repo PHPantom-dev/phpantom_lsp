@@ -226,6 +226,9 @@ fn inherit_class_metadata(merged: &mut ClassInfo, parent: &ClassInfo) {
     // readonly whether or not it repeats the keyword, and the
     // properties it inherits are readonly as well.
     merged.is_readonly |= parent.is_readonly;
+    // PHP checks `#[\AllowDynamicProperties]` on the class and every
+    // ancestor, so a subclass takes dynamic properties too.
+    merged.allows_dynamic_properties |= parent.allows_dynamic_properties;
 
     // Eloquent model configuration (`$fillable`, `$casts`,
     // `$primaryKey`, …) comes from the nearest class that declares it.

@@ -188,7 +188,7 @@ pub(super) fn index_project(
     // only by that walk, and a Yii project's routes are declared in its
     // `config/`, which no autoloader names.
     if backend.resolved_class_cache.read().laravel().is_enabled()
-        || backend.is_symfony_project()
+        || backend.reads_service_container()
         || backend.is_twig_project()
         || backend.is_yii_project()
     {

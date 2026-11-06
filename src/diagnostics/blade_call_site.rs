@@ -88,7 +88,8 @@ impl Backend {
         // A template renders its includes from its own scope, so what is
         // already in scope here decides whether an `@include` is short of
         // anything.  A plain PHP call site passes exactly what it lists.
-        let inherited = if self.is_blade_file(uri) {
+        let is_blade = self.is_blade_file(uri);
+        let inherited = if is_blade {
             self.blade_rendering_scope(uri)
         } else {
             Some(HashSet::new())
@@ -96,6 +97,10 @@ impl Backend {
         // What a render that forwards nothing inherits, so a site can stand
         // in for the file-wide answer without cloning it.
         let no_inherited = HashSet::new();
+        // What this template's own renders hand it beyond what it reads off
+        // itself. Finding them means reading other files, so it waits until
+        // a name is short of everything the template holds on its own.
+        let mut inbound: Option<Option<HashSet<String>>> = None;
 
         let file_ctx = &ctx.file;
         let class_loader = self.resolved_class_loader(file_ctx);
@@ -191,6 +196,15 @@ impl Backend {
                             out,
                         );
                         continue;
+                    }
+                    // A signature is only what this template's callers have
+                    // to pass, so a name it leaves out may still reach it,
+                    // and through it the include, from every one of them.
+                    if is_blade && site.forwards_scope {
+                        let inbound = inbound.get_or_insert_with(|| self.blade_inbound_scope(uri));
+                        if inbound.as_ref().is_none_or(|names| names.contains(name)) {
+                            continue;
+                        }
                     }
                     let Some(range) = self.offset_range_to_lsp_range(
                         uri,

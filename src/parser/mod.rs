@@ -53,6 +53,7 @@ mod stub_attributes;
 mod use_statements;
 
 pub(crate) use ast_helpers::*;
+pub(crate) use ast_update::AstIndexParseResult;
 pub(crate) use params::*;
 pub(crate) use parse_cache::*;
 pub(crate) use stub_attributes::*;

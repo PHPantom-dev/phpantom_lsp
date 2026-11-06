@@ -149,6 +149,7 @@ fn constructor_narrowed_properties(
         ctor.span().start.offset,
         Some("__construct"),
         false,
+        false,
         &walk_ctx,
     );
     // Each property starts out on its declared type, so an assignment

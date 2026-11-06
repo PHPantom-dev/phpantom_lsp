@@ -153,6 +153,15 @@ pub(crate) enum DocblockMemberRef {
     /// resolves the subject keeps only what [`crate::mock_methods`]
     /// accepts as a mock, and drops the span otherwise.
     MockedMethod,
+    /// A named argument's label in an attribute, `#[Foo(bar: 1)]`, with the
+    /// attribute class as the subject.
+    ///
+    /// The label names a constructor parameter, which is the property `bar`
+    /// only when the constructor promotes it.  A consumer that resolves the
+    /// subject keeps only the classes whose constructor does (see
+    /// [`crate::class_lookup::constructor_promotes`]), and drops the span
+    /// otherwise.
+    AttributeNamedArg,
 }
 
 impl DocblockMemberRef {
@@ -167,7 +176,10 @@ impl DocblockMemberRef {
     /// Whether a target that resolves to nothing is acceptable rather than
     /// a diagnostic.
     pub(crate) fn tolerates_missing_target(self) -> bool {
-        matches!(self, Self::See | Self::PropertyPath)
+        matches!(
+            self,
+            Self::See | Self::PropertyPath | Self::AttributeNamedArg
+        )
     }
 }
 

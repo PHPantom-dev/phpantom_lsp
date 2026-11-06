@@ -13,7 +13,7 @@ use crate::types::*;
 use super::chain_keys::{lookup_scope_for_subject, subject_scope_key};
 use super::context::resolved_to_arcs;
 use super::{
-    ResolutionCtx, is_bare_variable, resolve_static_owner_class, resolve_target_classes_expr,
+    ResolutionCtx, is_bare_variable, resolve_static_owner_classes, resolve_target_classes_expr,
 };
 
 /// Resolve `$base[...]` to the type its brackets select.
@@ -113,9 +113,16 @@ pub(super) fn resolve_array_access_subject(
         property,
     } = base
     {
+        let names = super::variable_subjects::resolve_dynamic_member_names(property, ctx);
         let owner_arcs = resolved_to_arcs(resolve_target_classes_expr(prop_base, access_kind, ctx));
         owner_arcs.iter().find_map(|cls| {
-            crate::inheritance::resolve_property_type_hint(cls, property, class_loader)
+            let hints: Vec<PhpType> = names
+                .iter()
+                .filter_map(|name| {
+                    crate::inheritance::resolve_property_type_hint(cls, name, class_loader)
+                })
+                .collect();
+            (!hints.is_empty()).then(|| PhpType::union(hints))
         })
     } else {
         None
@@ -232,9 +239,8 @@ fn resolve_call_raw_return_type(
             raw_return_type_with_magic_fallback(&base_classes, method, "__call", ctx)
         }
         SubjectExpr::StaticMethodCall { class, method } => {
-            let owner = resolve_static_owner_class(class, ctx);
-            let owner = owner.as_slice();
-            raw_return_type_with_magic_fallback(owner, method, "__callStatic", ctx)
+            let owners = resolve_static_owner_classes(class, ctx);
+            raw_return_type_with_magic_fallback(&owners, method, "__callStatic", ctx)
         }
         SubjectExpr::FunctionCall(fn_name) => {
             if let Some(fl) = ctx.function_loader

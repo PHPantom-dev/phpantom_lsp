@@ -355,6 +355,20 @@ impl Backend {
             );
         }
 
+        // ── Drupal hook implementation names ────────────────────
+        // A function declared at the top level of an extension's
+        // procedural file is offered as the implementation of each
+        // documented hook it can still become.
+        if let Some(items) = self.drupal_hook_function_completion(
+            uri,
+            content,
+            *cursor_offset as usize,
+            position,
+            ctx,
+        ) {
+            return ControlFlow::Break(Some(CompletionResponse::CompletionItemList(items)));
+        }
+
         // ── Class-body root member completion ───────────────────
         // At a new-member position with no modifier typed yet
         // (e.g. `o` right inside a class body), offer overridable

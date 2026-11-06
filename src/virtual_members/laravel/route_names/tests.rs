@@ -1003,7 +1003,8 @@ fn definition_follows_a_require_target_held_in_a_variable() {
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(
         found[0].uri,
-        Uri::from_file_path(dir.path().join("routes/admin.php").canonicalize().unwrap()).unwrap()
+        Uri::from_file_path(dunce::canonicalize(dir.path().join("routes/admin.php")).unwrap())
+            .unwrap()
     );
 }
 

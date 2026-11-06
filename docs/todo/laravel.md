@@ -300,25 +300,6 @@ want accessors that have a mutator.
 `completion/eloquent_string.rs`; `extract_column_names` in
 `virtual_members/laravel/model_extraction/` for `$appends`.
 
-#### L71. Model-level attributes as column sources
-
-**Impact: Medium · Complexity: Low-Medium**
-
-Laravel models can declare their column lists with class attributes
-instead of properties: `#[Fillable(['name'])]`, `#[Guarded([...])]`,
-`#[Hidden([...])]`, `#[Visible([...])]` and `#[Appends([...])]` from
-`Illuminate\Database\Eloquent\Attributes`, which the framework merges
-into the matching property when the model boots. PHPantom reads only the
-properties. A model that uses the attributes gets no column completion
-from them, no fillable-first ordering in `create([...])`, and none of
-the column names they list. Read their `columns` argument alongside the
-property it stands in for, so the two forms behave the same. L49 needs
-the same read for `#[Fillable]`, `#[Guarded]` and `#[Unguarded]`.
-
-**Where to look:** `extract_column_names` and the `$fillable`/`$guarded`
-reads in `virtual_members/laravel/model_extraction/`, which already
-reads the `#[Table]` attribute.
-
 #### L8. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
 
 **Impact: Low-Medium · Complexity: High**

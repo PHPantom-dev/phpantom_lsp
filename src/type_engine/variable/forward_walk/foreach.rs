@@ -795,14 +795,7 @@ fn non_empty_generalized_shape(entries: &[crate::php_type::ShapeEntry]) -> Optio
     }
     let mut keys = Vec::with_capacity(runtime_keys.len());
     for key in &runtime_keys {
-        if key.contains("::") {
-            return None;
-        }
-        keys.push(if crate::php_type::is_canonical_int_key(key) {
-            PhpType::literal_int(key.as_str())
-        } else {
-            PhpType::literal_string_value(key)
-        });
+        keys.push(crate::php_type::shape_key_literal(key)?);
     }
     let mut values: Vec<PhpType> = Vec::new();
     for entry in entries {

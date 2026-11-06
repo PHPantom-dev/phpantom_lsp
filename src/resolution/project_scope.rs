@@ -113,13 +113,24 @@ impl ProjectScopes {
         let installed: Vec<(usize, &ComposerProjectPaths)> = projects
             .iter()
             .enumerate()
-            .filter(|(_, project)| !project.vendor_paths.is_empty())
+            .filter(|(_, project)| {
+                !project.vendor_paths.is_empty() || !project.bin_vendor_paths.is_empty()
+            })
             .collect();
         if installed.len() < 2 {
             return Self::default();
         }
         let prefixes = |paths: &[PathBuf]| -> Vec<String> {
             paths.iter().map(|p| dir_uri_prefix(p)).collect()
+        };
+        // A bin namespace's vendor directory is its project's own.
+        let vendor_prefixes = |project: &ComposerProjectPaths| -> Vec<String> {
+            project
+                .vendor_paths
+                .iter()
+                .chain(&project.bin_vendor_paths)
+                .map(|p| dir_uri_prefix(p))
+                .collect()
         };
         let roots: Vec<Vec<String>> = installed
             .iter()
@@ -129,7 +140,7 @@ impl ProjectScopes {
             .iter()
             .enumerate()
             .map(|(position, &(index, project))| {
-                let own_vendor = prefixes(&project.vendor_paths);
+                let own_vendor = vendor_prefixes(project);
                 let own_roots = roots[position].clone();
                 let others = || {
                     installed
@@ -138,7 +149,7 @@ impl ProjectScopes {
                         .filter(move |((other, _), _)| *other != index)
                 };
                 let foreign_vendor = others()
-                    .flat_map(|((_, other), _)| prefixes(&other.vendor_paths))
+                    .flat_map(|((_, other), _)| vendor_prefixes(other))
                     .filter(|prefix| !own_vendor.contains(prefix))
                     .collect();
                 let foreign_roots = others()

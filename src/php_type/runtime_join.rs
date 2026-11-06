@@ -238,7 +238,7 @@ pub(super) fn shape_values_contained_in(
     let Some(keys) = runtime_shape_keys(entries) else {
         return false;
     };
-    if keys.iter().any(|key| key.contains("::")) {
+    if keys.iter().any(|key| is_opaque_shape_key(key)) {
         return false;
     }
 
@@ -301,11 +301,16 @@ pub(super) fn shape_values_contained_in(
         None => true,
         Some(key_type) if key_type.is_mixed() || key_type.is_array_key() => true,
         Some(key_type) => key_type.union_members().iter().any(|member| {
-            if is_decimal_int_array_key(key) {
+            let base_fits = if is_decimal_int_array_key(key) {
                 matches!(member.kind(), TypeKind::Named(n) if with_keyword_lowercase(n, |lower| matches!(lower, "int" | "integer")))
             } else {
                 matches!(member.kind(), TypeKind::Named(n) if with_keyword_lowercase(n, |lower| lower == "string"))
-            }
+            };
+            // A key domain spelled out as literals or class names
+            // (`array<'x'|class-string, V>`) holds the keys it names.
+            base_fits
+                || (is_runtime_scalar_value_domain(member)
+                    && is_runtime_value_subtype(&shape_key_type(key), member))
         }),
     }
     };

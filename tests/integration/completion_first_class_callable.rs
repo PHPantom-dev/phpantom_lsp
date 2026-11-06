@@ -706,6 +706,76 @@ async fn test_closure_literal_bindto_chain() {
 }
 
 #[tokio::test]
+async fn test_docblock_closure_signature_resolves_to_closure() {
+    // A parameter typed only by a docblock closure signature is still a
+    // `Closure`, so it offers the class's members.
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test/closure_signature_members.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Closure {\n",
+        "    public function bindTo(?object $newThis): ?Closure { return $this; }\n",
+        "    public function call(object $newThis, mixed ...$args): mixed { return null; }\n",
+        "}\n",
+        "class Service {\n",
+        "    /** @param \\Closure(int): string $cb */\n",
+        "    public function run(\\Closure $cb): void {\n",
+        "        $cb->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 8: `        $cb->`  cursor after `->`
+    let items = complete_at(&backend, &uri, src, 8, 13).await;
+    let names = method_names(&items);
+    assert!(names.contains(&"bindTo"), "Expected bindTo in {:?}", names);
+    assert!(names.contains(&"call"), "Expected call in {:?}", names);
+}
+
+#[tokio::test]
+async fn test_closure_signature_invoke_returns_signature_return_type() {
+    // `->__invoke()` and `->call()` run the closure, so they return what
+    // its signature says rather than the `Closure` class's `mixed`.
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test/closure_signature_invoke.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Closure {\n",
+        "    public function __invoke(...$args): mixed { return null; }\n",
+        "    public function call(object $newThis, mixed ...$args): mixed { return null; }\n",
+        "}\n",
+        "class User { public function getName(): string { return ''; } }\n",
+        "class Service {\n",
+        "    /** @param \\Closure(int): User $cb */\n",
+        "    public function run(\\Closure $cb): void {\n",
+        "        $cb->__invoke(1)->\n",
+        "        $cb->call($this, 1)->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 9: `        $cb->__invoke(1)->`  cursor after the last `->`
+    let items = complete_at(&backend, &uri, src, 9, 26).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"getName"),
+        "Expected getName after __invoke() in {:?}",
+        names
+    );
+
+    // Line 10: `        $cb->call($this, 1)->`  cursor after the last `->`
+    let items = complete_at(&backend, &uri, src, 10, 29).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"getName"),
+        "Expected getName after call() in {:?}",
+        names
+    );
+}
+
+#[tokio::test]
 async fn test_closure_no_params_resolves_to_closure() {
     // Even a bare closure with no params / no return type should resolve
     // to the Closure class.

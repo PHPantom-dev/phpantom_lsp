@@ -1076,7 +1076,8 @@ class Service {
     );
 
     let uri =
-        Uri::from_file_path(_tmp.path().join("src/Service.php").canonicalize().unwrap()).unwrap();
+        Uri::from_file_path(dunce::canonicalize(_tmp.path().join("src/Service.php")).unwrap())
+            .unwrap();
 
     let content = std::fs::read_to_string(_tmp.path().join("src/Service.php")).unwrap();
     open_php(&backend, &uri, &content).await;
@@ -1127,13 +1128,9 @@ class Controller {
         ],
     );
 
-    let uri = Uri::from_file_path(
-        _tmp.path()
-            .join("src/Controller.php")
-            .canonicalize()
-            .unwrap(),
-    )
-    .unwrap();
+    let uri =
+        Uri::from_file_path(dunce::canonicalize(_tmp.path().join("src/Controller.php")).unwrap())
+            .unwrap();
 
     let content = std::fs::read_to_string(_tmp.path().join("src/Controller.php")).unwrap();
     open_php(&backend, &uri, &content).await;

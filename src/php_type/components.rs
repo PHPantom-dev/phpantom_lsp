@@ -313,6 +313,38 @@ impl PhpType {
         }
     }
 
+    /// What calling a closure of this type returns, when every non-null
+    /// alternative is a closure signature (`Closure(int): User`,
+    /// `(\Closure(): void)|null`).
+    ///
+    /// This is what `->__invoke()` and `->call()` return on such a value:
+    /// the `Closure` class those calls resolve on only knows `mixed`.
+    /// `None` when some alternative is a bare `Closure` or anything else,
+    /// so the class's own declaration stands.
+    pub fn closure_signature_return(&self) -> Option<PhpType> {
+        let mut returns = Vec::new();
+        for member in self.union_members() {
+            if member.is_null() {
+                continue;
+            }
+            let member = match member.kind() {
+                TypeKind::Nullable(inner) => inner,
+                _ => member,
+            };
+            match member.kind() {
+                TypeKind::Callable(c) if c.is_closure() => {
+                    returns.push(c.return_type.clone().unwrap_or_else(PhpType::mixed));
+                }
+                _ => return None,
+            }
+        }
+        match returns.len() {
+            0 => None,
+            1 => returns.pop(),
+            _ => Some(PhpType::join_runtime_value_types(returns)),
+        }
+    }
+
     /// Extract the return type from a `Callable` variant.
     ///
     /// Returns the return type for callable/Closure types without

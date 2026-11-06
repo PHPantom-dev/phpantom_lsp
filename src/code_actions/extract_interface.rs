@@ -149,12 +149,10 @@ impl Backend {
             class: current_class,
         });
 
-        // Determine new file path (same directory as original).
+        // The new file sits next to the original, named on the URI itself
+        // so it keeps the client's spelling of the directory.
         let doc_url = crate::util::parse_url(uri)?;
-        let file_path = crate::util::url_to_path(&doc_url)?;
-        let dir = file_path.parent()?;
-        let new_file_path = dir.join(format!("{}.php", interface_name));
-        let new_file_uri = crate::util::path_to_url(&new_file_path)?;
+        let new_file_uri = doc_url.join(&format!("{interface_name}.php")).ok()?;
 
         let implements_edit = build_implements_edit(content, current_class, &interface_name)?;
 

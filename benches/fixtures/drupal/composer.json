@@ -1,0 +1,33 @@
+{
+    "name": "phpantom/drupal-memory-bench",
+    "type": "project",
+    "require": {
+        "composer/installers": "2.3.0",
+        "drupal/core-recommended": "11.4.11"
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/installers": true,
+            "drupal/core-composer-scaffold": false,
+            "php-http/discovery": false,
+            "symfony/runtime": false
+        },
+        "platform": {
+            "php": "8.3.0"
+        }
+    },
+    "extra": {
+        "drupal-scaffold": {
+            "locations": {
+                "web-root": "web/"
+            }
+        },
+        "installer-paths": {
+            "web/core": ["type:drupal-core"],
+            "web/libraries/{$name}": ["type:drupal-library"],
+            "web/modules/contrib/{$name}": ["type:drupal-module"],
+            "web/profiles/contrib/{$name}": ["type:drupal-profile"],
+            "web/themes/contrib/{$name}": ["type:drupal-theme"]
+        }
+    }
+}

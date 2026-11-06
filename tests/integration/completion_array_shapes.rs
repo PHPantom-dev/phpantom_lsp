@@ -4731,3 +4731,33 @@ async fn test_array_shape_key_completion_after_astral_character() {
         other => panic!("Expected Array response, got {:?}", other),
     }
 }
+
+#[tokio::test]
+async fn test_key_written_into_plain_array_param_reads_back() {
+    let backend = create_test_backend();
+
+    let uri = Uri::parse("file:///plain_array_write.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Foo { public function bar(): void {} }\n",
+        "/** @param array $args */\n",
+        "function add(array $args, Foo $foo): void {\n",
+        "    $args['foo'] = $foo;\n",
+        "    $args['foo']->\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let result = completion_response(&backend, &uri, 5, 19, None).await;
+    let labels: Vec<String> = match result {
+        Some(CompletionResponse::CompletionItemList(items)) => {
+            items.into_iter().map(|i| i.label).collect()
+        }
+        _ => Vec::new(),
+    };
+    assert!(
+        labels.iter().any(|label| label.starts_with("bar")),
+        "Should suggest Foo's members, got {labels:?}"
+    );
+}

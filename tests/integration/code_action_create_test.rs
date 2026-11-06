@@ -54,10 +54,10 @@ fn create_test_actions(
     character: u32,
 ) -> Vec<CreatedTest> {
     let (backend, dir) = create_psr4_workspace(composer, files);
-    let uri = format!("file://{}", dir.path().join(file).display());
+    let uri = crate::common::file_uri(&dir.path().join(file));
     let content = std::fs::read_to_string(dir.path().join(file)).unwrap();
     backend.update_ast(&uri, &content);
-    let root = format!("file://{}/", dir.path().display());
+    let root = format!("{}/", crate::common::file_uri(dir.path()));
 
     get_code_actions_at(&backend, &uri, &content, line, character)
         .into_iter()

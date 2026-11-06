@@ -221,10 +221,8 @@ async fn rename_namespace_updates_a_plain_use_statement_wrapped_across_lines() {
 
 #[tokio::test]
 async fn rename_namespace_updates_use_statements_in_unopened_usage_only_file() {
-    use std::path::PathBuf;
-
-    let workspace = PathBuf::from("/tmp/test_workspace_ns_usage_only");
-    let _ = std::fs::create_dir_all(&workspace);
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().to_path_buf();
 
     let backend = Backend::new_test_with_workspace(workspace.clone(), Vec::new());
     let uri_a = Uri::from_file_path(workspace.join("a.php")).unwrap();
@@ -1265,12 +1263,12 @@ async fn rename_class_move_aliases_added_import_on_short_name_collision() {
         result_usage
     );
     assert!(
-        result_usage.contains("use App\\Helpers\\Widget as WidgetAlias;"),
+        result_usage.contains("use App\\Helpers\\Widget as HelpersWidget;"),
         "The moved class must be imported under an alias; got:\n{}",
         result_usage
     );
     assert!(
-        result_usage.contains("new WidgetAlias()"),
+        result_usage.contains("new HelpersWidget()"),
         "The moved class's references must use the alias; got:\n{}",
         result_usage
     );

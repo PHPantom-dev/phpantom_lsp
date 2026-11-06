@@ -15,7 +15,7 @@ use crate::virtual_members::laravel::validated_shape;
 use crate::type_engine::resolver::VarResolutionCtx;
 
 use super::calls::any_argument_is_never;
-use super::function_calls::closure_call_return;
+use super::function_calls::{callable_return_resolution, closure_call_return};
 use super::laravel_calls::{
     try_resolve_command_accessor_type, try_resolve_config_method_type,
     try_resolve_request_accessor_type, try_resolve_trans_method_type, try_resolve_validated_shape,
@@ -164,6 +164,15 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
     let (owner_classes, receiver_resolved) =
         expand_union_generic_owners(owner_classes, receiver_resolved, ctx);
 
+    // `->__invoke()` / `->call()` on a closure signature returns what the
+    // signature says, which the `Closure` class it resolves on cannot know.
+    if crate::type_engine::call_resolution::is_closure_invoke_call(&method_name)
+        && let Some(ret_type) =
+            crate::type_engine::call_resolution::closure_invoke_return(&receiver_resolved)
+    {
+        return callable_return_resolution(&ret_type, ctx);
+    }
+
     // A property read through the Reflection API: the name handed to
     // `getProperty()` decides the type, so the stub's `ReflectionProperty`
     // / `mixed` return types are as specific as an annotation can be.
@@ -188,6 +197,24 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
         } else {
             ResolvedType::from_classes_with_hint(classes, ty)
         };
+    }
+
+    // A load on an entity storage `getStorage()` tagged with its entity
+    // class.  The entity type rides on the receiver's type argument, not on
+    // any owner class.
+    if let Some(result) =
+        super::drupal_calls::try_resolve_entity_load_type(&method_name, &receiver_resolved, ctx)
+    {
+        return result;
+    }
+    // An entity query on a tagged storage, and the count and the IDs a
+    // tagged query gives.
+    if let Some(result) = super::drupal_calls::try_resolve_entity_query_call_type(
+        &method_name,
+        &receiver_resolved,
+        ctx,
+    ) {
+        return result;
     }
 
     // Laravel validated input: the rules that guard this request describe the
@@ -230,6 +257,14 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             if let Some(result) =
                 try_resolve_container_lookup_type(owner, &method_name, argument_list, ctx)
             {
+                return result;
+            }
+            if let Some(result) = super::drupal_calls::try_resolve_entity_storage_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
                 return result;
             }
             if let Some(result) =

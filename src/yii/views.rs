@@ -71,12 +71,35 @@ fn pascal_case_to_id(name: &str) -> String {
     id.trim_matches('-').to_lowercase()
 }
 
-/// Collapse the `.` and `..` segments of a view path.  An alias is the
-/// root of the path it starts, so `..` never climbs out of it.
+/// The length of the root an absolute filesystem path starts with: `/`,
+/// or a Windows drive (`C:\`, `C:/`).
+fn absolute_root_len(path: &str) -> Option<usize> {
+    match path.as_bytes() {
+        [b'/' | b'\\', ..] => Some(1),
+        [drive, b':', b'/' | b'\\', ..] if drive.is_ascii_alphabetic() => Some(3),
+        _ => None,
+    }
+}
+
+/// Whether a view path is an absolute filesystem path rather than one
+/// starting with an alias or relative to a directory.
+pub(crate) fn is_absolute_view_path(path: &str) -> bool {
+    absolute_root_len(path).is_some()
+}
+
+/// Collapse the `.` and `..` segments of a view path, spelled with `/`
+/// whatever separators the platform built it with.  An alias, or the
+/// root of an absolute path, is the root of the path it starts, so `..`
+/// never climbs out of it.
 pub(crate) fn normalize_view_path(path: &str) -> String {
-    let absolute = path.starts_with('/');
+    let path: std::borrow::Cow<'_, str> = if path.contains('\\') {
+        path.replace('\\', "/").into()
+    } else {
+        path.into()
+    };
+    let (root, rest) = path.split_at(absolute_root_len(&path).unwrap_or(0));
     let mut segments: Vec<&str> = Vec::new();
-    for segment in path.split('/') {
+    for segment in rest.split('/') {
         match segment {
             "" | "." => {}
             ".." => {
@@ -88,10 +111,10 @@ pub(crate) fn normalize_view_path(path: &str) -> String {
         }
     }
     let joined = segments.join("/");
-    if absolute {
-        format!("/{joined}")
-    } else {
+    if root.is_empty() {
         joined
+    } else {
+        format!("{root}{joined}")
     }
 }
 
@@ -109,7 +132,7 @@ pub(crate) fn view_key(
     if name.is_empty() || name.starts_with("//") {
         return None;
     }
-    let path = if name.starts_with('/') {
+    let path = if is_absolute_view_path(name) {
         name.to_string()
     } else if name.starts_with("./") || name.starts_with("../") {
         format!("{}/{name}", current_dir?)
@@ -172,7 +195,7 @@ impl Backend {
     fn yii_view_path(&self, key: &str) -> Option<PathBuf> {
         self.yii_aliases()
             .resolve(key)
-            .filter(|path| path.starts_with('/'))
+            .filter(|path| is_absolute_view_path(path))
             .map(|path| PathBuf::from(normalize_view_path(&path)))
     }
 

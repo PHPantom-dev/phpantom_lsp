@@ -10,7 +10,7 @@ use crate::types::ResolvedType;
 
 use super::arithmetic::{
     ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
-    infer_modulo_result_type, overloaded_number_result,
+    infer_bitwise_assignment_result_type, infer_modulo_result_type, overloaded_number_result,
 };
 use super::resolve_rhs_expression;
 use super::scalar_fold::concat_result;
@@ -126,13 +126,15 @@ pub(crate) fn compound_assignment_result(
     match operator {
         AssignmentOperator::Concat(_) => Some(concat_result(&lhs_types(), rhs_types)),
         AssignmentOperator::Modulo(_) => Some(infer_modulo_result_type(&lhs_types(), &rhs_types())),
-        AssignmentOperator::LeftShift(_)
-        | AssignmentOperator::RightShift(_)
-        | AssignmentOperator::BitwiseAnd(_)
-        | AssignmentOperator::BitwiseOr(_)
-        | AssignmentOperator::BitwiseXor(_) => Some(
+        AssignmentOperator::LeftShift(_) | AssignmentOperator::RightShift(_) => Some(
             overloaded_number_result(&lhs_types(), &rhs_types(), true).unwrap_or_else(PhpType::int),
         ),
+        AssignmentOperator::BitwiseAnd(_)
+        | AssignmentOperator::BitwiseOr(_)
+        | AssignmentOperator::BitwiseXor(_) => Some(infer_bitwise_assignment_result_type(
+            &lhs_types(),
+            &rhs_types(),
+        )),
         AssignmentOperator::Addition(_) => {
             Some(infer_addition_result_type(&lhs_types(), &rhs_types()))
         }

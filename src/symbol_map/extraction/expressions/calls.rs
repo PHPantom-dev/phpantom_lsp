@@ -44,6 +44,7 @@ pub(super) fn extract_instantiation_expr<'a>(
         }
         emit_symfony_instantiation_spans(inst.class, args, ctx);
         emit_twig_callable_instantiation(inst.class, args, ctx);
+        emit_drupal_url_spans(inst.class, args, ctx);
         if !class_text.is_empty() {
             emit_call_site(
                 format!("new {}", class_text),
@@ -487,6 +488,8 @@ fn extract_method_call<'a>(
         let member_name = crate::atom::atom_bytes(ident.value);
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
         record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
+        record_drupal_route_parameter_sites(&member_name, argument_list, ctx);
+        record_drupal_hook_invocations(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
         // Recorded with `->` for both spellings so callable resolution
@@ -599,6 +602,28 @@ fn extract_static_method_call<'a>(
             &static_call.argument_list,
             ctx,
         );
+        if ctx.drupal && crate::drupal::is_service_lookup(semantic_subject, &member_name) {
+            try_emit_laravel_string_span(
+                crate::symbol_map::StringKeyKind::ServiceId,
+                &static_call.argument_list,
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
+        if ctx.drupal && crate::drupal::is_entity_query(semantic_subject, &member_name) {
+            try_emit_laravel_string_span(
+                crate::symbol_map::StringKeyKind::DrupalEntityType,
+                &static_call.argument_list,
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
+        if ctx.drupal
+            && let Some(index) =
+                crate::drupal::static_route_argument(semantic_subject, &member_name)
+        {
+            emit_drupal_route_span(index, &static_call.argument_list, ctx);
+        }
     }
     extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);
 }
@@ -678,6 +703,50 @@ mod tests {
     use crate::names::OwnedResolvedNames;
     use crate::symbol_map::StringKeyDependency;
 
+    /// The service IDs `\Drupal::service()` names in `php`, extracted for a
+    /// project that builds a Symfony service container, and is a Drupal
+    /// site when `drupal` holds.
+    fn drupal_service_ids(php: &str, drupal: bool) -> Vec<String> {
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: true,
+                service_container: true,
+                drupal,
+                twig: false,
+            },
+            None,
+        );
+        map.spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                crate::symbol_map::SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::ServiceId,
+                    key,
+                    ..
+                } => Some(key.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn drupal_service_lookups_name_a_service_only_in_a_drupal_site() {
+        let php = "<?php\n\\Drupal::service('acme.greeter');\n";
+        assert_eq!(
+            drupal_service_ids(php, true),
+            vec!["acme.greeter".to_string()]
+        );
+        assert!(drupal_service_ids(php, false).is_empty());
+    }
+
     #[test]
     fn route_can_span_waits_for_the_root_alias_shadow_check() {
         let php = "<?php\nRoute::get('/posts/{post}', $action)->can('update', 'post');\n";
@@ -688,7 +757,16 @@ mod tests {
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
 
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, true, true, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: true,
+                service_container: true,
+                drupal: false,
+                twig: true,
+            },
+            None,
         );
 
         assert_eq!(map.conditional_string_key_spans.len(), 1);

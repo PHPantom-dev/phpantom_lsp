@@ -427,6 +427,20 @@ fn html_to_markdown_code() {
 }
 
 #[test]
+fn html_to_markdown_multiline_code_is_fenced() {
+    assert_eq!(
+        formatting::html_to_markdown(
+            "Example:\n<code>\n    $qb->where('u.id = ?');\n    $qb->setParameter(1, 2);\n</code>\nThen <code>run()</code>."
+        ),
+        "Example:\n\n```php\n    $qb->where('u.id = ?');\n    $qb->setParameter(1, 2);\n```\n\nThen `run()`."
+    );
+    assert_eq!(
+        formatting::html_to_markdown("<pre>\nline one\nline two\n</pre>"),
+        "\n```php\nline one\nline two\n```\n"
+    );
+}
+
+#[test]
 fn html_to_markdown_br_variants() {
     assert_eq!(formatting::html_to_markdown("a<br>b"), "a\nb");
     assert_eq!(formatting::html_to_markdown("a<br/>b"), "a\nb");

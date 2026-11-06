@@ -518,3 +518,64 @@ same.
 **Where to look:** `src/framework.rs` (the Doctrine mapping index, which
 D31 also needs) and `src/diagnostics/uninitialized_properties.rs`.
 
+---
+
+## D41. A thrown exception nothing catches or documents is not reported
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** Loads the settings. */
+function load(string $path): array
+{
+    return json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+    // JsonException is neither caught nor in a @throws tag
+}
+```
+
+PhpStorm's "Unhandled exception" inspection is one of the checks its users
+rely on most: an exception the body throws, or a callee's `@throws`
+propagates, that no `try` catches and the function's own `@throws` does not
+list. PHPantom already computes exactly that set, since typing `@` in a
+docblock suggests `@throws` for each uncaught exception and "Update
+docblock" adds the missing tags, but nothing reports it. Report it as an
+opt-in diagnostic (it is a documentation contract, not a runtime failure,
+so Hint by the severity philosophy above), with "Update docblock" as its
+quick fix.
+
+PhpStorm treats `\RuntimeException` and `\Error` subclasses as unchecked by
+default, and so does PHPStan's `missingCheckedExceptionInThrows`; follow
+that, and make the unchecked list configurable the way both tools do.
+
+On a mid-sized Symfony API it was PhpStorm's most frequent real finding (60
+unhandled exceptions, 22 incomplete `@throws`, mostly `random_bytes()`'s
+`RandomException` and Doctrine's `ORMException`), where PHPantom reported
+nothing. The same set also tells a `catch` whose `try` cannot throw the
+class it catches, which PhpStorm reports as well; PHPStan's
+`catch.neverThrown` fix (H24) would then work without PHPStan.
+
+**Where to look:** `src/completion/source/throws_analysis/uncaught.rs`
+(the uncaught set), `src/code_actions/update_docblock/` (the fix), and
+PHPStan's `MissingCheckedExceptionInThrowsCheck`.
+
+---
+
+## D42. `from()` with a literal no enum case backs is not reported
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+enum Status: string { case Active = 'active'; }
+
+Status::from('Active');      // ValueError at runtime
+Status::tryFrom('Active');   // always null
+```
+
+When the argument is a literal and the enum is known, whether a case backs
+it is decidable, and `from()` throwing a `ValueError` is a crash, so Error
+severity. `tryFrom()` with such a literal always returns `null`, which is
+worth a Warning. PhpStorm reports both.
+
+**Where to look:** `src/diagnostics/enum_errors.rs`, and the enum's case
+values on `ClassInfo`.
+

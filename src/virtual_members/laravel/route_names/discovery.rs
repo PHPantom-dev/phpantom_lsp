@@ -608,8 +608,32 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
     let macros = MacroScope::for_backend(backend);
     let mut subdirectory_files = Vec::new();
 
+    // `withRouting(then: …)` in `bootstrap/app.php` can group a route file
+    // under a name prefix (`Route::name('admin.')->group(base_path(…))`).
+    // It is walked first so that file is read with the prefix, and not a
+    // second time below without it.
+    if let Some(root) = workspace_root.as_deref() {
+        let bootstrap = crate::util::path_to_uri(&root.join("bootstrap/app.php"));
+        walk_workspace_route_file(
+            backend,
+            &bootstrap,
+            Some(root),
+            &macros,
+            &mut collector,
+            &mut scanned,
+        );
+    }
+    let bootstrap_loaded: HashSet<PathBuf> = collector.sources.iter().cloned().collect();
+
     for (file_uri, _) in snapshot {
         if !file_uri.contains("/routes/") {
+            continue;
+        }
+        if !bootstrap_loaded.is_empty()
+            && crate::util::uri_to_path(&file_uri).is_some_and(|path| {
+                bootstrap_loaded.contains(&dunce::canonicalize(&path).unwrap_or(path))
+            })
+        {
             continue;
         }
         // A route file in a sub-directory of `routes/` is not loaded by
@@ -642,9 +666,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
         .route_files
         .clone();
     for route_path in &provider_route_files {
-        let canonical = route_path
-            .canonicalize()
-            .unwrap_or_else(|_| route_path.clone());
+        let canonical = dunce::canonicalize(route_path).unwrap_or_else(|_| route_path.clone());
         if !scanned.insert(canonical.clone()) {
             continue;
         }
@@ -676,7 +698,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
     subdirectory_files.sort();
     for file_uri in subdirectory_files {
         let loaded = crate::util::uri_to_path(&file_uri).is_some_and(|path| {
-            let canonical = path.canonicalize().unwrap_or(path);
+            let canonical = dunce::canonicalize(&path).unwrap_or(path);
             collector.sources.contains(&canonical)
         });
         if !loaded {
@@ -695,7 +717,9 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
     // to everything above and are discovered by their own filesystem-based
     // scan instead.
     for (route, page) in crate::virtual_members::laravel::folio::enumerate_folio_routes(backend) {
-        collector.sources.push(page.canonicalize().unwrap_or(page));
+        collector
+            .sources
+            .push(dunce::canonicalize(&page).unwrap_or(page));
         collector.routes.push(route);
     }
 
@@ -720,7 +744,7 @@ fn walk_workspace_route_file(
     };
     let path = crate::util::url_to_path(&uri);
     if let Some(ref p) = path {
-        let canonical = p.canonicalize().unwrap_or_else(|_| p.clone());
+        let canonical = dunce::canonicalize(p).unwrap_or_else(|_| p.clone());
         scanned.insert(canonical.clone());
         collector.sources.push(canonical);
     }
@@ -757,7 +781,7 @@ pub(super) fn walk_route_file(
     let open = RefCell::new(HashSet::new());
     if let Some(path) = file_path {
         open.borrow_mut()
-            .insert(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+            .insert(dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
     }
     let uri = Arc::new(uri.clone());
     let lines = LineIndex::new(content);
@@ -973,6 +997,11 @@ fn walk_expr(
                     record_action(expr, name, content, group, paths, scope, sink);
                 }
                 walk_expr(mc.object, content, group, paths, scope, sink);
+            } else if method == b"withrouting" {
+                for body in with_routing_callbacks(&mc.argument_list) {
+                    walk_group_body(body, content, group, paths, scope, sink);
+                }
+                walk_expr(mc.object, content, group, paths, scope, sink);
             } else if !walk_macro(ident.value, Some(mc.object), content, group, paths, sink) {
                 walk_expr(mc.object, content, group, paths, scope, sink);
             }
@@ -1042,6 +1071,29 @@ fn walk_expr(
         }
         _ => {}
     }
+}
+
+/// The closures an `ApplicationBuilder::withRouting()` call registers routes
+/// from: `using:`, which replaces the default route files, and `then:`, which
+/// runs after them.  Both run on the top-level router, so the routes they
+/// register (and the files they group in) carry no prefix but their own.
+fn with_routing_callbacks<'e, 'arena>(
+    args: &'e ArgumentList<'arena>,
+) -> impl Iterator<Item = &'e Expression<'arena>> {
+    // Positions in `withRouting(?Closure $using, …, ?callable $then)`.
+    const USING: usize = 0;
+    const THEN: usize = 8;
+    args.arguments
+        .iter()
+        .enumerate()
+        .filter_map(|(index, arg)| {
+            let is_callback = match arg {
+                Argument::Positional(_) => index == USING || index == THEN,
+                Argument::Named(named) => matches!(named.name.value, b"using" | b"then"),
+            };
+            is_callback.then(|| arg.value())
+        })
+        .filter(|value| matches!(value, Expression::Closure(_) | Expression::ArrowFunction(_)))
 }
 
 /// Record the controller method the registration call `registration`
@@ -1175,11 +1227,8 @@ fn walk_macro(
         this_is_router: true,
         controller: group.controller,
     };
-    sink.sources.push(
-        open.path
-            .canonicalize()
-            .unwrap_or_else(|_| open.path.clone()),
-    );
+    sink.sources
+        .push(dunce::canonicalize(&open.path).unwrap_or_else(|_| open.path.clone()));
     let lines = LineIndex::new(&open.content);
     in_parsed_route_file(&open.content, b"macro.php", |program, names| {
         let sub_paths = ScanPaths {

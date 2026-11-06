@@ -144,6 +144,39 @@ fn method_lookup_ignores_case() {
     );
 }
 
+/// A property typed from `new Logger()` in a lazily loaded file names the
+/// imported class, not the import qualified a second time with the file's
+/// namespace.
+#[test]
+fn lazily_loaded_instantiation_types_resolve_imports_once() {
+    let backend = Backend::new_test();
+    let classes = backend
+        .parse_and_cache_content(
+            "<?php namespace App; use Lib\\Logger;
+             class Service {
+                 private $logger;
+                 public function __construct(private $fallback = new Logger()) {
+                     $this->logger = new Logger();
+                 }
+             }",
+            "file:///service.php",
+        )
+        .expect("Service should parse");
+    let service = classes.iter().find(|c| c.name == "Service").unwrap();
+    for name in ["logger", "fallback"] {
+        let property = service.properties.iter().find(|p| p.name == name).unwrap();
+        assert_eq!(
+            property
+                .type_hint
+                .as_ref()
+                .map(ToString::to_string)
+                .as_deref(),
+            Some("Lib\\Logger"),
+            "{name}"
+        );
+    }
+}
+
 /// Re-parsing a lazily-loaded file through `parse_and_cache_content`
 /// (the vendor / stub / re-open-after-close path) must evict index
 /// entries for classes the file no longer defines.  Previously this

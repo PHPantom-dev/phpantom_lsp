@@ -31,7 +31,7 @@ fn require_once_string_literal() {
     fs::write(&target_file, "<?php // bootstrap").unwrap();
 
     let main_content = format!("<?php\nrequire_once '{}';\n", target_file.to_string_lossy());
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -57,7 +57,7 @@ fn include_string_literal() {
     fs::write(&target_file, "<?php // config").unwrap();
 
     let main_content = format!("<?php\ninclude '{}';\n", target_file.to_string_lossy());
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -77,7 +77,7 @@ fn require_string_literal() {
     fs::write(&target_file, "<?php // helpers").unwrap();
 
     let main_content = format!("<?php\nrequire '{}';\n", target_file.to_string_lossy());
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -97,7 +97,7 @@ fn include_once_string_literal() {
     fs::write(&target_file, "<?php // utils").unwrap();
 
     let main_content = format!("<?php\ninclude_once '{}';\n", target_file.to_string_lossy());
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -117,7 +117,7 @@ fn require_once_dir_concat() {
     fs::write(&target_file, "<?php // bootstrap").unwrap();
 
     let main_content = "<?php\nrequire_once __DIR__ . '/bootstrap.php';\n";
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, main_content);
@@ -146,7 +146,7 @@ fn require_once_dirname_dir() {
     fs::write(&target_file, "<?php // autoload").unwrap();
 
     let main_content = "<?php\nrequire_once dirname(__DIR__) . '/vendor/autoload.php';\n";
-    let main_uri = format!("file://{}", sub_dir.join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&sub_dir.join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, main_content);
@@ -175,7 +175,7 @@ fn no_link_for_nonexistent_file() {
         "<?php\nrequire_once '{}';\n",
         dir.path().join("nonexistent.php").to_string_lossy()
     );
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -195,7 +195,7 @@ fn require_relative_path() {
 
     // A relative path should resolve relative to the file's directory.
     let main_content = "<?php\nrequire_once 'helpers.php';\n";
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, main_content);
@@ -221,7 +221,7 @@ fn multiple_includes_in_one_file() {
         b = dir.path().join("b.php").to_string_lossy(),
         c = dir.path().join("c.php").to_string_lossy(),
     );
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -244,7 +244,7 @@ fn include_inside_function_body() {
         "<?php\nfunction boot() {{\n    require_once '{}';\n}}\n",
         target.to_string_lossy()
     );
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -267,7 +267,7 @@ fn include_inside_method_body() {
         "<?php\nclass App {{\n    public function boot(): void {{\n        require_once '{}';\n    }}\n}}\n",
         target.to_string_lossy()
     );
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -290,7 +290,7 @@ fn include_inside_if_statement() {
         "<?php\nif (true) {{\n    require_once '{}';\n}}\n",
         target.to_string_lossy()
     );
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -313,7 +313,7 @@ fn include_inside_namespace() {
         "<?php\nnamespace App;\n\nrequire_once '{}';\n",
         target.to_string_lossy()
     );
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -335,7 +335,7 @@ fn include_link_range_spans_value_expression() {
     fs::write(&target, "<?php").unwrap();
 
     let main_content = format!("<?php\nrequire_once '{}';\n", target.to_string_lossy());
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -394,7 +394,7 @@ fn dirname_dir_with_levels() {
 
     // dirname(__DIR__, 2) from a/b/ should go up 2 levels to dir/
     let main_content = "<?php\nrequire_once dirname(__DIR__, 2) . '/vendor/autoload.php';\n";
-    let main_uri = format!("file://{}", sub.join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&sub.join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, main_content);
@@ -421,7 +421,7 @@ fn dirname_file_concat() {
 
     // dirname(__FILE__) . '/helpers.php' should resolve to file_dir/helpers.php
     let main_content = "<?php\nrequire_once dirname(__FILE__) . '/helpers.php';\n";
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, main_content);
@@ -451,7 +451,7 @@ fn nested_dirname_calls() {
 
     // dirname(dirname(__DIR__)) from src/app/ goes up 2 levels
     let main_content = "<?php\nrequire_once dirname(dirname(__DIR__)) . '/vendor/autoload.php';\n";
-    let main_uri = format!("file://{}", sub.join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&sub.join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, main_content);
@@ -480,7 +480,7 @@ fn include_in_try_block() {
         "<?php\ntry {{\n    require_once '{}';\n}} catch (\\Exception $e) {{}}\n",
         target.to_string_lossy()
     );
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -503,7 +503,7 @@ fn include_in_switch_case() {
         "<?php\nswitch ($x) {{\n    case 1:\n        require_once '{}';\n        break;\n}}\n",
         target.to_string_lossy()
     );
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -526,7 +526,7 @@ fn include_in_foreach() {
         "<?php\nforeach ($items as $item) {{\n    require_once '{}';\n}}\n",
         target.to_string_lossy()
     );
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);
@@ -546,7 +546,7 @@ fn double_quoted_include_path() {
     fs::write(&target, "<?php").unwrap();
 
     let main_content = format!("<?php\nrequire_once \"{}\";\n", target.to_string_lossy());
-    let main_uri = format!("file://{}", dir.path().join("main.php").to_string_lossy());
+    let main_uri = crate::common::file_uri(&dir.path().join("main.php"));
 
     let backend = create_test_backend();
     let links = get_document_links(&backend, &main_uri, &main_content);

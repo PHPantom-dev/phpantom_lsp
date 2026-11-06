@@ -1,0 +1,29 @@
+// test: a template in the generic value type of an array parameter binds from each element's type argument
+// feature: hover
+// expect: array<string, int|string>
+---
+<?php
+
+/** @template T */
+interface TypeInterface {
+    /** @return T */
+    public function coerce(mixed $value): mixed;
+}
+
+/** @return TypeInterface<int> */
+function int(): TypeInterface { throw new Exception(); }
+/** @return TypeInterface<string> */
+function string(): TypeInterface { throw new Exception(); }
+
+/**
+ * @template Tk of array-key
+ * @template Tv
+ * @param array<Tk, TypeInterface<Tv>> $elements
+ * @return TypeInterface<array<Tk, Tv>>
+ */
+function shape(array $elements): TypeInterface { throw new Exception(); }
+
+function test(mixed $data): void {
+    $v = shape(['x' => int(), 'label' => string()])->coerce($data);
+    $<>v;
+}

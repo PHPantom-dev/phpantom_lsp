@@ -23,6 +23,11 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_twig_callable_attributes(class, ctx);
     emit_twig_global_declarations(class, ctx);
     emit_yii_route_argument_spans(class, ctx);
+    emit_drupal_entity_type_spans(class, ctx);
+    emit_drupal_route_attribute_spans(class, ctx);
+    emit_drupal_hook_attribute_spans(class, ctx);
+    emit_drupal_computed_hook_sites(&class.members, class.name.span.start.offset, ctx);
+    emit_drupal_route_builder_spans(&class.members, class.name.span.start.offset, ctx);
 
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {
@@ -196,6 +201,8 @@ pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut Extract
     });
 
     extract_from_attribute_lists(&trait_def.attribute_lists, ctx, 0);
+    emit_drupal_route_builder_spans(&trait_def.members, trait_def.name.span.start.offset, ctx);
+    emit_drupal_computed_hook_sites(&trait_def.members, trait_def.name.span.start.offset, ctx);
 
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, trait_def)
@@ -295,6 +302,7 @@ pub(super) fn extract_from_attribute_lists<'a>(
             // inside `#[Attr(...)]` just like `new Attr(...)`.
             if let Some(ref arg_list) = attr.argument_list {
                 extract_from_partial_arguments(&arg_list.arguments, ctx, scope_start);
+                emit_attribute_named_arg_spans(&attr.name, arg_list, ctx);
                 let class_name = raw.trim_start_matches('\\');
                 if !class_name.is_empty() {
                     emit_partial_call_site(
@@ -404,6 +412,54 @@ pub(super) fn extract_from_attribute_lists<'a>(
                 );
             }
         }
+    }
+}
+
+/// Emit a span for each named argument's label in an attribute,
+/// `#[Foo(bar: 1)]`, naming the property `bar` of the attribute class `Foo`.
+///
+/// Only a promoted constructor parameter is a property, which takes the
+/// class to tell, so the span is marked
+/// [`AttributeNamedArg`](DocblockMemberRef::AttributeNamedArg) for its
+/// consumers to check.  A `new Foo(bar: 1)` gets no such span: an
+/// attribute's arguments exist to set its properties, while a call's
+/// common parameter names (`name`, `id`) would mostly name properties the
+/// call has nothing to do with.
+fn emit_attribute_named_arg_spans<'a>(
+    attribute_name: &Identifier<'a>,
+    arg_list: &mago_syntax::cst::PartialArgumentList<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+) {
+    let name_span = attribute_name.span();
+    let subject = bytes_to_str(attribute_name.value());
+    for arg in arg_list.arguments.iter() {
+        let mago_syntax::cst::PartialArgument::Named(named) = arg else {
+            continue;
+        };
+        let label = bytes_to_str(named.name.value);
+        if label.is_empty() {
+            continue;
+        }
+        ctx.spans.push(SymbolSpan {
+            start: named.name.span.start.offset,
+            end: named.name.span.end.offset,
+            kind: SymbolKind::MemberAccess {
+                subject_text: SubjectText::new(
+                    subject.to_string(),
+                    name_span.start.offset,
+                    name_span.end.offset,
+                    ctx.content,
+                ),
+                member_name: crate::atom::atom(label),
+                // The subject is a class name, which is what a static
+                // access's subject is.
+                is_static: true,
+                is_method_call: false,
+                docblock_ref: DocblockMemberRef::AttributeNamedArg,
+                is_array_callable: false,
+                is_nullsafe: false,
+            },
+        });
     }
 }
 
@@ -918,6 +974,8 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
             is_docblock_reference: false,
         },
     });
+    emit_drupal_hook_doc_span(func, ctx);
+    emit_drupal_procedural_hook_span(func, ctx);
 
     // Docblock.  We extract type spans and template params now, but
     // defer `@param $var` variable spans until after we know

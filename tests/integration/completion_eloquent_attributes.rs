@@ -106,14 +106,22 @@ class Post extends \Illuminate\Database\Eloquent\Model {
 "#;
 
 fn workspace() -> (Backend, tempfile::TempDir, Uri) {
+    workspace_with_models(ACCOUNT, USER)
+}
+
+fn workspace_with_models(account: &str, user: &str) -> (Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(
         COMPOSER,
         &[
             ("framework/Model.php", MODEL),
             ("framework/Builder.php", BUILDER),
             ("framework/Relations/HasMany.php", HAS_MANY),
-            ("app/Models/Account.php", ACCOUNT),
-            ("app/Models/User.php", USER),
+            (
+                "framework/Relations/Pivot.php",
+                "<?php namespace Illuminate\\Database\\Eloquent\\Relations; class Pivot extends \\Illuminate\\Database\\Eloquent\\Model { protected $guarded = []; }",
+            ),
+            ("app/Models/Account.php", account),
+            ("app/Models/User.php", user),
             ("app/Models/Post.php", POST),
         ],
     );
@@ -416,6 +424,261 @@ async fn scalar_values_and_where_column_operators_do_not_offer_columns() {
         assert!(
             !labels.iter().any(|label| label == "name"),
             "{statement}: {labels:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn model_column_attributes_supply_columns_and_fillable_ordering() {
+    let user = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes as Columns;
+#[Columns\Fillable(['nickname', 'email'])]
+#[Columns\Guarded('secret')]
+#[Columns\Hidden(array('token'))]
+#[Columns\Visible([0 => 'public_name'])]
+#[Columns\Appends(['display_name'])]
+class User extends Account {
+    protected $fillable = ['local'];
+    protected $casts = ['nickname' => 'string'];
+}
+"#;
+    let (backend, _dir, uri) = workspace_with_models(ACCOUNT, user);
+    for statement in [
+        "User::create(['§']);",
+        "$user->fill(['§']);",
+        "User::where('§', 1);",
+    ] {
+        let items = complete_statement(&backend, &uri, statement).await;
+        for name in [
+            "nickname",
+            "email",
+            "secret",
+            "token",
+            "public_name",
+            "display_name",
+            "local",
+        ] {
+            assert!(
+                items.iter().any(|item| item.label == name),
+                "missing {name}: {items:?}"
+            );
+        }
+        assert!(!items.iter().any(|item| item.label == "name"));
+        if !statement.contains("where") {
+            for name in ["nickname", "email", "local"] {
+                assert_eq!(
+                    items
+                        .iter()
+                        .find(|item| item.label == name)
+                        .unwrap()
+                        .sort_text
+                        .as_deref(),
+                    Some(format!("0_{name}").as_str())
+                );
+            }
+        }
+    }
+    let items = complete_statement(&backend, &uri, "$user->§").await;
+    assert!(items.iter().any(|item| {
+        item.label == "nickname"
+            && item
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("string"))
+    }));
+}
+
+#[tokio::test]
+async fn model_column_attributes_and_properties_inherit_independently() {
+    let account = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\{Fillable, Hidden, Visible};
+#[Fillable(['parent_attribute'])]
+#[Hidden(['parent_secret'])]
+#[Visible(['parent_visible'])]
+class Account extends \Illuminate\Database\Eloquent\Model {
+    protected $fillable = ['parent_property'];
+    protected $hidden = ['property_secret'];
+}
+"#;
+    let user = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\{Fillable, Visible};
+#[Fillable(['child_attribute'])]
+#[Visible([])]
+class User extends Account { protected $hidden = []; }
+"#;
+    let (backend, _dir, uri) = workspace_with_models(account, user);
+    let items = complete_statement(&backend, &uri, "User::create(['§']);").await;
+    for name in ["parent_property", "child_attribute", "parent_secret"] {
+        assert!(
+            items.iter().any(|item| item.label == name),
+            "missing {name}: {items:?}"
+        );
+    }
+    for name in ["parent_attribute", "parent_visible", "property_secret"] {
+        assert!(
+            !items.iter().any(|item| item.label == name),
+            "unexpected {name}: {items:?}"
+        );
+    }
+    for name in ["parent_property", "child_attribute"] {
+        assert_eq!(
+            items
+                .iter()
+                .find(|item| item.label == name)
+                .unwrap()
+                .sort_text
+                .as_deref(),
+            Some(format!("0_{name}").as_str())
+        );
+    }
+}
+
+#[tokio::test]
+async fn model_column_attributes_respect_guarded_property_and_unguarded_precedence() {
+    for (property, attributes, expect_attribute) in [
+        ("", "#[Guarded(['attribute_secret'])]", true),
+        (
+            "protected $guarded = ['*'];",
+            "#[Guarded(['attribute_secret'])]",
+            true,
+        ),
+        (
+            "protected $guarded = [];",
+            "#[Guarded(['attribute_secret'])]",
+            false,
+        ),
+        (
+            "protected $guarded = ['property_secret'];",
+            "#[Guarded(['attribute_secret'])]",
+            false,
+        ),
+        ("", "#[Guarded(['attribute_secret']), Unguarded]", false),
+        (
+            "protected $guarded = ['property_secret'];",
+            "#[Guarded(['attribute_secret']), Unguarded]",
+            false,
+        ),
+    ] {
+        let account = format!(
+            "<?php namespace App\\Models; class Account extends \\Illuminate\\Database\\Eloquent\\Model {{ {property} }}"
+        );
+        let user = format!(
+            "<?php namespace App\\Models; use Illuminate\\Database\\Eloquent\\Attributes\\{{Guarded, Unguarded}}; {attributes} class User extends Account {{}}"
+        );
+        let (backend, _dir, uri) = workspace_with_models(&account, &user);
+        let items = complete_statement(&backend, &uri, "User::where('§', 1);").await;
+        assert_eq!(
+            items.iter().any(|item| item.label == "attribute_secret"),
+            expect_attribute,
+            "{property} {attributes}: {items:?}"
+        );
+        assert_eq!(
+            items.iter().any(|item| item.label == "property_secret"),
+            property.contains("property_secret")
+        );
+        assert!(!items.iter().any(|item| item.label == "*"));
+    }
+}
+
+#[tokio::test]
+async fn model_column_attributes_from_direct_traits_follow_class_precedence() {
+    let account = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\{Fillable, Hidden};
+#[Fillable(['ancestor'])]
+class Account extends \Illuminate\Database\Eloquent\Model {}
+#[Fillable(['trait_fillable']), Hidden(['trait_hidden'])]
+trait Columns {}
+#[Hidden(['nested_hidden'])]
+trait NestedColumns {}
+trait Wrapper { use NestedColumns; }
+"#;
+    let user = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
+#[Hidden(['own_hidden'])]
+class User extends Account { use Columns, Wrapper; }
+"#;
+    let (backend, _dir, uri) = workspace_with_models(account, user);
+    let items = complete_statement(&backend, &uri, "User::create(['§']);").await;
+    for name in ["trait_fillable", "own_hidden"] {
+        assert!(items.iter().any(|item| item.label == name), "{items:?}");
+    }
+    for name in ["ancestor", "trait_hidden", "nested_hidden"] {
+        assert!(!items.iter().any(|item| item.label == name), "{items:?}");
+    }
+}
+
+#[tokio::test]
+async fn model_column_attributes_update_after_provider_file_edits() {
+    let source = "<?php namespace App\\Models; #[\\Illuminate\\Database\\Eloquent\\Attributes\\Fillable(['before'])] class User extends Account {}";
+    let (backend, dir, uri) = workspace_with_models(ACCOUNT, source);
+    let items = complete_statement(&backend, &uri, "User::create(['§']);").await;
+    assert!(items.iter().any(|item| item.label == "before"));
+    let model_uri = Uri::from_file_path(dir.path().join("app/Models/User.php")).unwrap();
+    backend.update_ast(model_uri.as_str(), &source.replace("before", "after"));
+    let items = complete_statement(&backend, &uri, "User::create(['§']);").await;
+    assert!(items.iter().any(|item| item.label == "after"));
+    assert!(!items.iter().any(|item| item.label == "before"));
+}
+
+#[tokio::test]
+async fn model_column_attributes_index_imports_and_namespaces_before_extraction() {
+    for source in [
+        r#"<?php
+use Illuminate\Database\Eloquent\Attributes\Fillable as Fields;
+#[Fields(['nickname'])]
+class User extends \App\Models\Account {}
+(new User())->§
+"#,
+        r#"<?php
+namespace App;
+use Illuminate\Database\Eloquent\Attributes as Columns;
+#[Columns\Fillable(['nickname'])]
+class User extends \App\Models\Account {}
+(new User())->§
+"#,
+        r#"<?php
+namespace Other { use Other\Fillable as Fields; #[Fields(['wrong'])] class Other {} }
+namespace App {
+use Illuminate\Database\Eloquent\Attributes\Fillable as Fields;
+#[Fields(['nickname'])]
+class User extends \App\Models\Account {}
+(new User())->§
+}
+"#,
+    ] {
+        let (backend, _dir, uri) = workspace();
+        let (source, position) = split_cursor(source);
+        let items = complete_at(&backend, &uri, &source, position.line, position.character).await;
+        assert!(
+            items.iter().any(|item| item.label == "nickname"),
+            "{source}: {items:?}"
+        );
+        assert!(!items.iter().any(|item| item.label == "wrong"));
+    }
+}
+
+#[tokio::test]
+async fn model_column_attributes_use_pivots_empty_guarded_default() {
+    for (property, expected) in [("", true), ("protected $guarded = ['*'];", false)] {
+        let user = format!(
+            r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\Guarded;
+#[Guarded(['secret'])]
+class User extends \Illuminate\Database\Eloquent\Relations\Pivot {{ {property} }}
+"#
+        );
+        let (backend, _dir, uri) = workspace_with_models(ACCOUNT, &user);
+        let items = complete_statement(&backend, &uri, "User::where('§', 1);").await;
+        assert_eq!(
+            items.iter().any(|item| item.label == "secret"),
+            expected,
+            "{property}: {items:?}"
         );
     }
 }

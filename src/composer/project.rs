@@ -225,6 +225,14 @@ pub(crate) fn is_yii_project(package: &ComposerPackage) -> bool {
         })
 }
 
+/// Whether the package is a Drupal project: one that requires Drupal core.
+pub(crate) fn is_drupal_project(package: &ComposerPackage) -> bool {
+    const DRUPAL_PACKAGES: &[&str] = &["drupal/core", "drupal/core-recommended", "drupal/core-dev"];
+    DRUPAL_PACKAGES
+        .iter()
+        .any(|pkg| package.require.contains_key(*pkg) || package.require_dev.contains_key(*pkg))
+}
+
 /// Detect whether the project is a Laravel *application* rather than a
 /// library that uses an Illuminate component.
 ///
@@ -378,13 +386,7 @@ pub(crate) fn detect_drupal_web_root(
     workspace_root: &Path,
     package: &ComposerPackage,
 ) -> Option<PathBuf> {
-    const DRUPAL_PACKAGES: &[&str] = &["drupal/core", "drupal/core-recommended", "drupal/core-dev"];
-
-    let is_drupal = DRUPAL_PACKAGES
-        .iter()
-        .any(|pkg| package.require.contains_key(*pkg) || package.require_dev.contains_key(*pkg));
-
-    if !is_drupal {
+    if !is_drupal_project(package) {
         return None;
     }
 

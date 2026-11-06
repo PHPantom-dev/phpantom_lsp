@@ -23,6 +23,10 @@
 //! - **Replace deprecated call** — when the cursor is on a deprecated
 //!   function or method call that has a `#[Deprecated(replacement: "...")]`
 //!   template, offer to rewrite the call to the suggested replacement.
+//! - **Make parameter explicitly nullable** — when a typed parameter has
+//!   a `null` default but its type does not admit `null` (deprecated in
+//!   PHP 8.4), offer to write the `null` into the type: `?Foo` or
+//!   `int|string|null`.
 //! - **PHPStan quickfixes** — a family of code actions that respond to
 //!   PHPStan diagnostics.  See the [`phpstan`] submodule for details.
 //! - **Change visibility** — when the cursor is on a method, property,
@@ -115,6 +119,7 @@ mod create_missing_view;
 mod create_test;
 pub(crate) mod cursor_context;
 mod data_provider_fixes;
+pub(crate) mod explicit_nullable;
 mod extract_constant;
 mod extract_function;
 mod extract_interface;
@@ -126,6 +131,7 @@ mod generate_constructor;
 mod generate_getter_setter;
 mod generate_property_hooks;
 pub(crate) mod implement_methods;
+pub(crate) mod import_alias;
 mod import_all_classes;
 mod import_class;
 mod inline_variable;

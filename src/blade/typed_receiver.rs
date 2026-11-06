@@ -120,12 +120,17 @@ impl Backend {
 
     /// Resolve the receiver of every candidate site and keep the spans of
     /// the ones that turn out to be renders.
-    fn confirm_typed_receiver_sites(
+    pub(crate) fn confirm_typed_receiver_sites(
         &self,
         uri: &str,
         content: &str,
         sites: &[TypedReceiverSite],
     ) -> Vec<SymbolSpan> {
+        // The spans are cached per file, and a caller working on a file of
+        // another Composer project (a `\Drupal::service()` lookup reading a
+        // Symfony app's configurator) would otherwise resolve this file's
+        // receivers against that project's classes.
+        let _project = self.enter_project_scope(uri);
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let _cache_guard =
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
@@ -453,7 +458,8 @@ struct ReceiverCallWalker<'a, 'sites> {
 impl<'sites> ReceiverCallWalker<'_, 'sites> {
     /// The candidates the argument at `index` holds: in the string itself,
     /// or in the entries of the array a `first(['a', 'b'])` or an
-    /// `args(['%app.sender%'])` builds.
+    /// `args(['%app.sender%'])` builds, their keys included, which name
+    /// the parameters of a Drupal `setRedirect('route', ['node' => 1])`.
     fn matching_sites(
         &self,
         expr: &Expression<'_>,
@@ -491,7 +497,10 @@ impl<'sites> ReceiverCallWalker<'_, 'sites> {
         for element in elements.iter() {
             match element {
                 ArrayElement::Value(value) => self.matching_sites(value.value, index, out),
-                ArrayElement::KeyValue(value) => self.matching_sites(value.value, index, out),
+                ArrayElement::KeyValue(value) => {
+                    self.matching_sites(value.key, index, out);
+                    self.matching_sites(value.value, index, out);
+                }
                 _ => {}
             }
         }

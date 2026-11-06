@@ -51,7 +51,7 @@ pub(crate) use context::{
 pub(crate) use subject_outcome::{
     SubjectOutcome, UnionBranch, UnionBranches, resolve_subject_outcome,
 };
-pub(crate) use variable_subjects::resolve_dynamic_member_name;
+pub(crate) use variable_subjects::resolve_dynamic_member_names;
 pub(in crate::type_engine) use written_names::WrittenNames;
 
 use std::sync::Arc;
@@ -221,10 +221,7 @@ fn resolve_target_classes_expr_inner(
     match expr {
         // ── Keywords that always mean "current class" ────────────
         SubjectExpr::This => resolve_this_subject(ctx),
-        SubjectExpr::SelfKw | SubjectExpr::StaticKw => resolve_self_static_class(ctx)
-            .map(ResolvedType::from_arc)
-            .into_iter()
-            .collect(),
+        SubjectExpr::SelfKw | SubjectExpr::StaticKw => resolve_self_static_types(ctx),
 
         // ── `parent::` — resolve to the current class's parent ──
         SubjectExpr::Parent => {
@@ -358,7 +355,7 @@ fn resolve_static_access_subject(
     // class names, so find_class_by_name / class_loader won't
     // find them.
     let owner_classes: Vec<Arc<ClassInfo>> = if is_self_or_static(class) {
-        resolve_self_static_class(ctx).into_iter().collect()
+        resolve_self_static_classes(ctx)
     } else if let Some(parent_name) = resolve_class_keyword(class, current_class) {
         // `parent`, whose name the parser already resolved.
         crate::class_lookup::find_or_load_resolved(&parent_name, all_classes, class_loader)
@@ -485,9 +482,21 @@ fn resolve_call_subject(
                 .any(|m| matches!(m.kind(), TypeKind::Intersection(_))),
             _ => false,
         };
+        // A closure signature resolves to the `Closure` class, which
+        // cannot say what calling it returns; the hint can.
+        let is_closure_signature = |t: &PhpType| match t.kind() {
+            TypeKind::Callable(c) => c.is_closure(),
+            _ => false,
+        };
+        let carries_closure_signature = match h.kind() {
+            TypeKind::Nullable(inner) => is_closure_signature(inner),
+            TypeKind::Union(members) => members.iter().any(is_closure_signature),
+            _ => is_closure_signature(&h),
+        };
         if is_intersection
             || classes.iter().any(|c| !c.template_params.is_empty())
             || hint_names_a_class
+            || carries_closure_signature
         {
             return ResolvedType::from_classes_with_hint(classes, h);
         }
@@ -520,9 +529,21 @@ fn resolve_property_chain_subject(
     // to has already been consulted by the spine walk in
     // `resolve_target_classes_expr`, which reads it before
     // resolving anything below the property.
+    let names = variable_subjects::resolve_dynamic_member_names(property, ctx);
+    if names.is_empty() {
+        return Vec::new();
+    }
     let base_arcs = resolved_to_arcs(
         receiver.unwrap_or_else(|| resolve_target_classes_expr(base, access_kind, ctx)),
     );
+    // Every property the name can pick, on every class the base can be.
+    let property_hints = || {
+        base_arcs.iter().flat_map(|cls| {
+            names.iter().filter_map(move |property| {
+                resolve_property_type_hint(cls, property, class_loader).map(|hint| (cls, hint))
+            })
+        })
+    };
     let mut arc_results: Vec<Arc<ClassInfo>> = Vec::new();
     // The generic members of the property's hint, e.g.
     // `Collection<int, Post>`.  The classes resolved from it carry
@@ -534,10 +555,7 @@ fn resolve_property_chain_subject(
     // alternatives `Foo|MockObject`, so each is tagged with the whole
     // intersection below the way a call's return type is.
     let mut intersection_hints: Vec<PhpType> = Vec::new();
-    for cls in &base_arcs {
-        let Some(hint) = resolve_property_type_hint(cls, property, class_loader) else {
-            continue;
-        };
+    for (cls, hint) in property_hints() {
         let resolved = super::type_resolution::type_hint_to_classes_typed(
             &hint,
             &cls.fqn(),
@@ -570,12 +588,9 @@ fn resolve_property_chain_subject(
     // static members against `T` instead of leaving
     // `arc_results` empty.
     if arc_results.is_empty() && access_kind == AccessKind::DoubleColon {
-        for cls in &base_arcs {
-            if let Some(raw_type) = resolve_property_type_hint(cls, property, class_loader) {
-                let classes =
-                    classes_named_by_type(&raw_type, &cls.fqn(), all_classes, class_loader);
-                ClassInfo::extend_unique_arc(&mut arc_results, classes);
-            }
+        for (cls, raw_type) in property_hints() {
+            let classes = classes_named_by_type(&raw_type, &cls.fqn(), all_classes, class_loader);
+            ClassInfo::extend_unique_arc(&mut arc_results, classes);
         }
     }
 
@@ -603,7 +618,7 @@ fn resolve_property_chain_subject(
 
 // ── Static owner class resolution ───────────────────────────────────
 
-/// Resolve the class that a bare `self`/`static` keyword refers to at
+/// Resolve the classes that a bare `self`/`static` keyword refers to at
 /// the cursor position.
 ///
 /// Normally this is the lexically enclosing class, but inside a
@@ -612,46 +627,63 @@ fn resolve_property_chain_subject(
 /// runtime binds the closure with the target class as its scope
 /// (`Closure::bind`), so `self::` and `static::` refer to the bound
 /// target rather than the class that lexically encloses the closure.
-fn resolve_self_static_class(ctx: &ResolutionCtx<'_>) -> Option<Arc<ClassInfo>> {
-    super::variable::closure_resolution::find_closure_this_override(ctx).or_else(|| {
-        let current = ctx.current_class?;
-        // The enclosing class is normally one of the file's own, already
-        // behind an `Arc`.
-        Some(
-            ctx.file
-                .all_classes
-                .iter()
-                .find(|cls| std::ptr::eq(cls.as_ref(), current))
-                .cloned()
-                .unwrap_or_else(|| Arc::new(current.clone())),
-        )
-    })
+/// A union binding names one class per alternative.
+fn resolve_self_static_types(ctx: &ResolutionCtx<'_>) -> Vec<ResolvedType> {
+    if let Some(bound) = super::variable::closure_resolution::find_closure_this_types(ctx)
+        && bound.iter().any(|rt| rt.class_info.is_some())
+    {
+        return bound;
+    }
+    let Some(current) = ctx.current_class else {
+        return Vec::new();
+    };
+    // The enclosing class is normally one of the file's own, already
+    // behind an `Arc`.
+    vec![ResolvedType::from_arc(
+        ctx.file
+            .all_classes
+            .iter()
+            .find(|cls| std::ptr::eq(cls.as_ref(), current))
+            .cloned()
+            .unwrap_or_else(|| Arc::new(current.clone())),
+    )]
+}
+
+fn resolve_self_static_classes(ctx: &ResolutionCtx<'_>) -> Vec<Arc<ClassInfo>> {
+    ResolvedType::into_arced_classes(resolve_self_static_types(ctx))
 }
 
 /// Resolve a static class reference (`self`, `static`, `parent`, or a
-/// class name) to its `ClassInfo`.
+/// class name) to the classes it names.
 ///
 /// Handles the `self`/`static`/`parent` keywords and falls back to
 /// `class_loader` then `resolve_target_classes` for named classes.
-pub(in crate::type_engine) fn resolve_static_owner_class(
+/// Only `self`/`static` inside a closure bound to a union or an
+/// intersection name more than one class.
+pub(in crate::type_engine) fn resolve_static_owner_classes(
     class: &str,
     rctx: &ResolutionCtx<'_>,
-) -> Option<Arc<ClassInfo>> {
+) -> Vec<Arc<ClassInfo>> {
     if is_self_or_static(class) {
-        resolve_self_static_class(rctx)
+        resolve_self_static_classes(rctx)
     } else if let Some(resolved_name) = resolve_class_keyword(class, rctx.current_class) {
         // parent — load via class_loader so we get the full parent ClassInfo
         (rctx.file.class_loader)(Fqn::new(&resolved_name))
+            .into_iter()
+            .collect()
     } else {
         let fqn = rctx.written_names().resolve_class(class);
-        (rctx.file.class_loader)(Fqn::new(&fqn)).or_else(|| {
-            resolved_to_arcs(resolve_target_classes(
-                class,
-                crate::AccessKind::DoubleColon,
-                rctx,
-            ))
+        (rctx.file.class_loader)(Fqn::new(&fqn))
+            .or_else(|| {
+                resolved_to_arcs(resolve_target_classes(
+                    class,
+                    crate::AccessKind::DoubleColon,
+                    rctx,
+                ))
+                .into_iter()
+                .next()
+            })
             .into_iter()
-            .next()
-        })
+            .collect()
     }
 }

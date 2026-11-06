@@ -113,19 +113,32 @@ pub(crate) fn extract_laravel_trait_metadata<'a>(
     trait_def: &class_like::Trait<'a>,
     methods: &[MethodInfo],
     content: &str,
+    doc_ctx: Option<&DocblockCtx<'_>>,
 ) -> Option<Box<LaravelMetadata>> {
+    let mut column_names = Vec::new();
+    let mut column_sources = Vec::new();
+    let declared = extract_column_attributes(
+        &trait_def.attribute_lists,
+        doc_ctx,
+        &mut column_names,
+        &mut column_sources,
+    );
     let morph_type_columns = extract_morph_type_columns(trait_def.members.iter(), content);
     let config_related_models = extract_config_related_models(trait_def.members.iter(), content);
     let table_name = extract_string_property(trait_def.members.iter(), content, "table");
     let has_get_table_method = methods.iter().any(|method| {
         !method.is_abstract && !method.is_virtual && method.name.eq_ignore_ascii_case("getTable")
     });
-    (!morph_type_columns.is_empty()
+    (declared != 0
+        || !morph_type_columns.is_empty()
         || !config_related_models.is_empty()
         || table_name.is_some()
         || has_get_table_method)
         .then(|| {
             Box::new(LaravelMetadata {
+                declared,
+                column_names,
+                column_sources,
                 morph_type_columns,
                 config_related_models,
                 table_name,
@@ -193,6 +206,15 @@ pub(crate) fn extract_laravel_metadata<'a>(
 
     let (property_casts, method_casts) = extract_cast_sources(class.members.iter(), content);
     let mut declared = 0;
+    if class.name.value.eq_ignore_ascii_case(b"Pivot")
+        && doc_ctx.is_some_and(|ctx| {
+            ctx.namespace.as_deref().is_some_and(|namespace| {
+                namespace.eq_ignore_ascii_case("Illuminate\\Database\\Eloquent\\Relations")
+            })
+        })
+    {
+        declared |= model_declaration::PIVOT;
+    }
     if property_casts.is_some() {
         declared |= model_declaration::CASTS_PROPERTY;
     }
@@ -224,9 +246,15 @@ pub(crate) fn extract_laravel_metadata<'a>(
         declared |= model_declaration::DATES;
     }
 
-    let (column_names, column_sources, column_lists) =
+    let (mut column_names, mut column_sources, column_lists) =
         extract_column_names(class.members.iter(), content);
     declared |= column_lists;
+    declared |= extract_column_attributes(
+        &class.attribute_lists,
+        doc_ctx,
+        &mut column_names,
+        &mut column_sources,
+    );
 
     let connection_name =
         extract_laravel_connection_attribute(&class.attribute_lists, content, doc_ctx)
@@ -435,6 +463,56 @@ pub(crate) fn inherit_model_metadata(child: &mut LaravelMetadata, parent: &Larav
             .clone_from(&parent.attribute_defaults);
     }
 
+    inherit_column_lists(child, parent, child_flags, parent_flags, inherited);
+
+    child.declared = child_flags | inherited;
+
+    fn inherit<T: std::clone::Clone>(own: &mut Option<T>, parent: &Option<T>) {
+        if own.is_none() {
+            own.clone_from(parent);
+        }
+    }
+    inherit(&mut child.primary_key, &parent.primary_key);
+    inherit(&mut child.key_type, &parent.key_type);
+    inherit(&mut child.timestamps, &parent.timestamps);
+    inherit(&mut child.created_at_name, &parent.created_at_name);
+    inherit(&mut child.updated_at_name, &parent.updated_at_name);
+    inherit(&mut child.deleted_at_name, &parent.deleted_at_name);
+    child.soft_deletes |= parent.soft_deletes;
+    inherit(&mut child.connection_name, &parent.connection_name);
+    inherit(&mut child.table_name, &parent.table_name);
+    child.has_get_connection_name_method |= parent.has_get_connection_name_method;
+    child.has_get_table_method |= parent.has_get_table_method;
+    child.has_get_key_name_method |= parent.has_get_key_name_method;
+}
+
+/// Inherit attributes from a directly used trait, after the class's own
+/// attributes and before those on its parent class.
+pub(crate) fn inherit_model_column_attributes(
+    child: &mut LaravelMetadata,
+    parent: &LaravelMetadata,
+) {
+    let inherited = parent.declared
+        & !child.declared
+        & (model_declaration::COLUMN_ATTRIBUTES | model_declaration::UNGUARDED_ATTRIBUTE);
+    inherit_column_lists(
+        child,
+        parent,
+        declared_flags(child),
+        parent.declared,
+        inherited,
+    );
+    child.declared |= inherited;
+}
+
+fn inherit_column_lists(
+    child: &mut LaravelMetadata,
+    parent: &LaravelMetadata,
+    child_flags: u16,
+    parent_flags: u16,
+    inherited: u16,
+) {
+    use model_declaration::COLUMN_LISTS;
     let inherited_lists = inherited & COLUMN_LISTS;
     if inherited_lists != 0 {
         child
@@ -458,24 +536,4 @@ pub(crate) fn inherit_model_metadata(child: &mut LaravelMetadata, parent: &Larav
             }
         }
     }
-
-    child.declared = child_flags | inherited;
-
-    fn inherit<T: std::clone::Clone>(own: &mut Option<T>, parent: &Option<T>) {
-        if own.is_none() {
-            own.clone_from(parent);
-        }
-    }
-    inherit(&mut child.primary_key, &parent.primary_key);
-    inherit(&mut child.key_type, &parent.key_type);
-    inherit(&mut child.timestamps, &parent.timestamps);
-    inherit(&mut child.created_at_name, &parent.created_at_name);
-    inherit(&mut child.updated_at_name, &parent.updated_at_name);
-    inherit(&mut child.deleted_at_name, &parent.deleted_at_name);
-    child.soft_deletes |= parent.soft_deletes;
-    inherit(&mut child.connection_name, &parent.connection_name);
-    inherit(&mut child.table_name, &parent.table_name);
-    child.has_get_connection_name_method |= parent.has_get_connection_name_method;
-    child.has_get_table_method |= parent.has_get_table_method;
-    child.has_get_key_name_method |= parent.has_get_key_name_method;
 }

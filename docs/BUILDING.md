@@ -138,14 +138,16 @@ first. Each
 
 All seventeen must pass with zero warnings and zero failures, and the
 Symfony and Yii `analyze` runs must report `[OK] No errors`. The Laravel
-`analyze` run is the exception: `app/Demo.php` carries three
+`analyze` run is the exception: `app/Demo.php` carries four
 deliberate mistakes, each demonstrating a diagnostic.
 `Artisan::call('does:not-exist')`
-demonstrates `invalid_laravel_command`, and one `view('welcome', …)`
+demonstrates `invalid_laravel_command`,
+`->withoutMiddleware('bakery.closed')` demonstrates
+`invalid_laravel_middleware`, and one `view('welcome', …)`
 call both leaves out a variable the template declares and passes a
 misspelled key, demonstrating `missing_view_variable` and
 `unused_view_variable`. So it must report exactly
-`[ERROR] Found 3 errors`, on those two lines. Any other count, or an
+`[ERROR] Found 4 errors`, on those three lines. Any other count, or an
 error on a different line, is a regression.
 
 ### Manual LSP Testing

@@ -69,7 +69,7 @@ async fn phar_classes_are_indexed_under_their_phar_uri() {
     let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
     backend.initialized(InitializedParams {}).await;
 
-    let phar = tool.join("tool.phar").canonicalize().unwrap();
+    let phar = dunce::canonicalize(tool.join("tool.phar")).unwrap();
     let expected = format!("phar://{}/src/Rule.php", phar.display());
     let indexed = backend
         .fqn_uri_index()

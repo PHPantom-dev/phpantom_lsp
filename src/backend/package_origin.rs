@@ -66,9 +66,8 @@ impl Backend {
             if path.starts_with(root) {
                 let ws = self.workspace.workspace_root.read();
                 if let Some(ref workspace) = *ws {
-                    let canonical_ws = workspace
-                        .canonicalize()
-                        .unwrap_or_else(|_| workspace.clone());
+                    let canonical_ws =
+                        dunce::canonicalize(workspace).unwrap_or_else(|_| workspace.clone());
                     if root.starts_with(&canonical_ws) {
                         return (ClassCompletionOrigin::Project, None);
                     }

@@ -41,16 +41,22 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::GateAbility => CompletionItemKind::Method,
         StringKeyKind::Env => CompletionItemKind::Constant,
         StringKeyKind::ServiceId => CompletionItemKind::Reference,
+        StringKeyKind::DrupalEntityType => CompletionItemKind::Class,
         StringKeyKind::ContainerParameter => CompletionItemKind::Property,
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
-        StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook => CompletionItemKind::Event,
+        StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook | StringKeyKind::DrupalHook => {
+            CompletionItemKind::Event
+        }
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
-        StringKeyKind::YiiRouteArgument => CompletionItemKind::Field,
+        StringKeyKind::YiiRouteArgument | StringKeyKind::DrupalRouteParameter => {
+            CompletionItemKind::Field
+        }
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => CompletionItemKind::Function,
         StringKeyKind::TwigVariable => CompletionItemKind::Variable,
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::YiiRoute
+        | StringKeyKind::DrupalRoute
         | StringKeyKind::Command
         | StringKeyKind::Section
         | StringKeyKind::Stack
@@ -181,20 +187,27 @@ impl Backend {
             | StringKeyKind::TwigTemplate
             | StringKeyKind::SymfonyEvent
             | StringKeyKind::MessengerBus
-            | StringKeyKind::YiiRoute => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::YiiRoute
+            | StringKeyKind::DrupalEntityType
+            | StringKeyKind::DrupalRoute => self.symfony_declared_names(*kind).into(),
             StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
                 self.twig_callable_names(*kind).into()
             }
+            // Only the documentation, not the invocations the type engine
+            // would have to confirm in every file that fires a hook.
+            StringKeyKind::DrupalHook => self.drupal_documented_hooks().into(),
             // A translation key is completed in the domain it is looked up
             // in, a configuration key under the key it is nested in, which
             // only the Symfony completion knows, and a route argument from
-            // the routes of the handler it is written in.  A hook name is
+            // the routes of the handler it is written in, and a Drupal route
+            // parameter from the route its call names.  A hook name is
             // completed with its patterns as snippets, which only the
             // WordPress completion builds.
             StringKeyKind::SymfonyTranslation
             | StringKeyKind::WordPressHook
             | StringKeyKind::SymfonyConfigKey
             | StringKeyKind::YiiRouteArgument
+            | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::TwigBlock

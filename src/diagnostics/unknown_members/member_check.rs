@@ -165,6 +165,7 @@ impl UnknownMemberPass<'_> {
                 access.is_method_call,
                 self.report_magic,
             ) || (!access.is_method_call && c.name == "stdClass")
+                || (!access.is_method_call && !access.is_static && c.allows_dynamic_properties)
         };
         let class_answers = |c: &Arc<ClassInfo>| {
             if answers(c) {
@@ -309,6 +310,12 @@ impl UnknownMemberPass<'_> {
         if base_classes.iter().any(|c| c.name == "stdClass") {
             return (MemberCheckResult::Ok, diagnostics);
         }
+        // `#[\AllowDynamicProperties]` lets an instance take any property.
+        let takes_dynamic_property =
+            |c: &Arc<ClassInfo>| !is_method_call && !is_static && c.allows_dynamic_properties;
+        if base_classes.iter().any(takes_dynamic_property) {
+            return (MemberCheckResult::Ok, diagnostics);
+        }
         // This shortcut may be looking at a class that has not been
         // merged yet, which is enough to confirm a member is reachable
         // but not enough to judge one that is not: a magic handler or
@@ -349,6 +356,9 @@ impl UnknownMemberPass<'_> {
 
         // ── Skip stdClass (universal object container) ──────────────
         if resolved_classes.iter().any(|c| c.name == "stdClass") {
+            return (MemberCheckResult::Ok, diagnostics);
+        }
+        if resolved_classes.iter().any(takes_dynamic_property) {
             return (MemberCheckResult::Ok, diagnostics);
         }
 

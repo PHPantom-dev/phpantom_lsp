@@ -20,7 +20,7 @@ use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::php_type::PhpType;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
+use crate::symbol_map::{DocblockMemberRef, SelfStaticParentKind, SymbolKind};
 use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::*;
@@ -97,12 +97,22 @@ impl Backend {
                     ),
                 );
 
-                if *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod {
-                    candidates = crate::mock_methods::mocked_classes(
-                        candidates,
-                        *is_static,
-                        &resolved_class_loader,
-                    );
+                match docblock_ref {
+                    DocblockMemberRef::MockedMethod => {
+                        candidates = crate::mock_methods::mocked_classes(
+                            candidates,
+                            *is_static,
+                            &resolved_class_loader,
+                        );
+                    }
+                    DocblockMemberRef::AttributeNamedArg => candidates.retain(|class| {
+                        crate::class_lookup::constructor_promotes(
+                            class,
+                            member_name,
+                            &resolved_class_loader,
+                        )
+                    }),
+                    _ => {}
                 }
 
                 // Resolve the member's return type / property type.
@@ -121,14 +131,17 @@ impl Backend {
                     .map(|cc| vec![PhpType::named(cc.fqn())])
                     .unwrap_or_default(),
                 SelfStaticParentKind::This => {
-                    if let Some(override_cls) =
-                        self.resolve_closure_this_override(uri, content, offset)
-                    {
-                        vec![PhpType::named(override_cls.fqn())]
-                    } else {
+                    let bound = self.resolve_closure_this_types(uri, content, offset);
+                    if bound.is_empty() {
                         current_class
                             .map(|cc| vec![PhpType::named(cc.fqn())])
                             .unwrap_or_default()
+                    } else {
+                        bound
+                            .iter()
+                            .filter_map(|rt| rt.class_info.as_ref())
+                            .map(|cls| PhpType::named(cls.fqn()))
+                            .collect()
                     }
                 }
                 SelfStaticParentKind::Parent => current_class

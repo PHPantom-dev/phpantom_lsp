@@ -196,11 +196,12 @@ pub(crate) fn dir_uri_prefix(dir: &Path) -> String {
 /// its directory is canonicalized instead: the file still has to match the
 /// path it was recorded under.
 pub(crate) fn canonical_path_for_comparison(path: &Path) -> std::path::PathBuf {
-    if let Ok(canonical) = path.canonicalize() {
+    if let Ok(canonical) = dunce::canonicalize(path) {
         return canonical;
     }
     match (
-        path.parent().and_then(|parent| parent.canonicalize().ok()),
+        path.parent()
+            .and_then(|parent| dunce::canonicalize(parent).ok()),
         path.file_name(),
     ) {
         (Some(parent), Some(name)) => parent.join(name),

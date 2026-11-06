@@ -60,9 +60,15 @@ impl Backend {
     pub(crate) async fn eager_populate_resolved_classes(&self) {
         let backend = self.clone_for_blocking();
         crate::server::run_blocking_cancel_safe("eager_populate_resolved_classes", move || {
+            // A dormant file's classes are resolved when something asks for
+            // them, the way a vendor file's are.
             let sorted_fqns = {
                 let uri_classes_index = backend.symbols.uri_classes_index.read();
-                crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)
+                let dormant = backend.dormant_files.read();
+                crate::toposort::toposort_from_uri_classes_index_except(
+                    &uri_classes_index,
+                    &dormant,
+                )
             };
             // `populate_from_sorted` fans the list out over its own
             // large-stack workers, so this needs no wrapper thread of

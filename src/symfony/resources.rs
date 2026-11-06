@@ -318,7 +318,7 @@ pub(super) fn yaml_mapping_key(line: &str, line_start: usize) -> Option<(&str, u
 }
 
 /// `line` without a trailing `# comment`, leaving a `#` inside quotes.
-pub(super) fn yaml_content_before_comment(line: &str) -> &str {
+pub(crate) fn yaml_content_before_comment(line: &str) -> &str {
     let mut quote = None;
     for (index, byte) in line.bytes().enumerate() {
         match (quote, byte) {

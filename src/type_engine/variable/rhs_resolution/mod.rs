@@ -72,6 +72,7 @@ mod assignment_value;
 mod branches;
 mod calls;
 mod constant_access;
+mod drupal_calls;
 mod function_calls;
 mod instantiation;
 mod laravel_calls;

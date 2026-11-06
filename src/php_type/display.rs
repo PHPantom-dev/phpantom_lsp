@@ -33,7 +33,11 @@ impl fmt::Display for PhpType {
                 for entry in entries.iter() {
                     write!(f, "{entry}, ")?;
                 }
-                if base == "list" {
+                // A tail that says nothing about the other entries is
+                // spelled the way it is written, as a bare `...`.
+                if unsealed.value.is_mixed() && (base == "list" || unsealed.key.is_array_key()) {
+                    write!(f, "...}}")
+                } else if base == "list" {
                     write!(f, "...<{}>}}", unsealed.value)
                 } else {
                     write!(f, "...<{}, {}>}}", unsealed.key, unsealed.value)

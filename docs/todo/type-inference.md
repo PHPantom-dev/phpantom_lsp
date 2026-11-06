@@ -729,3 +729,31 @@ maybe_serialize(0.0);   // want 0.0, get float
 Integer, string and boolean literals keep their value as their type;
 float literals become `float`. A template bound to one, or a condition
 over one, loses the value. 2 assertions of the WordPress stubs fixtures.
+
+---
+
+## T62. A sealed hierarchy is not narrowed by ruling out its other members
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @psalm-inheritors LeafNode|TreeNode */
+interface NodeInterface {}
+
+function at_index(NodeInterface $node): mixed {
+    if ($node instanceof LeafNode) {
+        return null;
+    }
+    $node->getChildren();   // Method 'getChildren' not found on class 'NodeInterface'
+}
+```
+
+`@psalm-inheritors` and `@phpstan-sealed` list every class that may extend
+or implement the type. Once a guard rules out all but one, the subject is
+that one (`TreeNode` here), and a `match` over them is exhaustive. The tags
+are recognised (`src/docblock/tag_kind.rs`) but nothing reads them, so
+the subject keeps the declared interface. Store the permitted list on
+`ClassInfo` and subtract from it in the `instanceof` narrowing, the way an
+enum's cases are subtracted.
+
+Found by `analyze` on azjezz/psl, whose tree nodes are sealed this way.

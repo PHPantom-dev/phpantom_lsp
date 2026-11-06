@@ -172,12 +172,16 @@ fn removed_in_target_version(node: &impl HasSpan, doc_ctx: Option<&DocblockCtx<'
 }
 
 /// The FQN of a class name written in code, read against the file's
-/// imports and namespace.  Without a [`DocblockCtx`] to read it against,
+/// imports and namespace. Keep the leading backslash so the later declaration
+/// qualification pass recognizes it as resolved. Without a [`DocblockCtx`],
 /// the name is taken as written.
 fn resolve_written_class(name: &str, doc_ctx: Option<&DocblockCtx<'_>>) -> String {
     match doc_ctx {
-        Some(ctx) => crate::names::resolve_to_fqn(name, &ctx.use_map, &ctx.namespace),
-        None => name.strip_prefix('\\').unwrap_or(name).to_string(),
+        Some(ctx) => format!(
+            "\\{}",
+            crate::names::resolve_to_fqn(name, &ctx.use_map, &ctx.namespace)
+        ),
+        None => name.to_string(),
     }
 }
 
@@ -201,6 +205,13 @@ pub(super) fn add_implicit_stringable(interfaces: &mut Vec<Atom>, methods: &[Met
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inferred_class_without_context_preserves_its_written_name() {
+        for name in ["Repository", "App\\Repository", "\\Repository"] {
+            assert_eq!(resolve_written_class(name, None), name);
+        }
+    }
 
     /// A class declared inside an `if` block (e.g. a version guard, like
     /// Doctrine's `ServiceEntityRepository`) must be indexed with its native

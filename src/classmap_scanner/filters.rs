@@ -92,13 +92,13 @@ pub fn workspace_walk_builder(
 /// root and each skipped tree once per walk keeps the per-directory check
 /// a plain comparison.
 fn respell_under_root(root: &Path, skip_dirs: Arc<Vec<PathBuf>>) -> Arc<Vec<PathBuf>> {
-    let Ok(real_root) = root.canonicalize() else {
+    let Ok(real_root) = dunce::canonicalize(root) else {
         return skip_dirs;
     };
     let respelled: Vec<PathBuf> = skip_dirs
         .iter()
         .filter_map(|dir| {
-            let real_dir = dir.canonicalize().ok()?;
+            let real_dir = dunce::canonicalize(dir).ok()?;
             let spelled = root.join(real_dir.strip_prefix(&real_root).ok()?);
             (!skip_dirs.contains(&spelled)).then_some(spelled)
         })
@@ -164,7 +164,7 @@ impl LinkClaims {
     pub fn new(roots: impl IntoIterator<Item = PathBuf>, followed: Option<&FollowedLinks>) -> Self {
         let claimed = roots
             .into_iter()
-            .filter_map(|root| std::fs::canonicalize(root).ok())
+            .filter_map(|root| dunce::canonicalize(root).ok())
             .collect();
         Self {
             claimed: Arc::new(parking_lot::Mutex::new(claimed)),
@@ -186,7 +186,7 @@ impl LinkClaims {
     pub(crate) fn cover(&self, paths: impl IntoIterator<Item = PathBuf>) {
         let covered = paths
             .into_iter()
-            .filter_map(|path| std::fs::canonicalize(path).ok());
+            .filter_map(|path| dunce::canonicalize(path).ok());
         self.claimed.lock().extend(covered);
     }
 
@@ -196,7 +196,7 @@ impl LinkClaims {
     /// A broken link, or one whose target is already covered by a root
     /// or by an earlier link, answers `false`.
     pub(crate) fn claim(&self, link: &Path) -> bool {
-        let Ok(target) = std::fs::canonicalize(link) else {
+        let Ok(target) = dunce::canonicalize(link) else {
             return false;
         };
         let mut claimed = self.claimed.lock();

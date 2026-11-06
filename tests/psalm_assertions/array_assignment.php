@@ -846,7 +846,9 @@ namespace PsalmTest_array_assignment_59 {
         $arr["hello"]["goodbye"] = 5;
     }
 
-    assertType('array', $arr);
+    // The written entry is kept beside whatever else the array holds, and
+    // the branch that skipped the write leaves it a plain `array`.
+    assertType('array|array{hello: array{goodbye: 5, ...}, ...}', $arr);
 }
 
 // Test: manipulateArrayTwice
@@ -857,8 +859,9 @@ namespace PsalmTest_array_assignment_60 {
     /** @psalm-suppress MixedArrayAssignment */
     $options['b']['c'] = 2;
 
-    // PHPantom is more precise than Psalm here: the nested write gives `$options['b']` a known shape.
-    assertType('array{c: 2}', $options['b']);
+    // A plain `array` may already hold a `b` entry, so what the write put
+    // there is not all it holds, but it is an array that holds `c` now.
+    assertType('array{c: 2, ...}', $options['b']);
 }
 
 // Test: binaryOperation

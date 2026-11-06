@@ -38,7 +38,7 @@ impl PhpType {
             TypeKind::Generic(g) => is_primitive_scalar_name(&g.name),
             TypeKind::Array(_) => true,
             TypeKind::ArrayShape(_) => true,
-            TypeKind::Callable(_) => true,
+            TypeKind::Callable(c) => !c.is_closure(),
             TypeKind::IntRange(_, _) => true,
             TypeKind::Literal(_) => true,
             TypeKind::Raw(_) => false,
@@ -571,7 +571,7 @@ impl PhpType {
                 let trimmed = s.strip_prefix('\\').unwrap_or(s);
                 trimmed.eq_ignore_ascii_case("Closure")
             }
-            TypeKind::Callable(c) => c.kind.eq_ignore_ascii_case("Closure"),
+            TypeKind::Callable(c) => c.is_closure(),
             TypeKind::Nullable(inner) => inner.is_closure(),
             _ => false,
         }
@@ -686,6 +686,21 @@ impl PhpType {
             TypeKind::Union(members) => {
                 let non_null: Vec<_> = members.iter().filter(|m| !m.is_null()).collect();
                 !non_null.is_empty() && non_null.iter().all(|m| m.is_parent_ref())
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether this type is `static` or `$this` (bare, nullable, or in a
+    /// union with null): the keywords late static binding decides, unlike
+    /// `self` and `parent`, which always name the declaring class's side.
+    pub fn is_late_static_bound(&self) -> bool {
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("static") || s == "$this",
+            TypeKind::Nullable(inner) => inner.is_late_static_bound(),
+            TypeKind::Union(members) => {
+                let mut non_null = members.iter().filter(|m| !m.is_null()).peekable();
+                non_null.peek().is_some() && non_null.all(PhpType::is_late_static_bound)
             }
             _ => false,
         }

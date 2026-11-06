@@ -395,8 +395,12 @@ mod tests {
             program,
             php,
             &names,
-            false,
-            false,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: false,
+                twig: false,
+            },
             Some(std::path::Path::new("/p")),
         )
     }

@@ -45,10 +45,7 @@ fn headless_view_snapshot_builds_local_candidates() {
 #[test]
 fn headless_inference_skips_non_candidate_callers() {
     let dir = tempfile::tempdir().expect("failed to create test workspace");
-    let root = dir
-        .path()
-        .canonicalize()
-        .expect("test workspace should canonicalize");
+    let root = dunce::canonicalize(dir.path()).expect("test workspace should canonicalize");
     let views = root.join("resources/views");
     let app = root.join("app");
     std::fs::create_dir_all(&views).expect("failed to create view directory");

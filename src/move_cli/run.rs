@@ -57,9 +57,7 @@ pub async fn run(options: MoveOptions) -> i32 {
 /// [`run`] wraps this for the command line, where only the exit code
 /// survives; callers that need the outcome itself use this directly.
 pub async fn execute(options: &MoveOptions) -> Result<MoveSummary, String> {
-    let root = options
-        .workspace_root
-        .canonicalize()
+    let root = dunce::canonicalize(&options.workspace_root)
         .map_err(|e| format!("cannot resolve project root: {e}"))?;
     let cfg = config::load_config_from(&root, options.global_config.as_deref())
         .unwrap_or_else(|_| config::Config::default());
@@ -167,6 +165,14 @@ fn class_definition_path(backend: &Backend, fqn: &str) -> Option<PathBuf> {
 }
 
 fn resolve_source(backend: &Backend, root: &Path, value: &str) -> Result<MoveTarget, String> {
+    // `Tests\Unit` is also a relative path on Windows, where a
+    // case-insensitive filesystem finds `tests/Unit` by it, so a value
+    // that does not look like a path is a name first when the index
+    // knows it.
+    let path_first = looks_like_path(value);
+    if !path_first && let Some(target) = indexed_target(backend, value) {
+        return Ok(target);
+    }
     if let Some(path) = existing_path(root, value) {
         if path.is_file() {
             return Ok(MoveTarget::Class(class_fqn_from_path(
@@ -179,29 +185,26 @@ fn resolve_source(backend: &Backend, root: &Path, value: &str) -> Result<MoveTar
             )?));
         }
     }
-
-    let normalized = value.trim_start_matches('\\');
-    if backend
-        .symbols
-        .fqn_uri_index
-        .read()
-        .contains_key(normalized)
-    {
-        return Ok(MoveTarget::Class(normalized.to_string()));
-    }
-    let prefix = format!("{normalized}\\");
-    if backend
-        .symbols
-        .fqn_uri_index
-        .read()
-        .keys()
-        .any(|fqn| fqn.starts_with(&prefix))
-    {
-        return Ok(MoveTarget::Namespace(normalized.to_string()));
+    if path_first && let Some(target) = indexed_target(backend, value) {
+        return Ok(target);
     }
     Err(format!(
         "`{value}` does not identify an indexed class, namespace, file, or directory"
     ))
+}
+
+/// The class or namespace `value` names in the index.
+fn indexed_target(backend: &Backend, value: &str) -> Option<MoveTarget> {
+    let normalized = value.trim_start_matches('\\');
+    let index = backend.symbols.fqn_uri_index.read();
+    if index.contains_key(normalized) {
+        return Some(MoveTarget::Class(normalized.to_string()));
+    }
+    let prefix = format!("{normalized}\\");
+    index
+        .keys()
+        .any(|fqn| fqn.starts_with(&prefix))
+        .then(|| MoveTarget::Namespace(normalized.to_string()))
 }
 
 fn resolve_destination(

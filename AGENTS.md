@@ -187,11 +187,13 @@ edit and must be fixed before moving on.
 views, and translations), Symfony demos in `examples/symfony/` (a
 standalone project with `composer.json`, controllers, YAML/XML/PHP
 configuration, Twig templates, and translation catalogues), Yii 3
-demos in `examples/yii/` (an application generated from `yiisoft/app`), and
+demos in `examples/yii/` (an application generated from `yiisoft/app`),
 WordPress demos in `examples/wordpress/` (a plugin and a theme under
-`wp-content/`, with core's declarations from `php-stubs/wordpress-stubs`).
-`vendor/` is git-ignored in all four, so run `composer install` there before
-verifying framework demos on a fresh clone. Put new
+`wp-content/`, with core's declarations from `php-stubs/wordpress-stubs`),
+and Drupal demos in `examples/drupal/` (a `drupal/recommended-project`
+site with one custom module and one theme). `vendor/` is git-ignored in
+all five, and so is Drupal core under `web/`, so run `composer install`
+there before verifying framework demos on a fresh clone. Put new
 framework-specific features in the matching `examples/<framework>/`
 project, not in `examples/php/`. If a feature affects Laravel-specific
 resolution (Eloquent, config, views, routes, translations), also update
@@ -240,6 +242,20 @@ a throwaway SQLite database, loads the plugin and theme, and checks every
 claim the "Try:" comments make. Add a check there for each new one, run
 `php examples/wordpress/assertions.php`, then
 `phpantom_lsp analyze --project-root examples/wordpress --no-colour`, which
+must report `[OK] No errors`.
+
+Drupal support (services, entity types, routes, hooks, theme hooks)
+follows the same pattern in `examples/drupal/`, a
+`drupal/recommended-project` site whose custom module `acme` and theme
+`acme_theme` are the only committed code under `web/`: a "Try:" comment
+at the site and a line in its `README.md`. Lint with
+`find examples/drupal/web/modules/custom examples/drupal/web/themes/custom -type f \( -name '*.php' -o -name '*.module' -o -name '*.theme' \) -print0 | xargs -0 -n1 php -l`.
+`examples/drupal/assertions.php` reads the module's declarations with
+Drupal's own loaders and reflection, without booting a kernel, and checks
+every name the demo declares and every claim its "Try:" comments make.
+Add a check there for each new one, run
+`php examples/drupal/assertions.php`, then
+`phpantom_lsp analyze --project-root examples/drupal --no-colour`, which
 must report `[OK] No errors`.
 
 ## Updating docs/todo.md

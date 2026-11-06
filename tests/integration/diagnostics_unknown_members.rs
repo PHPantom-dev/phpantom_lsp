@@ -2350,6 +2350,92 @@ $f->create()->name;
     );
 }
 
+// ── #[\AllowDynamicProperties] ──────────────────────────────────────────
+
+/// A class marked `#[\AllowDynamicProperties]` takes any property, read
+/// or written, but its methods are still checked.
+#[test]
+fn allow_dynamic_properties_accepts_undeclared_properties() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+#[\AllowDynamicProperties]
+class Extension {}
+
+function f(Extension $extension): void {
+    $extension->sort = 1;
+    echo $extension->sort;
+    $extension->missing();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "Only the method call is unknown, got: {diags:?}"
+    );
+    assert!(
+        message_text(&diags[0].message).contains("missing"),
+        "got: {diags:?}"
+    );
+}
+
+/// The attribute is inherited: PHP checks it on every ancestor.
+#[test]
+fn allow_dynamic_properties_is_inherited() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+#[\AllowDynamicProperties]
+class Base {}
+class Child extends Base {}
+class GrandChild extends Child {}
+
+function f(GrandChild $c): void {
+    echo $c->sort;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "got: {diags:?}");
+}
+
+/// An unimported bare `AllowDynamicProperties` inside a namespace names
+/// `App\AllowDynamicProperties`, not the built-in; an imported one is the
+/// built-in.
+#[test]
+fn allow_dynamic_properties_name_resolves_through_namespace_and_imports() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+#[AllowDynamicProperties]
+class NotDynamic {}
+
+function f(NotDynamic $o): void {
+    echo $o->sort;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+
+    let backend = create_test_backend();
+    let text = r#"<?php
+namespace App;
+
+use AllowDynamicProperties;
+
+#[AllowDynamicProperties]
+class Dynamic {}
+
+function f(Dynamic $o): void {
+    echo $o->sort;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "got: {diags:?}");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Method return → array access: $c->items()[0]->getLabel()
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4593,10 +4679,7 @@ class FlowService {
         ],
     );
 
-    let uri = &format!(
-        "file://{}",
-        _dir.path().join("src/FlowService.php").display()
-    );
+    let uri = &crate::common::file_uri(&_dir.path().join("src/FlowService.php"));
     let diags = unknown_member_diagnostics(&backend, uri, service_php);
 
     let chained_diags: Vec<_> = diags
@@ -4746,10 +4829,7 @@ class FlowService {
         ],
     );
 
-    let uri = &format!(
-        "file://{}",
-        _dir.path().join("src/FlowService.php").display()
-    );
+    let uri = &crate::common::file_uri(&_dir.path().join("src/FlowService.php"));
     let diags = unknown_member_diagnostics(&backend, uri, service_php);
 
     let chained_diags: Vec<_> = diags
@@ -11540,6 +11620,144 @@ function test(?string $s): void {
     );
 }
 
+/// A `Closure(...): T` signature is still an instance of the `Closure`
+/// class, so its real methods (`__invoke`, `bindTo`, `call`, …) resolve
+/// through `?->` and `->` alike instead of being reported as member
+/// access on a scalar.
+#[test]
+fn no_scalar_member_access_on_typed_closure_methods() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ClosureInvoke
+{
+    /** @param (\Closure(): void)|null $then */
+    public function run(?\Closure $then): void
+    {
+        $then?->__invoke();
+    }
+
+    /** @param \Closure(int): string $map */
+    public function map(\Closure $map): string
+    {
+        $map->bindTo(null);
+        $map->call($this, 1);
+        return $map->__invoke(1);
+    }
+
+    public function plain(\Closure $c): void
+    {
+        $c->__invoke();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Closure methods on a typed closure should resolve, got: {:?}",
+        diags
+            .iter()
+            .map(|d| (d.range.start.line, &d.code, &d.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A method `Closure` does not declare is still reported on a typed
+/// closure — as an unknown member of `Closure`, not as scalar access.
+#[test]
+fn flags_unknown_method_on_typed_closure() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class ClosureInvoke
+{
+    /** @param \Closure(): void $then */
+    public function run(\Closure $then): void
+    {
+        $then->noSuchMethod();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(diags.len(), 1, "expected one diagnostic, got: {:?}", diags);
+    assert_eq!(
+        diags[0].code,
+        Some(Code::String("unknown_member".to_string())),
+        "expected unknown_member, got: {:?}",
+        diags[0]
+    );
+    assert!(
+        message_text(&diags[0].message).contains("noSuchMethod")
+            && message_text(&diags[0].message).contains("Closure"),
+        "expected noSuchMethod on Closure, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// A property or a method typed only by its docblock as a closure
+/// signature reaches the member check through its declared type rather than
+/// a resolved class: that type is the `Closure` class too, not a scalar.
+#[test]
+fn no_scalar_member_access_on_docblock_typed_closure_property_or_return() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class Deferred
+{
+    /** @var \Closure(): void */
+    private $then;
+
+    /** @return \Closure(int): string */
+    private function make()
+    {
+        return static fn (int $n): string => (string) $n;
+    }
+
+    public function run(): void
+    {
+        $this->then->bindTo(null);
+        $this->make()->__invoke(1);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a docblock closure signature has the Closure methods, got: {:?}",
+        diags
+    );
+}
+
+/// A plain `callable` property may hold a string or an array: it has no
+/// members, and calling one on it is still reported.
+#[test]
+fn flags_member_access_on_docblock_typed_callable_property() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class Deferred
+{
+    /** @var callable(): void */
+    private $then;
+
+    public function run(): void
+    {
+        $this->then->__invoke();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(diags.len(), 1, "expected one diagnostic, got: {:?}", diags);
+    assert_eq!(
+        diags[0].code,
+        Some(Code::String("scalar_member_access".to_string())),
+        "expected scalar_member_access, got: {:?}",
+        diags[0]
+    );
+}
+
 /// `$this->unknownMethod()->next()` inside a class — only
 /// `unknownMethod` should be flagged.
 #[test]
@@ -15197,6 +15415,83 @@ function test(Certainty $c, string $name): void {
     );
 }
 
+/// A member named by a variable that holds known literals names each of
+/// them, wherever the access sits in a chain: `$row->{$column}` is the
+/// union of the properties `$column` can name, and `$row->$getter()` the
+/// union of what the methods return.
+#[test]
+fn a_member_named_by_a_literal_variable_resolves_in_a_chain() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///dynamic_chain.php";
+    let text = r#"<?php
+class Decimal {
+    public function equals(Decimal $other): bool { return true; }
+}
+class Money {
+    public function equals(Decimal $other): bool { return true; }
+}
+class ProductPrice {
+    public Decimal $price;
+    public Money $member_price;
+    public function getD(): Decimal { return new Decimal(); }
+    public function getM(): Money { return new Money(); }
+    public function __call(string $name, array $args): mixed { return null; }
+}
+
+/** @param array{price: Decimal, member_price: Decimal} $prices */
+function differences(ProductPrice $price, array $prices): void {
+    foreach ($prices as $column => $amount) {
+        $price->{$column}->equals($amount);
+        $price->$column->equals($amount);
+    }
+}
+
+function single(ProductPrice $p, Decimal $d, bool $flag): void {
+    $name = 'getD';
+    $p->$name()->equals($d);
+    $p->{$name}()->equals($d);
+    $both = $flag ? 'getD' : 'getM';
+    $p->$both()->equals($d);
+    $p->{'price'}->equals($d);
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "every dynamic member names known members, got: {diags:?}"
+    );
+
+    // A method none of the named members has is still reported.
+    let text_missing = r#"<?php
+class Decimal {}
+class Money {}
+class ProductPrice {
+    public Decimal $price;
+    public Money $member_price;
+}
+
+function differences(ProductPrice $price, Decimal $d, bool $flag): void {
+    $column = $flag ? 'price' : 'member_price';
+    $price->{$column}->equals($d);
+}
+"#;
+    let backend = create_test_backend();
+    let diags =
+        unknown_member_diagnostics(&backend, "file:///dynamic_chain_missing.php", text_missing);
+    assert!(
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("equals")
+                && message_text(&d.message).contains("Decimal, Money")),
+        "`equals` is missing on both members of the union, got: {diags:?}",
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Narrowing a subject that is not a plain variable
 // ═══════════════════════════════════════════════════════════════════════════
@@ -17711,5 +18006,187 @@ function f(Base $b): void {
             .iter()
             .all(|d| !message_text(&d.message).contains("leafOnly")),
         "`first(Leaf::class)` returns `Leaf|null` through the override, got: {diags:?}"
+    );
+}
+
+#[test]
+fn param_closure_this_union_diagnostics() {
+    let backend = create_test_backend();
+    let src = r#"<?php
+class FirstContext { public function firstOnly(): void {} }
+class SecondContext { public function secondOnly(): void {} }
+/** @param-closure-this FirstContext|SecondContext $callback */
+function bindContext(\Closure $callback): void {}
+bindContext(function () {
+    $this->firstOnly();
+    $this->secondOnly();
+    $this->missing();
+});
+"#;
+    let diagnostics = unknown_member_diagnostics_with_scope_cache(
+        &backend,
+        "file:///closure_union_diagnostics.php",
+        src,
+    );
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(
+        message_text(&diagnostics[0].message).contains("missing"),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn param_closure_this_union_narrowed_diagnostics() {
+    let backend = create_test_backend();
+    let src = r#"<?php
+class FirstContext {
+    public function firstOnly(): void {}
+    public function run(): void {
+        bindContext(function () {
+            assert($this instanceof FirstContext);
+            $this->firstOnly();
+            $this->secondOnly();
+        });
+    }
+}
+class SecondContext { public function secondOnly(): void {} }
+/** @param-closure-this FirstContext|SecondContext $callback */
+function bindContext(\Closure $callback): void {}
+bindContext(function () {
+    if ($this instanceof FirstContext) { return; }
+    $this->secondOnly();
+    $this->firstOnly();
+});
+bindContext(fn() => $this instanceof FirstContext ? $this->firstOnly() : $this->secondOnly());
+"#;
+    let diagnostics = unknown_member_diagnostics_with_scope_cache(
+        &backend,
+        "file:///closure_union_narrowed_diagnostics.php",
+        src,
+    );
+    assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| message_text(&d.message).contains("secondOnly")),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| message_text(&d.message).contains("firstOnly")),
+        "{diagnostics:?}"
+    );
+}
+
+/// `parent::` forwards late static binding, so a `static` return read
+/// through it is the calling class, not the parent that declares it.
+#[test]
+fn parent_call_returning_static_resolves_to_calling_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Base {
+    /** @return static */
+    public static function create() { return new static(); }
+    public static function make(): static { return new static(); }
+    public function build(): static { return $this; }
+}
+
+class Child extends Base {
+    public ?string $service = null;
+
+    public static function create() {
+        $instance = parent::create();
+        $instance->childOnly();
+        $instance->service = 'x';
+        parent::create()->childOnly();
+        $made = parent::make();
+        $made->childOnly();
+        parent::make()->childOnly();
+        return $instance;
+    }
+
+    public function build(): static {
+        $built = parent::build();
+        $built->childOnly();
+        parent::build()->childOnly();
+        return $built;
+    }
+
+    public function childOnly(): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no diagnostics, got: {:?}",
+        diags
+    );
+}
+
+/// Positive control: a member the calling class lacks is still flagged.
+#[test]
+fn parent_call_returning_static_still_flags_missing_member() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Base {
+    /** @return static */
+    public static function create() { return new static(); }
+}
+
+class Child extends Base {
+    public static function create() {
+        $instance = parent::create();
+        $instance->missingThing();
+        return $instance;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| {
+            let m = message_text(&d.message);
+            m.contains("missingThing") && m.contains("Child")
+        }),
+        "Expected missingThing flagged on Child, got: {:?}",
+        diags
+    );
+}
+
+/// A conditional return that tests an array argument picks the same branch
+/// for a chained member access as it does for the call on its own.
+#[test]
+fn chained_call_on_array_argument_conditional_uses_the_matching_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+/** @template T */
+class Coll {
+    /** @return T|null */
+    public function first(): mixed { return null; }
+}
+class Pen {
+    public function write(): void {}
+}
+class Drawer {
+    /**
+     * @param  int|list<int>  $id
+     * @return ($id is list<int> ? Coll<Pen> : Pen|null)
+     */
+    public function find(int|array $id): Coll|Pen|null { return null; }
+}
+function run(Drawer $d): void {
+    $d->find([7, 8])->first();
+    $ids = [7, 8];
+    $d->find($ids)->first();
+    $d->find(7)?->write();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected each call to resolve on its matching branch, got: {diags:?}"
     );
 }

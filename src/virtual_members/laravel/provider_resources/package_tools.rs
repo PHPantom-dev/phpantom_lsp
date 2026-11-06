@@ -192,7 +192,7 @@ fn record_package_tools_registration(
                 .join("resources")
                 .join("lang");
             resources.trans_dirs.push(ProviderResource {
-                path: resolved.canonicalize().unwrap_or(resolved),
+                path: dunce::canonicalize(&resolved).unwrap_or(resolved),
                 namespace: ctx.short_name.to_string(),
             });
         }
@@ -205,7 +205,7 @@ fn record_package_tools_registration(
             let namespace = first_arg_name.unwrap_or_else(|| ctx.short_name.to_string());
             push_view_dir_registration(
                 resources,
-                resolved.canonicalize().unwrap_or(resolved),
+                dunce::canonicalize(&resolved).unwrap_or(resolved),
                 namespace,
                 file.paths.workspace_root,
             );
@@ -237,7 +237,7 @@ fn record_package_tools_registration(
                     .join("config")
                     .join(format!("{config_name}.php"));
                 resources.config_files.push(ProviderResource {
-                    path: resolved.canonicalize().unwrap_or(resolved),
+                    path: dunce::canonicalize(&resolved).unwrap_or(resolved),
                     namespace: config_name.replace(['/', '\\'], "."),
                 });
             }

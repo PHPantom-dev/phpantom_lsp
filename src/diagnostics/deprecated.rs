@@ -233,6 +233,18 @@ impl Backend {
                         None => continue,
                     };
 
+                    // An attribute's named-argument label uses a property
+                    // only when the constructor promotes the parameter.
+                    if *docblock_ref == crate::symbol_map::DocblockMemberRef::AttributeNamedArg
+                        && !crate::class_lookup::constructor_promotes(
+                            &base_class,
+                            member_name,
+                            resolved_class_loader,
+                        )
+                    {
+                        continue;
+                    }
+
                     // Resolve with inheritance + virtual members so we find
                     // members from parent classes and traits too.
                     //

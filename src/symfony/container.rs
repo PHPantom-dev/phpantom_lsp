@@ -213,7 +213,8 @@ impl Backend {
 
     /// The classes the service `id` is built from, following aliases, a
     /// class given as a parameter, and the parent a child definition takes
-    /// its class from when it names none.  An ID spelled as a class is that class
+    /// its class from when it names none.  In Drupal, the classes service
+    /// providers replace it with join it.  An ID spelled as a class is that class
     /// when no declaration says otherwise.  Empty when nothing the project
     /// declares says.
     pub(crate) fn symfony_service_classes(&self, id: &str) -> Vec<Atom> {
@@ -260,6 +261,12 @@ impl Backend {
                 self.collect_service_classes(&parent, seen, out);
             }
             found = out.len() > before;
+        }
+        if self.is_drupal_project() {
+            for class in self.drupal_service_replacements(id) {
+                found = true;
+                push_unique(out, class);
+            }
         }
         if !found && id.contains('\\') {
             let class = id.strip_prefix('\\').unwrap_or(id);

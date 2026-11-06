@@ -71,7 +71,7 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
         }
 
         // $fillable, $guarded, $hidden, $appends
-        for col in &laravel.column_names {
+        for (col, _) in laravel.column_lists() {
             push(col);
         }
 

@@ -1,0 +1,5 @@
+name: Acme
+type: module
+description: 'Declarations for the PHPantom Drupal playground.'
+package: PHPantom
+core_version_requirement: ^11
