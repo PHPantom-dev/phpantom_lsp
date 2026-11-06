@@ -1239,10 +1239,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#l17-additional-string-contexts-without-booting" class="md-nav__link">
+  <a href="#l71-inertia-page-props-and-asset-helpers-on-a-typed-url-generator" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L17. Additional string contexts without booting
+        L71. Inertia page props and asset helpers on a typed URL generator
       </span>
     </span>
   </a>
@@ -1968,10 +1968,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#l17-additional-string-contexts-without-booting" class="md-nav__link">
+  <a href="#l71-inertia-page-props-and-asset-helpers-on-a-typed-url-generator" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L17. Additional string contexts without booting
+        L71. Inertia page props and asset helpers on a typed URL generator
       </span>
     </span>
   </a>
@@ -2690,39 +2690,28 @@ that is hard to reason about anyway.</p>
 keys</strong>, <strong>env vars</strong>, <strong>translation keys</strong>, and <strong>view names</strong> via the
 declaration scanners in <code>virtual_members/laravel/{route_names, config_keys,
 env_vars, trans_keys, view_names}.rs</code>. These walk the relevant source files
-and resolve a string key to its declaration site. <code>StringKey</code> also
+and resolve a string key to its declaration site. <strong>Asset paths</strong> (<code>asset()</code>,
+<code>mix()</code>, <code>@vite</code>) and <strong>Inertia pages</strong> resolve against the filesystem at
+request time (<code>virtual_members/laravel/assets.rs</code>). <code>StringKey</code> also
 flows through find-references (rename, highlight, and semantic tokens
 are L31). <strong>Eloquent
 relation and column name strings</strong> have completion (<code>completion/eloquent_string.rs</code>).</p>
 <p>The scanners already enumerate every valid key for go-to-definition. The
 items below mostly wire that existing enumeration into three more LSP
 endpoints rather than building new analysis.</p>
-<h4 id="l17-additional-string-contexts-without-booting">L17. Additional string contexts without booting<a class="headerlink" href="#l17-additional-string-contexts-without-booting" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Constructs the extension and the Laravel LSP cover that we don't, and
-that are statically recoverable (no booting):</p>
-<ul>
-<li><strong>Asset paths</strong> — <code>asset('...')</code> (and <code>UrlGenerator::asset()</code>) against
-  a filesystem walk of <code>public/</code>. Two cheap extensions the Laravel LSP
-  has or lacks: <code>mix('...')</code> against <code>public/mix-manifest.json</code> (static
-  JSON, legacy projects), and — which they do <em>not</em> support — Vite
-  entry-point strings (<code>Vite::asset('resources/js/app.js')</code>, <code>@vite</code>
-  arguments) checked against source-file existence.</li>
-<li><strong>Inertia page paths</strong> — <code>Inertia::render('...')</code> and
-  <code>Inertia::modal()</code> arg 0, <code>Route::inertia()</code> arg 1, and the
-  <code>inertia()</code> helper, against a filesystem walk of <code>resources/js/Pages</code>
-  (page paths/extensions from <code>config/inertia.php</code>, read statically;
-  default <code>resources/js/Pages</code> + <code>.vue</code>). Only relevant to Inertia
-  projects. Pair the unknown-page diagnostic with a "create page" quick
-  fix (the Laravel LSP scaffolds a <code>&lt;script setup&gt;/&lt;template&gt;</code> stub).
-  Its second-argument prop-key completion (regex-parsing <code>defineProps</code>
-  out of the <code>.vue</code> page) is shallow and optional — defer unless asked.</li>
-</ul>
-<p><strong>Explicitly still out of scope</strong> (see the table at the top): container
-binding names (<code>app('...')</code>), facade string aliases, and anything else that
-requires the live container. These genuinely cannot be resolved without
-booting, and a snapshot of them is the "true for one boot" half-truth we are
-choosing not to ship.</p>
+<h4 id="l71-inertia-page-props-and-asset-helpers-on-a-typed-url-generator">L71. Inertia page props and asset helpers on a typed URL generator<a class="headerlink" href="#l71-inertia-page-props-and-asset-helpers-on-a-typed-url-generator" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p>Inertia page names complete, navigate, and are checked, but the props a
+render passes in its second argument (<code>Inertia::render('Users/Show',
+['user' =&gt; …])</code>) are not completed from the page's <code>defineProps</code> (Vue) or
+its component's props type. Reading them means parsing the page's
+<code>&lt;script setup&gt;</code> block or TypeScript props, which the Laravel extension
+does with a regex and only for Vue.</p>
+<p>Separately, <code>asset()</code> paths are recognised through the helper, the <code>URL</code>
+facade, and <code>url()-&gt;asset()</code>, but not on a receiver only its type says is
+a URL generator (<code>$this-&gt;url-&gt;asset('css/app.css')</code> on an injected
+<code>UrlGenerator</code>). That needs a typed receiver site like the one view names
+use (<code>view_receiver_method</code>).</p>
 <h4 id="l27-legacy-controllermethod-action-strings">L27. Legacy <code>Controller@method</code> action strings<a class="headerlink" href="#l27-legacy-controllermethod-action-strings" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <p>We already complete and resolve the modern <code>[Controller::class,
