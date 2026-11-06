@@ -1415,17 +1415,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#l66-related-file-navigation-for-models-events-and-listeners" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L66. Related-file navigation for models, events, and listeners
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l67-laravel-refactoring-intentions" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2153,17 +2142,6 @@
   
     <nav class="md-nav" aria-label="Navigation and code actions">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#l66-related-file-navigation-for-models-events-and-listeners" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L66. Related-file navigation for models, events, and listeners
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#l67-laravel-refactoring-intentions" class="md-nav__link">
@@ -2926,18 +2904,6 @@ including grouped imports, without treating unrelated classes named
 <hr />
 <h2 id="navigation-and-code-actions">Navigation and code actions<a class="headerlink" href="#navigation-and-code-actions" title="Permanent link">&para;</a></h2>
 <p>Editor features Laravel Idea has that do not live inside a string.</p>
-<h4 id="l66-related-file-navigation-for-models-events-and-listeners">L66. Related-file navigation for models, events, and listeners<a class="headerlink" href="#l66-related-file-navigation-for-models-events-and-listeners" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Laravel Idea links an Eloquent model to its factory, policy, observer,
-migrations, JSON resource, and custom collection, and an event
-to its listeners and back. We navigate none of these. The links are
-conventions or static registrations: <code>HasFactory</code> and the factory's
-model, <code>Gate::policy()</code>/<code>#[UsePolicy]</code>/the <code>Policies\{Model}Policy</code>
-guess, <code>#[ObservedBy]</code>/<code>::observe()</code>, <code>Event::listen()</code> and listener
-<code>handle(Event $e)</code> signatures (Laravel's event discovery reads exactly
-that type hint). Expose them as a code lens on the class or through
-go-to-implementation, whichever reads better in practice. The migrations
-link reuses the table map <code>database_schema/</code> already builds.</p>
 <h4 id="l67-laravel-refactoring-intentions">L67. Laravel refactoring intentions<a class="headerlink" href="#l67-laravel-refactoring-intentions" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Laravel Idea's intention actions with no counterpart here, grouped

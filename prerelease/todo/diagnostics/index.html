@@ -1079,10 +1079,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" class="md-nav__link">
+  <a href="#d33-private-members-nothing-uses-are-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        D33. Private properties nothing reads or writes are not reported
+        D33. Private members nothing uses are not reported
       </span>
     </span>
   </a>
@@ -1116,6 +1116,39 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         D43. Unknown named arguments to methods and functions are not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d44-a-function-that-can-end-without-returning-a-value-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D44. A function that can end without returning a value is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d45-an-object-without-__tostring-used-as-a-string-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D45. An object without <code>__toString()</code> used as a string is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d46-the-result-of-a-void-call-is-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D46. The result of a <code>void</code> call is used
       </span>
     </span>
   </a>
@@ -1731,10 +1764,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" class="md-nav__link">
+  <a href="#d33-private-members-nothing-uses-are-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        D33. Private properties nothing reads or writes are not reported
+        D33. Private members nothing uses are not reported
       </span>
     </span>
   </a>
@@ -1768,6 +1801,39 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         D43. Unknown named arguments to methods and functions are not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d44-a-function-that-can-end-without-returning-a-value-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D44. A function that can end without returning a value is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d45-an-object-without-__tostring-used-as-a-string-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D45. An object without <code>__toString()</code> used as a string is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d46-the-result-of-a-void-call-is-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D46. The result of a <code>void</code> call is used
       </span>
     </span>
   </a>
@@ -2199,7 +2265,7 @@ The extension's fixtures are the <code>entity_*.fixture</code> fixtures in
 <code>tests/phpstan_doctrine/rules/Doctrine/ORM/</code>, whose custom column types
 <code>entity-manager.php</code> registers.</p>
 <hr />
-<h2 id="d33-private-properties-nothing-reads-or-writes-are-not-reported">D33. Private properties nothing reads or writes are not reported<a class="headerlink" href="#d33-private-properties-nothing-reads-or-writes-are-not-reported" title="Permanent link">&para;</a></h2>
+<h2 id="d33-private-members-nothing-uses-are-not-reported">D33. Private members nothing uses are not reported<a class="headerlink" href="#d33-private-members-nothing-uses-are-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">final class Invoice</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">{</span>
@@ -2222,6 +2288,15 @@ read and written (PHPStan's Doctrine extension models Doctrine's and
 Gedmo's), or the check flags correct entities.</p>
 <p>The Doctrine extension's fixtures are <code>unused_private_property*.fixture</code>
 and <code>gedmo_property_assign*.fixture</code> in <code>tests/fixtures/phpstan_doctrine/</code>.</p>
+<p>Private methods and constants nothing in the class (or a closure bound to
+it) calls or reads are dead the same way, and are simpler: no framework
+writes them. Report all three dimmed, with the <code>Unnecessary</code> tag the way
+an unused import is, and offer "Remove unused member" (the fix H19 wires
+to PHPStan's <code>method.unused</code> and friends) on the native diagnostic too. A
+method a string names (<code>[$this, 'handle']</code>, <code>'handle'</code> in a callable
+position, a Laravel or Symfony convention that calls it by name) counts as
+used. PhpStorm reports unused private methods, properties and constants
+natively.</p>
 <p><strong>Where to look:</strong> the unused-variable check (<code>src/diagnostics/unused_variables.rs</code>)
 for the read/write bookkeeping, the Doctrine mapping index in
 <code>src/framework.rs</code>, and PHPStan's <code>UnusedPrivatePropertyRule</code> with the
@@ -2286,6 +2361,67 @@ need to be checked against PHP's own, which named arguments bind to.</p>
 (<code>report_unknown_named_arguments</code>), and
 <code>ResolvedCallableTarget</code> in <code>src/types/function.rs</code>, which does not record
 whether the target is a virtual method.</p>
+<hr />
+<h2 id="d44-a-function-that-can-end-without-returning-a-value-is-not-reported">D44. A function that can end without returning a value is not reported<a class="headerlink" href="#d44-a-function-that-can-end-without-returning-a-value-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">function score(int $x): int {</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    if ($x &gt; 0) {</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">        return 1;</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">    }</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">}   // TypeError: score(): Return value must be of type int, none returned</span>
+</code></pre></div>
+<p>When the end of a function or method body is reachable and its declared
+return type does not accept the implicit <code>null</code> (anything but <code>void</code>,
+<code>never</code>, <code>mixed</code>, <code>null</code> or a nullable type), PHP throws a <code>TypeError</code>
+there, so Error severity. A generator, an abstract or interface method,
+and a body that ends in <code>throw</code>, <code>exit</code> or a <code>never</code>-returning call are not
+affected; the reachability flow <code>unreachable_code</code> already computes
+answers whether the end is reachable. PhpStorm reports this as "Missing
+'return' statement", and PHPStan as <code>return.missing</code>.</p>
+<p><strong>Where to look:</strong> <code>src/diagnostics/unreachable_code.rs</code> (the flow that
+decides whether a statement list can complete normally) and
+<code>src/diagnostics/return_type_errors.rs</code> (the declared return type).</p>
+<hr />
+<h2 id="d45-an-object-without-__tostring-used-as-a-string-is-not-reported">D45. An object without <code>__toString()</code> used as a string is not reported<a class="headerlink" href="#d45-an-object-without-__tostring-used-as-a-string-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">final class Invoice {}</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">echo $invoice;                // Error: Object of class Invoice could not be converted to string</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">$label = 'No. ' . $invoice;   // same</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">$text = "Invoice $invoice";   // same</span>
+</code></pre></div>
+<p><code>echo</code>, <code>print</code>, concatenation, interpolation, a <code>(string)</code> cast and
+string functions all convert their operand, and an object whose class has
+no <code>__toString()</code> (and is not <code>Stringable</code>) throws. A <code>string</code> parameter
+is already covered by the type-mismatch check; these conversions are not.
+Severity follows the unknown-member rule: Error when the class is final or
+an enum, Warning when a subclass could still add the method. PhpStorm
+reports it as "Method '__toString' is not implemented".</p>
+<p><strong>Where to look:</strong> the binary-operator and <code>echo</code> handling in the
+forward walker's diagnostic pass (<code>src/type_engine/variable/forward_walk/</code>),
+and how <code>src/diagnostics/unknown_members/</code> grades its severity for final
+and non-final classes.</p>
+<hr />
+<h2 id="d46-the-result-of-a-void-call-is-used">D46. The result of a <code>void</code> call is used<a class="headerlink" href="#d46-the-result-of-a-void-call-is-used" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$sent = $mailer-&gt;send($message);   // send(): void, so $sent is always null</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">if ($logger-&gt;flush()) { … }        // never true</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">return $this-&gt;log($event);         // in a non-void function: returns null</span>
+</code></pre></div>
+<p>A function or method declared <code>void</code> (or <code>never</code>) returns nothing, so using
+its result is a mistake: the caller expected a value it will never get, or
+meant to write <code>null</code>. Report it wherever the call's value is consumed: an
+assignment, an argument, an operand, a condition, <code>echo</code>, or a <code>return</code>
+with a value. A call that is its own expression statement is fine. Judge
+by the native return type, since a <code>@return void</code> over an untyped
+signature does not stop the body returning something. Warning severity. The <code>return $this-&gt;log();</code>
+early-exit shorthand is caught too, and reads better as two statements.
+PhpStorm reports this as "'void' method result used", and PHPStan as
+<code>method.void</code> / <code>function.void</code>.</p>
+<p><strong>Where to look:</strong> the forward walker already resolves each call's return
+type, and <code>src/diagnostics/discarded_results.rs</code> already decides when a
+call's value is consumed (it reports the opposite case, a <code>#[\NoDiscard]</code>
+result that is not).</p>
 
 
 
