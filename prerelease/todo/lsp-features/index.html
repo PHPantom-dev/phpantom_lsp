@@ -2492,24 +2492,10 @@ path needs a way to say "the target of this association of that entity".</p>
 <code>src/doctrine/dql.rs</code>, <code>src/parser/attributes.rs</code> (the Doctrine mapping),
 <code>src/doctrine/mapping_files.rs</code>.</p>
 <hr />
-<h2 id="f68-dql-syntax-errors">F68. DQL syntax errors<a class="headerlink" href="#f68-dql-syntax-errors" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">$em-&gt;createQuery('SELECT e FROM App\Entity\User'); // no identification variable</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">$qb-&gt;andWhere('e.id = 1)');</span>
-</code></pre></div>
-<p>The DQL reader picks the names out of a query without checking its
-grammar, so a query that does not parse is not reported. PHPStan's
-Doctrine extension reports Doctrine's own parser error. Checking it here
-means a DQL grammar of our own, over the whole query a builder assembles.</p>
-<p>The fixtures are <code>dql.fixture</code> and <code>query_builder_dql.fixture</code> in
-<code>tests/fixtures/phpstan_doctrine/</code>.</p>
-<p><strong>Where to look:</strong> <code>src/doctrine/dql.rs</code>, and Doctrine ORM's
-<code>Query/Parser.php</code> for the grammar.</p>
-<hr />
 <h2 id="f69-dql-in-expression-objects-and-other-methods-query-builders">F69. DQL in expression objects and other methods' query builders<a class="headerlink" href="#f69-dql-in-expression-objects-and-other-methods-query-builders" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">$qb-&gt;add('orderBy', new Expr\OrderBy('e.name', 'ASC'));</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">$this-&gt;createQb()-&gt;andWhere('e.nonexistent = 1'); // `e` declared in createQb()</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">$qb-&gt;add('orderBy', new Expr\OrderBy('e.name', 'ASC'));</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">$this-&gt;createQb()-&gt;andWhere('e.nonexistent = 1'); // `e` declared in createQb()</span>
 </code></pre></div>
 <p>The DQL a query builder method or an <code>expr()</code> call takes is read, with the
 variables the builder calls of the same function body declare. The DQL an
@@ -2522,15 +2508,15 @@ another method returns, whose variables that method declares.</p>
 <hr />
 <h2 id="f45-symfony-events-named-by-their-class-or-a-constant">F45. Symfony events named by their class or a constant<a class="headerlink" href="#f45-symfony-events-named-by-their-class-or-a-constant" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">$dispatcher-&gt;dispatch(new OrderPlaced($order));   // which listeners?</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="x">#[AsEventListener]</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">public function onOrderPlaced(OrderPlaced $event): void {}</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="x">public static function getSubscribedEvents(): array</span>
-<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="x">{</span>
-<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="x">    return [KernelEvents::REQUEST =&gt; 'onRequest'];</span>
-<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">$dispatcher-&gt;dispatch(new OrderPlaced($order));   // which listeners?</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x">#[AsEventListener]</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x">public function onOrderPlaced(OrderPlaced $event): void {}</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x">public static function getSubscribedEvents(): array</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="x">{</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="x">    return [KernelEvents::REQUEST =&gt; 'onRequest'];</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="x">}</span>
 </code></pre></div>
 <p>An event name written as a string navigates between its dispatchers and
 its listeners. Most events are not: an event dispatched without a name is
@@ -2567,14 +2553,14 @@ reads the <code>event</code> beside the <code>method</code>), <code>src/resource
 <hr />
 <h2 id="f47-symfony-messenger-transports">F47. Symfony Messenger transports<a class="headerlink" href="#f47-symfony-messenger-transports" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nt">framework</span><span class="p">:</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">    </span><span class="nt">messenger</span><span class="p">:</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">        </span><span class="nt">failure_transport</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">failed</span>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">        </span><span class="nt">transports</span><span class="p">:</span>
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">            </span><span class="nt">async</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(MESSENGER_TRANSPORT_DSN)%'</span>
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">            </span><span class="nt">failed</span><span class="p">:</span><span class="w"> </span><span class="s">'doctrine://default?queue_name=failed'</span>
-<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="w">        </span><span class="nt">routing</span><span class="p">:</span>
-<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="w">            </span><span class="nt">App\Message\SendWelcomeEmail</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">async</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">framework</span><span class="p">:</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">    </span><span class="nt">messenger</span><span class="p">:</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">        </span><span class="nt">failure_transport</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">failed</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">        </span><span class="nt">transports</span><span class="p">:</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">            </span><span class="nt">async</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(MESSENGER_TRANSPORT_DSN)%'</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">            </span><span class="nt">failed</span><span class="p">:</span><span class="w"> </span><span class="s">'doctrine://default?queue_name=failed'</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="w">        </span><span class="nt">routing</span><span class="p">:</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="w">            </span><span class="nt">App\Message\SendWelcomeEmail</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">async</span>
 </code></pre></div>
 <p>A bus name navigates, completes, and is reported when nothing declares
 it. A transport name does none of this, in <code>routing</code>, <code>failure_transport</code>,
@@ -2592,9 +2578,9 @@ not reported.</p>
 <hr />
 <h2 id="f48-symfony-environment-variables">F48. Symfony environment variables<a class="headerlink" href="#f48-symfony-environment-variables" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="nt">parameters</span><span class="p">:</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">    </span><span class="nt">app.secret</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(APP_SECRET)%'</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">    </span><span class="nt">app.port</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(int:DATABASE_PORT)%'</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">    </span><span class="nt">app.secret</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(APP_SECRET)%'</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">    </span><span class="nt">app.port</span><span class="p">:</span><span class="w"> </span><span class="s">'%env(int:DATABASE_PORT)%'</span>
 </code></pre></div>
 <p>A Laravel <code>env('APP_NAME')</code> completes, jumps to the line of <code>.env</code> that
 declares it, and lists its references. The <code>%env(…)%</code> placeholders a
@@ -2625,8 +2611,8 @@ them.</p>
 <hr />
 <h2 id="f51-class-names-in-twigs-constant-and-enum">F51. Class names in Twig's <code>constant()</code> and <code>enum()</code><a class="headerlink" href="#f51-class-names-in-twigs-constant-and-enum" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="cp">{%</span> <span class="k">if</span> <span class="nv">user.status</span> <span class="o">==</span> <span class="nv">constant</span><span class="o">(</span><span class="s1">'App\\Entity\\User::ACTIVE'</span><span class="o">)</span> <span class="cp">%}</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="cp">{%</span> <span class="k">for</span> <span class="nv">case</span> <span class="k">in</span> <span class="nv">enum_cases</span><span class="o">(</span><span class="s1">'App\\Enum\\Status'</span><span class="o">)</span> <span class="cp">%}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="cp">{%</span> <span class="k">if</span> <span class="nv">user.status</span> <span class="o">==</span> <span class="nv">constant</span><span class="o">(</span><span class="s1">'App\\Entity\\User::ACTIVE'</span><span class="o">)</span> <span class="cp">%}</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="cp">{%</span> <span class="k">for</span> <span class="nv">case</span> <span class="k">in</span> <span class="nv">enum_cases</span><span class="o">(</span><span class="s1">'App\\Enum\\Status'</span><span class="o">)</span> <span class="cp">%}</span>
 </code></pre></div>
 <p>The class, constant, and enum case Twig's <code>constant()</code>, <code>enum()</code>, and
 <code>enum_cases()</code> name as strings neither complete nor navigate. They are
@@ -2660,8 +2646,8 @@ or XML, so it needs a scan of the controller files' class members.</p>
 <hr />
 <h2 id="f55-symfony-expressionlanguage-strings">F55. Symfony ExpressionLanguage strings<a class="headerlink" href="#f55-symfony-expressionlanguage-strings" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">#[IsGranted(new Expression('is_granted("ROLE_ADMIN") or user.isOwner(subject)'))]</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">#[Route('/admin', condition: "request.headers.get('X-Admin') == '1'")]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">#[IsGranted(new Expression('is_granted("ROLE_ADMIN") or user.isOwner(subject)'))]</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">#[Route('/admin', condition: "request.headers.get('X-Admin') == '1'")]</span>
 </code></pre></div>
 <p>An ExpressionLanguage string is a small language of its own, with
 variables Symfony binds per site: <code>user</code>, <code>subject</code>, <code>token</code>, and
@@ -2679,20 +2665,20 @@ nothing for a project until someone writes its rules.</p>
 <hr />
 <h2 id="f56-live-components">F56. Live components<a class="headerlink" href="#f56-live-components" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">#[AsLiveComponent]</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">final class SearchBox</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="x">{</span>
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="x">    use DefaultActionTrait;</span>
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="x">    #[LiveProp(writable: true)]</span>
-<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="x">    public string $query = '';</span>
-<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>
-<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="x">    #[LiveAction]</span>
-<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="x">    public function clear(): void { … }</span>
-<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">#[AsLiveComponent]</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">final class SearchBox</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="x">{</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="x">    use DefaultActionTrait;</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="x">    #[LiveProp(writable: true)]</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="x">    public string $query = '';</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="x">    #[LiveAction]</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="x">    public function clear(): void { … }</span>
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="x">}</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">&lt;input data-model="query"&gt;</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">&lt;button data-action="live#action" data-live-action-param="clear"&gt;Clear&lt;/button&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">&lt;input data-model="query"&gt;</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">&lt;button data-action="live#action" data-live-action-param="clear"&gt;Clear&lt;/button&gt;</span>
 </code></pre></div>
 <p>With <code>symfony/ux-live-component</code>, a component's template names its class's
 <code>#[LiveProp]</code> properties in <code>data-model</code> (and <code>data-model="on(change)|query"</code>),
@@ -2709,7 +2695,7 @@ link between a component class and its template.</p>
 <hr />
 <h2 id="f57-add-translation-quick-fix-for-an-undeclared-symfony-key">F57. "Add translation" quick fix for an undeclared Symfony key<a class="headerlink" href="#f57-add-translation-quick-fix-for-an-undeclared-symfony-key" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="x">$translator-&gt;trans('checkout.confirm'); // not in any catalogue</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">$translator-&gt;trans('checkout.confirm'); // not in any catalogue</span>
 </code></pre></div>
 <p>Laravel offers to add a missing translation to each locale's language file
 (<code>insert_translation_key.rs</code>). Symfony keys get no such fix. For an
