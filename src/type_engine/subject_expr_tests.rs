@@ -1265,3 +1265,27 @@ fn parse_dql_association_path() {
         SubjectExpr::CallExpr { .. }
     ));
 }
+
+#[test]
+fn parse_dql_builder_alias() {
+    assert_eq!(
+        SubjectExpr::parse("e@$qb"),
+        SubjectExpr::DqlBuilderAlias {
+            base: Box::new(SubjectExpr::Variable("$qb".to_string())),
+            alias: "e".to_string(),
+        }
+    );
+    let joined = SubjectExpr::parse("e@$this->users().team");
+    assert!(
+        matches!(&joined, SubjectExpr::DqlAssociation { base, association }
+            if association == "team"
+                && matches!(base.as_ref(), SubjectExpr::DqlBuilderAlias { alias, .. } if alias == "e")),
+        "{joined:?}"
+    );
+    assert_eq!(joined.to_subject_text(), "e@$this->users().team");
+    // An `@` inside a call's arguments is no builder variable.
+    assert!(matches!(
+        SubjectExpr::parse("$x->find('a@b')"),
+        SubjectExpr::CallExpr { .. }
+    ));
+}

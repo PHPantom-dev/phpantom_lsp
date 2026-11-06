@@ -795,28 +795,6 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ---
 
-## F69. DQL in expression objects and other methods' query builders
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$qb->add('orderBy', new Expr\OrderBy('e.name', 'ASC'));
-$this->createQb()->andWhere('e.nonexistent = 1'); // `e` declared in createQb()
-```
-
-The DQL a query builder method or an `expr()` call takes is read, with the
-variables the builder calls of the same function body declare. The DQL an
-expression object is constructed with (`new Expr\OrderBy()`, `new
-Expr\Andx()`) is not, and neither is a fragment added to a builder that
-another method returns, whose variables that method declares.
-
-The fixture is `query_builder_dql.fixture` in
-`tests/fixtures/phpstan_doctrine/`.
-
-**Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`.
-
----
-
 ## F72. DQL variables of a query builder a chain of methods handles
 
 **Impact: Low · Complexity: Medium**

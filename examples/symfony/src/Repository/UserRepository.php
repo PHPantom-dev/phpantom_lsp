@@ -4,6 +4,7 @@ namespace App\Repository;
 
 use App\Entity\User;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\ORM\Query\Expr;
 use Doctrine\ORM\QueryBuilder;
 
 /**
@@ -102,9 +103,10 @@ final class UserRepository extends ServiceEntityRepository
     {
         // Try: hover $users. The builder byEmail() sets up carries its DQL
         // into $builder, and through the call the `if` makes on it, so the
-        // result is still a list<User>. Change `u.displayName` to
-        // `t.displayName`: byEmail() declares `u` but not `t`, and that is
-        // reported.
+        // result is still a list<User>. Go-to-definition on displayName:
+        // the `u` byEmail() declared on the builder stands for User here.
+        // Change `u.displayName` to `t.displayName`: byEmail() declares `u`
+        // but not `t`, and that is reported.
         $builder = $this->byEmail();
         if ($name !== null) {
             $builder->andWhere('u.displayName = :name')->setParameter('name', $name);
@@ -126,6 +128,20 @@ final class UserRepository extends ServiceEntityRepository
 
         return $builder->andWhere('t.name = :team')
             ->setParameter('team', $team)
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * @return list<User>
+     */
+    public function sortedByName(): array
+    {
+        // Try: go-to-definition on displayName. The DQL an expression object
+        // is built from reads like any other fragment, so a field the mapping
+        // does not map, or a stray `)`, is reported there too.
+        return $this->createQueryBuilder('u')
+            ->add('orderBy', new Expr\OrderBy('u.displayName', 'ASC'))
             ->getQuery()
             ->getResult();
     }

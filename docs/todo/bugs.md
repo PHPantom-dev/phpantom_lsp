@@ -115,6 +115,41 @@ declaration is plainly the real one (the other has an empty body and no
 parameters, or sits in a file only one entry point includes), prefer it
 for hover and go-to-definition, and offer the others alongside.
 
+### B705. A method body in a file not yet opened is read without its imports
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+// src/Repository/Queries.php, loaded through PSR-4
+namespace App\Repository;
+use App\Entity\User;
+
+final class Queries {
+    public function make() { return new User(); }
+    public function users(): QueryBuilder
+    {
+        return $this->em->createQueryBuilder()->select('u')->from(User::class, 'u');
+    }
+}
+
+// src/Service/Users.php, the open file
+$queries->make();    // App\Repository\User, expected App\Entity\User
+$queries->users()->getQuery()->getResult();   // mixed, expected list<User>
+```
+
+When a method declares no return type, or returns a Doctrine query
+builder, its type is read from its body. A class name the body writes
+resolves against the declaring file's namespace but not its `use`
+imports, when that file was loaded on demand rather than opened or
+indexed: `User` becomes `App\Repository\User`. A fully-qualified name
+resolves, and so does every name once the whole project is indexed (as
+`analyze` does), so it shows in the editor rather than the CLI.
+
+**Where to look:** `Backend::infer_return_type_at`
+(`src/code_actions/phpstan/fix_return_type/inference.rs`), which takes
+the imports from `import_block_at`, and how a file loaded on demand
+records its `use` map in its `FileState`.
+
 ## Code actions
 
 No outstanding items.

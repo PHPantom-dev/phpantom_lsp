@@ -65,6 +65,7 @@ class QueryBuilder {
     public function having(mixed ...$having): static {}
     public function set(string $key, mixed $value): static {}
     public function orderBy(string $sort, ?string $order = null): static {}
+    public function add(string $dqlPartName, string|object|array $dqlPart, bool $append = false): static {}
     public function getQuery(): Query {}
 }
 ",
@@ -91,6 +92,24 @@ class Expr {
     public function orX(mixed ...$x): object {}
     public function eq(mixed $x, mixed $y): object {}
     public function literal(mixed $literal): object {}
+}
+",
+    ),
+    (
+        "stubs/orm/Query/Expr/OrderBy.php",
+        "<?php
+namespace Doctrine\\ORM\\Query\\Expr;
+class OrderBy {
+    public function __construct(?string $sort = null, ?string $order = null) {}
+}
+",
+    ),
+    (
+        "stubs/orm/Query/Expr/Andx.php",
+        "<?php
+namespace Doctrine\\ORM\\Query\\Expr;
+class Andx {
+    public function __construct(mixed $args = []) {}
 }
 ",
     ),
@@ -149,6 +168,25 @@ class Team {
     private ?User $owner;
     #[ORM\\OneToMany(targetEntity: 'User', mappedBy: 'team')]
     private iterable $members;
+}
+",
+    ),
+    // The entity is spelled in full: a body read from a file loaded on
+    // demand does not see that file's imports yet.
+    (
+        "src/Repository/Queries.php",
+        "<?php
+namespace App\\Repository;
+use Doctrine\\ORM\\EntityManagerInterface;
+use Doctrine\\ORM\\QueryBuilder;
+final class Queries {
+    public function __construct(private EntityManagerInterface $em) {}
+    public function users(): QueryBuilder
+    {
+        $qb = $this->em->createQueryBuilder();
+        $qb->select('u')->from(\\App\\Entity\\User::class, 'u');
+        return $qb;
+    }
 }
 ",
     ),
@@ -348,6 +386,56 @@ async fn a_variable_declared_differently_in_one_body_stands_for_nothing() {
     )
     .await;
     assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[tokio::test]
+async fn a_builder_another_method_returns_reads_the_variables_it_declared() {
+    let messages = diagnostics(
+        "        $queries = new \\App\\Repository\\Queries($em);
+        $queries->users()->andWhere('u.nope = 1');
+        $queries->users()->leftJoin('u.team', 't')->andWhere('t.size = 1 AND t.name = 1');
+        $qb = $queries->users();
+        $qb->andWhere('u.colour = 1')->andWhere($qb->expr()->isNull('u.shade'));
+        $queries->users()->andWhere('x.anything = 1');",
+    )
+    .await;
+    assert_eq!(
+        messages,
+        vec![
+            unmapped("nope", "User"),
+            unmapped("size", "Team"),
+            unmapped("colour", "User"),
+            unmapped("shade", "User"),
+        ]
+    );
+
+    let (backend, dir, uri, _, position) = open_service(
+        "        (new \\App\\Repository\\Queries($em))->users()->andWhere('u.em§ail = 1');",
+    )
+    .await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) =
+        goto_definition_at(&backend, &uri, position.line, position.character).await
+    else {
+        panic!("no definition");
+    };
+    let user = Uri::from_file_path(dir.path().join("src/Entity/User.php")).unwrap();
+    assert_eq!(location.uri, user);
+    assert_eq!(location.range.start.line, 10);
+}
+
+#[tokio::test]
+async fn an_expression_object_reports_unmapped_fields() {
+    let messages = diagnostics(
+        "        $order = new \\Doctrine\\ORM\\Query\\Expr\\OrderBy('u.size', 'ASC');
+        $em->createQueryBuilder()->select('u')->from(User::class, 'u')
+            ->add('where', new \\Doctrine\\ORM\\Query\\Expr\\Andx(['u.email = 1', 'u.nope = 1']))
+            ->add('orderBy', $order);",
+    )
+    .await;
+    assert_eq!(
+        messages,
+        vec![unmapped("size", "User"), unmapped("nope", "User")]
+    );
 }
 
 #[tokio::test]
@@ -604,6 +692,24 @@ async fn a_query_builder_fragment_that_does_not_parse_is_reported() {
             pair("'COUNT(u.id > 1'", "expected ')', got end of string"),
             pair("DESC", "expected end of string, got 'DESC'"),
             pair(":ids", "expected '(', got ':ids'"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_expression_object_that_does_not_parse_is_reported() {
+    let errors = syntax_errors(
+        "        $em->createQueryBuilder()->select('u')->from(User::class, 'u')
+            ->add('where', new \\Doctrine\\ORM\\Query\\Expr\\Andx(['u.id = 1)']))
+            ->add('orderBy', new \\Doctrine\\ORM\\Query\\Expr\\OrderBy(sort: 'u.email)'));
+        $other = new \\App\\Entity\\OrderBy('u.email)');",
+    )
+    .await;
+    assert_eq!(
+        errors,
+        vec![
+            pair(")", "expected end of string, got ')'"),
+            pair(")", "expected end of string, got ')'"),
         ]
     );
 }

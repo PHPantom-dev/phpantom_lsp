@@ -19,7 +19,14 @@
 //! part of the text declares.  A variable joined through an association
 //! (`JOIN u.team t`) stands for the association's target, which its subject
 //! text names in DQL's own path notation, `\App\Entity\User.team`, for the
-//! type engine to look up in the mapping.
+//! type engine to look up in the mapping.  One nothing in the body declares
+//! may have been declared on the builder before it got there, by the method
+//! that returned it: its subject text, `u@$this->users()`, asks the type
+//! engine what the builder's type says the variable stands for.
+//!
+//! The DQL an expression object is constructed with
+//! (`new Expr\OrderBy('u.name')`, `new Expr\Andx([…])`) is read the same
+//! way, with the variables of the function body it is written in.
 //!
 //! A variable a builder uses is reported when nothing declares it, or when
 //! some path through the function body to its query never does.  A builder
@@ -106,6 +113,8 @@ struct PendingField {
     alias: String,
     start: u32,
     end: u32,
+    /// Where the method name of the call whose DQL writes it starts.
+    call: u32,
 }
 
 /// A variable a path starts from, `u` in `u.email`, and the call whose DQL
@@ -178,6 +187,11 @@ pub(super) struct DqlPending<'a> {
     opaque: Vec<DqlTable>,
     /// The builders the DQL of each function body is given to.
     builders: Vec<(DqlTable, Builder)>,
+    /// The builder each call made on one that comes from a variable or
+    /// from elsewhere is made on, by where the call's method name starts:
+    /// a variable that call's DQL uses without anything in sight declaring
+    /// it may be one the builder declared before it got there.
+    call_builders: Vec<(u32, &'a Expression<'a>)>,
     /// The offset of each variable a method is called on.
     receivers: Vec<u32>,
     /// The offset of each variable assigned a builder, and where the
@@ -649,6 +663,30 @@ fn builder_parameter(method: &str, name: &str) -> Option<usize> {
     names.iter().position(|n| *n == name)
 }
 
+/// Record the builder `builder` that the DQL of the call whose method name
+/// starts at `method_start` is given to.
+fn note_call_builder<'a>(
+    builder: &'a Expression<'a>,
+    table: DqlTable,
+    method_start: u32,
+    ctx: &mut ExtractionCtx<'a>,
+) {
+    let origin = builder_of(builder);
+    if origin != Builder::Created {
+        ctx.dql.call_builders.push((method_start, builder));
+    }
+    ctx.dql.builders.push((table, origin));
+}
+
+/// The builder whose expression builder `object` is, `$qb` of
+/// `$qb->expr()`.
+fn expression_builder_owner<'a>(object: &'a Expression<'a>) -> &'a Expression<'a> {
+    match object {
+        Expression::Call(Call::Method(call)) => call.object,
+        _ => object,
+    }
+}
+
 /// Whether `object` is an expression builder, `….expr()`, whose methods
 /// take DQL fragments.
 fn is_expression_builder(object: &Expression<'_>) -> bool {
@@ -660,12 +698,12 @@ fn is_expression_builder(object: &Expression<'_>) -> bool {
 
 /// Read the DQL the instance call `object->method(arguments)` takes, if
 /// it takes any.
-pub(super) fn record_dql_call(
-    object: &Expression<'_>,
+pub(super) fn record_dql_call<'a>(
+    object: &'a Expression<'a>,
     method: &str,
     method_start: u32,
     arguments: &ArgumentList<'_>,
-    ctx: &mut ExtractionCtx<'_>,
+    ctx: &mut ExtractionCtx<'a>,
     scope_start: u32,
 ) {
     if !ctx.doctrine {
@@ -723,7 +761,7 @@ pub(super) fn record_dql_call(
         if method.eq_ignore_ascii_case("literal") {
             return;
         }
-        ctx.dql.builders.push((table, builder_of(object)));
+        note_call_builder(expression_builder_owner(object), table, method_start, ctx);
         for (index, argument) in arguments.arguments.iter().enumerate() {
             let grammar = match argument {
                 Argument::Positional(positional) if positional.ellipsis.is_none() => {
@@ -751,27 +789,48 @@ pub(super) fn record_dql_call(
     };
     // The builder `createQueryBuilder()` returns is a new one, whatever it
     // is called on.
-    let builder = if call.receiver == REPOSITORY {
-        Builder::Created
+    if call.receiver == REPOSITORY {
+        ctx.dql.builders.push((table, Builder::Created));
     } else {
-        builder_of(object)
-    };
-    ctx.dql.builders.push((table, builder));
+        note_call_builder(object, table, method_start, ctx);
+    }
     let role_at = |index: usize| match roles.get(index) {
         Some(role) => *role,
         None if variadic => roles[roles.len() - 1],
         None => Arg::Skip,
     };
+    let positional = bind_arguments(arguments, |name| builder_parameter(method, name));
+    if role_at(0) == Arg::RepositoryAlias
+        && let Some(Some(argument)) = positional.first()
+    {
+        match string_literal_text(argument) {
+            Some(alias) => ctx.dql.decls.push(PendingDecl {
+                table,
+                alias: alias.to_string(),
+                root: php_root(object),
+                at: method_start,
+            }),
+            None => ctx.dql.opaque.push(table),
+        }
+    }
+    read_arguments(&positional, role_at, table, call, ctx);
+}
+
+/// The arguments of a call, by the position of the parameter each is
+/// passed to; `slot` gives the position of a named one.  Reading stops at
+/// a spread argument.
+fn bind_arguments<'a>(
+    arguments: &'a ArgumentList<'a>,
+    slot: impl Fn(&str) -> Option<usize>,
+) -> Vec<Option<&'a Expression<'a>>> {
     let mut positional: Vec<Option<&Expression<'_>>> = Vec::new();
     for (index, argument) in arguments.arguments.iter().enumerate() {
         let slot = match argument {
             Argument::Positional(positional) if positional.ellipsis.is_none() => index,
-            Argument::Named(named) => {
-                match builder_parameter(method, crate::atom::bytes_to_str(named.name.value)) {
-                    Some(slot) => slot,
-                    None => continue,
-                }
-            }
+            Argument::Named(named) => match slot(crate::atom::bytes_to_str(named.name.value)) {
+                Some(slot) => slot,
+                None => continue,
+            },
             _ => break,
         };
         if positional.len() <= slot {
@@ -779,7 +838,18 @@ pub(super) fn record_dql_call(
         }
         positional[slot] = Some(argument.value());
     }
+    positional
+}
 
+/// Read the DQL the arguments `positional` of `call` hold, `role_at`
+/// giving what the argument at each position holds.
+fn read_arguments(
+    positional: &[Option<&Expression<'_>>],
+    role_at: impl Fn(usize) -> Arg,
+    table: DqlTable,
+    call: DqlCall,
+    ctx: &mut ExtractionCtx<'_>,
+) {
     for (index, argument) in positional.iter().enumerate() {
         let Some(argument) = argument else {
             continue;
@@ -816,21 +886,116 @@ pub(super) fn record_dql_call(
                 source.push_expr(alias, ctx.content);
                 read_source(&source, table, call, ctx);
             }
-            Arg::RepositoryAlias => {
-                let Some(alias) = string_literal_text(argument) else {
-                    ctx.dql.opaque.push(table);
-                    continue;
-                };
-                ctx.dql.decls.push(PendingDecl {
-                    table,
-                    alias: alias.to_string(),
-                    root: php_root(object),
-                    at: method_start,
-                });
-            }
-            Arg::Alias | Arg::Skip => {}
+            Arg::RepositoryAlias | Arg::Alias | Arg::Skip => {}
         }
     }
+}
+
+/// The expression objects whose constructors take DQL: each class, its
+/// constructor's parameter names, and what each argument holds.  The
+/// variables a `From` or a `Join` declares are the ones the builder it is
+/// added to declares.
+const EXPRESSION_OBJECTS: &[(&str, &[&str], &[Arg])] = {
+    use Arg::*;
+    &[
+        (
+            "Doctrine\\ORM\\Query\\Expr\\Andx",
+            &["args"],
+            &[Fragment(Grammar::Condition)],
+        ),
+        (
+            "Doctrine\\ORM\\Query\\Expr\\Orx",
+            &["args"],
+            &[Fragment(Grammar::Condition)],
+        ),
+        (
+            "Doctrine\\ORM\\Query\\Expr\\Select",
+            &["args"],
+            &[Fragment(Grammar::SelectList)],
+        ),
+        (
+            "Doctrine\\ORM\\Query\\Expr\\GroupBy",
+            &["args"],
+            &[Fragment(Grammar::GroupBy)],
+        ),
+        (
+            "Doctrine\\ORM\\Query\\Expr\\OrderBy",
+            &["sort", "order"],
+            &[Fragment(Grammar::OrderBy)],
+        ),
+        (
+            "Doctrine\\ORM\\Query\\Expr\\Comparison",
+            &["leftExpr", "operator", "rightExpr"],
+            &[Fragment(Grammar::Operand), Skip, Fragment(Grammar::Operand)],
+        ),
+        (
+            "Doctrine\\ORM\\Query\\Expr\\Math",
+            &["leftExpr", "operator", "rightExpr"],
+            &[Fragment(Grammar::Operand), Skip, Fragment(Grammar::Operand)],
+        ),
+        (
+            "Doctrine\\ORM\\Query\\Expr\\From",
+            &["from", "alias", "indexBy"],
+            &[Entity, Alias, Fragment(Grammar::Path)],
+        ),
+        (
+            "Doctrine\\ORM\\Query\\Expr\\Join",
+            &[
+                "joinType",
+                "join",
+                "alias",
+                "conditionType",
+                "condition",
+                "indexBy",
+            ],
+            &[
+                Skip,
+                Join,
+                Alias,
+                Skip,
+                Fragment(Grammar::Condition),
+                Fragment(Grammar::Path),
+            ],
+        ),
+    ]
+};
+
+/// Read the DQL the expression object `new class(arguments)` is
+/// constructed with, when `class` is one whose constructor takes DQL.
+pub(super) fn record_dql_instantiation(
+    class: &Expression<'_>,
+    arguments: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+    scope_start: u32,
+) {
+    if !ctx.doctrine {
+        return;
+    }
+    let Expression::Identifier(ident) = class else {
+        return;
+    };
+    let class_start = ident.span().start.offset;
+    let written = expr_to_subject_text(class);
+    let name = ctx.resolved_name_at(class_start).unwrap_or(&written);
+    let name = name.strip_prefix('\\').unwrap_or(name);
+    let Some(&(fqn, params, roles)) = EXPRESSION_OBJECTS
+        .iter()
+        .find(|(fqn, _, _)| fqn.eq_ignore_ascii_case(name))
+    else {
+        return;
+    };
+    let call = DqlCall {
+        method_start: class_start,
+        receiver: fqn,
+    };
+    let positional = bind_arguments(arguments, |name| params.iter().position(|p| *p == name));
+    read_arguments(
+        &positional,
+        |index| roles.get(index).copied().unwrap_or(Arg::Skip),
+        DqlTable::Scope(scope_start),
+        call,
+        ctx,
+    );
 }
 
 /// The argument at `index`, or the one named `name`.
@@ -932,6 +1097,7 @@ fn read_source(source: &DqlSource, table: DqlTable, call: DqlCall, ctx: &mut Ext
                     alias: source.text[alias].to_string(),
                     start,
                     end,
+                    call: call.method_start,
                 });
             }
         }
@@ -991,7 +1157,7 @@ impl Subject<'_> {
 pub(super) fn finish_dql(ctx: &mut ExtractionCtx<'_>) {
     let pending = std::mem::take(&mut ctx.dql);
     summarize_methods(&pending, ctx);
-    if pending.decls.is_empty() {
+    if pending.decls.is_empty() && pending.call_builders.is_empty() {
         report_undeclared(&pending, ctx);
         return;
     }
@@ -1012,33 +1178,60 @@ pub(super) fn finish_dql(ctx: &mut ExtractionCtx<'_>) {
     };
     // A join's variable stands for what the variable it joins from stands
     // for, followed through each join back to a root.  A variable joined
-    // from itself, directly or not, stands for nothing.
-    let resolve = |table: DqlTable, alias: &str| -> Option<Subject<'_>> {
-        let mut path: Vec<&str> = Vec::new();
-        let mut seen: Vec<&str> = Vec::new();
-        let mut current: &str = alias;
-        loop {
-            if seen.contains(&current) {
-                return None;
-            }
-            seen.push(current);
-            let (root, span) = match declared(table, current)? {
-                Root::Php { text, start, end } => (text.into(), Some((*start, *end))),
-                Root::Fqn(name) => (format!("\\{name}").into(), None),
-                Root::Join { alias, association } => {
-                    path.push(association);
-                    current = alias;
-                    continue;
+    // from itself, directly or not, stands for nothing.  One nothing in
+    // sight declares stands for what the builder `builder` the DQL is given
+    // to declared it as before it got there, as far as its type says.
+    let resolve =
+        |table: DqlTable, alias: &str, builder: Option<&Expression<'_>>| -> Option<Subject<'_>> {
+            let mut path: Vec<&str> = Vec::new();
+            let mut seen: Vec<&str> = Vec::new();
+            let mut current: &str = alias;
+            loop {
+                if seen.contains(&current) {
+                    return None;
                 }
-                Root::Unknown => return None,
-            };
-            path.reverse();
-            return Some(Subject { root, span, path });
-        }
-    };
+                seen.push(current);
+                let Some(root) = declared(table, current) else {
+                    if pending
+                        .decls
+                        .iter()
+                        .any(|d| d.table == table && d.alias == current)
+                    {
+                        return None;
+                    }
+                    let builder = expr_to_subject_text(builder?);
+                    if builder.is_empty() {
+                        return None;
+                    }
+                    path.reverse();
+                    return Some(Subject {
+                        root: format!("{current}@{builder}").into(),
+                        span: None,
+                        path,
+                    });
+                };
+                let (root, span) = match root {
+                    Root::Php { text, start, end } => (text.into(), Some((*start, *end))),
+                    Root::Fqn(name) => (format!("\\{name}").into(), None),
+                    Root::Join { alias, association } => {
+                        path.push(association);
+                        current = alias;
+                        continue;
+                    }
+                    Root::Unknown => return None,
+                };
+                path.reverse();
+                return Some(Subject { root, span, path });
+            }
+        };
 
     for field in &pending.fields {
-        let Some(subject) = resolve(field.table, &field.alias) else {
+        let builder = pending
+            .call_builders
+            .iter()
+            .find(|(call, _)| *call == field.call)
+            .map(|(_, builder)| *builder);
+        let Some(subject) = resolve(field.table, &field.alias, builder) else {
             continue;
         };
         let subject_text = subject.subject_text(ctx.content);
@@ -1064,7 +1257,7 @@ pub(super) fn finish_dql(ctx: &mut ExtractionCtx<'_>) {
     let content_len = ctx.content.len() as u32;
     let mut sites: Vec<crate::symbol_map::DqlAliasSite> = Vec::new();
     for decl in &pending.decls {
-        let Some(subject) = resolve(decl.table, &decl.alias) else {
+        let Some(subject) = resolve(decl.table, &decl.alias, None) else {
             continue;
         };
         let (start, end) = match decl.table {

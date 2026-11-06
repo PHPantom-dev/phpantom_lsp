@@ -47,6 +47,7 @@ pub(super) fn extract_instantiation_expr<'a>(
         emit_drupal_url_spans(inst.class, args, ctx);
         emit_drupal_route_permission_spans(inst.class, args, ctx);
         emit_drupal_config_target_spans(inst.class, args, ctx);
+        record_dql_instantiation(inst.class, args, ctx, scope_start);
         if !class_text.is_empty() {
             emit_call_site(
                 format!("new {}", class_text),

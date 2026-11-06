@@ -703,6 +703,16 @@ pub(crate) enum StatementKind {
     Delete,
 }
 
+/// What a variable a query builder declares stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AliasRoot<'a> {
+    /// The entity a range declaration, or a join of an entity, names.
+    Entity(&'a str),
+    /// The target of the association `field` of what the variable `alias`
+    /// stands for.
+    Association { alias: &'a str, field: &'a str },
+}
+
 /// A range declaration a builder's `from()` adds, with the joins attached
 /// to it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -711,8 +721,9 @@ struct FromPart {
     alias: String,
     index_by: Option<String>,
     joins: Vec<String>,
-    /// The variables the joins declare.
-    join_aliases: Vec<String>,
+    /// The variable each join declares, with the association path or
+    /// entity it joins.
+    join_aliases: Vec<(String, String)>,
 }
 
 /// An argument a builder method is called with, as far as its value is
@@ -997,9 +1008,11 @@ impl QueryBuilderState {
                 .iter()
                 .position(|f| Some(f.alias.as_str()) == parent)
                 .or_else(|| {
-                    self.from
-                        .iter()
-                        .position(|f| f.join_aliases.iter().any(|a| Some(a.as_str()) == parent))
+                    self.from.iter().position(|f| {
+                        f.join_aliases
+                            .iter()
+                            .any(|(a, _)| Some(a.as_str()) == parent)
+                    })
                 })
                 .or_else(|| (!self.from.is_empty()).then_some(0))?;
             let kind = if is("leftJoin") { "LEFT" } else { "INNER" };
@@ -1010,7 +1023,7 @@ impl QueryBuilderState {
             }
             let part = &mut self.from[root];
             part.joins.push(text);
-            part.join_aliases.push(alias);
+            part.join_aliases.push((alias, join));
         } else if is("indexBy") {
             let alias = required(0)?;
             let index_by = required(1)?;
@@ -1090,6 +1103,29 @@ impl QueryBuilderState {
             return None;
         }
         Some(())
+    }
+
+    /// What the variable `alias` the builder has declared stands for.
+    pub(crate) fn alias_root(&self, alias: &str) -> Option<AliasRoot<'_>> {
+        for from in &self.from {
+            if from.alias == alias {
+                return Some(AliasRoot::Entity(&from.entity));
+            }
+            for (joined, join) in &from.join_aliases {
+                if joined == alias {
+                    return Some(match join.split_once('.') {
+                        Some((alias, field)) => AliasRoot::Association { alias, field },
+                        None => AliasRoot::Entity(join),
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    /// How many variables the builder has declared.
+    pub(crate) fn alias_count(&self) -> usize {
+        self.from.iter().map(|f| 1 + f.join_aliases.len()).sum()
     }
 
     /// The DQL of the `SELECT` built so far.

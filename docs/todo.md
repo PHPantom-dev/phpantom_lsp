@@ -39,7 +39,6 @@ contributor even though it's short.
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
 | T66 | [A DQL aggregate or function is typed `mixed`](todo/type-inference.md#t66-a-dql-aggregate-or-function-is-typed-mixed) | Low-Medium  | Medium      |
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
-| F69 | [DQL in expression objects and other methods' query builders](todo/lsp-features.md#f69-dql-in-expression-objects-and-other-methods-query-builders) | Low-Medium  | Medium      |
 | F72 | [DQL variables of a query builder a chain of methods handles](todo/lsp-features.md#f72-dql-variables-of-a-query-builder-a-chain-of-methods-handles) | Low         | Medium      |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
@@ -81,7 +80,6 @@ ships, remove every row that names it.
 | F56 | [Live components](todo/lsp-features.md#f56-live-components) (depends on F38) | Low-Medium  | Medium-High |
 | T66 | [A DQL aggregate or function is typed `mixed`](todo/type-inference.md#t66-a-dql-aggregate-or-function-is-typed-mixed) | Low-Medium  | Medium      |
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
-| F69 | [DQL in expression objects and other methods' query builders](todo/lsp-features.md#f69-dql-in-expression-objects-and-other-methods-query-builders) | Low-Medium  | Medium      |
 | F72 | [DQL variables of a query builder a chain of methods handles](todo/lsp-features.md#f72-dql-variables-of-a-query-builder-a-chain-of-methods-handles) | Low         | Medium      |
 | F48 | [Symfony environment variables](todo/lsp-features.md#f48-symfony-environment-variables) | Medium      | Low-Medium  |
 | F24 | [Doctrine lenses miss attribute mappings and generic repositories](todo/lsp-features.md#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories) | Medium      | Medium      |

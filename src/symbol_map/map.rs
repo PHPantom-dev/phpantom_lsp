@@ -766,10 +766,12 @@ pub(crate) struct DqlSyntaxSite {
     pub message: Box<str>,
     /// The diagnostic code the site is reported with.
     pub code: &'static str,
-    /// Where the method name of the call that takes the DQL starts.
+    /// Where the method name of the call that takes the DQL starts, or
+    /// the class name of the `new` that does.
     pub call: u32,
-    /// The class the call's receiver must be for the DQL to be judged: a
-    /// method of that name on anything else takes something else.
+    /// The class the call's receiver, or the object the `new` makes, must
+    /// be for the DQL to be judged: a method of that name on anything else
+    /// takes something else.
     pub receiver: &'static str,
     /// The calls of other methods that create or are handed the query
     /// builder the variable is used on.  The variable is undeclared only

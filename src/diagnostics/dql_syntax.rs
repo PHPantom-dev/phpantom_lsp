@@ -8,7 +8,9 @@
 //! throws on such a query when it runs, so each is an error, once the type
 //! engine confirms that the call taking the text is Doctrine's: `where()`
 //! and `select()` are common names, and a DBAL query builder takes SQL
-//! through the same ones.
+//! through the same ones.  The DQL an expression object is constructed
+//! with (`new Expr\OrderBy('u.name')`) is confirmed by the class of the
+//! object.
 //!
 //! A variable used on a builder another method returns, or that is passed
 //! to one, is reported only once the type engine finds that method and its
@@ -265,7 +267,7 @@ fn read_dql_builder_methods(uri: &str, content: &str) -> SymbolMap {
 }
 
 /// The calls the walk is after, and the receiver and method name of the
-/// ones it found.
+/// ones it found: for a `new`, the object it makes, and no name.
 struct Calls<'w, 'ast, 'arena> {
     wanted: &'w HashSet<u32>,
     found: Vec<(u32, &'ast Expression<'arena>, &'arena str)>,
@@ -307,5 +309,20 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, Calls<'w, 'ast,
         calls: &mut Calls<'w, 'ast, 'arena>,
     ) {
         Self::visit(node.object, &node.method, calls);
+    }
+
+    /// An expression object constructed with DQL is confirmed by the
+    /// object it makes.
+    fn walk_in_expression(
+        &self,
+        node: &'ast Expression<'arena>,
+        calls: &mut Calls<'w, 'ast, 'arena>,
+    ) {
+        if let Expression::Instantiation(instantiation) = node {
+            let start = instantiation.class.span().start.offset;
+            if calls.wanted.contains(&start) {
+                calls.found.push((start, node, ""));
+            }
+        }
     }
 }

@@ -128,6 +128,16 @@ pub enum SubjectExpr {
         /// The association's field.
         association: String,
     },
+    /// The entity the Doctrine Query Language variable `alias` of the query
+    /// builder `base` stands for, `alias@base`: the variable a builder
+    /// declared before it got to the code that uses it, which the builder's
+    /// type carries.  No PHP expression is written this way either.
+    DqlBuilderAlias {
+        /// The query builder.
+        base: Box<SubjectExpr>,
+        /// The variable.
+        alias: String,
+    },
     /// Inline array literal with index access: `[expr1, expr2][0]`.
     InlineArray {
         /// The raw element expressions inside the `[…]` literal.
@@ -238,6 +248,14 @@ impl SubjectExpr {
             return SubjectExpr::DqlAssociation {
                 base: Box::new(SubjectExpr::parse(base)),
                 association: association.to_string(),
+            };
+        }
+
+        // ── A query builder's DQL variable: `alias@base` ───────────
+        if let Some((alias, base)) = split_dql_builder_alias(subject) {
+            return SubjectExpr::DqlBuilderAlias {
+                base: Box::new(SubjectExpr::parse(base)),
+                alias: alias.to_string(),
             };
         }
 
@@ -469,6 +487,11 @@ impl SubjectExpr {
                     stack.push(Step::Text("."));
                     stack.push(Step::Node(base));
                 }
+                SubjectExpr::DqlBuilderAlias { base, alias } => {
+                    out.push_str(alias);
+                    out.push('@');
+                    stack.push(Step::Node(base));
+                }
                 SubjectExpr::StaticMethodCall { class, method } => {
                     out.push_str(class);
                     out.push_str("::");
@@ -612,7 +635,8 @@ impl SubjectExpr {
                     base
                 }
                 SubjectExpr::ArrayAccess { base, .. }
-                | SubjectExpr::DqlAssociation { base, .. } => base,
+                | SubjectExpr::DqlAssociation { base, .. }
+                | SubjectExpr::DqlBuilderAlias { base, .. } => base,
                 SubjectExpr::CallExpr { callee, args_text } => {
                     pending_args.push(args_text);
                     callee
@@ -686,7 +710,8 @@ fn detach_child(node: &mut SubjectExpr, pending: &mut Vec<SubjectExpr>) {
         SubjectExpr::PropertyChain { base, .. }
         | SubjectExpr::MethodCall { base, .. }
         | SubjectExpr::ArrayAccess { base, .. }
-        | SubjectExpr::DqlAssociation { base, .. } => base,
+        | SubjectExpr::DqlAssociation { base, .. }
+        | SubjectExpr::DqlBuilderAlias { base, .. } => base,
         SubjectExpr::CallExpr { callee, .. } => callee,
         SubjectExpr::This
         | SubjectExpr::SelfKw
@@ -721,6 +746,18 @@ fn split_dql_association(subject: &str) -> Option<(&str, &str)> {
     }
     base.ends_with(|c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | ')' | ']'))
         .then_some((base, association))
+}
+
+/// Split a query builder's DQL variable, `alias@base`, into the variable
+/// and the builder.
+fn split_dql_builder_alias(subject: &str) -> Option<(&str, &str)> {
+    let (alias, base) = subject.split_once('@')?;
+    let mut chars = alias.chars();
+    let starts_name = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    (starts_name && chars.all(|c| c.is_ascii_alphanumeric() || c == '_') && !base.is_empty())
+        .then_some((alias, base))
 }
 
 /// Appends the names of genuine local variables (`$name`, but not `$this`)

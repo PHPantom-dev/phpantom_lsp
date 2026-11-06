@@ -392,6 +392,14 @@ $builder = $entityManager->createQueryBuilder()->select('u')->from(User::class, 
 $builder->andWhere('u.displayName = :name')->setParameter('name', 'Ada');
 $users = $builder->getQuery()->getResult();
 check('searchByName() gets a list of User from the builder byEmail() sets up and the branch changes', array_is_list($users) && $users[0] instanceof User);
+$users = $entityManager->createQueryBuilder()
+    ->select('u')
+    ->from(User::class, 'u')
+    ->add('orderBy', new \Doctrine\ORM\Query\Expr\OrderBy('u.displayName', 'ASC'))
+    ->getQuery()
+    ->getResult();
+check('sortedByName() orders by the displayName an Expr\OrderBy names', array_is_list($users) && $users[0] instanceof User);
+check('A stray parenthesis in an Expr\OrderBy fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u ORDER BY u.displayName) ASC'));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

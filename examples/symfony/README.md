@@ -134,12 +134,16 @@ catalogues together, the way a real Symfony project does.
   `displayNamesByEmail()`, hover `$rows`, a shape of the selected fields
   keyed by the `INDEX BY` field. In `searchByName()`, hover `$users`: the
   builder `byEmail()` returns carries its DQL into a variable and through
-  a branch, so the result is still a `list<User>`.
+  a branch, so the result is still a `list<User>`, and the `u` that
+  `byEmail()` declared stands for `User` in the `andWhere()`.
 - In `UserRepository::searchByName()`, change `u.displayName` to
   `t.displayName`, or in `inTeamByEmail()`, delete the `joinTeam()` call.
   The variables a builder uses are checked against the ones declared by
   the method that creates it and the methods it is passed to, so the `t`
   nothing joins is reported.
+- In `UserRepository::sortedByName()`, go-to-definition on `displayName`
+  in the `Expr\OrderBy`. The DQL an expression object is built from reads
+  like any other fragment.
 
 ## Getting started
 
