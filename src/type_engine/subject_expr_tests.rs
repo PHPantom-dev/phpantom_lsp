@@ -1238,3 +1238,30 @@ fn parse_invoked_closure_literal_round_trips() {
         assert_eq!(parsed.to_subject_text(), text);
     }
 }
+
+#[test]
+fn parse_dql_association_path() {
+    assert_eq!(
+        SubjectExpr::parse("\\App\\User.team.owner"),
+        SubjectExpr::DqlAssociation {
+            base: Box::new(SubjectExpr::DqlAssociation {
+                base: Box::new(SubjectExpr::ClassName("\\App\\User".to_string())),
+                association: "team".to_string(),
+            }),
+            association: "owner".to_string(),
+        }
+    );
+    assert_eq!(
+        SubjectExpr::parse("$this.team").to_subject_text(),
+        "$this.team"
+    );
+    assert_eq!(
+        SubjectExpr::parse("$em->getRepository(User::class).team").to_subject_text(),
+        "$em->getRepository(User::class).team"
+    );
+    // A `.` inside a call's arguments is no path.
+    assert!(matches!(
+        SubjectExpr::parse("$x->find('a.b')"),
+        SubjectExpr::CallExpr { .. }
+    ));
+}

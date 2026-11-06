@@ -1,11 +1,14 @@
-//! Doctrine Query Language that does not parse.
+//! Doctrine Query Language that does not parse, or uses a variable nothing
+//! declares.
 //!
 //! The symbol map records where each query, and each fragment a query
 //! builder joins into one, stops following DQL's grammar (see
-//! [`crate::doctrine::dql_syntax`]).  Doctrine throws on such a query when
-//! it runs, so each is an error, once the type engine confirms that the
-//! call taking the text is Doctrine's: `where()` and `select()` are common
-//! names, and a DBAL query builder takes SQL through the same ones.
+//! [`crate::doctrine::dql_syntax`]), and each variable a query, or the
+//! builders a function body creates, uses without declaring.  Doctrine
+//! throws on such a query when it runs, so each is an error, once the type
+//! engine confirms that the call taking the text is Doctrine's: `where()`
+//! and `select()` are common names, and a DBAL query builder takes SQL
+//! through the same ones.
 
 use std::collections::HashMap;
 
@@ -21,6 +24,9 @@ use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 /// Diagnostic code used for DQL that does not parse.
 pub(crate) const DQL_SYNTAX_ERROR_CODE: &str = "dql_syntax_error";
+
+/// Diagnostic code used for a DQL variable nothing declares.
+pub(crate) const UNKNOWN_DQL_VARIABLE_CODE: &str = "unknown_dql_variable";
 
 impl Backend {
     /// Report each piece of DQL in the file at `uri` that does not follow
@@ -98,7 +104,7 @@ impl Backend {
             out.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::Error,
-                DQL_SYNTAX_ERROR_CODE,
+                site.code,
                 site.message.to_string(),
             ));
         }

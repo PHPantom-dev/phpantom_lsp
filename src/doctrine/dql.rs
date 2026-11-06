@@ -22,9 +22,12 @@ pub(crate) const DYNAMIC: char = '\u{1}';
 pub(crate) enum DeclRoot {
     /// The entity class the range of text names (`FROM App\Entity\User u`).
     Entity(Range<usize>),
-    /// The target of the association `field` of the entity another variable
-    /// stands for (`JOIN u.address a`).
-    Association,
+    /// The target of the association `field` of the entity the variable
+    /// `alias` stands for (`JOIN u.address a`).
+    Association {
+        alias: Range<usize>,
+        field: Range<usize>,
+    },
     /// Something the text does not spell out.
     Unknown,
 }
@@ -55,6 +58,9 @@ pub(crate) enum DqlRef {
 pub(crate) struct DqlScan {
     pub(crate) decls: Vec<DqlDecl>,
     pub(crate) refs: Vec<DqlRef>,
+    /// Whether a declaration's variable is a dynamic part of the text, so
+    /// that the text may declare any variable.
+    pub(crate) opaque: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,6 +244,8 @@ impl Scanner<'_> {
         if self.kind(i) == Some(Tok::Ident) {
             let alias = self.range(i);
             self.out.decls.push(DqlDecl { alias, root });
+        } else {
+            self.out.opaque = true;
         }
         i + 1
     }
@@ -263,7 +271,18 @@ impl Scanner<'_> {
     fn join_decl(&mut self, i: usize) -> usize {
         if self.is_path(i) {
             let end = self.path(i);
-            return self.declare(end, DeclRoot::Association);
+            let root = if end == i + 3
+                && self.kind(i) == Some(Tok::Ident)
+                && self.kind(i + 2) == Some(Tok::Ident)
+            {
+                DeclRoot::Association {
+                    alias: self.range(i),
+                    field: self.range(i + 2),
+                }
+            } else {
+                DeclRoot::Unknown
+            };
+            return self.declare(end, root);
         }
         self.entity_decl(i)
     }
@@ -472,7 +491,9 @@ mod tests {
             .map(|d| {
                 let root = match &d.root {
                     DeclRoot::Entity(r) => text[r.clone()].to_string(),
-                    DeclRoot::Association => "<assoc>".to_string(),
+                    DeclRoot::Association { alias, field } => {
+                        format!("{}.{}", &text[alias.clone()], &text[field.clone()])
+                    }
                     DeclRoot::Unknown => "<unknown>".to_string(),
                 };
                 (text[d.alias.clone()].to_string(), root)
@@ -503,7 +524,7 @@ mod tests {
         );
         assert_eq!(
             decls,
-            vec![pair("u", "App\\Entity\\User"), pair("a", "<assoc>")]
+            vec![pair("u", "App\\Entity\\User"), pair("a", "u.address")]
         );
         assert_eq!(refs, vec!["u.address", "u.email", "a.city", "u.name"]);
     }
@@ -564,6 +585,8 @@ mod tests {
         let (decls, refs) = names(&text);
         assert_eq!(decls, vec![pair("u", "<unknown>")]);
         assert!(refs.is_empty());
+        assert!(!scan(&text).opaque);
+        assert!(scan(&format!("SELECT u FROM App\\User {DYNAMIC}")).opaque);
     }
 
     #[test]

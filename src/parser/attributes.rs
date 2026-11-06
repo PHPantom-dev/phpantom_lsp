@@ -53,6 +53,16 @@ pub(super) fn extract_doctrine_mapping<'a>(
 ) -> Option<Box<DoctrineMapping>> {
     let entity = find_attribute(attribute_lists, ctx, DOCTRINE_ENTITY);
     let mut fields = Vec::new();
+    let mut associations = Vec::new();
+    let mut map = |lists: &Sequence<'_, AttributeList<'_>>, name: Atom| {
+        let Some(attr) = field_attribute(lists, ctx) else {
+            return;
+        };
+        if let Some(target) = association_target(attr, ctx) {
+            associations.push((name, target));
+        }
+        fields.push(name);
+    };
     for member in members {
         match member {
             ClassLikeMember::Property(property) => {
@@ -60,18 +70,16 @@ pub(super) fn extract_doctrine_mapping<'a>(
                     Property::Plain(p) => &p.attribute_lists,
                     Property::Hooked(h) => &h.attribute_lists,
                 };
-                if maps_field(lists, ctx) {
-                    for variable in property.variables() {
-                        fields.push(property_name(variable.name));
-                    }
+                for variable in property.variables() {
+                    map(lists, property_name(variable.name));
                 }
             }
             ClassLikeMember::Method(method)
                 if method.name.value.eq_ignore_ascii_case(b"__construct") =>
             {
                 for param in method.parameter_list.parameters.iter() {
-                    if param.is_promoted_property() && maps_field(&param.attribute_lists, ctx) {
-                        fields.push(property_name(param.variable.name));
+                    if param.is_promoted_property() {
+                        map(&param.attribute_lists, property_name(param.variable.name));
                     }
                 }
             }
@@ -85,6 +93,7 @@ pub(super) fn extract_doctrine_mapping<'a>(
         is_entity: entity.is_some(),
         repository: entity.and_then(|attr| repository_class(attr, ctx)),
         fields,
+        associations,
         managed_entity: None,
     }))
 }
@@ -94,23 +103,67 @@ fn property_name(variable: &[u8]) -> Atom {
     atom(name.strip_prefix('$').unwrap_or(name))
 }
 
-/// Whether one of `attribute_lists` maps its property as a field, an
-/// identifier, or an association.  The short name is checked first, so a
-/// property with unrelated attributes resolves none of their names.
-fn maps_field(
-    attribute_lists: &Sequence<'_, AttributeList<'_>>,
+/// The attribute among `attribute_lists` that maps its property as a field,
+/// an identifier, or an association, preferring an association's.  The
+/// short name is checked first, so a property with unrelated attributes
+/// resolves none of their names.
+fn field_attribute<'l, 'a>(
+    attribute_lists: &'l Sequence<'a, AttributeList<'a>>,
     ctx: Option<&DocblockCtx<'_>>,
-) -> bool {
-    attribute_lists
+) -> Option<&'l Attribute<'a>> {
+    let mut found = None;
+    for attr in attribute_lists
         .iter()
         .flat_map(|list| list.attributes.iter())
-        .any(|attr| {
-            let short = bytes_to_str(last_segment(attr.name.value()));
-            DOCTRINE_FIELD_ATTRIBUTES.contains(&short)
-                && attribute_fqn(attr, ctx)
-                    .strip_prefix(DOCTRINE_MAPPING_NS)
-                    .is_some_and(|rest| rest.eq_ignore_ascii_case(short))
-        })
+    {
+        let short = bytes_to_str(last_segment(attr.name.value()));
+        if DOCTRINE_FIELD_ATTRIBUTES.contains(&short)
+            && attribute_fqn(attr, ctx)
+                .strip_prefix(DOCTRINE_MAPPING_NS)
+                .is_some_and(|rest| rest.eq_ignore_ascii_case(short))
+        {
+            if association_kind(attr).is_some() {
+                return Some(attr);
+            }
+            found = Some(attr);
+        }
+    }
+    found
+}
+
+/// The association attribute `attr` is, by its short name.
+fn association_kind(attr: &Attribute<'_>) -> Option<&'static str> {
+    let short = bytes_to_str(last_segment(attr.name.value()));
+    ["ManyToOne", "OneToOne", "OneToMany", "ManyToMany"]
+        .into_iter()
+        .find(|kind| kind.eq_ignore_ascii_case(short))
+}
+
+/// For an association attribute, the entity its `targetEntity` names, in
+/// the form [`repository_class`] gives a class name; `Some(None)` when it
+/// names none.  `None` for an attribute that maps no association.
+///
+/// `targetEntity` is the first parameter of every association attribute
+/// but `OneToMany`, whose first was `mappedBy` before ORM 3, so a
+/// positional first argument counts there only as an `X::class`, which no
+/// property name is.
+fn association_target(attr: &Attribute<'_>, ctx: Option<&DocblockCtx<'_>>) -> Option<Option<Atom>> {
+    let kind = association_kind(attr)?;
+    let Some(arguments) = attr.argument_list.as_ref().map(|list| &list.arguments) else {
+        return Some(None);
+    };
+    let value = arguments.iter().enumerate().find_map(|(i, arg)| match arg {
+        PartialArgument::Positional(positional)
+            if i == 0
+                && (kind != "OneToMany"
+                    || crate::parser::class_fetch_identifier(positional.value).is_some()) =>
+        {
+            Some(positional.value)
+        }
+        PartialArgument::Named(named) if named.name.value == b"targetEntity" => Some(named.value),
+        _ => None,
+    });
+    Some(value.and_then(|value| class_name_argument(value, ctx, true)))
 }
 
 /// The attribute among `attribute_lists` whose name resolves to `fqn`.
@@ -153,16 +206,39 @@ fn repository_class(attr: &Attribute<'_>, ctx: Option<&DocblockCtx<'_>>) -> Opti
         })?,
         _ => return None,
     };
+    class_name_argument(value, ctx, false)
+}
+
+/// The class an attribute argument names: an `X::class` as written, and a
+/// string, which PHP never reads through the file's imports, as a
+/// fully-qualified `\X`.  With `in_namespace`, a string without a `\` names
+/// a class of the file's namespace, as Doctrine reads an association's
+/// target.
+fn class_name_argument(
+    value: &mago_syntax::cst::Expression<'_>,
+    ctx: Option<&DocblockCtx<'_>>,
+    in_namespace: bool,
+) -> Option<Atom> {
     if let Some(name) = crate::parser::class_fetch_identifier(value) {
         return Some(atom(bytes_to_str(name.value())));
     }
+    let ctx = ctx?;
     let span = value.span();
-    let text = ctx?
+    let text = ctx
         .content
         .get(span.start.offset as usize..span.end.offset as usize)?;
     let name = crate::util::unescape_php_string_literal(text.trim())?;
-    let name = name.trim().trim_start_matches('\\');
-    (!name.is_empty()).then(|| atom(&format!("\\{name}")))
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    if in_namespace
+        && !name.contains('\\')
+        && let Some(namespace) = ctx.namespace.as_deref().filter(|ns| !ns.is_empty())
+    {
+        return Some(atom(&format!("\\{namespace}\\{name}")));
+    }
+    Some(atom(&format!("\\{}", name.trim_start_matches('\\'))))
 }
 
 /// Extract the PHP attribute target bitmask from a class's attribute lists.

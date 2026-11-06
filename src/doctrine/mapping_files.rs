@@ -24,6 +24,9 @@ pub(crate) struct MappedClass {
     pub(crate) is_entity: bool,
     /// The fields, identifiers, and associations the file maps.
     pub(crate) fields: Vec<String>,
+    /// The associations among `fields`, each with the entity it targets,
+    /// fully qualified, when the file names one.
+    pub(crate) associations: Vec<(String, Option<String>)>,
 }
 
 /// The classes each mapping file maps, keyed by the file's URI.
@@ -58,6 +61,31 @@ pub(crate) fn mapped_fields(index: &MappingFileIndex, fqn: &str) -> Option<(bool
             let (is_entity, fields) = found.get_or_insert_with(|| (false, Vec::new()));
             *is_entity |= class.is_entity;
             fields.extend(class.fields.iter().cloned());
+        }
+    }
+    found
+}
+
+/// Whether a mapping file maps `field` of `fqn` as an association, and the
+/// entity it targets when the file names one.  `None` when no file maps
+/// the field as an association.
+pub(crate) fn mapped_association(
+    index: &MappingFileIndex,
+    fqn: &str,
+    field: &str,
+) -> Option<Option<String>> {
+    let fqn = fqn.strip_prefix('\\').unwrap_or(fqn);
+    let mut found = None;
+    for classes in index.read().values() {
+        for class in classes.iter().filter(|c| c.fqn.eq_ignore_ascii_case(fqn)) {
+            for (name, target) in &class.associations {
+                if name == field {
+                    if target.is_some() {
+                        return Some(target.clone());
+                    }
+                    found = Some(None);
+                }
+            }
         }
     }
     found
@@ -133,6 +161,7 @@ fn scan_xml(content: &str) -> Vec<MappedClass> {
                 fqn: normalize_framework_fqn(&fqn),
                 is_entity,
                 fields: Vec::new(),
+                associations: Vec::new(),
             };
             if self_closing {
                 classes.push(class);
@@ -148,6 +177,11 @@ fn scan_xml(content: &str) -> Vec<MappedClass> {
             && let Some(&(_, attr)) = XML_FIELD_TAGS.iter().find(|(t, _)| *t == name)
             && let Some((field, _, _)) = xml_attr_value(tag, 0, &[attr])
         {
+            if attr == "field" {
+                let target = xml_attr_value(tag, 0, &["target-entity"])
+                    .map(|(target, _, _)| qualify_target(&class.fqn, &target));
+                class.associations.push((field.clone(), target));
+            }
             class.fields.push(field);
         }
     }
@@ -189,10 +223,13 @@ fn scan_yaml(content: &str) -> Vec<MappedClass> {
         let Some(key) = yaml_key(line) else {
             continue;
         };
+        let fqn = normalize_framework_fqn(key);
         let mut kind = None;
         let mut fields = Vec::new();
+        let mut associations: Vec<(String, Option<String>)> = Vec::new();
         let mut section_indent = None;
         let mut in_field_section = false;
+        let mut in_associations = false;
         let mut field_indent = None;
         while i < lines.len() && leading_spaces(lines[i].1) > 0 {
             let line = lines[i].1;
@@ -209,12 +246,24 @@ fn scan_yaml(content: &str) -> Vec<MappedClass> {
                     kind = yaml_value(line);
                 } else if YAML_FIELD_SECTIONS.contains(&child) {
                     in_field_section = true;
+                    in_associations = !matches!(child, "id" | "fields");
                 }
-            } else if in_field_section
-                && indent == *field_indent.get_or_insert(indent)
-                && let Some(field) = yaml_key(line)
+            } else if !in_field_section {
+                continue;
+            } else if indent == *field_indent.get_or_insert(indent) {
+                if let Some(field) = yaml_key(line) {
+                    fields.push(field.to_string());
+                    if in_associations {
+                        associations.push((field.to_string(), None));
+                    }
+                }
+            } else if in_associations
+                && indent > field_indent.unwrap_or(indent)
+                && yaml_key(line) == Some("targetEntity")
+                && let Some(target) = yaml_value(line)
+                && let Some((_, known)) = associations.last_mut()
             {
-                fields.push(field.to_string());
+                *known = Some(qualify_target(&fqn, target));
             }
         }
         let is_entity = match kind {
@@ -223,12 +272,24 @@ fn scan_yaml(content: &str) -> Vec<MappedClass> {
             _ => continue,
         };
         classes.push(MappedClass {
-            fqn: normalize_framework_fqn(key),
+            fqn,
             is_entity,
             fields,
+            associations,
         });
     }
     classes
+}
+
+/// The entity a mapping of `owner` names as an association's target: a
+/// name without a `\` is a class of the owner's namespace, as Doctrine's
+/// `ClassMetadata::fullyQualifiedClassName()` reads it.
+fn qualify_target(owner: &str, target: &str) -> String {
+    let qualified = normalize_framework_fqn(target);
+    match owner.rsplit_once('\\') {
+        Some((namespace, _)) if !target.contains('\\') => format!("{namespace}\\{qualified}"),
+        _ => qualified,
+    }
 }
 
 /// The key a YAML mapping line opens, unquoted.
@@ -263,6 +324,7 @@ mod tests {
     <id name="id" type="integer"><generator strategy="AUTO"/></id>
     <field name="email" type="string"/>
     <many-to-one field="team" target-entity="App\Entity\Team"/>
+    <one-to-many field="posts" target-entity="Post" mapped-by="author"/>
     <order-by-field name="ignored"/>
     <embedded name="address" class="App\Entity\Address"/>
   </entity>
@@ -277,12 +339,17 @@ mod tests {
                 MappedClass {
                     fqn: "App\\Entity\\User".to_string(),
                     is_entity: true,
-                    fields: vec!["id".into(), "email".into(), "team".into()],
+                    fields: vec!["id".into(), "email".into(), "team".into(), "posts".into()],
+                    associations: vec![
+                        ("team".into(), Some("App\\Entity\\Team".into())),
+                        ("posts".into(), Some("App\\Entity\\Post".into())),
+                    ],
                 },
                 MappedClass {
                     fqn: "App\\Entity\\Base".to_string(),
                     is_entity: false,
                     fields: vec!["createdAt".into()],
+                    associations: Vec::new(),
                 },
             ]
         );
@@ -303,6 +370,8 @@ App\\Entity\\User:
     manyToOne:
         team:
             targetEntity: Team
+        owner:
+            inversedBy: teams
     lifecycleCallbacks:
         prePersist: [touch]
 ";
@@ -312,7 +381,11 @@ App\\Entity\\User:
             vec![MappedClass {
                 fqn: "App\\Entity\\User".to_string(),
                 is_entity: true,
-                fields: vec!["id".into(), "email".into(), "team".into()],
+                fields: vec!["id".into(), "email".into(), "team".into(), "owner".into()],
+                associations: vec![
+                    ("team".into(), Some("App\\Entity\\Team".into())),
+                    ("owner".into(), None),
+                ],
             }]
         );
     }

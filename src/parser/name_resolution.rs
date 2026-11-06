@@ -470,10 +470,15 @@ impl Backend {
             .map(|i| atom(&resolve_to_fqn(i, use_map, namespace)))
             .collect();
 
-        if let Some(doctrine) = class.doctrine.as_deref_mut()
-            && let Some(ref repository) = doctrine.repository
-        {
-            doctrine.repository = Some(atom(&resolve_to_fqn(repository, use_map, namespace)));
+        if let Some(doctrine) = class.doctrine.as_deref_mut() {
+            if let Some(ref repository) = doctrine.repository {
+                doctrine.repository = Some(atom(&resolve_to_fqn(repository, use_map, namespace)));
+            }
+            for (_, target) in &mut doctrine.associations {
+                if let Some(name) = target {
+                    *name = atom(&resolve_to_fqn(name, use_map, namespace));
+                }
+            }
         }
 
         // Resolve the `@phpstan-require-extends` base class to its

@@ -123,6 +123,9 @@ catalogues together, the way a real Symfony project does.
   to the class, and a field the mapping does not map is reported. DQL
   that Doctrine cannot parse, such as a query whose entity class has no
   identification variable, is reported too.
+- In `UserRepository::inTeam()`, complete after `t.`. A variable a join
+  declares stands for the entity its association targets, here the
+  `Team` that `team` maps to, and a variable nothing declares is reported.
 - In `UserRepository::named()`, hover `$byBuilder` or `$byQuery`: a query
   is typed by what its DQL selects, so both are a `list<User>`. In
   `displayNamesByEmail()`, hover `$rows`, a shape of the selected fields

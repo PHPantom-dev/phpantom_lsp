@@ -8,5 +8,8 @@
   >
     <id name="email" type="string"/>
     <field name="displayName" type="string"/>
+    <many-to-one field="team" target-entity="Team">
+      <join-column name="team_name" referenced-column-name="name"/>
+    </many-to-one>
   </entity>
 </doctrine-mapping>

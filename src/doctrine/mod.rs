@@ -103,21 +103,9 @@ pub(crate) fn entity_fields(
     }
 
     let mut fields: Vec<Atom> = Vec::new();
-    let mut visited: Vec<Atom> = Vec::new();
-    // The entity as loaded, since `entity` may be a merged copy, then its
-    // parents; each one's traits join the walk as it is reached.
-    let mut pending: Vec<Arc<ClassInfo>> = crate::inheritance::ancestors(entity, class_loader)
-        .map(|(_, parent)| parent)
-        .collect();
-    pending.extend(class_loader(Fqn::new(&entity.fqn())));
-    while let Some(class) = pending.pop() {
-        let fqn = class.fqn();
-        if visited.contains(&fqn) {
-            continue;
-        }
-        visited.push(fqn);
+    for class in mapping_classes(entity, class_loader) {
         let attribute_fields = class.doctrine.iter().flat_map(|d| d.fields.iter().copied());
-        let file_fields = mapping_files::mapped_fields(&state.mapping_files, &fqn)
+        let file_fields = mapping_files::mapped_fields(&state.mapping_files, &class.fqn())
             .map(|(_, mapped)| mapped)
             .unwrap_or_default()
             .into_iter()
@@ -127,14 +115,162 @@ pub(crate) fn entity_fields(
                 fields.push(field);
             }
         }
+    }
+    Some(fields)
+}
+
+/// The classes whose mappings make up `entity`'s: the entity as loaded,
+/// since `entity` may be a merged copy, its parents, and the traits any of
+/// them use.
+fn mapping_classes(
+    entity: &ClassInfo,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    let mut out: Vec<Arc<ClassInfo>> = Vec::new();
+    let mut pending: Vec<Arc<ClassInfo>> = crate::inheritance::ancestors(entity, class_loader)
+        .map(|(_, parent)| parent)
+        .collect();
+    pending.extend(class_loader(Fqn::new(&entity.fqn())));
+    while let Some(class) = pending.pop() {
+        if out.iter().any(|known| known.fqn() == class.fqn()) {
+            continue;
+        }
         pending.extend(
             class
                 .used_traits
                 .iter()
                 .filter_map(|name| class_loader(Fqn::new(name))),
         );
+        out.push(class);
     }
-    Some(fields)
+    out
+}
+
+/// Doctrine's collection interface, which a to-many association's property
+/// holds.
+const COLLECTION: &str = "Doctrine\\Common\\Collections\\Collection";
+
+/// Whether the field `field` of `entity`, whose property is of type `ty`,
+/// is an association, and the entity it targets when that is known: the
+/// one its mapping names, else the one its property holds, alone or as the
+/// elements of a collection.  `None` for a field that is no association.
+pub(crate) fn association(
+    entity: &ClassInfo,
+    field: &str,
+    ty: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+    state: &DoctrineCacheState,
+) -> Option<Option<Atom>> {
+    let mut mapped: Option<Option<Atom>> = None;
+    for class in mapping_classes(entity, class_loader) {
+        let in_attributes = class
+            .doctrine
+            .iter()
+            .flat_map(|d| d.associations.iter())
+            .find(|(name, _)| name == field)
+            .map(|(_, target)| *target);
+        let in_files = || {
+            mapping_files::mapped_association(&state.mapping_files, &class.fqn(), field)
+                .map(|target| target.map(|t| atom(&t)))
+        };
+        match in_attributes.or_else(in_files) {
+            Some(Some(target)) => {
+                let target = class_loader(Fqn::new(&target)).map_or(target, |c| c.fqn());
+                return Some(Some(target));
+            }
+            Some(None) => mapped = Some(None),
+            None => {}
+        }
+    }
+    let typed = association_of_type(ty, class_loader, state);
+    match mapped {
+        Some(_) => Some(typed.flatten()),
+        None => typed,
+    }
+}
+
+/// Whether a property of type `ty` holds an association, and the entity it
+/// targets when that is known: an entity, or a collection of them.
+fn association_of_type(
+    ty: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+    state: &DoctrineCacheState,
+) -> Option<Option<Atom>> {
+    let mut association = false;
+    let mut target = None;
+    let ty = ty.non_null_type().unwrap_or_else(|| ty.clone());
+    let entity = |name: &str| {
+        class_loader(Fqn::new(name.strip_prefix('\\').unwrap_or(name)))
+            .filter(|class| is_entity(class, state))
+    };
+    for member in ty.union_members() {
+        let (name, element) = match member.kind() {
+            TypeKind::Named(name) => (*name, None),
+            TypeKind::Generic(generic) => (generic.name, generic.args.last().cloned()),
+            _ => continue,
+        };
+        if crate::php_type::is_keyword_type(name.as_str()) {
+            continue;
+        }
+        let Some(class) = class_loader(Fqn::new(name.strip_prefix('\\').unwrap_or(&name))) else {
+            continue;
+        };
+        if is_entity(&class, state) {
+            association = true;
+            target = Some(class.fqn());
+        } else if crate::class_lookup::is_subtype_of(&class, COLLECTION, class_loader) {
+            association = true;
+            if let Some(TypeKind::Named(element)) = element.as_ref().map(PhpType::kind)
+                && let Some(element) = entity(element)
+            {
+                target = Some(element.fqn());
+            }
+        }
+    }
+    association.then_some(target)
+}
+
+/// The type `entity` declares for the property of the field `field`.
+pub(crate) fn field_type(
+    entity: &ClassInfo,
+    field: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+    cache: Option<&ResolvedClassCache>,
+) -> PhpType {
+    crate::virtual_members::resolve_class_fully_maybe_cached(entity, class_loader, cache)
+        .get_property(field)
+        .and_then(|property| property.type_hint.clone())
+        .unwrap_or_else(PhpType::mixed)
+}
+
+/// The entities the association `field` targets, of the entities
+/// `receivers` stand for as [`managed_entity_classes`] reads them: what a
+/// DQL variable joined through it stands for.
+pub(crate) fn association_targets(
+    receivers: Vec<Arc<ClassInfo>>,
+    field: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+    cache: Option<&ResolvedClassCache>,
+) -> Vec<Arc<ClassInfo>> {
+    let state = cache
+        .map(|cache| cache.read().doctrine().clone())
+        .unwrap_or_default();
+    let mut out: Vec<Arc<ClassInfo>> = Vec::new();
+    for entity in managed_entities(receivers, class_loader, cache, &state) {
+        if !entity_fields(&entity, class_loader, &state)
+            .is_some_and(|f| f.iter().any(|f| f == field))
+        {
+            continue;
+        }
+        let ty = field_type(&entity, field, class_loader, cache);
+        if let Some(Some(target)) = association(&entity, field, &ty, class_loader, &state)
+            && let Some(class) = class_loader(Fqn::new(&target))
+            && !out.iter().any(|known| known.fqn() == class.fqn())
+        {
+            out.push(class);
+        }
+    }
+    out
 }
 
 /// The type the `T` of `class`'s `EntityRepository` ancestor is bound to,
@@ -359,9 +495,18 @@ pub(crate) fn managed_entity_classes(
     cache: &ResolvedClassCache,
 ) -> Vec<Arc<ClassInfo>> {
     let state = cache.read().doctrine().clone();
+    managed_entities(receivers, class_loader, Some(cache), &state)
+}
+
+fn managed_entities(
+    receivers: Vec<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
+    cache: Option<&ResolvedClassCache>,
+    state: &DoctrineCacheState,
+) -> Vec<Arc<ClassInfo>> {
     let mut out: Vec<Arc<ClassInfo>> = Vec::new();
     for receiver in receivers {
-        if is_entity(&receiver, &state) {
+        if is_entity(&receiver, state) {
             if !out.iter().any(|known| known.fqn() == receiver.fqn()) {
                 out.push(receiver);
             }
@@ -370,7 +515,7 @@ pub(crate) fn managed_entity_classes(
         // A receiver typed by its own repository class may come back as
         // parsed; its entity is recorded on the resolved class.
         let receiver = if receiver.doctrine.is_none() && receiver.parent_class.is_some() {
-            crate::virtual_members::resolve_class_fully_cached(&receiver, class_loader, cache)
+            crate::virtual_members::resolve_class_fully_maybe_cached(&receiver, class_loader, cache)
         } else {
             receiver
         };

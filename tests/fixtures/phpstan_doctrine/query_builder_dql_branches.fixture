@@ -3,12 +3,12 @@
 // Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testRuleBranches.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/query-builder-branches-dql.php
-// codes: unknown_class, unknown_entity_field
+// codes: unknown_class, unknown_entity_field, unknown_dql_variable
 // PHPantom reports a name on the line its string spells it, where upstream reports the line the call starts on.
-// expect_diagnostic: 31: QueryBuilder: [Semantical Error] line 0, col 58 near 'p.id = 1': Error: 'p' is not defined. // SKIP: a DQL variable no call declares is not reported
-// expect_diagnostic: 45: QueryBuilder: [Semantical Error] line 0, col 58 near 'p.id = 1': Error: 'p' is not defined. // SKIP: a DQL variable no call declares is not reported
-// expect_diagnostic: 59: QueryBuilder: [Semantical Error] line 0, col 58 near 'p.id = 1': Error: 'p' is not defined. // SKIP: a DQL variable no call declares is not reported
-// expect_diagnostic: 90: QueryBuilder: [Semantical Error] line 0, col 93 near 't.id = 1': Error: 't' is not defined. // SKIP: a DQL variable no call declares is not reported
+// expect_diagnostic: 23: Undefined DQL variable 'p'
+// expect_diagnostic: 39: Undefined DQL variable 'p'
+// expect_diagnostic: 59: QueryBuilder: [Semantical Error] line 0, col 58 near 'p.id = 1': Error: 'p' is not defined. // SKIP: a variable one branch declares counts as declared on every branch
+// expect_diagnostic: 87: Undefined DQL variable 't'
+// expect_diagnostic: 102: Undefined DQL variable 't'
 // expect_diagnostic: 104: Field 'foo' is not mapped on entity 'PHPStan\Rules\Doctrine\ORM\MyEntity'
-// expect_diagnostic: 107: QueryBuilder: [Semantical Error] line 0, col 93 near 't.id = 1': Error: 't' is not defined. // SKIP: a DQL variable no call declares is not reported
 ---

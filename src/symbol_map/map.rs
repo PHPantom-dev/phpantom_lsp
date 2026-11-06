@@ -750,14 +750,18 @@ pub(crate) struct DqlAliasSite {
     pub subject: Box<str>,
 }
 
-/// Where a piece of DQL stops following the grammar.
+/// Where a piece of DQL stops following the grammar, or uses a variable
+/// nothing declares.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DqlSyntaxSite {
     /// The token the grammar does not allow, or the whole argument when
-    /// the text ends too early or the token is not written out.
+    /// the text ends too early or the token is not written out; or the
+    /// variable.
     pub start: u32,
     pub end: u32,
     pub message: Box<str>,
+    /// The diagnostic code the site is reported with.
+    pub code: &'static str,
     /// Where the method name of the call that takes the DQL starts.
     pub call: u32,
     /// The class the call's receiver must be for the DQL to be judged: a

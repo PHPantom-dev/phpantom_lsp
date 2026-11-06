@@ -190,6 +190,10 @@ pub struct DoctrineMapping {
     /// The properties the class declares with a field, identifier, or
     /// association attribute: the names a repository's criteria take.
     pub fields: Vec<Atom>,
+    /// The associations among `fields`, each with the entity its
+    /// attribute's `targetEntity` names, fully qualified.  `None` when the
+    /// attribute leaves the target to the property's type.
+    pub associations: Vec<(Atom, Option<Atom>)>,
     /// On a resolved repository whose entity's mapping is known, the
     /// entity it manages, a union when the repository serves several.
     /// Never set by the parser.

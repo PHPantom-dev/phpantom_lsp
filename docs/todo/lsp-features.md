@@ -795,36 +795,35 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ---
 
-## F67. DQL variables joined through an association
+## F70. DQL variables a query builder declares on some branches
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 ```php
-$qb->from(User::class, 'u')->join('u.team', 't')->where('t.name = :n');
-$em->createQuery('SELECT u FROM App\Entity\User u WHERE x.id = 1');
+$qb = $em->createQueryBuilder()->from(User::class, 'u')->andWhere('t.id = 1');
+if ($withTeam) {
+    $qb->join('u.team', 't');
+}
+$qb->getQuery(); // `t` is not declared when `$withTeam` is false
 ```
 
-A DQL variable declared by an entity class, `X::class`, or a repository's
-`createQueryBuilder('u')` stands for its entity, so its fields complete,
-navigate, and are checked. One joined through an association (`t` above)
-stands for nothing, because the association's target entity is not
-recorded: the field after the variable is silent. A variable nothing
-declares (`x`) is not reported either, though PHPStan's Doctrine extension
-reports it as `'x' is not defined`.
+A DQL variable nothing in a query or a function body declares is
+reported. A query builder's variables are read for the whole function
+body at once, so one declared on any branch counts as declared on all of
+them, and PHPStan's Doctrine extension reports the case above where
+PHPantom does not. Nor is anything reported for a builder that comes from
+a parameter, a property, or another method, or is passed to one, since
+its variables may be declared out of sight.
 
-Record each association's target on the mapping (`targetEntity:` on the
-attribute, the property's type for a to-one association, `target-entity`
-in a mapping file), and let a join's variable stand for the target of the
-path it joins. A field span's subject is a single subject text today, so a
-path needs a way to say "the target of this association of that entity".
+Both need the builder's calls replayed in order along each path to its
+`getQuery()`, the way the type engine already replays a single fluent
+chain to type the query it builds (see T64).
 
-The fixtures are `query_builder_dql_branches.fixture` and
-`query_builder_dql_branching_performance.fixture` in
+The fixture is `query_builder_dql_branches.fixture` in
 `tests/fixtures/phpstan_doctrine/`.
 
-**Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`,
-`src/doctrine/dql.rs`, `src/parser/attributes.rs` (the Doctrine mapping),
-`src/doctrine/mapping_files.rs`.
+**Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`
+(`report_undeclared`), `src/doctrine/query.rs` (`QueryBuilderState`).
 
 ---
 

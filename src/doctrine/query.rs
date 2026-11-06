@@ -1039,10 +1039,6 @@ pub(crate) fn root_state(
 
 // ─── The project's mapping ──────────────────────────────────────────────────
 
-/// Doctrine's collection interface, which a to-many association's property
-/// holds.
-const COLLECTION: &str = "Doctrine\\Common\\Collections\\Collection";
-
 /// The [`EntityModel`] of the project a resolution runs in: the entities
 /// its mapping knows, and the types their properties declare.
 pub(crate) struct ResolverModel<'a, 'c> {
@@ -1062,43 +1058,6 @@ impl<'a, 'c> ResolverModel<'a, 'c> {
     fn load(&self, name: &str) -> Option<Arc<ClassInfo>> {
         (self.ctx.file.class_loader)(Fqn::new(name.strip_prefix('\\').unwrap_or(name)))
     }
-
-    /// The entity a property of type `ty` refers to, when it holds an
-    /// association: an entity, or a collection of them.
-    fn association_target(&self, ty: &PhpType) -> Option<Option<Atom>> {
-        let mut association = false;
-        let mut target = None;
-        let ty = ty.non_null_type().unwrap_or_else(|| ty.clone());
-        for member in ty.union_members() {
-            let (name, element) = match member.kind() {
-                TypeKind::Named(name) => (*name, None),
-                TypeKind::Generic(generic) => (generic.name, generic.args.last().cloned()),
-                _ => continue,
-            };
-            if crate::php_type::is_keyword_type(name.as_str()) {
-                continue;
-            }
-            let Some(class) = self.load(&name) else {
-                continue;
-            };
-            if super::is_entity(&class, &self.state) {
-                association = true;
-                target = Some(class.fqn());
-            } else if crate::class_lookup::is_subtype_of(
-                &class,
-                COLLECTION,
-                self.ctx.file.class_loader,
-            ) {
-                association = true;
-                if let Some(TypeKind::Named(element)) = element.as_ref().map(PhpType::kind)
-                    && let Some(entity) = self.entity(element)
-                {
-                    target = Some(entity);
-                }
-            }
-        }
-        association.then_some(target)
-    }
 }
 
 impl EntityModel for ResolverModel<'_, '_> {
@@ -1113,19 +1072,14 @@ impl EntityModel for ResolverModel<'_, '_> {
         if !fields.iter().any(|f| f == field) {
             return None;
         }
-        let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
-            &class,
-            self.ctx.file.class_loader,
-            self.ctx.resolved_class_cache,
-        );
-        let ty = resolved
-            .get_property(field)
-            .and_then(|property| property.type_hint.clone())
-            .unwrap_or_else(PhpType::mixed);
-        Some(match self.association_target(&ty) {
-            Some(target) => Field::Association(target),
-            None => Field::Column(ty),
-        })
+        let class_loader = self.ctx.file.class_loader;
+        let ty = super::field_type(&class, field, class_loader, self.ctx.resolved_class_cache);
+        Some(
+            match super::association(&class, field, &ty, class_loader, &self.state) {
+                Some(target) => Field::Association(target),
+                None => Field::Column(ty),
+            },
+        )
     }
 }
 

@@ -44,6 +44,23 @@ final class UserRepository extends ServiceEntityRepository
     }
 
     /**
+     * @return list<User>
+     */
+    public function inTeam(string $team): array
+    {
+        // Try: complete after `t.`, or go-to-definition on name. The `t` the
+        // join declares stands for the Team entity the `team` association
+        // targets. Change `t.name` to `x.name`, and the variable nothing
+        // declares is reported.
+        return $this->createQueryBuilder('u')
+            ->join('u.team', 't')
+            ->where('t.name = :team')
+            ->setParameter('team', $team)
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
      * @return array<string, string>
      */
     public function displayNamesByEmail(): array

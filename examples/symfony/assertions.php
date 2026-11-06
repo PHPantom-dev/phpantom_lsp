@@ -16,6 +16,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 use App\Admin\DashboardController;
 use App\Controller\DemoController;
 use App\DependencyInjection\Configuration;
+use App\Entity\Team;
 use App\Entity\User;
 use App\DependencyInjection\AcmeDemoExtension;
 use App\EventListener\OrderPlacedListener;
@@ -348,9 +349,30 @@ check('The DQL in UserRepository::named() names the User entity and its mapped f
 check('A field the mapping does not map fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE u.nickname = :name'));
 check('An entity class without its identification variable fails DQL', !$dqlParses('SELECT u FROM App\Entity\User WHERE u.displayName = :name'));
 check('A stray parenthesis in the where() fragment fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE u.displayName = :name)'));
-(new SchemaTool($entityManager))->createSchema([$entityManager->getClassMetadata(User::class)]);
-$entityManager->persist(new User('ada@example.com', 'Ada'));
+$userMetadata = $entityManager->getClassMetadata(User::class);
+check('The XML mapping maps team as an association to Team', $userMetadata->hasAssociation('team') && $userMetadata->getAssociationTargetClass('team') === Team::class);
+check('The DQL in UserRepository::inTeam() joins Team and names its fields', $dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE t.name = :team'));
+check('A field the joined Team does not map fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE t.email = :team'));
+check('A variable nothing declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE x.name = :team'));
+(new SchemaTool($entityManager))->createSchema([
+    $entityManager->getClassMetadata(User::class),
+    $entityManager->getClassMetadata(Team::class),
+]);
+$core = new Team('Core');
+$member = new User('ada@example.com', 'Ada');
+$member->setTeam($core);
+$entityManager->persist($core);
+$entityManager->persist($member);
 $entityManager->flush();
+$inTeam = $entityManager->createQueryBuilder()
+    ->select('u')
+    ->from(User::class, 'u')
+    ->join('u.team', 't')
+    ->where('t.name = :team')
+    ->setParameter('team', 'Core')
+    ->getQuery()
+    ->getResult();
+check('inTeam() gets a list of User', array_is_list($inTeam) && $inTeam[0] instanceof User);
 $rows = $entityManager->createQueryBuilder()
     ->select('u')
     ->from(User::class, 'u', 'u.email')

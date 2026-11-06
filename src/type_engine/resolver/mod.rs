@@ -319,6 +319,25 @@ fn resolve_target_classes_expr_inner(
         // ── Bare variable ───────────────────────────────────────
         SubjectExpr::Variable(var_name) => resolve_variable_fallback(var_name, access_kind, ctx),
 
+        // ── The entity a DQL variable joined through an association
+        //    stands for ─────────────────────────────────────────────
+        SubjectExpr::DqlAssociation { base, association } => {
+            let owners = ResolvedType::into_arced_classes(resolve_target_classes_expr(
+                base,
+                AccessKind::Arrow,
+                ctx,
+            ));
+            crate::doctrine::association_targets(
+                owners,
+                association,
+                class_loader,
+                ctx.resolved_class_cache,
+            )
+            .into_iter()
+            .map(ResolvedType::from_arc)
+            .collect()
+        }
+
         // ── Callee-only variants (MethodCall, StaticMethodCall,
         //    FunctionCall) should not appear as top-level subjects;
         //    they are wrapped in CallExpr.  If they do appear

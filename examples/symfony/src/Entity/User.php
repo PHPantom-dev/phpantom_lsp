@@ -6,6 +6,8 @@ use Symfony\Component\Serializer\Attribute\Groups;
 
 final class User
 {
+    private ?Team $team = null;
+
     public function __construct(
         private string $email,
         private string $displayName,
@@ -31,5 +33,15 @@ final class User
     public function setDisplayName(string $displayName): void
     {
         $this->displayName = $displayName;
+    }
+
+    public function getTeam(): ?Team
+    {
+        return $this->team;
+    }
+
+    public function setTeam(?Team $team): void
+    {
+        $this->team = $team;
     }
 }

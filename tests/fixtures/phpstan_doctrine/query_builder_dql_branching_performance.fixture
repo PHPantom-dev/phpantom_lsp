@@ -3,6 +3,7 @@
 // Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testBranchingPerformance.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/query-builder-branches-performance.php
-// codes: unknown_class, unknown_entity_field
-// expect_diagnostic: 121: QueryBuilder: [Semantical Error] line 0, col 58 near 'p.id = 1 AND': Error: 'p' is not defined. // SKIP: a DQL variable no call declares is not reported
+// codes: unknown_class, unknown_entity_field, unknown_dql_variable
+// PHPantom reports a variable nothing declares at its first use, where upstream reports the call that builds the query.
+// expect_diagnostic: 23: Undefined DQL variable 'p'
 ---

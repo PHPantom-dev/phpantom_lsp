@@ -261,7 +261,7 @@ mod deprecated;
 mod destructuring_offsets;
 mod discarded_results;
 mod docblock_native_mismatch;
-mod dql_syntax;
+pub(crate) mod dql_syntax;
 mod drupal_route_parameters;
 mod dynamic_member_names;
 mod enum_errors;

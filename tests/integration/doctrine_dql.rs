@@ -111,6 +111,10 @@ class Expr {
         "<?php\nnamespace Doctrine\\ORM\\Mapping;\n#[\\Attribute]\nfinal class ManyToOne { public function __construct(public ?string $targetEntity = null) {} }\n",
     ),
     (
+        "stubs/orm/Mapping/OneToMany.php",
+        "<?php\nnamespace Doctrine\\ORM\\Mapping;\n#[\\Attribute]\nfinal class OneToMany { public function __construct(public ?string $targetEntity = null, public ?string $mappedBy = null) {} }\n",
+    ),
+    (
         "src/Entity/User.php",
         "<?php
 namespace App\\Entity;
@@ -141,6 +145,10 @@ class Team {
     private int $id;
     #[ORM\\Column]
     private string $name;
+    #[ORM\\ManyToOne]
+    private ?User $owner;
+    #[ORM\\OneToMany(targetEntity: 'User', mappedBy: 'team')]
+    private iterable $members;
 }
 ",
     ),
@@ -259,11 +267,53 @@ async fn a_query_builder_reports_unmapped_fields() {
 async fn variables_that_stand_for_nothing_known_are_left_alone() {
     let messages = diagnostics(
         "        $em->createQuery('SELECT u FROM ' . $entity . ' u WHERE u.anything = 1');
-        $em->createQueryBuilder()->select('t')->from(User::class, 't')->leftJoin('t.team', 'team')->where('team.anything = 1');
+        $em->createQueryBuilder()->select('t')->from(User::class, 't')->leftJoin('t.email', 'e')->where('e.anything = 1');
         $other = $em->createQuery('SELECT u FROM App\\Entity\\User u WHERE u.' . $field . ' = 1');",
     )
     .await;
     assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[tokio::test]
+async fn a_variable_joined_through_an_association_stands_for_its_target() {
+    let messages = diagnostics(
+        "        $em->createQuery('SELECT u, t FROM App\\Entity\\User u JOIN u.team t JOIN t.owner o WHERE t.name = 1 AND t.nope = 1 AND o.size = 1');
+        $em->createQueryBuilder()->select('u')->from(User::class, 'u')->leftJoin('u.team', 'team')->where('team.anything = 1');
+        $users->createQueryBuilder('x')->join('x.team', 't')->join('t.members', 'm')->where('m.email = 1 AND m.colour = 1');",
+    )
+    .await;
+    assert_eq!(
+        messages,
+        vec![
+            unmapped("nope", "Team"),
+            unmapped("size", "User"),
+            unmapped("anything", "Team"),
+            unmapped("colour", "User"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_joined_variable_s_field_completes_and_goes_to_the_property() {
+    let labels = completions(
+        "        $em->createQuery('SELECT u FROM App\\Entity\\User u JOIN u.team t WHERE t.§');",
+    )
+    .await;
+    assert!(labels.contains(&"name".to_string()), "{labels:?}");
+    assert!(!labels.contains(&"email".to_string()), "{labels:?}");
+
+    let (backend, dir, uri, _, position) = open_service(
+        "        $users->createQueryBuilder('u')->join('u.team', 't')->where('t.na§me = 1');",
+    )
+    .await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) =
+        goto_definition_at(&backend, &uri, position.line, position.character).await
+    else {
+        panic!("no definition");
+    };
+    let team = Uri::from_file_path(dir.path().join("src/Entity/Team.php")).unwrap();
+    assert_eq!(location.uri, team);
+    assert_eq!(location.range.start.line, 9);
 }
 
 #[tokio::test]
@@ -557,6 +607,64 @@ async fn dql_whose_call_is_not_doctrine_s_or_whose_text_is_dynamic_is_not_report
         $sql->select('u.*')->from('users', 'u')->where('u.flags & 4 = 4');
         $em->createQuery('SELECT u FROM App\\Entity\\User u WHERE u.id = ' . $id . ')');
         $em->createQueryBuilder()->select('u')->from(User::class, 'u')->where('u.id IN (' . implode(',', $ids));",
+    )
+    .await;
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// The undeclared DQL variables reported for a service whose method body
+/// is `body`: the text each covers and its message.
+async fn undeclared(body: &str) -> Vec<(String, String)> {
+    let (backend, _dir, uri, content, _) = open_service(&format!("{body}§")).await;
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), &content, &mut out);
+    let lines: Vec<&str> = content.lines().collect();
+    out.iter()
+        .filter(|d| d.code == Some(Code::String("unknown_dql_variable".into())))
+        .map(|d| {
+            let line = lines[d.range.start.line as usize];
+            let covered = &line[d.range.start.character as usize..d.range.end.character as usize];
+            (covered.to_string(), message_text(&d.message).to_string())
+        })
+        .collect()
+}
+
+fn undefined(alias: &str) -> (String, String) {
+    (
+        alias.to_string(),
+        format!("Undefined DQL variable '{alias}'"),
+    )
+}
+
+#[tokio::test]
+async fn a_variable_nothing_declares_is_reported_once() {
+    let errors = undeclared(
+        "        $em->createQuery('SELECT u FROM App\\Entity\\User u WHERE x.id = 1 AND x.email = 2');
+        $qb = $em->createQueryBuilder();
+        $qb->select('u')->from(User::class, 'u')->where('p.id = 1');
+        $qb = $qb->andWhere('p.email = 1');
+        $users->createQueryBuilder('r')->join('r.team', 't')->where('t.id = 1 AND q.id = 2');
+        $qb->getQuery();",
+    )
+    .await;
+    assert_eq!(errors, vec![undefined("x"), undefined("p"), undefined("q")]);
+}
+
+#[tokio::test]
+async fn a_variable_a_builder_may_have_been_given_elsewhere_is_not_reported() {
+    // Passed to another method, which may join anything onto it.
+    let errors = undeclared(
+        "        $qb = $em->createQueryBuilder();
+        $this->joinTeams($qb);
+        $qb->select('u')->from(User::class, 'u')->where('j.id = 1');",
+    )
+    .await;
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // Declared under a name the text does not spell.
+    let errors = undeclared(
+        "        $em->createQueryBuilder()->select('u')->from(User::class, 'u')->join('u.team', $alias)->where('k.id = 1');
+        $em->createQuery('SELECT u FROM App\\Entity\\User ' . $alias . ' WHERE v.id = 1');",
     )
     .await;
     assert!(errors.is_empty(), "{errors:?}");
