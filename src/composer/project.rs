@@ -380,8 +380,7 @@ pub(crate) fn explicit_dependency_names(package: &ComposerPackage) -> HashSet<St
 ///
 /// **Web-root resolution order:**
 /// 1. `extra.drupal-scaffold.locations.web-root` in `composer.json`.
-/// 2. Filesystem fallback: the first of `web/`, `docroot/`, `public/`,
-///    `html/` that contains `core/lib/Drupal.php`.
+/// 2. Filesystem fallback: [`drupal_web_root_on_disk`].
 pub(crate) fn detect_drupal_web_root(
     workspace_root: &Path,
     package: &ComposerPackage,
@@ -398,19 +397,30 @@ pub(crate) fn detect_drupal_web_root(
             .and_then(|l| l.get("web-root"))
             .and_then(|v| v.as_str())
     {
-        let path = workspace_root.join(web_root_str.trim_end_matches('/'));
-        return Some(path);
-    }
-
-    // 2. Filesystem fallback: find which common dir contains core/lib/Drupal.php
-    for candidate in &["web", "docroot", "public", "html"] {
-        let path = workspace_root.join(candidate);
-        if path.join("core/lib/Drupal.php").exists() {
-            return Some(path);
+        // `drupal/legacy-project` names the project root as `./`, which
+        // must not leave a `.` in every path walked under it.
+        let relative = web_root_str.trim_end_matches('/');
+        let relative = relative.strip_prefix("./").unwrap_or(relative);
+        if relative.is_empty() || relative == "." {
+            return Some(workspace_root.to_path_buf());
         }
+        return Some(workspace_root.join(relative));
     }
 
-    None
+    // 2. Filesystem fallback
+    drupal_web_root_on_disk(workspace_root)
+}
+
+/// The web root of the Drupal tree at `root`, found on disk: the first of
+/// `web/`, `docroot/`, `public/` and `html/` that holds
+/// `core/lib/Drupal.php`, else `root` itself when it does, as in a legacy
+/// layout that keeps `core/` beside `composer.json`.
+pub(crate) fn drupal_web_root_on_disk(root: &Path) -> Option<PathBuf> {
+    ["web", "docroot", "public", "html"]
+        .iter()
+        .map(|candidate| root.join(candidate))
+        .chain(std::iter::once(root.to_path_buf()))
+        .find(|path| path.join("core/lib/Drupal.php").exists())
 }
 
 #[cfg(test)]
@@ -710,6 +720,66 @@ mod tests {
         let p = pkg(r#"{"require": {"drupal/core": "^10.0"}}"#);
         let result = detect_drupal_web_root(dir.path(), &p);
         assert_eq!(result, Some(dir.path().join("public")));
+    }
+
+    /// Write `<dir>/core/lib/Drupal.php`.
+    fn write_core(dir: &Path) {
+        let lib = dir.join("core").join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(lib.join("Drupal.php"), "<?php").unwrap();
+    }
+
+    #[test]
+    fn drupal_core_beside_composer_json_makes_the_project_root_the_web_root() {
+        let dir = tempfile::tempdir().unwrap();
+        write_core(dir.path());
+
+        let p = pkg(r#"{"require": {"drupal/core": "^10.0"}}"#);
+        assert_eq!(
+            detect_drupal_web_root(dir.path(), &p),
+            Some(dir.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn a_scaffold_entry_or_a_web_folder_wins_over_core_at_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        write_core(dir.path());
+        write_core(&dir.path().join("html"));
+
+        let p = pkg(r#"{"require": {"drupal/core": "^10.0"}}"#);
+        assert_eq!(
+            detect_drupal_web_root(dir.path(), &p),
+            Some(dir.path().join("html"))
+        );
+
+        let p = pkg(r#"{
+            "require": {"drupal/core": "^10.0"},
+            "extra": {"drupal-scaffold": {"locations": {"web-root": "docroot/"}}}
+        }"#);
+        assert_eq!(
+            detect_drupal_web_root(dir.path(), &p),
+            Some(dir.path().join("docroot"))
+        );
+    }
+
+    #[test]
+    fn a_scaffold_entry_naming_the_project_root_gives_the_root_as_written() {
+        let dir = tempfile::tempdir().unwrap();
+        for web_root in ["./", ".", ""] {
+            let p = pkg(&format!(
+                r#"{{
+                    "require": {{"drupal/core": "^10.0"}},
+                    "extra": {{"drupal-scaffold": {{"locations": {{"web-root": "{web_root}"}}}}}}
+                }}"#
+            ));
+            // Compared as text: `Path` equality ignores a trailing `.`.
+            assert_eq!(
+                detect_drupal_web_root(dir.path(), &p).map(PathBuf::into_os_string),
+                Some(dir.path().as_os_str().to_owned()),
+                "{web_root:?}"
+            );
+        }
     }
 
     #[test]

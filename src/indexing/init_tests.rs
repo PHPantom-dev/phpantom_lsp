@@ -326,6 +326,167 @@ async fn a_drupal_site_reads_its_hook_files_as_php_everywhere() {
     );
 }
 
+/// A Drupal tree with its web root at `web_root` and no `composer.json`
+/// of the project's own, only core's and a module's.  The module sits in a
+/// vendor folder, outside `contrib` and `custom`, and the tree ignores
+/// every module the way a site's `.gitignore` ignores contributed ones.
+fn write_drupal_tree(web_root: &Path) {
+    write(
+        &web_root.join("core/lib/Drupal.php"),
+        "<?php\nclass Drupal {}\n",
+    );
+    write(
+        &web_root.join("core/composer.json"),
+        r#"{ "name": "drupal/core", "autoload": { "psr-4": { "Drupal\\Core\\": "lib/Drupal/Core" } } }"#,
+    );
+    let module = web_root.join("modules/acme/acme_greeter");
+    write(
+        &module.join("composer.json"),
+        r#"{ "name": "acme/acme_greeter", "type": "drupal-module" }"#,
+    );
+    write(
+        &module.join("src/Greeter.php"),
+        "<?php\nnamespace Drupal\\acme_greeter;\nclass Greeter {}\n",
+    );
+    write(
+        &module.join("acme_greeter.services.yml"),
+        "services:\n  acme_greeter.greeter:\n    class: Drupal\\acme_greeter\\Greeter\n",
+    );
+    write(&web_root.join(".gitignore"), "/modules/\n");
+}
+
+/// What every Drupal tree without a `composer.json` must give, with its
+/// web root at `web_root` inside the workspace at `root`, a git checkout
+/// so that the tree's `.gitignore` holds.
+async fn assert_indexed_as_a_drupal_site(root: &Path, web_root: &Path) {
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    assert!(
+        !crate::composer::discover_subproject_roots(root).is_empty(),
+        "the tree must hold the composer.json files a monorepo would be made of"
+    );
+
+    let backend = index_workspace(root).await;
+
+    assert!(backend.is_drupal_project());
+    assert!(indexes(&backend, "Drupal\\acme_greeter\\Greeter"));
+    // The workspace walk leaves core to the Drupal scan.
+    assert!(indexes(&backend, "Drupal"));
+    let services = web_root.join("modules/acme/acme_greeter/acme_greeter.services.yml");
+    assert!(
+        backend.drupal_declaration_files().contains(&services),
+        "{:?}",
+        backend.drupal_declaration_files()
+    );
+    for project in ["core", "modules/acme/acme_greeter"] {
+        assert!(
+            !is_composer_project(&backend, &web_root.join(project)),
+            "{project} must not be indexed as a project of its own"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_drupal_tree_without_composer_json_is_a_drupal_site() {
+    let dir = tempfile::tempdir().unwrap();
+    write_drupal_tree(dir.path());
+    assert_indexed_as_a_drupal_site(dir.path(), dir.path()).await;
+}
+
+#[tokio::test]
+async fn a_drupal_tree_under_web_without_composer_json_is_a_drupal_site() {
+    let dir = tempfile::tempdir().unwrap();
+    let web_root = dir.path().join("web");
+    write_drupal_tree(&web_root);
+    assert_indexed_as_a_drupal_site(dir.path(), &web_root).await;
+}
+
+/// Without Drupal core, a workspace holding a `core/` folder with a
+/// `composer.json` is still a monorepo, and one without any is still a
+/// plain workspace; neither is a Drupal site.
+#[tokio::test]
+async fn a_workspace_without_drupal_core_is_no_drupal_site() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("core/composer.json"),
+        r#"{ "autoload": { "psr-4": { "Core\\": "src/" } } }"#,
+    );
+    write(
+        &dir.path().join("core/src/Kernel.php"),
+        "<?php\nnamespace Core;\nclass Kernel {}\n",
+    );
+    let backend = index_workspace(dir.path()).await;
+    assert!(!backend.is_drupal_project());
+    assert!(is_composer_project(&backend, &dir.path().join("core")));
+
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("lib/Thing.php"),
+        "<?php\nnamespace Plain;\nclass Thing {}\n",
+    );
+    let backend = index_workspace(dir.path()).await;
+    assert!(!backend.is_drupal_project());
+    assert!(indexes(&backend, "Plain\\Thing"));
+}
+
+/// A Drupal project in `docroot/` of a workspace without a `composer.json`
+/// of its own owns the site: it is indexed as a Composer project, with the
+/// dependencies its gitignored `vendor/` holds.
+#[tokio::test]
+async fn a_drupal_project_in_a_workspace_folder_keeps_its_dependencies() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    let docroot = dir.path().join("docroot");
+    write_subproject(&docroot, &["Client"]);
+    write(
+        &docroot.join("composer.json"),
+        r#"{ "require": { "drupal/core-recommended": "^11", "acme/lib": "*" } }"#,
+    );
+    write(
+        &docroot.join("core/lib/Drupal.php"),
+        "<?php\nclass Drupal {}\n",
+    );
+    write(&docroot.join(".gitignore"), "/vendor/\n");
+
+    let backend = index_workspace(dir.path()).await;
+
+    assert!(backend.is_drupal_project());
+    assert!(is_composer_project(&backend, &docroot));
+    assert!(indexes(&backend, "Acme\\Lib\\Client"));
+}
+
+/// A Composer project with its own dependencies beside a Drupal tree that
+/// has no `composer.json`, or inside it when the tree is the workspace, is
+/// still indexed as a project, and the tree as a Drupal site.
+#[tokio::test]
+async fn a_drupal_tree_without_composer_json_keeps_a_project_beside_it() {
+    for web in ["", "web"] {
+        let dir = tempfile::tempdir().unwrap();
+        let web_root = if web.is_empty() {
+            dir.path().to_path_buf()
+        } else {
+            dir.path().join(web)
+        };
+        write_drupal_tree(&web_root);
+        let behat = dir.path().join("tests/behat");
+        write_subproject(&behat, &["Client"]);
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+
+        let backend = index_workspace(dir.path()).await;
+
+        assert!(backend.is_drupal_project(), "{web:?}");
+        assert!(is_composer_project(&backend, &behat), "{web:?}");
+        assert!(indexes(&backend, "Acme\\Lib\\Client"), "{web:?}");
+        assert!(
+            indexes(&backend, "Drupal\\acme_greeter\\Greeter"),
+            "{web:?}"
+        );
+        assert!(
+            !is_composer_project(&backend, &web_root.join("core")),
+            "{web:?}"
+        );
+    }
+}
+
 /// A root project using `bamarni/composer-bin-plugin`, whose `phpunit` bin
 /// namespace installs `PHPUnit\Framework\<class>` for each of `classes`
 /// at PHPUnit `version`.

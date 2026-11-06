@@ -644,15 +644,10 @@ pub fn scan_drupal_directories(
 ) -> (WorkspaceScanResult, DrupalDeclarationFiles) {
     use ignore::WalkBuilder;
 
-    let drupal_dirs = [
-        "core",
-        "modules/contrib",
-        "modules/custom",
-        "themes/contrib",
-        "themes/custom",
-        "profiles",
-        "sites",
-    ];
+    // Whole folders, not only their `contrib` and `custom` halves: sites
+    // also group modules by vendor (`modules/acme/`), keep them directly
+    // under `modules/`, or ship them inside a profile.
+    let drupal_dirs = ["core", "modules", "themes", "profiles", "sites"];
 
     let mut php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
     let mut declaration_files = DrupalDeclarationFiles::default();

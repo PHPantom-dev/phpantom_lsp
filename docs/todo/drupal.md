@@ -1,8 +1,9 @@
 # PHPantom — Drupal
 
 Known gaps and missing features in PHPantom's Drupal support. The web
-root is detected, core, contrib, and the Drupal file extensions
-(`.module`, `.install`, `.theme`, …) are indexed past `.gitignore`, and
+root is detected with or without a `composer.json`. Core and every
+module, theme, and profile, with the Drupal file extensions (`.module`,
+`.install`, `.theme`, …), are indexed past `.gitignore`, and
 the services the `*.services.yml` files declare, the entity types
 entity classes declare, the routes the routing files, route attributes,
 and route builders declare, and the hooks the `*.api.php` files document
@@ -101,32 +102,6 @@ Permissions are declared in `<module>.permissions.yml` (and by
 permission callbacks), configuration objects in `config/install` and
 `config/schema`. Complete and navigate both, and complete the keys
 `get()` reads from the schema.
-
----
-
-## DR9. Drupal directories outside `contrib` and `custom`
-
-**Impact: Medium-High · Complexity: Low-Medium**
-
-The scan that bypasses `.gitignore` covers `core`, `modules/contrib`,
-`modules/custom`, `themes/contrib`, `themes/custom`, `profiles`, and
-`sites` under the web root. Sites also group modules by vendor
-(`modules/acme/`) or keep them directly under `modules/`, and profiles
-carry their own `modules/` and `themes/`; a module a site's `.gitignore`
-hides in any of those places is not indexed, and its classes read as
-unknown. Scan `modules`, `themes`, and `profiles` whole.
-
-The scan also runs only when the Drupal site is the workspace's Composer
-root. A workspace that holds the site beside other Composer projects, or
-opens a Drupal tree without a `composer.json`, gets none of it. Run it
-for each Composer project in the workspace that requires `drupal/core`,
-and give the scanned classes the same origin (project, vendor) other
-classes get, so completion ranks and filters them the same way.
-
-**Where to look:** `scan_drupal_directories` in
-`src/classmap_scanner/discovery.rs`, its caller in
-`src/indexing/init.rs`, and how per-project Composer roots are handled
-there.
 
 ---
 

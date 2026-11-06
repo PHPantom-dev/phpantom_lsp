@@ -42,14 +42,29 @@ pub(crate) fn note_plain_php_project(root: &Path, consequence: &str) {
 /// [`note_plain_php_project`] for the commands that index the workspace
 /// the way the language server does: a root without a `composer.json`
 /// whose subdirectories hold Composer projects is indexed as those
-/// projects, so the note names them instead.
+/// projects, so the note names them instead, along with a Drupal site none
+/// of them holds (see [`crate::composer::discover_workspace_projects`]).
 pub(crate) fn note_workspace_layout(root: &Path, consequence: &str) {
     if root.join("composer.json").is_file() {
         return;
     }
-    let subprojects = crate::composer::discover_subproject_roots(root);
+    let (subprojects, drupal_tree) = crate::composer::discover_workspace_projects(root);
+    let drupal_site = drupal_tree.map(|web_root| {
+        let relative = web_root.strip_prefix(root).unwrap_or(&web_root);
+        if relative.as_os_str().is_empty() {
+            "a Drupal site".to_string()
+        } else {
+            format!("the Drupal site in {}", relative.display())
+        }
+    });
     if subprojects.is_empty() {
-        note_plain_php_project(root, consequence);
+        match drupal_site {
+            Some(site) => eprintln!(
+                "Note: no composer.json found in {} - indexing it as {site}.",
+                root.display()
+            ),
+            None => note_plain_php_project(root, consequence),
+        }
         return;
     }
     let names: Vec<String> = subprojects
@@ -62,8 +77,11 @@ pub(crate) fn note_workspace_layout(root: &Path, consequence: &str) {
                 .to_string()
         })
         .collect();
+    let beside = drupal_site
+        .map(|site| format!(" and {site}"))
+        .unwrap_or_default();
     eprintln!(
-        "Note: no composer.json found in {} - using the Composer projects in {}.",
+        "Note: no composer.json found in {} - using the Composer projects in {}{beside}.",
         root.display(),
         names.join(", ")
     );

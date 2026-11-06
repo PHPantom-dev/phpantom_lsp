@@ -448,6 +448,87 @@ fn scan_drupal_directories_finds_php_and_module_files() {
     );
 }
 
+/// Extensions outside `contrib` and `custom`: grouped by vendor, directly
+/// under `modules/`, and inside an install profile.
+#[test]
+fn scan_drupal_directories_finds_extensions_outside_contrib_and_custom() {
+    let dir = tempfile::tempdir().unwrap();
+    let web_root = dir.path();
+    for (path, content) in [
+        (
+            "modules/acme/acme_shop/src/Cart.php",
+            "<?php\nnamespace Drupal\\acme_shop;\nclass Cart {}",
+        ),
+        (
+            "modules/acme/acme_shop/acme_shop.module",
+            "<?php\nfunction acme_shop_help() {}",
+        ),
+        (
+            "modules/acme/acme_shop/acme_shop.services.yml",
+            "services: {}\n",
+        ),
+        (
+            "modules/acme/acme_shop/src/AcmeShopServiceProvider.php",
+            "<?php\nnamespace Drupal\\acme_shop;\nclass AcmeShopServiceProvider {}",
+        ),
+        (
+            "modules/example/src/Greeter.php",
+            "<?php\nnamespace Drupal\\example;\nclass Greeter {}",
+        ),
+        (
+            "themes/acme/acme_theme/src/ThemeHelper.php",
+            "<?php\nnamespace Drupal\\acme_theme;\nclass ThemeHelper {}",
+        ),
+        (
+            "profiles/acme_profile/modules/acme_base/src/Base.php",
+            "<?php\nnamespace Drupal\\acme_base;\nclass Base {}",
+        ),
+        (
+            "profiles/acme_profile/modules/acme_base/acme_base.services.yml",
+            "services: {}\n",
+        ),
+    ] {
+        let full = web_root.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+
+    let (result, files) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    for class in [
+        "Drupal\\acme_shop\\Cart",
+        "Drupal\\example\\Greeter",
+        "Drupal\\acme_theme\\ThemeHelper",
+        "Drupal\\acme_base\\Base",
+    ] {
+        assert!(
+            result.classmap.contains_key(class),
+            "{class}; keys: {:?}",
+            result.classmap.keys().collect::<Vec<_>>()
+        );
+    }
+    assert!(result.function_index.contains_key("acme_shop_help"));
+    for services in [
+        "modules/acme/acme_shop/acme_shop.services.yml",
+        "profiles/acme_profile/modules/acme_base/acme_base.services.yml",
+    ] {
+        assert!(
+            files.declarations.contains(&web_root.join(services)),
+            "{services}: {:?}",
+            files.declarations
+        );
+    }
+    assert!(
+        files
+            .declarations
+            .contains(&web_root.join("modules/acme/acme_shop/acme_shop.module")),
+        "the module file documents or implements hooks"
+    );
+    assert_eq!(
+        files.service_providers,
+        vec![web_root.join("modules/acme/acme_shop/src/AcmeShopServiceProvider.php")]
+    );
+}
+
 #[test]
 fn scan_drupal_directories_indexes_test_dirs_by_default() {
     let dir = tempfile::tempdir().unwrap();
