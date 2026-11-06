@@ -2468,35 +2468,27 @@ PHPStan's Symfony extension (<code>Rules/Symfony/Undefined*Rule</code>,
 <code>Rules/Symfony/Invalid*DefaultValueRule</code>,
 <code>Type/Symfony/InputInterface*Extension</code>).</p>
 <hr />
-<h2 id="f72-dql-variables-of-a-query-builder-a-chain-of-methods-handles">F72. DQL variables of a query builder a chain of methods handles<a class="headerlink" href="#f72-dql-variables-of-a-query-builder-a-chain-of-methods-handles" title="Permanent link">&para;</a></h2>
+<h2 id="f73-dql-variables-a-returned-query-builder-uses-that-its-callers-never-declare">F73. DQL variables a returned query builder uses that its callers never declare<a class="headerlink" href="#f73-dql-variables-a-returned-query-builder-uses-that-its-callers-never-declare" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">private function base(): QueryBuilder</span>
 <a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">{</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    return $this-&gt;createQb()-&gt;join('e.team', 't');  // builder from another method</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">}</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">private function joinTeams(QueryBuilder $qb): void</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">{</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">    $this-&gt;joinOwner($qb);                          // passed on again</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x">}</span>
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="x">$qb = self::createQb();                             // static call</span>
-<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="x">$qb-&gt;andWhere('x.id = 1')-&gt;getQuery();              // `x` not reported</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    return $this-&gt;em-&gt;createQueryBuilder()</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">        -&gt;select('u')-&gt;from(User::class, 'u')</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">        -&gt;andWhere('t.id = 1');                  // `t` declared by no caller</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">}</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">$this-&gt;base()-&gt;getQuery();                       // PHPStan reports `t` here</span>
 </code></pre></div>
-<p>A builder another method returns, or that is passed to one, counts the
-variables that method's body declares, but only when that body creates the
-builder itself or only calls the methods of the one it is passed. One the
-method gets from a third method, or passes on to one, is not followed, so
-a variable used on it is not reported. Nor is one a static call or a call
-on a variable (<code>$repo-&gt;createQb()</code>) hands over. A variable such a method
-declares also counts on every path through the caller, not only the paths
-that make the call.</p>
-<p>The other direction is not reported either: a variable a method's returned
-builder uses, which none of its callers declare. PHPStan reports it in the
-caller, where the query is run.</p>
+<p>A variable used on a builder a method returns is left for the method's
+callers to declare, so one that none of them declares is not reported.
+PHPStan reports it in the caller, where the query is run. The method's
+summary would carry the variables its builder uses and does not declare
+itself, and each caller would check them along its paths, the way it
+checks its own uses against what the methods it calls declare. The same
+goes for a variable a method uses on a builder it is passed.</p>
 <p><strong>Where to look:</strong> <code>src/symbol_map/extraction/doctrine_dql.rs</code>
-(<code>summarize_methods</code>, <code>keeps_builder</code>, <code>builder_of</code>) and
-<code>src/diagnostics/dql_syntax.rs</code> (<code>providing_methods</code>).</p>
+(<code>summarize_methods</code>, <code>report_undeclared</code>) and
+<code>src/diagnostics/dql_syntax.rs</code> (<code>Providers</code>).</p>
 <hr />
 <h2 id="f45-symfony-events-named-by-their-class-or-a-constant">F45. Symfony events named by their class or a constant<a class="headerlink" href="#f45-symfony-events-named-by-their-class-or-a-constant" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
