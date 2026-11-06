@@ -44,7 +44,9 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::GateAbility => CompletionItemKind::Method,
         StringKeyKind::Env => CompletionItemKind::Constant,
         StringKeyKind::ServiceId => CompletionItemKind::Reference,
-        StringKeyKind::DrupalEntityType => CompletionItemKind::Class,
+        StringKeyKind::DrupalEntityType | StringKeyKind::DrupalRenderElement => {
+            CompletionItemKind::Class
+        }
         StringKeyKind::ContainerParameter => CompletionItemKind::Property,
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
         StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook | StringKeyKind::DrupalHook => {
@@ -196,7 +198,8 @@ impl Backend {
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRoute
             | StringKeyKind::DrupalPermission
-            | StringKeyKind::DrupalConfigName => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::DrupalConfigName
+            | StringKeyKind::DrupalRenderElement => self.symfony_declared_names(*kind).into(),
             StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
                 self.twig_callable_names(*kind).into()
             }

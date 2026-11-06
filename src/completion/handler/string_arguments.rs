@@ -138,6 +138,17 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Drupal render elements ──────────────────────────────
+        // `'#type' => '|'` and `$form['name']['#type'] = '|'`.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_drupal_render_element_completion(uri, content, position, code)
+        {
+            return Some(response);
+        }
+
         // ── Symfony form options ────────────────────────────────
         // `$builder->add('email', EmailType::class, ['|' => …])`, wherever
         // the form component is used.

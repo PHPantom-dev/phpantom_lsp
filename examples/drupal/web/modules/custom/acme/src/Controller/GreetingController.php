@@ -58,4 +58,25 @@ final class GreetingController extends ControllerBase
 
         return Link::createFromRoute($this->t('Greet the world'), 'acme.greeting', $url->getRouteParameters());
     }
+
+    /**
+     * The greeting for `$name` in a card, with more about it folded away.
+     *
+     * @return array<string, mixed>
+     */
+    public function card(string $name): array
+    {
+        // Try: go to the definition of 'acme_greeting_card', which lands on
+        // the GreetingCard class, or hover 'details' to see core's element
+        // class. Complete an element name inside '#type' => '', core's
+        // elements included.
+        $build = [
+            '#type' => 'acme_greeting_card',
+            'greeting' => $this->greet($name),
+        ];
+        $build['more']['#type'] = 'details';
+        $build['more']['#title'] = $this->t('More');
+
+        return $build;
+    }
 }

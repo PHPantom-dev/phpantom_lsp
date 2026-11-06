@@ -15,6 +15,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Controller\NoteController;
+use Drupal\acme\Element\GreetingCard;
 use Drupal\acme\Entity\Note;
 use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
@@ -42,6 +43,10 @@ use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Language\LanguageManager;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Link;
+use Drupal\Core\Render\Attribute\FormElement;
+use Drupal\Core\Render\Attribute\RenderElement;
+use Drupal\Core\Render\Element\Details;
+use Drupal\Core\Render\Element\RenderElementBase;
 use Drupal\Core\Url;
 use Drupal\language\ConfigurableLanguageManager;
 use Drupal\language\LanguageServiceProvider;
@@ -281,6 +286,29 @@ check('acme_form_alter() implements hook_form_alter procedurally', function_exis
 check("core documents hook_form_alter() with the FormStateInterface acme_form_alter() leaves untyped", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/form.api.php"), 'function hook_form_alter(&$form, \\Drupal\\Core\\Form\\FormStateInterface $form_state, $form_id)') && (new ReflectionFunction('acme_form_alter'))->getParameters()[1]->getType() === null);
 check("core documents hook_form_alter() with a docblock acme_form_alter()'s hover shows", (bool) preg_match('~/\*\*\n \* Perform alterations before a form is rendered\.\n(?: \*[^\n]*\n)* \*/\nfunction hook_form_alter\(~', (string) file_get_contents("$web/core/lib/Drupal/Core/Form/form.api.php")));
 check("core's FormBuilder::prepareForm() fires the form alter hooks", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/FormBuilder.php"), '$this->moduleHandler->alter($hooks, $form, $form_state, $form_id);'));
+
+// ─── Render elements ────────────────────────────────────────────────────────
+
+$card = new ReflectionClass(GreetingCard::class);
+check('GreetingCard declares the acme_greeting_card element by attribute', (attributeArguments($card, RenderElement::class)[0] ?? null) === 'acme_greeting_card');
+check('GreetingCard is a render element', $card->isSubclassOf(RenderElementBase::class));
+check("core's Details declares the details element", (attributeArguments(new ReflectionClass(Details::class), RenderElement::class)[0] ?? null) === 'details');
+
+// Every element the controller names is one the module or core declares.
+$declaredElements = ['acme_greeting_card'];
+foreach (glob("$web/core/lib/Drupal/Core/Render/Element/*.php") ?: [] as $file) {
+    $class = 'Drupal\\Core\\Render\\Element\\' . basename($file, '.php');
+    if (!class_exists($class)) {
+        continue;
+    }
+    $element = new ReflectionClass($class);
+    foreach ([RenderElement::class, FormElement::class] as $attribute) {
+        $declaredElements[] = attributeArguments($element, $attribute)[0] ?? null;
+    }
+}
+preg_match_all("/'#type'(?:\\] =| =>) '([^']+)'/", $controllerSource, $namedElements);
+check('GreetingController names the custom and a core element in a literal and an assignment', $namedElements[1] === ['acme_greeting_card', 'details']);
+check('every element GreetingController names is declared', array_diff($namedElements[1], $declaredElements) === []);
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

@@ -200,6 +200,11 @@ pub(crate) enum StringKeyKind {
     /// object's `get()`, `set()`, and `clear()`, the part after the `:` of
     /// a `#config_target`, and a `ConfigTarget`'s property path.
     DrupalConfigKey,
+    /// A Drupal render element name: declared by the ID of a class's
+    /// `#[RenderElement]` or `#[FormElement]` attribute, or of the
+    /// annotation older code uses, and read by the `#type` of a render
+    /// array.
+    DrupalRenderElement,
 }
 
 impl StringKeyKind {
@@ -253,7 +258,8 @@ impl StringKeyKind {
             | Self::DrupalHook
             | Self::DrupalPermission
             | Self::DrupalConfigName
-            | Self::DrupalConfigKey => KeyFramework::Drupal,
+            | Self::DrupalConfigKey
+            | Self::DrupalRenderElement => KeyFramework::Drupal,
         }
     }
 
@@ -702,6 +708,17 @@ pub(crate) struct EntityTypeSite {
     /// of its kind of entity type; `None` when it names none and has no
     /// default.
     pub storage: Option<crate::atom::Atom>,
+}
+
+/// The class a Drupal plugin declaration is written on, such as a render
+/// element's.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PluginClassSite {
+    /// Byte offset of the plugin ID's first character, matching the
+    /// declaration's [`SymbolKind::StringKey`] span.
+    pub start: u32,
+    /// The class the attribute or annotation is written on.
+    pub class: crate::atom::Atom,
 }
 
 /// The value a container declaration gives, read by the kind of name it

@@ -48,6 +48,7 @@ enum CheckedStringKind {
     YiiRoute,
     YiiRouteArgument,
     DrupalRoute,
+    DrupalRenderElement,
 }
 
 impl CheckedStringKind {
@@ -78,6 +79,7 @@ impl CheckedStringKind {
             StringKeyKind::YiiRoute => Self::YiiRoute,
             StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
             StringKeyKind::DrupalRoute => Self::DrupalRoute,
+            StringKeyKind::DrupalRenderElement => Self::DrupalRenderElement,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -188,6 +190,8 @@ struct DeclaredKeys<'a> {
     /// The `Class::method` and `Class` names Drupal gives attribute routes,
     /// sorted.
     drupal_route_aliases: Vec<String>,
+    /// The Drupal render element names the project declares, sorted.
+    drupal_render_elements: Vec<String>,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -223,6 +227,8 @@ impl<'a> DeclaredKeys<'a> {
         let has_messenger_bus = names(|kind| kind == CheckedStringKind::MessengerBus);
         let has_yii_route = names(|kind| kind == CheckedStringKind::YiiRoute);
         let has_drupal_route = names(|kind| kind == CheckedStringKind::DrupalRoute);
+        let has_drupal_render_element =
+            names(|kind| kind == CheckedStringKind::DrupalRenderElement);
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -395,6 +401,15 @@ impl<'a> DeclaredKeys<'a> {
             (Vec::new(), Vec::new(), Vec::new())
         };
 
+        // Core's and contributed modules' elements are only known once
+        // the workspace index has read the folders `.gitignore` leaves out.
+        let drupal_render_elements = if has_drupal_render_element {
+            backend.ensure_workspace_index_ready_for_request();
+            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::DrupalRenderElement)
+        } else {
+            Vec::new()
+        };
+
         Self {
             backend,
             routes,
@@ -421,6 +436,7 @@ impl<'a> DeclaredKeys<'a> {
             drupal_routes,
             drupal_route_patterns,
             drupal_route_aliases,
+            drupal_render_elements,
         }
     }
 
@@ -504,6 +520,7 @@ impl<'a> DeclaredKeys<'a> {
             CheckedStringKind::YiiRoute => self.judge_yii_route(key),
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
             CheckedStringKind::DrupalRoute => self.judge_drupal_route(key),
+            CheckedStringKind::DrupalRenderElement => self.judge_drupal_render_element(key),
         }
     }
 
@@ -574,6 +591,20 @@ impl<'a> DeclaredKeys<'a> {
             return None;
         }
         Some((false, VERDICT.0, VERDICT.1))
+    }
+
+    /// Every render element is a class with an element attribute or
+    /// annotation, so the names they declare are all of them.  A project
+    /// that declares none was not read at all.
+    fn judge_drupal_render_element(&self, key: &str) -> Verdict {
+        if self.drupal_render_elements.is_empty() {
+            return None;
+        }
+        let valid = self
+            .drupal_render_elements
+            .binary_search_by(|name| name.as_str().cmp(key))
+            .is_ok();
+        Some((valid, "render element", "invalid_drupal_render_element"))
     }
 
     /// No package Yii installs declares routes of its own, so the
@@ -906,9 +937,15 @@ impl Backend {
                 {
                     return None;
                 }
-                // Test code passes invented route names to mocks, and an
-                // `*.api.php` file's examples name invented routes too.
-                if *kind == crate::symbol_map::StringKeyKind::DrupalRoute && is_drupal_test_code {
+                // Test code passes invented route names to mocks and uses
+                // its test modules' elements, and an `*.api.php` file's
+                // examples name invented ones too.
+                if matches!(
+                    kind,
+                    crate::symbol_map::StringKeyKind::DrupalRoute
+                        | crate::symbol_map::StringKeyKind::DrupalRenderElement
+                ) && is_drupal_test_code
+                {
                     return None;
                 }
                 Some((

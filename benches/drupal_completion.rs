@@ -8,15 +8,17 @@ use tower_lsp_server::gen_lsp_types::*;
 
 /// Custom modules in the generated site, each declaring `SERVICES`
 /// services, `ROUTES` routes, `ENTITY_TYPES` entity types, `PERMISSIONS`
-/// permissions, and `CONFIGS` configuration objects, with their default
-/// configuration and schema, and documenting `HOOKS` hooks, and
-/// implementing the hooks the module before it documents.
+/// permissions, `CONFIGS` configuration objects, with their default
+/// configuration and schema, and `ELEMENTS` render elements, and
+/// documenting `HOOKS` hooks, and implementing the hooks the module before
+/// it documents.
 const MODULES: usize = 30;
 const SERVICES: usize = 10;
 const ROUTES: usize = 10;
 const ENTITY_TYPES: usize = 3;
 const PERMISSIONS: usize = 10;
 const CONFIGS: usize = 10;
+const ELEMENTS: usize = 3;
 const HOOKS: usize = 10;
 
 const COMPOSER: &str = r#"{
@@ -43,6 +45,10 @@ const STUBS: &[(&str, &str)] = &[
     (
         "web/core/lib/Drupal/Core/Entity/Attribute/ContentEntityType.php",
         "<?php\nnamespace Drupal\\Core\\Entity\\Attribute;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass ContentEntityType {\n    public function __construct(public readonly string $id) {}\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Render/Attribute/RenderElement.php",
+        "<?php\nnamespace Drupal\\Core\\Render\\Attribute;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass RenderElement {\n    public function __construct(public readonly string $id) {}\n}\n",
     ),
     (
         "web/core/lib/Drupal/Core/Extension/ModuleHandlerInterface.php",
@@ -86,6 +92,7 @@ final class Consumer
         $this->modules->invokeAll('mod1_');
         $this->account->hasPermission('administer mod1 ');
         \Drupal::config('mod1.');
+        $build = ['#type' => 'mod1_'];
     }
 }
 "#;
@@ -103,7 +110,8 @@ fn rt() -> tokio::runtime::Runtime {
 }
 
 /// The files of a site with many custom modules: their services, routes,
-/// entity types, documented hooks, and hook implementations.
+/// entity types, render elements, documented hooks, and hook
+/// implementations.
 fn generate_site() -> Vec<(String, String)> {
     let mut files = Vec::new();
 
@@ -159,6 +167,15 @@ fn generate_site() -> Vec<(String, String)> {
                 format!("{dir}/src/Entity/Entity{e}.php"),
                 format!(
                     "<?php\nnamespace Drupal\\mod{m}\\Entity;\n\nuse Drupal\\Core\\Entity\\Attribute\\ContentEntityType;\n\n#[ContentEntityType(\n    id: 'mod{m}_entity{e}',\n)]\nclass Entity{e} {{}}\n"
+                ),
+            ));
+        }
+
+        for e in 0..ELEMENTS {
+            files.push((
+                format!("{dir}/src/Element/Element{e}.php"),
+                format!(
+                    "<?php\nnamespace Drupal\\mod{m}\\Element;\n\nuse Drupal\\Core\\Render\\Attribute\\RenderElement;\n\n#[RenderElement('mod{m}_element{e}')]\nclass Element{e} {{}}\n"
                 ),
             ));
         }
@@ -322,6 +339,13 @@ fn bench_drupal_name_completion(c: &mut Criterion) {
             CONSUMER_PHP,
             "config('mod1.'",
             "mod1.setting7",
+        ),
+        (
+            "render_element",
+            &consumer,
+            CONSUMER_PHP,
+            "'#type' => 'mod1_'",
+            "mod1_element2",
         ),
         (
             "hook_name_invoke_all",

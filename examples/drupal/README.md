@@ -3,8 +3,8 @@
 A standalone editor playground for PHPantom on Drupal 11. It is a
 `drupal/recommended-project` site with one custom module, `acme`, and one
 theme, `acme_theme`, declaring a service, a route, a content entity type,
-hooks, a theme hook, permissions, and configuration the way a real Drupal
-module declares them.
+a render element, hooks, a theme hook, permissions, and configuration the
+way a real Drupal module declares them.
 
 Run `composer install` here first. Composer puts core and contrib into
 `web/`, which is git-ignored apart from the custom module and theme.
@@ -105,6 +105,14 @@ Run `composer install` here first. Composer puts core and contrib into
   hover `$languageManager`: core declares `language_manager` as
   `LanguageManager`, and the language module's `LanguageServiceProvider`
   swaps in `ConfigurableLanguageManager`, so it is either class.
+- Render element names in `#type` navigate to the element class that
+  declares them. In `card()` in
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the
+  definition of `'acme_greeting_card'`, which lands on
+  `src/Element/GreetingCard.php`, or hover `'details'` to see core's
+  `Details` class. Complete a name inside `'#type' => ''` or
+  `$build['more']['#type'] = ''`; core's elements are offered too. A name
+  no element class declares is reported.
 
 ## What the Symfony support already reads
 

@@ -449,6 +449,9 @@ impl Backend {
                 ("View", detail)
             }
             StringKeyKind::WordPressHook => ("Hook", self.wordpress_hook_detail(key)),
+            StringKeyKind::DrupalRenderElement => {
+                ("Render element", self.drupal_render_element_detail(key))
+            }
         };
 
         Some(make_hover(format!(
