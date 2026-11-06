@@ -17251,3 +17251,157 @@ function f(array $data, Dog $actual): void {
     );
     assert_eq!(got, ["Dog"]);
 }
+
+// ─── Mismatches against docblock types (docblock-type-mismatches) ───────────
+
+/// Every kind of type mismatch in `php`, with `docblock-type-mismatches`
+/// as given; `None` leaves it unset.
+fn docblock_type_mismatches(php: &str, docblock_types: Option<bool>) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///docblock_types.php";
+    let mut cfg = backend.config();
+    cfg.diagnostics.docblock_type_mismatches = docblock_types;
+    backend.set_config(cfg);
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    backend.collect_return_type_diagnostics(uri, php, &mut diags);
+    backend.collect_property_type_diagnostics(uri, php, &mut diags);
+    diags
+}
+
+/// Each mismatch here breaks only a docblock type: the native type, where
+/// there is one, accepts the value.
+const DOCBLOCK_ONLY: &str = r#"<?php
+declare(strict_types=1);
+
+class Response {}
+
+/** @param Response $r */
+function takes_response($r): void {}
+
+/** @param Response $r */
+function takes_response_or_string(Response|string $r): void {}
+
+/** @return string */
+function untyped_return() {
+    return new Response();
+}
+
+/** @return Response */
+function narrowed_return(): Response|string {
+    return 'plain text';
+}
+
+class Holder {
+    /** @var Response */
+    public $untyped;
+
+    /** @var Response */
+    public Response|string $narrowed;
+
+    public function run(): void {
+        takes_response('x');
+        takes_response_or_string('x');
+        $this->untyped = 'x';
+        $this->narrowed = 'x';
+    }
+}
+"#;
+
+#[test]
+fn docblock_types_are_checked_by_default() {
+    let diags = docblock_type_mismatches(DOCBLOCK_ONLY, None);
+    assert_eq!(diags.len(), 6, "got {diags:?}");
+}
+
+#[test]
+fn switching_docblock_types_off_checks_only_native_types() {
+    let diags = docblock_type_mismatches(DOCBLOCK_ONLY, Some(false));
+    assert!(diags.is_empty(), "got {diags:?}");
+}
+
+#[test]
+fn native_mismatches_are_reported_with_docblock_types_off() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Response {}
+
+/** @param Response $r */
+function takes_response(Response $r): void {}
+
+/** @return Response */
+function wrong_return(): Response {
+    return 'many';
+}
+
+class Holder {
+    /** @var Response */
+    public Response $prop;
+
+    public function run(): void {
+        takes_response('x');
+        $this->prop = 'x';
+    }
+}
+"#;
+    let diags = docblock_type_mismatches(php, Some(false));
+    let codes: Vec<_> = diags
+        .iter()
+        .map(|d| match &d.code {
+            Some(Code::String(code)) => code.as_str(),
+            other => panic!("unexpected code {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        codes,
+        vec![
+            "type_mismatch_argument",
+            "type_mismatch_return",
+            "type_mismatch_property",
+        ],
+        "got {diags:?}"
+    );
+}
+
+/// A method's own parameters and return go through the class's
+/// `MethodInfo` rather than the function index.
+#[test]
+fn methods_are_checked_against_native_types_with_docblock_types_off() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Response {}
+
+class Controller {
+    /** @param Response $module */
+    public function __construct($id, $module) {}
+
+    /** @return string */
+    public function actionIndex() {
+        return new Response();
+    }
+
+    /** @return Response */
+    public function actionSave(): Response|string {
+        return 'plain text';
+    }
+
+    /** @return Response */
+    public function actionBroken(): Response {
+        return 'plain text';
+    }
+}
+
+new Controller('test', []);
+"#;
+    assert_eq!(docblock_type_mismatches(php, None).len(), 4);
+    let diags = docblock_type_mismatches(php, Some(false));
+    assert_eq!(diags.len(), 1, "got {diags:?}");
+    assert_eq!(
+        diags[0].code,
+        Some(Code::String("type_mismatch_return".into())),
+        "got {diags:?}"
+    );
+}

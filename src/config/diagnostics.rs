@@ -97,6 +97,18 @@ pub struct DiagnosticsConfig {
     #[serde(rename = "possibly-empty-mismatches")]
     pub possibly_empty_mismatches: Option<bool>,
 
+    /// Check arguments, return values and property writes against the
+    /// type a docblock declares, not just the native one.
+    ///
+    /// On by default. Set to `false` and a `type_mismatch_argument`,
+    /// `type_mismatch_return` or `type_mismatch_property` is only reported
+    /// when the value breaks the native type, so the code would throw a
+    /// `TypeError`. A parameter, return or property with no native type is
+    /// then not checked at all. Useful on legacy code whose docblocks
+    /// have drifted from what the code does.
+    #[serde(rename = "docblock-type-mismatches")]
+    pub docblock_type_mismatches: Option<bool>,
+
     /// Rules that suppress matching diagnostics, similar to PHPStan's
     /// `ignoreErrors`.
     ///
@@ -191,5 +203,12 @@ impl DiagnosticsConfig {
     /// Whether a mismatch that only a `null` or `false` causes is reported.
     pub fn possibly_empty_mismatches_enabled(&self) -> bool {
         self.possibly_empty_mismatches.unwrap_or(false)
+    }
+
+    /// Whether type mismatches are checked against docblock types.
+    ///
+    /// Defaults to `true` (on) when not explicitly set.
+    pub fn docblock_type_mismatches_enabled(&self) -> bool {
+        self.docblock_type_mismatches.unwrap_or(true)
     }
 }

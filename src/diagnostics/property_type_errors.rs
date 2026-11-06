@@ -67,6 +67,9 @@ struct PropertyCheckCtx<'a> {
     symbol_map: &'a SymbolMap,
     type_ctx: &'a TypeCheckCtx<'a>,
     backend: &'a Backend,
+    /// Whether the docblock type of a property is checked, or only its
+    /// native one.
+    docblock_types: bool,
     out: &'a mut Vec<ResolvedPropertyAssignment>,
 }
 
@@ -218,6 +221,7 @@ fn check_property_write(member_offset: u32, rhs: &Expression<'_>, ctx: &mut Prop
             receiver,
             prop_name,
             is_static,
+            ctx.docblock_types,
             resolved_class_loader,
             ctx.backend,
         ) else {
@@ -289,20 +293,25 @@ fn check_property_write(member_offset: u32, rhs: &Expression<'_>, ctx: &mut Prop
 /// `None` when the receiver has no such property, when its staticness
 /// does not match the access, when the property is virtual (`@property`,
 /// framework attributes: magic `__set` decides what those accept), or
-/// when it carries no type worth checking.
+/// when it carries no type worth checking. Only the native type counts
+/// when `docblock_types` is off.
 fn declared_property_type(
     receiver: &Arc<ClassInfo>,
     name: &str,
     is_static: bool,
+    docblock_types: bool,
     class_loader: &ResolvedClassLoader<'_>,
     backend: &Backend,
 ) -> Option<PhpType> {
     let find = |class: &ClassInfo| {
-        class
-            .properties
-            .iter()
-            .find(|p| p.name == name)
-            .map(|p| (p.is_virtual, p.is_static, p.type_hint.clone()))
+        class.properties.iter().find(|p| p.name == name).map(|p| {
+            let ty = if docblock_types {
+                &p.type_hint
+            } else {
+                &p.native_type_hint
+            };
+            (p.is_virtual, p.is_static, ty.clone())
+        })
     };
     // The receiver itself first: it carries any generic substitutions
     // the subject applied, which the cached merge of its class does not.
@@ -351,6 +360,7 @@ impl Backend {
     ) {
         let symbol_map = &ctx.symbol_map;
         let report_possibly_empty = self.possibly_empty_mismatches_enabled();
+        let docblock_types = self.docblock_type_mismatches_enabled();
         out.extend(collect_type_check(
             self,
             &ctx.file,
@@ -366,6 +376,7 @@ impl Backend {
                         symbol_map,
                         type_ctx: ctx,
                         backend: self,
+                        docblock_types,
                         out: &mut resolved,
                     };
 

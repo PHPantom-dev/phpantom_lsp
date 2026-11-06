@@ -106,6 +106,12 @@ fn prompt_diagnostic_toggles() -> Vec<&'static str> {
     ) {
         diagnostics.push("possibly-empty-mismatches = true");
     }
+    if !prompt_bool(
+        "Check type mismatches against docblock types, not just native ones?",
+        true,
+    ) {
+        diagnostics.push("docblock-type-mismatches = false");
+    }
     diagnostics
 }
 

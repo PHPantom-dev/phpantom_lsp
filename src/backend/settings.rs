@@ -35,6 +35,18 @@ impl Backend {
             .possibly_empty_mismatches_enabled()
     }
 
+    /// Whether type mismatches are checked against docblock types, not
+    /// just native ones; see
+    /// [`DiagnosticsConfig::docblock_type_mismatches_enabled`](config::DiagnosticsConfig::docblock_type_mismatches_enabled).
+    /// Reads the one flag without cloning the whole config.
+    pub(crate) fn docblock_type_mismatches_enabled(&self) -> bool {
+        self.workspace
+            .config
+            .lock()
+            .diagnostics
+            .docblock_type_mismatches_enabled()
+    }
+
     /// The directory symlinks the workspace walks have indexed through.
     ///
     /// Walks report into it as they discover links; the watcher

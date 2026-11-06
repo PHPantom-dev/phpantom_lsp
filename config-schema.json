@@ -50,6 +50,11 @@
           "description": "Report a type_mismatch_argument, type_mismatch_return or type_mismatch_property whose only failing members are null or false, such as a string|false passed to a string parameter. Off by default, since the code only fails if the value turns out empty. Matches PHPStan's checkUnionTypes and checkNullables (levels 7 and 8).",
           "default": false
         },
+        "docblock-type-mismatches": {
+          "type": "boolean",
+          "description": "Check arguments, return values and property assignments against the types docblocks declare. On by default. Set to false to report a type_mismatch_argument, type_mismatch_return or type_mismatch_property only when the value breaks the native type, so a parameter, return or property typed only in a docblock is not checked. Useful on legacy code whose docblocks have drifted from what the code does.",
+          "default": true
+        },
         "workspace": {
           "type": "boolean",
           "description": "Compute diagnostics for the whole workspace in the background after startup and the full index finish, so project-wide problems appear for files that are not open in the editor. Off by default: it costs a project-wide sweep every session. Requires the default \"full\" indexing strategy.",

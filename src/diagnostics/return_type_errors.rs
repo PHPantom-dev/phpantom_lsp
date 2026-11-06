@@ -77,6 +77,7 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let report_possibly_empty = self.possibly_empty_mismatches_enabled();
+        let docblock_types = self.docblock_type_mismatches_enabled();
         out.extend(collect_type_check(
             self,
             &ctx.file,
@@ -102,6 +103,7 @@ impl Backend {
                             ctx.loaders.function_loader_at(offset),
                             ctx.loaders.constant_loader_at(offset),
                             self,
+                            docblock_types,
                             &mut resolved_returns,
                         );
                     }
@@ -328,7 +330,7 @@ fn resolve_return_and_push(
 
 /// The return type the index holds for the function `uri` declares at
 /// `func_offset`, with the `@return` docblock already merged over the native
-/// hint.
+/// hint, or only the native hint when `docblock_types` is off.
 ///
 /// Only this file's own declaration will do.  A same-named function in another
 /// file has a docblock that says nothing about the body being checked, so the
@@ -340,6 +342,7 @@ fn indexed_return_type(
     uri: &str,
     func_name: &str,
     func_offset: u32,
+    docblock_types: bool,
 ) -> Option<(PhpType, HashMap<String, PhpType>)> {
     let fqn = file_ctx.resolve_name_at(func_name, func_offset);
     let declared = || {
@@ -360,6 +363,9 @@ fn indexed_return_type(
     };
 
     let mut fi = declared()?;
+    if !docblock_types {
+        return Some((fi.native_return_type?, HashMap::new()));
+    }
     // Checked once the index is no longer locked: it loads classes.
     backend.verify_function_doc_types(&mut fi);
     let bounds = template_bounds(&fi.template_params, &fi.template_param_bounds);
@@ -378,6 +384,7 @@ fn process_top_level_statement(
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
+    docblock_types: bool,
     out: &mut Vec<ResolvedReturn>,
 ) {
     match stmt {
@@ -393,6 +400,7 @@ fn process_top_level_statement(
                     function_loader,
                     constant_loader,
                     backend,
+                    docblock_types,
                     out,
                 );
             }
@@ -408,6 +416,7 @@ fn process_top_level_statement(
                     function_loader,
                     constant_loader,
                     backend,
+                    docblock_types,
                     out,
                 );
             }
@@ -425,16 +434,22 @@ fn process_top_level_statement(
             // against `array<string, int>` rather than bare `array`.  Falling
             // back to the AST hint covers a function the index has not caught
             // up with yet.
-            let (declared_return, template_bounds) =
-                match indexed_return_type(backend, file_ctx, uri, func_name, func_offset) {
-                    Some((ret, bounds)) => (Some(ret), bounds),
-                    None => (
-                        func.return_type_hint
-                            .as_ref()
-                            .map(|rth| crate::parser::extract_hint_type(&rth.hint)),
-                        HashMap::new(),
-                    ),
-                };
+            let (declared_return, template_bounds) = match indexed_return_type(
+                backend,
+                file_ctx,
+                uri,
+                func_name,
+                func_offset,
+                docblock_types,
+            ) {
+                Some((ret, bounds)) => (Some(ret), bounds),
+                None => (
+                    func.return_type_hint
+                        .as_ref()
+                        .map(|rth| crate::parser::extract_hint_type(&rth.hint)),
+                    HashMap::new(),
+                ),
+            };
 
             let declared_return = match declared_return {
                 Some(t) if !t.is_untyped() && !t.is_mixed() => t,
@@ -519,6 +534,7 @@ fn process_top_level_statement(
                         function_loader,
                         constant_loader,
                         backend,
+                        docblock_types,
                         out,
                     );
                 }
@@ -534,6 +550,7 @@ fn process_top_level_statement(
                             function_loader,
                             constant_loader,
                             backend,
+                            docblock_types,
                             out,
                         );
                     }
@@ -555,6 +572,7 @@ fn process_class_member(
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
+    docblock_types: bool,
     out: &mut Vec<ResolvedReturn>,
 ) {
     use mago_syntax::cst::class_like::member::ClassLikeMember;
@@ -585,7 +603,13 @@ fn process_class_member(
 
     // Look up the method's declared return type from the parsed MethodInfo.
     let method_info = current_class.get_method(method_name);
-    let declared_return = method_info.and_then(|mi| mi.return_type.clone());
+    let declared_return = method_info.and_then(|mi| {
+        if docblock_types {
+            mi.return_type.clone()
+        } else {
+            mi.native_return_type.clone()
+        }
+    });
 
     let declared_return = match declared_return {
         Some(t) if !t.is_untyped() && !t.is_mixed() => t,
