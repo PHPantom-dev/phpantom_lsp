@@ -381,13 +381,6 @@ impl Backend {
                     &self.resolved_class_cache,
                 );
             }
-            DocblockMemberRef::AttributeNamedArg => candidates.retain(|class| {
-                crate::class_lookup::constructor_promotes(
-                    class,
-                    member_name,
-                    &resolved_class_loader,
-                )
-            }),
             _ => {}
         }
 

@@ -1,9 +1,9 @@
-//! Argument count diagnostics.
+//! Argument count and named-argument diagnostics.
 //!
 //! Walk the precomputed [`CallSite`] entries in the symbol map and flag
 //! every call that passes too few or too many arguments relative to the
-//! resolved callable's parameter list, and every named argument the
-//! callable has no parameter for.
+//! resolved callable's parameter list, and every named argument that
+//! callable declares no parameter for.
 //!
 //! Diagnostics use `Severity::Error` because passing the wrong number
 //! of arguments crashes at runtime with a `TypeError`.
@@ -22,6 +22,17 @@
 //!   have genuinely overloaded signatures (e.g. `array_keys` accepts
 //!   1 or 2-3 arguments, `mt_rand` accepts 0 or 2) that the
 //!   phpstorm-stubs format cannot express with a single declaration.
+//! - Unknown named arguments are reported unless the callee collects them:
+//!   a variadic parameter takes any label passed for it, and a method the
+//!   engine synthesized from an `@method` tag, a macro or a forwarder reaches
+//!   `__call`, which collects them too.  A name the engine read from a
+//!   callable *type* rather than from a declaration bounds no caller either.
+//!   An extension shipped apart from php-src names its parameters differently
+//!   from one release to the next, so its stub bounds no caller either.
+//!   At a built-in, where the bundled stub rather than PHP's own arginfo
+//!   supplies the names, a label that differs from a declared parameter only
+//!   in case or underscores is accepted: the stubs spell some parameters
+//!   otherwise than the runtime does.
 
 use tower_lsp_server::gen_lsp_types::*;
 
@@ -36,8 +47,8 @@ use super::helpers::{
 /// Diagnostic code used for argument-count diagnostics.
 pub(crate) const ARGUMENT_COUNT_MISMATCH_CODE: &str = "argument_count_mismatch";
 
-/// Diagnostic code for a named argument no parameter of a constructor is
-/// named after, which PHP throws on.
+/// Diagnostic code for a named argument no parameter of the call is named
+/// after, which PHP throws on.
 pub(crate) const UNKNOWN_NAMED_ARGUMENT_CODE: &str = "unknown_named_argument";
 
 /// Alternative minimum argument counts for built-in functions whose
@@ -309,6 +320,13 @@ impl Backend {
                 None => continue,
             };
 
+            // ── Unknown named arguments ─────────────────────────────
+            // PHP binds a label to the parameter that shares its name and
+            // throws `Unknown named parameter $x` when the callee declares
+            // none, so a label that matches nothing is a crash rather than a
+            // style choice.
+            self.report_unknown_named_arguments(uri, content, call_site, &resolved, file_ctx, out);
+
             // A callable that accepts any number of arguments (e.g. a class
             // with no explicit constructor, which PHP lets you call with
             // extra arguments) is never an argument-count error.
@@ -318,28 +336,6 @@ impl Backend {
 
             let params = &resolved.parameters;
             let actual_args = call_site.arg_count;
-
-            // ── Unknown named arguments ─────────────────────────────
-            // A name no parameter declares throws, unless a variadic
-            // parameter collects it.  Attributes are recorded as `new` call
-            // sites, so `#[Length(mni: 3)]` is checked here too.
-            if resolved.binds_named_args
-                && !call_site.named_arg_indices.is_empty()
-                && !resolved.reads_func_args
-                && !params.iter().any(|p| p.is_variadic)
-                && !resolved.owner_class.is_some_and(|owner| {
-                    self.method_declared_by_unbundled_extension(&owner, expr, file_ctx)
-                })
-            {
-                self.report_unknown_named_arguments(
-                    uri,
-                    content,
-                    &call_site,
-                    params,
-                    &resolved.overloads,
-                    out,
-                );
-            }
 
             let mut required_count = params.iter().filter(|p| p.is_required).count() as u32;
 
@@ -519,40 +515,125 @@ impl Backend {
             })
     }
 
-    /// Report each named argument of `call_site` that none of `params` is
-    /// named after.
+    /// Flag every named argument the callee declares no parameter for.
+    ///
+    /// Runs from the argument-count pass, which already resolves each call
+    /// site's callable and reads its parameter list.  Attributes are recorded
+    /// as `new` call sites, so `#[Length(mni: 3)]` is checked here too.
+    ///
+    /// A label is proved wrong only against a parameter list that bounds what
+    /// a caller may write; the notes below name the lists that do not.
     fn report_unknown_named_arguments(
         &self,
         uri: &str,
         content: &str,
-        call_site: &crate::symbol_map::CallSite<'_>,
-        params: &[crate::types::ParameterInfo],
-        overloads: &[Vec<crate::types::ParameterInfo>],
+        call_site: crate::symbol_map::CallSite<'_>,
+        resolved: &crate::types::ResolvedCallableTarget,
+        file_ctx: &crate::types::FileContext,
         out: &mut Vec<Diagnostic>,
     ) {
-        let declares = |params: &[crate::types::ParameterInfo], name: &str| {
-            params
-                .iter()
-                .any(|p| p.is_variadic || p.name.strip_prefix('$').unwrap_or(&p.name) == name)
-        };
-        for (name, &index) in call_site
-            .named_arg_names
-            .iter()
-            .zip(call_site.named_arg_indices)
+        if call_site.named_arg_indices.is_empty() {
+            return;
+        }
+
+        // `binds_named_args` marks the targets whose declaration names its
+        // parameters the way the runtime binds them: it is false for a
+        // callable type, a partial application, and a built-in of an
+        // extension php-src does not ship, whose stub cannot say which
+        // names the installed release takes.  The same reads the method
+        // behind a class the call resolves to.
+        if !resolved.binds_named_args
+            || resolved.owner_class.as_ref().is_some_and(|owner| {
+                self.method_declared_by_unbundled_extension(
+                    owner.as_str(),
+                    call_site.call_expression,
+                    file_ctx,
+                )
+            })
         {
-            // An overloaded built-in accepts the name when any of its
-            // signatures does.
-            if declares(params, name) || overloads.iter().any(|o| declares(o, name)) {
+            return;
+        }
+
+        // `accepts_any_args` marks a callable whose parameter list is not the
+        // whole story: a bare `callable` value, or a class with no
+        // constructor of its own.  The second still rejects labels — PHP
+        // throws for `new WithoutConstructor(x: 1)` even though it swallows
+        // positional arguments — but that reading only applies to a call the
+        // engine spells `new …`.
+        let is_instantiation = call_site.call_expression.starts_with("new ");
+        if resolved.accepts_any_args && !is_instantiation {
+            return;
+        }
+
+        // A variadic parameter collects the labels passed for it, which is how
+        // `sprintf(format: 'x', 1, 2)` and `filter_var_array(value: $v,
+        // filters: $f)` stay legal.
+        //
+        // Reading `func_get_args()` wins no such thing: it takes extra
+        // *positional* arguments, and a label the signature does not declare
+        // still throws — `collector(anything: 1)` against
+        // `function collector() { return func_get_args(); }` is an error at
+        // runtime, so a call like that is reported.
+        let declaration_bounds_labels =
+            |parameters: &[crate::types::ParameterInfo]| !parameters.iter().any(|p| p.is_variadic);
+        if !declaration_bounds_labels(&resolved.parameters)
+            || resolved
+                .overloads
+                .iter()
+                .any(|overload| !declaration_bounds_labels(overload))
+        {
+            return;
+        }
+        // A method the engine synthesized — an `@method` tag, a macro, a
+        // forwarder — documents what `__call` will receive rather than
+        // bounding it, and `__call` collects whatever label the caller writes.
+        if resolved.is_virtual_method {
+            return;
+        }
+        // A callable *type* says what a callee takes and returns, never what
+        // its parameters are called, so the names on such a list are the
+        // engine's placeholders and no label can be proved wrong against them.
+        if resolved.synthesized_parameter_names {
+            return;
+        }
+        // A built-in's stub is a description of PHP's signature rather than the
+        // signature itself, and the bundled stubs spell some parameters
+        // otherwise than the runtime's arginfo does, so a name a stub does not
+        // list is only proof that PHP throws when it is no parameter's name in
+        // any spelling.  A name that differs from one the stub lists by case
+        // or underscores alone is left alone; a name that matches nothing at
+        // all is still reported.
+        let spelling_is_a_guess = self.signature_from_embedded_stub(uri, call_site, resolved);
+
+        for (name_index, arg_index) in call_site.named_arg_indices.iter().enumerate() {
+            let Some(name) = call_site.named_arg_names.get(name_index) else {
+                continue;
+            };
+            // PHP binds a label to the parameter whose name spells it, and a
+            // parameter's name is case-sensitive, so `name:` does not fill a
+            // `$Name` parameter.  A name any overload declares is one the
+            // function takes, since which overload runs is the arguments'
+            // business rather than the label's.
+            let matches_a_parameter = resolved
+                .parameters
+                .iter()
+                .chain(resolved.overloads.iter().flatten())
+                .any(|p| {
+                    let declared = bare_parameter_name(p);
+                    declared == name
+                        || (spelling_is_a_guess && same_name_spelled_differently(declared, name))
+                });
+            if matches_a_parameter {
                 continue;
             }
-            let Some(&start) = call_site.arg_offsets.get(index as usize) else {
+            let Some(&offset) = call_site.arg_offsets.get(*arg_index as usize) else {
                 continue;
             };
             let Some(range) = self.offset_range_to_lsp_range(
                 uri,
                 content,
-                start as usize,
-                start as usize + name.len(),
+                offset as usize,
+                offset as usize + name.len(),
             ) else {
                 continue;
             };
@@ -562,6 +643,67 @@ impl Backend {
                 UNKNOWN_NAMED_ARGUMENT_CODE,
                 format!("Unknown named parameter ${name}"),
             ));
+        }
+    }
+
+    /// Whether the callee a call resolves to is declared by an embedded stub.
+    ///
+    /// The bundled stubs are the engine's own description of the built-in
+    /// symbols, parsed with no file behind them; a consumer that would hold a
+    /// caller to what they list is reading an approximation of PHP's signature
+    /// rather than PHP's signature.
+    fn signature_from_embedded_stub(
+        &self,
+        call_uri: &str,
+        call_site: crate::symbol_map::CallSite<'_>,
+        resolved: &crate::types::ResolvedCallableTarget,
+    ) -> bool {
+        if let Some(class) = resolved.owner_class.as_ref() {
+            return self
+                .find_class_file_uri(class, call_uri)
+                .is_some_and(|uri| crate::stubs::is_stub_uri(&uri));
+        }
+        if call_site.call_expression.starts_with("new ") {
+            // A `new` whose class the engine could not name resolved to no
+            // declaration, so no list bounds it.
+            return false;
+        }
+        let functions = self.global_functions().read();
+        self.function_lookup_candidates_at(
+            call_uri,
+            call_site.args_start,
+            call_site.call_expression,
+        )
+        .iter()
+        .find_map(|fqn| functions.get(fqn.as_str()))
+        .is_some_and(|(uri, _)| crate::stubs::is_stub_uri(uri))
+    }
+}
+
+/// A parameter's name without the `$` its declaration carries.
+fn bare_parameter_name(parameter: &crate::types::ParameterInfo) -> &str {
+    parameter
+        .name
+        .strip_prefix('$')
+        .unwrap_or(parameter.name.as_str())
+}
+
+/// Whether two parameter names are one name written differently — `xRounding`
+/// and `x_rounding`, or `Name` and `name`.
+///
+/// The bundled stubs of an extension spell some of its parameters in the style
+/// the stub's author chose rather than the one PHP's arginfo uses, and it is
+/// the arginfo a named argument binds to.  Nothing else about such a signature
+/// is in doubt, so this is the only forgiveness the built-in check extends.
+fn same_name_spelled_differently(declared: &str, label: &str) -> bool {
+    let same = |a: u8, b: u8| a == b || (a.is_ascii_alphabetic() && a.eq_ignore_ascii_case(&b));
+    let mut left = declared.bytes().filter(|b| *b != b'_');
+    let mut right = label.bytes().filter(|b| *b != b'_');
+    loop {
+        match (left.next(), right.next()) {
+            (Some(a), Some(b)) if same(a, b) => {}
+            (None, None) => return true,
+            _ => return false,
         }
     }
 }

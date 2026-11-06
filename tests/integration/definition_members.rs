@@ -4428,20 +4428,342 @@ async fn test_goto_definition_attribute_named_argument() {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 (location.range.start.line, location.range.start.character),
-                (4, 48),
+                // The parameter's `$name` token, `$` included, which is where
+                // a definition of a variable or parameter is reported.
+                (4, 47),
                 "the label jumps to the promoted parameter"
             );
         }
         other => panic!("Expected a location, got: {:?}", other),
     }
 
-    // A label naming a plain parameter is not the property of its name.
+    // A label naming a plain parameter names that parameter all the same,
+    // so it lands on the parameter's own token and not on the same-named
+    // property of the class.
     match goto_definition_at(&backend, &uri, 6, 21).await {
-        None => {}
-        Some(DefinitionResponse::Definition(Definition::Location(location))) => assert_ne!(
-            location.range.start.line, 3,
-            "the label must not jump to the unrelated property"
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => assert_eq!(
+            location.range.start.line, 4,
+            "the label jumps to the parameter it fills, got: {location:?}"
         ),
-        other => panic!("Unexpected response: {:?}", other),
+        other => panic!("Expected a location, got: {:?}", other),
     }
+}
+
+// ─── Named-argument labels ──────────────────────────────────────────────────
+
+/// A label at a call site names the parameter it fills, so going to its
+/// definition lands on that parameter's `$name` token — which, for a
+/// constructor-promoted property, is where the property is declared.
+#[tokio::test]
+async fn goto_definition_from_a_constructor_label_lands_on_the_promoted_property() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///label_def.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class SelectField\n",
+        "{\n",
+        "    public function __construct(\n",
+        "        public string $name = '',\n",
+        "    ) {}\n",
+        "}\n",
+        "\n",
+        "$a = new SelectField(name: 'dashboard');\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let result = goto_definition_at(&backend, &uri, 8, 25).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(location.range.start.line, 4, "got {location:?}");
+    assert_eq!(location.range.start.character, 22, "got {location:?}");
+}
+
+/// The same, across files: the label jumps to the constructor of the class
+/// the call names, wherever that class lives.
+#[tokio::test]
+async fn goto_definition_from_a_label_reaches_another_file() {
+    let class = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class SelectField\n",
+        "{\n",
+        "    public function __construct(\n",
+        "        public string $name = '',\n",
+        "    ) {}\n",
+        "}\n",
+    );
+    let (backend, dir) = create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[("src/SelectField.php", class)],
+    );
+    let definition_uri = crate::common::workspace_uri(&backend, "src/SelectField.php");
+    open_php(&backend, &definition_uri, class).await;
+
+    let usage = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "$a = new SelectField(name: 'dashboard');\n",
+    );
+    let usage_path = dir.path().join("src/usage.php");
+    std::fs::write(&usage_path, usage).unwrap();
+    let usage_uri = Uri::from_file_path(&usage_path).unwrap();
+    open_php(&backend, &usage_uri, usage).await;
+
+    let result = goto_definition_at(&backend, &usage_uri, 3, 25).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(location.uri, definition_uri, "got {location:?}");
+    assert_eq!(location.range.start.line, 5, "got {location:?}");
+    assert_eq!(location.range.start.character, 22, "got {location:?}");
+}
+
+/// A label of a plain method parameter jumps to that parameter, not to a
+/// property of the same name.
+#[tokio::test]
+async fn goto_definition_from_a_method_label_lands_on_the_parameter() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///label_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Renderer\n",
+        "{\n",
+        "    public string $field = '';\n",
+        "\n",
+        "    public function render(string $field): string\n",
+        "    {\n",
+        "        return $field;\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "(new Renderer())->render(field: 'x');\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let result = goto_definition_at(&backend, &uri, 11, 29).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(
+        location.range.start.line, 5,
+        "the parameter, not the property"
+    );
+    assert_eq!(location.range.start.character, 34, "got {location:?}");
+}
+
+/// The `(line, character)` of `sub` inside the first occurrence of `needle`.
+fn point_of(text: &str, needle: &str, sub: &str) -> (u32, u32) {
+    let at = text.find(needle).expect(needle) + needle.find(sub).expect(sub);
+    let line = text[..at].matches('\n').count() as u32;
+    let line_start = text[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    (line, (at - line_start) as u32)
+}
+
+/// A standalone function's parameter is reachable from a label the same way a
+/// method's is: the name written at the call is the name declared.
+#[tokio::test]
+async fn goto_definition_from_a_function_label_lands_on_the_parameter() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///label_function.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "function render(string $field): string\n",
+        "{\n",
+        "    return $field;\n",
+        "}\n",
+        "\n",
+        "render(field: 'x');\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = point_of(text, "render(field:", "field");
+    let result = goto_definition_at(&backend, &uri, line, character).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(location.uri, uri);
+    assert_eq!(
+        (location.range.start.line, location.range.start.character),
+        point_of(text, "string $field", "$field"),
+        "got {location:?}"
+    );
+}
+
+/// An unqualified function call inside a namespace reaches the global function
+/// of that name whenever the namespace declares none — which is how a helper
+/// file is called from namespaced code.  The label names a parameter of that
+/// global function, so it has to land there rather than on the namespaced
+/// reading of the name, which exists nowhere.
+#[tokio::test]
+async fn goto_definition_from_a_label_reaches_a_global_function_a_namespace_falls_back_to() {
+    let backend = create_test_backend();
+    let helper_uri = Uri::parse("file:///helper.php").unwrap();
+    let helper = "<?php\nfunction helper(string $name): string { return $name; }\n";
+    open_php(&backend, &helper_uri, helper).await;
+
+    let usage_uri = Uri::parse("file:///usage.php").unwrap();
+    let usage = "<?php\nnamespace App;\n\nhelper(name: 'x');\n";
+    open_php(&backend, &usage_uri, usage).await;
+
+    let (line, character) = point_of(usage, "helper(name:", "name");
+    let result = goto_definition_at(&backend, &usage_uri, line, character).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected the label to reach the global function's parameter, got {result:?}");
+    };
+    assert_eq!(location.uri, helper_uri, "got {location:?}");
+    assert_eq!(
+        (location.range.start.line, location.range.start.character),
+        point_of(helper, "string $name", "$name"),
+        "the `$name` token of the global `helper`"
+    );
+}
+
+/// The fallback is PHP's rule, not a preference: when the namespace does
+/// declare the function, its parameter is the one the label fills, and the
+/// global function of the same name keeps its own.
+#[tokio::test]
+async fn a_label_binds_the_namespaced_function_when_one_is_declared() {
+    let backend = create_test_backend();
+    let helper_uri = Uri::parse("file:///helper.php").unwrap();
+    let helper = "<?php\nfunction helper(string $name): string { return $name; }\n";
+    open_php(&backend, &helper_uri, helper).await;
+
+    let usage_uri = Uri::parse("file:///usage.php").unwrap();
+    let usage = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "function helper(string $other): string { return $other; }\n",
+        "\n",
+        "helper(other: 'x');\n",
+    );
+    open_php(&backend, &usage_uri, usage).await;
+
+    let (line, character) = point_of(usage, "helper(other:", "other");
+    let result = goto_definition_at(&backend, &usage_uri, line, character).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(
+        location.uri, usage_uri,
+        "the namespaced function wins, got {location:?}"
+    );
+    assert_eq!(
+        (location.range.start.line, location.range.start.character),
+        point_of(usage, "string $other", "$other"),
+        "got {location:?}"
+    );
+
+    // The global function of the same name keeps its own parameter, and a
+    // label naming it is not this function's.
+    let global_line = point_of(helper, "string $name", "$name").0;
+    assert_eq!(global_line, 1);
+}
+
+/// A trait's method declares the parameters its callers name, so a label at a
+/// class using the trait lands on the trait's own token.
+#[tokio::test]
+async fn goto_definition_from_a_label_reaches_a_parameter_of_a_trait_method() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///label_trait.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Renders\n",
+        "{\n",
+        "    public function render(string $field): string\n",
+        "    {\n",
+        "        return $field;\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "class Page\n",
+        "{\n",
+        "    use Renders;\n",
+        "}\n",
+        "\n",
+        "(new Page())->render(field: 'x');\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = point_of(text, "render(field:", "field");
+    let result = goto_definition_at(&backend, &uri, line, character).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(
+        (location.range.start.line, location.range.start.character),
+        point_of(text, "string $field", "$field"),
+        "the trait's own parameter, got {location:?}"
+    );
+}
+
+/// A label at a constructor a trait declares fills the property that
+/// constructor promotes, exactly as a label at a class' own constructor does.
+#[tokio::test]
+async fn goto_definition_from_a_label_reaches_a_trait_constructor_s_property() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///label_trait_ctor.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait HasName\n",
+        "{\n",
+        "    public function __construct(public string $name = '') {}\n",
+        "}\n",
+        "\n",
+        "class Field\n",
+        "{\n",
+        "    use HasName;\n",
+        "}\n",
+        "\n",
+        "$field = new Field(name: 'x');\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = point_of(text, "Field(name:", "name");
+    let result = goto_definition_at(&backend, &uri, line, character).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(
+        (location.range.start.line, location.range.start.character),
+        point_of(text, "string $name", "$name"),
+        "the promoted parameter of the trait's constructor, got {location:?}"
+    );
+}
+
+/// An interface's method declares the parameter a label binds even though it
+/// opens no scope of its own: the engine has the token, and it is the one the
+/// implementing class' calls agree on.
+#[tokio::test]
+async fn goto_definition_from_a_label_reaches_a_parameter_of_an_interface_method() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///label_interface.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Renders\n",
+        "{\n",
+        "    public function render(string $field): string;\n",
+        "}\n",
+        "\n",
+        "function show(Renders $r): string\n",
+        "{\n",
+        "    return $r->render(field: 'x');\n",
+        "}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = point_of(text, "render(field:", "field");
+    let result = goto_definition_at(&backend, &uri, line, character).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(
+        (location.range.start.line, location.range.start.character),
+        point_of(text, "string $field", "$field"),
+        "the interface's own parameter, got {location:?}"
+    );
 }

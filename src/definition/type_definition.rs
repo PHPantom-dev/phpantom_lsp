@@ -112,13 +112,6 @@ impl Backend {
                             &self.resolved_class_cache,
                         );
                     }
-                    DocblockMemberRef::AttributeNamedArg => candidates.retain(|class| {
-                        crate::class_lookup::constructor_promotes(
-                            class,
-                            member_name,
-                            &resolved_class_loader,
-                        )
-                    }),
                     _ => {}
                 }
 
@@ -168,6 +161,16 @@ impl Backend {
                 .resolve_function_return_type(name, &ctx, &function_loader, symbol.start)
                 .into_iter()
                 .collect(),
+
+            SymbolKind::NamedArgument { .. } => {
+                // The type a label's parameter accepts is the type definition
+                // worth jumping to.
+                self.named_argument_declaration(uri, content, &symbol)
+                    .and_then(|declaration| declaration.parameter)
+                    .and_then(|parameter| parameter.type_hint)
+                    .map(|ty| vec![ty])
+                    .unwrap_or_default()
+            }
 
             SymbolKind::ClassDeclaration { .. }
             | SymbolKind::MemberDeclaration { .. }

@@ -384,3 +384,66 @@ before the diagnostic runs, or a separate workspace-wide pass.
 
 **Where to look:** `src/diagnostics/unused_parameters.rs` (`can_be_overridden`)
 and `src/definition/implementation.rs` (`find_implementors`).
+
+---
+
+## D44. A named argument at PHP's own functions and classes is checked against the stub, not against PHP
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$i = new Imagick();
+$i->roundCornersImage(xRounding: 1, …);   // Error at runtime; no report
+```
+
+A label that matches no parameter of the call is reported, and a built-in is
+checked like any other callee. What it is checked against is the bundled
+stub rather than PHP's arginfo, and the two disagree on some names —
+`Imagick::roundCornersImage` is stubbed as `$xRounding` and takes
+`x_rounding:` at runtime, and a sweep of every loadable internal class found
+121 such names across `Imagick`, `ImagickDraw`, `ImagickPixel` and
+`ImagickKernel`. So a built-in label that is one of those stub spellings is
+not reported, and the runtime spelling is accepted only because the check
+forgives a name that differs from a declared one by case or underscores
+alone. An argument count read against the same spelling has the same soft
+spot: `roundCornersImage(x_rounding: 1, …)` reports the runtime's five names
+as required but unfilled.
+
+The fix is to check the bundled names against PHP's own — a generated sweep
+over `ReflectionFunction::getParameters()` and `ReflectionMethod` for every
+extension the stubs cover, corrected in the stubs or in `stub_patches` — and
+then to drop both the spelling forgiveness and the todo here. PHP's own
+classes are already right: `#[\Deprecated(reason: "…")]` is reported because
+the class takes `message` and `since`.
+
+**Where to look:** `src/diagnostics/argument_count.rs`
+(`signature_from_embedded_stub`, `same_name_spelled_differently`,
+`report_unknown_named_arguments`), `src/stubs.rs`, `src/stub_patches.rs`.
+
+---
+
+## D45. A promoted parameter's own `@deprecated` does not deprecate the property
+
+**Impact: Low · Complexity: Low**
+
+```php
+class Field
+{
+    public function __construct(
+        /** @deprecated Use `$name` instead. */ public string $old = '',
+    ) {}
+}
+
+echo $field->old;                  // nothing reported
+new Field(old: 'x');               // …nor the label
+```
+
+A property a constructor parameter promotes carries no deprecation at all:
+the parser writes `deprecation_message: None` for it, so no use of one is
+ever reported whichever spelling it is written in. PHP itself cannot help —
+`#[\Deprecated]` does not target a parameter — so the docblock the parameter
+carries is the only place an author can say it. Note that the engine already
+reads that same docblock for the property's type.
+
+**Where to look:** `src/parser/classes/methods.rs`
+(`push_promoted_properties`), `src/diagnostics/deprecated.rs`.

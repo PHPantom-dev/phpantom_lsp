@@ -481,3 +481,161 @@ fn highlight_member_named_like_a_keyword() {
         "both `->class` accesses should highlight, got: {spans:?}"
     );
 }
+
+/// A label highlights the property it fills: the declaration, the accesses,
+/// and the labels that fill it — while a label of the same name at a
+/// different callee stays dark.
+#[test]
+fn a_label_highlights_the_labels_that_fill_the_same_parameter() {
+    let backend = create_test_backend();
+    let uri = "file:///label_highlight.php";
+    let php = concat!(
+        "<?php\n",
+        "class Field { public function __construct(public string $name = '') {} }\n",
+        "class Other { public function __construct(public string $name = '') {} }\n",
+        "\n",
+        "$a = new Field(name: 'x');\n",
+        "$b = new Field();\n",
+        "$b->name = 'y';\n",
+        "$c = new Other(name: 'z');\n",
+    );
+
+    let highlights = highlight_at(&backend, uri, php, 4, 16);
+    let mut spans: Vec<(u32, u32, u32)> = highlights
+        .iter()
+        .map(|h| {
+            (
+                h.range.start.line,
+                h.range.start.character,
+                h.range.end.character,
+            )
+        })
+        .collect();
+    spans.sort_unstable();
+    assert_eq!(
+        spans,
+        vec![(1, 56, 61), (2, 56, 61), (4, 15, 19), (6, 4, 8)],
+        "the declaration, the label, and the access light up, as a property highlight lights every same-named declaration in the file; the label at `Other` on line 7 names a different property and stays dark"
+    );
+}
+
+/// The `(line, start, end)` of `sub` inside the first `needle` written in `text`.
+fn span_of(text: &str, needle: &str, sub: &str) -> (u32, u32, u32) {
+    let at = text.find(needle).expect(needle) + needle.find(sub).expect(sub);
+    let line = text[..at].matches('\n').count() as u32;
+    let line_start = text[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let character = (at - line_start) as u32;
+    (line, character, character + sub.len() as u32)
+}
+
+fn sorted_spans(highlights: &[DocumentHighlight]) -> Vec<(u32, u32, u32)> {
+    let mut spans: Vec<(u32, u32, u32)> = highlights
+        .iter()
+        .map(|h| {
+            (
+                h.range.start.line,
+                h.range.start.character,
+                h.range.end.character,
+            )
+        })
+        .collect();
+    spans.sort_unstable();
+    spans
+}
+
+/// Highlighting goes both ways: the declaration of a promoted property lights
+/// up the label that fills it, the same set a label lights up from its end.
+#[test]
+fn a_promoted_property_declaration_highlights_the_label_that_fills_it() {
+    let backend = create_test_backend();
+    let uri = "file:///decl_highlight.php";
+    let php = concat!(
+        "<?php\n",
+        "class Field { public function __construct(public string $name = '') {} }\n",
+        "class Other { public function __construct(public string $name = '') {} }\n",
+        "\n",
+        "$a = new Field(name: 'x');\n",
+        "$b = new Field();\n",
+        "$b->name = 'y';\n",
+        "$c = new Other(name: 'z');\n",
+    );
+
+    let declaration = span_of(php, "public string $name", "$name");
+    let (_, character, _) = declaration;
+    let highlights = highlight_at(&backend, uri, php, declaration.0, character + 1);
+    assert_eq!(
+        sorted_spans(&highlights),
+        vec![
+            declaration,
+            span_of(
+                php,
+                "class Other { public function __construct(public string $name",
+                "$name"
+            ),
+            span_of(php, "new Field(name:", "name"),
+            span_of(php, "$b->name", "name"),
+        ],
+        "the declaration, the property's accesses and the label that fills it; \
+         the label at `Other` names a different property and stays dark"
+    );
+}
+
+/// A property access lights up its labels too, which is the direction that
+/// makes "highlights like the parameter it fills" mean the same from either
+/// end of the reference.
+#[test]
+fn a_property_access_highlights_the_label_that_fills_it() {
+    let backend = create_test_backend();
+    let uri = "file:///access_highlight.php";
+    let php = concat!(
+        "<?php\n",
+        "class Field { public function __construct(public string $name = '') {} }\n",
+        "$a = new Field(name: 'x');\n",
+        "echo $a->name;\n",
+    );
+
+    let access = span_of(php, "$a->name", "name");
+    let highlights = highlight_at(&backend, uri, php, access.0, access.1 + 1);
+    assert_eq!(
+        sorted_spans(&highlights),
+        vec![
+            span_of(php, "string $name", "$name"),
+            span_of(php, "Field(name:", "name"),
+            span_of(php, "$a->name", "name"),
+        ],
+        "the declaration, the label, and the access"
+    );
+}
+
+/// A plain parameter's own declaration lights up the labels that name it, in
+/// the file that calls as well as in the uses inside its function.
+#[test]
+fn a_parameter_declaration_highlights_the_labels_that_fill_it() {
+    let backend = create_test_backend();
+    let uri = "file:///param_highlight.php";
+    let php = concat!(
+        "<?php\n",
+        "class Renderer\n",
+        "{\n",
+        "    public function render(string $field, int $count = 0): string\n",
+        "    {\n",
+        "        return $field . $count;\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "$other = new Renderer();\n",
+        "$other->render(field: 'x', count: 2);\n",
+    );
+
+    let declaration = span_of(php, "string $field", "$field");
+    let highlights = highlight_at(&backend, uri, php, declaration.0, declaration.1 + 1);
+    assert_eq!(
+        sorted_spans(&highlights),
+        vec![
+            declaration,
+            span_of(php, "return $field", "$field"),
+            span_of(php, "render(field:", "field"),
+        ],
+        "the parameter, its use in the body, and the label that names it"
+    );
+}

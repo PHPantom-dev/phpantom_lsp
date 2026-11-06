@@ -238,18 +238,6 @@ impl Backend {
                         None => continue,
                     };
 
-                    // An attribute's named-argument label uses a property
-                    // only when the constructor promotes the parameter.
-                    if *docblock_ref == crate::symbol_map::DocblockMemberRef::AttributeNamedArg
-                        && !crate::class_lookup::constructor_promotes(
-                            &base_class,
-                            member_name,
-                            resolved_class_loader,
-                        )
-                    {
-                        continue;
-                    }
-
                     // Resolve with inheritance + virtual members so we find
                     // members from parent classes and traits too.
                     //
@@ -302,6 +290,56 @@ impl Backend {
                             Some(&resolved.fqn()),
                             msg,
                             see_refs,
+                        );
+                    }
+                }
+
+                // ── Named-argument labels ────────────────────────────
+                SymbolKind::NamedArgument { name, .. } => {
+                    // A label that fills a promoted constructor parameter sets
+                    // the property that parameter declares, which is the member
+                    // an attribute's `#[Foo(bar: 1)]` exists to write, so a
+                    // deprecated one is used deprecated here exactly as
+                    // `$foo->bar` uses it.  A label at a plain parameter names
+                    // a parameter, and a parameter is no member a caller
+                    // trips over.
+                    //
+                    // A promoted property declares no deprecation of its own
+                    // today, since the parser reads none from the parameter
+                    // that promotes it; this arm therefore asks the same
+                    // question the access above asks of the member, and answers
+                    // it the same way until that changes.
+                    let Some(declaration) = self
+                        .named_argument_location(uri, content, span)
+                        .filter(|declaration| declaration.promotes_property)
+                    else {
+                        continue;
+                    };
+                    let Some(class) = declaration.class else {
+                        continue;
+                    };
+                    let Some(owner) = self.find_or_load_class(&class) else {
+                        continue;
+                    };
+                    // The declaration named by the label is the class whose
+                    // constructor promotes the parameter, so the property is
+                    // its own and needs no hierarchy walk.
+                    let Some(property) = owner
+                        .properties
+                        .iter()
+                        .find(|property| property.name == name.as_str())
+                    else {
+                        continue;
+                    };
+                    if let Some(msg) = &property.deprecation_message {
+                        report(
+                            out,
+                            span.start,
+                            span.end,
+                            name.as_str(),
+                            Some(&owner.fqn()),
+                            msg,
+                            &property.see_refs,
                         );
                     }
                 }
