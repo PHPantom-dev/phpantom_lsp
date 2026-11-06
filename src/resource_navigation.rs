@@ -264,6 +264,7 @@ impl Backend {
                     );
                     let parameters = crate::drupal::routing::twig_parameter_spans(content, &spans);
                     spans.extend(parameters);
+                    spans.extend(crate::drupal::libraries::twig_library_spans(content));
                     spans.sort_by_key(|span| span.start);
                     spans
                 } else {
@@ -310,6 +311,15 @@ impl Backend {
                 }
                 crate::drupal::DeclarationFile::Permissions => {
                     spans = crate::drupal::permissions::permissions_spans(content);
+                }
+                crate::drupal::DeclarationFile::Libraries => {
+                    if let Some(extension) = crate::drupal::libraries::libraries_file_extension(uri)
+                    {
+                        spans = crate::drupal::libraries::libraries_file_spans(extension, content);
+                    }
+                }
+                crate::drupal::DeclarationFile::Info => {
+                    spans = crate::drupal::libraries::info_file_spans(content);
                 }
             }
         } else if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
@@ -439,6 +449,9 @@ impl Backend {
                 content, &routes,
             ));
             spans.extend(routes);
+        }
+        if self.is_drupal_project() {
+            spans.extend(crate::drupal::libraries::twig_library_spans(content));
         }
         if is_symfony {
             spans.extend(crate::symfony::translations::twig_translation_spans(

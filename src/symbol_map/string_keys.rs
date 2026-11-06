@@ -200,6 +200,27 @@ pub(crate) enum StringKeyKind {
     /// object's `get()`, `set()`, and `clear()`, the part after the `:` of
     /// a `#config_target`, and a `ConfigTarget`'s property path.
     DrupalConfigKey,
+    /// A Drupal render element name: declared by the ID of a class's
+    /// `#[RenderElement]` or `#[FormElement]` attribute, or of the
+    /// annotation older code uses, and read by the `#type` of a render
+    /// array.
+    DrupalRenderElement,
+    /// A Drupal theme hook name: declared by a key of the array a
+    /// `hook_theme()` implementation returns (see `drupal::theme_hooks`),
+    /// and read by a render array's `#theme` and `#theme_wrappers`.  A
+    /// suggestion (`node__article`) reads as the hook it falls back to.
+    DrupalThemeHook,
+    /// A variable of a Drupal theme hook, keyed by the hook as written as
+    /// well as the name (see `drupal::theme_hooks::theme_variable_key`):
+    /// declared by a key of the hook's `variables`, and read by the `#`
+    /// keys of a render array whose `#theme` names the hook.
+    DrupalThemeHookVariable,
+    /// A Drupal library, `<extension>/<name>`: declared by a top-level key
+    /// of an extension's libraries file, and read by the `library` list of
+    /// a render array's `#attached`, a template's `attach_library()`, the
+    /// `dependencies` of a library, and the `libraries` of a theme's info
+    /// file (see `drupal::libraries`).
+    DrupalLibrary,
 }
 
 impl StringKeyKind {
@@ -253,7 +274,11 @@ impl StringKeyKind {
             | Self::DrupalHook
             | Self::DrupalPermission
             | Self::DrupalConfigName
-            | Self::DrupalConfigKey => KeyFramework::Drupal,
+            | Self::DrupalConfigKey
+            | Self::DrupalRenderElement
+            | Self::DrupalThemeHook
+            | Self::DrupalThemeHookVariable
+            | Self::DrupalLibrary => KeyFramework::Drupal,
         }
     }
 
@@ -590,12 +615,14 @@ pub(crate) enum TwigCallableTarget {
 }
 
 /// The variables one render of a Twig template hands it: the keys of a
-/// `render()`'s context array, of a templated email's `context()`, or of
-/// what a `#[Template]` action returns.
+/// `render()`'s context array, of a templated email's `context()`, of
+/// what a `#[Template]` action returns, or the `#` keys of a Drupal render
+/// array, without the `#`.
 ///
 /// Keyed by the template name it renders, whose span (or typed receiver
 /// site, for a `render()` only its receiver's type confirms) starts at
-/// [`Self::template_start`].
+/// [`Self::template_start`]; a render array's by the theme hook its
+/// `#theme` names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TwigContextSite {
     pub template_start: u32,
@@ -702,6 +729,17 @@ pub(crate) struct EntityTypeSite {
     /// of its kind of entity type; `None` when it names none and has no
     /// default.
     pub storage: Option<crate::atom::Atom>,
+}
+
+/// The class a Drupal plugin declaration is written on, such as a render
+/// element's.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PluginClassSite {
+    /// Byte offset of the plugin ID's first character, matching the
+    /// declaration's [`SymbolKind::StringKey`] span.
+    pub start: u32,
+    /// The class the attribute or annotation is written on.
+    pub class: crate::atom::Atom,
 }
 
 /// The value a container declaration gives, read by the kind of name it

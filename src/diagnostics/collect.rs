@@ -212,9 +212,10 @@ pub(crate) type SlowDiagnosticObserver<'a> =
 impl Backend {
     /// Returns `true` if the URI should be skipped for diagnostics: stub
     /// files (embedded or under a stub path), and resource documents (YAML,
-    /// XML, and XLIFF files), which are not PHP.  A Twig template and a
-    /// Symfony validation mapping are resource documents too, but what they
-    /// hold is judged (see [`Self::collect_resource_diagnostics`]).  Vendor
+    /// XML, and XLIFF files), which are not PHP.  A Twig template, a Symfony
+    /// validation mapping, and a Drupal file that reads library names are
+    /// resource documents too, but what they hold is judged (see
+    /// [`Self::collect_resource_diagnostics`]).  Vendor
     /// files are
     /// not skipped here: users
     /// working in monorepos or with `--prefer-source` packages
@@ -229,11 +230,22 @@ impl Backend {
     }
 
     /// Whether the resource document at `uri` is one whose contents are
-    /// judged: a Twig template, or a Symfony validation mapping.
+    /// judged: a Twig template, a Symfony validation mapping, or a Drupal
+    /// libraries or info file.
     pub(crate) fn has_resource_diagnostics(&self, uri: &str) -> bool {
         self.is_twig_template_uri(uri)
             || (crate::symfony::validation::is_validation_mapping_uri(uri)
                 && self.is_symfony_project())
+            || self.reads_drupal_libraries(uri)
+    }
+
+    /// Whether `uri` is a Drupal libraries file or info file, whose library
+    /// names are judged.
+    fn reads_drupal_libraries(&self, uri: &str) -> bool {
+        matches!(
+            self.drupal_declaration_file(uri),
+            Some(crate::drupal::DeclarationFile::Libraries | crate::drupal::DeclarationFile::Info)
+        )
     }
 
     /// Collect the diagnostics of a resource document that has them (see
@@ -246,13 +258,18 @@ impl Backend {
     ) {
         if self.is_twig_template_uri(uri_str) {
             self.collect_template_diagnostics(uri_str, content, out);
+        } else if self.reads_drupal_libraries(uri_str) {
+            let ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
+            if ctx.symbol_map.matches_source(content) {
+                self.collect_invalid_laravel_string_key_diagnostics(&ctx, uri_str, content, out);
+            }
         } else {
             self.collect_constraint_option_diagnostics(uri_str, content, out);
         }
     }
 
     /// Collect the diagnostics of a Twig template: the template, route,
-    /// and translation names it holds that nothing declares.  A template
+    /// translation, and library names it holds that nothing declares.  A template
     /// is not PHP, so this is all that is judged there.
     pub fn collect_template_diagnostics(
         &self,

@@ -82,10 +82,14 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::DrupalEntityType
         | StringKeyKind::DrupalRoute
         | StringKeyKind::DrupalRouteParameter
-        | StringKeyKind::DrupalPermission => backend.symfony_declaration_locations(*kind, key),
+        | StringKeyKind::DrupalPermission
+        | StringKeyKind::DrupalLibrary => backend.symfony_declaration_locations(*kind, key),
         StringKeyKind::DrupalHook => backend.drupal_hook_documentation(key),
         StringKeyKind::DrupalConfigName => backend.drupal_config_locations(key),
         StringKeyKind::DrupalConfigKey => backend.drupal_config_key_locations(key),
+        StringKeyKind::DrupalRenderElement => backend.drupal_render_element_definitions(key),
+        StringKeyKind::DrupalThemeHook => backend.drupal_theme_hook_definitions(key),
+        StringKeyKind::DrupalThemeHookVariable => backend.drupal_theme_variable_definitions(key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
         StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
@@ -325,7 +329,9 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::DrupalEntityType
         | StringKeyKind::DrupalRoute
         | StringKeyKind::DrupalRouteParameter
-        | StringKeyKind::DrupalPermission => {
+        | StringKeyKind::DrupalPermission
+        | StringKeyKind::DrupalRenderElement
+        | StringKeyKind::DrupalLibrary => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // A documented pattern stands for every hook that fills it in.
@@ -336,12 +342,15 @@ pub(crate) fn find_laravel_string_key_references(
         // its handler's routes a route argument, and are added below.  A
         // route's name may be put together by the imports that load it, or
         // declared by a bundle's routing file outside the workspace, so its
-        // declarations are too.
+        // declarations are too, as are a theme hook's and its variables',
+        // which `hook_theme()` arrays declare.
         StringKeyKind::TranslationDomain
         | StringKeyKind::YiiRouteArgument
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::DrupalConfigName
-        | StringKeyKind::DrupalConfigKey => {
+        | StringKeyKind::DrupalConfigKey
+        | StringKeyKind::DrupalThemeHook
+        | StringKeyKind::DrupalThemeHookVariable => {
             find_string_key_usages(kind, key, backend, snapshot, false)
         }
         // Two spellings of one view share no key, so the renders are found

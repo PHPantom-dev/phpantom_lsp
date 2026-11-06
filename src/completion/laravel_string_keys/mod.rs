@@ -44,7 +44,9 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::GateAbility => CompletionItemKind::Method,
         StringKeyKind::Env => CompletionItemKind::Constant,
         StringKeyKind::ServiceId => CompletionItemKind::Reference,
-        StringKeyKind::DrupalEntityType => CompletionItemKind::Class,
+        StringKeyKind::DrupalEntityType | StringKeyKind::DrupalRenderElement => {
+            CompletionItemKind::Class
+        }
         StringKeyKind::ContainerParameter => CompletionItemKind::Property,
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
         StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook | StringKeyKind::DrupalHook => {
@@ -52,15 +54,17 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         }
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
         StringKeyKind::SerializerGroup => CompletionItemKind::EnumMember,
-        StringKeyKind::YiiRouteArgument | StringKeyKind::DrupalRouteParameter => {
-            CompletionItemKind::Field
-        }
+        StringKeyKind::YiiRouteArgument
+        | StringKeyKind::DrupalRouteParameter
+        | StringKeyKind::DrupalThemeHookVariable => CompletionItemKind::Field,
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => CompletionItemKind::Function,
         StringKeyKind::TwigVariable => CompletionItemKind::Variable,
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::YiiRoute
         | StringKeyKind::DrupalRoute
+        | StringKeyKind::DrupalThemeHook
+        | StringKeyKind::DrupalLibrary
         | StringKeyKind::Command
         | StringKeyKind::Section
         | StringKeyKind::Stack
@@ -196,18 +200,22 @@ impl Backend {
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRoute
             | StringKeyKind::DrupalPermission
-            | StringKeyKind::DrupalConfigName => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::DrupalConfigName
+            | StringKeyKind::DrupalRenderElement
+            | StringKeyKind::DrupalLibrary => self.symfony_declared_names(*kind).into(),
             StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
                 self.twig_callable_names(*kind).into()
             }
             // Only the documentation, not the invocations the type engine
             // would have to confirm in every file that fires a hook.
             StringKeyKind::DrupalHook => self.drupal_documented_hooks().into(),
+            StringKeyKind::DrupalThemeHook => self.drupal_theme_hook_names().into(),
             // A translation key is completed in the domain it is looked up
             // in, a configuration key under the key it is nested in, which
             // only the Symfony completion knows, and a route argument from
             // the routes of the handler it is written in, and a Drupal route
-            // parameter from the route its call names.  A hook name is
+            // parameter from the route its call names, and a theme hook's
+            // variable from the `#theme` of its render array.  A hook name is
             // completed with its patterns as snippets, which only the
             // WordPress completion builds.
             StringKeyKind::SymfonyTranslation
@@ -216,6 +224,7 @@ impl Backend {
             | StringKeyKind::YiiRouteArgument
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalConfigKey
+            | StringKeyKind::DrupalThemeHookVariable
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::TwigBlock

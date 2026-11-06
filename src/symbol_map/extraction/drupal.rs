@@ -1,16 +1,18 @@
 //! The entity types a Drupal entity class declares, by attribute or by the
-//! annotation older code uses, and the route names Drupal's static and
-//! constructor calls read (see [`crate::drupal`]).
+//! annotation older code uses, the route names Drupal's static and
+//! constructor calls read, and the libraries a render array attaches (see
+//! [`crate::drupal`]).
 
 use super::*;
 use crate::symbol_map::extraction::symfony::{
     RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
 use crate::symbol_map::{
-    DeclaredParameter, DrupalRouteSite, EntityTypeSite, ReceiverClass, StringKeyKind,
-    TypedReceiverSite,
+    DeclaredParameter, DrupalRouteSite, EntityTypeSite, PluginClassSite, ReceiverClass,
+    StringKeyKind, TypedReceiverSite,
 };
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
+use mago_syntax::cst::sequence::TokenSeparatedSequence;
 
 const CONTENT_STORAGE: &str = "Drupal\\Core\\Entity\\Sql\\SqlContentEntityStorage";
 const CONFIG_STORAGE: &str = "Drupal\\Core\\Config\\Entity\\ConfigEntityStorage";
@@ -130,6 +132,173 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
             storage: storage.map(|storage| crate::atom::atom(&storage)),
         });
     }
+}
+
+/// A Drupal plugin attribute and the annotation older code writes instead.
+struct PluginMarker {
+    attribute: &'static str,
+    /// The annotation's opening, matched by short name, the way Drupal's
+    /// annotation discovery reads it.
+    annotation: &'static str,
+}
+
+const RENDER_ELEMENT_MARKERS: [PluginMarker; 2] = [
+    PluginMarker {
+        attribute: "Drupal\\Core\\Render\\Attribute\\RenderElement",
+        annotation: "@RenderElement(",
+    },
+    PluginMarker {
+        attribute: "Drupal\\Core\\Render\\Attribute\\FormElement",
+        annotation: "@FormElement(",
+    },
+];
+
+/// Record the render element `class` declares: a span over its ID, and
+/// the class beside it.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_element_spans(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    emit_drupal_plugin_spans(
+        class,
+        &RENDER_ELEMENT_MARKERS,
+        StringKeyKind::DrupalRenderElement,
+        ctx,
+    );
+}
+
+/// Record the plugin ID `class` declares by one of the `markers`, as a key
+/// of `kind`, with the class it is written on.  An attribute wins over an
+/// annotation, as in Drupal's discovery.
+fn emit_drupal_plugin_spans(
+    class: &Class<'_>,
+    markers: &[PluginMarker],
+    kind: StringKeyKind,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let mut found = Vec::new();
+    for marker in markers {
+        for attribute in attributes_named(&class.attribute_lists, marker.attribute, ctx) {
+            let id = attribute_arguments(attribute, &["id"])
+                .into_iter()
+                .find(|(parameter, _)| *parameter == "id")
+                .and_then(|(_, value)| resolved_string_literal(value, ctx.content));
+            if let Some((key, start, end)) = id {
+                found.push((key.to_string(), start as u32, end as u32));
+            }
+        }
+    }
+    if found.is_empty()
+        && let Some((doc, offset)) = get_docblock_text_with_offset(ctx.trivias, ctx.content, class)
+        && let Some((start, end)) = markers.iter().find_map(|marker| {
+            let at = doc.find(marker.annotation)?;
+            annotation_plugin_id(doc, at + marker.annotation.len())
+        })
+    {
+        found.push((
+            doc[start..end].to_string(),
+            offset + start as u32,
+            offset + end as u32,
+        ));
+    }
+    found.retain(|(key, _, _)| !key.is_empty());
+    if found.is_empty() {
+        return;
+    }
+    let Some(fqn) = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
+    else {
+        return;
+    };
+    for (key, start, end) in found {
+        ctx.spans.push(SymbolSpan {
+            start,
+            end,
+            kind: SymbolKind::StringKey {
+                kind,
+                key,
+                is_write: true,
+                is_optional: false,
+            },
+        });
+        ctx.drupal_plugin_classes
+            .push(PluginClassSite { start, class: fqn });
+    }
+}
+
+/// The range of the ID a plugin annotation whose arguments start at `from`
+/// in `doc` declares: its first argument when that is a string
+/// (`@RenderElement("details")`), else its `id = "…"`.
+fn annotation_plugin_id(doc: &str, from: usize) -> Option<(usize, usize)> {
+    let rest = doc.get(from..)?;
+    let first = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '*');
+    if let Some(quoted) = first.strip_prefix('"') {
+        let start = doc.len() - quoted.len();
+        return Some((start, start + quoted.find('"')?));
+    }
+    annotation_entries(doc, from)
+        .into_iter()
+        .find(|entry| entry.path.is_empty() && entry.key == "id")
+        .map(|entry| (entry.value_start, entry.value_end))
+}
+
+/// Record the render element name a `'#type' => 'x'` entry of an array
+/// literal reads.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_element_reads(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_type_keys {
+        return;
+    }
+    for element in elements.iter() {
+        if let ArrayElement::KeyValue(entry) = element {
+            push_render_element_read(entry.key, entry.value, ctx);
+        }
+    }
+}
+
+/// Record the render element name a `$form['x']['#type'] = 'x'`
+/// assignment reads.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_element_assignment(
+    assign: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_type_keys || !assign.operator.is_assign() {
+        return;
+    }
+    if let Expression::ArrayAccess(access) = assign.lhs {
+        push_render_element_read(access.index, assign.rhs, ctx);
+    }
+}
+
+/// Record `value` as the render element name it reads when `key` is the
+/// literal `#type` and `value` a string literal.
+fn push_render_element_read(
+    key: &Expression<'_>,
+    value: &Expression<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !resolved_string_literal(key, ctx.content).is_some_and(|(key, _, _)| key == "#type") {
+        return;
+    }
+    let Some((name, start, end)) = resolved_string_literal(value, ctx.content) else {
+        return;
+    };
+    ctx.spans.push(SymbolSpan {
+        start: start as u32,
+        end: end as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalRenderElement,
+            key: name.to_string(),
+            is_write: false,
+            is_optional: false,
+        },
+    });
 }
 
 /// Record the routes the `#[Route]` attributes of a controller declare, the
@@ -730,6 +899,162 @@ fn extension_of(fqn: &str) -> Option<&str> {
     let mut segments = fqn.trim_start_matches('\\').split('\\');
     let extension = (segments.next() == Some("Drupal")).then(|| segments.next())??;
     (!matches!(extension, "Core" | "Component") && segments.next().is_some()).then_some(extension)
+}
+
+/// Record the theme hooks a render array literal names: its `#theme`, a
+/// string or a list of names, and its `#theme_wrappers`, a list of names or
+/// of names keying their own variables.  When `#theme` is one name, every
+/// other `#` key may pass one of the hook's variables, which is decided
+/// when it is looked up, and the array is a render of the hook's templates
+/// (a [`TwigContextSite`](crate::symbol_map::TwigContextSite) keyed by the
+/// `#theme` value's span) passing those keys without the `#`.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_array_spans(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_theme_keys {
+        return;
+    }
+    let mut hook = None;
+    let mut keys = Vec::new();
+    for element in elements.iter() {
+        let ArrayElement::KeyValue(entry) = element else {
+            continue;
+        };
+        let Some((key, start, end)) = resolved_string_literal(entry.key, ctx.content) else {
+            continue;
+        };
+        match key {
+            "#theme" => {
+                hook = resolved_string_literal(entry.value, ctx.content);
+                push_theme_hook_spans(entry.value, false, ctx);
+            }
+            "#theme_wrappers" => push_theme_hook_spans(entry.value, true, ctx),
+            _ if key.len() > 1 && key.starts_with('#') && !is_render_api_key(key) => {
+                let span = entry.value.span();
+                keys.push((key, start, end, (span.start.offset, span.end.offset)));
+            }
+            _ => {}
+        }
+    }
+    let Some((hook, hook_start, _)) = hook else {
+        return;
+    };
+    let vars: Vec<crate::symbol_map::TwigContextVar> = keys
+        .iter()
+        .filter(|(key, ..)| crate::twig::variables::is_twig_variable_name(&key[1..]))
+        .map(
+            |(key, start, end, (value_start, value_end))| crate::symbol_map::TwigContextVar {
+                name: crate::atom::atom(&key[1..]),
+                start: *start as u32 + 1,
+                end: *end as u32,
+                value: crate::symbol_map::TwigContextValue::Expression {
+                    start: *value_start,
+                    end: *value_end,
+                },
+            },
+        )
+        .collect();
+    if !vars.is_empty() {
+        ctx.twig_contexts.push(crate::symbol_map::TwigContextSite {
+            template_start: hook_start as u32,
+            vars,
+            shape: None,
+        });
+    }
+    for (key, start, end, _) in keys {
+        ctx.spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::DrupalThemeHookVariable,
+                key: crate::drupal::theme_hooks::theme_variable_key(hook, &key[1..]),
+                is_write: false,
+                is_optional: false,
+            },
+        });
+    }
+}
+
+/// The render array keys Drupal's renderer reads itself, which no theme
+/// hook declares as a variable, sorted.
+const RENDER_API_KEYS: [&str; 23] = [
+    "#access",
+    "#access_callback",
+    "#after_build",
+    "#allowed_tags",
+    "#attached",
+    "#cache",
+    "#cache_properties",
+    "#create_placeholder",
+    "#defaults_loaded",
+    "#lazy_builder",
+    "#markup",
+    "#plain_text",
+    "#post_render",
+    "#pre_render",
+    "#prefix",
+    "#printed",
+    "#process",
+    "#render_children",
+    "#sorted",
+    "#states",
+    "#suffix",
+    "#type",
+    "#weight",
+];
+
+fn is_render_api_key(key: &str) -> bool {
+    RENDER_API_KEYS.binary_search(&key).is_ok()
+}
+
+/// Record the theme hooks `$build['#theme'] = …` and
+/// `$build['#theme_wrappers'] = …` name.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_array_assignment(
+    assignment: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_theme_keys || !assignment.operator.is_assign() {
+        return;
+    }
+    let Expression::ArrayAccess(access) = assignment.lhs else {
+        return;
+    };
+    match resolved_string_literal(access.index, ctx.content) {
+        Some(("#theme", _, _)) => push_theme_hook_spans(assignment.rhs, false, ctx),
+        Some(("#theme_wrappers", _, _)) => push_theme_hook_spans(assignment.rhs, true, ctx),
+        _ => {}
+    }
+}
+
+/// Record the theme hook names `value` holds: a string, or the strings of a
+/// list, and for `#theme_wrappers` the keys of a keyed list.
+fn push_theme_hook_spans(value: &Expression<'_>, wrappers: bool, ctx: &mut ExtractionCtx<'_>) {
+    let push = |name: &Expression<'_>, ctx: &mut ExtractionCtx<'_>| {
+        if let Some((key, start, end)) = resolved_string_literal(name, ctx.content) {
+            ctx.spans.push(SymbolSpan {
+                start: start as u32,
+                end: end as u32,
+                kind: SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalThemeHook,
+                    key: key.to_string(),
+                    is_write: false,
+                    is_optional: false,
+                },
+            });
+        }
+    };
+    let Some(elements) = crate::parser::array_literal_elements(value) else {
+        push(value, ctx);
+        return;
+    };
+    for element in elements.iter() {
+        match element {
+            ArrayElement::Value(item) => push(item.value, ctx),
+            ArrayElement::KeyValue(entry) if wrappers => push(entry.key, ctx),
+            _ => {}
+        }
+    }
 }
 
 const HOOK_ATTRIBUTE: &str = "Drupal\\Core\\Hook\\Attribute\\Hook";
@@ -1906,6 +2231,124 @@ fn annotation_entries(doc: &str, from: usize) -> Vec<AnnotationEntry<'_>> {
     entries
 }
 
+// ─── Libraries ──────────────────────────────────────────────────────────────
+
+/// The key a render array attaches its assets under.
+const ATTACHED: &str = "#attached";
+
+/// The key of the libraries among them.
+const LIBRARY: &str = "library";
+
+/// Record the libraries an array literal attaches: the `library` list of
+/// its `'#attached'` entry.
+pub(in crate::symbol_map::extraction) fn emit_drupal_attached_array_spans(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_attached {
+        return;
+    }
+    for element in elements.iter() {
+        if let ArrayElement::KeyValue(entry) = element
+            && is_literal_key(entry.key, ATTACHED, ctx.content)
+        {
+            push_attached_libraries(entry.value, ctx);
+        }
+    }
+}
+
+/// Record the libraries an assignment into a render array's `#attached`
+/// attaches: `$build['#attached']['library'][] = '…'`, a whole `library`
+/// list, or a whole `#attached` array.
+pub(in crate::symbol_map::extraction) fn emit_drupal_attached_assignment_spans(
+    assign: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_attached || !assign.operator.is_assign() {
+        return;
+    }
+    match assign.lhs {
+        Expression::ArrayAppend(append)
+            if accesses_keys(append.array, &[ATTACHED, LIBRARY], ctx.content) =>
+        {
+            push_library(assign.rhs, ctx);
+        }
+        lhs if accesses_keys(lhs, &[ATTACHED, LIBRARY], ctx.content) => {
+            push_library_list(assign.rhs, ctx);
+        }
+        lhs if accesses_keys(lhs, &[ATTACHED], ctx.content) => {
+            push_attached_libraries(assign.rhs, ctx);
+        }
+        _ => {}
+    }
+}
+
+/// Whether `expression` is an array access whose last offsets are the
+/// string literals `keys`, in order.
+fn accesses_keys(mut expression: &Expression<'_>, keys: &[&str], content: &str) -> bool {
+    for key in keys.iter().rev() {
+        let Expression::ArrayAccess(access) = expression else {
+            return false;
+        };
+        if !is_literal_key(access.index, key, content) {
+            return false;
+        }
+        expression = access.array;
+    }
+    true
+}
+
+/// Whether `expression` is the string literal `key`.
+fn is_literal_key(expression: &Expression<'_>, key: &str, content: &str) -> bool {
+    resolved_string_literal(expression, content).is_some_and(|(found, _, _)| found == key)
+}
+
+/// Record the libraries of the `library` list of an `#attached` array
+/// literal.
+fn push_attached_libraries(attached: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some(entries) = crate::parser::array_literal_elements(attached) else {
+        return;
+    };
+    for entry in entries.iter() {
+        if let ArrayElement::KeyValue(entry) = entry
+            && is_literal_key(entry.key, LIBRARY, ctx.content)
+        {
+            push_library_list(entry.value, ctx);
+        }
+    }
+}
+
+/// Record the libraries of a list literal of them.
+fn push_library_list(list: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some(items) = crate::parser::array_literal_elements(list) else {
+        return;
+    };
+    for item in items.iter() {
+        if let ArrayElement::Value(item) = item {
+            push_library(item.value, ctx);
+        }
+    }
+}
+
+/// Record the library a string literal names.
+fn push_library(expression: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some((name, start, end)) = resolved_string_literal(expression, ctx.content) else {
+        return;
+    };
+    if crate::drupal::libraries::is_library_name(name) {
+        ctx.spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::DrupalLibrary,
+                key: name.to_string(),
+                is_write: false,
+                is_optional: false,
+            },
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2818,5 +3261,267 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
     #[test]
     fn a_doc_comment_without_an_entity_type_declares_none() {
         assert!(annotation_entity_type("/** @see EntityType(id = \"x\") */", 0).is_none());
+    }
+
+    /// The symbol map of `php` in a Drupal project, or in another one.
+    fn map_of(php: &str, drupal: bool) -> crate::symbol_map::SymbolMap {
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: drupal,
+                drupal,
+                twig: false,
+                doctrine: false,
+            },
+            None,
+        )
+    }
+
+    /// The render elements `php` declares, each with the ID's text and its
+    /// class.
+    fn elements(php: &str) -> Vec<(String, String, String)> {
+        let map = map_of(php, true);
+        map.drupal_plugin_classes
+            .iter()
+            .filter_map(|site| {
+                let span = map.spans.iter().find(|span| {
+                    span.start == site.start
+                        && matches!(
+                            span.kind,
+                            SymbolKind::StringKey {
+                                kind: StringKeyKind::DrupalRenderElement,
+                                is_write: true,
+                                ..
+                            }
+                        )
+                })?;
+                let SymbolKind::StringKey { key, .. } = &span.kind else {
+                    return None;
+                };
+                Some((
+                    key.clone(),
+                    php[span.start as usize..span.end as usize].to_string(),
+                    site.class.to_string(),
+                ))
+            })
+            .collect()
+    }
+
+    /// The render element names `php` reads, in source order.
+    fn element_reads(php: &str, drupal: bool) -> Vec<String> {
+        map_of(php, drupal)
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalRenderElement,
+                    key,
+                    is_write: false,
+                    ..
+                } => {
+                    assert_eq!(&php[span.start as usize..span.end as usize], key);
+                    Some(key.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn render_and_form_element_attributes_declare_their_ids() {
+        let php = "<?php\nnamespace Drupal\\acme\\Element;\nuse Drupal\\Core\\Render\\Attribute\\RenderElement;\nuse Drupal\\Core\\Render\\Attribute\\FormElement;\n#[RenderElement('acme_card')]\nclass Card {}\n#[FormElement(id: 'acme_input')]\nclass Input {}\n#[\\Drupal\\Core\\Render\\Attribute\\RenderElement('acme_badge')]\nclass Badge {}\n";
+        assert_eq!(
+            elements(php),
+            vec![
+                (
+                    "acme_card".to_string(),
+                    "acme_card".to_string(),
+                    "Drupal\\acme\\Element\\Card".to_string()
+                ),
+                (
+                    "acme_input".to_string(),
+                    "acme_input".to_string(),
+                    "Drupal\\acme\\Element\\Input".to_string()
+                ),
+                (
+                    "acme_badge".to_string(),
+                    "acme_badge".to_string(),
+                    "Drupal\\acme\\Element\\Badge".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn element_annotations_declare_by_position_or_by_id() {
+        let php = "<?php\nnamespace Drupal\\acme\\Element;\n/**\n * Provides a card.\n *\n * @RenderElement(\"acme_card\")\n */\nclass Card {}\n/**\n * @FormElement(id = \"acme_input\")\n */\nclass Input {}\n/**\n * @see RenderElement(\"nope\")\n */\nclass Nope {}\n";
+        assert_eq!(
+            elements(php),
+            vec![
+                (
+                    "acme_card".to_string(),
+                    "acme_card".to_string(),
+                    "Drupal\\acme\\Element\\Card".to_string()
+                ),
+                (
+                    "acme_input".to_string(),
+                    "acme_input".to_string(),
+                    "Drupal\\acme\\Element\\Input".to_string()
+                ),
+            ]
+        );
+    }
+
+    /// An attribute is matched by the class its name resolves to, so a
+    /// class of the same short name elsewhere declares nothing.
+    #[test]
+    fn another_render_element_attribute_declares_nothing() {
+        let imported = "<?php\nnamespace Drupal\\acme\\Element;\nuse Acme\\Attribute\\RenderElement;\n#[RenderElement('acme_card')]\nclass Card {}\n";
+        let unimported = "<?php\nnamespace Drupal\\acme\\Element;\n#[RenderElement('acme_card')]\nclass Card {}\n";
+        assert!(elements(imported).is_empty());
+        assert!(elements(unimported).is_empty());
+    }
+
+    #[test]
+    fn an_element_with_attribute_and_annotation_declares_once() {
+        let php = "<?php\nnamespace Drupal\\acme\\Element;\nuse Drupal\\Core\\Render\\Attribute\\RenderElement;\n/**\n * @RenderElement(\"acme_card\")\n */\n#[RenderElement('acme_card')]\nclass Card {}\n";
+        assert_eq!(elements(php).len(), 1);
+    }
+
+    #[test]
+    fn type_keys_of_render_arrays_read_element_names() {
+        let php = "<?php\nfunction build(array $form, string $type): array {\n    $form['name']['#type'] = 'textfield';\n    $form[\"#type\"] = \"form\";\n    $form['other']['#type'] .= 'nope';\n    $form['dynamic']['#type'] = $type;\n    $form['type'] = 'not_an_element';\n    return [\n        '#type' => 'details',\n        'inner' => array('#type' => 'container', '#title' => 'not_an_element'),\n        '#theme' => 'not_an_element',\n        'computed' => ['#type' => $type],\n    ];\n}\n";
+        assert_eq!(
+            element_reads(php, true),
+            ["textfield", "form", "details", "container"]
+        );
+        assert!(element_reads(php, false).is_empty());
+    }
+
+    /// The theme hook and variable spans `php` reads, as kind, key, and
+    /// text, read as a Drupal project's file or not.
+    fn render_array_reads(php: &str, drupal: bool) -> Vec<(StringKeyKind, String, String)> {
+        map_of(php, drupal)
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey { kind, key, .. }
+                    if matches!(
+                        kind,
+                        StringKeyKind::DrupalThemeHook | StringKeyKind::DrupalThemeHookVariable
+                    ) =>
+                {
+                    Some((
+                        *kind,
+                        key.clone(),
+                        php[span.start as usize..span.end as usize].to_string(),
+                    ))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn render_arrays_name_theme_hooks_and_pass_their_variables() {
+        let php = r#"<?php
+$build = [
+  '#theme' => 'acme_greeting',
+  '#name' => $name,
+  '#' => 1,
+  'child' => ['#theme' => ['acme_box__wide', 'acme_box'], '#label' => 'x'],
+  '#theme_wrappers' => ['container', 'acme_panel' => ['#title' => 'y']],
+];
+$build['more']['#theme'] = 'item_list';
+"#;
+        let hook = |key: &str| {
+            (
+                StringKeyKind::DrupalThemeHook,
+                key.to_string(),
+                key.to_string(),
+            )
+        };
+        assert_eq!(
+            render_array_reads(php, true),
+            vec![
+                hook("acme_greeting"),
+                (
+                    StringKeyKind::DrupalThemeHookVariable,
+                    "acme_greeting#name".to_string(),
+                    "#name".to_string()
+                ),
+                hook("acme_box__wide"),
+                hook("acme_box"),
+                hook("container"),
+                hook("acme_panel"),
+                hook("item_list"),
+            ]
+        );
+        assert!(render_array_reads(php, false).is_empty());
+    }
+
+    /// A render array whose `#theme` is one name renders that hook's
+    /// templates with its other `#` keys, without the `#`.
+    #[test]
+    fn a_theme_render_array_passes_its_hash_keys_to_the_hooks_templates() {
+        let php = r#"<?php
+$build = [
+  '#theme' => 'acme_greeting',
+  '#name' => $name,
+  '#' => 1,
+  '#not-a-name' => 2,
+  '#cache' => ['max-age' => 0],
+  '#weight' => 5,
+  'child' => ['#theme' => ['acme_box__wide', 'acme_box'], '#label' => 'x'],
+];
+$build['more']['#theme'] = 'item_list';
+"#;
+        assert!(RENDER_API_KEYS.is_sorted());
+        let map = map_of(php, true);
+        // The renderer's own keys pass nothing.
+        assert!(!map.spans.iter().any(|span| matches!(
+            &span.kind,
+            SymbolKind::StringKey { kind: StringKeyKind::DrupalThemeHookVariable, key, .. }
+                if key.ends_with("#cache") || key.ends_with("#weight")
+        )));
+        let sites: Vec<(String, Vec<(String, String)>)> = map
+            .twig_contexts
+            .iter()
+            .map(|site| {
+                let start = site.template_start as usize;
+                let hook = &php[start..start + php[start..].find('\'').unwrap()];
+                let vars = site
+                    .vars
+                    .iter()
+                    .map(|var| {
+                        assert_eq!(&php[var.start as usize..var.end as usize], &*var.name);
+                        let value = match var.value {
+                            crate::symbol_map::TwigContextValue::Expression { start, end } => {
+                                php[start as usize..end as usize].to_string()
+                            }
+                            other => format!("{other:?}"),
+                        };
+                        (var.name.to_string(), value)
+                    })
+                    .collect();
+                (hook.to_string(), vars)
+            })
+            .collect();
+        assert_eq!(
+            sites,
+            vec![(
+                "acme_greeting".to_string(),
+                vec![("name".to_string(), "$name".to_string())]
+            )]
+        );
+        assert!(map_of(php, false).twig_contexts.is_empty());
     }
 }

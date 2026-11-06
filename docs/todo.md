@@ -36,7 +36,6 @@ contributor even though it's short.
 | D41 | [A thrown exception nothing catches or documents is not reported](todo/diagnostics.md#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported) | Medium      | Medium      |
 | L66 | [Related-file navigation for models, events, and listeners](todo/laravel.md#l66-related-file-navigation-for-models-events-and-listeners) | Medium | Medium |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (assets, Inertia) | Medium | Medium |
-| DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
 | T67 | [A DQL expression whose type depends on the driver is `mixed`](todo/type-inference.md#t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed) | Low-Medium  | Medium      |
 | T68 | [A DQL field is typed by its property, not its column's type](todo/type-inference.md#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type) | Low         | Medium      |
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
@@ -132,7 +131,6 @@ ships, remove every row that names it.
 | DR13 | [Module names and `*.info.yml`](todo/drupal.md#dr13-module-names-and-infoyml) | Low-Medium | Low-Medium |
 | DR10 | [Plugin IDs](todo/drupal.md#dr10-plugin-ids) | Medium | Medium |
 | DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |
-| DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
 | DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) | Medium-High | High        |
 | DR16 | [Event subscribers](todo/drupal.md#dr16-event-subscribers) | Medium | Low-Medium |
 | DR17 | [Warn on unknown service IDs](todo/drupal.md#dr17-warn-on-unknown-service-ids) | Medium | Low-Medium |
@@ -142,6 +140,7 @@ ships, remove every row that names it.
 | DR21 | [Return types core's docblocks leave wide](todo/drupal.md#dr21-return-types-cores-docblocks-leave-wide) | Medium | Low-Medium |
 | DR22 | [Complete permissions built in code](todo/drupal.md#dr22-complete-permissions-built-in-code) | Low-Medium | Medium |
 | DR23 | [Warn on unknown permission names](todo/drupal.md#dr23-warn-on-unknown-permission-names) | Medium | Low-Medium |
+| DR24 | [Warn on unknown theme hook names](todo/drupal.md#dr24-warn-on-unknown-theme-hook-names) | Low-Medium | Medium-High |
 
 ## Yii
 

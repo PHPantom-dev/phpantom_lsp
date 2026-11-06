@@ -15,6 +15,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Controller\NoteController;
+use Drupal\acme\Element\GreetingCard;
 use Drupal\acme\Entity\Note;
 use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
@@ -42,6 +43,10 @@ use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Language\LanguageManager;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Link;
+use Drupal\Core\Render\Attribute\FormElement;
+use Drupal\Core\Render\Attribute\RenderElement;
+use Drupal\Core\Render\Element\Details;
+use Drupal\Core\Render\Element\RenderElementBase;
 use Drupal\Core\Url;
 use Drupal\language\ConfigurableLanguageManager;
 use Drupal\language\LanguageServiceProvider;
@@ -268,6 +273,13 @@ check('hook_theme declares the acme_greeting theme hook', isset($themeHooks['acm
 check('acme_greeting declares the variables the controller passes', array_keys($themeHooks['acme_greeting']['variables'] ?? []) === ['name', 'greeting']);
 check('acme_greeting has the template its name implies', is_file("$module/templates/acme-greeting.html.twig"));
 check('acme_theme preprocesses acme_greeting', function_exists('acme_theme_preprocess_acme_greeting'));
+check('acme_theme overrides the acme_greeting template', is_file("$theme/templates/acme-greeting.html.twig"));
+check('GreetingController::greet() renders acme_greeting with its variables', str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#theme' => 'acme_greeting',\n            '#name' => \$name,\n            '#greeting' =>"));
+check('GreetingController::compactGreet() renders the acme_greeting__compact suggestion', str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#theme' => 'acme_greeting__compact'") && str_starts_with('acme_greeting__compact', 'acme_greeting__') && !isset($themeHooks['acme_greeting__compact']));
+check('acme_theme draws the suggestion with acme-greeting--compact.html.twig', is_file("$theme/templates/acme-greeting--compact.html.twig"));
+check('GreetingController::greet() passes a string as #name', (string) (new ReflectionMethod(GreetingController::class, 'greet'))->getParameters()[0]->getType() === 'string');
+check("core turns a theme hook template's attributes variables into an Attribute, which has addClass()", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeManager.php"), "foreach (['attributes', 'title_attributes', 'content_attributes'] as \$key) {") && method_exists(\Drupal\Core\Template\Attribute::class, 'addClass'));
+check("core's ThemeCommonElements declares item_list, drawn by system's item-list.html.twig", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeCommonElements.php"), "      'item_list' => [\n        'variables' => [\n          'items' => [],") && is_file("$web/core/modules/system/templates/item-list.html.twig"));
 
 // The module documents, invokes, and implements its own hook, and
 // implements core's form alter hooks.
@@ -281,6 +293,73 @@ check('acme_form_alter() implements hook_form_alter procedurally', function_exis
 check("core documents hook_form_alter() with the FormStateInterface acme_form_alter() leaves untyped", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/form.api.php"), 'function hook_form_alter(&$form, \\Drupal\\Core\\Form\\FormStateInterface $form_state, $form_id)') && (new ReflectionFunction('acme_form_alter'))->getParameters()[1]->getType() === null);
 check("core documents hook_form_alter() with a docblock acme_form_alter()'s hover shows", (bool) preg_match('~/\*\*\n \* Perform alterations before a form is rendered\.\n(?: \*[^\n]*\n)* \*/\nfunction hook_form_alter\(~', (string) file_get_contents("$web/core/lib/Drupal/Core/Form/form.api.php")));
 check("core's FormBuilder::prepareForm() fires the form alter hooks", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/FormBuilder.php"), '$this->moduleHandler->alter($hooks, $form, $form_state, $form_id);'));
+
+// ─── Render elements ────────────────────────────────────────────────────────
+
+$card = new ReflectionClass(GreetingCard::class);
+check('GreetingCard declares the acme_greeting_card element by attribute', (attributeArguments($card, RenderElement::class)[0] ?? null) === 'acme_greeting_card');
+check('GreetingCard is a render element', $card->isSubclassOf(RenderElementBase::class));
+check("core's Details declares the details element", (attributeArguments(new ReflectionClass(Details::class), RenderElement::class)[0] ?? null) === 'details');
+
+// Every element the controller names is one the module or core declares.
+$declaredElements = ['acme_greeting_card'];
+foreach (glob("$web/core/lib/Drupal/Core/Render/Element/*.php") ?: [] as $file) {
+    $class = 'Drupal\\Core\\Render\\Element\\' . basename($file, '.php');
+    if (!class_exists($class)) {
+        continue;
+    }
+    $element = new ReflectionClass($class);
+    foreach ([RenderElement::class, FormElement::class] as $attribute) {
+        $declaredElements[] = attributeArguments($element, $attribute)[0] ?? null;
+    }
+}
+preg_match_all("/'#type'(?:\\] =| =>) '([^']+)'/", $controllerSource, $namedElements);
+check('GreetingController names the custom and a core element in a literal and an assignment', $namedElements[1] === ['acme_greeting_card', 'details']);
+check('every element GreetingController names is declared', array_diff($namedElements[1], $declaredElements) === []);
+
+// ─── Libraries ──────────────────────────────────────────────────────────────
+
+// A library is `<extension>/<key>`, the key a top-level one of the
+// extension's libraries file (core's AssetResolver splits it on the first
+// slash).
+$libraryFiles = [
+    'core' => "$web/core/core.libraries.yml",
+    'acme' => "$module/acme.libraries.yml",
+    'acme_theme' => "$theme/acme_theme.libraries.yml",
+];
+$libraries = [];
+foreach ($libraryFiles as $extension => $file) {
+    foreach (Yaml::decode((string) file_get_contents($file)) as $key => $library) {
+        $libraries["$extension/$key"] = $library;
+    }
+}
+check('acme.libraries.yml declares acme/greeting', isset($libraries['acme/greeting']));
+check('acme_theme.libraries.yml declares acme_theme/global', isset($libraries['acme_theme/global']));
+check('core.libraries.yml declares core/drupal', isset($libraries['core/drupal']));
+check("acme/greeting's version is the 1.x its hover shows", ($libraries['acme/greeting']['version'] ?? null) === '1.x');
+check('the CSS files the libraries name exist', is_file("$module/css/acme-greeting.css") && is_file("$theme/css/global.css"));
+check("Drupal's AssetResolver splits a library name on its first slash", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Asset/AssetResolver.php"), "[\$extension, \$name] = explode('/', \$library, 2);"));
+
+// Every library the demo attaches or depends on is declared.
+$template = (string) file_get_contents("$module/templates/acme-greeting.html.twig");
+preg_match_all("/attach_library\\('([^']+)'\\)/", $template, $attachedInTwig);
+preg_match_all("/'#attached' => \\['library' => \\['([^']+)'\\]\\]/", $controllerSource, $attachedInPhp);
+$attached = [
+    'GreetingController::greet()' => $attachedInPhp[1],
+    'the acme_greeting template' => $attachedInTwig[1],
+    'the dependencies of acme/greeting' => $libraries['acme/greeting']['dependencies'] ?? [],
+    'the dependencies of acme_theme/global' => $libraries['acme_theme/global']['dependencies'] ?? [],
+    "acme_theme's info file" => $themeInfo['libraries'] ?? [],
+];
+$preprocessed = ['attributes' => ['class' => []]];
+acme_theme_preprocess_acme_greeting($preprocessed);
+$attached['acme_theme_preprocess_acme_greeting()'] = $preprocessed['#attached']['library'] ?? [];
+foreach ($attached as $where => $names) {
+    check("$where attaches a library", $names !== []);
+    check("every library $where attaches is declared", array_diff($names, array_keys($libraries)) === []);
+}
+check("core's Twig extension declares attach_library()", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Template/TwigExtension.php"), "new TwigFunction('attach_library'"));
+check("core's ThemeManager collects the #attached a preprocess function sets", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeManager.php"), "foreach (['#attached', '#cache'] as \$key)"));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

@@ -1405,6 +1405,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 sm.container_values.capacity() * size_of::<crate::symbol_map::ContainerValueSite>(),
             );
             sym.add(sm.entity_types.capacity() * size_of::<crate::symbol_map::EntityTypeSite>());
+            sym.add(
+                sm.drupal_plugin_classes.capacity()
+                    * size_of::<crate::symbol_map::PluginClassSite>(),
+            );
             sym.add(sm.drupal_route_patterns.capacity() * size_of::<String>());
             sym.add(sm.drupal_route_aliases.capacity() * size_of::<String>());
             sym.add(sm.drupal_hooks.capacity() * size_of::<crate::symbol_map::HookSite>());

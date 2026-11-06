@@ -503,6 +503,7 @@ impl Backend {
             declaration_files.default_config,
             declaration_files.config_schemas,
         );
+        self.note_drupal_templates(declaration_files.templates);
         let drupal_count = drupal_result.classmap.len()
             + drupal_result.function_index.len()
             + drupal_result.constant_index.len();

@@ -3,8 +3,8 @@
 A standalone editor playground for PHPantom on Drupal 11. It is a
 `drupal/recommended-project` site with one custom module, `acme`, and one
 theme, `acme_theme`, declaring a service, a route, a content entity type,
-hooks, a theme hook, permissions, and configuration the way a real Drupal
-module declares them.
+a render element, hooks, a theme hook, permissions, and configuration the
+way a real Drupal module declares them.
 
 Run `composer install` here first. Composer puts core and contrib into
 `web/`, which is git-ignored apart from the custom module and theme.
@@ -100,11 +100,48 @@ Run `composer install` here first. Composer puts core and contrib into
   definition of `'notify_email'`, which lands on its line in
   `acme.schema.yml`. Hover `$settings`, whose type carries the name it was
   read by.
+- Theme hooks navigate between the render arrays that name them, their
+  `hook_theme()` entry, and their templates, core's included. In
+  `GreetingController::greet()`, go to the definition of `'acme_greeting'`,
+  which lists its key in `src/Hook/AcmeHooks.php`, the module's
+  `templates/acme-greeting.html.twig`, and `acme_theme`'s override, or hover
+  it to see its template and variables. Complete a `#theme` value, core's
+  `item_list` included, or a key after `'#'` to see the hook's variables, and
+  go to the definition of `'#name'`. In `compactGreet()`,
+  `'acme_greeting__compact'` is a suggestion: it leads to `acme_greeting` and
+  to `acme_theme`'s `acme-greeting--compact.html.twig`.
+- A theme hook's templates receive its variables, typed by the render
+  arrays that pass them, and the variables Drupal adds to every template.
+  In `web/modules/custom/acme/templates/acme-greeting.html.twig`, hover
+  `name` to see the `string` `GreetingController::greet()` passes, go to its
+  definition in `AcmeHooks::theme()`, or complete after `attributes.` to see
+  core's `Attribute` methods.
+- Library names navigate between the libraries file that declares them and
+  the render arrays, templates, and YAML that attach them. In
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, hover
+  `'acme/greeting'` in the `#attached` of `greet()` to see its libraries file
+  and version, or go to its definition, which lands on its key in
+  `acme.libraries.yml`; the `attach_library()` in
+  `templates/acme-greeting.html.twig`, the `dependencies` of
+  `web/themes/custom/acme_theme/acme_theme.libraries.yml`, and the
+  `libraries` of `acme_theme.info.yml` go there too. Complete a library name
+  in any of them; core's libraries, such as `core/drupal`, are offered too.
+  A name no libraries file declares is reported, unless its module adds
+  libraries in code with `hook_library_info_build()` or
+  `hook_library_info_alter()`.
 - A module's service provider may build a service from a class of its own.
   In `acme_french_site_name()` in `web/modules/custom/acme/acme.module`,
   hover `$languageManager`: core declares `language_manager` as
   `LanguageManager`, and the language module's `LanguageServiceProvider`
   swaps in `ConfigurableLanguageManager`, so it is either class.
+- Render element names in `#type` navigate to the element class that
+  declares them. In `card()` in
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the
+  definition of `'acme_greeting_card'`, which lands on
+  `src/Element/GreetingCard.php`, or hover `'details'` to see core's
+  `Details` class. Complete a name inside `'#type' => ''` or
+  `$build['more']['#type'] = ''`; core's elements are offered too. A name
+  no element class declares is reported.
 
 ## What the Symfony support already reads
 

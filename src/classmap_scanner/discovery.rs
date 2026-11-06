@@ -694,6 +694,8 @@ pub fn scan_drupal_directories(
                 declaration_files.config_schemas.push(path.to_path_buf());
             } else if crate::drupal::is_declaration_file(path, web_root) {
                 declaration_files.declarations.push(path.to_path_buf());
+            } else if crate::drupal::is_template_file(path, web_root) {
+                declaration_files.templates.push(path.to_path_buf());
             }
         }
     }
@@ -720,6 +722,9 @@ pub struct DrupalDeclarationFiles {
     pub default_config: Vec<PathBuf>,
     /// The configuration schema files.
     pub config_schemas: Vec<PathBuf>,
+    /// The Twig templates theme hooks are drawn with (see
+    /// `drupal::is_template_file`), recorded without being read.
+    pub templates: Vec<PathBuf>,
 }
 
 /// The extensions besides `.php` that Drupal treats as PHP source.
