@@ -120,6 +120,9 @@ Run `composer install` here first. Composer puts core and contrib into
   `web/themes/custom/acme_theme/acme_theme.libraries.yml`, and the
   `libraries` of `acme_theme.info.yml` go there too. Complete a library name
   in any of them; core's libraries, such as `core/drupal`, are offered too.
+  A name no libraries file declares is reported, unless its module adds
+  libraries in code with `hook_library_info_build()` or
+  `hook_library_info_alter()`.
 - A module's service provider may build a service from a class of its own.
   In `acme_french_site_name()` in `web/modules/custom/acme/acme.module`,
   hover `$languageManager`: core declares `language_manager` as

@@ -252,6 +252,27 @@ pub(crate) fn library_version(content: &str, key: &str) -> Option<String> {
         .filter(|version| !version.is_empty())
 }
 
+/// Whether the library `key` is one of the sorted `declared` names, or
+/// `None` when that cannot be told: a site whose libraries files were not
+/// read declares none at all, and an extension among the sorted `builders`
+/// may add any library in code.  A name whose extension declares nothing,
+/// or does not exist, is no library.
+pub(crate) fn judge_library(declared: &[String], builders: &[String], key: &str) -> Option<bool> {
+    if declared.is_empty() {
+        return None;
+    }
+    let found = |names: &[String], wanted: &str| {
+        names
+            .binary_search_by(|name| name.as_str().cmp(wanted))
+            .is_ok()
+    };
+    if found(declared, key) {
+        return Some(true);
+    }
+    let extension = key.split_once('/').map_or(key, |(extension, _)| extension);
+    (!found(builders, extension)).then_some(false)
+}
+
 // ─── Twig ───────────────────────────────────────────────────────────────────
 
 /// The `attach_library` function a template calls with a library name.
@@ -343,7 +364,125 @@ pub(crate) fn twig_library_name_start(content: &str, cursor: usize) -> Option<us
     is_function_start(content, function.len()).then_some(name_start)
 }
 
+/// The hooks whose implementations may add libraries in code.
+const LIBRARY_BUILDING_HOOKS: [&str; 2] = ["library_info_build", "library_info_alter"];
+
+/// The extensions that implement `hook_library_info_build()` or
+/// `hook_library_info_alter()`, by the file they do it in, and all of them
+/// sorted.
+#[derive(Default)]
+pub(crate) struct LibraryBuilders {
+    by_source: std::collections::HashMap<String, Vec<String>>,
+    extensions: Vec<String>,
+}
+
+impl LibraryBuilders {
+    fn new(by_source: std::collections::HashMap<String, Vec<String>>) -> Self {
+        let mut extensions: Vec<String> = by_source.values().flatten().cloned().collect();
+        extensions.sort_unstable();
+        extensions.dedup();
+        Self {
+            by_source,
+            extensions,
+        }
+    }
+}
+
+/// The extensions the implementations of either library hook Drupal
+/// collects in `map` are for, sorted.
+fn builder_extensions(map: &crate::symbol_map::SymbolMap) -> Vec<String> {
+    let mut extensions: Vec<String> = map
+        .spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::StringKey {
+                kind: StringKeyKind::DrupalHook,
+                key,
+                is_write: false,
+                ..
+            } if LIBRARY_BUILDING_HOOKS.contains(&key.as_str()) => {
+                let at = map
+                    .drupal_hooks
+                    .binary_search_by_key(&span.start, |site| site.start)
+                    .ok()?;
+                match &map.drupal_hooks[at].role {
+                    crate::symbol_map::HookRole::Implementation {
+                        extension,
+                        collected: true,
+                        ..
+                    } => Some(extension.to_string()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect();
+    extensions.sort_unstable();
+    extensions.dedup();
+    extensions
+}
+
 impl Backend {
+    /// The extensions that implement `hook_library_info_build()` or
+    /// `hook_library_info_alter()`, sorted: the libraries under them may be
+    /// added in code.  Read once, then kept up to date one file at a time
+    /// (see [`Self::note_drupal_library_builder_sources`]).
+    pub(crate) fn drupal_library_builders(&self) -> Vec<String> {
+        if let Some(builders) = self.drupal.library_builders.read().as_ref() {
+            return builders.extensions.clone();
+        }
+        let mut by_source: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for hook in LIBRARY_BUILDING_HOOKS {
+            for (uri, _, extension) in self.drupal_hook_implementations(hook) {
+                by_source.entry(uri).or_default().push(extension);
+            }
+        }
+        let builders = LibraryBuilders::new(by_source);
+        let extensions = builders.extensions.clone();
+        *self.drupal.library_builders.write() = Some(std::sync::Arc::new(builders));
+        extensions
+    }
+
+    /// Follow the file at `uri`, now holding `map`, in what
+    /// [`Self::drupal_library_builders`] read: the extensions it implements
+    /// either hook for are read from `map` alone.  A map dropped (`None`)
+    /// while its file is read again changes nothing; a file gone from disk
+    /// builds nothing.
+    pub(crate) fn note_drupal_library_builder_sources(
+        &self,
+        uri: &str,
+        map: Option<&crate::symbol_map::SymbolMap>,
+    ) {
+        let Some(builders) = self.drupal.library_builders.read().clone() else {
+            return;
+        };
+        let found = match map {
+            Some(map) => builder_extensions(map),
+            None if crate::util::uri_to_path(uri).is_some_and(|path| path.exists()) => return,
+            None => Vec::new(),
+        };
+        if builders
+            .by_source
+            .get(uri)
+            .map_or(found.is_empty(), |known| *known == found)
+        {
+            return;
+        }
+        let mut by_source = builders.by_source.clone();
+        if found.is_empty() {
+            by_source.remove(uri);
+        } else {
+            by_source.insert(uri.to_string(), found);
+        }
+        let mut slot = self.drupal.library_builders.write();
+        // Another change landed meanwhile: read them all again.
+        *slot = slot
+            .as_ref()
+            .filter(|current| std::sync::Arc::ptr_eq(current, &builders))
+            .map(|_| std::sync::Arc::new(LibraryBuilders::new(by_source)));
+    }
+
     /// What the hover of the library `name` says: the libraries file that
     /// declares it, and the version it gives the library.
     pub(crate) fn drupal_library_detail(&self, name: &str) -> String {
@@ -483,6 +622,31 @@ mod tests {
         let yaml = "one:\n  js: {}\ntwo:\n  css:\n    version: no\n  version: \"1.0.1\"\n";
         assert_eq!(library_version(yaml, "two").as_deref(), Some("1.0.1"));
         assert_eq!(library_version(yaml, "one"), None);
+    }
+
+    #[test]
+    fn a_library_is_judged_against_the_declared_names() {
+        let declared = ["acme/greeting".to_string(), "core/drupal".to_string()];
+        let builders = ["example".to_string()];
+        assert_eq!(
+            judge_library(&declared, &builders, "acme/greeting"),
+            Some(true)
+        );
+        assert_eq!(
+            judge_library(&declared, &builders, "acme/greting"),
+            Some(false)
+        );
+        assert_eq!(
+            judge_library(&declared, &builders, "nowhere/thing"),
+            Some(false)
+        );
+        assert_eq!(judge_library(&declared, &builders, "example/built"), None);
+        // The builder's name is the whole extension, not a prefix.
+        assert_eq!(
+            judge_library(&declared, &builders, "examples/x"),
+            Some(false)
+        );
+        assert_eq!(judge_library(&[], &builders, "acme/greeting"), None);
     }
 
     #[test]

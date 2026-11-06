@@ -401,15 +401,257 @@ async fn a_twig_project_reads_attach_library() {
     assert!(labels.contains(&"acme/greeting".to_string()), "{labels:?}");
 }
 
+/// The unknown-library messages the diagnostics of the open file at `path`
+/// report, each with its line.
+fn unknown_libraries(
+    backend: &Backend,
+    dir: &tempfile::TempDir,
+    path: &str,
+    content: &str,
+) -> Vec<(String, u32)> {
+    let uri = uri_for(dir, path);
+    let mut diagnostics = Vec::new();
+    if path.ends_with(".php") {
+        backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
+    } else {
+        backend.collect_resource_diagnostics(uri.as_str(), content, &mut diagnostics);
+    }
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(Code::String(code)) if code == "invalid_drupal_library"
+            )
+        })
+        .map(|diagnostic| {
+            (
+                crate::common::message_text(&diagnostic.message).to_string(),
+                diagnostic.range.start.line,
+            )
+        })
+        .collect()
+}
+
+/// A message and line for each of `names`, written on `line`.
+fn reported(found: &[(&str, u32)]) -> Vec<(String, u32)> {
+    found
+        .iter()
+        .map(|(name, line)| (format!("Unknown library: '{name}'"), *line))
+        .collect()
+}
+
+#[tokio::test]
+async fn an_undeclared_library_is_reported_in_php() {
+    let content = "<?php\nfunction build(string $name): array {\n    $build = ['#attached' => ['library' => ['acme/greeting', 'acme/greting']]];\n    $build['#attached']['library'][] = 'core/drupal';\n    $build['#attached']['library'][] = 'core/missing';\n    $build['#attached']['library'][] = 'nowhere/thing';\n    $build['#attached']['library'][] = $name;\n    $build['#attached']['library'][] = 'acme/' . $name;\n    return $build;\n}\n";
+    let (backend, dir) = site(
+        DRUPAL,
+        &[(LIBRARIES_PATH, LIBRARIES), (CONTROLLER_PATH, content)],
+    )
+    .await;
+    assert_eq!(
+        unknown_libraries(&backend, &dir, CONTROLLER_PATH, content),
+        reported(&[
+            ("acme/greting", 2),
+            ("core/missing", 4),
+            ("nowhere/thing", 5)
+        ])
+    );
+}
+
+#[tokio::test]
+async fn an_undeclared_library_is_reported_in_twig_and_yaml() {
+    let libraries = "greeting:\n  version: 1.x\n  dependencies:\n    - core/drupal\n    - core/drupla\nflow:\n  dependencies: [acme/greeting, acme/nothing]\n";
+    let info = "name: Acme Theme\ntype: theme\nlibraries:\n  - acme/greeting\n  - acme/gone\n";
+    let template = "{{ attach_library('acme/greeting') }}\n{{ attach_library('acme/greting') }}\n{{ attach_library(name) }}\n";
+    for composer in [DRUPAL, DRUPAL_WITH_TWIG] {
+        let (backend, dir) = site(
+            composer,
+            &[
+                (LIBRARIES_PATH, libraries),
+                (THEME_INFO_PATH, info),
+                (TEMPLATE_PATH, template),
+            ],
+        )
+        .await;
+        for (path, content, expected) in [
+            (
+                LIBRARIES_PATH,
+                libraries,
+                reported(&[("core/drupla", 4), ("acme/nothing", 6)]),
+            ),
+            (THEME_INFO_PATH, info, reported(&[("acme/gone", 4)])),
+            (TEMPLATE_PATH, template, reported(&[("acme/greting", 1)])),
+        ] {
+            assert_eq!(
+                unknown_libraries(&backend, &dir, path, content),
+                expected,
+                "{path}"
+            );
+        }
+    }
+}
+
+/// A module that implements `hook_library_info_build()` may add any
+/// library in code, so no name under it is reported.
+#[tokio::test]
+async fn names_under_a_module_that_builds_libraries_are_not_reported() {
+    let hook_attribute = "<?php\nnamespace Drupal\\Core\\Hook\\Attribute;\n#[\\Attribute]\nclass Hook {\n    public function __construct(public string $hook, public string $method = '', public ?string $module = NULL) {}\n}\n";
+    let acme_hooks = "<?php\nnamespace Drupal\\acme\\Hook;\n\nuse Drupal\\Core\\Hook\\Attribute\\Hook;\n\nfinal class AcmeHooks {\n  #[Hook('library_info_build')]\n  public function libraryInfoBuild(): array {\n    return ['built' => ['js' => []]];\n  }\n}\n";
+    let example_module = "<?php\n\nfunction example_library_info_build() {\n  return ['built' => ['js' => []]];\n}\n";
+    let content = "<?php\nfunction build(): array {\n    return ['#attached' => ['library' => [\n        'acme/built',\n        'example/built',\n        'other/built',\n    ]]];\n}\n";
+    let (backend, dir) = site(
+        DRUPAL,
+        &[
+            (
+                "web/core/lib/Drupal/Core/Hook/Attribute/Hook.php",
+                hook_attribute,
+            ),
+            (
+                "web/modules/custom/acme/acme.info.yml",
+                "name: Acme\ntype: module\n",
+            ),
+            (LIBRARIES_PATH, LIBRARIES),
+            ("web/modules/custom/acme/src/Hook/AcmeHooks.php", acme_hooks),
+            (
+                "web/modules/custom/example/example.info.yml",
+                "name: Example\ntype: module\n",
+            ),
+            ("web/modules/custom/example/example.module", example_module),
+            (
+                "web/modules/custom/other/other.info.yml",
+                "name: Other\ntype: module\n",
+            ),
+            (CONTROLLER_PATH, content),
+        ],
+    )
+    .await;
+    assert_eq!(
+        unknown_libraries(&backend, &dir, CONTROLLER_PATH, content),
+        reported(&[("other/built", 5)])
+    );
+}
+
+/// An edit to one module's implementation is followed at once, and the
+/// other modules' implementations are kept.
+#[tokio::test]
+async fn a_library_builder_edit_is_followed() {
+    let content = "<?php\nfunction build(): array {\n    return ['#attached' => ['library' => ['other/built', 'example/built']]];\n}\n";
+    let other = "web/modules/custom/other/other.module";
+    let example_module =
+        "<?php\n\nfunction example_library_info_alter(array &$libraries, $extension) {\n}\n";
+    let (backend, dir) = site(
+        DRUPAL,
+        &[
+            (
+                "web/modules/custom/other/other.info.yml",
+                "name: Other\ntype: module\n",
+            ),
+            (other, "<?php\n"),
+            (
+                "web/modules/custom/example/example.info.yml",
+                "name: Example\ntype: module\n",
+            ),
+            ("web/modules/custom/example/example.module", example_module),
+            (LIBRARIES_PATH, LIBRARIES),
+            (CONTROLLER_PATH, content),
+        ],
+    )
+    .await;
+    assert_eq!(
+        unknown_libraries(&backend, &dir, CONTROLLER_PATH, content),
+        reported(&[("other/built", 2)])
+    );
+    let builder = "<?php\n\nfunction other_library_info_build() {\n  return [];\n}\n";
+    open_document(&backend, &uri_for(&dir, other), "php", builder).await;
+    assert!(unknown_libraries(&backend, &dir, CONTROLLER_PATH, content).is_empty());
+    open_document(&backend, &uri_for(&dir, other), "php", "<?php\n").await;
+    assert_eq!(
+        unknown_libraries(&backend, &dir, CONTROLLER_PATH, content),
+        reported(&[("other/built", 2)])
+    );
+}
+
+/// An alter hook can add libraries too, so a module that implements it is
+/// treated as one that builds them.
+#[tokio::test]
+async fn names_under_a_module_that_alters_libraries_are_not_reported() {
+    let hook_attribute = "<?php\nnamespace Drupal\\Core\\Hook\\Attribute;\n#[\\Attribute]\nclass Hook {\n    public function __construct(public string $hook, public string $method = '', public ?string $module = NULL) {}\n}\n";
+    let acme_hooks = "<?php\nnamespace Drupal\\acme\\Hook;\n\nuse Drupal\\Core\\Hook\\Attribute\\Hook;\n\nfinal class AcmeHooks {\n  #[Hook('library_info_alter')]\n  public function libraryInfoAlter(array &$libraries, string $extension): void {\n    if ($extension === 'acme') {\n      $libraries['added'] = ['js' => []];\n    }\n  }\n}\n";
+    let example_module = "<?php\n\nfunction example_library_info_alter(array &$libraries, $extension) {\n  $libraries['added'] = ['js' => []];\n}\n";
+    let content = "<?php\nfunction build(): array {\n    return ['#attached' => ['library' => [\n        'acme/added',\n        'example/added',\n        'other/added',\n    ]]];\n}\n";
+    let (backend, dir) = site(
+        DRUPAL,
+        &[
+            (
+                "web/core/lib/Drupal/Core/Hook/Attribute/Hook.php",
+                hook_attribute,
+            ),
+            (
+                "web/modules/custom/acme/acme.info.yml",
+                "name: Acme\ntype: module\n",
+            ),
+            (LIBRARIES_PATH, LIBRARIES),
+            ("web/modules/custom/acme/src/Hook/AcmeHooks.php", acme_hooks),
+            (
+                "web/modules/custom/example/example.info.yml",
+                "name: Example\ntype: module\n",
+            ),
+            ("web/modules/custom/example/example.module", example_module),
+            (
+                "web/modules/custom/other/other.info.yml",
+                "name: Other\ntype: module\n",
+            ),
+            (CONTROLLER_PATH, content),
+        ],
+    )
+    .await;
+    assert_eq!(
+        unknown_libraries(&backend, &dir, CONTROLLER_PATH, content),
+        reported(&[("other/added", 5)])
+    );
+}
+
+/// A test module's library counts only while its libraries file is open,
+/// and test code, which attaches its test modules' libraries, is not
+/// judged.
+#[tokio::test]
+async fn test_modules_libraries_count_while_open() {
+    let content = "<?php\nfunction build(): array {\n    return ['#attached' => ['library' => ['fixture_test/fixture']]];\n}\n";
+    let (backend, dir) = site(
+        DRUPAL,
+        &[(LIBRARIES_PATH, LIBRARIES), (CONTROLLER_PATH, content)],
+    )
+    .await;
+    assert_eq!(
+        unknown_libraries(&backend, &dir, CONTROLLER_PATH, content),
+        reported(&[("fixture_test/fixture", 2)])
+    );
+
+    let fixture = "web/core/modules/system/tests/modules/fixture_test/fixture_test.libraries.yml";
+    let fixture_content =
+        "fixture:\n  js:\n    fixture.js: {}\n  dependencies:\n    - fixture_test/missing\n";
+    open_document(&backend, &uri_for(&dir, fixture), "yaml", fixture_content).await;
+    assert!(unknown_libraries(&backend, &dir, CONTROLLER_PATH, content).is_empty());
+    assert!(unknown_libraries(&backend, &dir, fixture, fixture_content).is_empty());
+
+    let test_code = "web/core/modules/system/tests/modules/fixture_test/src/Build.php";
+    let test_content = "<?php\nfunction fixture_build(): array {\n    return ['#attached' => ['library' => ['fixture_test/missing']]];\n}\n";
+    open_document(&backend, &uri_for(&dir, test_code), "php", test_content).await;
+    assert!(unknown_libraries(&backend, &dir, test_code, test_content).is_empty());
+}
+
 /// Outside a Drupal project, none of it is read.
 #[tokio::test]
 async fn a_project_without_drupal_reads_no_libraries() {
-    let content = "<?php\nfunction build(): array {\n    return ['#attached' => ['library' => ['acme/greeting', '']]];\n}\n";
+    let content = "<?php\nfunction build(): array {\n    return ['#attached' => ['library' => ['acme/greeting', 'acme/missing', '']]];\n}\n";
     let (backend, dir) = site(
         r#"{ "require": { "php": "^8.3" } }"#,
         &[(LIBRARIES_PATH, LIBRARIES), (CONTROLLER_PATH, content)],
     )
     .await;
+    assert!(unknown_libraries(&backend, &dir, CONTROLLER_PATH, content).is_empty());
+    assert!(unknown_libraries(&backend, &dir, LIBRARIES_PATH, LIBRARIES).is_empty());
     let found = landing(
         &backend,
         &dir,

@@ -49,6 +49,7 @@ enum CheckedStringKind {
     YiiRouteArgument,
     DrupalRoute,
     DrupalRenderElement,
+    DrupalLibrary,
 }
 
 impl CheckedStringKind {
@@ -80,6 +81,7 @@ impl CheckedStringKind {
             StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
             StringKeyKind::DrupalRoute => Self::DrupalRoute,
             StringKeyKind::DrupalRenderElement => Self::DrupalRenderElement,
+            StringKeyKind::DrupalLibrary => Self::DrupalLibrary,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -96,8 +98,7 @@ impl CheckedStringKind {
             // name that nothing above defines starts a new block.  A
             // template variable no render was found to pass may be passed
             // by one that builds its context at runtime.  A module can add
-            // an entity type in PHP, through `hook_entity_type_build()`,
-            // and a library, through `hook_library_info_build()`.
+            // an entity type in PHP, through `hook_entity_type_build()`.
             // Drupal sends a route parameter no path declares as the query
             // string.  A serializer group nothing puts a member in selects
             // nothing, which is no error either.  A module can declare
@@ -116,7 +117,6 @@ impl CheckedStringKind {
             | StringKeyKind::DrupalConfigKey
             | StringKeyKind::DrupalThemeHook
             | StringKeyKind::DrupalThemeHookVariable
-            | StringKeyKind::DrupalLibrary
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack
@@ -199,6 +199,11 @@ struct DeclaredKeys<'a> {
     drupal_route_aliases: Vec<String>,
     /// The Drupal render element names the project declares, sorted.
     drupal_render_elements: Vec<String>,
+    /// The Drupal library names the project's libraries files declare,
+    /// sorted.
+    drupal_libraries: Vec<String>,
+    /// The extensions that build libraries in code, sorted.
+    drupal_library_builders: Vec<String>,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -236,6 +241,7 @@ impl<'a> DeclaredKeys<'a> {
         let has_drupal_route = names(|kind| kind == CheckedStringKind::DrupalRoute);
         let has_drupal_render_element =
             names(|kind| kind == CheckedStringKind::DrupalRenderElement);
+        let has_drupal_library = names(|kind| kind == CheckedStringKind::DrupalLibrary);
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -417,6 +423,19 @@ impl<'a> DeclaredKeys<'a> {
             Vec::new()
         };
 
+        // Core's and contributed modules' libraries files are only read
+        // once the workspace index has walked the folders `.gitignore`
+        // leaves out.
+        let (drupal_libraries, drupal_library_builders) = if has_drupal_library {
+            backend.ensure_workspace_index_ready_for_request();
+            (
+                backend.symfony_declared_names(crate::symbol_map::StringKeyKind::DrupalLibrary),
+                backend.drupal_library_builders(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
         Self {
             backend,
             routes,
@@ -444,6 +463,8 @@ impl<'a> DeclaredKeys<'a> {
             drupal_route_patterns,
             drupal_route_aliases,
             drupal_render_elements,
+            drupal_libraries,
+            drupal_library_builders,
         }
     }
 
@@ -528,6 +549,12 @@ impl<'a> DeclaredKeys<'a> {
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
             CheckedStringKind::DrupalRoute => self.judge_drupal_route(key),
             CheckedStringKind::DrupalRenderElement => self.judge_drupal_render_element(key),
+            CheckedStringKind::DrupalLibrary => crate::drupal::libraries::judge_library(
+                &self.drupal_libraries,
+                &self.drupal_library_builders,
+                key,
+            )
+            .map(|valid| (valid, "library", "invalid_drupal_library")),
         }
     }
 
@@ -945,12 +972,13 @@ impl Backend {
                     return None;
                 }
                 // Test code passes invented route names to mocks and uses
-                // its test modules' elements, and an `*.api.php` file's
-                // examples name invented ones too.
+                // its test modules' elements and libraries, and an
+                // `*.api.php` file's examples name invented ones too.
                 if matches!(
                     kind,
                     crate::symbol_map::StringKeyKind::DrupalRoute
                         | crate::symbol_map::StringKeyKind::DrupalRenderElement
+                        | crate::symbol_map::StringKeyKind::DrupalLibrary
                 ) && is_drupal_test_code
                 {
                     return None;
