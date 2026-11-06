@@ -130,7 +130,7 @@ mod generate_constructor;
 mod generate_getter_setter;
 mod generate_property_hooks;
 pub(crate) mod implement_methods;
-mod import_alias;
+pub(crate) mod import_alias;
 mod import_all_classes;
 mod import_class;
 mod inline_variable;

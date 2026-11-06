@@ -110,6 +110,7 @@ class SortUseStatementsDemo
 // alias `Line`" turns it into `use SplQueue;` and every `Line` in this file
 // into `SplQueue`. On an import without an alias, such as `use Closure;` at
 // the top, the action is "Alias `Closure` as `GlobalClosure`" instead.
+// Renaming `Line` (F2), here or on any `Line` below, renames only the alias.
 // Completing a class whose short name another import already holds imports
 // it under an alias the same way, e.g. `EloquentCollection`.
 

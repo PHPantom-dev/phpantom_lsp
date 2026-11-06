@@ -249,7 +249,6 @@ ships, remove every row that names it.
 | H13 | Declare missing property (native unknown-member diagnostic and PHPStan `property.notFound`)                                                                                 | Medium      | Medium      |
 | H15 | Template bound from tip — add `@template T of X`                                                                                                                            | Medium      | Medium      |
 | F17 | [Wire class move to `workspace/willRenameFiles`](todo/lsp-features.md#f17-wire-class-move-to-workspacewillrenamefiles)                                                       | Medium      | Medium      |
-| F67 | [Rename an import alias within its file](todo/lsp-features.md#f67-rename-an-import-alias-within-its-file) | Low-Medium  | Medium      |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | High        | Medium-High |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | High        | Medium-High |
 | FX7 | [`add_return_type` — generate `@return` docblocks from function bodies](todo/fix-cli.md#fx7-add_return_type-generate-return-docblocks-from-function-bodies)                | Medium-High | Medium-High |

@@ -97,6 +97,9 @@ impl Backend {
         if self.is_resource_uri(uri) {
             return Ok(self.handle_framework_prepare_rename(uri, content, position));
         }
+        if let Some(alias) = self.alias_rename_at(uri, content, position) {
+            return Ok(Some(alias.prepare(content)));
+        }
         let Some((span, response)) = self.prepare_rename_response(uri, content, position) else {
             return Ok(None);
         };
@@ -251,6 +254,9 @@ impl Backend {
         // occurrences are reached from the declaration instead.
         if self.is_resource_uri(uri) {
             return self.handle_framework_rename(uri, content, position, new_name);
+        }
+        if let Some(alias) = self.alias_rename_at(uri, content, position) {
+            return alias.rename(uri, new_name);
         }
 
         let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {

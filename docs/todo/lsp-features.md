@@ -1163,29 +1163,3 @@ When the domain has no catalogue yet, offer to create
 **Where to look:** `src/code_actions/insert_translation_key.rs`,
 `src/symfony/translations.rs` (`catalogue_spans`, `scan_yaml`,
 `scan_xliff`).
-
----
-
-## F67. Rename an import alias within its file
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-use Illuminate\Database\Eloquent\Collection as EloquentCollection;
-
-function load(): EloquentCollection {}
-```
-
-The "Alias `Collection` as `EloquentCollection`" code action picks the
-alias itself, since a code action cannot ask for a name. To choose
-another, a rename started on the alias in the `use` statement should
-rename it only in this file: the `as` clause and every name the block
-writes through it, refusing a name the block already binds. The symbol
-map records a span for the imported name in a `use` statement but none
-for its alias. A rename started on a reference through the alias renames the class
-itself, and should keep doing so.
-
-**Where to look:** `src/code_actions/import_alias.rs` (finding the
-import under the cursor, the names written through it, and what the
-block already binds), `src/rename/prepare.rs`.
-

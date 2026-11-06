@@ -290,6 +290,7 @@ mod references_laravel_trans;
 mod reflection_property_types;
 mod rename_class;
 mod rename_class_moves;
+mod rename_import_alias;
 mod rename_member;
 mod rename_namespace;
 mod rename_symbols;
