@@ -153,20 +153,9 @@ pub(super) fn export_span(
             ..
         } => {
             let subject = subject_text.as_str(export_context.mapped_source);
-            // An attribute's named-argument label is an occurrence of the
-            // property its constructor promotes, and of nothing otherwise.
-            let kind = if *docblock_ref == DocblockMemberRef::AttributeNamedArg {
-                if !backend.member_span_names_member(
-                    context,
-                    *docblock_ref,
-                    subject,
-                    span.start,
-                    member_name,
-                ) {
-                    return;
-                }
-                OccurrenceKind::Property
-            } else if *docblock_ref == DocblockMemberRef::EntityField {
+            // A repository call's field name is the entity's property the
+            // field maps.
+            let kind = if *docblock_ref == DocblockMemberRef::EntityField {
                 OccurrenceKind::Property
             } else {
                 member_occurrence_kind(&source.source, range, *is_static, *is_method_call)
@@ -209,6 +198,24 @@ pub(super) fn export_span(
                     kind: ExportDiagnosticKind::UnresolvedMember,
                     range,
                     message: format!("unresolved member `{member_name}` on `{subject}`"),
+                });
+            }
+        }
+        SymbolKind::NamedArgument { name, .. } => {
+            // A label that fills a promoted parameter is an occurrence of the
+            // property that parameter declares.  A label filling a plain
+            // parameter names a parameter, which has no exported kind, so it
+            // is left out rather than mislabelled as a property.
+            let declaration = backend.named_argument_location(&source.uri, &source.source, span);
+            if let Some(declaration) = declaration.filter(|d| d.promotes_property) {
+                output.occurrences.push(ExportOccurrence {
+                    kind: OccurrenceKind::Property,
+                    range,
+                    name: name.to_string(),
+                    resolved_symbol: declaration
+                        .class
+                        .map(|class| format!("{}::{}", class, name)),
+                    is_definition: false,
                 });
             }
         }

@@ -50,6 +50,23 @@ pub(crate) struct ResolvedCallableTarget {
     /// stand in for it: in `$this->state->canChangeTo(…)` the enclosing
     /// class is not the class that declares `canChangeTo`.
     pub owner_class: Option<Atom>,
+    /// Whether the method this target came from is one the engine
+    /// synthesized rather than read from a declaration: an `@method` tag, a
+    /// Laravel macro, a facade or builder forwarder.
+    ///
+    /// Its parameter list is a docblock's summary of what `__call` will
+    /// receive, and `__call` collects any label the caller writes into its
+    /// arguments array.  A consumer that would tell the caller the call is
+    /// wrong has nothing to say that against a documented signature.
+    pub is_virtual_method: bool,
+    /// Whether the parameters stand for a callable *type* rather than for a
+    /// declaration that names them.
+    ///
+    /// `callable(string): string` says what a callee takes and returns and
+    /// nothing about what its parameters are called, so a target built from
+    /// one numbers them (`$param1`, `$param2`, …).  An argument's count and
+    /// type still mean something against such a list; a name does not.
+    pub synthesized_parameter_names: bool,
     /// Parameter names (`$`-prefixed) whose substituted type came from
     /// resolving that same parameter's own argument, and only that
     /// argument (the `@template` it declares has no other binding site).

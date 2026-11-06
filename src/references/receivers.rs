@@ -17,7 +17,7 @@ use std::cell::OnceCell;
 use tower_lsp_server::gen_lsp_types::Range;
 
 use crate::atom::Atom;
-use crate::class_lookup::Fqn;
+use crate::references::MemberRefKind;
 use crate::references::member_scope::{AccessReceiver, MemberScope};
 use crate::symbol_map::SymbolMap;
 use crate::symbol_map::{DocblockMemberRef, SelfStaticParentKind, SubjectText, SymbolKind};
@@ -118,13 +118,10 @@ pub(super) enum ReceiverWalk<'a> {
 impl Backend {
     /// The classes a member access's receiver resolves to, as the member
     /// search reads them: for the method a mock expectation names, the
-    /// class the receiver mocks (see [`crate::mock_methods`]), and for an
-    /// attribute's named-argument label, the attribute class only when its
-    /// constructor promotes the parameter `member_name`.
+    /// class the receiver mocks (see [`crate::mock_methods`]).
     pub(super) fn member_receiver_fqns(
         &self,
         receiver: AccessReceiver<'_>,
-        member_name: &str,
         ctx: &crate::types::FileContext,
         access_offset: u32,
         content: &str,
@@ -150,28 +147,17 @@ impl Backend {
                 &self.resolved_class_cache,
             );
         }
-        let mut fqns =
+        let fqns =
             self.resolve_subject_to_fqns(subject_text, is_static, ctx, access_offset, content);
         if fqns.is_empty() {
             return fqns;
         }
-        let class_loader = self.resolved_class_loader_with(&ctx.classes);
         match docblock_ref {
-            DocblockMemberRef::MockedMethod => {
-                crate::mock_methods::mocked_class_names(fqns, is_static, &class_loader)
-            }
-            DocblockMemberRef::AttributeNamedArg => {
-                fqns.retain(|fqn| {
-                    class_loader(Fqn::new(fqn)).is_some_and(|class| {
-                        crate::class_lookup::constructor_promotes(
-                            &class,
-                            member_name,
-                            &class_loader,
-                        )
-                    })
-                });
-                fqns
-            }
+            DocblockMemberRef::MockedMethod => crate::mock_methods::mocked_class_names(
+                fqns,
+                is_static,
+                &self.resolved_class_loader_with(&ctx.classes),
+            ),
             _ => fqns,
         }
     }
@@ -206,15 +192,32 @@ impl Backend {
     /// settled by the text nor recorded keeps the whole file.  Every query has
     /// to carry a hierarchy, since the name-only fallback the search drops to
     /// without one accepts any receiver and so rules nothing out.
+    ///
+    /// A query's kind matters because a label is a spelling only a property
+    /// search is answered by: the `render:` of `$view->render(render: 1)`
+    /// names a parameter, not a member, and must not keep a file alive for a
+    /// search for the method of that name.
     pub(super) fn member_accesses_ruled_out(
         &self,
         uri: &str,
         symbol_map: &Arc<SymbolMap>,
-        queries: &[(Atom, &MemberScope)],
+        queries: &[(Atom, &MemberScope, MemberRefKind)],
     ) -> bool {
         let file_ctx = OnceCell::new();
         let resolved = self.resolved_member_file(uri, symbol_map);
-        for (member, hierarchy) in queries {
+        for (member, hierarchy, target_kind) in queries {
+            // A label that fills a promoted property is a reference no
+            // receiver walk speaks for, so a file holding one is not pruned.
+            // The label of a method or function call names no property, so it
+            // leaves the file prunable.
+            if target_kind.admits(MemberRefKind::Property)
+                && symbol_map
+                    .named_argument_indices(member.as_str())
+                    .iter()
+                    .any(|&index| symbol_map.label_constructs(index))
+            {
+                return false;
+            }
             // A recorded entry answers for every access of a name it covers,
             // settled or not, so it replaces the test below rather than
             // supplementing it.  An access it holds nothing for resolved to
@@ -256,7 +259,6 @@ impl Backend {
                         is_static: *is_static,
                         docblock_ref: *docblock_ref,
                     },
-                    member,
                     file_ctx,
                     span.start,
                     "",
@@ -497,7 +499,6 @@ impl Backend {
                 let span = &symbol_map.spans[span_index];
                 let SymbolKind::MemberAccess {
                     subject_text,
-                    member_name,
                     is_static,
                     docblock_ref,
                     ..
@@ -512,7 +513,6 @@ impl Backend {
                             is_static: *is_static,
                             docblock_ref: *docblock_ref,
                         },
-                        member_name,
                         &file_ctx,
                         span.start,
                         content,

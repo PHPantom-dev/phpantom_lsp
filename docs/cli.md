@@ -259,6 +259,7 @@ and `--exclude-code` take. The most common ones are:
 | `partial_union_member`    | Warning  | Member only some classes of a union declare (opt-in) |
 | `unknown_function`        | Error    | Function call not resolvable                         |
 | `argument_count_mismatch` | Error    | Wrong number of arguments to a function or method    |
+| `unknown_named_argument`  | Error    | Named argument that matches no parameter of the call |
 | `missing_implementation`  | Error    | Missing required interface or abstract methods       |
 | `scalar_member_access`    | Error    | Member access on a scalar type (int, string, etc.)   |
 | `invalid_member_access`   | Error    | `private` or `protected` member reached from outside |

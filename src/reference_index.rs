@@ -920,6 +920,24 @@ impl Backend {
                     true,
                 )]
             }
+            // A named-argument label is an occurrence of the name a
+            // parameter or a promoted property is known by, so it makes its
+            // file a candidate for a search for that name.  Never an access:
+            // which parameter a label names is decided by the callee, and
+            // only the exact search can read that — which is also why it
+            // counts as a reference here rather than registering the key with
+            // a zero: a promoted property whose only other spelling is a
+            // label has to reach the exact search, not be answered as having
+            // nothing to find.
+            SymbolKind::NamedArgument { name, .. } => {
+                vec![(
+                    ReferenceIndexKey::Member {
+                        name: name.to_string(),
+                        is_static: false,
+                    },
+                    true,
+                )]
+            }
             SymbolKind::StringKey { kind, key, .. } => {
                 vec![(string_key_reference_key(*kind, key), true)]
             }
@@ -937,6 +955,29 @@ impl Backend {
             .lock()
             .iter()
             .any(|prefix| uri.starts_with(prefix.as_str()))
+    }
+
+    /// Every name a function call written `source_name` at `offset` can
+    /// invoke, in the order PHP looks them up: the one the file's imports and
+    /// namespace resolve to, then the global one, which an unqualified call
+    /// reaches whenever the namespace declares nothing of that name.
+    ///
+    /// A helper file called from namespaced code is the usual arrangement, so
+    /// a consumer that reads the callee's declaration has to try both spellings
+    /// before concluding that the call names no function.
+    pub(crate) fn function_lookup_candidates_at(
+        &self,
+        uri: &str,
+        offset: u32,
+        source_name: &str,
+    ) -> Vec<String> {
+        let resolved = self.function_fqn_at(uri, offset, source_name);
+        let mut candidates = vec![resolved.clone()];
+        let namespaces = OnceCell::new();
+        if self.names_global_fallback(uri, offset, source_name, &resolved, &namespaces) {
+            candidates.push(normalize_symbol_name(source_name));
+        }
+        candidates
     }
 
     /// Whether an unqualified function or constant name at `offset` also

@@ -3862,3 +3862,33 @@ class Child extends AV {
         deprecated
     );
 }
+
+// ─── Named-argument labels of promoted properties ───────────────────────────
+
+/// A label at a plain parameter names a parameter, and a parameter is not a
+/// member anything can deprecate for the caller.
+#[test]
+fn a_label_at_a_plain_parameter_is_not_a_deprecated_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_label_plain.php";
+    let text = r#"<?php
+class Field
+{
+    #[\Deprecated("gone")]
+    public string $old = '';
+
+    public function __construct(string $old = '') {}
+}
+
+new Field(old: 'x');
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        !deprecated.iter().any(|d| d.range.start.line == 9),
+        "the label fills the parameter, not the same-named property: {:?}",
+        deprecated
+    );
+}

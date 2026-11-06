@@ -59,6 +59,46 @@ class GtdTarget extends GtdParent
 function gtdHelper(): GtdTarget { return new GtdTarget(); }
 
 
+// ── Named Arguments ─────────────────────────────────────────────────────────
+// The label a call writes (`title:`) is the parameter's name, so it navigates,
+// highlights, and renames like the parameter it fills.  A constructor
+// parameter that promotes a property is one token serving as both, so the
+// label is a reference to the property as much as `$ticket->title` is.
+
+class NamedArgumentGtdDemo
+{
+    public function demo(): void
+    {
+        // Rename `title` from any of the three spellings below — this label,
+        // the `->title` read, and the declaration in `GtdTicket` — and all of
+        // them move together.
+        $ticket = new GtdTicket(title: 'Re: hello', author: 'Ada');
+        // Ctrl+Click on `title` → GtdTicket's promoted property, the same
+        // place Ctrl+Click on `$ticket->title` on the next line lands.
+        echo $ticket->title;                      // Ctrl+Click → GtdTicket::$title
+
+        $plain = new GtdTicket();
+        $plain->author = 'Bob';                   // Ctrl+Click → the same property
+        echo $plain->author;
+
+        echo GtdTicket::describe(limit: 2);       // Ctrl+Click on `limit` → its parameter
+    }
+}
+
+class GtdTicket
+{
+    public function __construct(
+        public string $title = '',
+        public string $author = '',
+    ) {}
+
+    public static function describe(int $limit): string
+    {
+        return (string) $limit;                   // Ctrl+Click on `$limit` → the parameter
+    }
+}
+
+
 // ── Property Hook Bodies (PHP 8.4) ──────────────────────────────────────────
 // A `get`/`set` hook body reads like any other body: Ctrl+Click reaches
 // what is written inside one, `$this` is the class that declares the hook,

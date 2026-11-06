@@ -230,10 +230,11 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| D44 | [A named argument at PHP's own functions and classes is checked against the stub, not against PHP](todo/diagnostics.md#d44-a-named-argument-at-phps-own-functions-and-classes-is-checked-against-the-stub-not-against-php) | Low-Medium  | Medium      |
 | D42 | [`from()` with a literal no enum case backs is not reported](todo/diagnostics.md#d42-from-with-a-literal-no-enum-case-backs-is-not-reported) | Low-Medium  | Low         |
 | D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
+| D45 | [A promoted parameter's own `@deprecated` does not deprecate the property](todo/diagnostics.md#d45-a-promoted-parameters-own-deprecated-does-not-deprecate-the-property) | Low         | Low         |
 | D41 | [A thrown exception nothing catches or documents is not reported](todo/diagnostics.md#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported) | Medium      | Medium      |
-| D43 | [Unknown named arguments to methods and functions are not reported](todo/diagnostics.md#d43-unknown-named-arguments-to-methods-and-functions-are-not-reported) | Low-Medium  | Medium      |
 | D19 | [`invalid_member_access` cannot tell a property read from a write](todo/diagnostics.md#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
 | D33 | [Private properties nothing reads or writes are not reported](todo/diagnostics.md#d33-private-properties-nothing-reads-or-writes-are-not-reported) | Low-Medium  | Medium      |
@@ -294,6 +295,8 @@ ships, remove every row that names it.
 | C6  | `#[ExpectedValues]` parameter value suggestions                                                                                                                             | Low         | Medium      |
 | C10 | [Deprecation markers on class-name completions from all sources](todo/completion.md#c10-deprecation-markers-on-class-name-completions-from-all-sources)                     | Low         | Medium      |
 | C12 | [The implicit `$value` of a `set` hook is not offered by variable completion](todo/completion.md#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion) | Low         | Medium      |
+| F70 | [A label at a call with no signature to bind](todo/lsp-features.md#f70-a-label-at-a-call-with-no-signature-to-bind)                                                                                                        | Low-Medium  | Medium      |
+| F71 | [Hover on a parameter at its declaration](todo/lsp-features.md#f71-hover-on-a-parameter-at-its-declaration)                                                                                          | Low         | Low         |
 | S4  | Named argument awareness in active parameter                                                                                                                                | Low         | Medium      |
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Medium      |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |

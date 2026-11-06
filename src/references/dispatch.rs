@@ -226,7 +226,69 @@ impl Backend {
                         declaration_scope.flatten().as_ref(),
                     );
                 }
-                self.find_variable_references(uri, content, name, span_start, include_declaration)
+                let mut locations = self.find_variable_references(
+                    uri,
+                    content,
+                    name,
+                    span_start,
+                    include_declaration,
+                );
+                // A parameter is named from outside its own scope as well:
+                // every call that hands it a value by name writes its name as
+                // a label, and those labels are part of what renaming the
+                // parameter reaches.  A use of the parameter — including the
+                // declaration itself — resolves back to the token the label
+                // binds, so the search starts from there.
+                let parameter_declaration = self.symbol_map_for(uri).and_then(|map| {
+                    map.enclosing_parameter_for_use(name.as_str(), span_start)
+                        .map(|def| def.token_range())
+                });
+                if let Some(declaration_token) = parameter_declaration {
+                    locations.extend(self.find_parameter_label_references(
+                        name.as_str(),
+                        uri,
+                        declaration_token,
+                    ));
+                }
+                locations
+            }
+            SymbolKind::NamedArgument { .. } => {
+                // A label stands for the parameter it binds, so asking for a
+                // label's references asks for that parameter's: its
+                // declaration, the labels that bind it elsewhere, and — when
+                // the parameter promotes a property — every access to that
+                // property.  Starting the search from the declaration is what
+                // keeps the two answers identical.
+                let Some(declaration) = self.named_argument_location(uri, content, span) else {
+                    return Vec::new();
+                };
+                // A declaration the engine cannot show (an embedded stub) has
+                // no parameter to search for, and no label of it to reach.
+                let Some(name_token) = declaration.name_token else {
+                    return Vec::new();
+                };
+                let Some(declaration_uri) = crate::util::parse_url(&declaration.uri) else {
+                    return Vec::new();
+                };
+                let Some(declaration_content) = self.reference_file_content(&declaration.uri)
+                else {
+                    return Vec::new();
+                };
+                let position = offset_to_position(&declaration_content, name_token.0 as usize);
+                let Some(declaration_span) = self.lookup_symbol_at_position(
+                    declaration_uri.as_str(),
+                    &declaration_content,
+                    position,
+                ) else {
+                    return Vec::new();
+                };
+                self.dispatch_symbol_references(
+                    &declaration_span,
+                    declaration_uri.as_str(),
+                    &declaration_content,
+                    include_declaration,
+                    mode,
+                )
             }
             SymbolKind::ClassReference { name, is_fqn, .. } => {
                 let ctx = self.file_context(uri);
@@ -261,21 +323,16 @@ impl Backend {
                     is_static: *is_static,
                     docblock_ref: *docblock_ref,
                 };
-                let member_is_static = receiver.member_is_static();
                 let (hierarchy, declaration_scope) =
                     self.resolve_member_access_scopes(uri, receiver, span_start, member_name, mode);
                 // A string passed to `allows()` on something that is not a
                 // mock names no method, so there is nothing to search for;
                 // the name-only search an unresolved receiver falls back to
-                // would match every method of that name.  Likewise an
-                // attribute's named-argument label whose parameter the
-                // constructor does not promote names no property.
+                // would match every method of that name.
                 if hierarchy.is_none()
                     && matches!(
                         docblock_ref,
-                        DocblockMemberRef::MockedMethod
-                            | DocblockMemberRef::AttributeNamedArg
-                            | DocblockMemberRef::EntityField
+                        DocblockMemberRef::MockedMethod | DocblockMemberRef::EntityField
                     )
                 {
                     return Vec::new();
@@ -312,7 +369,7 @@ impl Backend {
                 };
                 let mut locations = self.find_member_references(
                     member_name,
-                    member_is_static,
+                    *is_static,
                     target_kind,
                     include_declaration,
                     hierarchy.as_ref(),

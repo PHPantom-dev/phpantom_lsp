@@ -845,6 +845,14 @@ function runDemoAssertions(): void
     $named = $mapper->map(source: 'bar', signature: 'foo');
     assert($named instanceof Scaffolding\Pen, 'out-of-order named args bind $signature="foo" → Scaffolding\Pen');
 
+    // ── Named arguments fill the parameter they name ────────────────────
+    $byLabel = new Scaffolding\User(email: 'alice@test.com', name: 'Alice');
+    assert($byLabel->getName() === 'Alice', 'a label binds the parameter of its name, in any order');
+    assert($byLabel->getEmail() === 'alice@test.com', 'the other label binds the other parameter');
+    $ticket = new GtdTicket(title: 'Re: hello', author: 'Ada');
+    assert($ticket->title === 'Re: hello', 'a label fills the promoted property it names');
+    assert($ticket->author === 'Ada', 'the promoted property holds the value its label passed');
+
     // ── Conditional branch selecting `mixed` flows through ──────────────
     $unknown = Scaffolding\sessionValue('file');
     assert(is_string($unknown), 'Scaffolding\sessionValue("file") returns a mixed value narrowable to string');

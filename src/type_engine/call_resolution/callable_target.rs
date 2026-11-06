@@ -262,6 +262,7 @@ impl Backend {
                 reads_func_args: result_method.reads_func_args,
                 no_discard: result_method.is_no_discard,
                 owner_class: Some(owner.fqn()),
+                is_virtual_method: m.is_virtual,
                 self_bound_params,
                 ..Default::default()
             };
@@ -290,6 +291,7 @@ impl Backend {
                 reads_func_args: m.reads_func_args,
                 no_discard: m.is_no_discard,
                 owner_class: Some(owner.fqn()),
+                is_virtual_method: m.is_virtual,
                 ..Default::default()
             };
 
@@ -384,6 +386,7 @@ impl Backend {
             reads_func_args: result_method.reads_func_args,
             no_discard: result_method.is_no_discard,
             owner_class: Some(owner.fqn()),
+            is_virtual_method: m.is_virtual,
             self_bound_params,
             ..Default::default()
         })
@@ -520,11 +523,13 @@ impl Backend {
                     rctx.file.class_loader,
                 );
                 let mut result_ctor = ctor;
+                let is_virtual = result_ctor.is_virtual;
                 crate::inheritance::apply_substitution_to_method(&mut result_ctor, &subs);
                 return Some(ResolvedCallableTarget {
                     parameters: result_ctor.parameters.clone(),
                     return_type: result_ctor.return_type.clone(),
                     owner_class: Some(ci.fqn()),
+                    is_virtual_method: is_virtual,
                     self_bound_params,
                     ..Default::default()
                 });
@@ -536,6 +541,7 @@ impl Backend {
             return_type: ctor.return_type.clone(),
             reads_func_args: ctor.reads_func_args,
             owner_class: Some(ci.fqn()),
+            is_virtual_method: ctor.is_virtual,
             ..Default::default()
         })
     }
@@ -1019,6 +1025,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                 parameters: parameters.into(),
                 return_type: return_type.clone(),
                 accepts_any_args: false,
+                synthesized_parameter_names: true,
                 ..Default::default()
             })
         }

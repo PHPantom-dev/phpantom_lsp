@@ -45,6 +45,12 @@ struct ExtractionCtx<'a> {
     /// For closures the body start is the `{` offset; for arrow functions
     /// it is the `=>` token offset.  Used by signature help suppression.
     body_scopes: Vec<(u32, u32)>,
+    /// `(name token, body start)` for every named function-like this file
+    /// declares.  A function's parameters sit between the two, and a closure
+    /// written in a parameter's default value opens a scope in that stretch
+    /// too, so pairing the two is what tells one function's parameter list
+    /// from the next function's.
+    named_function_bodies: Vec<(u32, u32)>,
     /// Narrowing block boundaries `(start, end)` for if-body, elseif-body,
     /// else-body, match-arm, and switch-case blocks.  Used by the
     /// diagnostic subject cache to determine whether two variable accesses
@@ -517,6 +523,7 @@ fn extract_symbol_map_inner(
         scopes: Vec::new(),
         arrow_fn_scopes: Vec::new(),
         body_scopes: Vec::new(),
+        named_function_bodies: Vec::new(),
         narrowing_blocks: Vec::new(),
         assert_narrowing_offsets: Vec::new(),
         template_defs: Vec::new(),
@@ -686,6 +693,8 @@ fn extract_symbol_map_inner(
 
     ctx.assert_narrowing_offsets.sort();
     ctx.arrow_fn_scopes.sort_unstable();
+    ctx.named_function_bodies
+        .sort_unstable_by_key(|pair| pair.0);
 
     // Sort template_defs by name_offset for binary search / reverse scan.
     ctx.template_defs.sort_by_key(|d| d.name_offset);
@@ -707,26 +716,17 @@ fn extract_symbol_map_inner(
     ctx.drupal_hooks.dedup_by_key(|s| s.start);
     ctx.routes.shrink_to_fit();
 
-    let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
-        crate::atom::AtomMap::default();
-    for (idx, span) in ctx.spans.iter().enumerate() {
-        if let SymbolKind::MemberAccess { member_name, .. } = &span.kind {
-            member_access_indices
-                .entry(*member_name)
-                .or_default()
-                .push(idx);
-        }
-    }
-
-    SymbolMap {
+    let mut map = SymbolMap {
         spans: ctx.spans,
         conditional_string_key_spans: ctx.conditional_string_key_spans,
-        member_access_indices,
+        member_access_indices: crate::atom::AtomMap::default(),
+        named_argument_indices: crate::atom::AtomMap::default(),
         var_defs: ctx.var_defs,
         var_defs_by_name,
         scopes: NestedRanges::new(ctx.scopes),
         arrow_fn_scopes: ctx.arrow_fn_scopes,
         body_scopes: ctx.body_scopes,
+        named_function_bodies: ctx.named_function_bodies,
         narrowing_blocks: NestedRanges::new(ctx.narrowing_blocks),
         assert_narrowing_offsets: ctx.assert_narrowing_offsets,
         template_defs: ctx.template_defs,
@@ -761,5 +761,7 @@ fn extract_symbol_map_inner(
             .collect(),
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
         source_hash: None,
-    }
+    };
+    map.rebuild_span_indices();
+    map
 }

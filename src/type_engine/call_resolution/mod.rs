@@ -79,6 +79,7 @@ mod constant_operands;
 mod doctrine_repository;
 mod facade_owner;
 mod if_this_is;
+mod named_arguments;
 mod out_param;
 mod reflection;
 mod return_types;
@@ -86,6 +87,7 @@ mod target_cache;
 mod template_binding;
 mod template_subs;
 
+pub(crate) use named_arguments::NamedArgumentDeclaration;
 pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_for_call};
 
 pub(crate) use arg_text_types::array_literal_shape_type_with;

@@ -203,6 +203,21 @@ impl CallSites {
         }
     }
 
+    /// The site whose argument list opens at `args_start`.
+    ///
+    /// A [`SymbolKind::NamedArgument`](crate::symbol_map::SymbolKind)
+    /// remembers that offset rather than a copy of the callee, so a label
+    /// reads its own call back from here.  Only valid once
+    /// [`Self::finish`] has sorted the sites, which is when the map becomes
+    /// readable.
+    pub(crate) fn site_at(&self, args_start: u32) -> Option<CallSite<'_>> {
+        let index = self
+            .sites
+            .binary_search_by_key(&args_start, |site| site.args_start)
+            .ok()?;
+        Some(self.view(&self.sites[index]))
+    }
+
     fn view(&self, site: &CallSiteRecord) -> CallSite<'_> {
         let text_start = site.text_start as usize;
         let names_start = text_start + site.expression_len as usize;

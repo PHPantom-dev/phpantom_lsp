@@ -1354,6 +1354,13 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 sym.add(v.capacity() * size_of::<usize>());
                 member_idx.add(v.capacity() * size_of::<usize>());
             }
+            sym += map_buckets::<Atom, Vec<usize>>(sm.named_argument_indices.capacity());
+            member_idx += map_buckets::<Atom, Vec<usize>>(sm.named_argument_indices.capacity());
+            for v in sm.named_argument_indices.values() {
+                sym.add(v.capacity() * size_of::<usize>());
+                member_idx.add(v.capacity() * size_of::<usize>());
+            }
+            sym.add(sm.named_function_bodies.capacity() * size_of::<(u32, u32)>());
             sym.add(sm.var_defs.capacity() * size_of::<crate::symbol_map::VarDefSite>());
             for v in &sm.var_defs {
                 sym.add(v.name.capacity());
@@ -1453,7 +1460,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         }
     }
     eprintln!(
-        "── symbol_maps: {} files, {:.1} MB total | {} spans: structs {:.1} MB + strings {:.1} MB ({} allocs) | member_access_indices {:.1} MB | other vecs {:.1} MB",
+        "── symbol_maps: {} files, {:.1} MB total | {} spans: structs {:.1} MB + strings {:.1} MB ({} allocs) | span indices {:.1} MB | other vecs {:.1} MB",
         n_syms,
         mb(sym.bytes),
         n_spans,
