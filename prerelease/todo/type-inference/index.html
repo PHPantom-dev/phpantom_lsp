@@ -1337,10 +1337,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed" class="md-nav__link">
+  <a href="#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        T67. A DQL expression whose type depends on the driver is <code>mixed</code>
+        T68. A DQL field is typed by its property, not its column's type
       </span>
     </span>
   </a>
@@ -1348,10 +1348,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type" class="md-nav__link">
+  <a href="#t69-identity-in-a-dql-select-is-mixed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        T68. A DQL field is typed by its property, not its column's type
+        T69. <code>IDENTITY()</code> in a DQL <code>SELECT</code> is <code>mixed</code>
       </span>
     </span>
   </a>
@@ -1686,10 +1686,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed" class="md-nav__link">
+  <a href="#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        T67. A DQL expression whose type depends on the driver is <code>mixed</code>
+        T68. A DQL field is typed by its property, not its column's type
       </span>
     </span>
   </a>
@@ -1697,10 +1697,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type" class="md-nav__link">
+  <a href="#t69-identity-in-a-dql-select-is-mixed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        T68. A DQL field is typed by its property, not its column's type
+        T69. <code>IDENTITY()</code> in a DQL <code>SELECT</code> is <code>mixed</code>
       </span>
     </span>
   </a>
@@ -2306,62 +2306,60 @@ a query takes it.</p>
 <p><strong>Where to look:</strong> PHPStan's Doctrine extension
 (<code>Type/Doctrine/QueryBuilder/Expr/</code>).</p>
 <hr />
-<h2 id="t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed">T67. A DQL expression whose type depends on the driver is <code>mixed</code><a class="headerlink" href="#t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$em-&gt;createQuery('SELECT SUM(u.score) AS total, u.score * 2 AS doubled FROM App\Entity\User u')</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    -&gt;getResult(); // list&lt;array{total: mixed, doubled: mixed}&gt;</span>
-</code></pre></div>
-<p>A <code>SELECT</code> expression is typed where every database driver gives the same
-value: <code>COUNT()</code> and <code>LENGTH()</code>, which Doctrine converts to <code>int</code>, and the
-string functions, string literals, and the <code>CASE</code>, <code>COALESCE()</code>, and
-<code>NULLIF()</code> of those. The rest (<code>SUM()</code>, <code>AVG()</code>, <code>MIN()</code>, <code>MAX()</code>, <code>ABS()</code>,
-<code>MOD()</code>, <code>IDENTITY()</code>, arithmetic, a number or boolean literal) is fetched
-as the driver gives it, which differs between MySQL, PostgreSQL, and
-SQLite, and with the PHP version and the PDO options. PHPStan's Doctrine
-extension types each of these by the connection's driver, and gives
-<code>mixed</code> when it does not know the driver. Reading the driver is the work
-T56 needs too: the <code>driver</code> or <code>url</code> of <code>DriverManager::getConnection()</code>,
-or the <code>dbal</code> section of a Symfony project's <code>doctrine.yaml</code>.</p>
-<p><strong>Where to look:</strong> <code>Scope::value_of</code> in <code>src/doctrine/query.rs</code>, and
-PHPStan's Doctrine extension (<code>Type/Doctrine/Query/QueryResultTypeWalker.php</code>:
-<code>walkFunction()</code>, <code>walkAggregateExpression()</code>, <code>walkLiteral()</code>, and the
-stringify rules of <code>walkSelectExpression()</code>).</p>
-<hr />
 <h2 id="t68-a-dql-field-is-typed-by-its-property-not-its-columns-type">T68. A DQL field is typed by its property, not its column's type<a class="headerlink" href="#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">#[ORM\Column(type: 'bigint')]</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">public int $views;</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">$em-&gt;createQuery('SELECT u.views FROM App\Entity\User u')</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">    -&gt;getResult(); // list&lt;array{views: int}&gt;, though DBAL 4 gives int|string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">#[ORM\Column(type: 'bigint')]</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">public int $views;</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">$em-&gt;createQuery('SELECT u.views FROM App\Entity\User u')</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">    -&gt;getResult(); // list&lt;array{views: int}&gt;, though DBAL 4 gives int|string</span>
 </code></pre></div>
 <p>A selected field is typed by the type its entity declares for the
 property, but a scalar result is converted by the column's Doctrine type,
 which can differ: <code>bigint</code> is <code>int|string</code> on DBAL 4, and <code>decimal</code> is a
-<code>numeric-string</code> whatever the property says. Inside a DQL expression only a
-<code>string</code> property is read as a string, for the same reason. PHPStan's
-Doctrine extension maps each Doctrine type to the PHP type it converts to.</p>
+<code>numeric-string</code> whatever the property says. Inside a DQL expression, where
+the database's own value counts, a field is read by its property too: a
+<code>string</code>, <code>int</code>, or <code>bool</code> property is taken for a column of that type, and
+any other (a <code>float</code> one, which may map a <code>float</code> or a <code>decimal</code> column) is
+<code>mixed</code>, so <code>SUM()</code> of it is too. PHPStan's Doctrine extension maps each
+Doctrine type to the PHP type it converts to, and to the value each driver
+fetches for it.</p>
 <p><strong>Where to look:</strong> <code>ResolverModel::field</code> in <code>src/doctrine/query.rs</code>, the
 column type the mapping attributes and files record, and PHPStan's
 Doctrine extension (<code>Type/Doctrine/Descriptors/</code>).</p>
 <hr />
-<h2 id="t56-a-dbal-results-row-count-ignores-the-connections-driver">T56. A DBAL result's row count ignores the connection's driver<a class="headerlink" href="#t56-a-dbal-results-row-count-ignores-the-connections-driver" title="Permanent link">&para;</a></h2>
+<h2 id="t69-identity-in-a-dql-select-is-mixed">T69. <code>IDENTITY()</code> in a DQL <code>SELECT</code> is <code>mixed</code><a class="headerlink" href="#t69-identity-in-a-dql-select-is-mixed" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$em-&gt;createQuery('SELECT IDENTITY(p.author) AS author FROM App\Entity\Post p')</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    -&gt;getResult(); // list&lt;array{author: mixed}&gt;</span>
+</code></pre></div>
+<p><code>IDENTITY()</code> gives the foreign key a to-one association holds: the
+identifier column of the entity it targets, <code>null</code> when the join column is
+nullable (as it is unless <code>#[JoinColumn(nullable: false)]</code> says otherwise).
+Typing it needs the target's identifier field and the join column's
+nullability, which the parsed mapping does not record. PHPStan's Doctrine
+extension types it like any other column of the target, by the connection's
+driver.</p>
+<p><strong>Where to look:</strong> <code>Scope::call</code> in <code>src/doctrine/query.rs</code>, the identifier
+and join-column attributes the parser reads into <code>DoctrineMapping</code>, and
+PHPStan's Doctrine extension (<code>QueryResultTypeWalker::walkFunction()</code>).</p>
+<hr />
+<h2 id="t56-a-dbal-results-row-count-ignores-the-connections-driver">T56. A DBAL result's row count ignores the connection's driver<a class="headerlink" href="#t56-a-dbal-results-row-count-ignores-the-connections-driver" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">$rows = $result-&gt;rowCount(); // int|numeric-string, though only mysqli returns a string</span>
 </code></pre></div>
 <p>DBAL 4 declares <code>Result::rowCount()</code> as <code>int|numeric-string</code>, because the
 <code>mysqli</code> driver can return a row count too large for an <code>int</code> as a string.
 Every other driver returns an <code>int</code>, and PHPStan's Doctrine extension
 narrows the return type by the driver the project's connection uses. The
-driver is in the connection's configuration: the <code>driver</code> or <code>url</code> of
-<code>DriverManager::getConnection()</code>, or the <code>dbal</code> section of a Symfony
-project's <code>doctrine.yaml</code>.</p>
+driver is read already, for typing DQL expressions:
+<code>doctrine::connection::project_connection()</code> gives the one the project's
+<code>DriverManager::getConnection()</code> calls and Symfony configuration agree on.</p>
 <p>The fixtures are <code>tests/phpstan_doctrine/data/DBAL/pdo/</code> and
 <code>tests/phpstan_doctrine/data/DBAL/mysqli/</code>, each a project whose
 <code>entity-manager.php</code> builds the connection.</p>
-<p><strong>Where to look:</strong> PHPStan's Doctrine extension
-(<code>Type/Doctrine/DBAL/*RowCountReturnTypeExtension</code>,
-<code>Doctrine/Driver/DriverDetector</code>).</p>
+<p><strong>Where to look:</strong> <code>src/doctrine/connection.rs</code>, and PHPStan's Doctrine
+extension (<code>Type/Doctrine/DBAL/*RowCountReturnTypeExtension</code>).</p>
 <hr />
 <h2 id="t58-newt-is-not-supported">T58. <code>new&lt;T&gt;</code> is not supported<a class="headerlink" href="#t58-newt-is-not-supported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
