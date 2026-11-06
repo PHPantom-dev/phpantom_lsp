@@ -1,7 +1,7 @@
 # PHPantom — Drupal
 
 Known gaps and missing features in PHPantom's Drupal support. The web
-root is detected, with or without a `composer.json`, core and every
+root is detected with or without a `composer.json`. Core and every
 module, theme, and profile, with the Drupal file extensions (`.module`,
 `.install`, `.theme`, …), are indexed past `.gitignore`, and
 the services the `*.services.yml` files declare, the entity types
