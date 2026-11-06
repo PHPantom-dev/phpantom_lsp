@@ -1155,17 +1155,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#d46-the-result-of-a-void-call-is-used" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D46. The result of a <code>void</code> call is used
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1851,17 +1840,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#d46-the-result-of-a-void-call-is-used" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D46. The result of a <code>void</code> call is used
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2431,27 +2409,6 @@ reports it as "Method '__toString' is not implemented".</p>
 forward walker's diagnostic pass (<code>src/type_engine/variable/forward_walk/</code>),
 and how <code>src/diagnostics/unknown_members/</code> grades its severity for final
 and non-final classes.</p>
-<hr />
-<h2 id="d46-the-result-of-a-void-call-is-used">D46. The result of a <code>void</code> call is used<a class="headerlink" href="#d46-the-result-of-a-void-call-is-used" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">$sent = $mailer-&gt;send($message);   // send(): void, so $sent is always null</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">if ($logger-&gt;flush()) { … }        // never true</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">return $this-&gt;log($event);         // in a non-void function: returns null</span>
-</code></pre></div>
-<p>A function or method declared <code>void</code> (or <code>never</code>) returns nothing, so using
-its result is a mistake: the caller expected a value it will never get, or
-meant to write <code>null</code>. Report it wherever the call's value is consumed: an
-assignment, an argument, an operand, a condition, <code>echo</code>, or a <code>return</code>
-with a value. A call that is its own expression statement is fine. Judge
-by the native return type, since a <code>@return void</code> over an untyped
-signature does not stop the body returning something. Warning severity. The <code>return $this-&gt;log();</code>
-early-exit shorthand is caught too, and reads better as two statements.
-PhpStorm reports this as "'void' method result used", and PHPStan as
-<code>method.void</code> / <code>function.void</code>.</p>
-<p><strong>Where to look:</strong> the forward walker already resolves each call's return
-type, and <code>src/diagnostics/discarded_results.rs</code> already decides when a
-call's value is consumed (it reports the opposite case, a <code>#[\NoDiscard]</code>
-result that is not).</p>
 
 
 
