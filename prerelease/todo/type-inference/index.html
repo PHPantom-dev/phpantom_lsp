@@ -1282,17 +1282,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T45. Doctrine <code>getRepository(Entity::class)</code> is typed as the generic repository
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t52-symfony-return-types-an-argument-decides" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1602,17 +1591,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T43. <code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T45. Doctrine <code>getRepository(Entity::class)</code> is typed as the generic repository
       </span>
     </span>
   </a>
@@ -2145,31 +2123,6 @@ the <em>declaring</em> class's own <code>type_aliases</code> and resolve it thro
 substituting it into the parent's template. Mago's <code>issue_870.php</code> can be
 ported once this lands.</p>
 <hr />
-<h2 id="t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository">T45. Doctrine <code>getRepository(Entity::class)</code> is typed as the generic repository<a class="headerlink" href="#t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$repo = $entityManager-&gt;getRepository(User::class);</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$repo-&gt;findActive(); // PHPantom: EntityRepository&lt;User&gt;, so findActive() is unknown</span>
-</code></pre></div>
-<p>Doctrine's stubs type <code>getRepository()</code> as <code>EntityRepository&lt;T&gt;</code> (or
-<code>ObjectRepository&lt;T&gt;</code>), but the object it returns is the entity's own
-repository: the class named by <code>#[ORM\Entity(repositoryClass: ...)]</code> or by
-the <code>repositoryClass</code>/<code>repository-class</code> key of a YAML/XML mapping.
-PHPStan's Doctrine extension answers this with a dynamic return type
-extension. Completion, hover, diagnostics, and Find References on the
-repository's own methods all miss it today.</p>
-<p>The return type belongs in the type engine, as a return-type hook for
-<code>getRepository()</code> with a class-string argument, so every consumer sees
-the concrete repository. The Doctrine mapping index built from YAML/XML
-resources already knows those pairs; the attribute form needs the
-<code>ClassInfo</code> support F24 describes.</p>
-<p><strong>Where to look:</strong> <code>src/framework.rs</code>
-(<code>framework_doctrine_repository_fqns_for_entity</code>) for the YAML/XML
-mapping pairs, and method-call return resolution under
-<code>src/type_engine/variable/rhs_resolution/</code> for where the hook goes. The
-extension's fixture, <code>tests/phpstan_doctrine/data/namedManagerRepository.php</code>,
-has an entity whose repository depends on the entity manager; its
-<code>named-manager-registry.php</code> is the registry that says which.</p>
-<hr />
 <h2 id="t52-symfony-return-types-an-argument-decides">T52. Symfony return types an argument decides<a class="headerlink" href="#t52-symfony-return-types-an-argument-decides" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>PHPStan's Symfony extension narrows a list of framework methods by their
@@ -2208,9 +2161,9 @@ Symfony extension (<code>src/Type/Symfony/</code>, <code>stubs/</code>).</p>
 <hr />
 <h2 id="t53-doctrine-collections-narrowed-by-isempty">T53. Doctrine collections narrowed by <code>isEmpty()</code><a class="headerlink" href="#t53-doctrine-collections-narrowed-by-isempty" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">if (!$order-&gt;lines-&gt;isEmpty()) {</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    $first = $order-&gt;lines-&gt;first(); // OrderLine|false, should be OrderLine</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">if (!$order-&gt;lines-&gt;isEmpty()) {</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    $first = $order-&gt;lines-&gt;first(); // OrderLine|false, should be OrderLine</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>Collection::first()</code> and <code>last()</code> return <code>T|false</code>; once <code>isEmpty()</code> has
 been ruled out they cannot return <code>false</code>. This is a narrowing of the
@@ -2225,9 +2178,9 @@ Doctrine extension (<code>Type/Doctrine/Collection/IsEmptyTypeSpecifyingExtensio
 <hr />
 <h2 id="t54-messenger-handlers-a-service-tag-registers">T54. Messenger handlers a service tag registers<a class="headerlink" href="#t54-messenger-handlers-a-service-tag-registers" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">services</span><span class="p">:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span><span class="nt">App\Handler\GetOrderHandler</span><span class="p">:</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">        </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">messenger.message_handler</span><span class="p p-Indicator">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">services</span><span class="p">:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span><span class="nt">App\Handler\GetOrderHandler</span><span class="p">:</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">        </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">messenger.message_handler</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <p>A query bus's <code>HandleTrait::handle()</code> returns what the message's one
 handler returns, but only a handler <code>#[AsMessageHandler]</code> registers is
@@ -2253,10 +2206,10 @@ tagged in <code>tests/phpstan_symfony/config/services.xml</code>.</p>
 <hr />
 <h2 id="t55-symfony-array-parameters-are-typed-as-plain-array">T55. Symfony array parameters are typed as plain <code>array</code><a class="headerlink" href="#t55-symfony-array-parameters-are-typed-as-plain-array" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">parameters</span><span class="p">:</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">    </span><span class="nt">app.locales</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">en</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">da</span><span class="p p-Indicator">]</span><span class="w">        </span><span class="c1"># array, PHPStan says array&lt;int, string&gt;</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">app.mailer</span><span class="p">:</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">        </span><span class="nt">dsn</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">smtp://localhost</span><span class="w">    </span><span class="c1"># array, PHPStan says array{dsn: string}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span><span class="nt">app.locales</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">en</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">da</span><span class="p p-Indicator">]</span><span class="w">        </span><span class="c1"># array, PHPStan says array&lt;int, string&gt;</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">app.mailer</span><span class="p">:</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">        </span><span class="nt">dsn</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">smtp://localhost</span><span class="w">    </span><span class="c1"># array, PHPStan says array{dsn: string}</span>
 </code></pre></div>
 <p><code>getParameter()</code> is typed by the parameter's declared value, but an
 array value is typed as <code>array</code> whatever it holds. PHPStan's Symfony
@@ -2274,7 +2227,7 @@ extension's fixtures declare theirs that way, in
 <hr />
 <h2 id="t56-a-dbal-results-row-count-ignores-the-connections-driver">T56. A DBAL result's row count ignores the connection's driver<a class="headerlink" href="#t56-a-dbal-results-row-count-ignores-the-connections-driver" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$rows = $result-&gt;rowCount(); // int|numeric-string, though only mysqli returns a string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">$rows = $result-&gt;rowCount(); // int|numeric-string, though only mysqli returns a string</span>
 </code></pre></div>
 <p>DBAL 4 declares <code>Result::rowCount()</code> as <code>int|numeric-string</code>, because the
 <code>mysqli</code> driver can return a row count too large for an <code>int</code> as a string.
@@ -2292,14 +2245,14 @@ project's <code>doctrine.yaml</code>.</p>
 <hr />
 <h2 id="t58-newt-is-not-supported">T58. <code>new&lt;T&gt;</code> is not supported<a class="headerlink" href="#t58-newt-is-not-supported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/**</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x"> * @template T of string</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x"> * @param T $class_name</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x"> * @return ($class_name is 'WP_Posts_List_Table'|'WP_Users_List_Table'|… ? new&lt;T&gt; : false)</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x"> */</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">function _get_list_table($class_name, $args = []) { … }</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="x">_get_list_table('WP_Posts_List_Table');   // want WP_Posts_List_Table, get new&lt;&lt;T&gt;&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">/**</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x"> * @template T of string</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x"> * @param T $class_name</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x"> * @return ($class_name is 'WP_Posts_List_Table'|'WP_Users_List_Table'|… ? new&lt;T&gt; : false)</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x"> */</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">function _get_list_table($class_name, $args = []) { … }</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="x">_get_list_table('WP_Posts_List_Table');   // want WP_Posts_List_Table, get new&lt;&lt;T&gt;&gt;</span>
 </code></pre></div>
 <p><code>new&lt;T&gt;</code> is PHPStan's type for an instance of the class a string names,
 used where a function instantiates the class it is given by name. We
@@ -2311,22 +2264,22 @@ are marked with this.</p>
 <hr />
 <h2 id="t59-tk-on-a-class-template-is-not-resolved">T59. <code>T[K]</code> on a class template is not resolved<a class="headerlink" href="#t59-tk-on-a-class-template-is-not-resolved" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">/**</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x"> * @template T of array = array&lt;string, mixed&gt;</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x"> * @implements ArrayAccess&lt;key-of&lt;T&gt;, value-of&lt;T&gt;&gt;</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x"> */</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">class WP_REST_Request implements ArrayAccess {</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">    /**</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">     * @template TOffset of key-of&lt;T&gt;</span>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">     * @param TOffset $key</span>
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="x">     * @return T[TOffset]|null</span>
-<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="x">     */</span>
-<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="x">    public function get_param($key) { … }</span>
-<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="x">}</span>
-<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>
-<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="x">/** @var WP_REST_Request&lt;array{id: int, name: string}&gt; $request */</span>
-<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="x">$request-&gt;get_param('id');   // want int|null, get array{id: int, name: string}['id']|null</span>
-<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="x">$request['id'];              // want int|null, get array{id: int, name: string}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/**</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x"> * @template T of array = array&lt;string, mixed&gt;</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x"> * @implements ArrayAccess&lt;key-of&lt;T&gt;, value-of&lt;T&gt;&gt;</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x"> */</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">class WP_REST_Request implements ArrayAccess {</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">    /**</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">     * @template TOffset of key-of&lt;T&gt;</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="x">     * @param TOffset $key</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="x">     * @return T[TOffset]|null</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="x">     */</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="x">    public function get_param($key) { … }</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="x">}</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="x">/** @var WP_REST_Request&lt;array{id: int, name: string}&gt; $request */</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="x">$request-&gt;get_param('id');   // want int|null, get array{id: int, name: string}['id']|null</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="x">$request['id'];              // want int|null, get array{id: int, name: string}</span>
 </code></pre></div>
 <p>An offset access type over a class template stays as written once the
 template is bound, and array access on the object (through
@@ -2338,14 +2291,14 @@ API endpoint that types its request this way gets every parameter wrong.
 <hr />
 <h2 id="t60-a-float-literal-is-typed-float-not-its-value">T60. A float literal is typed <code>float</code>, not its value<a class="headerlink" href="#t60-a-float-literal-is-typed-float-not-its-value" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/**</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x"> * @template T</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x"> * @param T $data</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x"> * @return (T is array|object|string ? string : T)</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x"> */</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">function maybe_serialize($data) { … }</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">maybe_serialize(0.0);   // want 0.0, get float</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">/**</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x"> * @template T</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x"> * @param T $data</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x"> * @return (T is array|object|string ? string : T)</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x"> */</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">function maybe_serialize($data) { … }</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">maybe_serialize(0.0);   // want 0.0, get float</span>
 </code></pre></div>
 <p>Integer, string and boolean literals keep their value as their type;
 float literals become <code>float</code>. A template bound to one, or a condition
@@ -2353,15 +2306,15 @@ over one, loses the value. 2 assertions of the WordPress stubs fixtures.</p>
 <hr />
 <h2 id="t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members">T62. A sealed hierarchy is not narrowed by ruling out its other members<a class="headerlink" href="#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/** @psalm-inheritors LeafNode|TreeNode */</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">interface NodeInterface {}</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">function at_index(NodeInterface $node): mixed {</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">    if ($node instanceof LeafNode) {</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">        return null;</span>
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="x">    }</span>
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">    $node-&gt;getChildren();   // Method 'getChildren' not found on class 'NodeInterface'</span>
-<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/** @psalm-inheritors LeafNode|TreeNode */</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">interface NodeInterface {}</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">function at_index(NodeInterface $node): mixed {</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">    if ($node instanceof LeafNode) {</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">        return null;</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">    }</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">    $node-&gt;getChildren();   // Method 'getChildren' not found on class 'NodeInterface'</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>@psalm-inheritors</code> and <code>@phpstan-sealed</code> list every class that may extend
 or implement the type. Once a guard rules out all but one, the subject is

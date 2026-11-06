@@ -2087,13 +2087,12 @@ name a repository, and the repository's own
 <code>@extends ServiceEntityRepository&lt;Account&gt;</code> (or the class it passes to
 <code>parent::__construct()</code>) names its entity. A pair that breaks the naming
 convention gets no lens.</p>
-<p>The attribute needs reading at parse time, with its class name resolved
-the way the parser resolves <code>extends</code>, into <code>ClassInfo</code> (a field every
-class pays for, or a slot in an optional per-class box). The
-entity-to-repository direction can then read the entity's <code>ClassInfo</code>,
-and the repository-to-entity direction the first generic argument of
-its <code>ServiceEntityRepository</code>/<code>EntityRepository</code> ancestor in
-<code>extends_generics</code>. T45 needs the same attribute.</p>
+<p>The parser already records the attribute's repository, fully qualified,
+in <code>ClassInfo::doctrine_repository</code>, which is what types
+<code>getRepository()</code>. The entity-to-repository direction can read it, and
+the repository-to-entity direction the first generic argument of its
+<code>ServiceEntityRepository</code>/<code>EntityRepository</code> ancestor in
+<code>extends_generics</code>.</p>
 <p><strong>Where to look:</strong> <code>src/framework.rs</code>
 (<code>doctrine_repository_fqns_for_entity</code>,
 <code>doctrine_entity_fqns_for_repository</code>), <code>src/parser/classes/class_likes.rs</code>
@@ -2479,8 +2478,8 @@ PHPStan's Symfony extension (<code>Rules/Symfony/Undefined*Rule</code>,
 <code>findOneBy()</code>, <code>count()</code>, and <code>findBy()</code>'s <code>$orderBy</code> take field names as
 array keys. None of the magic methods resolve, and the keys neither
 complete, navigate, nor get checked. The magic methods are virtual members
-of the repository, the way Eloquent's are, which needs the repository's
-entity (T45). The keys are member references to the entity's mapped
+of the repository, the way Eloquent's are, keyed on the entity
+<code>getRepository()</code> binds or the repository's own <code>@extends</code>. The keys are member references to the entity's mapped
 properties, the same member spans a form field and a validation mapping
 record.</p>
 <p>The fields come from the entity's mapping: <code>#[ORM\Column]</code>,
@@ -2505,7 +2504,7 @@ and <code>getResult()</code> is <code>mixed</code> where the query settles it (<
 an array shape for a scalar select). PHPStan's Doctrine extension parses the
 DQL with Doctrine's own parser and the booted metadata; PHPantom would need
 a DQL reader of its own over the static mapping, with the query builder's
-chain followed the way T45's repository is.</p>
+chain followed the way <code>getRepository()</code>'s repository is.</p>
 <p>Navigation and completion of the entity and field names are the cheaper
 half and the one an editor user notices; result types follow. The extension
 also types a query as <code>Query&lt;TKey, TResult&gt;</code>, so <code>getResult()</code> and its
