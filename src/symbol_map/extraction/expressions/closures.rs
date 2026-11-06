@@ -10,6 +10,7 @@ pub(super) fn extract_closure_expr<'a>(closure: &'a Closure<'a>, ctx: &mut Extra
     ctx.scopes.push((closure_scope_start, closure_scope_end));
     ctx.body_scopes
         .push((closure_scope_start, closure_scope_end));
+    note_dql_body(closure_scope_start, closure.body.statements.as_slice(), ctx);
 
     for param in closure.parameter_list.parameters.iter() {
         extract_from_parameter(param, ctx, closure_scope_start);

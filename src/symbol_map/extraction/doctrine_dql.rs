@@ -21,6 +21,9 @@
 //! text names in DQL's own path notation, `\App\Entity\User.team`, for the
 //! type engine to look up in the mapping.
 //!
+//! A variable a builder uses is reported when nothing declares it, or when
+//! some path through the function body to its query never does.
+//!
 //! Each query, and each fragment whose place in the query is known, is also
 //! checked against DQL's grammar.  Where one stops following it is recorded
 //! with the call it was read from, for the diagnostic pass to report once
@@ -87,6 +90,8 @@ struct PendingDecl {
     table: DqlTable,
     alias: String,
     root: Root,
+    /// Where the method name of the call that declares it starts.
+    at: u32,
 }
 
 #[derive(Debug)]
@@ -122,7 +127,7 @@ enum Builder {
 
 /// The variables and fields read so far, settled once the whole file is.
 #[derive(Debug, Default)]
-pub(super) struct DqlPending {
+pub(super) struct DqlPending<'a> {
     decls: Vec<PendingDecl>,
     fields: Vec<PendingField>,
     uses: Vec<PendingUse>,
@@ -139,6 +144,21 @@ pub(super) struct DqlPending {
     /// creates, and whether the builder is a new one rather than the one the
     /// variable already holds (`$qb = $qb->andWhere(…)`).
     created: Vec<(u32, bool)>,
+    /// The statements of each function body, by where its table starts,
+    /// for following its query builders' calls along each path.
+    bodies: Vec<(u32, &'a [Statement<'a>])>,
+}
+
+/// Record the statements of the function body whose DQL table starts at
+/// `scope_start`.
+pub(super) fn note_dql_body<'a>(
+    scope_start: u32,
+    statements: &'a [Statement<'a>],
+    ctx: &mut ExtractionCtx<'a>,
+) {
+    if ctx.doctrine {
+        ctx.dql.bodies.push((scope_start, statements));
+    }
 }
 
 /// Where the builder `expr` is comes from: the `createQueryBuilder()` call
@@ -697,6 +717,7 @@ pub(super) fn record_dql_call(
                     table,
                     alias: alias.to_string(),
                     root: php_root(object),
+                    at: method_start,
                 });
             }
             Arg::Alias | Arg::Skip => {}
@@ -774,6 +795,7 @@ fn read_source(source: &DqlSource, table: DqlTable, call: DqlCall, ctx: &mut Ext
             table,
             alias: source.text[decl.alias].to_string(),
             root,
+            at: call.method_start,
         });
     }
     for reference in scan.refs {
@@ -964,8 +986,9 @@ pub(super) fn finish_dql(ctx: &mut ExtractionCtx<'_>) {
     ctx.dql_aliases = sites;
 }
 
-/// Record each variable a path starts from that nothing declares, at its
-/// first use in the query or function body, where
+/// Record each variable a path starts from that nothing declares, or that
+/// some path through its function body never declares, at its first use
+/// left undeclared in the query or function body, where
 /// everything that could declare it is in sight: a whole query that spells
 /// all its declarations out, or a function body whose query builders it
 /// creates itself and keeps to itself.  A builder from anywhere else may
@@ -996,16 +1019,390 @@ fn report_undeclared(pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
             continue;
         }
         reported.push((site.table, &site.alias));
-        ctx.dql_syntax_errors
-            .push(crate::symbol_map::DqlSyntaxSite {
-                start: site.start,
-                end: site.end,
-                message: format!("Undefined DQL variable '{}'", site.alias).into_boxed_str(),
-                code: crate::diagnostics::dql_syntax::UNKNOWN_DQL_VARIABLE_CODE,
-                call: site.call.method_start,
-                receiver: site.call.receiver,
-            });
+        push_undeclared(site, ctx);
     }
+
+    // A variable declared somewhere in a function body may still be
+    // undeclared on some path through it to its query.
+    for &(scope_start, statements) in &pending.bodies {
+        let table = DqlTable::Scope(scope_start);
+        let closed = match tables.iter().find(|(t, _)| *t == table) {
+            Some(&(_, closed)) => closed,
+            None => is_closed(table, pending, ctx),
+        };
+        if !closed {
+            continue;
+        }
+        let sites: Vec<&PendingUse> = pending
+            .uses
+            .iter()
+            .filter(|site| {
+                site.table == table
+                    && !reported.contains(&(table, site.alias.as_str()))
+                    && pending
+                        .decls
+                        .iter()
+                        .any(|d| d.table == table && d.alias == site.alias)
+            })
+            .collect();
+        if sites.is_empty() {
+            continue;
+        }
+        let mut events: Vec<(u32, Event<'_>)> = sites
+            .iter()
+            .enumerate()
+            .map(|(index, site)| (site.start, Event::Use(index)))
+            .chain(
+                pending
+                    .decls
+                    .iter()
+                    .filter(|d| d.table == table)
+                    .map(|d| (d.at, Event::Declare(d.alias.as_str()))),
+            )
+            .collect();
+        events.sort_by_key(|(at, _)| *at);
+        let paths = Paths {
+            events: &events,
+            sites: &sites,
+        };
+        let flow = paths.statements(statements, vec![NOTHING_YET; sites.len()]);
+        let mut exits = flow.next;
+        merge(&mut exits, &flow.exits);
+        let mut bad: Vec<&PendingUse> = sites
+            .iter()
+            .zip(&exits)
+            .filter(|(_, state)| *state & UNDECLARED != 0)
+            .map(|(site, _)| *site)
+            .collect();
+        bad.sort_by_key(|site| site.start);
+        for site in bad {
+            if reported.contains(&(table, site.alias.as_str())) {
+                continue;
+            }
+            reported.push((table, &site.alias));
+            push_undeclared(site, ctx);
+        }
+    }
+}
+
+fn push_undeclared(site: &PendingUse, ctx: &mut ExtractionCtx<'_>) {
+    ctx.dql_syntax_errors
+        .push(crate::symbol_map::DqlSyntaxSite {
+            start: site.start,
+            end: site.end,
+            message: format!("Undefined DQL variable '{}'", site.alias).into_boxed_str(),
+            code: crate::diagnostics::dql_syntax::UNKNOWN_DQL_VARIABLE_CODE,
+            call: site.call.method_start,
+            receiver: site.call.receiver,
+        });
+}
+
+/// A query builder call along a path: one declaring a variable, or one
+/// using the variable of the tracked use at the index.
+#[derive(Debug, Clone, Copy)]
+enum Event<'a> {
+    Declare(&'a str),
+    Use(usize),
+}
+
+/// For each use a function body's paths are followed for, the states the
+/// paths reaching a point are in, one bit each: whether the use's variable
+/// has been declared, and whether the use has been passed.  The variables
+/// a builder declares count however late in its path they are declared,
+/// so a use is only wrong on a path that passes it and never declares its
+/// variable, and paths that agree on both can be merged.  An empty set
+/// means no path reaches the point.
+type States = Vec<u8>;
+
+const NOTHING_YET: u8 = 0b0001;
+const DECLARED: u8 = 0b0010;
+const UNDECLARED: u8 = 0b0100;
+const USED_DECLARED: u8 = 0b1000;
+
+fn merge(into: &mut States, from: &States) {
+    for (a, b) in into.iter_mut().zip(from) {
+        *a |= b;
+    }
+}
+
+fn unreachable(states: &States) -> bool {
+    states.iter().all(|s| *s == 0)
+}
+
+/// Where the paths through a statement go: on to the next one, out of the
+/// loop or `switch` around it, to the loop's next iteration, or out of
+/// the function.  A path that throws goes nowhere a query is run.
+struct Flow {
+    next: States,
+    breaks: States,
+    continues: States,
+    exits: States,
+}
+
+impl Flow {
+    fn to_next(next: States) -> Self {
+        let len = next.len();
+        Self {
+            next,
+            breaks: vec![0; len],
+            continues: vec![0; len],
+            exits: vec![0; len],
+        }
+    }
+
+    fn nowhere(len: usize) -> Self {
+        Self::to_next(vec![0; len])
+    }
+
+    /// Take in the paths of another branch alongside this one's.
+    fn join(&mut self, other: &Flow) {
+        merge(&mut self.next, &other.next);
+        self.leave_with(other);
+    }
+
+    /// Take in the paths that leave `other` other than by going on.
+    fn leave_with(&mut self, other: &Flow) {
+        merge(&mut self.breaks, &other.breaks);
+        merge(&mut self.continues, &other.continues);
+        merge(&mut self.exits, &other.exits);
+    }
+}
+
+/// Follows the tracked uses of a function body along each path through
+/// its statements.  Control flow inside an expression (`?:`, `&&`,
+/// `match`) is read as though every part of it runs, which can only make
+/// a path declare more.
+struct Paths<'p, 'a> {
+    events: &'p [(u32, Event<'a>)],
+    sites: &'p [&'p PendingUse],
+}
+
+impl Paths<'_, '_> {
+    /// Apply the calls made in the source range `start..end`.
+    fn apply(&self, states: &mut States, start: u32, end: u32) {
+        let from = self.events.partition_point(|(at, _)| *at < start);
+        for (at, event) in &self.events[from..] {
+            if *at >= end {
+                break;
+            }
+            match event {
+                Event::Use(index) => {
+                    let s = &mut states[*index];
+                    *s = ((*s & (NOTHING_YET | DECLARED)) << 2)
+                        | (*s & (UNDECLARED | USED_DECLARED));
+                }
+                Event::Declare(alias) => {
+                    for (site, s) in self.sites.iter().zip(states.iter_mut()) {
+                        if site.alias != *alias {
+                            continue;
+                        }
+                        let mut next = 0;
+                        if *s & (NOTHING_YET | DECLARED) != 0 {
+                            next |= DECLARED;
+                        }
+                        if *s & (UNDECLARED | USED_DECLARED) != 0 {
+                            next |= USED_DECLARED;
+                        }
+                        *s = next;
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_span(&self, states: &mut States, node: &impl HasSpan) {
+        let span = node.span();
+        self.apply(states, span.start.offset, span.end.offset);
+    }
+
+    fn statements(&self, statements: &[Statement<'_>], states: States) -> Flow {
+        let mut flow = Flow::to_next(states);
+        for statement in statements {
+            if unreachable(&flow.next) {
+                break;
+            }
+            let next = std::mem::take(&mut flow.next);
+            let inner = self.statement(statement, next);
+            flow.next = inner.next.clone();
+            flow.leave_with(&inner);
+        }
+        flow
+    }
+
+    fn statement(&self, statement: &Statement<'_>, mut states: States) -> Flow {
+        let len = states.len();
+        match statement {
+            Statement::Block(block) => self.statements(block.statements.as_slice(), states),
+            Statement::Namespace(namespace) => {
+                self.statements(namespace.statements().as_slice(), states)
+            }
+            Statement::If(if_stmt) => {
+                self.apply_span(&mut states, if_stmt.condition);
+                let mut flow = self.statements(if_stmt.body.statements(), states.clone());
+                for (condition, statements) in if_stmt.body.else_if_clauses() {
+                    self.apply_span(&mut states, condition);
+                    flow.join(&self.statements(statements, states.clone()));
+                }
+                match if_stmt.body.else_statements() {
+                    Some(statements) => flow.join(&self.statements(statements, states)),
+                    None => merge(&mut flow.next, &states),
+                }
+                flow
+            }
+            Statement::While(while_stmt) => {
+                self.apply_span(&mut states, while_stmt.condition);
+                let body = self.statements(while_stmt.body.statements(), states.clone());
+                self.after_loop(states, body, |_| {})
+            }
+            Statement::Foreach(foreach) => {
+                self.apply(
+                    &mut states,
+                    foreach.span().start.offset,
+                    foreach.body.span().start.offset,
+                );
+                let body = self.statements(foreach.body.statements(), states.clone());
+                self.after_loop(states, body, |_| {})
+            }
+            Statement::For(for_stmt) => {
+                for expr in for_stmt
+                    .initializations
+                    .iter()
+                    .chain(for_stmt.conditions.iter())
+                {
+                    self.apply_span(&mut states, *expr);
+                }
+                let body = self.statements(for_stmt.body.statements(), states.clone());
+                self.after_loop(states, body, |next| {
+                    for expr in for_stmt.increments.iter().chain(for_stmt.conditions.iter()) {
+                        self.apply_span(next, *expr);
+                    }
+                })
+            }
+            Statement::DoWhile(do_while) => {
+                let body = self.statements(std::slice::from_ref(do_while.statement), states);
+                let mut next = body.next.clone();
+                merge(&mut next, &body.continues);
+                self.apply_span(&mut next, do_while.condition);
+                merge(&mut next, &body.breaks);
+                let mut flow = Flow::to_next(next);
+                merge(&mut flow.exits, &body.exits);
+                flow
+            }
+            Statement::Switch(switch) => {
+                self.apply_span(&mut states, switch.expression);
+                let mut flow = Flow::nowhere(len);
+                let mut unmatched = states;
+                let mut falling = vec![0; len];
+                let mut has_default = false;
+                for case in switch.body.cases().iter() {
+                    match case {
+                        SwitchCase::Expression(case) => {
+                            self.apply_span(&mut unmatched, case.expression);
+                        }
+                        SwitchCase::Default(_) => has_default = true,
+                    }
+                    merge(&mut falling, &unmatched);
+                    let body = self.statements(case.statements(), falling);
+                    falling = body.next;
+                    // A `continue` aimed at a `switch` acts as a `break`.
+                    merge(&mut flow.next, &body.breaks);
+                    merge(&mut flow.next, &body.continues);
+                    merge(&mut flow.exits, &body.exits);
+                }
+                merge(&mut flow.next, &falling);
+                if !has_default {
+                    merge(&mut flow.next, &unmatched);
+                }
+                flow
+            }
+            Statement::Try(try_stmt) => {
+                let body = self.statements(try_stmt.block.statements.as_slice(), states.clone());
+                // A catch is entered from anywhere in the block; from its
+                // start or its end, a path has made fewer calls or more.
+                let mut caught = states;
+                merge(&mut caught, &body.next);
+                let mut flow = Flow::to_next(body.next.clone());
+                flow.leave_with(&body);
+                for catch in try_stmt.catch_clauses.iter() {
+                    let handler =
+                        self.statements(catch.block.statements.as_slice(), caught.clone());
+                    flow.join(&handler);
+                }
+                let Some(finally) = &try_stmt.finally_clause else {
+                    return flow;
+                };
+                let block = finally.block.statements.as_slice();
+                for leaving in [&mut flow.breaks, &mut flow.continues, &mut flow.exits] {
+                    self.apply_span(leaving, &finally.block);
+                }
+                let after = self.statements(block, std::mem::take(&mut flow.next));
+                flow.next = after.next.clone();
+                flow.leave_with(&after);
+                flow
+            }
+            Statement::Return(ret) => {
+                self.apply_span(&mut states, ret);
+                let mut flow = Flow::nowhere(len);
+                flow.exits = states;
+                flow
+            }
+            Statement::Break(brk) => {
+                let mut flow = Flow::nowhere(len);
+                if loop_level(brk.level) == 1 {
+                    flow.breaks = states;
+                }
+                flow
+            }
+            Statement::Continue(cont) => {
+                let mut flow = Flow::nowhere(len);
+                if loop_level(cont.level) == 1 {
+                    flow.continues = states;
+                }
+                flow
+            }
+            Statement::Expression(expr_stmt) if ends_script(expr_stmt.expression) => {
+                Flow::nowhere(len)
+            }
+            _ => {
+                self.apply_span(&mut states, statement);
+                Flow::to_next(states)
+            }
+        }
+    }
+
+    /// The paths out of a loop entered with `entry`, whose body is `body`
+    /// and whose next iteration starts with `repeat`.  One pass through
+    /// the body is enough: a path that goes round more than once only
+    /// adds calls to one that goes round once.
+    fn after_loop(&self, entry: States, body: Flow, repeat: impl FnOnce(&mut States)) -> Flow {
+        let mut again = body.next;
+        merge(&mut again, &body.continues);
+        repeat(&mut again);
+        let mut next = entry;
+        merge(&mut next, &again);
+        merge(&mut next, &body.breaks);
+        let mut flow = Flow::to_next(next);
+        merge(&mut flow.exits, &body.exits);
+        flow
+    }
+}
+
+/// How many loops a `break` or `continue` leaves.  Paths that leave more
+/// than one are not followed.
+fn loop_level(level: Option<&Expression<'_>>) -> u64 {
+    match level {
+        None => 1,
+        Some(Expression::Literal(literal::Literal::Integer(integer))) => integer.value.unwrap_or(0),
+        Some(_) => 0,
+    }
+}
+
+/// Whether the expression statement `expr` throws or exits.
+fn ends_script(expr: &Expression<'_>) -> bool {
+    matches!(
+        expr,
+        Expression::Throw(_) | Expression::Construct(Construct::Exit(_) | Construct::Die(_))
+    )
 }
 
 /// Whether every declaration the DQL of `table` can see is read.

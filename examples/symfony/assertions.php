@@ -354,6 +354,8 @@ check('The XML mapping maps team as an association to Team', $userMetadata->hasA
 check('The DQL in UserRepository::inTeam() joins Team and names its fields', $dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE t.name = :team'));
 check('A field the joined Team does not map fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE t.email = :team'));
 check('A variable nothing declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE x.name = :team'));
+check('UserRepository::search() without a team builds DQL without t', $dqlParses('SELECT u FROM App\Entity\User u'));
+check('A variable used on a path that does not join it fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.name = :team'));
 (new SchemaTool($entityManager))->createSchema([
     $entityManager->getClassMetadata(User::class),
     $entityManager->getClassMetadata(Team::class),

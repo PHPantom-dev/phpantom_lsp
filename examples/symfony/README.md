@@ -126,6 +126,9 @@ catalogues together, the way a real Symfony project does.
 - In `UserRepository::inTeam()`, complete after `t.`. A variable a join
   declares stands for the entity its association targets, here the
   `Team` that `team` maps to, and a variable nothing declares is reported.
+- In `UserRepository::search()`, move the `andWhere()` out of the `if`.
+  A variable is reported when some path through the method builds the
+  query without declaring it, here the path that skips the join.
 - In `UserRepository::named()`, hover `$byBuilder` or `$byQuery`: a query
   is typed by what its DQL selects, so both are a `list<User>`. In
   `displayNamesByEmail()`, hover `$rows`, a shape of the selected fields

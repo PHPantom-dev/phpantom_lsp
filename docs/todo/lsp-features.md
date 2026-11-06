@@ -795,35 +795,34 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ---
 
-## F70. DQL variables a query builder declares on some branches
+## F71. DQL variables of a query builder other code handles
 
 **Impact: Low-Medium · Complexity: Medium-High**
 
 ```php
-$qb = $em->createQueryBuilder()->from(User::class, 'u')->andWhere('t.id = 1');
-if ($withTeam) {
-    $qb->join('u.team', 't');
-}
-$qb->getQuery(); // `t` is not declared when `$withTeam` is false
+$qb = $this->createQb();                  // `e` declared in createQb()
+$qb->andWhere('t.id = 1')->getQuery();    // `t` declared nowhere
+
+$qb = $em->createQueryBuilder()->from(User::class, 'u');
+$this->joinTeams($qb);
+$qb->andWhere('t.id = 1')->getQuery();
 ```
 
-A DQL variable nothing in a query or a function body declares is
-reported. A query builder's variables are read for the whole function
-body at once, so one declared on any branch counts as declared on all of
-them, and PHPStan's Doctrine extension reports the case above where
-PHPantom does not. Nor is anything reported for a builder that comes from
-a parameter, a property, or another method, or is passed to one, since
-its variables may be declared out of sight.
+A DQL variable a query builder uses but never declares, on some path
+through the function body that builds it, is reported. Nothing is
+reported for a builder that comes from a parameter, a property, or
+another method, or that is passed to one, since its variables may be
+declared out of sight. PHPStan's Doctrine extension reads the body of a
+method that returns a builder, so it reports the first case above.
 
-Both need the builder's calls replayed in order along each path to its
-`getQuery()`, the way the type engine already replays a single fluent
-chain to type the query it builds (see T64).
-
-The fixture is `query_builder_dql_branches.fixture` in
-`tests/fixtures/phpstan_doctrine/`.
+A builder another method of the project returns can be read from that
+method's body, the way the type engine replays a single fluent chain to
+type the query it builds (see T64). One passed to a method is harder: the
+method may join anything onto it.
 
 **Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`
-(`report_undeclared`), `src/doctrine/query.rs` (`QueryBuilderState`).
+(`report_undeclared`, `is_closed`), `src/doctrine/query.rs`
+(`QueryBuilderState`).
 
 ---
 

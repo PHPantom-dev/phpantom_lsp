@@ -720,6 +720,7 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         let s = body.left_brace.start.offset;
         let e = body.right_brace.end.offset;
         ctx.scopes.push((s, e));
+        note_dql_body(s, body.statements.as_slice(), ctx);
         if is_static {
             ctx.static_method_scopes.push((s, e));
         } else {
@@ -880,6 +881,7 @@ fn extract_from_hook<'a>(hook: &'a PropertyHook<'a>, ctx: &mut ExtractionCtx<'a>
 
     match body {
         PropertyHookConcreteBody::Block(block) => {
+            note_dql_body(scope_start, block.statements.as_slice(), ctx);
             for stmt in block.statements.iter() {
                 extract_from_statement(stmt, ctx, scope_start);
             }
@@ -1012,6 +1014,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
     let func_scope_start = func.body.left_brace.start.offset;
     let func_scope_end = func.body.right_brace.end.offset;
     ctx.scopes.push((func_scope_start, func_scope_end));
+    note_dql_body(func_scope_start, func.body.statements.as_slice(), ctx);
 
     // Emit Variable spans and VarDefSite markers for `@param $varName`
     // tokens in the docblock so that rename and find-references cover

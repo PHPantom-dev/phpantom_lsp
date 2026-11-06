@@ -669,3 +669,96 @@ async fn a_variable_a_builder_may_have_been_given_elsewhere_is_not_reported() {
     .await;
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[tokio::test]
+async fn a_variable_one_path_never_declares_is_reported() {
+    // Joined on one branch only.
+    let errors = undeclared(
+        "        $qb = $em->createQueryBuilder()->select('u')->from(User::class, 'u')->andWhere('t.id = 1');
+        if ($withTeam) {
+            $qb->join('u.team', 't');
+        }
+        $qb->getQuery();",
+    )
+    .await;
+    assert_eq!(errors, vec![undefined("t")]);
+
+    // Used on a branch that does not join it, after one that does.
+    let errors = undeclared(
+        "        $qb = $em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        switch ($mode) {
+            case 1:
+                $qb->join('u.team', 't')->andWhere('t.id = 1');
+                break;
+            default:
+                $qb->andWhere('t.id = 2');
+        }
+        return $qb->getQuery();",
+    )
+    .await;
+    assert_eq!(errors, vec![undefined("t")]);
+
+    // Joined only by a loop that may not run.
+    let errors = undeclared(
+        "        $qb = $em->createQueryBuilder()->select('u')->from(User::class, 'u')->andWhere('t.id = 1');
+        foreach ($ids as $id) {
+            $qb->join('u.team', 't');
+        }
+        $qb->getQuery();",
+    )
+    .await;
+    assert_eq!(errors, vec![undefined("t")]);
+}
+
+#[tokio::test]
+async fn a_variable_every_path_to_the_query_declares_is_not_reported() {
+    // Declared and used on the same branch, and on both branches.
+    let errors = undeclared(
+        "        $qb = $em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        if ($withTeam) {
+            $qb->join('u.team', 't')->andWhere('t.id = 1');
+        }
+        if ($a) {
+            $qb->join('u.team', 's');
+        } elseif ($b) {
+            $qb->leftJoin('u.team', 's');
+        } else {
+            $qb->innerJoin('u.team', 's');
+        }
+        $qb->andWhere('s.id = 1');
+        $qb->getQuery();",
+    )
+    .await;
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // The paths that do not declare it throw or return before using it.
+    let errors = undeclared(
+        "        $qb = $em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        if ($withTeam) {
+            $qb->join('u.team', 't');
+        } else {
+            throw new \\RuntimeException();
+        }
+        try {
+            $qb->join('u.team', 'r');
+        } finally {
+            $qb->andWhere('r.id = 1');
+        }
+        do {
+            $qb->join('u.team', 'd');
+        } while ($more);
+        while (true) {
+            if ($done) {
+                $qb->join('u.team', 'w');
+                break;
+            }
+        }
+        if (!$withTeam) {
+            return $qb->getQuery();
+        }
+        $qb->andWhere('t.id = 1 AND d.id = 1');
+        return $qb->getQuery();",
+    )
+    .await;
+    assert!(errors.is_empty(), "{errors:?}");
+}

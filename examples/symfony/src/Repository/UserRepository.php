@@ -62,6 +62,24 @@ final class UserRepository extends ServiceEntityRepository
     }
 
     /**
+     * @return list<User>
+     */
+    public function search(?string $team): array
+    {
+        // Try: move the `andWhere()` below the `if`. The builder only joins
+        // `t` when a team is given, so the query built without one uses a
+        // variable it never declares, and that is reported.
+        $builder = $this->createQueryBuilder('u');
+        if ($team !== null) {
+            $builder->join('u.team', 't')
+                ->andWhere('t.name = :team')
+                ->setParameter('team', $team);
+        }
+
+        return $builder->getQuery()->getResult();
+    }
+
+    /**
      * @return array<string, string>
      */
     public function displayNamesByEmail(): array

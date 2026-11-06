@@ -7,7 +7,7 @@
 // PHPantom reports a name on the line its string spells it, where upstream reports the line the call starts on.
 // expect_diagnostic: 23: Undefined DQL variable 'p'
 // expect_diagnostic: 39: Undefined DQL variable 'p'
-// expect_diagnostic: 59: QueryBuilder: [Semantical Error] line 0, col 58 near 'p.id = 1': Error: 'p' is not defined. // SKIP: a variable one branch declares counts as declared on every branch
+// expect_diagnostic: 53: Undefined DQL variable 'p'
 // expect_diagnostic: 87: Undefined DQL variable 't'
 // expect_diagnostic: 102: Undefined DQL variable 't'
 // expect_diagnostic: 104: Field 'foo' is not mapped on entity 'PHPStan\Rules\Doctrine\ORM\MyEntity'

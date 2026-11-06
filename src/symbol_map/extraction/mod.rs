@@ -224,7 +224,7 @@ struct ExtractionCtx<'a> {
     /// Whether the project uses Doctrine, which gates reading DQL.
     doctrine: bool,
     /// The DQL variables and fields read so far (see [`doctrine_dql`]).
-    dql: doctrine_dql::DqlPending,
+    dql: doctrine_dql::DqlPending<'a>,
     /// The DQL variables settled once the file is read.
     dql_aliases: Vec<crate::symbol_map::DqlAliasSite>,
     /// Where the DQL the file holds stops following the grammar.
@@ -585,6 +585,7 @@ fn extract_symbol_map_inner(
         dql_syntax_errors: Vec::new(),
     };
 
+    note_dql_body(0, program.statements.as_slice(), &mut ctx);
     for stmt in program.statements.iter() {
         extract_from_statement(stmt, &mut ctx, 0);
     }
