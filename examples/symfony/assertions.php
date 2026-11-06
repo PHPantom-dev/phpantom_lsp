@@ -384,6 +384,10 @@ $rows = $entityManager->createQueryBuilder()
     ->getQuery()
     ->getResult();
 check('displayNamesByEmail() gets a shape of the fields keyed by email', $rows === ['ada@example.com' => ['email' => 'ada@example.com', 'displayName' => 'Ada']]);
+$rows = $entityManager
+    ->createQuery('SELECT t.name, COUNT(u.email) AS members, UPPER(t.name) AS label FROM App\Entity\User u JOIN u.team t GROUP BY t.name')
+    ->getResult();
+check('teamSizes() gets the COUNT() as an int and UPPER() as a string', $rows === [['name' => 'Core', 'members' => 1, 'label' => 'CORE']]);
 $users = $entityManager->createQuery('SELECT u FROM App\Entity\User u WHERE u.displayName = :name')
     ->setParameter('name', 'Ada')
     ->getResult();

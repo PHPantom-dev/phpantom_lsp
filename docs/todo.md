@@ -37,7 +37,8 @@ contributor even though it's short.
 | L66 | [Related-file navigation for models, events, and listeners](todo/laravel.md#l66-related-file-navigation-for-models-events-and-listeners) | Medium | Medium |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (assets, Inertia) | Medium | Medium |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
-| T66 | [A DQL aggregate or function is typed `mixed`](todo/type-inference.md#t66-a-dql-aggregate-or-function-is-typed-mixed) | Low-Medium  | Medium      |
+| T67 | [A DQL expression whose type depends on the driver is `mixed`](todo/type-inference.md#t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed) | Low-Medium  | Medium      |
+| T68 | [A DQL field is typed by its property, not its column's type](todo/type-inference.md#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type) | Low         | Medium      |
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
 | F72 | [DQL variables of a query builder a chain of methods handles](todo/lsp-features.md#f72-dql-variables-of-a-query-builder-a-chain-of-methods-handles) | Low         | Medium      |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
@@ -78,7 +79,8 @@ ships, remove every row that names it.
 | F34 | [Template names a PHP wrapper builds](todo/lsp-features.md#f34-template-names-a-php-wrapper-builds) | Medium      | Medium-High |
 | F38 | [Twig components](todo/lsp-features.md#f38-twig-components) | Low-Medium  | Medium-High |
 | F56 | [Live components](todo/lsp-features.md#f56-live-components) (depends on F38) | Low-Medium  | Medium-High |
-| T66 | [A DQL aggregate or function is typed `mixed`](todo/type-inference.md#t66-a-dql-aggregate-or-function-is-typed-mixed) | Low-Medium  | Medium      |
+| T67 | [A DQL expression whose type depends on the driver is `mixed`](todo/type-inference.md#t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed) | Low-Medium  | Medium      |
+| T68 | [A DQL field is typed by its property, not its column's type](todo/type-inference.md#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type) | Low         | Medium      |
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
 | F72 | [DQL variables of a query builder a chain of methods handles](todo/lsp-features.md#f72-dql-variables-of-a-query-builder-a-chain-of-methods-handles) | Low         | Medium      |
 | F48 | [Symfony environment variables](todo/lsp-features.md#f48-symfony-environment-variables) | Medium      | Low-Medium  |

@@ -9,13 +9,20 @@
 //! `Query<mixed, mixed>`.
 //!
 //! A row is the entity a `SELECT u` names, the shape of the fields a
-//! `SELECT u.id, u.name` names, or an entity at key `0` (or its result
-//! variable) beside those fields.  A field's type is the type its entity
-//! declares for the property; a field of a variable a `LEFT JOIN` declares
-//! may be `null` too.  Anything else in a `SELECT` (an aggregate, a
-//! function, arithmetic) is typed only when it names its result variable,
-//! and then as `mixed`.  A fetch join adds nothing to a row: its entities
-//! are hydrated into their owner's association.
+//! `SELECT u.id, u.name` names, the object a lone `NEW Dto(...)` makes, or
+//! an entity at key `0` (or its result variable) beside those fields.  A
+//! field's type is the type its entity declares for the property; a field
+//! of a variable a `LEFT JOIN` declares may be `null` too, and so may
+//! everything a query that aggregates without a `GROUP BY` selects.  A fetch
+//! join adds nothing to a row: its entities are hydrated into their owner's
+//! association.
+//!
+//! Any other expression is keyed by its result variable, or by a counter
+//! from `1`.  Its type is what every driver agrees on: `COUNT()` and
+//! `LENGTH()` are converted to `int` by Doctrine itself, and the string
+//! functions, string literals, and the `CASE`, `COALESCE()`, and `NULLIF()`
+//! of those give strings.  The rest (`SUM()`, arithmetic, a number) is
+//! fetched as the driver gives it and is `mixed`.
 //!
 //! A query builder's query is the DQL its calls build, replayed by
 //! [`QueryBuilderState`].  The calls that only filter or order the rows
@@ -67,6 +74,9 @@ pub(crate) trait EntityModel {
     fn entity(&self, name: &str) -> Option<Atom>;
     /// What `field` of `entity` maps, when it maps it.
     fn field(&self, entity: &str, field: &str) -> Option<Field>;
+    /// The fully-qualified name of the class `name` names, when it is one:
+    /// the class `NEW` constructs.
+    fn class(&self, name: &str) -> Option<Atom>;
 }
 
 /// `Query<key, result>`.
@@ -332,8 +342,309 @@ enum Selected {
     Entity { alias: String },
     /// A field, `alias.field`.
     Field { alias: String, field: String },
-    /// Anything else.
-    Other,
+    /// `NEW class(...)`, with the number of arguments it passes.
+    New { class: String, args: usize },
+    /// Any other expression, the tokens `start..end`.
+    Other { start: usize, end: usize },
+}
+
+/// The words that name an aggregate function.
+const AGGREGATES: &[&str] = &["COUNT", "SUM", "AVG", "MIN", "MAX"];
+
+/// The type of a scalar expression, as far as it is the same whatever
+/// driver the connection uses.
+enum Value {
+    Known(PhpType),
+    /// A value whose type depends on the driver, and whether it may be
+    /// `null`.
+    Unknown {
+        nullable: bool,
+    },
+}
+
+impl Value {
+    fn nullable(&self) -> bool {
+        match self {
+            Value::Known(ty) => ty.accepts_null(),
+            Value::Unknown { nullable } => *nullable,
+        }
+    }
+
+    fn unknown() -> Self {
+        Value::Unknown { nullable: true }
+    }
+}
+
+fn or_null(ty: PhpType, nullable: bool) -> PhpType {
+    if nullable {
+        PhpType::union(vec![ty, PhpType::null()])
+    } else {
+        ty
+    }
+}
+
+/// What the `SELECT` expressions of a query are read against.
+struct Scope<'a> {
+    reader: &'a Reader<'a>,
+    decls: &'a [Decl],
+    model: &'a dyn EntityModel,
+    /// Whether the query aggregates without a `GROUP BY`: its one row may
+    /// come from no row at all, so every column may be `null`.
+    aggregate_without_group_by: bool,
+}
+
+impl Scope<'_> {
+    /// The type of the selected field `field` of what `alias` stands for.
+    fn field(&self, alias: &str, field: &str) -> Option<PhpType> {
+        let decl = self.decls.iter().find(|d| d.alias == alias)?;
+        let Field::Column(ty) = self.model.field(decl.entity.as_ref()?, field)? else {
+            return None;
+        };
+        if (decl.optional || self.aggregate_without_group_by) && !ty.is_mixed() {
+            return Some(PhpType::union(vec![ty, PhpType::null()]).simplified());
+        }
+        Some(ty)
+    }
+
+    /// The type of the top-level `SELECT` expression in `start..end`.
+    ///
+    /// Doctrine converts the result of `COUNT()` and `LENGTH()` through its
+    /// `integer` type, which makes it an `int` whatever the driver gave.
+    /// Every other expression is hydrated as the driver fetched it, so only
+    /// a string is known to stay one.
+    fn select_type(&self, start: usize, end: usize) -> PhpType {
+        if let Some((name, args)) = self.function(start, end) {
+            if name.eq_ignore_ascii_case("COUNT") {
+                return PhpType::int_range("0", "max");
+            }
+            if name.eq_ignore_ascii_case("LENGTH") {
+                let nullable = self.aggregate_without_group_by
+                    || args
+                        .first()
+                        .is_none_or(|&(s, e)| self.value(s, e).nullable());
+                return or_null(PhpType::int_range("0", "max"), nullable);
+            }
+        }
+        match self.value(start, end) {
+            Value::Known(ty) => ty,
+            Value::Unknown { .. } => PhpType::mixed(),
+        }
+    }
+
+    /// The function call `name(args)` the tokens `start..end` are.
+    fn function(&self, start: usize, end: usize) -> Option<(&str, Vec<(usize, usize)>)> {
+        let name = self.reader.word(start)?;
+        if self.reader.kind(start + 1) != Some(Tok::LParen)
+            || matching(self.reader, start + 1)? + 1 != end
+        {
+            return None;
+        }
+        let args = if start + 2 == end - 1 {
+            Vec::new()
+        } else {
+            top_level_items(self.reader, start + 2, end - 1)?
+        };
+        Some((name, args))
+    }
+
+    /// The type of the expression in `start..end`.
+    fn value(&self, start: usize, end: usize) -> Value {
+        self.value_of(start, end).unwrap_or_else(Value::unknown)
+    }
+
+    fn value_of(&self, start: usize, end: usize) -> Option<Value> {
+        let reader = self.reader;
+        if start >= end {
+            return None;
+        }
+        if reader.kind(start) == Some(Tok::LParen) && matching(reader, start)? + 1 == end {
+            if reader.is_word(start + 1, "SELECT") {
+                return None;
+            }
+            return self.value_of(start + 1, end - 1);
+        }
+        if end - start == 1 {
+            if reader.is_word(start, "NULL") {
+                return Some(Value::Known(PhpType::null()));
+            }
+            return string_literal(reader.text(start)).map(Value::Known);
+        }
+        if end - start == 3
+            && let Some((alias, field)) = reader.path(start)
+        {
+            // A field as the driver fetched it, which is a string for a
+            // string column on every driver.
+            let decl = self.decls.iter().find(|d| d.alias == alias)?;
+            let Field::Column(ty) = self.model.field(decl.entity.as_ref()?, &field)? else {
+                return None;
+            };
+            let nullable = decl.optional || self.aggregate_without_group_by || ty.accepts_null();
+            let non_null = ty.non_null_type().unwrap_or(ty);
+            return Some(if non_null.is_string_type() {
+                Value::Known(or_null(PhpType::string(), nullable))
+            } else {
+                Value::Unknown { nullable }
+            });
+        }
+        if reader.is_word(start, "CASE") && reader.is_word(end - 1, "END") {
+            return self.case(start, end);
+        }
+        let (name, args) = self.function(start, end)?;
+        let is = |n: &str| name.eq_ignore_ascii_case(n);
+        let any_nullable =
+            |args: &[(usize, usize)]| args.iter().any(|&(s, e)| self.value(s, e).nullable());
+        let string = |nullable: bool| Some(Value::Known(or_null(PhpType::string(), nullable)));
+        if is("COUNT") {
+            Some(Value::Unknown { nullable: false })
+        } else if is("LENGTH") {
+            Some(Value::Unknown {
+                nullable: any_nullable(&args),
+            })
+        } else if is("CONCAT") || is("LOWER") || is("UPPER") || is("SUBSTRING") {
+            string(any_nullable(&args))
+        } else if is("TRIM") {
+            // `TRIM([[LEADING | TRAILING | BOTH] [char] FROM] string)`.
+            let &[(s, e)] = args.as_slice() else {
+                return None;
+            };
+            let from = (s..e)
+                .rev()
+                .find(|&i| reader.is_word(i, "FROM"))
+                .map_or(s, |i| i + 1);
+            string(self.value(from, e).nullable())
+        } else if is("CURRENT_DATE") || is("CURRENT_TIME") || is("CURRENT_TIMESTAMP") {
+            args.is_empty().then(|| Value::Known(PhpType::string()))
+        } else if is("DATE_ADD") || is("DATE_SUB") {
+            string(any_nullable(args.get(..2)?))
+        } else if is("COALESCE") {
+            let values: Vec<Value> = args.iter().map(|&(s, e)| self.value(s, e)).collect();
+            let all_nullable = values.iter().all(Value::nullable);
+            let mut types = Vec::new();
+            for value in values {
+                let Value::Known(ty) = value else {
+                    return None;
+                };
+                for member in ty.union_members() {
+                    if member.is_null() {
+                        if all_nullable {
+                            types.push(PhpType::null());
+                        }
+                    } else if member.is_string_literal() {
+                        types.push(PhpType::string());
+                    } else {
+                        types.push(member.clone());
+                    }
+                }
+            }
+            Some(Value::Known(PhpType::union(types).simplified()))
+        } else if is("NULLIF") {
+            let &[(s, e), _] = args.as_slice() else {
+                return None;
+            };
+            match self.value(s, e) {
+                Value::Known(ty) => Some(Value::Known(or_null(ty, true).simplified())),
+                Value::Unknown { .. } => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// The type of `CASE ... END` in `start..end`: one of its results, or
+    /// `null` when it has no `ELSE`.
+    fn case(&self, start: usize, end: usize) -> Option<Value> {
+        let reader = self.reader;
+        // The `WHEN`, `THEN`, and `ELSE` of this `CASE`, outside the
+        // parentheses and the `CASE`s nested in it.
+        let mut marks = Vec::new();
+        let mut depth = 0usize;
+        for i in start + 1..end - 1 {
+            match reader.tokens[i].kind {
+                Tok::LParen => depth += 1,
+                Tok::RParen => depth = depth.checked_sub(1)?,
+                Tok::Ident if reader.is_word(i, "CASE") => depth += 1,
+                Tok::Ident if reader.is_word(i, "END") => depth = depth.checked_sub(1)?,
+                Tok::Ident
+                    if depth == 0
+                        && ["WHEN", "THEN", "ELSE"]
+                            .iter()
+                            .any(|k| reader.is_word(i, k)) =>
+                {
+                    marks.push(i);
+                }
+                _ => {}
+            }
+        }
+        if depth != 0 {
+            return None;
+        }
+        marks.push(end - 1);
+        let mut types = Vec::new();
+        let mut has_else = false;
+        for pair in marks.windows(2) {
+            let (mark, next) = (pair[0], pair[1]);
+            let is_else = reader.is_word(mark, "ELSE");
+            if !is_else && !reader.is_word(mark, "THEN") {
+                continue;
+            }
+            has_else |= is_else;
+            let Value::Known(ty) = self.value(mark + 1, next) else {
+                return None;
+            };
+            types.push(ty);
+        }
+        if types.is_empty() {
+            return None;
+        }
+        if !has_else {
+            types.push(PhpType::null());
+        }
+        Some(Value::Known(PhpType::union(types).simplified()))
+    }
+}
+
+/// The index of the `)` that closes the `(` at `open`.
+fn matching(reader: &Reader<'_>, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for i in open..reader.tokens.len() {
+        match reader.tokens[i].kind {
+            Tok::LParen => depth += 1,
+            Tok::RParen => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The string a DQL string literal token holds.
+fn string_literal(token: &str) -> Option<PhpType> {
+    let inner = token.strip_prefix('\'')?.strip_suffix('\'')?;
+    Some(PhpType::literal_string_value(inner.replace("''", "'")))
+}
+
+/// Whether the `SELECT` clause in `start..end` calls an aggregate function
+/// outside a subquery.
+fn selects_aggregate(reader: &Reader<'_>, start: usize, end: usize) -> bool {
+    let mut i = start;
+    while i < end {
+        if reader.kind(i) == Some(Tok::LParen) && reader.is_word(i + 1, "SELECT") {
+            match matching(reader, i) {
+                Some(close) => i = close,
+                None => return false,
+            }
+        } else if reader.kind(i + 1) == Some(Tok::LParen)
+            && AGGREGATES.iter().any(|name| reader.is_word(i, name))
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 /// The `TKey` and `TResult` of a query whose DQL is `text`, or `None` when
@@ -365,10 +676,24 @@ fn result_types(text: &str, model: &dyn EntityModel) -> Option<(PhpType, PhpType
     if reader.is_word(1, "DISTINCT") {
         select_start = 2;
     }
+    let group_by = (from_end..reader.tokens.len().saturating_sub(1))
+        .any(|i| reader.is_word(i, "GROUP") && reader.is_word(i + 1, "BY"));
+    let scope = Scope {
+        reader: &reader,
+        decls: &decls,
+        model,
+        aggregate_without_group_by: !group_by && selects_aggregate(&reader, select_start, from),
+    };
     let mut entities: Vec<(Option<String>, PhpType)> = Vec::new();
     let mut scalars: Vec<(String, PhpType)> = Vec::new();
+    let mut new_objects: Vec<(String, PhpType)> = Vec::new();
     let mut selected_entities: Vec<String> = Vec::new();
     let mut selected_fields: Vec<(String, String)> = Vec::new();
+    // Doctrine keys a scalar without a result variable by a counter from 1,
+    // which each argument of a `NEW` advances too, and a `NEW` without one
+    // by a counter from 0.
+    let mut scalar_counter = 1usize;
+    let mut new_counter = 0usize;
     for (start, end) in top_level_items(&reader, select_start, from)? {
         let (selected, result_variable, hidden) = select_expression(&reader, start, end)?;
         match &selected {
@@ -376,7 +701,7 @@ fn result_types(text: &str, model: &dyn EntityModel) -> Option<(PhpType, PhpType
             Selected::Field { alias, field } => {
                 selected_fields.push((alias.clone(), field.clone()))
             }
-            Selected::Other => {}
+            Selected::New { .. } | Selected::Other { .. } => {}
         }
         if hidden {
             continue;
@@ -387,35 +712,77 @@ fn result_types(text: &str, model: &dyn EntityModel) -> Option<(PhpType, PhpType
                 if !decl.in_row {
                     continue;
                 }
-                entities.push((result_variable, PhpType::named(decl.entity?)));
+                let entity = PhpType::named(decl.entity?);
+                let nullable = decl.optional || scope.aggregate_without_group_by;
+                entities.push((result_variable, or_null(entity, nullable)));
             }
             Selected::Field { alias, field } => {
-                let decl = decls.iter().find(|d| d.alias == alias)?;
-                let Field::Column(mut ty) = model.field(decl.entity.as_ref()?, &field)? else {
-                    return None;
-                };
-                if decl.optional && !ty.is_mixed() {
-                    ty = PhpType::union(vec![ty, PhpType::null()]).simplified();
-                }
+                let ty = scope.field(&alias, &field)?;
                 scalars.push((result_variable.unwrap_or(field), ty));
             }
-            Selected::Other => scalars.push((result_variable?, PhpType::mixed())),
+            Selected::New { class, args } => {
+                let class = model.class(&class)?;
+                scalar_counter += args;
+                let key = result_variable.unwrap_or_else(|| {
+                    new_counter += 1;
+                    (new_counter - 1).to_string()
+                });
+                new_objects.push((key, PhpType::named(class)));
+            }
+            Selected::Other { start, end } => {
+                let key = result_variable.unwrap_or_else(|| {
+                    scalar_counter += 1;
+                    (scalar_counter - 1).to_string()
+                });
+                scalars.push((key, scope.select_type(start, end)));
+            }
         }
     }
 
-    let result = match (entities.len(), scalars.is_empty()) {
-        (0, true) => return None,
-        (_, true) => PhpType::union(entities.into_iter().map(|(_, ty)| ty).collect()),
-        (0, false) => shape(scalars),
-        (1, false) => {
-            let (key, entity) = entities.pop()?;
-            let mut entries = vec![(key.unwrap_or_else(|| "0".to_string()), entity)];
-            entries.extend(scalars);
-            shape(entries)
+    // How Doctrine's `ObjectHydrator` lays out a row, as PHPStan's
+    // `QueryResultTypeBuilder` has it: a lone `NEW` object is the row; an
+    // entity is the row unless a scalar, another `NEW` object, or a result
+    // variable of an entity makes it a shape; and each entity selected
+    // beside others is a row of its own, the last carrying the scalars.
+    let key = index_key(&decls, model, &selected_entities, &selected_fields)?;
+    if new_objects.len() == 1 && scalars.is_empty() {
+        let (_, object) = new_objects.pop()?;
+        return Some((key, object));
+    }
+    let is_shape = !scalars.is_empty()
+        || new_objects.len() > 1
+        || entities.iter().any(|(key, _)| key.is_some());
+    scalars.extend(new_objects);
+    let result = if entities.is_empty() {
+        if scalars.is_empty() {
+            return None;
         }
-        _ => return None,
+        shape(scalars)
+    } else if !is_shape {
+        PhpType::union(entities.into_iter().map(|(_, ty)| ty).collect())
+    } else {
+        let last = entities.len() - 1;
+        let mut rows = Vec::new();
+        for (i, (key, entity)) in entities.into_iter().enumerate() {
+            let mut entries = vec![(key.unwrap_or_else(|| "0".to_string()), entity)];
+            if i == last {
+                entries.extend(std::mem::take(&mut scalars));
+            }
+            rows.push(shape(entries));
+        }
+        PhpType::union(rows)
     };
+    Some((key, result))
+}
 
+/// The `TKey` of a query whose root's `INDEX BY` is read in `decls`, given
+/// the entities and fields its `SELECT` names.
+fn index_key(
+    decls: &[Decl],
+    model: &dyn EntityModel,
+    selected_entities: &[String],
+    selected_fields: &[(String, String)],
+) -> Option<PhpType> {
     // `INDEX BY` keys the rows by the field when the entity it indexes is
     // hydrated, or when the field is selected itself; otherwise the rows
     // are a list (Doctrine's `SqlWalker::walkIndexBy()`).
@@ -426,17 +793,16 @@ fn result_types(text: &str, model: &dyn EntityModel) -> Option<(PhpType, PhpType
                 .iter()
                 .any(|(a, f)| a == alias && f == field)
     });
-    let key = match index_by {
-        None => PhpType::null(),
+    match index_by {
+        None => Some(PhpType::null()),
         Some((alias, field)) => {
             let decl = decls.iter().find(|d| d.alias == *alias)?;
             match model.field(decl.entity.as_ref()?, field)? {
-                Field::Column(ty) => ty,
-                Field::Association(_) => return None,
+                Field::Column(ty) => Some(ty),
+                Field::Association(_) => None,
             }
         }
-    };
-    Some((key, result))
+    }
 }
 
 /// The token ranges of the comma-separated items in `start..end`.
@@ -481,7 +847,10 @@ fn select_expression(
         if before > start && reader.is_word(before - 1, "AS") {
             result_variable = Some(name.to_string());
             core_end = before - 1;
-        } else if hidden || simple_expression_end(reader, start) == Some(before) {
+        } else if hidden
+            || simple_expression_end(reader, start) == Some(before)
+            || ends_expression(reader, before - 1)
+        {
             result_variable = Some(name.to_string());
             core_end = before;
         }
@@ -509,11 +878,44 @@ fn select_expression(
     {
         Selected::Field { alias, field }
     } else if reader.is_word(start, "NEW") {
-        return None;
+        let class = reader.word(start + 1)?;
+        if reader.kind(start + 2) != Some(Tok::LParen)
+            || matching(reader, start + 2)? + 1 != core_end
+        {
+            return None;
+        }
+        let args = if start + 3 == core_end - 1 {
+            0
+        } else {
+            top_level_items(reader, start + 3, core_end - 1)?.len()
+        };
+        Selected::New {
+            class: class.to_string(),
+            args,
+        }
     } else {
-        Selected::Other
+        Selected::Other {
+            start,
+            end: core_end,
+        }
     };
     Some((selected, result_variable, hidden))
+}
+
+/// Whether the token at `i` can end a scalar expression, so that a name
+/// after it is a result variable: a `)`, a literal, or `END`.
+fn ends_expression(reader: &Reader<'_>, i: usize) -> bool {
+    match reader.kind(i) {
+        Some(Tok::RParen) => true,
+        Some(Tok::Other) => {
+            let text = reader.text(i);
+            text.starts_with('\'') || text.starts_with(|c: char| c.is_ascii_digit())
+        }
+        Some(Tok::Ident) => ["END", "TRUE", "FALSE", "NULL"]
+            .iter()
+            .any(|k| reader.is_word(i, k)),
+        _ => false,
+    }
 }
 
 /// Where the variable or path at `start` ends, when one starts there.
@@ -1200,6 +1602,10 @@ impl EntityModel for ResolverModel<'_, '_> {
         super::is_entity(&class, &self.state).then(|| class.fqn())
     }
 
+    fn class(&self, name: &str) -> Option<Atom> {
+        self.load(name).map(|class| class.fqn())
+    }
+
     fn field(&self, entity: &str, field: &str) -> Option<Field> {
         let class = self.load(entity)?;
         let fields = super::entity_fields(&class, self.ctx.file.class_loader, &self.state)?;
@@ -1242,6 +1648,11 @@ mod tests {
                 _ => return None,
             })
         }
+
+        fn class(&self, name: &str) -> Option<Atom> {
+            let name = name.strip_prefix('\\').unwrap_or(name);
+            (self.entity(name).is_some() || name == "App\\Dto").then(|| atom(name))
+        }
     }
 
     fn query(dql: &str) -> String {
@@ -1264,7 +1675,97 @@ mod tests {
         );
         assert_eq!(
             query("SELECT u AS user, COUNT(u.id) AS total FROM App\\User u GROUP BY u"),
-            "Doctrine\\ORM\\Query<null, array{user: App\\User, total: mixed}>"
+            "Doctrine\\ORM\\Query<null, array{user: App\\User, total: int<0, max>}>"
+        );
+    }
+
+    #[test]
+    fn functions_and_aggregates() {
+        assert_eq!(
+            query("SELECT COUNT(u.id) FROM App\\User u"),
+            "Doctrine\\ORM\\Query<null, array{1: int<0, max>}>"
+        );
+        assert_eq!(
+            query("SELECT u, COUNT(u.id) total, SUM(u.id) AS s FROM App\\User u GROUP BY u"),
+            "Doctrine\\ORM\\Query<null, array{0: App\\User, total: int<0, max>, s: mixed}>"
+        );
+        assert_eq!(
+            query(
+                "SELECT LENGTH(u.email) AS a, LENGTH(u.name) AS b, LOWER(u.email), \
+                 CONCAT(u.email, u.name) c FROM App\\User u"
+            ),
+            "Doctrine\\ORM\\Query<null, array{a: int<0, max>, b: int<0, max>|null, 1: string, c: string|null}>"
+        );
+        assert_eq!(
+            query(
+                "SELECT TRIM(LEADING 'x' FROM u.email) t, CURRENT_DATE() d, 'it''s' AS l, \
+                 u.id + 1 AS plus FROM App\\User u"
+            ),
+            "Doctrine\\ORM\\Query<null, array{t: string, d: string, l: 'it\\'s', plus: mixed}>"
+        );
+        // Aggregating without `GROUP BY` gives one row, from no row at all
+        // when nothing matches.
+        assert_eq!(
+            query("SELECT COUNT(u.id) AS n, MAX(u.id) AS m, u.email FROM App\\User u"),
+            "Doctrine\\ORM\\Query<null, array{n: int<0, max>, m: mixed, email: string|null}>"
+        );
+        assert_eq!(
+            query("SELECT (SELECT COUNT(p.id) FROM App\\Post p) AS n, u.email FROM App\\User u"),
+            "Doctrine\\ORM\\Query<null, array{n: mixed, email: string}>"
+        );
+    }
+
+    #[test]
+    fn conditional_expressions() {
+        assert_eq!(
+            query(
+                "SELECT CASE WHEN u.id > 1 THEN 'big' ELSE 'small' END AS size, \
+                 CASE u.id WHEN 1 THEN 'one' END one FROM App\\User u"
+            ),
+            "Doctrine\\ORM\\Query<null, array{size: 'big'|'small', one: 'one'|null}>"
+        );
+        assert_eq!(
+            query(
+                "SELECT COALESCE(u.name, '') AS a, COALESCE(u.name, NULL) AS b, \
+                 NULLIF(u.email, 'x') AS c, COALESCE(u.id, 0) AS d FROM App\\User u"
+            ),
+            "Doctrine\\ORM\\Query<null, array{a: string, b: string|null, c: string|null, d: mixed}>"
+        );
+        assert_eq!(
+            query("SELECT CASE WHEN u.id > 1 THEN 1 ELSE 0 END AS flag FROM App\\User u"),
+            "Doctrine\\ORM\\Query<null, array{flag: mixed}>"
+        );
+    }
+
+    #[test]
+    fn new_objects() {
+        assert_eq!(
+            query("SELECT NEW App\\Dto(u.id, u.email) FROM App\\User u"),
+            "Doctrine\\ORM\\Query<null, App\\Dto>"
+        );
+        assert_eq!(
+            query("SELECT NEW App\\Dto(u.id, u.email), COUNT(u.id) FROM App\\User u GROUP BY u.id"),
+            "Doctrine\\ORM\\Query<null, array{3: int<0, max>, 0: App\\Dto}>"
+        );
+        assert_eq!(
+            query("SELECT NEW App\\Dto(u.id) AS a, NEW App\\Dto() FROM App\\User u"),
+            "Doctrine\\ORM\\Query<null, array{a: App\\Dto, 0: App\\Dto}>"
+        );
+        assert_eq!(
+            query("SELECT NEW App\\Missing(u.id) FROM App\\User u"),
+            "Doctrine\\ORM\\Query<mixed, mixed>"
+        );
+    }
+
+    #[test]
+    fn several_entities_beside_scalars() {
+        assert_eq!(
+            query("SELECT u, p, u.email FROM App\\User u JOIN App\\Post p WITH p.id = u.id"),
+            "Doctrine\\ORM\\Query<null, array{0: App\\User}|array{0: App\\Post, email: string}>"
+        );
+        assert_eq!(
+            query("SELECT u, p FROM App\\User u LEFT JOIN App\\Post p WITH p.id = u.id"),
+            "Doctrine\\ORM\\Query<null, App\\User|App\\Post|null>"
         );
     }
 
@@ -1315,7 +1816,6 @@ mod tests {
         assert_eq!(query("SELECT u.missing FROM App\\User u"), mixed);
         assert_eq!(query("SELECT u.address FROM App\\User u"), mixed);
         assert_eq!(query("SELECT x FROM App\\Unknown x"), mixed);
-        assert_eq!(query("SELECT COUNT(u.id) FROM App\\User u"), mixed);
         assert_eq!(query("SELECT u FROM App\\User u, App\\Post u"), mixed);
     }
 

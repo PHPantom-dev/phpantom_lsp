@@ -616,27 +616,56 @@ The fixtures are the SKIP lines of `expressionBuilderGetQuery.php` and
 
 ---
 
-## T66. A DQL aggregate or function is typed `mixed`
+## T67. A DQL expression whose type depends on the driver is `mixed`
 
 **Impact: Low-Medium · Complexity: Medium**
 
 ```php
-$em->createQuery('SELECT COUNT(u.id) AS total FROM App\Entity\User u')
-    ->getResult(); // list<array{total: mixed}>
+$em->createQuery('SELECT SUM(u.score) AS total, u.score * 2 AS doubled FROM App\Entity\User u')
+    ->getResult(); // list<array{total: mixed, doubled: mixed}>
 ```
 
-A query's selected entities and fields are typed, but any other `SELECT`
-expression (an aggregate, a function, arithmetic, a literal, a `CASE`) is
-`mixed`, and without a result variable it leaves the whole query
-`Query<mixed, mixed>`. So does `NEW Dto(...)`. A field is typed by the
-type its entity declares for the property, not by its column's Doctrine
-type, which can differ (`bigint` is `int|string` on DBAL 4). PHPStan's
-Doctrine extension types each expression by the function and the
-connection's driver.
+A `SELECT` expression is typed where every database driver gives the same
+value: `COUNT()` and `LENGTH()`, which Doctrine converts to `int`, and the
+string functions, string literals, and the `CASE`, `COALESCE()`, and
+`NULLIF()` of those. The rest (`SUM()`, `AVG()`, `MIN()`, `MAX()`, `ABS()`,
+`MOD()`, `IDENTITY()`, arithmetic, a number or boolean literal) is fetched
+as the driver gives it, which differs between MySQL, PostgreSQL, and
+SQLite, and with the PHP version and the PDO options. PHPStan's Doctrine
+extension types each of these by the connection's driver, and gives
+`mixed` when it does not know the driver. Reading the driver is the work
+T56 needs too: the `driver` or `url` of `DriverManager::getConnection()`,
+or the `dbal` section of a Symfony project's `doctrine.yaml`.
 
-**Where to look:** `src/doctrine/query.rs` (`result_types`), and PHPStan's
-Doctrine extension (`Type/Doctrine/Query/QueryResultTypeWalker.php`,
-`Type/Doctrine/Descriptors/`).
+**Where to look:** `Scope::value_of` in `src/doctrine/query.rs`, and
+PHPStan's Doctrine extension (`Type/Doctrine/Query/QueryResultTypeWalker.php`:
+`walkFunction()`, `walkAggregateExpression()`, `walkLiteral()`, and the
+stringify rules of `walkSelectExpression()`).
+
+---
+
+## T68. A DQL field is typed by its property, not its column's type
+
+**Impact: Low · Complexity: Medium**
+
+```php
+#[ORM\Column(type: 'bigint')]
+public int $views;
+
+$em->createQuery('SELECT u.views FROM App\Entity\User u')
+    ->getResult(); // list<array{views: int}>, though DBAL 4 gives int|string
+```
+
+A selected field is typed by the type its entity declares for the
+property, but a scalar result is converted by the column's Doctrine type,
+which can differ: `bigint` is `int|string` on DBAL 4, and `decimal` is a
+`numeric-string` whatever the property says. Inside a DQL expression only a
+`string` property is read as a string, for the same reason. PHPStan's
+Doctrine extension maps each Doctrine type to the PHP type it converts to.
+
+**Where to look:** `ResolverModel::field` in `src/doctrine/query.rs`, the
+column type the mapping attributes and files record, and PHPStan's
+Doctrine extension (`Type/Doctrine/Descriptors/`).
 
 ---
 

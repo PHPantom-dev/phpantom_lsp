@@ -156,4 +156,27 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B706. A Doctrine mapping file is not read until the workspace index ends
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+// config/doctrine/User.orm.xml maps User, with a `team` association
+$em->createQuery('SELECT t.name FROM App\Entity\User u JOIN u.team t');
+// Query<mixed, mixed> right after the editor starts,
+// Query<null, array{name: string}> a few seconds later
+```
+
+The XML and YAML mapping files are indexed with the other resource files,
+in the last step of the background workspace index
+(`index_resource_paths_batch` from `indexing/preload.rs`). Until then an
+entity mapped only by a file is no entity: a hover, completion, or
+diagnostic asked for before then gives a mixed query, no magic finders,
+and no DQL field names, and nothing recomputes it when the files arrive.
+The resolved-class cache is cleared as each file is indexed, but a result
+already shown stays wrong until it is asked for again.
+
+**Where to look:** where `index_framework_uri_content` is called during
+startup; the mapping files could be indexed before the PHP files are
+parsed, or the open files' diagnostics refreshed once they are.
+

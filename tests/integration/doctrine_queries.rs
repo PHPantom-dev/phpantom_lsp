@@ -115,6 +115,10 @@ class Address {
 ",
     ),
     (
+        "src/Dto/UserSummary.php",
+        "<?php\nnamespace App\\Dto;\nfinal class UserSummary {\n    public function __construct(public int $id, public string $email) {}\n}\n",
+    ),
+    (
         "src/Repository/UserRepository.php",
         "<?php
 namespace App\\Repository;
@@ -235,6 +239,40 @@ async fn selected_fields_give_a_shape_typed_by_their_properties() {
         ),
         "{hover}"
     );
+}
+
+#[tokio::test]
+async fn aggregates_and_functions_are_typed_where_every_driver_agrees() {
+    let rows = hover(
+        "        $rows = $em->createQuery(\"SELECT u.email, COUNT(a.city) AS total, LOWER(u.name), CASE WHEN u.id > 1 THEN 'old' ELSE 'new' END age, SUM(u.id) AS ids FROM App\\Entity\\User u LEFT JOIN u.address a GROUP BY u.email\")->getResult();\n        $ro§ws;",
+    )
+    .await;
+    assert!(
+        shows(
+            &rows,
+            "list<array{email: string, total: int<0, max>, 1: string|null, age: 'old'|'new', ids: mixed}>"
+        ),
+        "{rows}"
+    );
+
+    // Without a `GROUP BY`, the one row may come from no row at all.
+    let row = hover(
+        "        $row = $em->createQuery('SELECT COUNT(u.id) AS total, u.email FROM App\\Entity\\User u')->getSingleResult(AbstractQuery::HYDRATE_OBJECT);\n        $r§ow;",
+    )
+    .await;
+    assert!(
+        shows(&row, "array{total: int<0, max>, email: string|null}"),
+        "{row}"
+    );
+}
+
+#[tokio::test]
+async fn a_new_object_is_the_row() {
+    let hover = hover(
+        "        $rows = $em->createQuery('SELECT NEW App\\Dto\\UserSummary(u.id, u.email) FROM App\\Entity\\User u')->getResult();\n        $ro§ws;",
+    )
+    .await;
+    assert!(shows(&hover, "list<UserSummary>"), "{hover}");
 }
 
 #[tokio::test]

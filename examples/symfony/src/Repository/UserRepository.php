@@ -97,6 +97,21 @@ final class UserRepository extends ServiceEntityRepository
     }
 
     /**
+     * @return list<array{name: string, members: int<0, max>, label: string}>
+     */
+    public function teamSizes(): array
+    {
+        // Try: hover $rows. An aggregate or a function is typed where every
+        // database driver agrees: COUNT() gives an int<0, max> and UPPER() a
+        // string. Something like SUM() depends on the driver and is mixed.
+        $rows = $this->getEntityManager()
+            ->createQuery('SELECT t.name, COUNT(u.email) AS members, UPPER(t.name) AS label FROM App\Entity\User u JOIN u.team t GROUP BY t.name')
+            ->getResult();
+
+        return $rows;
+    }
+
+    /**
      * @return list<User>
      */
     public function searchByName(?string $name): array
