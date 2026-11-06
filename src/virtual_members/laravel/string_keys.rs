@@ -82,7 +82,8 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::DrupalEntityType
         | StringKeyKind::DrupalRoute
         | StringKeyKind::DrupalRouteParameter
-        | StringKeyKind::DrupalPermission => backend.symfony_declaration_locations(*kind, key),
+        | StringKeyKind::DrupalPermission
+        | StringKeyKind::DrupalLibrary => backend.symfony_declaration_locations(*kind, key),
         StringKeyKind::DrupalHook => backend.drupal_hook_documentation(key),
         StringKeyKind::DrupalConfigName => backend.drupal_config_locations(key),
         StringKeyKind::DrupalConfigKey => backend.drupal_config_key_locations(key),
@@ -329,7 +330,8 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::DrupalRoute
         | StringKeyKind::DrupalRouteParameter
         | StringKeyKind::DrupalPermission
-        | StringKeyKind::DrupalRenderElement => {
+        | StringKeyKind::DrupalRenderElement
+        | StringKeyKind::DrupalLibrary => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // A documented pattern stands for every hook that fills it in.

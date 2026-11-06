@@ -110,6 +110,16 @@ Run `composer install` here first. Composer puts core and contrib into
   go to the definition of `'#name'`. In `compactGreet()`,
   `'acme_greeting__compact'` is a suggestion: it leads to `acme_greeting` and
   to `acme_theme`'s `acme-greeting--compact.html.twig`.
+- Library names navigate between the libraries file that declares them and
+  the render arrays, templates, and YAML that attach them. In
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, hover
+  `'acme/greeting'` in the `#attached` of `greet()` to see its libraries file
+  and version, or go to its definition, which lands on its key in
+  `acme.libraries.yml`; the `attach_library()` in
+  `templates/acme-greeting.html.twig`, the `dependencies` of
+  `web/themes/custom/acme_theme/acme_theme.libraries.yml`, and the
+  `libraries` of `acme_theme.info.yml` go there too. Complete a library name
+  in any of them; core's libraries, such as `core/drupal`, are offered too.
 - A module's service provider may build a service from a class of its own.
   In `acme_french_site_name()` in `web/modules/custom/acme/acme.module`,
   hover `$languageManager`: core declares `language_manager` as

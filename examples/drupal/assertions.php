@@ -315,6 +315,50 @@ preg_match_all("/'#type'(?:\\] =| =>) '([^']+)'/", $controllerSource, $namedElem
 check('GreetingController names the custom and a core element in a literal and an assignment', $namedElements[1] === ['acme_greeting_card', 'details']);
 check('every element GreetingController names is declared', array_diff($namedElements[1], $declaredElements) === []);
 
+// ─── Libraries ──────────────────────────────────────────────────────────────
+
+// A library is `<extension>/<key>`, the key a top-level one of the
+// extension's libraries file (core's AssetResolver splits it on the first
+// slash).
+$libraryFiles = [
+    'core' => "$web/core/core.libraries.yml",
+    'acme' => "$module/acme.libraries.yml",
+    'acme_theme' => "$theme/acme_theme.libraries.yml",
+];
+$libraries = [];
+foreach ($libraryFiles as $extension => $file) {
+    foreach (Yaml::decode((string) file_get_contents($file)) as $key => $library) {
+        $libraries["$extension/$key"] = $library;
+    }
+}
+check('acme.libraries.yml declares acme/greeting', isset($libraries['acme/greeting']));
+check('acme_theme.libraries.yml declares acme_theme/global', isset($libraries['acme_theme/global']));
+check('core.libraries.yml declares core/drupal', isset($libraries['core/drupal']));
+check("acme/greeting's version is the 1.x its hover shows", ($libraries['acme/greeting']['version'] ?? null) === '1.x');
+check('the CSS files the libraries name exist', is_file("$module/css/acme-greeting.css") && is_file("$theme/css/global.css"));
+check("Drupal's AssetResolver splits a library name on its first slash", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Asset/AssetResolver.php"), "[\$extension, \$name] = explode('/', \$library, 2);"));
+
+// Every library the demo attaches or depends on is declared.
+$template = (string) file_get_contents("$module/templates/acme-greeting.html.twig");
+preg_match_all("/attach_library\\('([^']+)'\\)/", $template, $attachedInTwig);
+preg_match_all("/'#attached' => \\['library' => \\['([^']+)'\\]\\]/", $controllerSource, $attachedInPhp);
+$attached = [
+    'GreetingController::greet()' => $attachedInPhp[1],
+    'the acme_greeting template' => $attachedInTwig[1],
+    'the dependencies of acme/greeting' => $libraries['acme/greeting']['dependencies'] ?? [],
+    'the dependencies of acme_theme/global' => $libraries['acme_theme/global']['dependencies'] ?? [],
+    "acme_theme's info file" => $themeInfo['libraries'] ?? [],
+];
+$preprocessed = ['attributes' => ['class' => []]];
+acme_theme_preprocess_acme_greeting($preprocessed);
+$attached['acme_theme_preprocess_acme_greeting()'] = $preprocessed['#attached']['library'] ?? [];
+foreach ($attached as $where => $names) {
+    check("$where attaches a library", $names !== []);
+    check("every library $where attaches is declared", array_diff($names, array_keys($libraries)) === []);
+}
+check("core's Twig extension declares attach_library()", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Template/TwigExtension.php"), "new TwigFunction('attach_library'"));
+check("core's ThemeManager collects the #attached a preprocess function sets", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeManager.php"), "foreach (['#attached', '#cache'] as \$key)"));
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

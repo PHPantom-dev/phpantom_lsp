@@ -96,7 +96,8 @@ impl CheckedStringKind {
             // name that nothing above defines starts a new block.  A
             // template variable no render was found to pass may be passed
             // by one that builds its context at runtime.  A module can add
-            // an entity type in PHP, through `hook_entity_type_build()`.
+            // an entity type in PHP, through `hook_entity_type_build()`,
+            // and a library, through `hook_library_info_build()`.
             // Drupal sends a route parameter no path declares as the query
             // string.  A serializer group nothing puts a member in selects
             // nothing, which is no error either.  A module can declare
@@ -115,6 +116,7 @@ impl CheckedStringKind {
             | StringKeyKind::DrupalConfigKey
             | StringKeyKind::DrupalThemeHook
             | StringKeyKind::DrupalThemeHookVariable
+            | StringKeyKind::DrupalLibrary
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack

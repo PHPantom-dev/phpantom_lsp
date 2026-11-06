@@ -81,6 +81,7 @@ pub(crate) mod command_params;
 mod doctrine_fields;
 mod drupal_config;
 pub(crate) mod drupal_hooks;
+mod drupal_libraries;
 mod drupal_permissions;
 pub(crate) mod drupal_route_params;
 mod drupal_theme_hooks;

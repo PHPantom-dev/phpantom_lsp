@@ -9,9 +9,9 @@ use tower_lsp_server::gen_lsp_types::*;
 /// Custom modules in the generated site, each declaring `SERVICES`
 /// services, `ROUTES` routes, `ENTITY_TYPES` entity types, `PERMISSIONS`
 /// permissions, `CONFIGS` configuration objects, with their default
-/// configuration and schema, `ELEMENTS` render elements, and `THEME_HOOKS`
-/// theme hooks, documenting `HOOKS` hooks, and implementing the hooks the
-/// module before it documents.
+/// configuration and schema, `ELEMENTS` render elements, `THEME_HOOKS`
+/// theme hooks, and `LIBRARIES` libraries, documenting `HOOKS` hooks, and
+/// implementing the hooks the module before it documents.
 const MODULES: usize = 30;
 const SERVICES: usize = 10;
 const ROUTES: usize = 10;
@@ -21,6 +21,7 @@ const CONFIGS: usize = 10;
 const ELEMENTS: usize = 3;
 const HOOKS: usize = 10;
 const THEME_HOOKS: usize = 5;
+const LIBRARIES: usize = 10;
 
 const COMPOSER: &str = r#"{
     "require": { "drupal/core-recommended": "^11" },
@@ -95,6 +96,7 @@ final class Consumer
         \Drupal::config('mod1.');
         $build = ['#type' => 'mod1_'];
         $themed = ['#theme' => 'mod1_'];
+        $build = ['#attached' => ['library' => ['mod1/']]];
     }
 }
 "#;
@@ -163,6 +165,15 @@ fn generate_site() -> Vec<(String, String)> {
             );
         }
         files.push((format!("{dir}/config/schema/mod{m}.schema.yml"), schema));
+
+        let mut libraries = String::new();
+        for l in 0..LIBRARIES {
+            let _ = writeln!(
+                libraries,
+                "library{l}:\n  version: 1.x\n  js:\n    js/library{l}.js: {{}}\n  dependencies:\n    - core/drupal"
+            );
+        }
+        files.push((format!("{dir}/mod{m}.libraries.yml"), libraries));
 
         for e in 0..ENTITY_TYPES {
             files.push((
@@ -381,6 +392,13 @@ fn bench_drupal_name_completion(c: &mut Criterion) {
             CONSUMER_PHP,
             "'#theme' => 'mod1_'",
             "mod1_widget4",
+        ),
+        (
+            "library_name",
+            &consumer,
+            CONSUMER_PHP,
+            "['library' => ['mod1/'",
+            "mod1/library7",
         ),
         (
             "hook_implementation",

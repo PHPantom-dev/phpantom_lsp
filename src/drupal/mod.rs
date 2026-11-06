@@ -21,6 +21,7 @@ pub(crate) mod config;
 pub(crate) mod config_keys;
 pub(crate) mod elements;
 pub(crate) mod hooks;
+pub(crate) mod libraries;
 pub(crate) mod links;
 pub(crate) mod permissions;
 pub(crate) mod routing;
@@ -85,6 +86,10 @@ pub(crate) enum DeclarationFile {
     Links,
     /// `<extension>.permissions.yml`.
     Permissions,
+    /// `<extension>.libraries.yml`.
+    Libraries,
+    /// An extension's `<extension>.info.yml`.
+    Info,
 }
 
 /// The kind of declaration file the file name at the end of `path` is, if
@@ -108,6 +113,10 @@ fn declaration_file_kind(path: &str) -> Option<DeclarationFile> {
     .any(|suffix| name.ends_with(suffix))
     {
         Some(DeclarationFile::Links)
+    } else if libraries::libraries_file_extension(name).is_some() {
+        Some(DeclarationFile::Libraries)
+    } else if hooks::is_info_file_name(name) {
+        Some(DeclarationFile::Info)
     } else {
         None
     }
@@ -258,11 +267,12 @@ pub(crate) fn matches_route_pattern(pattern: &str, name: &str) -> bool {
 }
 
 /// Whether `path` is a file Drupal reads declarations from: a services,
-/// routing, links, or permissions file, or an extension's `*.info.yml`.
+/// routing, links, permissions, or libraries file, or an extension's
+/// `*.info.yml`.
 pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| declaration_file_kind(name).is_some() || hooks::is_info_file_name(name))
+        .is_some_and(|name| declaration_file_kind(name).is_some())
         && !is_test_fixture(path, web_root)
         && !is_unloaded(path, web_root)
 }
@@ -362,7 +372,13 @@ impl Backend {
                 .and_then(|name| name.to_str())
                 .unwrap_or_default();
             if hooks::is_info_file_name(name) {
-                extensions.extend(hooks::read_extension(&file));
+                if let Some(extension) = hooks::read_extension(&file) {
+                    // A theme's info file attaches libraries.
+                    if extension.is_theme {
+                        yaml.push(file);
+                    }
+                    extensions.push(extension);
+                }
             } else if name.ends_with(".yml") {
                 yaml.push(file);
             } else {

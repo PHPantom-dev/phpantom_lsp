@@ -16,6 +16,7 @@ pub(super) fn extract_assignment_expr<'a>(
     crate::symbol_map::extraction::doctrine_dql::note_builder_assignment(assign, ctx);
     emit_drupal_render_element_assignment(assign, ctx);
     emit_drupal_render_array_assignment(assign, ctx);
+    emit_drupal_attached_assignment_spans(assign, ctx);
 
     // The definition only becomes visible *after* the entire
     // assignment expression — the RHS still sees the previous

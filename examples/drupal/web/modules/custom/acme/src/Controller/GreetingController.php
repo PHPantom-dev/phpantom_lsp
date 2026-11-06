@@ -36,6 +36,9 @@ final class GreetingController extends ControllerBase
             '#theme' => 'acme_greeting',
             '#name' => $name,
             '#greeting' => $this->greeter->greet($name),
+            // Try: hover 'acme/greeting' to see its libraries file and
+            // version, or complete a library name in the list.
+            '#attached' => ['library' => ['acme/greeting']],
         ];
     }
 

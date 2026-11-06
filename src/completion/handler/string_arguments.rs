@@ -160,6 +160,19 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Drupal libraries ────────────────────────────────────
+        // `'#attached' => ['library' => ['|']]` and
+        // `$build['#attached']['library'][] = '|'`.  Asked before the
+        // Symfony names, which would read an item after a comma as an
+        // argument of a call around the array.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_drupal_library_completion(uri, content, position, code)
+        {
+            return Some(response);
+        }
+
         // ── Symfony form options ────────────────────────────────
         // `$builder->add('email', EmailType::class, ['|' => …])`, wherever
         // the form component is used.

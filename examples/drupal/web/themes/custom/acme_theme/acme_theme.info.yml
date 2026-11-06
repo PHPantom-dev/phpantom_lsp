@@ -4,3 +4,7 @@ description: 'Theme for the PHPantom Drupal playground.'
 package: PHPantom
 core_version_requirement: ^11
 base theme: false
+# Try: hover acme_theme/global to see the file that declares it and its
+# version, or complete a library name in this list.
+libraries:
+  - acme_theme/global

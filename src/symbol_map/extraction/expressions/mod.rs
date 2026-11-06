@@ -245,6 +245,7 @@ pub(super) fn extract_from_expression<'a>(
             emit_drupal_config_target_entry_spans(&array.elements, ctx);
             emit_drupal_render_element_reads(&array.elements, ctx);
             emit_drupal_render_array_spans(&array.elements, ctx);
+            emit_drupal_attached_array_spans(&array.elements, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::LegacyArray(array) => {
@@ -252,6 +253,7 @@ pub(super) fn extract_from_expression<'a>(
             emit_drupal_config_target_entry_spans(&array.elements, ctx);
             emit_drupal_render_element_reads(&array.elements, ctx);
             emit_drupal_render_array_spans(&array.elements, ctx);
+            emit_drupal_attached_array_spans(&array.elements, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::List(list) => {

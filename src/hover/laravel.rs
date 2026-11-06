@@ -422,6 +422,7 @@ impl Backend {
                 }
                 ("Route parameter", detail)
             }
+            StringKeyKind::DrupalLibrary => ("Library", self.drupal_library_detail(key)),
             // An installed bundle's schema is not read, so a key no schema
             // of the project's declares is only not one of its own.
             StringKeyKind::SymfonyConfigKey => {

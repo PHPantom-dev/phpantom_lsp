@@ -1,6 +1,7 @@
 //! The entity types a Drupal entity class declares, by attribute or by the
-//! annotation older code uses, and the route names Drupal's static and
-//! constructor calls read (see [`crate::drupal`]).
+//! annotation older code uses, the route names Drupal's static and
+//! constructor calls read, and the libraries a render array attaches (see
+//! [`crate::drupal`]).
 
 use super::*;
 use crate::symbol_map::extraction::symfony::{
@@ -2169,6 +2170,124 @@ fn annotation_entries(doc: &str, from: usize) -> Vec<AnnotationEntry<'_>> {
         i += 1;
     }
     entries
+}
+
+// ─── Libraries ──────────────────────────────────────────────────────────────
+
+/// The key a render array attaches its assets under.
+const ATTACHED: &str = "#attached";
+
+/// The key of the libraries among them.
+const LIBRARY: &str = "library";
+
+/// Record the libraries an array literal attaches: the `library` list of
+/// its `'#attached'` entry.
+pub(in crate::symbol_map::extraction) fn emit_drupal_attached_array_spans(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_attached {
+        return;
+    }
+    for element in elements.iter() {
+        if let ArrayElement::KeyValue(entry) = element
+            && is_literal_key(entry.key, ATTACHED, ctx.content)
+        {
+            push_attached_libraries(entry.value, ctx);
+        }
+    }
+}
+
+/// Record the libraries an assignment into a render array's `#attached`
+/// attaches: `$build['#attached']['library'][] = '…'`, a whole `library`
+/// list, or a whole `#attached` array.
+pub(in crate::symbol_map::extraction) fn emit_drupal_attached_assignment_spans(
+    assign: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_attached || !assign.operator.is_assign() {
+        return;
+    }
+    match assign.lhs {
+        Expression::ArrayAppend(append)
+            if accesses_keys(append.array, &[ATTACHED, LIBRARY], ctx.content) =>
+        {
+            push_library(assign.rhs, ctx);
+        }
+        lhs if accesses_keys(lhs, &[ATTACHED, LIBRARY], ctx.content) => {
+            push_library_list(assign.rhs, ctx);
+        }
+        lhs if accesses_keys(lhs, &[ATTACHED], ctx.content) => {
+            push_attached_libraries(assign.rhs, ctx);
+        }
+        _ => {}
+    }
+}
+
+/// Whether `expression` is an array access whose last offsets are the
+/// string literals `keys`, in order.
+fn accesses_keys(mut expression: &Expression<'_>, keys: &[&str], content: &str) -> bool {
+    for key in keys.iter().rev() {
+        let Expression::ArrayAccess(access) = expression else {
+            return false;
+        };
+        if !is_literal_key(access.index, key, content) {
+            return false;
+        }
+        expression = access.array;
+    }
+    true
+}
+
+/// Whether `expression` is the string literal `key`.
+fn is_literal_key(expression: &Expression<'_>, key: &str, content: &str) -> bool {
+    resolved_string_literal(expression, content).is_some_and(|(found, _, _)| found == key)
+}
+
+/// Record the libraries of the `library` list of an `#attached` array
+/// literal.
+fn push_attached_libraries(attached: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some(entries) = crate::parser::array_literal_elements(attached) else {
+        return;
+    };
+    for entry in entries.iter() {
+        if let ArrayElement::KeyValue(entry) = entry
+            && is_literal_key(entry.key, LIBRARY, ctx.content)
+        {
+            push_library_list(entry.value, ctx);
+        }
+    }
+}
+
+/// Record the libraries of a list literal of them.
+fn push_library_list(list: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some(items) = crate::parser::array_literal_elements(list) else {
+        return;
+    };
+    for item in items.iter() {
+        if let ArrayElement::Value(item) = item {
+            push_library(item.value, ctx);
+        }
+    }
+}
+
+/// Record the library a string literal names.
+fn push_library(expression: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some((name, start, end)) = resolved_string_literal(expression, ctx.content) else {
+        return;
+    };
+    if crate::drupal::libraries::is_library_name(name) {
+        ctx.spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::DrupalLibrary,
+                key: name.to_string(),
+                is_write: false,
+                is_optional: false,
+            },
+        });
+    }
 }
 
 #[cfg(test)]

@@ -215,6 +215,12 @@ pub(crate) enum StringKeyKind {
     /// declared by a key of the hook's `variables`, and read by the `#`
     /// keys of a render array whose `#theme` names the hook.
     DrupalThemeHookVariable,
+    /// A Drupal library, `<extension>/<name>`: declared by a top-level key
+    /// of an extension's libraries file, and read by the `library` list of
+    /// a render array's `#attached`, a template's `attach_library()`, the
+    /// `dependencies` of a library, and the `libraries` of a theme's info
+    /// file (see `drupal::libraries`).
+    DrupalLibrary,
 }
 
 impl StringKeyKind {
@@ -271,7 +277,8 @@ impl StringKeyKind {
             | Self::DrupalConfigKey
             | Self::DrupalRenderElement
             | Self::DrupalThemeHook
-            | Self::DrupalThemeHookVariable => KeyFramework::Drupal,
+            | Self::DrupalThemeHookVariable
+            | Self::DrupalLibrary => KeyFramework::Drupal,
         }
     }
 

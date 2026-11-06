@@ -171,6 +171,10 @@ struct ExtractionCtx<'a> {
     /// Drupal makes, such as `\Drupal::service()`, the entity types an
     /// entity class declares, and the entity type IDs its manager reads.
     drupal: bool,
+    /// Whether the file is a Drupal site's and says `#attached`, the only
+    /// key of a render array its libraries are attached under.  Spares
+    /// every other file's arrays and assignments the look.
+    drupal_attached: bool,
     /// Whether the project uses Twig, outside Symfony too.  Gates the
     /// `render()` calls recorded for the type engine to confirm as naming
     /// a template.
@@ -579,6 +583,7 @@ fn extract_symbol_map_inner(
         symfony,
         service_container,
         drupal,
+        drupal_attached: drupal && memchr::memmem::find(content.as_bytes(), b"#attached").is_some(),
         twig,
         uses_symfony_configurators: None,
         uses_symfony_routing_configurators: None,
