@@ -2738,6 +2738,24 @@ When the domain has no catalogue yet, offer to create
 <p><strong>Where to look:</strong> <code>src/code_actions/insert_translation_key.rs</code>,
 <code>src/symfony/translations.rs</code> (<code>catalogue_spans</code>, <code>scan_yaml</code>,
 <code>scan_xliff</code>).</p>
+<hr />
+<h2 id="f67-rename-an-import-alias-within-its-file">F67. Rename an import alias within its file<a class="headerlink" href="#f67-rename-an-import-alias-within-its-file" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="x">use Illuminate\Database\Eloquent\Collection as EloquentCollection;</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="x">function load(): EloquentCollection {}</span>
+</code></pre></div>
+<p>The "Alias <code>Collection</code> as <code>EloquentCollection</code>" code action picks the
+alias itself, since a code action cannot ask for a name. To choose
+another, a rename started on the alias in the <code>use</code> statement should
+rename it only in this file: the <code>as</code> clause and every name the block
+writes through it, refusing a name the block already binds. The symbol
+map records a span for the imported name in a <code>use</code> statement but none
+for its alias. A rename started on a reference through the alias renames the class
+itself, and should keep doing so.</p>
+<p><strong>Where to look:</strong> <code>src/code_actions/import_alias.rs</code> (finding the
+import under the cursor, the names written through it, and what the
+block already binds), <code>src/rename/prepare.rs</code>.</p>
 
 
 
