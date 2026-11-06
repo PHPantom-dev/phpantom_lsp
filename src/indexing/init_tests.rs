@@ -619,9 +619,14 @@ async fn the_root_vendor_wins_over_a_bin_namespace() {
             .join("vendor/phpunit/phpunit/src/Framework/TestCase.php"),
         "<?php\nnamespace PHPUnit\\Framework;\nclass TestCase {}\n",
     );
+    // Package files are indexed under their canonical path, which on
+    // Windows is the long form of the temp dir's 8.3 short name.
     let root_copy = crate::util::path_to_uri(
-        &dir.path()
-            .join("vendor/phpunit/phpunit/src/Framework/TestCase.php"),
+        &dunce::canonicalize(
+            dir.path()
+                .join("vendor/phpunit/phpunit/src/Framework/TestCase.php"),
+        )
+        .unwrap(),
     );
 
     let backend = index_root_project(dir.path()).await;

@@ -298,6 +298,38 @@ crash mid-work; the previous agent may have edited code but died before
 fixing the resulting breakage. "It was already broken" is not an excuse
 to leave it broken.
 
+## Writing Portable Code and Tests
+
+CI runs the suite on Windows too, and local runs are on Linux, so a
+Windows-only failure shows up only after you push. These are the
+mistakes that have broken it:
+
+- **Canonicalize with `dunce::canonicalize`.** The standard library's
+  version returns a verbatim `\\?\C:\...` path on Windows that never
+  equals the same file reached any other way. `clippy.toml` forbids it.
+- **Compare against the spelling the index stores.** Package roots and
+  the files under them are stored canonicalized. A temp dir can come
+  back as an 8.3 short name (`C:\Users\RUNNER~1\...`), so an expected
+  path or URI built straight from `tempdir()` spells the same file
+  differently. Canonicalize the expected path first (after the file
+  exists).
+- **Paths are not strings.** Don't test absoluteness with
+  `starts_with('/')` or a suffix with `str::ends_with`. Use
+  `Path::is_absolute`, `Path::ends_with`, and `Path::join`, and when a
+  test compares relative paths as text, normalise `\` to `/` first.
+- **Build test URIs from real paths.** `file:///foo.php` has no drive
+  letter, so it is not a path on Windows. Make a path under
+  `std::env::temp_dir()` (or a `tempdir()`) and convert it with
+  `crate::util::path_to_uri`.
+- **The filesystem is case-insensitive.** A namespace like `Tests\Unit`
+  is also a relative path that finds `tests/Unit`.
+- **Executables have extensions.** Tools in `node_modules/.bin` or
+  `vendor/bin` are `.cmd`/`.bat`/`.exe` files there. Use the
+  platform-specific name the code already defines (e.g. `BINARY` in the
+  Blade formatter) rather than a hardcoded Unix name.
+- **Line endings can be CRLF.** User files may use `\r\n`, so offset
+  and line arithmetic must not assume `\n`.
+
 ## Discovered Bugs
 
 If you discover a bug while working on the system, whether related to
