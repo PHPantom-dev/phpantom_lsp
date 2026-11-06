@@ -1662,9 +1662,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     let n_blade;
     {
         let m = backend.files.read();
-        let lowerings: Vec<&crate::file_state::BladeFileState> = m
+        let lowerings: Vec<&crate::file_state::TemplateFileState> = m
             .values()
-            .filter_map(|state| state.blade.as_ref())
+            .filter_map(|state| state.template.as_ref())
             .collect();
         n_blade = lowerings.len();
         for lowering in lowerings {
@@ -1784,7 +1784,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         );
     };
     probe("blade lowerings", &mut || {
-        clear_file_state_field(backend, |state| state.blade = None)
+        clear_file_state_field(backend, |state| state.template = None)
     });
     probe("schema_index", &mut || {
         *backend.laravel.schema_index.write() = Default::default()

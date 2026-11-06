@@ -323,6 +323,7 @@ pub mod stubs;
 mod symbol_index;
 pub(crate) mod symbol_map;
 mod symfony;
+pub mod template;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;

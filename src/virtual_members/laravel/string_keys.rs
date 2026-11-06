@@ -377,7 +377,7 @@ pub(crate) fn find_laravel_string_key_references(
             // translates the whole list back as though it all did.
             let decl_uri = decl.uri.as_str();
             let range = if backend.is_blade_file(decl_uri) {
-                backend.translate_blade_range_to_php(decl_uri, decl.range)
+                backend.translate_template_range_to_php(decl_uri, decl.range)
             } else {
                 decl.range
             };

@@ -585,10 +585,10 @@ impl LanguageServer for Backend {
 
             backend.handle_with_position("hover", uri, position, |content, pos| {
                 let mut hover = backend.handle_hover(uri, content, pos)?;
-                if backend.is_blade_file(uri)
+                if backend.is_php_template(uri)
                     && let Some(range) = &mut hover.range
                 {
-                    *range = backend.translate_blade_range(uri, *range);
+                    *range = backend.translate_template_range(uri, *range);
                 }
                 Some(hover)
             })
@@ -768,7 +768,7 @@ impl LanguageServer for Backend {
                                     .into_iter()
                                     .filter_map(|mut h| {
                                         h.range =
-                                            backend.try_translate_blade_range(uri, h.range)?;
+                                            backend.try_translate_template_range(uri, h.range)?;
                                         Some(h)
                                     })
                                     .collect()
@@ -807,10 +807,10 @@ impl LanguageServer for Backend {
             };
             Ok(response.and_then(|res| match res {
                 PrepareRenameResult::Range(r) => backend
-                    .try_translate_blade_range(uri, r)
+                    .try_translate_template_range(uri, r)
                     .map(PrepareRenameResult::Range),
                 PrepareRenameResult::PrepareRenamePlaceholder(p) => backend
-                    .try_translate_blade_range(uri, p.range)
+                    .try_translate_template_range(uri, p.range)
                     .map(|range| {
                         PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
                             range,
@@ -1145,9 +1145,10 @@ impl LanguageServer for Backend {
                                 items
                                     .into_iter()
                                     .map(|mut item| {
-                                        item.range = backend.translate_blade_range(uri, item.range);
+                                        item.range =
+                                            backend.translate_template_range(uri, item.range);
                                         item.selection_range = backend
-                                            .translate_blade_range(uri, item.selection_range);
+                                            .translate_template_range(uri, item.selection_range);
                                         item
                                     })
                                     .collect()

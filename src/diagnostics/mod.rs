@@ -332,8 +332,8 @@ impl Backend {
             .files
             .read()
             .get(uri)
-            .and_then(|state| state.blade.clone());
-        if let Some(crate::file_state::BladeFileState {
+            .and_then(|state| state.template.clone());
+        if let Some(crate::file_state::TemplateFileState {
             virtual_php,
             source_map: map,
         }) = &blade
@@ -404,7 +404,7 @@ mod tests {
 
         // First 6 lines are prologue (including wrapper function declaration).
         let virtual_php = backend
-            .blade_virtual_php_arc(uri)
+            .template_virtual_php_arc(uri)
             .expect("Virtual content should exist");
 
         // Find start of line 5 (0-indexed).

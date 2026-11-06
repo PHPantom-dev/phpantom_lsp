@@ -28,24 +28,24 @@ impl Backend {
     /// integration tests to diagnose the virtual content the way the
     /// live pipeline does).
     pub fn blade_virtual_php(&self, uri: &str) -> Option<String> {
-        self.blade_virtual_php_arc(uri)
+        self.template_virtual_php_arc(uri)
             .map(|php| String::clone(&php))
     }
 
     /// [`Self::blade_virtual_php`] without the copy, for the request paths
     /// that only need to read the text.
-    pub(crate) fn blade_virtual_php_arc(&self, uri: &str) -> Option<Arc<String>> {
+    pub(crate) fn template_virtual_php_arc(&self, uri: &str) -> Option<Arc<String>> {
         let files = self.files.read();
-        Some(Arc::clone(&files.get(uri)?.blade.as_ref()?.virtual_php))
+        Some(Arc::clone(&files.get(uri)?.template.as_ref()?.virtual_php))
     }
 
     /// The source map from a template's virtual PHP back to the template.
-    pub(crate) fn blade_source_map(
+    pub(crate) fn template_source_map(
         &self,
         uri: &str,
-    ) -> Option<Arc<crate::blade::source_map::BladeSourceMap>> {
+    ) -> Option<Arc<crate::template::source_map::TemplateSourceMap>> {
         let files = self.files.read();
-        Some(Arc::clone(&files.get(uri)?.blade.as_ref()?.source_map))
+        Some(Arc::clone(&files.get(uri)?.template.as_ref()?.source_map))
     }
 
     /// Every template whose lowering has been recorded.
@@ -53,7 +53,7 @@ impl Backend {
         self.files
             .read()
             .iter()
-            .filter(|(_, state)| state.blade.is_some())
+            .filter(|(_, state)| state.template.is_some())
             .map(|(uri, _)| uri.clone())
             .collect()
     }

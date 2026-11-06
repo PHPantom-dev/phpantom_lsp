@@ -262,7 +262,7 @@ impl Backend {
         // the injected prologue rather than clamping them to the
         // template's start.
         match response {
-            Some(response) if self.is_blade_file(uri) => {
+            Some(response) if self.is_php_template(uri) => {
                 Some(self.translate_completion_response(uri, response))
             }
             other => other,

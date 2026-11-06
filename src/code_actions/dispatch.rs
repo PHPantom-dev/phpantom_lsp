@@ -234,7 +234,7 @@ impl Backend {
         let translated;
         let params = if is_template {
             let mut moved = params.clone();
-            moved.range = self.translate_blade_range_to_php(uri, params.range);
+            moved.range = self.translate_template_range_to_php(uri, params.range);
             translated = moved;
             &translated
         } else {

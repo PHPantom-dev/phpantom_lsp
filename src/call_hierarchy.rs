@@ -352,8 +352,8 @@ impl Backend {
         if !self.is_blade_file(&uri) {
             return;
         }
-        item.range = self.translate_blade_range(&uri, item.range);
-        item.selection_range = self.translate_blade_range(&uri, item.selection_range);
+        item.range = self.translate_template_range(&uri, item.range);
+        item.selection_range = self.translate_template_range(&uri, item.selection_range);
     }
 
     fn translate_ranges_to_blade(&self, uri: &str, ranges: &mut [Range]) {
@@ -361,7 +361,7 @@ impl Backend {
             return;
         }
         for range in ranges {
-            *range = self.translate_blade_range(uri, *range);
+            *range = self.translate_template_range(uri, *range);
         }
     }
 }
