@@ -1257,17 +1257,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#dr7-render-arrays-theme-hooks-and-libraries" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        DR7. Render arrays, theme hooks, and libraries
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#dr10-plugin-ids" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1410,6 +1399,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#dr24-warn-on-unknown-theme-hook-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR24. Warn on unknown theme hook names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1444,9 +1444,11 @@ the services the <code>*.services.yml</code> files declare, the entity types
 entity classes declare, the routes the routing files, route attributes,
 and route builders declare, the hooks the <code>*.api.php</code> files document
 and the extensions implement, the permissions the <code>*.permissions.yml</code>
-files declare, and the configuration objects and keys the default
-configuration and the configuration schema declare are read. Nothing
-reads fields yet.</p>
+files declare, the configuration objects and keys the default
+configuration and the configuration schema declare, the theme hooks
+<code>hook_theme()</code> implementations declare, the render elements element
+classes declare, and the libraries the <code>*.libraries.yml</code> files declare
+are read. Nothing reads fields yet.</p>
 <p>The requests in
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/issues/48">#48</a> are the
 scope of this document: the indexing it asked for first has shipped, and
@@ -1461,9 +1463,10 @@ is what they expect from an editor.</p>
 installs core into <code>web/core</code> through Composer (<code>memory_drupal_module</code>),
 next to the other framework scenarios. <code>benches/drupal_completion.rs</code>
 measures completion of service IDs, route names, entity type IDs,
-permission names, configuration names, hook names, and hook
-implementations over a generated site with many custom modules. Every item that adds a name Drupal declares adds its case to
-it.</p>
+permission names, configuration names, render element names, hook names,
+theme hook names, library names, and hook implementations over a
+generated site with many custom modules. Every item that adds a name
+Drupal declares adds its case to it.</p>
 <p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
@@ -1502,46 +1505,27 @@ entity as <code>FieldItemListInterface</code> without checking the name. That is
 the floor; reading the configuration is what lets an editor complete
 names and report a misspelt one.</p>
 <hr />
-<h2 id="dr7-render-arrays-theme-hooks-and-libraries">DR7. Render arrays, theme hooks, and libraries<a class="headerlink" href="#dr7-render-arrays-theme-hooks-and-libraries" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">return [</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    '#theme' =&gt; 'acme_order_summary',</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    '#order' =&gt; $order,</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    '#attached' =&gt; ['library' =&gt; ['acme/order-summary']],</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">];</span>
-</code></pre></div>
-<ul>
-<li><strong><code>#theme</code></strong> names a theme hook a <code>hook_theme()</code> implementation
-  declares, which renders <code>templates/acme-order-summary.html.twig</code>.
-  Navigate from the string to both, complete it, and complete the
-  <code>#</code>-prefixed variables the hook declares.</li>
-<li><strong><code>#type</code></strong> names a render or form element class
-  (<code>#[RenderElement('details')]</code>, <code>#[FormElement('textfield')]</code>).</li>
-<li><strong>Libraries</strong> in <code>#attached</code> name entries in <code>&lt;module&gt;.libraries.yml</code>.</li>
-</ul>
-<p>The Twig support already finds templates outside Symfony, and a
-template's variables from the renders that name it; a theme hook's
-variables would be one more source of them (see <code>src/twig/variables.rs</code>).</p>
-<hr />
 <h2 id="dr10-plugin-ids">DR10. Plugin IDs<a class="headerlink" href="#dr10-plugin-ids" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">#[Block(id: 'acme_order_summary', admin_label: new TranslatableMarkup('Order summary'))]</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">final class OrderSummaryBlock extends BlockBase { … }</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$block = $this-&gt;blockManager-&gt;createInstance('acme_order_summary');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">#[Block(id: 'acme_order_summary', admin_label: new TranslatableMarkup('Order summary'))]</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">final class OrderSummaryBlock extends BlockBase { … }</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">$block = $this-&gt;blockManager-&gt;createInstance('acme_order_summary');</span>
 </code></pre></div>
 <p>Blocks, field types, formatters, widgets, queue workers, and the other
 plugin types declare an ID in an attribute (or, in older code, a
 docblock annotation). Complete and navigate plugin IDs where a plugin
 manager takes one (<code>createInstance()</code>, <code>getDefinition()</code>,
-<code>hasDefinition()</code>), and in the YAML and render arrays that name them
-(<code>'#type'</code> is <a href="#dr7-render-arrays-theme-hooks-and-libraries">DR7</a>), and
-type <code>createInstance()</code> as the plugin class.</p>
+<code>hasDefinition()</code>), and in the YAML that names them, and type
+<code>createInstance()</code> as the plugin class. Render elements, the plugins a
+render array's <code>'#type'</code> names, already complete and navigate, and the
+reader that finds their attributes and annotations takes the attribute
+class as a parameter, so the other plugin types can reuse it.</p>
 <hr />
 <h2 id="dr11-form-and-render-callbacks">DR11. Form and render callbacks<a class="headerlink" href="#dr11-form-and-render-callbacks" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$form['actions']['submit']['#submit'][] = '::submitOrder';</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$form['country']['#ajax'] = ['callback' =&gt; '::updateRegions'];</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$form['actions']['submit']['#submit'][] = '::submitOrder';</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$form['country']['#ajax'] = ['callback' =&gt; '::updateRegions'];</span>
 </code></pre></div>
 <p><code>#submit</code>, <code>#validate</code>, <code>#element_validate</code>, <code>#pre_render</code>,
 <code>#after_build</code>, and an <code>#ajax</code> <code>callback</code> name methods of the form class
@@ -1550,7 +1534,7 @@ complete them, and report one that names nothing.</p>
 <hr />
 <h2 id="dr12-translation-placeholders">DR12. Translation placeholders<a class="headerlink" href="#dr12-translation-placeholders" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$this-&gt;t('Order @number was placed by %name', ['@number' =&gt; $id, '%nmae' =&gt; $name]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$this-&gt;t('Order @number was placed by %name', ['@number' =&gt; $id, '%nmae' =&gt; $name]);</span>
 </code></pre></div>
 <p><code>t()</code>, <code>$this-&gt;t()</code>, <code>new TranslatableMarkup()</code>, and <code>formatPlural()</code>
 replace <code>@</code>, <code>%</code>, and <code>:</code> placeholders from the array they are given.
@@ -1559,11 +1543,11 @@ a key the string never uses.</p>
 <hr />
 <h2 id="dr13-module-names-and-infoyml">DR13. Module names and <code>*.info.yml</code><a class="headerlink" href="#dr13-module-names-and-infoyml" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">\Drupal::moduleHandler()-&gt;moduleExists('acme_shop');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">\Drupal::moduleHandler()-&gt;moduleExists('acme_shop');</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">dependencies</span><span class="p">:</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">drupal:node</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">acme:acme_shop</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">dependencies</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">drupal:node</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">acme:acme_shop</span>
 </code></pre></div>
 <p>A module's machine name is the basename of its <code>*.info.yml</code>. Complete
 and navigate machine names in <code>moduleExists()</code>, <code>getModule()</code>, and the
@@ -1590,11 +1574,11 @@ in the README as not ported.</p>
 <hr />
 <h2 id="dr16-event-subscribers">DR16. Event subscribers<a class="headerlink" href="#dr16-event-subscribers" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">final class AcmeSubscriber implements EventSubscriberInterface {</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    public static function getSubscribedEvents(): array {</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">        return [KernelEvents::REQUEST =&gt; 'onRequest'];</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    }</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">final class AcmeSubscriber implements EventSubscriberInterface {</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    public static function getSubscribedEvents(): array {</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">        return [KernelEvents::REQUEST =&gt; 'onRequest'];</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    }</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>Drupal's event subscribers are Symfony's: a service tagged
 <code>event_subscriber</code> maps event names to its own methods in
@@ -1607,7 +1591,7 @@ the event names complete where Drupal's event dispatcher takes one.</p>
 <hr />
 <h2 id="dr17-warn-on-unknown-service-ids">DR17. Warn on unknown service IDs<a class="headerlink" href="#dr17-warn-on-unknown-service-ids" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$manager = \Drupal::service('acme.order_manger');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$manager = \Drupal::service('acme.order_manger');</span>
 </code></pre></div>
 <p>A service ID no <code>*.services.yml</code> declares is a typo or a module the site
 lacks, and the container throws for it at run time. Report one where
@@ -1617,7 +1601,7 @@ lists, so an ID such a provider may register must not warn.</p>
 <hr />
 <h2 id="dr18-warn-on-unknown-entity-type-ids">DR18. Warn on unknown entity type IDs<a class="headerlink" href="#dr18-warn-on-unknown-entity-type-ids" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$storage = \Drupal::entityTypeManager()-&gt;getStorage('nod');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$storage = \Drupal::entityTypeManager()-&gt;getStorage('nod');</span>
 </code></pre></div>
 <p>An entity type ID no entity class declares is a typo or a module the
 site lacks, and the entity type manager throws for it at run time.
@@ -1628,7 +1612,7 @@ site where an implementation of that hook may add one stays silent.</p>
 <hr />
 <h2 id="dr19-warn-on-unknown-hook-names">DR19. Warn on unknown hook names<a class="headerlink" href="#dr19-warn-on-unknown-hook-names" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">\Drupal::moduleHandler()-&gt;invokeAll('acme_order_placd', [$order]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">\Drupal::moduleHandler()-&gt;invokeAll('acme_order_placd', [$order]);</span>
 </code></pre></div>
 <p>Any module may invoke any hook name, and many hooks have no <code>*.api.php</code>
 documentation, so a name nothing documents is not wrong on that alone.
@@ -1637,8 +1621,8 @@ or invokes anywhere else, which is most likely a typo.</p>
 <hr />
 <h2 id="dr20-complete-route-names-built-in-code">DR20. Complete route names built in code<a class="headerlink" href="#dr20-complete-route-names-built-in-code" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">Url::fromRoute('entity.node.canonical', ['node' =&gt; $nid]);</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">Url::fromRoute('view.content.page_1');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">Url::fromRoute('entity.node.canonical', ['node' =&gt; $nid]);</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">Url::fromRoute('view.content.page_1');</span>
 </code></pre></div>
 <p>Entity routes and Views routes are accepted without a warning, but
 neither completes nor goes to a definition, since no routing file declares
@@ -1656,9 +1640,9 @@ shape.</p>
 <hr />
 <h2 id="dr21-return-types-cores-docblocks-leave-wide">DR21. Return types core's docblocks leave wide<a class="headerlink" href="#dr21-return-types-cores-docblocks-leave-wide" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$url = Url::fromRoute('acme.greeting')-&gt;toString();           // string|GeneratedUrl</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">$query = $db-&gt;select('node', 'n')-&gt;extend(PagerSelectExtender::class);</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">$query-&gt;limit(10);                                            // limit() not found on ExtendableInterface</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$url = Url::fromRoute('acme.greeting')-&gt;toString();           // string|GeneratedUrl</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">$query = $db-&gt;select('node', 'n')-&gt;extend(PagerSelectExtender::class);</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">$query-&gt;limit(10);                                            // limit() not found on ExtendableInterface</span>
 </code></pre></div>
 <p>A few core methods that Drupal code calls everywhere declare a return
 type wider than what the call gives. <code>Url::toString()</code> returns a
@@ -1675,8 +1659,8 @@ if it has shipped), so a <code>string</code> parameter takes the plain
 <hr />
 <h2 id="dr22-complete-permissions-built-in-code">DR22. Complete permissions built in code<a class="headerlink" href="#dr22-complete-permissions-built-in-code" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">$account-&gt;hasPermission('create article content');</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">$account-&gt;hasPermission('use text format basic_html');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$account-&gt;hasPermission('create article content');</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">$account-&gt;hasPermission('use text format basic_html');</span>
 </code></pre></div>
 <p>Permissions a permissions file builds through its
 <code>permission_callbacks</code> neither complete nor go to a definition, since no
@@ -1694,8 +1678,8 @@ names are.</p>
 <hr />
 <h2 id="dr23-warn-on-unknown-permission-names">DR23. Warn on unknown permission names<a class="headerlink" href="#dr23-warn-on-unknown-permission-names" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$account-&gt;hasPermission('administer acme ordres');</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$account-&gt;hasPermission('administer acme+access content');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">$account-&gt;hasPermission('administer acme ordres');</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">$account-&gt;hasPermission('administer acme+access content');</span>
 </code></pre></div>
 <p>A permission name no <code>*.permissions.yml</code> declares is a typo or a module
 the site lacks, and Drupal does not throw for it: the check fails, and the
@@ -1707,6 +1691,22 @@ the access result helpers, the user module's role functions, each part of
 a route's <code>_permission</code>, and an entity type's <code>admin_permission</code>. This
 depends on <a href="#dr22-complete-permissions-built-in-code">DR22</a>: the names
 permission callbacks build would otherwise be reported.</p>
+<hr />
+<h2 id="dr24-warn-on-unknown-theme-hook-names">DR24. Warn on unknown theme hook names<a class="headerlink" href="#dr24-warn-on-unknown-theme-hook-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">return ['#theme' =&gt; 'acme_order_sumary', '#order' =&gt; $order];</span>
+</code></pre></div>
+<p>A <code>#theme</code> that names no theme hook never reaches a template: Drupal
+logs a warning and renders only the array's children and <code>#markup</code>. Render element and library names are reported when
+nothing declares them, but theme hook names are not, because the hooks
+read from <code>hook_theme()</code> implementations are not all of them. Views, in
+core, and some contributed modules build their hooks in a loop or from
+other calls, which are not read, and a hook name does not say which
+extension declares it, so the only safe rule, silence wherever an
+implementation cannot be read, would silence every site. Report a name
+only once those hooks are read, or with a rule that knows which names
+such an implementation can add. A suggestion such as
+<code>acme_greeting__compact</code> is valid when its base hook is.</p>
 
 
 
