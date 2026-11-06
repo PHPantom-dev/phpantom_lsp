@@ -99,6 +99,11 @@ impl Backend {
         uri: &str,
         range: tower_lsp_server::gen_lsp_types::Range,
     ) -> Option<tower_lsp_server::gen_lsp_types::Range> {
+        if let Some(map) = self.template_source_map(uri)
+            && let Some(spans) = &map.copied
+        {
+            return spans.to_source_range(range);
+        }
         Some(tower_lsp_server::gen_lsp_types::Range {
             start: self.try_translate_php_to_template(uri, range.start)?,
             end: self.try_translate_php_to_template(uri, range.end)?,
@@ -115,6 +120,9 @@ impl Backend {
     ) -> Option<tower_lsp_server::gen_lsp_types::CompletionItem> {
         use tower_lsp_server::gen_lsp_types::CompletionItemTextEdit;
 
+        if crate::tempest::is_view(uri) && item.label.starts_with("$__phpantom_tempest_empty_") {
+            return None;
+        }
         if let Some(edit) = item.text_edit.take() {
             item.text_edit = Some(match edit {
                 CompletionItemTextEdit::TextEdit(mut e) => {
@@ -132,7 +140,12 @@ impl Backend {
         if let Some(edits) = item.additional_text_edits.take() {
             let mut translated = Vec::with_capacity(edits.len());
             for mut e in edits {
-                e.range = self.try_translate_template_range(uri, e.range)?;
+                if !(crate::tempest::is_view(uri)
+                    && e.range == Default::default()
+                    && e.new_text.starts_with("<?php use "))
+                {
+                    e.range = self.try_translate_template_range(uri, e.range)?;
+                }
                 translated.push(e);
             }
             item.additional_text_edits = Some(translated);

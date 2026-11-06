@@ -82,7 +82,7 @@ pub(crate) struct AstIndexUpdate {
     pub(super) template: Option<TemplateLowering>,
 }
 
-/// A Blade template lowered to the virtual PHP everything else reads it as,
+/// A template lowered to the virtual PHP everything else reads it as,
 /// with the source map that carries positions back to the template.
 pub(crate) struct TemplateLowering {
     pub(super) virtual_php: Arc<String>,
@@ -91,7 +91,7 @@ pub(crate) struct TemplateLowering {
     /// newer scope written by call-site re-inference can be told apart from
     /// one still describing the current scope (see
     /// [`Backend::apply_ast_index_parse_results_batch`]).
-    scope: BladeScope,
+    scope: Option<BladeScope>,
 }
 
 impl Backend {
@@ -253,6 +253,14 @@ impl Backend {
     /// at once has deadlocked against the batch-publish locks.  The serial
     /// refresh passes own the cache; this path only reads it.
     pub(crate) fn lower_template(&self, uri: &str, content: &str) -> Option<TemplateLowering> {
+        if crate::tempest::is_view(uri) {
+            let (virtual_php, source_map) = crate::tempest::preprocessor::preprocess(content);
+            return Some(TemplateLowering {
+                virtual_php: Arc::new(virtual_php),
+                source_map,
+                scope: None,
+            });
+        }
         if !self.is_blade_file(uri) {
             return None;
         }
@@ -280,7 +288,7 @@ impl Backend {
         Some(TemplateLowering {
             virtual_php: Arc::new(virtual_php),
             source_map,
-            scope: injected,
+            scope: Some(injected),
         })
     }
 
@@ -363,11 +371,11 @@ impl Backend {
                     if open_uris.contains_key(&update.uri) {
                         continue;
                     }
-                    if let Some(blade) = &update.template {
+                    if let Some(scope) = update.template.as_ref().and_then(|t| t.scope.as_ref()) {
                         let current = injected_vars.get(&update.uri);
                         let stale = match current {
-                            Some(current) => *current != blade.scope,
-                            None => blade.scope != BladeScope::default(),
+                            Some(current) => current != scope,
+                            None => *scope != BladeScope::default(),
                         };
                         if stale {
                             continue;
@@ -452,7 +460,7 @@ impl Backend {
         // workspace-symbol results.  They stay in the virtual PHP, so
         // the calls the lowering emits still resolve against them
         // within the template.
-        if self.is_blade_file(uri) {
+        if self.is_php_template(uri) {
             functions.retain(|func| !crate::blade::is_synthetic_function(&func.name));
         }
 

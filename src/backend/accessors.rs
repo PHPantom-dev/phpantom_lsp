@@ -48,12 +48,12 @@ impl Backend {
         Some(Arc::clone(&files.get(uri)?.template.as_ref()?.source_map))
     }
 
-    /// Every template whose lowering has been recorded.
-    pub(crate) fn lowered_template_uris(&self) -> Vec<String> {
+    /// Lowered Blade templates whose inferred scope may need refreshing.
+    pub(crate) fn lowered_blade_uris(&self) -> Vec<String> {
         self.files
             .read()
             .iter()
-            .filter(|(_, state)| state.template.is_some())
+            .filter(|(uri, state)| state.template.is_some() && self.is_blade_file(uri))
             .map(|(uri, _)| uri.clone())
             .collect()
     }

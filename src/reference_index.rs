@@ -57,6 +57,13 @@ pub(crate) enum ReferenceIndexKey {
 /// changing the exact source range consumers return.
 pub(crate) fn string_key_reference_key(kind: StringKeyKind, key: &str) -> ReferenceIndexKey {
     match kind {
+        // The same view has different spellings relative to its callers.
+        // Index Tempest callers together; the path resolver compares the
+        // actual targets after this inexpensive candidate selection.
+        StringKeyKind::TempestView { .. } => ReferenceIndexKey::StringKey {
+            kind: StringKeyKind::TempestView { relative: false },
+            key: String::new(),
+        },
         StringKeyKind::ConfigResource(resource)
             if !crate::symbol_map::laravel_resources::is_implicit_resource_name(resource, key) =>
         {
@@ -784,7 +791,7 @@ impl Backend {
             KeyFramework::Symfony => is_symfony,
             KeyFramework::Twig => is_twig,
             KeyFramework::Yii => is_yii,
-            KeyFramework::WordPress => false,
+            KeyFramework::WordPress | KeyFramework::Tempest => false,
             KeyFramework::Drupal => is_drupal,
         };
         for site in &symbol_map.typed_receiver_sites {

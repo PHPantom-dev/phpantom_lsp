@@ -179,6 +179,12 @@ impl TemplateText {
     /// lie between template text: a template's first line is often a
     /// directive.
     pub(crate) fn translate_edit(&self, range: Range, new_text: &str) -> Option<Range> {
+        if self.map.copied.is_some()
+            && range == Range::default()
+            && new_text.starts_with("<?php use ")
+        {
+            return Some(range);
+        }
         if range.start != range.end {
             return self.wrote(range);
         }

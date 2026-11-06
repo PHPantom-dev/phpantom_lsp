@@ -57,6 +57,9 @@ impl CheckedStringKind {
         use crate::symbol_map::StringKeyKind;
 
         Some(match kind {
+            // Tempest path navigation is available without a complete
+            // catalogue of the renderer's configured discovery locations.
+            StringKeyKind::TempestView { .. } => return None,
             StringKeyKind::Route => Self::Route,
             StringKeyKind::Config => Self::Config,
             StringKeyKind::ConfigResource(resource) => Self::ConfigResource(*resource),

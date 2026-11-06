@@ -34,6 +34,10 @@ pub(crate) fn resolve_laravel_string_key(
 ) -> Vec<Location> {
     use crate::symbol_map::StringKeyKind;
     match kind {
+        StringKeyKind::TempestView { relative } => backend
+            .tempest_view_definition(uri, key, *relative)
+            .into_iter()
+            .collect(),
         StringKeyKind::Section => {
             backend.blade_block_definitions(uri, crate::blade::blocks::BlockKind::Section, key)
         }
@@ -298,6 +302,15 @@ pub(crate) fn find_laravel_string_key_references(
                 uri,
                 crate::blade::blocks::BlockKind::Stack,
                 key,
+            );
+        }
+        StringKeyKind::TempestView { relative } => {
+            return backend.tempest_view_references(
+                uri,
+                key,
+                *relative,
+                snapshot,
+                include_declaration,
             );
         }
         StringKeyKind::View

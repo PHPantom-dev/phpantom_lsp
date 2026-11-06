@@ -88,7 +88,7 @@ impl Backend {
         content: &'a str,
         offset: usize,
     ) -> Option<ImportAliasScope<'a>> {
-        if self.is_blade_file(uri) {
+        if self.is_php_template(uri) {
             return None;
         }
         let symbol_map = self.symbol_map_for(uri)?;

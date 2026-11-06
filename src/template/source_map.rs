@@ -3,6 +3,9 @@ use tower_lsp_server::gen_lsp_types::Position;
 /// Source map from virtual PHP back to original template positions.
 #[derive(Debug, Clone)]
 pub struct TemplateSourceMap {
+    /// Exact copied regions for templates whose PHP expressions must be
+    /// emitted in a different order than their markup attributes.
+    pub copied: Option<Box<super::source_spans::SourceSpans>>,
     /// Per-line column anchor points.
     ///
     /// Each entry is a pair `(blade_utf16_col, php_utf16_col)` representing
@@ -22,6 +25,7 @@ pub struct TemplateSourceMap {
 impl Default for TemplateSourceMap {
     fn default() -> Self {
         Self {
+            copied: None,
             adjustments: Vec::new(),
             prologue_lines: crate::blade::PROLOGUE_LINES,
             template_len: 0,
@@ -77,6 +81,9 @@ impl TemplateSourceMap {
     /// no PHP of its own: it maps to where the replacement ends, never into
     /// the PHP behind it.
     pub fn blade_to_php(&self, pos: Position) -> Position {
+        if let Some(copied) = &self.copied {
+            return copied.to_php(pos).unwrap_or_default();
+        }
         let line = pos.line as usize;
         let virtual_line = line as u32 + self.prologue_lines;
 
@@ -132,6 +139,9 @@ impl TemplateSourceMap {
     /// synthesized `$this` wrapper class), so there is no template text
     /// behind it and no position to map to.
     pub fn try_php_to_blade(&self, pos: Position) -> Option<Position> {
+        if let Some(copied) = &self.copied {
+            return copied.to_source(pos);
+        }
         if pos.line < self.prologue_lines {
             return None;
         }

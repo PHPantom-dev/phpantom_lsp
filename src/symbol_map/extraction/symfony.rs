@@ -232,7 +232,7 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             KeyFramework::Twig => ctx.twig,
             KeyFramework::Yii => ctx.yii,
             KeyFramework::Drupal => ctx.drupal,
-            KeyFramework::Laravel | KeyFramework::WordPress => false,
+            KeyFramework::Laravel | KeyFramework::WordPress | KeyFramework::Tempest => false,
         };
         if !receiver.names_any(records) {
             continue;

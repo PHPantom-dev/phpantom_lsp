@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Tempest View completion and navigation.** PHP expressions in `.view.php` templates use imports and `@var` annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to `Tempest\View\view()` also complete and navigate. Contributed by @shuvroroy.
 - **Symfony form options.** The keys of the options array a form builder's `add()`, a form factory's `create()`, or a controller's `createForm()` passes complete from the options the form type accepts, its parent types and the installed type extensions included, and jump to where each is declared. An option the type does not accept, such as `'requird'`, is reported.
 - **DQL variables of a query builder another method builds.** A query builder another method creates and returns, or that is passed to a method that joins onto it, is checked for DQL variables nothing declares, counting the ones that method declares. A variable a method's returned builder uses is left for its caller to declare.
 - **DQL variables declared on only some branches.** A query builder that uses a DQL variable it only joins under an `if`, a `switch` case, or a loop that may not run is reported, at the use, when some path builds the query without declaring it.
@@ -130,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Property types on an annotated `$this`.** Reading a property through an explicitly typed `$this` now preserves its type in assignments and loops, including Tempest views. Contributed by @shuvroroy.
 - **Symfony playground runtime checks.** The repository examples load and their runtime assertions run again. Contributed by @shuvroroy.
 - **Tools installed with the Composer bin plugin.** In a project using `bamarni/composer-bin-plugin`, classes from the tools under `vendor-bin/` (PHPUnit's `TestCase`, say) resolve again without un-ignoring their vendor directories, and stay out of analysis like any other vendor code. PHPUnit's version is read from there too.
 - **Templates in the value type of an array parameter.** A function taking `iterable<Tk, (Closure(): Tv)>` or `array<Tk, TypeInterface<Tv>>` now infers `Tv` from each element of the array passed to it, closures and first-class callables included, instead of from the whole array.

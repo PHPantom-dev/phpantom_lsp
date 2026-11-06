@@ -403,6 +403,11 @@ impl LanguageServer for Backend {
                 // A component tag is HTML, so it has no position in the virtual
                 // PHP `handle_with_position` would swap in below; it is resolved
                 // from the template's own source instead.
+                if let Some(location) = backend.tempest_component_definition(uri, position) {
+                    return Ok(Some(DefinitionResponse::Definition(Definition::Location(
+                        location,
+                    ))));
+                }
                 if backend.is_blade_file(uri)
                     && let Some(location) = crate::util::catch_panic_unwind_safe(
                         "goto_definition",

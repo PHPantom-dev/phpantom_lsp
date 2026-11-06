@@ -342,6 +342,7 @@ mod phpunit;
 mod statements;
 mod subject_text;
 mod symfony;
+mod tempest;
 mod twig;
 mod twig_context;
 mod wordpress;

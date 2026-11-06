@@ -31,9 +31,10 @@ pub(crate) use context::{ArgumentSlot, attribute_class_start, scalar_argument_at
 pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
         StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::Property,
-        StringKeyKind::View | StringKeyKind::TwigTemplate | StringKeyKind::YiiView => {
-            CompletionItemKind::File
-        }
+        StringKeyKind::View
+        | StringKeyKind::TempestView { .. }
+        | StringKeyKind::TwigTemplate
+        | StringKeyKind::YiiView => CompletionItemKind::File,
         StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
         StringKeyKind::DrupalPermission => CompletionItemKind::Constant,
         StringKeyKind::DrupalConfigName => CompletionItemKind::File,
@@ -221,7 +222,8 @@ impl Backend {
             | StringKeyKind::TwigBlock
             | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
-            | StringKeyKind::YiiView => Arc::new([]),
+            | StringKeyKind::YiiView
+            | StringKeyKind::TempestView { .. } => Arc::new([]),
         }
     }
 
