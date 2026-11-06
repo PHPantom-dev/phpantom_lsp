@@ -286,6 +286,7 @@ impl Backend {
                             template_param_defaults: func_template_param_defaults,
                             throws,
                             is_polyfill: false,
+                            from_unbundled_extension: false,
                             overloads: Vec::new(),
                             is_pure,
                             is_impure,

@@ -476,11 +476,14 @@ impl Backend {
         // session.  A phpstorm-stubs checkout under a stub path has the
         // same gaps, so it is corrected the same way.
         if self.is_phpstorm_stubs_uri(uri) {
+            let unbundled = crate::stubs::is_unbundled_extension_stub(uri, content);
             for func in &mut functions {
                 crate::stub_patches::apply_function_stub_patches(func);
+                func.from_unbundled_extension = unbundled;
             }
             for (cls, _, _) in &mut decls.classes_with_ns {
                 crate::stub_patches::apply_class_stub_patches(cls);
+                cls.from_unbundled_extension = unbundled;
             }
         } else if !self.is_external_stub_uri(uri) {
             for func in &mut functions {

@@ -260,6 +260,7 @@ impl Backend {
                 parameters: result_method.parameters.clone(),
                 return_type: result_method.return_type.clone(),
                 reads_func_args: result_method.reads_func_args,
+                binds_named_args: binds_named_args(m, &effective),
                 no_discard: result_method.is_no_discard,
                 native_void: result_method
                     .native_return_type
@@ -292,6 +293,7 @@ impl Backend {
                 parameters: m.parameters.clone(),
                 return_type: m.return_type.clone(),
                 reads_func_args: m.reads_func_args,
+                binds_named_args: binds_named_args(m, &effective),
                 no_discard: m.is_no_discard,
                 native_void: m.native_return_type.as_ref().is_some_and(PhpType::is_void),
                 owner_class: Some(owner.fqn()),
@@ -387,6 +389,7 @@ impl Backend {
             parameters: result_method.parameters.clone(),
             return_type: result_method.return_type.clone(),
             reads_func_args: result_method.reads_func_args,
+            binds_named_args: binds_named_args(m, &merged),
             no_discard: result_method.is_no_discard,
             native_void: result_method
                 .native_return_type
@@ -404,6 +407,7 @@ impl Backend {
             parameters: func.parameters.clone(),
             return_type: func.return_type.clone(),
             reads_func_args: func.reads_func_args,
+            binds_named_args: !func.from_unbundled_extension,
             no_discard: func.is_no_discard,
             native_void: func
                 .native_return_type
@@ -452,6 +456,8 @@ impl Backend {
                 return ResolvedCallableTarget {
                     parameters: parameters.into(),
                     return_type: func.return_type.clone(),
+                    reads_func_args: func.reads_func_args,
+                    binds_named_args: !func.from_unbundled_extension,
                     no_discard: func.is_no_discard,
                     native_void: func
                         .native_return_type
@@ -541,6 +547,8 @@ impl Backend {
                 return Some(ResolvedCallableTarget {
                     parameters: result_ctor.parameters.clone(),
                     return_type: result_ctor.return_type.clone(),
+                    reads_func_args: result_ctor.reads_func_args,
+                    binds_named_args: true,
                     owner_class: Some(ci.fqn()),
                     self_bound_params,
                     ..Default::default()
@@ -552,6 +560,7 @@ impl Backend {
             parameters: ctor.parameters.clone(),
             return_type: ctor.return_type.clone(),
             reads_func_args: ctor.reads_func_args,
+            binds_named_args: true,
             owner_class: Some(ci.fqn()),
             ..Default::default()
         })
@@ -812,6 +821,7 @@ impl Backend {
                             crate::call_args::partial_application_params(&target.parameters, bound)
                                 .into();
                         target.overloads.clear();
+                        target.binds_named_args = false;
                         Some(target)
                     }
                     (resolved, _) => resolved,
@@ -916,6 +926,23 @@ impl Backend {
         untyped
             .or_else(|| Self::resolve_instance_method_callable(value, "__invoke", rctx, args_text))
     }
+}
+
+/// Whether a call to `method` on `class` binds named arguments to the
+/// method's declared parameter names.
+///
+/// A virtual member (`@method`, a mixin, a macro, a Laravel scope) is
+/// reached through `__call` / `__callStatic`, which takes unknown names
+/// into its argument array, and its declared names need not match those of
+/// whatever finally runs.  A non-public method on a class with a magic
+/// call handler is routed there from any call site that cannot see it.
+fn binds_named_args(method: &MethodInfo, class: &ClassInfo) -> bool {
+    if method.is_virtual {
+        return false;
+    }
+    method.visibility == Visibility::Public
+        || (class.get_method_ci("__call").is_none()
+            && class.get_method_ci("__callStatic").is_none())
 }
 
 /// The types a value invoked as a callable can hold, from its resolved

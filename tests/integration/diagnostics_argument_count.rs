@@ -1367,4 +1367,127 @@ function test(): void {
         let diags = collect(php);
         assert!(diags.is_empty(), "got: {diags:?}");
     }
+
+    fn unknown_named(diags: &[Diagnostic]) -> Vec<(u32, &str)> {
+        diags
+            .iter()
+            .filter(|d| d.code == Some(Code::String("unknown_named_argument".to_string())))
+            .map(|d| (d.range.start.line, message_text(&d.message)))
+            .collect()
+    }
+
+    /// A method or function binds named arguments to its declared
+    /// parameters as a constructor does, whether it is called on an
+    /// instance, statically, or as a first-class callable.
+    #[test]
+    fn flags_unknown_named_argument_to_method_and_function() {
+        let php = r#"<?php
+class Mailer {
+    public function send(string $to, string $subject): void {}
+    public static function make(string $dsn): self { return new self(); }
+}
+function greet(string $name): void {}
+function test(Mailer $mailer): void {
+    $mailer->send(to: 'a', subjct: 'Hi');
+    Mailer::make(dns: 'x');
+    greet(nme: 'x');
+    $fn = greet(...);
+    $fn(nam: 'x');
+    $mailer?->send('a', subject: 'ok');
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            unknown_named(&diags),
+            vec![
+                (7, "Unknown named parameter $subjct"),
+                (8, "Unknown named parameter $dns"),
+                (9, "Unknown named parameter $nme"),
+                (11, "Unknown named parameter $nam"),
+            ],
+            "got: {diags:?}",
+        );
+    }
+
+    /// Built-in functions and classes bind to the names php-src gives
+    /// their parameters.
+    #[test]
+    fn flags_unknown_named_argument_to_builtin() {
+        let php = r#"<?php
+function test(\DateTime $date): void {
+    strlen(str: 'x');
+    strlen(string: 'x');
+    $date->format(fmt: 'Y');
+    $date->format(format: 'Y');
+}
+"#;
+        let diags = collect_diagnostics_with(
+            &Backend::new_test_with_full_stubs(),
+            php,
+            Backend::collect_argument_count_diagnostics,
+        );
+        assert_eq!(
+            unknown_named(&diags),
+            vec![
+                (2, "Unknown named parameter $str"),
+                (4, "Unknown named parameter $fmt"),
+            ],
+            "got: {diags:?}",
+        );
+    }
+
+    /// A call `__call` or `__callStatic` receives takes any name: a
+    /// `@method` tag, a mixin's method, and a method the call site cannot
+    /// see on a class with a magic handler.  A signature read from a
+    /// callable type has no real parameter names to check against.
+    #[test]
+    fn no_unknown_named_argument_through_magic_or_callable_type() {
+        let php = r#"<?php
+class Target {
+    public function run(int $times): void {}
+}
+/**
+ * @method void virtualCall(int $count)
+ * @mixin Target
+ */
+class Magic {
+    public function __call(string $name, array $args): mixed { return null; }
+    public static function __callStatic(string $name, array $args): mixed { return null; }
+    protected function hidden(int $value): void {}
+}
+/**
+ * @param Closure(int): void $callback
+ */
+function test(Magic $magic, Closure $callback): void {
+    $magic->virtualCall(anything: 1);
+    $magic->run(other: 1);
+    $magic->hidden(whatever: 1);
+    Magic::hidden(whatever: 1);
+    $callback(value: 1);
+}
+"#;
+        let diags = collect(php);
+        assert!(unknown_named(&diags).is_empty(), "got: {diags:?}");
+    }
+
+    /// A separately released extension names its parameters differently
+    /// from one release to the next, so its stub cannot say which names
+    /// the installed one takes, including through a subclass.
+    #[test]
+    fn no_unknown_named_argument_for_unbundled_extension() {
+        let php = r#"<?php
+class Thumbnail extends \Imagick {}
+function test(\Imagick $image, Thumbnail $thumb): void {
+    $image->compareImageLayers(metric: 1);
+    $thumb->compareImageLayers(metric: 1);
+    new \RedisSentinel(options: []);
+}
+"#;
+        let diags = collect_diagnostics_with(
+            &Backend::new_test_with_full_stubs(),
+            php,
+            Backend::collect_argument_count_diagnostics,
+        );
+        assert!(unknown_named(&diags).is_empty(), "got: {diags:?}");
+    }
 }
