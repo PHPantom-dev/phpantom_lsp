@@ -79,16 +79,16 @@ fn only_what_changes_the_names_drops_the_configuration_index() {
     let schema = "web/modules/custom/acme/config/schema/acme.schema.yml";
     let fixture =
         "web/core/modules/system/tests/modules/config_test/config/install/config_test.system.yml";
-    backend.note_drupal_config_files(vec![default.clone()], Vec::new());
+    backend.note_drupal_config_files(vec![default.clone()], vec![dir.path().join(schema)]);
     let first = backend.drupal_config_index();
 
-    backend.note_drupal_config_document(&crate::util::path_to_uri(&default));
+    backend.note_drupal_config_document(&crate::util::path_to_uri(&default), Some(""));
     assert!(std::sync::Arc::ptr_eq(
         &first,
         &backend.drupal_config_index()
     ));
 
-    backend.note_drupal_config_document(&uri(dir.path(), schema));
+    backend.note_drupal_config_document(&uri(dir.path(), schema), Some("acme.settings: {}\n"));
     let second = backend.drupal_config_index();
     assert!(!std::sync::Arc::ptr_eq(&first, &second));
 
@@ -97,19 +97,19 @@ fn only_what_changes_the_names_drops_the_configuration_index() {
         fixture_uri.clone(),
         std::sync::Arc::new("a: b\n".to_string()),
     );
-    backend.note_drupal_config_document(&fixture_uri);
+    backend.note_drupal_config_document(&fixture_uri, Some("a: b\n"));
     let opened = backend.drupal_config_index();
     assert!(!std::sync::Arc::ptr_eq(&second, &opened));
     assert!(opened.names().contains(&"config_test.system".to_string()));
     // Typing in it changes no name.
-    backend.note_drupal_config_document(&fixture_uri);
+    backend.note_drupal_config_document(&fixture_uri, Some("a: b\n"));
     assert!(std::sync::Arc::ptr_eq(
         &opened,
         &backend.drupal_config_index()
     ));
 
     backend.open_files.write().remove(&fixture_uri);
-    backend.note_drupal_config_document(&fixture_uri);
+    backend.note_drupal_config_document(&fixture_uri, Some("a: b\n"));
     assert!(
         !backend
             .drupal_config_index()

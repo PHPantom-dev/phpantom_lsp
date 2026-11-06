@@ -394,6 +394,42 @@ async fn an_open_test_module_offers_its_names() {
     );
 }
 
+/// A test module's configuration file never saved stops counting once it
+/// is closed.
+#[tokio::test]
+async fn a_closed_unsaved_test_module_file_offers_nothing() {
+    let controller = CONTROLLER.replace("system.site", "");
+    let (backend, dir) = site_backend(&[(CONTROLLER_PATH, controller.as_str())]).await;
+    let php = uri_for(&dir, CONTROLLER_PATH);
+    let position = offset_position(&controller, controller.find("''").unwrap() + 1);
+    let offered = || async {
+        response_labels(
+            completion_response(&backend, &php, position.line, position.character, None).await,
+        )
+    };
+    let unsaved = uri_for(
+        &dir,
+        "web/core/modules/system/tests/modules/config_test/config/install/config_test.unsaved.yml",
+    );
+    crate::common::open_document(&backend, &unsaved, "yaml", "foo: bar\n").await;
+    let labels = offered().await;
+    assert!(
+        labels.contains(&"config_test.unsaved".to_string()),
+        "{labels:?}"
+    );
+
+    backend
+        .did_close(DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: unsaved },
+        })
+        .await;
+    let labels = offered().await;
+    assert!(
+        !labels.contains(&"config_test.unsaved".to_string()),
+        "{labels:?}"
+    );
+}
+
 /// A class that uses core's `ConfigFormBaseTrait` without being a form,
 /// as a list builder may, reads a name in its `config()` too.
 #[tokio::test]
