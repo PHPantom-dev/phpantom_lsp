@@ -795,37 +795,6 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ---
 
-## F71. DQL variables of a query builder other code handles
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-```php
-$qb = $this->createQb();                  // `e` declared in createQb()
-$qb->andWhere('t.id = 1')->getQuery();    // `t` declared nowhere
-
-$qb = $em->createQueryBuilder()->from(User::class, 'u');
-$this->joinTeams($qb);
-$qb->andWhere('t.id = 1')->getQuery();
-```
-
-A DQL variable a query builder uses but never declares, on some path
-through the function body that builds it, is reported. Nothing is
-reported for a builder that comes from a parameter, a property, or
-another method, or that is passed to one, since its variables may be
-declared out of sight. PHPStan's Doctrine extension reads the body of a
-method that returns a builder, so it reports the first case above.
-
-A builder another method of the project returns can be read from that
-method's body, the way the type engine replays a single fluent chain to
-type the query it builds (see T64). One passed to a method is harder: the
-method may join anything onto it.
-
-**Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`
-(`report_undeclared`, `is_closed`), `src/doctrine/query.rs`
-(`QueryBuilderState`).
-
----
-
 ## F69. DQL in expression objects and other methods' query builders
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -845,6 +814,44 @@ The fixture is `query_builder_dql.fixture` in
 `tests/fixtures/phpstan_doctrine/`.
 
 **Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`.
+
+---
+
+## F72. DQL variables of a query builder a chain of methods handles
+
+**Impact: Low · Complexity: Medium**
+
+```php
+private function base(): QueryBuilder
+{
+    return $this->createQb()->join('e.team', 't');  // builder from another method
+}
+
+private function joinTeams(QueryBuilder $qb): void
+{
+    $this->joinOwner($qb);                          // passed on again
+}
+
+$qb = self::createQb();                             // static call
+$qb->andWhere('x.id = 1')->getQuery();              // `x` not reported
+```
+
+A builder another method returns, or that is passed to one, counts the
+variables that method's body declares, but only when that body creates the
+builder itself or only calls the methods of the one it is passed. One the
+method gets from a third method, or passes on to one, is not followed, so
+a variable used on it is not reported. Nor is one a static call or a call
+on a variable (`$repo->createQb()`) hands over. A variable such a method
+declares also counts on every path through the caller, not only the paths
+that make the call.
+
+The other direction is not reported either: a variable a method's returned
+builder uses, which none of its callers declare. PHPStan reports it in the
+caller, where the query is run.
+
+**Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`
+(`summarize_methods`, `keeps_builder`, `builder_of`) and
+`src/diagnostics/dql_syntax.rs` (`providing_methods`).
 
 ---
 

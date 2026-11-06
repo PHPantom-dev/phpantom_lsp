@@ -229,6 +229,8 @@ struct ExtractionCtx<'a> {
     dql_aliases: Vec<crate::symbol_map::DqlAliasSite>,
     /// Where the DQL the file holds stops following the grammar.
     dql_syntax_errors: Vec<crate::symbol_map::DqlSyntaxSite>,
+    /// What each method declares on the builders it hands on.
+    dql_builder_methods: Vec<crate::symbol_map::DqlBuilderMethod>,
 }
 
 /// A variable token's name without its `$`.
@@ -583,6 +585,7 @@ fn extract_symbol_map_inner(
         dql: Default::default(),
         dql_aliases: Vec::new(),
         dql_syntax_errors: Vec::new(),
+        dql_builder_methods: Vec::new(),
     };
 
     note_dql_body(0, program.statements.as_slice(), &mut ctx);
@@ -758,6 +761,7 @@ fn extract_symbol_map_inner(
         routes: ctx.routes,
         dql_aliases: ctx.dql_aliases,
         dql_syntax_errors: ctx.dql_syntax_errors,
+        dql_builder_methods: ctx.dql_builder_methods,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx
             .route_imports

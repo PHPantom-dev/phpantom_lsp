@@ -722,6 +722,7 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         let e = body.right_brace.end.offset;
         ctx.scopes.push((s, e));
         note_dql_body(s, body.statements.as_slice(), ctx);
+        note_dql_method(s, method, ctx);
         if is_static {
             ctx.static_method_scopes.push((s, e));
         } else {

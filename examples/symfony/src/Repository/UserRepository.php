@@ -98,11 +98,13 @@ final class UserRepository extends ServiceEntityRepository
     /**
      * @return list<User>
      */
-    public function search(?string $name): array
+    public function searchByName(?string $name): array
     {
         // Try: hover $users. The builder byEmail() sets up carries its DQL
         // into $builder, and through the call the `if` makes on it, so the
-        // result is still a list<User>.
+        // result is still a list<User>. Change `u.displayName` to
+        // `t.displayName`: byEmail() declares `u` but not `t`, and that is
+        // reported.
         $builder = $this->byEmail();
         if ($name !== null) {
             $builder->andWhere('u.displayName = :name')->setParameter('name', $name);
@@ -112,8 +114,29 @@ final class UserRepository extends ServiceEntityRepository
         return $users;
     }
 
+    /**
+     * @return list<User>
+     */
+    public function inTeamByEmail(string $team): array
+    {
+        // Try: delete the `joinTeam()` call. The `t` it joins onto the
+        // builder is then declared nowhere, and that is reported.
+        $builder = $this->byEmail();
+        $this->joinTeam($builder);
+
+        return $builder->andWhere('t.name = :team')
+            ->setParameter('team', $team)
+            ->getQuery()
+            ->getResult();
+    }
+
     private function byEmail(): QueryBuilder
     {
         return $this->createQueryBuilder('u')->orderBy('u.email', 'ASC');
+    }
+
+    private function joinTeam(QueryBuilder $builder): void
+    {
+        $builder->join('u.team', 't');
     }
 }

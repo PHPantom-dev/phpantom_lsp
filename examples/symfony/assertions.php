@@ -356,6 +356,8 @@ check('A field the joined Team does not map fails DQL', !$dqlParses('SELECT u FR
 check('A variable nothing declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE x.name = :team'));
 check('UserRepository::search() without a team builds DQL without t', $dqlParses('SELECT u FROM App\Entity\User u'));
 check('A variable used on a path that does not join it fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.name = :team'));
+check('UserRepository::inTeamByEmail() builds DQL that joins t through joinTeam()', $dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE t.name = :team ORDER BY u.email ASC'));
+check('A variable neither byEmail() nor joinTeam() declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.displayName = :name ORDER BY u.email ASC'));
 (new SchemaTool($entityManager))->createSchema([
     $entityManager->getClassMetadata(User::class),
     $entityManager->getClassMetadata(Team::class),
@@ -389,7 +391,7 @@ check('named() gets a list of User', array_is_list($users) && $users[0] instance
 $builder = $entityManager->createQueryBuilder()->select('u')->from(User::class, 'u')->orderBy('u.email', 'ASC');
 $builder->andWhere('u.displayName = :name')->setParameter('name', 'Ada');
 $users = $builder->getQuery()->getResult();
-check('search() gets a list of User from the builder byEmail() sets up and the branch changes', array_is_list($users) && $users[0] instanceof User);
+check('searchByName() gets a list of User from the builder byEmail() sets up and the branch changes', array_is_list($users) && $users[0] instanceof User);
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

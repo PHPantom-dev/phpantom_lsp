@@ -132,9 +132,14 @@ catalogues together, the way a real Symfony project does.
 - In `UserRepository::named()`, hover `$byBuilder` or `$byQuery`: a query
   is typed by what its DQL selects, so both are a `list<User>`. In
   `displayNamesByEmail()`, hover `$rows`, a shape of the selected fields
-  keyed by the `INDEX BY` field. In `search()`, hover `$users`: the
+  keyed by the `INDEX BY` field. In `searchByName()`, hover `$users`: the
   builder `byEmail()` returns carries its DQL into a variable and through
   a branch, so the result is still a `list<User>`.
+- In `UserRepository::searchByName()`, change `u.displayName` to
+  `t.displayName`, or in `inTeamByEmail()`, delete the `joinTeam()` call.
+  The variables a builder uses are checked against the ones declared by
+  the method that creates it and the methods it is passed to, so the `t`
+  nothing joins is reported.
 
 ## Getting started
 

@@ -174,6 +174,25 @@ class UserRepository extends \\Doctrine\\ORM\\EntityRepository {
 /// A workspace with the Doctrine stubs and entities, and a service whose
 /// method body is `body`, opened at the `§` marker.
 async fn open_service(body: &str) -> (Backend, tempfile::TempDir, Uri, String, Position) {
+    open_service_with(
+        &format!(
+            "    public function run(UserRepository $users, EntityManagerInterface $em): void
+    {{
+{body}
+    }}"
+        ),
+        &[],
+    )
+    .await
+}
+
+/// A workspace with the Doctrine stubs and entities, the files `extra`,
+/// and a service class whose members are `members`, opened at the `§`
+/// marker.
+async fn open_service_with(
+    members: &str,
+    extra: &[(&str, &str)],
+) -> (Backend, tempfile::TempDir, Uri, String, Position) {
     let source = format!(
         "<?php
 namespace App\\Service;
@@ -182,19 +201,24 @@ use App\\Entity\\Team;
 use App\\Entity\\User;
 use App\\Repository\\UserRepository;
 use Doctrine\\ORM\\EntityManagerInterface;
+use Doctrine\\ORM\\QueryBuilder;
 
-final class Users
+final class Users extends BaseUsers
 {{
-    public function run(UserRepository $users, EntityManagerInterface $em): void
-    {{
-{body}
-    }}
+{members}
 }}
 "
     );
     let (stripped, position) = split_cursor(&source);
     let path = "src/Service/Users.php";
     let mut files: Vec<(&str, &str)> = STUBS.to_vec();
+    files.extend_from_slice(extra);
+    if !extra.iter().any(|(p, _)| *p == "src/Service/BaseUsers.php") {
+        files.push((
+            "src/Service/BaseUsers.php",
+            "<?php\nnamespace App\\Service;\nabstract class BaseUsers {}\n",
+        ));
+    }
     files.push((path, stripped.as_str()));
     let (backend, dir) = create_psr4_workspace(COMPOSER, &files);
     let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
@@ -615,7 +639,20 @@ async fn dql_whose_call_is_not_doctrine_s_or_whose_text_is_dynamic_is_not_report
 /// The undeclared DQL variables reported for a service whose method body
 /// is `body`: the text each covers and its message.
 async fn undeclared(body: &str) -> Vec<(String, String)> {
-    let (backend, _dir, uri, content, _) = open_service(&format!("{body}§")).await;
+    let opened = open_service(&format!("{body}§")).await;
+    undeclared_in(opened).await
+}
+
+/// [`undeclared`] for a service whose members are `members`, beside the
+/// files `extra`.
+async fn undeclared_with(members: &str, extra: &[(&str, &str)]) -> Vec<(String, String)> {
+    let opened = open_service_with(&format!("{members}§"), extra).await;
+    undeclared_in(opened).await
+}
+
+async fn undeclared_in(
+    (backend, _dir, uri, content, _): (Backend, tempfile::TempDir, Uri, String, Position),
+) -> Vec<(String, String)> {
     let mut out = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), &content, &mut out);
     let lines: Vec<&str> = content.lines().collect();
@@ -761,4 +798,165 @@ async fn a_variable_every_path_to_the_query_declares_is_not_reported() {
     )
     .await;
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[tokio::test]
+async fn a_variable_a_builder_another_method_returns_declares_is_not_reported() {
+    let errors = undeclared_with(
+        "    private EntityManagerInterface $em;
+
+    private function createQb(): QueryBuilder
+    {
+        return $this->em->createQueryBuilder()->select('e')->from(User::class, 'e');
+    }
+
+    public function run(): void
+    {
+        $qb = $this->createQb();
+        $qb->andWhere('t.id = 1 AND e.id = 1')->getQuery();
+        $this->createQb()->andWhere('e.id = 2 AND s.id = 1')->getQuery();
+    }",
+        &[],
+    )
+    .await;
+    assert_eq!(errors, vec![undefined("t"), undefined("s")]);
+}
+
+#[tokio::test]
+async fn a_variable_a_method_the_builder_is_passed_to_declares_is_not_reported() {
+    let errors = undeclared_with(
+        "    private function joinTeams(QueryBuilder $qb): void
+    {
+        $qb->join('u.team', 't');
+    }
+
+    public function run(EntityManagerInterface $em): void
+    {
+        $qb = $em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        $this->joinTeams($qb);
+        $qb->andWhere('t.id = 1 AND p.id = 1')->getQuery();
+    }",
+        &[],
+    )
+    .await;
+    assert_eq!(errors, vec![undefined("p")]);
+}
+
+#[tokio::test]
+async fn a_variable_used_on_a_builder_a_method_returns_is_left_to_its_caller() {
+    // The caller may declare it, so the method that returns the builder
+    // does not report it.
+    let errors = undeclared_with(
+        "    private EntityManagerInterface $em;
+
+    private function base(): QueryBuilder
+    {
+        return $this->em->createQueryBuilder()->select('u')->from(User::class, 'u')->andWhere('t.id = 1');
+    }
+
+    private function filtered(): QueryBuilder
+    {
+        $qb = $this->em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        $qb->andWhere('r.id = 1');
+        return $qb;
+    }
+
+    public function run(): void
+    {
+        $this->base()->join('u.team', 't')->getQuery();
+        $this->filtered()->join('u.team', 'r')->getQuery();
+    }",
+        &[],
+    )
+    .await;
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[tokio::test]
+async fn a_variable_a_method_out_of_sight_may_declare_is_not_reported() {
+    let errors = undeclared_with(
+        "    private QueryBuilder $qb;
+    private EntityManagerInterface $em;
+
+    private function joinAny(QueryBuilder $qb, string $alias): void
+    {
+        $qb->join('u.team', $alias);
+    }
+
+    private function joinElsewhere(QueryBuilder $qb): void
+    {
+        $qb->join('u.team', 't');
+        $this->joinAny($qb, 'x');
+    }
+
+    private function stored(): QueryBuilder
+    {
+        return $this->qb;
+    }
+
+    private function wrapped(): QueryBuilder
+    {
+        return $this->createOther();
+    }
+
+    public function opaque(): void
+    {
+        $qb = $this->em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        $this->joinAny($qb, 'a');
+        $qb->andWhere('a.id = 1')->getQuery();
+    }
+
+    public function passedOn(): void
+    {
+        $qb = $this->em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        $this->joinElsewhere($qb);
+        $qb->andWhere('x.id = 1')->getQuery();
+    }
+
+    public function fromProperty(): void
+    {
+        $this->stored()->andWhere('b.id = 1')->getQuery();
+    }
+
+    public function fromAnotherMethod(): void
+    {
+        $this->wrapped()->andWhere('c.id = 1')->getQuery();
+    }
+
+    public function fromNowhere(): void
+    {
+        $this->missing()->andWhere('d.id = 1')->getQuery();
+    }",
+        &[],
+    )
+    .await;
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[tokio::test]
+async fn a_variable_an_inherited_method_s_builder_declares_is_read_from_its_file() {
+    let errors = undeclared_with(
+        "    public function run(): void
+    {
+        $this->createQb()->andWhere('e.id = 1 AND t.id = 1')->getQuery();
+    }",
+        &[(
+            "src/Service/BaseUsers.php",
+            "<?php
+namespace App\\Service;
+use App\\Entity\\User;
+use Doctrine\\ORM\\EntityManagerInterface;
+use Doctrine\\ORM\\QueryBuilder;
+abstract class BaseUsers {
+    protected EntityManagerInterface $em;
+    protected function createQb(): QueryBuilder
+    {
+        return $this->em->createQueryBuilder()->select('e')->from(User::class, 'e');
+    }
+}
+",
+        )],
+    )
+    .await;
+    assert_eq!(errors, vec![undefined("t")]);
 }

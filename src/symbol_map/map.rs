@@ -337,6 +337,10 @@ pub(crate) struct SymbolMap {
     /// following the grammar, in source order.  Empty for every file whose
     /// DQL parses.
     pub dql_syntax_errors: Vec<DqlSyntaxSite>,
+    /// The DQL variables each method declares on a query builder it
+    /// returns or is passed, for the callers that build a query on it.
+    /// Empty for every file whose methods hand no builder on.
+    pub dql_builder_methods: Vec<DqlBuilderMethod>,
     /// Whether the file declares a Twig loader of the project's own: a
     /// class that is one, or a service tagged `twig.loader`.  Such a loader
     /// can serve any template name, so no name can be told missing.
@@ -767,6 +771,39 @@ pub(crate) struct DqlSyntaxSite {
     /// The class the call's receiver must be for the DQL to be judged: a
     /// method of that name on anything else takes something else.
     pub receiver: &'static str,
+    /// The calls of other methods that create or are handed the query
+    /// builder the variable is used on.  The variable is undeclared only
+    /// when each of them is known to declare what it declares, and none
+    /// declares the variable.
+    pub requires: Box<[DqlProvider]>,
+}
+
+/// Where a method's query builder comes in or goes out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DqlSlot {
+    /// The builder the method returns.
+    Returned,
+    /// The builder passed as the argument at the index.
+    Parameter(u32),
+}
+
+/// A call of another method that a query builder comes from or is passed
+/// to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DqlProvider {
+    /// Where the method name of the call starts.
+    pub call: u32,
+    pub slot: DqlSlot,
+}
+
+/// The DQL variables a method declares on a query builder it creates and
+/// returns, or is passed and keeps to itself.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DqlBuilderMethod {
+    /// Where the method's name starts.
+    pub name_offset: u32,
+    pub slot: DqlSlot,
+    pub aliases: Box<[crate::atom::Atom]>,
 }
 
 impl SymbolMap {
@@ -778,5 +815,19 @@ impl SymbolMap {
             .filter(|site| site.start <= offset && offset <= site.end && site.alias == alias)
             .min_by_key(|site| site.end - site.start)
             .map(|site| &*site.subject)
+    }
+
+    /// The DQL variables the method whose name starts at `name_offset`
+    /// declares on the builder in `slot`, when it is known to declare no
+    /// others.
+    pub(crate) fn dql_builder_aliases(
+        &self,
+        name_offset: u32,
+        slot: DqlSlot,
+    ) -> Option<&[crate::atom::Atom]> {
+        self.dql_builder_methods
+            .iter()
+            .find(|method| method.name_offset == name_offset && method.slot == slot)
+            .map(|method| &*method.aliases)
     }
 }
