@@ -992,6 +992,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b705-a-method-body-in-a-file-not-yet-opened-is-read-without-its-imports" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B705. A method body in a file not yet opened is read without its imports
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1649,6 +1660,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b705-a-method-body-in-a-file-not-yet-opened-is-read-without-its-imports" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B705. A method body in a file not yet opened is read without its imports
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1780,6 +1802,35 @@ accepts it, and its return type is the join of theirs. Where one
 declaration is plainly the real one (the other has an empty body and no
 parameters, or sits in a file only one entry point includes), prefer it
 for hover and go-to-definition, and offer the others alongside.</p>
+<h3 id="b705-a-method-body-in-a-file-not-yet-opened-is-read-without-its-imports">B705. A method body in a file not yet opened is read without its imports<a class="headerlink" href="#b705-a-method-body-in-a-file-not-yet-opened-is-read-without-its-imports" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// src/Repository/Queries.php, loaded through PSR-4</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">namespace App\Repository;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">use App\Entity\User;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">final class Queries {</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    public function make() { return new User(); }</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    public function users(): QueryBuilder</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    {</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">        return $this-&gt;em-&gt;createQueryBuilder()-&gt;select('u')-&gt;from(User::class, 'u');</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">    }</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">}</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">// src/Service/Users.php, the open file</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">$queries-&gt;make();    // App\Repository\User, expected App\Entity\User</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">$queries-&gt;users()-&gt;getQuery()-&gt;getResult();   // mixed, expected list&lt;User&gt;</span>
+</code></pre></div>
+<p>When a method declares no return type, or returns a Doctrine query
+builder, its type is read from its body. A class name the body writes
+resolves against the declaring file's namespace but not its <code>use</code>
+imports, when that file was loaded on demand rather than opened or
+indexed: <code>User</code> becomes <code>App\Repository\User</code>. A fully-qualified name
+resolves, and so does every name once the whole project is indexed (as
+<code>analyze</code> does), so it shows in the editor rather than the CLI.</p>
+<p><strong>Where to look:</strong> <code>Backend::infer_return_type_at</code>
+(<code>src/code_actions/phpstan/fix_return_type/inference.rs</code>), which takes
+the imports from <code>import_block_at</code>, and how a file loaded on demand
+records its <code>use</code> map in its <code>FileState</code>.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
