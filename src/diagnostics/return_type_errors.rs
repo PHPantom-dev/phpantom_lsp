@@ -30,7 +30,7 @@ use crate::types::ClassInfo;
 use super::helpers::{
     FileDiagnosticContext, collect_type_check, template_bounds, template_bounds_in_scope,
 };
-use super::type_errors::{fails_only_on_empty, is_type_compatible};
+use super::type_errors::{fails_only_on_empty, fits_partially, is_type_compatible};
 
 /// Diagnostic code used for return type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_RETURN_CODE: &str = "type_mismatch_return";
@@ -77,6 +77,7 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let report_possibly_empty = self.possibly_empty_mismatches_enabled();
+        let report_partial_union = self.partial_union_mismatches_enabled();
         let docblock_types = self.docblock_type_mismatches_enabled();
         out.extend(collect_type_check(
             self,
@@ -146,6 +147,18 @@ impl Backend {
                     Some(ty)
                         if !report_possibly_empty
                             && fails_only_on_empty(
+                                ty,
+                                &ret.declared_type,
+                                ctx.loaders.resolved_class_loader(),
+                                ctx.strict_types,
+                            ) =>
+                    {
+                        return None;
+                    }
+                    // Some member of the union fits, which is opt-out.
+                    Some(ty)
+                        if !report_partial_union
+                            && fits_partially(
                                 ty,
                                 &ret.declared_type,
                                 ctx.loaders.resolved_class_loader(),

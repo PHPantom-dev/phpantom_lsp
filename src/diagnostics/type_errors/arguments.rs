@@ -31,7 +31,8 @@ use super::super::helpers::{
     make_diagnostic,
 };
 use super::{
-    TYPE_MISMATCH_ARGUMENT_CODE, fails_only_on_empty, has_strict_types, is_type_compatible,
+    TYPE_MISMATCH_ARGUMENT_CODE, fails_only_on_empty, fits_partially, has_strict_types,
+    is_type_compatible,
 };
 
 // ── Resolved argument info ──────────────────────────────────────────────────
@@ -315,6 +316,7 @@ impl Backend {
             // Read once for the whole file, so the flag cannot change
             // mid-pass.
             report_possibly_empty: self.possibly_empty_mismatches_enabled(),
+            report_partial_union: self.partial_union_mismatches_enabled(),
             docblock_types: self.docblock_type_mismatches_enabled(),
         };
 
@@ -569,6 +571,7 @@ struct ArgumentCheck<'a> {
     class_loader: &'a ResolvedClassLoader<'a>,
     strict_types: bool,
     report_possibly_empty: bool,
+    report_partial_union: bool,
     /// Whether an argument is checked against the parameter's docblock
     /// type, or only its native one.
     docblock_types: bool,
@@ -770,6 +773,19 @@ impl ArgumentCheck<'_> {
             && missing_keys.is_empty()
             && !breaks_list_order
             && fails_only_on_empty(
+                arg_type,
+                effective_param_type,
+                self.class_loader,
+                self.strict_types,
+            )
+        {
+            return;
+        }
+
+        if !self.report_partial_union
+            && missing_keys.is_empty()
+            && !breaks_list_order
+            && fits_partially(
                 arg_type,
                 effective_param_type,
                 self.class_loader,

@@ -35,6 +35,18 @@ impl Backend {
             .possibly_empty_mismatches_enabled()
     }
 
+    /// Whether a type mismatch some members of the value's union fit is
+    /// reported; see
+    /// [`DiagnosticsConfig::partial_union_mismatches_enabled`](config::DiagnosticsConfig::partial_union_mismatches_enabled).
+    /// Reads the one flag without cloning the whole config.
+    pub(crate) fn partial_union_mismatches_enabled(&self) -> bool {
+        self.workspace
+            .config
+            .lock()
+            .diagnostics
+            .partial_union_mismatches_enabled()
+    }
+
     /// Whether type mismatches are checked against docblock types, not
     /// just native ones; see
     /// [`DiagnosticsConfig::docblock_type_mismatches_enabled`](config::DiagnosticsConfig::docblock_type_mismatches_enabled).

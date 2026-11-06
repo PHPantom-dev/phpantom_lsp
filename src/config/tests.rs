@@ -200,6 +200,24 @@ fn possibly_empty_mismatches_defaults_to_false() {
 }
 
 #[test]
+fn parses_partial_union_mismatches() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(CONFIG_FILE_NAME);
+    std::fs::write(&path, "[diagnostics]\npartial-union-mismatches = false\n").unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(!config.diagnostics.partial_union_mismatches_enabled());
+}
+
+#[test]
+fn partial_union_mismatches_defaults_to_true() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(CONFIG_FILE_NAME);
+    std::fs::write(&path, "[diagnostics]\n").unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(config.diagnostics.partial_union_mismatches_enabled());
+}
+
+#[test]
 fn parses_docblock_type_mismatches() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(CONFIG_FILE_NAME);

@@ -17405,3 +17405,71 @@ new Controller('test', []);
         "got {diags:?}"
     );
 }
+
+// ─── Unions some members of which fit (partial-union-mismatches) ────────────
+
+/// Every kind of type mismatch in `php`, with `partial-union-mismatches`
+/// as given; `None` leaves it unset.
+fn partial_union_mismatches(php: &str, partial_union: Option<bool>) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///partial_union.php";
+    let mut cfg = backend.config();
+    cfg.diagnostics.partial_union_mismatches = partial_union;
+    backend.set_config(cfg);
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    backend.collect_return_type_diagnostics(uri, php, &mut diags);
+    backend.collect_property_type_diagnostics(uri, php, &mut diags);
+    diags
+}
+
+const PARTIAL_UNION: &str = r#"<?php
+declare(strict_types=1);
+function label(string $text): void {}
+
+class Holder {
+    public string $name = '';
+
+    public function run(array|string $a, array|string $b, int|string $c, ?string $d): string {
+        label($a);
+        $this->name = $b;
+        label($d);
+        return $c;
+    }
+}
+"#;
+
+#[test]
+fn a_union_some_members_of_which_fit_is_reported_by_default() {
+    // `possibly-empty-mismatches` is on in the test environment, so the
+    // `?string` argument is reported too.
+    let diags = partial_union_mismatches(PARTIAL_UNION, None);
+    assert_eq!(diags.len(), 4, "got {diags:?}");
+}
+
+#[test]
+fn switching_partial_union_mismatches_off_leaves_them_out() {
+    let diags = partial_union_mismatches(PARTIAL_UNION, Some(false));
+    assert!(diags.is_empty(), "got {diags:?}");
+}
+
+/// No member fits, so there is no value for which the code works.
+#[test]
+fn a_union_no_member_of_which_fits_is_always_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+function label(string $text): void {}
+
+class Holder {
+    public string $name = '';
+
+    public function run(array|int $a, array|float $b, int|float $c): string {
+        label($a);
+        $this->name = $b;
+        return $c;
+    }
+}
+"#;
+    assert_eq!(partial_union_mismatches(php, Some(false)).len(), 3);
+}

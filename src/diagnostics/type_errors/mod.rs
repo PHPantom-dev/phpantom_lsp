@@ -74,6 +74,28 @@ pub(super) fn fails_only_on_empty(
     }
 }
 
+/// Whether a `value` that does not fit `declared` is a union with at least
+/// one member that does, such as an `array|string` passed to a `string`
+/// parameter.
+///
+/// The code fails only when the value turns out to be one of the other
+/// members, so `partial-union-mismatches = false` leaves these unreported,
+/// the way PHPStan below level 7 accepts a union it judges "maybe".
+pub(super) fn fits_partially(
+    value: &crate::php_type::PhpType,
+    declared: &crate::php_type::PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+    strict_types: bool,
+) -> bool {
+    use crate::php_type::{PhpType, TypeKind};
+    let fits = |ty: &PhpType| is_type_compatible(ty, declared, class_loader, strict_types);
+    match value.kind() {
+        TypeKind::Nullable(inner) => fits(inner) || fits(&PhpType::null()),
+        TypeKind::Union(members) => members.iter().any(fits),
+        _ => false,
+    }
+}
+
 /// Whether `arg_type` can be passed where `param_type` is declared, with
 /// the Laravel model-type operators (`builder-of<Model>`, …) on either side
 /// expanded to the classes they name first.

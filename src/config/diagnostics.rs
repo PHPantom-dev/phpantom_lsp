@@ -97,6 +97,17 @@ pub struct DiagnosticsConfig {
     #[serde(rename = "possibly-empty-mismatches")]
     pub possibly_empty_mismatches: Option<bool>,
 
+    /// Report a `type_mismatch_argument`, `type_mismatch_return` or
+    /// `type_mismatch_property` where some members of the value's union
+    /// fit the declared type, such as an `array|string` passed to a
+    /// `string` parameter.
+    ///
+    /// On by default. Set to `false` and only a value no member of which
+    /// fits is reported, the way PHPStan below level 7 judges unions. That
+    /// also leaves out the mismatches `possibly-empty-mismatches` covers.
+    #[serde(rename = "partial-union-mismatches")]
+    pub partial_union_mismatches: Option<bool>,
+
     /// Check arguments, return values and property writes against the
     /// type a docblock declares, not just the native one.
     ///
@@ -203,6 +214,13 @@ impl DiagnosticsConfig {
     /// Whether a mismatch that only a `null` or `false` causes is reported.
     pub fn possibly_empty_mismatches_enabled(&self) -> bool {
         self.possibly_empty_mismatches.unwrap_or(false)
+    }
+
+    /// Whether a mismatch some members of the value's union fit is reported.
+    ///
+    /// Defaults to `true` (on) when not explicitly set.
+    pub fn partial_union_mismatches_enabled(&self) -> bool {
+        self.partial_union_mismatches.unwrap_or(true)
     }
 
     /// Whether type mismatches are checked against docblock types.

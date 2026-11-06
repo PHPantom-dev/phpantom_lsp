@@ -107,6 +107,12 @@ fn prompt_diagnostic_toggles() -> Vec<&'static str> {
         diagnostics.push("possibly-empty-mismatches = true");
     }
     if !prompt_bool(
+        "Report a type mismatch when some members of a union fit?",
+        true,
+    ) {
+        diagnostics.push("partial-union-mismatches = false");
+    }
+    if !prompt_bool(
         "Check type mismatches against docblock types, not just native ones?",
         true,
     ) {
