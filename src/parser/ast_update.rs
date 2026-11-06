@@ -80,6 +80,9 @@ pub(crate) struct AstIndexUpdate {
     /// The lowering a template was parsed as, published together with
     /// `symbol_map` because the map's offsets index its virtual PHP.
     pub(super) blade: Option<BladeLowering>,
+    /// The database connections the file configures through
+    /// `DriverManager::getConnection()`.
+    pub(super) doctrine_connections: Vec<crate::doctrine::connection::Connection>,
 }
 
 /// A Blade template lowered to the virtual PHP everything else reads it as,
@@ -603,6 +606,11 @@ impl Backend {
         }
         let symbol_map = Arc::new(symbol_map);
         let pest_uses = crate::pest::file_uses(program.statements.iter(), &owned_resolved);
+        let doctrine_connections = if self.configures_project_connection(uri, content) {
+            crate::doctrine::connection::php_connections(program, &owned_resolved)
+        } else {
+            Vec::new()
+        };
 
         // For files without any explicit namespace blocks, synthesize a
         // single span covering the entire file with the detected namespace
@@ -631,7 +639,25 @@ impl Backend {
             defines,
             symbol_map,
             blade: None,
+            doctrine_connections,
         }
+    }
+
+    /// Whether `content`, the text of `uri`, may configure the database
+    /// connection of a Doctrine project: a file of the project's own that
+    /// calls `getConnection()`.  An installed package's connections are
+    /// those its users configure.
+    fn configures_project_connection(&self, uri: &str, content: &str) -> bool {
+        self.is_doctrine_project()
+            && uri.starts_with("file:")
+            && !self.is_external_stub_uri(uri)
+            && crate::doctrine::connection::may_configure_connection(content)
+            && !self
+                .workspace
+                .vendor_uri_prefixes
+                .lock()
+                .iter()
+                .any(|prefix| uri.starts_with(prefix.as_str()))
     }
 }
 

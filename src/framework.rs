@@ -105,19 +105,47 @@ impl Backend {
         drop(doctrine_repositories);
         // A repository resolved before the change carries the finders of
         // the fields the entity mapped then.
-        if crate::doctrine::mapping_files::index_mapping_file(
+        let mapping_changed = crate::doctrine::mapping_files::index_mapping_file(
             &self.doctrine_mapping_files,
             uri,
             content,
-        ) {
+        );
+        let connections_changed = crate::doctrine::connection::record(
+            &self.doctrine_connections,
+            uri,
+            self.yaml_doctrine_connections(uri, content),
+        );
+        if mapping_changed || connections_changed {
             self.clear_resolved_class_cache();
         }
+    }
+
+    /// The database connections the Symfony configuration file `uri`
+    /// configures for Doctrine.
+    fn yaml_doctrine_connections(
+        &self,
+        uri: &str,
+        content: &str,
+    ) -> Vec<crate::doctrine::connection::Connection> {
+        if !self.is_doctrine_project() || !(uri.ends_with(".yaml") || uri.ends_with(".yml")) {
+            return Vec::new();
+        }
+        let Some(path) = crate::util::uri_to_path(uri) else {
+            return Vec::new();
+        };
+        let root = crate::doctrine::connection::symfony_root(&path);
+        crate::doctrine::connection::yaml_connections(&path, content, &|name| {
+            crate::doctrine::connection::symfony_env(root?, name)
+        })
     }
 
     pub(crate) fn remove_framework_uri(&self, uri: &str) {
         self.framework_references.write().remove(uri);
         self.framework_doctrine_repositories.write().remove(uri);
-        if self.doctrine_mapping_files.write().remove(uri).is_some() {
+        let mapping_removed = self.doctrine_mapping_files.write().remove(uri).is_some();
+        let connections_removed =
+            crate::doctrine::connection::record(&self.doctrine_connections, uri, Vec::new());
+        if mapping_removed || connections_removed {
             self.clear_resolved_class_cache();
         }
     }

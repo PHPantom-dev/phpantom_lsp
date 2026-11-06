@@ -18,6 +18,7 @@
 //! Where neither maps the entity, its fields are not known, and nothing
 //! here claims anything about it.
 
+pub(crate) mod connection;
 pub(crate) mod dql;
 pub(crate) mod dql_syntax;
 pub(crate) mod mapping_files;

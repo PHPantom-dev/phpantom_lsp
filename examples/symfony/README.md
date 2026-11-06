@@ -134,7 +134,9 @@ catalogues together, the way a real Symfony project does.
   `displayNamesByEmail()`, hover `$rows`, a shape of the selected fields
   keyed by the `INDEX BY` field. In `teamSizes()`, hover `$rows`: an
   aggregate or a function is typed where every database driver agrees,
-  so `COUNT()` is an `int<0, max>` and `UPPER()` a `string`. In
+  so `COUNT()` is an `int<0, max>` and `UPPER()` a `string`, and `AVG()`
+  is typed for the SQLite driver `config/packages/doctrine.yaml` names, a
+  `float`. In
   `searchByName()`, hover `$users`: the
   builder `byEmail()` returns carries its DQL into a variable and through
   a branch, so the result is still a `list<User>`, and the `u` that

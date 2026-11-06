@@ -387,9 +387,11 @@ $rows = $entityManager->createQueryBuilder()
     ->getResult();
 check('displayNamesByEmail() gets a shape of the fields keyed by email', $rows === ['ada@example.com' => ['email' => 'ada@example.com', 'displayName' => 'Ada']]);
 $rows = $entityManager
-    ->createQuery('SELECT t.name, COUNT(u.email) AS members, UPPER(t.name) AS label FROM App\Entity\User u JOIN u.team t GROUP BY t.name')
+    ->createQuery('SELECT t.name, COUNT(u.email) AS members, UPPER(t.name) AS label, AVG(LENGTH(u.displayName)) AS nameLength FROM App\Entity\User u JOIN u.team t GROUP BY t.name')
     ->getResult();
-check('teamSizes() gets the COUNT() as an int and UPPER() as a string', $rows === [['name' => 'Core', 'members' => 1, 'label' => 'CORE']]);
+check('teamSizes() gets the COUNT() as an int, UPPER() as a string, and AVG() on SQLite as a float', $rows === [['name' => 'Core', 'members' => 1, 'label' => 'CORE', 'nameLength' => 3.0]]);
+$dbal = Yaml::parseFile("$config/packages/doctrine.yaml")['doctrine']['dbal'];
+check('config/packages/doctrine.yaml connects with SQLite, which the assertions run on', str_starts_with($dbal['url'], 'sqlite:'));
 $users = $entityManager->createQuery('SELECT u FROM App\Entity\User u WHERE u.displayName = :name')
     ->setParameter('name', 'Ada')
     ->getResult();

@@ -271,6 +271,15 @@ impl Backend {
             .epoch
             .begin_publication(updates.iter().map(|update| update.uri.as_str()));
 
+        let mut connections_changed = false;
+        for update in &updates {
+            connections_changed |= crate::doctrine::connection::record(
+                &self.doctrine_connections,
+                &update.uri,
+                update.doctrine_connections.clone(),
+            );
+        }
+
         let old_classes_by_update: Vec<Vec<Arc<ClassInfo>>> = {
             let uri_classes = self.symbols.uri_classes_index.read();
             updates
@@ -500,7 +509,12 @@ impl Backend {
             }
         }
 
-        let changed = structural_changed || !refreshed_existing.is_empty();
+        // What a query's DQL selects is fetched as the connection's driver
+        // gives it, in every file.
+        if connections_changed {
+            self.clear_resolved_class_cache();
+        }
+        let changed = structural_changed || connections_changed || !refreshed_existing.is_empty();
 
         self.reindex_references_for_symbol_maps_batch(reference_items);
 

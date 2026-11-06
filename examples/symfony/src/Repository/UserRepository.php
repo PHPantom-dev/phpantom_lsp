@@ -97,15 +97,17 @@ final class UserRepository extends ServiceEntityRepository
     }
 
     /**
-     * @return list<array{name: string, members: int<0, max>, label: string}>
+     * @return list<array{name: string, members: int<0, max>, label: string, nameLength: float}>
      */
     public function teamSizes(): array
     {
         // Try: hover $rows. An aggregate or a function is typed where every
         // database driver agrees: COUNT() gives an int<0, max> and UPPER() a
-        // string. Something like SUM() depends on the driver and is mixed.
+        // string. What AVG() gives depends on the driver: SQLite, which the
+        // URL in config/packages/doctrine.yaml names, gives a float. Change
+        // the URL to start with mysql:// and it is a numeric-string.
         $rows = $this->getEntityManager()
-            ->createQuery('SELECT t.name, COUNT(u.email) AS members, UPPER(t.name) AS label FROM App\Entity\User u JOIN u.team t GROUP BY t.name')
+            ->createQuery('SELECT t.name, COUNT(u.email) AS members, UPPER(t.name) AS label, AVG(LENGTH(u.displayName)) AS nameLength FROM App\Entity\User u JOIN u.team t GROUP BY t.name')
             ->getResult();
 
         return $rows;

@@ -182,7 +182,9 @@ pub(crate) use config_keys::{
     resolve_config_key_declaration_exact, resolve_config_key_definition_fallback,
 };
 pub(crate) use const_eval::ClassContext;
-pub(crate) use env_vars::{enumerate_env_keys, env_declaration, env_name_is_sensitive};
+pub(crate) use env_vars::{
+    declared_env_value, enumerate_env_keys, env_declaration, env_name_is_sensitive,
+};
 pub(crate) use gates::{
     LaravelGateIndex, enumerate_gate_abilities, model_policy_abilities, scan_gate_registrations,
 };

@@ -18,11 +18,15 @@
 //! association.
 //!
 //! Any other expression is keyed by its result variable, or by a counter
-//! from `1`.  Its type is what every driver agrees on: `COUNT()` and
-//! `LENGTH()` are converted to `int` by Doctrine itself, and the string
-//! functions, string literals, and the `CASE`, `COALESCE()`, and `NULLIF()`
-//! of those give strings.  The rest (`SUM()`, arithmetic, a number) is
-//! fetched as the driver gives it and is `mixed`.
+//! from `1`.  `COUNT()` and `LENGTH()` are converted to `int` by Doctrine
+//! itself; every other expression is what the database gives for it, as the
+//! driver fetches it.  The string functions, string literals, and the
+//! `CASE`, `COALESCE()`, and `NULLIF()` of those give strings on every
+//! driver.  The rest (`SUM()`, arithmetic, a number) differs between MySQL,
+//! PostgreSQL, and SQLite, and with the PDO options and the PHP version:
+//! it is typed the way PHPStan's Doctrine extension types it for the
+//! project's connection (see [`super::connection`]), and is `mixed` when
+//! the connection is not known.
 //!
 //! A query builder's query is the DQL its calls build, replayed by
 //! [`QueryBuilderState`].  The calls that only filter or order the rows
@@ -33,11 +37,12 @@ use std::sync::Arc;
 
 use crate::atom::Atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
-use crate::php_type::{PhpType, ShapeEntry, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, PhpVersion};
 
 use super::DoctrineCacheState;
+use super::connection::{Connection, Driver};
 use super::dql::{Tok, Token, is_keyword, tokenize};
 
 /// ORM's query class.
@@ -77,6 +82,10 @@ pub(crate) trait EntityModel {
     /// The fully-qualified name of the class `name` names, when it is one:
     /// the class `NEW` constructs.
     fn class(&self, name: &str) -> Option<Atom>;
+    /// The connection the queries run on, when its driver is known.
+    fn platform(&self) -> Option<Platform> {
+        None
+    }
 }
 
 /// `Query<key, result>`.
@@ -351,12 +360,388 @@ enum Selected {
 /// The words that name an aggregate function.
 const AGGREGATES: &[&str] = &["COUNT", "SUM", "AVG", "MIN", "MAX"];
 
-/// The type of a scalar expression, as far as it is the same whatever
-/// driver the connection uses.
+/// The connection a query runs on, as far as it decides what the database
+/// gives back for an expression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Platform {
+    pub(crate) driver: Driver,
+    /// `PDO::ATTR_STRINGIFY_FETCHES`, `None` when not known.
+    pub(crate) stringify_fetches: Option<bool>,
+    /// `PDO::ATTR_EMULATE_PREPARES`, `None` when not known.
+    pub(crate) emulate_prepares: Option<bool>,
+    /// The PHP version the project runs on, whose PDO drivers changed what
+    /// they return in 8.1 and 8.4.
+    pub(crate) php: PhpVersion,
+}
+
+/// The kinds of value a PDO driver may return as a string instead.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fetch {
+    Int,
+    Float,
+    Bool,
+}
+
+impl Platform {
+    /// The platform of `connection` on `php`, when its driver is known.
+    pub(crate) fn of(connection: Connection, php: PhpVersion) -> Option<Self> {
+        Some(Self {
+            driver: connection.driver?,
+            stringify_fetches: connection.stringify_fetches,
+            emulate_prepares: connection.emulate_prepares,
+            php,
+        })
+    }
+
+    /// Whether the driver returns a value of kind `fetch` as a string:
+    /// `Some(true)` when it does, `Some(false)` when it does not, `None`
+    /// when either may happen.  The table is PHPStan's Doctrine extension's,
+    /// which comes from fetching every kind from every driver.
+    fn stringifies(&self, fetch: Fetch) -> Option<bool> {
+        let at_least = |minor: u8| self.php >= PhpVersion::new(8, minor);
+        let stringify = self.stringify_fetches;
+        match self.driver {
+            Driver::PdoMysql => match stringify {
+                Some(true) => Some(true),
+                None => None,
+                Some(false) if at_least(1) => Some(false),
+                Some(false) => self.emulate_prepares,
+            },
+            Driver::PdoSqlite => match stringify {
+                Some(true) => Some(true),
+                _ if !at_least(1) => Some(true),
+                other => other,
+            },
+            Driver::PdoPgsql => match fetch {
+                Fetch::Bool if !at_least(1) => Some(false),
+                Fetch::Float if !at_least(4) => Some(true),
+                _ => stringify,
+            },
+            Driver::Mysqli | Driver::Pgsql | Driver::Sqlite3 => Some(false),
+        }
+    }
+
+    /// What the value the database gives as `fetched` is once the driver
+    /// has fetched it.
+    fn hydrate(&self, fetched: Fetched) -> Fetched {
+        let mut members = Vec::new();
+        for member in fetched.members {
+            let fetch = match member {
+                Scalar::Int(_) | Scalar::NonNegativeInt => Fetch::Int,
+                Scalar::Float(_) => Fetch::Float,
+                Scalar::Bool(_) => Fetch::Bool,
+                Scalar::NumericString | Scalar::String { .. } => {
+                    members.push(member);
+                    continue;
+                }
+            };
+            let stringify = self.stringifies(fetch);
+            if stringify == Some(false) {
+                members.push(member);
+                continue;
+            }
+            let strings = fetched_as_string(&member);
+            if stringify.is_none() {
+                members.push(member);
+            }
+            members.extend(strings);
+        }
+        Fetched {
+            members,
+            nullable: fetched.nullable,
+        }
+    }
+}
+
+/// What a PDO driver gives for `member` when it returns it as a string.
+fn fetched_as_string(member: &Scalar) -> Vec<Scalar> {
+    match member {
+        Scalar::Int(Some(n)) => vec![Scalar::string(n.to_string())],
+        Scalar::Bool(Some(b)) => vec![Scalar::string(if *b { "1" } else { "0" })],
+        Scalar::Bool(None) => vec![Scalar::string("0"), Scalar::string("1")],
+        // A float's digits differ between PHP versions, so only its being
+        // numeric is known.
+        _ => vec![Scalar::NumericString],
+    }
+}
+
+/// A value the database gives for an expression, as PHP sees it before
+/// Doctrine converts anything.
+#[derive(Debug, Clone, PartialEq)]
+enum Scalar {
+    /// An `int`, or the one int when known.
+    Int(Option<i64>),
+    /// An `int<0, max>`.
+    NonNegativeInt,
+    /// A `float`, or the one float when known.
+    Float(Option<f64>),
+    /// A `numeric-string`.
+    NumericString,
+    /// A `string`, or the one string when known.  `written` says whether
+    /// it is a string literal of the DQL, which arithmetic reads as the
+    /// number it spells.
+    String {
+        value: Option<String>,
+        written: bool,
+    },
+    /// A `bool`, or the one bool when known.
+    Bool(Option<bool>),
+}
+
+impl Scalar {
+    fn string(value: impl Into<String>) -> Self {
+        Scalar::String {
+            value: Some(value.into()),
+            written: false,
+        }
+    }
+
+    fn any_string() -> Self {
+        Scalar::String {
+            value: None,
+            written: false,
+        }
+    }
+
+    fn is_int(&self) -> bool {
+        matches!(self, Scalar::Int(_) | Scalar::NonNegativeInt)
+    }
+
+    fn is_float(&self) -> bool {
+        matches!(self, Scalar::Float(_))
+    }
+
+    fn is_string(&self) -> bool {
+        matches!(self, Scalar::NumericString | Scalar::String { .. })
+    }
+
+    fn is_numeric_string(&self) -> bool {
+        match self {
+            Scalar::NumericString => true,
+            Scalar::String {
+                value: Some(value), ..
+            } => LiteralValue::string_value(value).is_numeric_string(),
+            _ => false,
+        }
+    }
+
+    fn is_numeric(&self) -> bool {
+        self.is_int() || self.is_float() || self.is_numeric_string()
+    }
+
+    fn is_constant(&self) -> bool {
+        matches!(
+            self,
+            Scalar::Int(Some(_))
+                | Scalar::Float(Some(_))
+                | Scalar::String { value: Some(_), .. }
+                | Scalar::Bool(Some(_))
+        )
+    }
+
+    fn to_php(&self) -> PhpType {
+        match self {
+            Scalar::Int(Some(n)) => PhpType::literal_int(n.to_string()),
+            Scalar::Int(None) => PhpType::int(),
+            Scalar::NonNegativeInt => PhpType::int_range("0", "max"),
+            Scalar::Float(Some(f)) => PhpType::literal_float(float_literal(*f)),
+            Scalar::Float(None) => PhpType::float(),
+            Scalar::NumericString => PhpType::numeric_string(),
+            Scalar::String {
+                value: Some(value), ..
+            } => PhpType::literal_string_value(value),
+            Scalar::String { value: None, .. } => PhpType::string(),
+            Scalar::Bool(Some(true)) => PhpType::true_(),
+            Scalar::Bool(Some(false)) => PhpType::false_(),
+            Scalar::Bool(None) => PhpType::bool(),
+        }
+    }
+
+    /// The scalar PHP's string cast makes of this one.
+    fn cast_to_string(&self) -> Vec<Scalar> {
+        match self {
+            Scalar::Int(Some(n)) => vec![Scalar::string(n.to_string())],
+            Scalar::Float(Some(f)) => vec![Scalar::string(php_float_string(*f))],
+            Scalar::Int(None) | Scalar::NonNegativeInt | Scalar::Float(None) => {
+                vec![Scalar::NumericString]
+            }
+            Scalar::Bool(Some(b)) => vec![Scalar::string(if *b { "1" } else { "" })],
+            Scalar::Bool(None) => vec![Scalar::string(""), Scalar::string("1")],
+            Scalar::NumericString | Scalar::String { .. } => vec![self.clone()],
+        }
+    }
+
+    /// The scalar PHP's float cast makes of this one.
+    fn cast_to_float(&self) -> Scalar {
+        match self {
+            Scalar::Int(Some(n)) => Scalar::Float(Some(*n as f64)),
+            Scalar::Bool(Some(b)) => Scalar::Float(Some(if *b { 1.0 } else { 0.0 })),
+            Scalar::String {
+                value: Some(value), ..
+            } => Scalar::Float(Some(value.trim().parse().unwrap_or(0.0))),
+            Scalar::Float(f) => Scalar::Float(*f),
+            _ => Scalar::Float(None),
+        }
+    }
+}
+
+/// A float as a PHPDoc literal spells it, with a fraction.
+fn float_literal(f: f64) -> String {
+    if f.fract() == 0.0 && f.abs() < 1e15 {
+        format!("{f:.1}")
+    } else {
+        format!("{f}")
+    }
+}
+
+/// A float as PHP's string cast spells it.
+fn php_float_string(f: f64) -> String {
+    if f.fract() == 0.0 && f.abs() < 1e15 {
+        format!("{}", f as i64)
+    } else {
+        format!("{f}")
+    }
+}
+
+/// What the database gives for an expression: one of `members`, or `null`
+/// when `nullable`.
+#[derive(Debug, Clone, PartialEq)]
+struct Fetched {
+    members: Vec<Scalar>,
+    nullable: bool,
+}
+
+impl Fetched {
+    fn of(member: Scalar, nullable: bool) -> Self {
+        Self {
+            members: vec![member],
+            nullable,
+        }
+    }
+
+    fn null() -> Self {
+        Self {
+            members: Vec::new(),
+            nullable: true,
+        }
+    }
+
+    fn union(values: impl IntoIterator<Item = Fetched>) -> Self {
+        let mut out = Fetched {
+            members: Vec::new(),
+            nullable: false,
+        };
+        for value in values {
+            out.nullable |= value.nullable;
+            for member in value.members {
+                if !out.members.contains(&member) {
+                    out.members.push(member);
+                }
+            }
+        }
+        out
+    }
+
+    fn or_null(mut self, nullable: bool) -> Self {
+        self.nullable |= nullable;
+        self
+    }
+
+    /// Whether every member satisfies `predicate`, there being at least
+    /// one.
+    fn all(&self, predicate: impl Fn(&Scalar) -> bool) -> bool {
+        !self.members.is_empty() && self.members.iter().all(predicate)
+    }
+
+    fn is_integer(&self) -> bool {
+        self.all(Scalar::is_int)
+    }
+
+    fn is_float(&self) -> bool {
+        self.all(Scalar::is_float)
+    }
+
+    fn is_string(&self) -> bool {
+        self.all(Scalar::is_string)
+    }
+
+    fn is_numeric_string(&self) -> bool {
+        self.all(Scalar::is_numeric_string)
+    }
+
+    fn is_numeric(&self) -> bool {
+        self.all(Scalar::is_numeric)
+    }
+
+    /// Whether the value is a string literal of the DQL.
+    fn is_written_string(&self) -> bool {
+        matches!(
+            self.members.as_slice(),
+            [Scalar::String {
+                value: Some(_),
+                written: true
+            }]
+        )
+    }
+
+    /// The type a constant is one of: `SUM(1)` is an `int`, not `1`.
+    fn generalized(&self, nullable: bool) -> Fetched {
+        let nullable = self.nullable || nullable;
+        if !self.all(Scalar::is_constant) {
+            return Fetched {
+                members: self.members.clone(),
+                nullable,
+            };
+        }
+        let member = if self.is_integer() {
+            Scalar::Int(None)
+        } else if self.is_float() {
+            Scalar::Float(None)
+        } else if self.is_numeric_string() {
+            Scalar::NumericString
+        } else if self.is_string() {
+            Scalar::any_string()
+        } else {
+            return Fetched {
+                members: self.members.clone(),
+                nullable,
+            };
+        };
+        Fetched::of(member, nullable)
+    }
+
+    fn map(self, f: impl Fn(&Scalar) -> Vec<Scalar>) -> Fetched {
+        Fetched::union(
+            self.members
+                .iter()
+                .map(|member| Fetched {
+                    members: f(member),
+                    nullable: false,
+                })
+                .chain(std::iter::once(Fetched {
+                    members: Vec::new(),
+                    nullable: self.nullable,
+                })),
+        )
+    }
+
+    fn to_php(&self) -> PhpType {
+        let mut types: Vec<PhpType> = self.members.iter().map(Scalar::to_php).collect();
+        if self.nullable {
+            types.push(PhpType::null());
+        }
+        if types.is_empty() {
+            return PhpType::mixed();
+        }
+        PhpType::union(types).simplified()
+    }
+}
+
+/// What the database gives for a scalar expression.
+#[derive(Debug, Clone, PartialEq)]
 enum Value {
-    Known(PhpType),
-    /// A value whose type depends on the driver, and whether it may be
-    /// `null`.
+    Known(Fetched),
+    /// A value whose type is not known, and whether it may be `null`.
     Unknown {
         nullable: bool,
     },
@@ -365,7 +750,7 @@ enum Value {
 impl Value {
     fn nullable(&self) -> bool {
         match self {
-            Value::Known(ty) => ty.accepts_null(),
+            Value::Known(fetched) => fetched.nullable,
             Value::Unknown { nullable } => *nullable,
         }
     }
@@ -373,6 +758,139 @@ impl Value {
     fn unknown() -> Self {
         Value::Unknown { nullable: true }
     }
+
+    fn of(member: Scalar, nullable: bool) -> Self {
+        Value::Known(Fetched::of(member, nullable))
+    }
+
+    /// A numeric string literal of the DQL, read as the number it spells,
+    /// the way the database reads it in arithmetic: `1 * '1'` is `1`.
+    /// MySQL reads every one as a float.
+    fn read_as_number(self, driver: Option<Driver>) -> Self {
+        let Value::Known(fetched) = &self else {
+            return self;
+        };
+        let [
+            Scalar::String {
+                value: Some(text),
+                written: true,
+            },
+        ] = fetched.members.as_slice()
+        else {
+            return self;
+        };
+        if fetched.nullable || !LiteralValue::string_value(text).is_numeric_string() {
+            return self;
+        }
+        let mysql = driver.is_some_and(Driver::is_mysql);
+        if !mysql
+            && !text.contains(['.', 'e'])
+            && let Ok(n) = text.trim().parse::<i64>()
+        {
+            return Value::of(Scalar::Int(Some(n)), false);
+        }
+        Value::of(Scalar::Float(text.trim().parse().ok()), false)
+    }
+
+    /// A numeric string literal of the DQL, read as a float.
+    fn read_as_float(self) -> Self {
+        match &self {
+            Value::Known(fetched)
+                if fetched.is_written_string() && !fetched.nullable && fetched.is_numeric() =>
+            {
+                Value::Known(fetched.clone().map(|m| vec![m.cast_to_float()]))
+            }
+            _ => self,
+        }
+    }
+}
+
+/// What the scalar values `values` are, each known.
+fn all_known(values: Vec<Value>) -> Result<Vec<Fetched>, Value> {
+    let mut out = Vec::with_capacity(values.len());
+    for value in values {
+        match value {
+            Value::Known(fetched) => out.push(fetched),
+            Value::Unknown { .. } => return Err(Value::unknown()),
+        }
+    }
+    Ok(out)
+}
+
+/// What the database gives for `+`, `-`, or `*` of `terms`.
+fn plus_minus_times(terms: Vec<Value>, driver: Option<Driver>) -> Value {
+    let terms = match all_known(terms) {
+        Ok(terms) => terms,
+        Err(unknown) => return unknown,
+    };
+    let terms: Vec<Fetched> = terms.iter().map(|t| t.generalized(false)).collect();
+    let union = Fetched::union(terms.iter().cloned());
+    let nullable = union.nullable;
+    if union.is_integer() {
+        return Value::of(Scalar::Int(None), nullable);
+    }
+    match driver {
+        Some(driver) if driver.is_sqlite() => sqlite_arithmetic(&terms, nullable),
+        Some(_) => {
+            if union.all(|m| m.is_int() || m.is_float()) {
+                Value::of(Scalar::Float(None), nullable)
+            } else if union.all(|m| m.is_int() || m.is_numeric_string()) {
+                Value::of(Scalar::NumericString, nullable)
+            } else if union.is_numeric() {
+                Value::of(Scalar::Float(None), nullable)
+            } else {
+                Value::unknown()
+            }
+        }
+        None => Value::unknown(),
+    }
+}
+
+/// What the database gives for `/` of `factors`.
+fn division(factors: Vec<Value>, driver: Option<Driver>) -> Value {
+    let factors = match all_known(factors) {
+        Ok(factors) => factors,
+        Err(unknown) => return unknown,
+    };
+    let factors: Vec<Fetched> = factors.iter().map(|t| t.generalized(false)).collect();
+    let union = Fetched::union(factors.iter().cloned());
+    let nullable = union.nullable;
+    let Some(driver) = driver else {
+        return Value::unknown();
+    };
+    if union.is_integer() {
+        let member = if driver.is_mysql() {
+            Scalar::NumericString
+        } else {
+            Scalar::Int(None)
+        };
+        return Value::of(member, nullable);
+    }
+    if driver.is_sqlite() {
+        return sqlite_arithmetic(&factors, nullable);
+    }
+    if union.all(|m| m.is_int() || m.is_numeric_string()) {
+        Value::of(Scalar::NumericString, nullable)
+    } else if union.is_numeric() {
+        Value::of(Scalar::Float(None), nullable)
+    } else {
+        Value::unknown()
+    }
+}
+
+/// What SQLite gives for arithmetic on the generalized `operands`, which
+/// are not all integers.
+fn sqlite_arithmetic(operands: &[Fetched], nullable: bool) -> Value {
+    if !operands.iter().all(Fetched::is_numeric) {
+        return Value::unknown();
+    }
+    if operands.iter().any(Fetched::is_float) {
+        return Value::of(Scalar::Float(None), nullable);
+    }
+    Value::Known(Fetched {
+        members: vec![Scalar::Float(None), Scalar::Int(None)],
+        nullable,
+    })
 }
 
 fn or_null(ty: PhpType, nullable: bool) -> PhpType {
@@ -391,9 +909,15 @@ struct Scope<'a> {
     /// Whether the query aggregates without a `GROUP BY`: its one row may
     /// come from no row at all, so every column may be `null`.
     aggregate_without_group_by: bool,
+    /// The connection the query runs on, when known.
+    platform: Option<Platform>,
 }
 
 impl Scope<'_> {
+    fn driver(&self) -> Option<Driver> {
+        self.platform.map(|p| p.driver)
+    }
+
     /// The type of the selected field `field` of what `alias` stands for.
     fn field(&self, alias: &str, field: &str) -> Option<PhpType> {
         let decl = self.decls.iter().find(|d| d.alias == alias)?;
@@ -410,8 +934,9 @@ impl Scope<'_> {
     ///
     /// Doctrine converts the result of `COUNT()` and `LENGTH()` through its
     /// `integer` type, which makes it an `int` whatever the driver gave.
-    /// Every other expression is hydrated as the driver fetched it, so only
-    /// a string is known to stay one.
+    /// Every other expression is hydrated as the driver fetched it: a
+    /// string stays one on every driver, and anything else is known once
+    /// the driver is.
     fn select_type(&self, start: usize, end: usize) -> PhpType {
         if let Some((name, args)) = self.function(start, end) {
             if name.eq_ignore_ascii_case("COUNT") {
@@ -425,9 +950,13 @@ impl Scope<'_> {
                 return or_null(PhpType::int_range("0", "max"), nullable);
             }
         }
-        match self.value(start, end) {
-            Value::Known(ty) => ty,
-            Value::Unknown { .. } => PhpType::mixed(),
+        let Value::Known(fetched) = self.value(start, end) else {
+            return PhpType::mixed();
+        };
+        match self.platform {
+            Some(platform) => platform.hydrate(fetched).to_php(),
+            None if fetched.members.iter().all(Scalar::is_string) => fetched.to_php(),
+            None => PhpType::mixed(),
         }
     }
 
@@ -464,47 +993,134 @@ impl Scope<'_> {
             return self.value_of(start + 1, end - 1);
         }
         if end - start == 1 {
-            if reader.is_word(start, "NULL") {
-                return Some(Value::Known(PhpType::null()));
-            }
-            return string_literal(reader.text(start)).map(Value::Known);
+            return self.literal(start);
         }
         if end - start == 3
             && let Some((alias, field)) = reader.path(start)
         {
-            // A field as the driver fetched it, which is a string for a
-            // string column on every driver.
-            let decl = self.decls.iter().find(|d| d.alias == alias)?;
-            let Field::Column(ty) = self.model.field(decl.entity.as_ref()?, &field)? else {
-                return None;
-            };
-            let nullable = decl.optional || self.aggregate_without_group_by || ty.accepts_null();
-            let non_null = ty.non_null_type().unwrap_or(ty);
-            return Some(if non_null.is_string_type() {
-                Value::Known(or_null(PhpType::string(), nullable))
-            } else {
-                Value::Unknown { nullable }
-            });
+            return self.path_value(&alias, &field);
         }
         if reader.is_word(start, "CASE") && reader.is_word(end - 1, "END") {
             return self.case(start, end);
         }
-        let (name, args) = self.function(start, end)?;
+        if let Some((name, args)) = self.function(start, end) {
+            return self.call(name, &args);
+        }
+        self.arithmetic(start, end)
+    }
+
+    /// The literal at `i`.
+    fn literal(&self, i: usize) -> Option<Value> {
+        let reader = self.reader;
+        if reader.is_word(i, "NULL") {
+            return Some(Value::Known(Fetched::null()));
+        }
+        if reader.is_word(i, "TRUE") || reader.is_word(i, "FALSE") {
+            let value = reader.is_word(i, "TRUE");
+            return Some(match self.driver() {
+                Some(driver) if driver.is_pgsql() => Value::of(Scalar::Bool(Some(value)), false),
+                Some(_) => Value::of(Scalar::Int(Some(i64::from(value))), false),
+                None => Value::Unknown { nullable: false },
+            });
+        }
+        let text = reader.text(i);
+        if let Some(inner) = text.strip_prefix('\'').and_then(|t| t.strip_suffix('\'')) {
+            return Some(Value::of(
+                Scalar::String {
+                    value: Some(inner.replace("''", "'")),
+                    written: true,
+                },
+                false,
+            ));
+        }
+        if !text.starts_with(|c: char| c.is_ascii_digit()) {
+            return None;
+        }
+        if !text.contains(['.', 'e', 'E']) {
+            return text
+                .parse()
+                .ok()
+                .map(|n| Value::of(Scalar::Int(Some(n)), false));
+        }
+        // MySQL gives a decimal literal as the string it is, and a float
+        // only for one with an exponent; PostgreSQL gives a string either
+        // way.
+        let float: f64 = text.parse().ok()?;
+        let has_exponent = text.contains(['e', 'E']);
+        Some(match self.driver() {
+            Some(driver) if driver.is_mysql() && !has_exponent => {
+                Value::of(Scalar::string(text), false)
+            }
+            Some(driver) if driver.is_pgsql() => {
+                let text = if has_exponent {
+                    php_float_string(float)
+                } else {
+                    text.to_string()
+                };
+                Value::of(Scalar::string(text), false)
+            }
+            Some(_) => Value::of(Scalar::Float(Some(float)), false),
+            None => Value::Unknown { nullable: false },
+        })
+    }
+
+    /// The field `alias.field` as the database gives it, which is the
+    /// column's type rather than the property's: a string column is a
+    /// string on every driver, an integer one an integer, and a boolean
+    /// one an integer except on PostgreSQL.
+    fn path_value(&self, alias: &str, field: &str) -> Option<Value> {
+        let decl = self.decls.iter().find(|d| d.alias == alias)?;
+        let Field::Column(ty) = self.model.field(decl.entity.as_ref()?, field)? else {
+            return None;
+        };
+        let nullable = decl.optional || self.aggregate_without_group_by || ty.accepts_null();
+        let non_null = ty.non_null_type().unwrap_or(ty);
+        Some(if non_null.is_string_type() {
+            Value::of(Scalar::any_string(), nullable)
+        } else if non_null.is_int() {
+            Value::of(Scalar::Int(None), nullable)
+        } else if non_null.is_bool() {
+            match self.driver() {
+                Some(driver) if driver.is_pgsql() => Value::of(Scalar::Bool(None), nullable),
+                Some(_) => Value::Known(Fetched {
+                    members: vec![Scalar::Int(Some(0)), Scalar::Int(Some(1))],
+                    nullable,
+                }),
+                None => Value::Unknown { nullable },
+            }
+        } else {
+            Value::Unknown { nullable }
+        })
+    }
+
+    /// The function call `name(args)`.
+    fn call(&self, name: &str, args: &[(usize, usize)]) -> Option<Value> {
+        let reader = self.reader;
         let is = |n: &str| name.eq_ignore_ascii_case(n);
         let any_nullable =
             |args: &[(usize, usize)]| args.iter().any(|&(s, e)| self.value(s, e).nullable());
-        let string = |nullable: bool| Some(Value::Known(or_null(PhpType::string(), nullable)));
+        let string = |nullable: bool| Some(Value::of(Scalar::any_string(), nullable));
+        let non_negative = |nullable: bool| Some(Value::of(Scalar::NonNegativeInt, nullable));
+        let driver = self.driver();
         if is("COUNT") {
-            Some(Value::Unknown { nullable: false })
-        } else if is("LENGTH") {
-            Some(Value::Unknown {
-                nullable: any_nullable(&args),
-            })
+            non_negative(false)
+        } else if is("SUM") || is("AVG") || is("MIN") || is("MAX") {
+            let &[(mut s, e)] = args else {
+                return None;
+            };
+            if reader.is_word(s, "DISTINCT") {
+                s += 1;
+            }
+            Some(self.aggregate(name, self.value(s, e)))
+        } else if is("LENGTH") || is("BIT_AND") || is("BIT_OR") {
+            non_negative(any_nullable(args))
+        } else if is("LOCATE") {
+            non_negative(any_nullable(args.get(..2)?))
         } else if is("CONCAT") || is("LOWER") || is("UPPER") || is("SUBSTRING") {
-            string(any_nullable(&args))
+            string(any_nullable(args))
         } else if is("TRIM") {
             // `TRIM([[LEADING | TRAILING | BOTH] [char] FROM] string)`.
-            let &[(s, e)] = args.as_slice() else {
+            let &[(s, e)] = args else {
                 return None;
             };
             let from = (s..e)
@@ -513,41 +1129,280 @@ impl Scope<'_> {
                 .map_or(s, |i| i + 1);
             string(self.value(from, e).nullable())
         } else if is("CURRENT_DATE") || is("CURRENT_TIME") || is("CURRENT_TIMESTAMP") {
-            args.is_empty().then(|| Value::Known(PhpType::string()))
+            args.is_empty()
+                .then(|| Value::of(Scalar::any_string(), false))
         } else if is("DATE_ADD") || is("DATE_SUB") {
             string(any_nullable(args.get(..2)?))
-        } else if is("COALESCE") {
-            let values: Vec<Value> = args.iter().map(|&(s, e)| self.value(s, e)).collect();
-            let all_nullable = values.iter().all(Value::nullable);
-            let mut types = Vec::new();
-            for value in values {
-                let Value::Known(ty) = value else {
-                    return None;
-                };
-                for member in ty.union_members() {
-                    if member.is_null() {
-                        if all_nullable {
-                            types.push(PhpType::null());
-                        }
-                    } else if member.is_string_literal() {
-                        types.push(PhpType::string());
-                    } else {
-                        types.push(member.clone());
-                    }
-                }
-            }
-            Some(Value::Known(PhpType::union(types).simplified()))
-        } else if is("NULLIF") {
-            let &[(s, e), _] = args.as_slice() else {
+        } else if is("DATE_DIFF") {
+            let nullable = any_nullable(args.get(..2)?);
+            Some(match driver {
+                Some(driver) if driver.is_sqlite() => Value::of(Scalar::Float(None), nullable),
+                Some(_) => Value::of(Scalar::Int(None), nullable),
+                None => Value::Unknown { nullable },
+            })
+        } else if is("ABS") {
+            let &[(s, e)] = args else {
                 return None;
             };
-            match self.value(s, e) {
-                Value::Known(ty) => Some(Value::Known(or_null(ty, true).simplified())),
-                Value::Unknown { .. } => None,
+            let Value::Known(fetched) = self.value(s, e).read_as_float() else {
+                return Some(Value::unknown());
+            };
+            let fetched = fetched.generalized(false);
+            Some(if fetched.is_integer() {
+                Value::of(Scalar::NonNegativeInt, fetched.nullable)
+            } else if fetched.is_numeric() {
+                Value::Known(fetched)
+            } else {
+                Value::unknown()
+            })
+        } else if is("MOD") {
+            let &[(s1, e1), (s2, e2)] = args else {
+                return None;
+            };
+            let (Value::Known(a), Value::Known(b)) = (self.value(s1, e1), self.value(s2, e2))
+            else {
+                return Some(Value::unknown());
+            };
+            if !Fetched::union([a.clone(), b.clone()]).is_integer() {
+                return Some(Value::unknown());
             }
+            // `MOD(x, 0)` is `NULL` where the database does not refuse it.
+            let may_be_zero = b
+                .members
+                .iter()
+                .any(|m| !matches!(m, Scalar::Int(Some(n)) if *n != 0));
+            let by_zero = may_be_zero && !driver.is_some_and(Driver::is_pgsql);
+            Some(Value::of(
+                Scalar::Int(None),
+                a.nullable || b.nullable || by_zero,
+            ))
+        } else if is("SQRT") {
+            let &[(s, e)] = args else {
+                return None;
+            };
+            Some(self.sqrt(self.value(s, e)))
+        } else if is("COALESCE") {
+            Some(self.coalesce(args))
+        } else if is("NULLIF") {
+            let &[(s, e), _] = args else {
+                return None;
+            };
+            Some(match self.value(s, e) {
+                Value::Known(fetched) => Value::Known(fetched.or_null(true)),
+                Value::Unknown { .. } => Value::unknown(),
+            })
         } else {
             None
         }
+    }
+
+    /// What the aggregate function `name` gives for `arg`.
+    fn aggregate(&self, name: &str, arg: Value) -> Value {
+        let without_group_by = self.aggregate_without_group_by;
+        if name.eq_ignore_ascii_case("MIN") || name.eq_ignore_ascii_case("MAX") {
+            // The column's own type.
+            return match arg {
+                Value::Known(fetched) => Value::Known(fetched.generalized(without_group_by)),
+                Value::Unknown { .. } => Value::unknown(),
+            };
+        }
+        let Value::Known(fetched) = arg.read_as_number(self.driver()) else {
+            return Value::unknown();
+        };
+        let nullable = fetched.nullable || without_group_by;
+        let Some(driver) = self.driver() else {
+            return Value::unknown();
+        };
+        let integer = fetched.is_integer();
+        let non_numeric_string = fetched.is_string() && !fetched.is_numeric_string();
+        let general = Value::Known(fetched.generalized(nullable));
+        if name.eq_ignore_ascii_case("AVG") {
+            if driver.is_sqlite() {
+                return Value::of(Scalar::Float(None), nullable);
+            }
+            if integer {
+                return Value::of(Scalar::NumericString, nullable);
+            }
+            if driver.is_mysql() && non_numeric_string {
+                return Value::of(Scalar::Float(None), nullable);
+            }
+            return general;
+        }
+        // `SUM`.
+        if integer && driver.is_mysql() {
+            Value::of(Scalar::NumericString, nullable)
+        } else if integer && driver.is_pgsql() {
+            Value::Known(Fetched {
+                members: vec![Scalar::Int(None), Scalar::NumericString],
+                nullable,
+            })
+        } else if non_numeric_string && !driver.is_pgsql() {
+            Value::of(Scalar::Float(None), nullable)
+        } else {
+            general
+        }
+    }
+
+    /// What `SQRT()` gives for `arg`.
+    fn sqrt(&self, arg: Value) -> Value {
+        let Value::Known(fetched) = arg else {
+            return Value::unknown();
+        };
+        if !fetched.is_numeric() {
+            return Value::unknown();
+        }
+        let Some(driver) = self.driver() else {
+            return Value::unknown();
+        };
+        if !driver.is_pgsql() {
+            // The square root of a negative number is `NULL`.
+            let may_be_negative = fetched.members.iter().any(|m| match m {
+                Scalar::NonNegativeInt => false,
+                Scalar::Int(Some(n)) => *n < 0,
+                Scalar::Float(Some(f)) => *f < 0.0,
+                Scalar::String {
+                    value: Some(value), ..
+                } => value.trim().parse::<f64>().is_ok_and(|f| f < 0.0),
+                _ => true,
+            });
+            return Value::of(Scalar::Float(None), fetched.nullable || may_be_negative);
+        }
+        let nullable = fetched.nullable;
+        let number = match Value::Known(Fetched {
+            members: fetched.members,
+            nullable: false,
+        })
+        .read_as_number(Some(driver))
+        {
+            Value::Known(number) => number,
+            Value::Unknown { .. } => return Value::unknown(),
+        };
+        let members = if number.is_integer() || number.is_float() {
+            vec![Scalar::Float(None)]
+        } else if number.is_numeric_string() {
+            vec![Scalar::NumericString]
+        } else {
+            vec![Scalar::Float(None), Scalar::NumericString]
+        };
+        Value::Known(Fetched { members, nullable })
+    }
+
+    /// What `COALESCE()` of `args` gives: one of its arguments, `null` only
+    /// when every one may be.  MySQL converts the arguments to one type: a
+    /// float when one is, and a string when one is.
+    fn coalesce(&self, args: &[(usize, usize)]) -> Value {
+        let values: Vec<Value> = args.iter().map(|&(s, e)| self.value(s, e)).collect();
+        let all_nullable = values.iter().all(Value::nullable);
+        let raw = match all_known(values) {
+            Ok(raw) => raw,
+            Err(_) => {
+                return Value::Unknown {
+                    nullable: all_nullable,
+                };
+            }
+        };
+        let mut result = Fetched::union(raw.iter().map(|r| r.generalized(false)));
+        result.nullable = all_nullable;
+        if self.driver().is_some_and(Driver::is_mysql) {
+            let contains_float = raw.iter().any(Fetched::is_float);
+            let all_numbers = raw.iter().all(|r| r.is_numeric() && !r.is_written_string());
+            let contains_string = raw.iter().any(Fetched::is_string);
+            if contains_float && all_numbers {
+                result = result.map(|m| vec![m.cast_to_float()]);
+            } else if contains_string {
+                result = result.map(|m| match m {
+                    Scalar::Float(None) => vec![Scalar::NumericString],
+                    other => other.cast_to_string(),
+                });
+            }
+        }
+        Value::Known(result)
+    }
+
+    /// The arithmetic expression in `start..end`: terms joined by `+` and
+    /// `-`, factors joined by `*` and `/`, or a signed factor.
+    fn arithmetic(&self, start: usize, end: usize) -> Option<Value> {
+        let driver = self.driver();
+        let plus_minus = self.binary_operators(start, end, &["+", "-"])?;
+        if !plus_minus.is_empty() {
+            let terms = split_at(start, end, &plus_minus)
+                .into_iter()
+                .map(|(s, e)| self.value(s, e).read_as_number(driver))
+                .collect();
+            return Some(plus_minus_times(terms, driver));
+        }
+        let times_divide = self.binary_operators(start, end, &["*", "/"])?;
+        if !times_divide.is_empty() {
+            let factors = split_at(start, end, &times_divide)
+                .into_iter()
+                .map(|(s, e)| self.value(s, e).read_as_number(driver))
+                .collect();
+            let divides = times_divide.iter().any(|&i| self.reader.text(i) == "/");
+            return Some(if divides {
+                division(factors, driver)
+            } else {
+                plus_minus_times(factors, driver)
+            });
+        }
+        let sign = self.reader.text(start);
+        if sign != "-" && sign != "+" {
+            return None;
+        }
+        let value = self.value_of(start + 1, end)?;
+        if sign == "+" {
+            return Some(value);
+        }
+        Some(match value {
+            Value::Known(fetched) => Value::Known(fetched.map(|m| {
+                vec![match m {
+                    Scalar::Int(Some(n)) => Scalar::Int(n.checked_neg()),
+                    Scalar::NonNegativeInt => Scalar::Int(None),
+                    Scalar::Float(Some(f)) => Scalar::Float(Some(-f)),
+                    other => other.clone(),
+                }]
+            })),
+            unknown => unknown,
+        })
+    }
+
+    /// The top-level binary operators among `operators` in `start..end`.
+    /// `None` when the range holds an operator that is no arithmetic.
+    fn binary_operators(&self, start: usize, end: usize, operators: &[&str]) -> Option<Vec<usize>> {
+        let reader = self.reader;
+        let mut found = Vec::new();
+        let mut depth = 0usize;
+        for i in start..end {
+            match reader.tokens[i].kind {
+                Tok::LParen => depth += 1,
+                Tok::RParen => depth = depth.checked_sub(1)?,
+                Tok::Ident if reader.is_word(i, "CASE") => depth += 1,
+                Tok::Ident if reader.is_word(i, "END") => depth = depth.checked_sub(1)?,
+                Tok::Other if depth == 0 => {
+                    let text = reader.text(i);
+                    if text
+                        .starts_with(|c: char| c.is_ascii_digit() || matches!(c, '\'' | ':' | '?'))
+                    {
+                        continue;
+                    }
+                    if !["+", "-", "*", "/"].contains(&text) {
+                        return None;
+                    }
+                    // A sign, rather than an operator, follows another
+                    // operator or opens the expression.
+                    let binary = i > start
+                        && match reader.kind(i - 1) {
+                            Some(Tok::Other) => !["+", "-", "*", "/"].contains(&reader.text(i - 1)),
+                            Some(Tok::RParen | Tok::Ident) => true,
+                            _ => false,
+                        };
+                    if binary && operators.contains(&text) {
+                        found.push(i);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Some(found)
     }
 
     /// The type of `CASE ... END` in `start..end`: one of its results, or
@@ -579,7 +1434,7 @@ impl Scope<'_> {
             return None;
         }
         marks.push(end - 1);
-        let mut types = Vec::new();
+        let mut results = Vec::new();
         let mut has_else = false;
         for pair in marks.windows(2) {
             let (mark, next) = (pair[0], pair[1]);
@@ -588,19 +1443,28 @@ impl Scope<'_> {
                 continue;
             }
             has_else |= is_else;
-            let Value::Known(ty) = self.value(mark + 1, next) else {
-                return None;
-            };
-            types.push(ty);
+            results.push(self.value(mark + 1, next));
         }
-        if types.is_empty() {
+        if results.is_empty() {
             return None;
         }
-        if !has_else {
-            types.push(PhpType::null());
-        }
-        Some(Value::Known(PhpType::union(types).simplified()))
+        Some(match all_known(results) {
+            Ok(results) => Value::Known(Fetched::union(results).or_null(!has_else)),
+            Err(unknown) => unknown,
+        })
     }
+}
+
+/// The ranges between the operators at `operators` in `start..end`.
+fn split_at(start: usize, end: usize, operators: &[usize]) -> Vec<(usize, usize)> {
+    let mut out = Vec::with_capacity(operators.len() + 1);
+    let mut from = start;
+    for &op in operators {
+        out.push((from, op));
+        from = op + 1;
+    }
+    out.push((from, end));
+    out
 }
 
 /// The index of the `)` that closes the `(` at `open`.
@@ -619,12 +1483,6 @@ fn matching(reader: &Reader<'_>, open: usize) -> Option<usize> {
         }
     }
     None
-}
-
-/// The string a DQL string literal token holds.
-fn string_literal(token: &str) -> Option<PhpType> {
-    let inner = token.strip_prefix('\'')?.strip_suffix('\'')?;
-    Some(PhpType::literal_string_value(inner.replace("''", "'")))
 }
 
 /// Whether the `SELECT` clause in `start..end` calls an aggregate function
@@ -683,6 +1541,7 @@ fn result_types(text: &str, model: &dyn EntityModel) -> Option<(PhpType, PhpType
         decls: &decls,
         model,
         aggregate_without_group_by: !group_by && selects_aggregate(&reader, select_start, from),
+        platform: model.platform(),
     };
     let mut entities: Vec<(Option<String>, PhpType)> = Vec::new();
     let mut scalars: Vec<(String, PhpType)> = Vec::new();
@@ -1597,6 +2456,12 @@ impl<'a, 'c> ResolverModel<'a, 'c> {
 }
 
 impl EntityModel for ResolverModel<'_, '_> {
+    fn platform(&self) -> Option<Platform> {
+        let backend = self.ctx.file.backend?;
+        let connection = super::connection::project_connection(&backend.doctrine_connections)?;
+        Platform::of(connection, backend.php_version())
+    }
+
     fn entity(&self, name: &str) -> Option<Atom> {
         let class = self.load(name)?;
         super::is_entity(&class, &self.state).then(|| class.fqn())
@@ -1643,6 +2508,8 @@ mod tests {
                 (_, "id") => Field::Column(PhpType::int()),
                 ("App\\User", "name") => Field::Column(PhpType::parse("string|null")),
                 ("App\\User", "email") => Field::Column(PhpType::string()),
+                ("App\\User", "score") => Field::Column(PhpType::parse("int|null")),
+                ("App\\User", "active") => Field::Column(PhpType::bool()),
                 ("App\\User", "address") => Field::Association(Some(atom("App\\Address"))),
                 ("App\\Address", "city") => Field::Column(PhpType::string()),
                 _ => return None,
@@ -1657,6 +2524,165 @@ mod tests {
 
     fn query(dql: &str) -> String {
         query_type(dql, &Model).to_string()
+    }
+
+    /// [`Model`] on a connection to `driver`.
+    struct OnPlatform(Platform);
+
+    impl EntityModel for OnPlatform {
+        fn entity(&self, name: &str) -> Option<Atom> {
+            Model.entity(name)
+        }
+
+        fn field(&self, entity: &str, field: &str) -> Option<Field> {
+            Model.field(entity, field)
+        }
+
+        fn class(&self, name: &str) -> Option<Atom> {
+            Model.class(name)
+        }
+
+        fn platform(&self) -> Option<Platform> {
+            Some(self.0)
+        }
+    }
+
+    fn platform(driver: Driver) -> Platform {
+        Platform {
+            driver,
+            stringify_fetches: Some(false),
+            emulate_prepares: Some(true),
+            php: PhpVersion::new(8, 4),
+        }
+    }
+
+    /// The row type of `SELECT <select> FROM App\User u <rest>` on
+    /// `platform`.
+    fn row_on(platform: Platform, select: &str, rest: &str) -> String {
+        let dql = format!("SELECT {select} FROM App\\User u {rest}");
+        let ty = query_type(&dql, &OnPlatform(platform)).to_string();
+        ty.strip_prefix("Doctrine\\ORM\\Query<null, ")
+            .and_then(|t| t.strip_suffix('>'))
+            .unwrap_or(&ty)
+            .to_string()
+    }
+
+    /// The type of the one expression `expr` selects, on each of pdo_mysql,
+    /// pdo_sqlite, and pdo_pgsql.
+    fn on_each(expr: &str, rest: &str) -> [String; 3] {
+        [Driver::PdoMysql, Driver::PdoSqlite, Driver::PdoPgsql].map(|driver| {
+            let row = row_on(platform(driver), &format!("{expr} AS v"), rest);
+            row.strip_prefix("array{v: ")
+                .and_then(|t| t.strip_suffix('}'))
+                .unwrap_or(&row)
+                .to_string()
+        })
+    }
+
+    #[test]
+    fn aggregates_are_typed_by_the_driver() {
+        let group = "GROUP BY u.id";
+        assert_eq!(
+            on_each("SUM(u.id)", group),
+            ["numeric-string", "int", "int|numeric-string"]
+        );
+        assert_eq!(
+            on_each("AVG(u.id)", group),
+            ["numeric-string", "float", "numeric-string"]
+        );
+        assert_eq!(on_each("MAX(u.id)", group), ["int", "int", "int"]);
+        // One row from no row at all.
+        assert_eq!(
+            on_each("MIN(u.id)", ""),
+            ["int|null", "int|null", "int|null"]
+        );
+        assert_eq!(
+            on_each("SUM(u.score)", group),
+            ["numeric-string|null", "int|null", "int|numeric-string|null"]
+        );
+        assert_eq!(
+            on_each("MAX(u.email)", ""),
+            ["string|null", "string|null", "string|null"]
+        );
+    }
+
+    #[test]
+    fn literals_and_arithmetic_are_typed_by_the_driver() {
+        assert_eq!(on_each("u.id + 1", ""), ["int", "int", "int"]);
+        assert_eq!(on_each("u.id / 2", ""), ["numeric-string", "int", "int"]);
+        assert_eq!(on_each("1.5", ""), ["'1.5'", "1.5", "'1.5'"]);
+        assert_eq!(on_each("TRUE", ""), ["1", "1", "true"]);
+        assert_eq!(on_each("-2 * 3", ""), ["int", "int", "int"]);
+        assert_eq!(
+            on_each("u.id * 1.5", ""),
+            ["numeric-string", "float", "numeric-string"]
+        );
+        assert_eq!(on_each("u.id = 1", ""), ["mixed", "mixed", "mixed"]);
+    }
+
+    #[test]
+    fn functions_are_typed_by_the_driver() {
+        assert_eq!(
+            on_each("ABS(u.id)", ""),
+            ["int<0, max>", "int<0, max>", "int<0, max>"]
+        );
+        assert_eq!(on_each("MOD(u.id, 3)", ""), ["int", "int", "int"]);
+        assert_eq!(
+            on_each("MOD(u.id, u.id)", ""),
+            ["int|null", "int|null", "int"]
+        );
+        assert_eq!(on_each("SQRT(4)", ""), ["float", "float", "float"]);
+        assert_eq!(
+            on_each("SQRT(u.id)", ""),
+            ["float|null", "float|null", "float"]
+        );
+        assert_eq!(
+            on_each("DATE_DIFF(u.email, u.email)", ""),
+            ["int", "float", "int"]
+        );
+        assert_eq!(on_each("COALESCE(u.score, 0)", ""), ["int", "int", "int"]);
+        assert_eq!(
+            on_each("COALESCE(u.score, u.email)", ""),
+            ["string", "int|string", "int|string"]
+        );
+        assert_eq!(
+            on_each("CASE WHEN u.id > 1 THEN 1 ELSE 0 END", ""),
+            ["1|0", "1|0", "1|0"]
+        );
+        assert_eq!(on_each("u.active + 0", ""), ["int", "int", "mixed"]);
+    }
+
+    #[test]
+    fn a_pdo_driver_may_give_numbers_as_strings() {
+        let old = Platform {
+            php: PhpVersion::new(8, 0),
+            ..platform(Driver::PdoMysql)
+        };
+        assert_eq!(row_on(old, "u.id + 1 AS v", ""), "array{v: numeric-string}");
+        let unknown = Platform {
+            stringify_fetches: None,
+            ..platform(Driver::PdoMysql)
+        };
+        assert_eq!(
+            row_on(unknown, "u.id + 1 AS v", ""),
+            "array{v: int|numeric-string}"
+        );
+        assert_eq!(row_on(unknown, "1 AS v", ""), "array{v: 1|'1'}");
+        // pdo_pgsql gives floats as strings before PHP 8.4.
+        let pgsql = Platform {
+            php: PhpVersion::new(8, 3),
+            ..platform(Driver::PdoPgsql)
+        };
+        assert_eq!(
+            row_on(pgsql, "SQRT(u.id) AS v", ""),
+            "array{v: numeric-string}"
+        );
+        // mysqli never does.
+        let mysqli = Platform {
+            php: PhpVersion::new(8, 0),
+            ..platform(Driver::Mysqli)
+        };
+        assert_eq!(row_on(mysqli, "u.id + 1 AS v", ""), "array{v: int}");
     }
 
     #[test]
