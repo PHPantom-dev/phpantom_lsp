@@ -1109,3 +1109,37 @@ When the domain has no catalogue yet, offer to create
 **Where to look:** `src/code_actions/insert_translation_key.rs`,
 `src/symfony/translations.rs` (`catalogue_spans`, `scan_yaml`,
 `scan_xliff`).
+
+
+---
+
+## F73. Tempest view context inference
+
+**Impact: Medium-High · Complexity: High**
+
+Infer template data from `Tempest\View\view()` named arguments and custom
+`View` objects, including the object bound as `$this`. Component attributes
+and named slots must get the scope Tempest renders them in: a slot does not
+simply inherit every local variable of the template that writes it. Preserve
+explicit `@var` annotations and use the shared type engine for expressions.
+Recompute affected views when a caller changes, and test conflicting short
+class names across namespaces and component overrides.
+
+**Where to look:** `src/tempest/`, `src/blade/call_site_inference.rs`,
+`src/type_engine/variable/forward_walk/`, and `examples/tempest/`.
+
+---
+
+## F74. Configured Tempest view discovery
+
+**Impact: Medium · Complexity: Medium-High**
+
+Read additional discovery locations and component registrations from
+Tempest configuration, including `ViewConfig::addViewComponent()` and
+`addViewComponents()`. Resolve statically knowable paths through variables,
+constants, and view wrappers, keeping declaration-file path context.
+Refresh the catalogue when configuration changes and verify the resulting
+names with Tempest's own discovery and renderer.
+
+**Where to look:** `src/tempest/discovery.rs`, `src/tempest/paths.rs`, and
+`src/symbol_map/extraction/tempest.rs`.

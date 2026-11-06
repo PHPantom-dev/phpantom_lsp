@@ -40,6 +40,8 @@ contributor even though it's short.
 | T66 | [A DQL aggregate or function is typed `mixed`](todo/type-inference.md#t66-a-dql-aggregate-or-function-is-typed-mixed) | Low-Medium  | Medium      |
 | T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
 | F72 | [DQL variables of a query builder a chain of methods handles](todo/lsp-features.md#f72-dql-variables-of-a-query-builder-a-chain-of-methods-handles) | Low         | Medium      |
+| F73 | [Tempest view context inference](todo/lsp-features.md#f73-tempest-view-context-inference) | Medium-High | High |
+| F74 | [Configured Tempest view discovery](todo/lsp-features.md#f74-configured-tempest-view-discovery) | Medium | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
