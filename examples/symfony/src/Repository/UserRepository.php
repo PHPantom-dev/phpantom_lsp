@@ -65,7 +65,7 @@ final class UserRepository extends ServiceEntityRepository
     /**
      * @return list<User>
      */
-    public function search(?string $team): array
+    public function searchInTeam(?string $team): array
     {
         // Try: move the `andWhere()` below the `if`. The builder only joins
         // `t` when a team is given, so the query built without one uses a

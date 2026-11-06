@@ -130,6 +130,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Symfony playground runtime checks.** The repository examples load and their runtime assertions run again. Contributed by @shuvroroy.
 - **Tools installed with the Composer bin plugin.** In a project using `bamarni/composer-bin-plugin`, classes from the tools under `vendor-bin/` (PHPUnit's `TestCase`, say) resolve again without un-ignoring their vendor directories, and stay out of analysis like any other vendor code. PHPUnit's version is read from there too.
 - **Templates in the value type of an array parameter.** A function taking `iterable<Tk, (Closure(): Tv)>` or `array<Tk, TypeInterface<Tv>>` now infers `Tv` from each element of the array passed to it, closures and first-class callables included, instead of from the whole array.
 - **Closures that capture by reference the variable they are assigned to.** In `$lock = new Lock(function () use (&$lock) { ... })`, `$lock` inside the closure is now what the assignment stores, `@var` included, instead of `null`.
