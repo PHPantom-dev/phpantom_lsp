@@ -149,6 +149,17 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Drupal theme hooks ──────────────────────────────────
+        // `'#theme' => '|'`, a `#theme` or `#theme_wrappers` list, and the
+        // `#` keys of a render array whose `#theme` names a hook.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_drupal_theme_hook_completion(content, position, code)
+        {
+            return Some(response);
+        }
+
         // ── Symfony form options ────────────────────────────────
         // `$builder->add('email', EmailType::class, ['|' => …])`, wherever
         // the form component is used.

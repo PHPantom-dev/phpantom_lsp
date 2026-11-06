@@ -900,6 +900,103 @@ fn extension_of(fqn: &str) -> Option<&str> {
     (!matches!(extension, "Core" | "Component") && segments.next().is_some()).then_some(extension)
 }
 
+/// Record the theme hooks a render array literal names: its `#theme`, a
+/// string or a list of names, and its `#theme_wrappers`, a list of names or
+/// of names keying their own variables.  When `#theme` is one name, every
+/// other `#` key may pass one of the hook's variables, which is decided
+/// when it is looked up.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_array_spans(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_theme_keys {
+        return;
+    }
+    let mut hook = None;
+    let mut keys = Vec::new();
+    for element in elements.iter() {
+        let ArrayElement::KeyValue(entry) = element else {
+            continue;
+        };
+        let Some((key, start, end)) = resolved_string_literal(entry.key, ctx.content) else {
+            continue;
+        };
+        match key {
+            "#theme" => {
+                hook = resolved_string_literal(entry.value, ctx.content).map(|(name, _, _)| name);
+                push_theme_hook_spans(entry.value, false, ctx);
+            }
+            "#theme_wrappers" => push_theme_hook_spans(entry.value, true, ctx),
+            _ if key.len() > 1 && key.starts_with('#') => keys.push((key, start, end)),
+            _ => {}
+        }
+    }
+    let Some(hook) = hook else {
+        return;
+    };
+    for (key, start, end) in keys {
+        ctx.spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::DrupalThemeHookVariable,
+                key: crate::drupal::theme_hooks::theme_variable_key(hook, &key[1..]),
+                is_write: false,
+                is_optional: false,
+            },
+        });
+    }
+}
+
+/// Record the theme hooks `$build['#theme'] = …` and
+/// `$build['#theme_wrappers'] = …` name.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_array_assignment(
+    assignment: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_theme_keys || !assignment.operator.is_assign() {
+        return;
+    }
+    let Expression::ArrayAccess(access) = assignment.lhs else {
+        return;
+    };
+    match resolved_string_literal(access.index, ctx.content) {
+        Some(("#theme", _, _)) => push_theme_hook_spans(assignment.rhs, false, ctx),
+        Some(("#theme_wrappers", _, _)) => push_theme_hook_spans(assignment.rhs, true, ctx),
+        _ => {}
+    }
+}
+
+/// Record the theme hook names `value` holds: a string, or the strings of a
+/// list, and for `#theme_wrappers` the keys of a keyed list.
+fn push_theme_hook_spans(value: &Expression<'_>, wrappers: bool, ctx: &mut ExtractionCtx<'_>) {
+    let push = |name: &Expression<'_>, ctx: &mut ExtractionCtx<'_>| {
+        if let Some((key, start, end)) = resolved_string_literal(name, ctx.content) {
+            ctx.spans.push(SymbolSpan {
+                start: start as u32,
+                end: end as u32,
+                kind: SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalThemeHook,
+                    key: key.to_string(),
+                    is_write: false,
+                    is_optional: false,
+                },
+            });
+        }
+    };
+    let Some(elements) = crate::parser::array_literal_elements(value) else {
+        push(value, ctx);
+        return;
+    };
+    for element in elements.iter() {
+        match element {
+            ArrayElement::Value(item) => push(item.value, ctx),
+            ArrayElement::KeyValue(entry) if wrappers => push(entry.key, ctx),
+            _ => {}
+        }
+    }
+}
+
 const HOOK_ATTRIBUTE: &str = "Drupal\\Core\\Hook\\Attribute\\Hook";
 
 /// Record the hook a `hook_<name>()` function of an `*.api.php` file
@@ -3129,5 +3226,67 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
             ["textfield", "form", "details", "container"]
         );
         assert!(element_reads(php, false).is_empty());
+    }
+
+    /// The theme hook and variable spans `php` reads, as kind, key, and
+    /// text, read as a Drupal project's file or not.
+    fn render_array_reads(php: &str, drupal: bool) -> Vec<(StringKeyKind, String, String)> {
+        map_of(php, drupal)
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey { kind, key, .. }
+                    if matches!(
+                        kind,
+                        StringKeyKind::DrupalThemeHook | StringKeyKind::DrupalThemeHookVariable
+                    ) =>
+                {
+                    Some((
+                        *kind,
+                        key.clone(),
+                        php[span.start as usize..span.end as usize].to_string(),
+                    ))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn render_arrays_name_theme_hooks_and_pass_their_variables() {
+        let php = r#"<?php
+$build = [
+  '#theme' => 'acme_greeting',
+  '#name' => $name,
+  '#' => 1,
+  'child' => ['#theme' => ['acme_box__wide', 'acme_box'], '#label' => 'x'],
+  '#theme_wrappers' => ['container', 'acme_panel' => ['#title' => 'y']],
+];
+$build['more']['#theme'] = 'item_list';
+"#;
+        let hook = |key: &str| {
+            (
+                StringKeyKind::DrupalThemeHook,
+                key.to_string(),
+                key.to_string(),
+            )
+        };
+        assert_eq!(
+            render_array_reads(php, true),
+            vec![
+                hook("acme_greeting"),
+                (
+                    StringKeyKind::DrupalThemeHookVariable,
+                    "acme_greeting#name".to_string(),
+                    "#name".to_string()
+                ),
+                hook("acme_box__wide"),
+                hook("acme_box"),
+                hook("container"),
+                hook("acme_panel"),
+                hook("item_list"),
+            ]
+        );
+        assert!(render_array_reads(php, false).is_empty());
     }
 }

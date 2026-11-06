@@ -83,6 +83,7 @@ mod drupal_config;
 pub(crate) mod drupal_hooks;
 mod drupal_permissions;
 pub(crate) mod drupal_route_params;
+mod drupal_theme_hooks;
 pub(crate) mod eloquent_model_attributes;
 pub(crate) mod eloquent_string;
 pub(crate) mod handler;

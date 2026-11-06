@@ -100,6 +100,16 @@ Run `composer install` here first. Composer puts core and contrib into
   definition of `'notify_email'`, which lands on its line in
   `acme.schema.yml`. Hover `$settings`, whose type carries the name it was
   read by.
+- Theme hooks navigate between the render arrays that name them, their
+  `hook_theme()` entry, and their templates, core's included. In
+  `GreetingController::greet()`, go to the definition of `'acme_greeting'`,
+  which lists its key in `src/Hook/AcmeHooks.php`, the module's
+  `templates/acme-greeting.html.twig`, and `acme_theme`'s override, or hover
+  it to see its template and variables. Complete a `#theme` value, core's
+  `item_list` included, or a key after `'#'` to see the hook's variables, and
+  go to the definition of `'#name'`. In `compactGreet()`,
+  `'acme_greeting__compact'` is a suggestion: it leads to `acme_greeting` and
+  to `acme_theme`'s `acme-greeting--compact.html.twig`.
 - A module's service provider may build a service from a class of its own.
   In `acme_french_site_name()` in `web/modules/custom/acme/acme.module`,
   hover `$languageManager`: core declares `language_manager` as

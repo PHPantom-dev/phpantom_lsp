@@ -104,9 +104,10 @@ impl Backend {
         {
             self.forget_symfony_judged_translation_domains();
         }
+        let theme_hooks_changed = self.note_drupal_theme_watched_changes(&changes);
         let mut batch = self.classify_watched_changes(&changes, root, is_laravel);
         if batch.is_empty() {
-            return false;
+            return theme_hooks_changed;
         }
 
         if batch.translations_changed {

@@ -28,8 +28,29 @@ final class GreetingController extends ControllerBase
     {
         // Try: go to the definition of `$this->greeter->greet()`, or complete
         // after `$this->` to see the helpers ControllerBase inherits from core.
+        // Go to the definition of 'acme_greeting', which lists its key in
+        // AcmeHooks::theme(), its template, and acme_theme's override, or of
+        // '#name', which lands on the variable the hook declares. Complete a
+        // key after '#' to see the hook's variables.
         return [
             '#theme' => 'acme_greeting',
+            '#name' => $name,
+            '#greeting' => $this->greeter->greet($name),
+        ];
+    }
+
+    /**
+     * The greeting in the compact form acme_theme draws it in.
+     *
+     * @return array<string, mixed>
+     */
+    public function compactGreet(string $name): array
+    {
+        // Try: hover 'acme_greeting__compact', a suggestion of acme_greeting,
+        // or go to its definition, which lists acme_greeting's key and
+        // template and acme_theme's acme-greeting--compact.html.twig.
+        return [
+            '#theme' => 'acme_greeting__compact',
             '#name' => $name,
             '#greeting' => $this->greeter->greet($name),
         ];

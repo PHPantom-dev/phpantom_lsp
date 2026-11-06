@@ -518,7 +518,7 @@ impl Backend {
 
     /// The completion response offering those of `names` that start with
     /// what is typed between `prefix_start` and `cursor`.
-    fn symfony_names_response(
+    pub(crate) fn symfony_names_response(
         &self,
         kind: StringKeyKind,
         names: Vec<String>,

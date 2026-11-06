@@ -220,6 +220,7 @@ impl Backend {
                 .any(|prefix| uri.starts_with(prefix.as_str()));
         self.note_drupal_routes(uri, Some(map));
         self.note_drupal_hook_declarations(uri, Some(map));
+        self.note_drupal_theme_hook_sources(uri, Some(map));
         let was_declaring = self.symfony.declaring_uris.read().contains(uri);
         // Only take the write lock when the answer changes.
         if was_declaring == declares {
@@ -237,6 +238,7 @@ impl Backend {
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
         self.note_drupal_routes(uri, None);
         self.note_drupal_hook_declarations(uri, None);
+        self.note_drupal_theme_hook_sources(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
         }

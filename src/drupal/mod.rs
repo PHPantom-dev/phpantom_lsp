@@ -25,6 +25,7 @@ pub(crate) mod links;
 pub(crate) mod permissions;
 pub(crate) mod routing;
 pub(crate) mod service_providers;
+pub(crate) mod theme_hooks;
 pub(crate) mod types;
 pub(crate) mod upcasting;
 
@@ -50,6 +51,14 @@ pub(crate) struct DrupalState {
     extensions: RwLock<hooks::ExtensionIndex>,
     /// What the hook documentation says, until a declaring file changes.
     hook_index: RwLock<Option<std::sync::Arc<hooks::HookIndex>>>,
+    /// The paths of the Twig templates of every web root, outside test
+    /// modules, which the workspace walk does not reach in core and
+    /// contributed extensions, by the hook name their file name spells
+    /// (see [`theme_hooks::template_key`]).
+    templates: RwLock<std::collections::HashMap<String, Vec<PathBuf>>>,
+    /// The theme hooks the site declares, until a file they come from
+    /// changes.
+    theme_hook_index: RwLock<Option<std::sync::Arc<theme_hooks::ThemeHookIndex>>>,
     /// The services each service provider's `alter()` gives another class,
     /// keyed by the provider's URI; see [`service_providers`].
     service_replacements: RwLock<BTreeMap<String, Vec<(Atom, Atom)>>>,
@@ -258,6 +267,16 @@ pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
         && !is_unloaded(path, web_root)
 }
 
+/// Whether `path` is a Twig template a theme hook may be drawn with: an
+/// `*.html.twig` outside test modules.
+pub(crate) fn is_template_file(path: &Path, web_root: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(theme_hooks::TEMPLATE_SUFFIX))
+        && !is_test_fixture(path, web_root)
+        && !is_unloaded(path, web_root)
+}
+
 /// Whether `name` has the shape of the route Views builds for a display of
 /// a view: `view.<view_id>.<display_id>`, neither ID holding a dot.
 pub(crate) fn is_views_route_name(name: &str) -> bool {
@@ -321,6 +340,8 @@ impl Backend {
         self.drupal.web_roots.write().clear();
         self.drupal.declaration_files.write().clear();
         self.drupal.hook_php_files.write().clear();
+        self.drupal.templates.write().clear();
+        *self.drupal.theme_hook_index.write() = None;
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
         self.drupal.default_config_files.write().clear();

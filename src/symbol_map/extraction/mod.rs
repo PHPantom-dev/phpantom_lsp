@@ -110,6 +110,9 @@ struct ExtractionCtx<'a> {
     /// render array names its element under.  Spares every other file's
     /// arrays and assignments the look.
     drupal_type_keys: bool,
+    /// Likewise for `#theme`, the key a render array names its theme hook
+    /// under, which `#theme_wrappers` starts with.
+    drupal_theme_keys: bool,
     drupal_route_patterns: Vec<String>,
     drupal_route_aliases: Vec<String>,
     /// The Drupal routes the file's `#[Route]` attributes declare.
@@ -556,6 +559,7 @@ fn extract_symbol_map_inner(
         entity_types: Vec::new(),
         drupal_plugin_classes: Vec::new(),
         drupal_type_keys: drupal && memchr::memmem::find(content.as_bytes(), b"#type").is_some(),
+        drupal_theme_keys: drupal && memchr::memmem::find(content.as_bytes(), b"#theme").is_some(),
         drupal_route_patterns: Vec::new(),
         drupal_route_aliases: Vec::new(),
         drupal_routes: Vec::new(),

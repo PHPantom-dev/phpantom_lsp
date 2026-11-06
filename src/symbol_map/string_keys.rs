@@ -205,6 +205,16 @@ pub(crate) enum StringKeyKind {
     /// annotation older code uses, and read by the `#type` of a render
     /// array.
     DrupalRenderElement,
+    /// A Drupal theme hook name: declared by a key of the array a
+    /// `hook_theme()` implementation returns (see `drupal::theme_hooks`),
+    /// and read by a render array's `#theme` and `#theme_wrappers`.  A
+    /// suggestion (`node__article`) reads as the hook it falls back to.
+    DrupalThemeHook,
+    /// A variable of a Drupal theme hook, keyed by the hook as written as
+    /// well as the name (see `drupal::theme_hooks::theme_variable_key`):
+    /// declared by a key of the hook's `variables`, and read by the `#`
+    /// keys of a render array whose `#theme` names the hook.
+    DrupalThemeHookVariable,
 }
 
 impl StringKeyKind {
@@ -259,7 +269,9 @@ impl StringKeyKind {
             | Self::DrupalPermission
             | Self::DrupalConfigName
             | Self::DrupalConfigKey
-            | Self::DrupalRenderElement => KeyFramework::Drupal,
+            | Self::DrupalRenderElement
+            | Self::DrupalThemeHook
+            | Self::DrupalThemeHookVariable => KeyFramework::Drupal,
         }
     }
 

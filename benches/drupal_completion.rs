@@ -9,9 +9,9 @@ use tower_lsp_server::gen_lsp_types::*;
 /// Custom modules in the generated site, each declaring `SERVICES`
 /// services, `ROUTES` routes, `ENTITY_TYPES` entity types, `PERMISSIONS`
 /// permissions, `CONFIGS` configuration objects, with their default
-/// configuration and schema, and `ELEMENTS` render elements, and
-/// documenting `HOOKS` hooks, and implementing the hooks the module before
-/// it documents.
+/// configuration and schema, `ELEMENTS` render elements, and `THEME_HOOKS`
+/// theme hooks, documenting `HOOKS` hooks, and implementing the hooks the
+/// module before it documents.
 const MODULES: usize = 30;
 const SERVICES: usize = 10;
 const ROUTES: usize = 10;
@@ -20,6 +20,7 @@ const PERMISSIONS: usize = 10;
 const CONFIGS: usize = 10;
 const ELEMENTS: usize = 3;
 const HOOKS: usize = 10;
+const THEME_HOOKS: usize = 5;
 
 const COMPOSER: &str = r#"{
     "require": { "drupal/core-recommended": "^11" },
@@ -93,6 +94,7 @@ final class Consumer
         $this->account->hasPermission('administer mod1 ');
         \Drupal::config('mod1.');
         $build = ['#type' => 'mod1_'];
+        $themed = ['#theme' => 'mod1_'];
     }
 }
 "#;
@@ -110,8 +112,8 @@ fn rt() -> tokio::runtime::Runtime {
 }
 
 /// The files of a site with many custom modules: their services, routes,
-/// entity types, render elements, documented hooks, and hook
-/// implementations.
+/// entity types, render elements, documented hooks, hook implementations,
+/// and theme hooks.
 fn generate_site() -> Vec<(String, String)> {
     let mut files = Vec::new();
 
@@ -188,6 +190,18 @@ fn generate_site() -> Vec<(String, String)> {
             );
         }
         files.push((format!("{dir}/mod{m}.api.php"), api));
+
+        let mut theme = format!(
+            "<?php\nnamespace Drupal\\mod{m}\\Hook;\n\nuse Drupal\\Core\\Hook\\Attribute\\Hook;\n\nfinal class ThemeHooks {{\n    #[Hook('theme')]\n    public function theme(): array {{\n        return [\n"
+        );
+        for t in 0..THEME_HOOKS {
+            let _ = writeln!(
+                theme,
+                "            'mod{m}_widget{t}' => ['variables' => ['label' => NULL, 'items' => []]],"
+            );
+        }
+        theme.push_str("        ];\n    }\n}\n");
+        files.push((format!("{dir}/src/Hook/ThemeHooks.php"), theme));
 
         if m > 0 {
             let previous = m - 1;
@@ -360,6 +374,13 @@ fn bench_drupal_name_completion(c: &mut Criterion) {
             CONSUMER_PHP,
             "#[Hook('mod1_'",
             "mod1_event7",
+        ),
+        (
+            "theme_hook_name",
+            &consumer,
+            CONSUMER_PHP,
+            "'#theme' => 'mod1_'",
+            "mod1_widget4",
         ),
         (
             "hook_implementation",

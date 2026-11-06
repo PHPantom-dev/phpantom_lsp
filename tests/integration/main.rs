@@ -215,6 +215,7 @@ mod drupal_permissions;
 mod drupal_render_elements;
 mod drupal_routes;
 mod drupal_services;
+mod drupal_theme_hooks;
 mod duplicate_class_declarations;
 mod duplicate_function_declarations;
 mod expression_evaluation_order;

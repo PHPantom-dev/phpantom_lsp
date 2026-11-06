@@ -273,6 +273,11 @@ check('hook_theme declares the acme_greeting theme hook', isset($themeHooks['acm
 check('acme_greeting declares the variables the controller passes', array_keys($themeHooks['acme_greeting']['variables'] ?? []) === ['name', 'greeting']);
 check('acme_greeting has the template its name implies', is_file("$module/templates/acme-greeting.html.twig"));
 check('acme_theme preprocesses acme_greeting', function_exists('acme_theme_preprocess_acme_greeting'));
+check('acme_theme overrides the acme_greeting template', is_file("$theme/templates/acme-greeting.html.twig"));
+check('GreetingController::greet() renders acme_greeting with its variables', str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#theme' => 'acme_greeting',\n            '#name' => \$name,\n            '#greeting' =>"));
+check('GreetingController::compactGreet() renders the acme_greeting__compact suggestion', str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#theme' => 'acme_greeting__compact'") && str_starts_with('acme_greeting__compact', 'acme_greeting__') && !isset($themeHooks['acme_greeting__compact']));
+check('acme_theme draws the suggestion with acme-greeting--compact.html.twig', is_file("$theme/templates/acme-greeting--compact.html.twig"));
+check("core's ThemeCommonElements declares item_list, drawn by system's item-list.html.twig", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeCommonElements.php"), "      'item_list' => [\n        'variables' => [\n          'items' => [],") && is_file("$web/core/modules/system/templates/item-list.html.twig"));
 
 // The module documents, invokes, and implements its own hook, and
 // implements core's form alter hooks.

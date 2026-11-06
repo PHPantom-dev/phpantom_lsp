@@ -102,7 +102,10 @@ impl CheckedStringKind {
             // nothing, which is no error either.  A module can declare
             // permissions in PHP, through a permissions file's
             // `permission_callbacks`.  Configuration is created at runtime
-            // too, by the configuration a site exports and by code.
+            // too, by the configuration a site exports and by code.  Views
+            // and other modules declare theme hooks in loops, which are not
+            // read, and a render array may pass anything besides a hook's
+            // variables.
             StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRouteParameter
@@ -110,6 +113,8 @@ impl CheckedStringKind {
             | StringKeyKind::DrupalPermission
             | StringKeyKind::DrupalConfigName
             | StringKeyKind::DrupalConfigKey
+            | StringKeyKind::DrupalThemeHook
+            | StringKeyKind::DrupalThemeHookVariable
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack

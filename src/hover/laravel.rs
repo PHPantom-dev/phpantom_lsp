@@ -452,6 +452,17 @@ impl Backend {
             StringKeyKind::DrupalRenderElement => {
                 ("Render element", self.drupal_render_element_detail(key))
             }
+            StringKeyKind::DrupalThemeHook => ("Theme hook", self.drupal_theme_hook_detail(key)),
+            // A variable is shown by its key, under the hook it belongs to;
+            // any other `#` key of the array is a property of the render API.
+            StringKeyKind::DrupalThemeHookVariable => {
+                let (hook, name) = crate::drupal::theme_hooks::split_theme_variable_key(key);
+                if self.drupal_theme_variable_definitions(key).is_empty() {
+                    return None;
+                }
+                shown = name;
+                ("Theme hook variable", format!("Theme hook `{hook}`"))
+            }
         };
 
         Some(make_hover(format!(

@@ -823,3 +823,31 @@ fn scan_drupal_directories_collects_declaration_files_outside_tests() {
         ]
     );
 }
+
+#[test]
+fn scan_drupal_directories_records_templates_outside_tests() {
+    let dir = tempfile::tempdir().unwrap();
+    let web_root = dir.path();
+    for path in [
+        "core/modules/system/templates/item-list.html.twig",
+        "themes/contrib/olivo/templates/content/node.html.twig",
+        "core/modules/system/tests/themes/fixture/templates/item-list.html.twig",
+        "modules/custom/acme/templates/acme.txt.twig",
+    ] {
+        let full = web_root.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, "{{ x }}\n").unwrap();
+    }
+
+    let (_, files) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let mut templates = files.templates;
+    templates.sort();
+    assert_eq!(
+        templates,
+        vec![
+            web_root.join("core/modules/system/templates/item-list.html.twig"),
+            web_root.join("themes/contrib/olivo/templates/content/node.html.twig"),
+        ]
+    );
+    assert!(files.declarations.is_empty());
+}
