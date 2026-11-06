@@ -2723,23 +2723,6 @@ When the domain has no catalogue yet, offer to create
 <p><strong>Where to look:</strong> <code>src/code_actions/insert_translation_key.rs</code>,
 <code>src/symfony/translations.rs</code> (<code>catalogue_spans</code>, <code>scan_yaml</code>,
 <code>scan_xliff</code>).</p>
-<hr />
-<h2 id="f67-symfony-constraint-options-in-yaml-and-xml-validation-mappings">F67. Symfony constraint options in YAML and XML validation mappings<a class="headerlink" href="#f67-symfony-constraint-options-in-yaml-and-xml-validation-mappings" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="nt">App\Entity\User</span><span class="p">:</span>
-<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">    </span><span class="nt">properties</span><span class="p">:</span>
-<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="w">        </span><span class="nt">displayName</span><span class="p">:</span>
-<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Length</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mni</span><span class="p">:</span><span class="w"> </span><span class="nv">2</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># a typo, not reported</span>
-</code></pre></div>
-<p>A constraint's options are its constructor's parameters, which a named
-argument in PHP is checked against and completes from. The option keys of
-a constraint in a validation mapping, the YAML mapping's and the
-<code>&lt;option name="…"&gt;</code> of the XML one, neither complete nor get checked. The
-mapping already knows each constraint's class (see
-<code>src/symfony/validation.rs</code>), so its constructor's parameters are a class
-load away.</p>
-<p><strong>Where to look:</strong> <code>src/symfony/validation.rs</code> (<code>scan_yaml</code>, <code>scan_xml</code>),
-and the named-argument check in <code>src/diagnostics/argument_count.rs</code>.</p>
 
 
 
