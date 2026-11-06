@@ -1028,6 +1028,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b706-a-doctrine-mapping-file-is-not-read-until-the-workspace-index-ends" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B706. A Doctrine mapping file is not read until the workspace index ends
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1696,6 +1713,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b706-a-doctrine-mapping-file-is-not-read-until-the-workspace-index-ends" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B706. A Doctrine mapping file is not read until the workspace index ends
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1834,7 +1868,24 @@ records its <code>use</code> map in its <code>FileState</code>.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b706-a-doctrine-mapping-file-is-not-read-until-the-workspace-index-ends">B706. A Doctrine mapping file is not read until the workspace index ends<a class="headerlink" href="#b706-a-doctrine-mapping-file-is-not-read-until-the-workspace-index-ends" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// config/doctrine/User.orm.xml maps User, with a `team` association</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$em-&gt;createQuery('SELECT t.name FROM App\Entity\User u JOIN u.team t');</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">// Query&lt;mixed, mixed&gt; right after the editor starts,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">// Query&lt;null, array{name: string}&gt; a few seconds later</span>
+</code></pre></div>
+<p>The XML and YAML mapping files are indexed with the other resource files,
+in the last step of the background workspace index
+(<code>index_resource_paths_batch</code> from <code>indexing/preload.rs</code>). Until then an
+entity mapped only by a file is no entity: a hover, completion, or
+diagnostic asked for before then gives a mixed query, no magic finders,
+and no DQL field names, and nothing recomputes it when the files arrive.
+The resolved-class cache is cleared as each file is indexed, but a result
+already shown stays wrong until it is asked for again.</p>
+<p><strong>Where to look:</strong> where <code>index_framework_uri_content</code> is called during
+startup; the mapping files could be indexed before the PHP files are
+parsed, or the open files' diagnostics refreshed once they are.</p>
 
 
 

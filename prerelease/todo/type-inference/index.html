@@ -1337,10 +1337,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t66-a-dql-aggregate-or-function-is-typed-mixed" class="md-nav__link">
+  <a href="#t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        T66. A DQL aggregate or function is typed <code>mixed</code>
+        T67. A DQL expression whose type depends on the driver is <code>mixed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T68. A DQL field is typed by its property, not its column's type
       </span>
     </span>
   </a>
@@ -1675,10 +1686,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t66-a-dql-aggregate-or-function-is-typed-mixed" class="md-nav__link">
+  <a href="#t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        T66. A DQL aggregate or function is typed <code>mixed</code>
+        T67. A DQL expression whose type depends on the driver is <code>mixed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T68. A DQL field is typed by its property, not its column's type
       </span>
     </span>
   </a>
@@ -2284,26 +2306,48 @@ a query takes it.</p>
 <p><strong>Where to look:</strong> PHPStan's Doctrine extension
 (<code>Type/Doctrine/QueryBuilder/Expr/</code>).</p>
 <hr />
-<h2 id="t66-a-dql-aggregate-or-function-is-typed-mixed">T66. A DQL aggregate or function is typed <code>mixed</code><a class="headerlink" href="#t66-a-dql-aggregate-or-function-is-typed-mixed" title="Permanent link">&para;</a></h2>
+<h2 id="t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed">T67. A DQL expression whose type depends on the driver is <code>mixed</code><a class="headerlink" href="#t67-a-dql-expression-whose-type-depends-on-the-driver-is-mixed" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$em-&gt;createQuery('SELECT COUNT(u.id) AS total FROM App\Entity\User u')</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    -&gt;getResult(); // list&lt;array{total: mixed}&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$em-&gt;createQuery('SELECT SUM(u.score) AS total, u.score * 2 AS doubled FROM App\Entity\User u')</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    -&gt;getResult(); // list&lt;array{total: mixed, doubled: mixed}&gt;</span>
 </code></pre></div>
-<p>A query's selected entities and fields are typed, but any other <code>SELECT</code>
-expression (an aggregate, a function, arithmetic, a literal, a <code>CASE</code>) is
-<code>mixed</code>, and without a result variable it leaves the whole query
-<code>Query&lt;mixed, mixed&gt;</code>. So does <code>NEW Dto(...)</code>. A field is typed by the
-type its entity declares for the property, not by its column's Doctrine
-type, which can differ (<code>bigint</code> is <code>int|string</code> on DBAL 4). PHPStan's
-Doctrine extension types each expression by the function and the
-connection's driver.</p>
-<p><strong>Where to look:</strong> <code>src/doctrine/query.rs</code> (<code>result_types</code>), and PHPStan's
-Doctrine extension (<code>Type/Doctrine/Query/QueryResultTypeWalker.php</code>,
-<code>Type/Doctrine/Descriptors/</code>).</p>
+<p>A <code>SELECT</code> expression is typed where every database driver gives the same
+value: <code>COUNT()</code> and <code>LENGTH()</code>, which Doctrine converts to <code>int</code>, and the
+string functions, string literals, and the <code>CASE</code>, <code>COALESCE()</code>, and
+<code>NULLIF()</code> of those. The rest (<code>SUM()</code>, <code>AVG()</code>, <code>MIN()</code>, <code>MAX()</code>, <code>ABS()</code>,
+<code>MOD()</code>, <code>IDENTITY()</code>, arithmetic, a number or boolean literal) is fetched
+as the driver gives it, which differs between MySQL, PostgreSQL, and
+SQLite, and with the PHP version and the PDO options. PHPStan's Doctrine
+extension types each of these by the connection's driver, and gives
+<code>mixed</code> when it does not know the driver. Reading the driver is the work
+T56 needs too: the <code>driver</code> or <code>url</code> of <code>DriverManager::getConnection()</code>,
+or the <code>dbal</code> section of a Symfony project's <code>doctrine.yaml</code>.</p>
+<p><strong>Where to look:</strong> <code>Scope::value_of</code> in <code>src/doctrine/query.rs</code>, and
+PHPStan's Doctrine extension (<code>Type/Doctrine/Query/QueryResultTypeWalker.php</code>:
+<code>walkFunction()</code>, <code>walkAggregateExpression()</code>, <code>walkLiteral()</code>, and the
+stringify rules of <code>walkSelectExpression()</code>).</p>
+<hr />
+<h2 id="t68-a-dql-field-is-typed-by-its-property-not-its-columns-type">T68. A DQL field is typed by its property, not its column's type<a class="headerlink" href="#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">#[ORM\Column(type: 'bigint')]</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">public int $views;</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">$em-&gt;createQuery('SELECT u.views FROM App\Entity\User u')</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">    -&gt;getResult(); // list&lt;array{views: int}&gt;, though DBAL 4 gives int|string</span>
+</code></pre></div>
+<p>A selected field is typed by the type its entity declares for the
+property, but a scalar result is converted by the column's Doctrine type,
+which can differ: <code>bigint</code> is <code>int|string</code> on DBAL 4, and <code>decimal</code> is a
+<code>numeric-string</code> whatever the property says. Inside a DQL expression only a
+<code>string</code> property is read as a string, for the same reason. PHPStan's
+Doctrine extension maps each Doctrine type to the PHP type it converts to.</p>
+<p><strong>Where to look:</strong> <code>ResolverModel::field</code> in <code>src/doctrine/query.rs</code>, the
+column type the mapping attributes and files record, and PHPStan's
+Doctrine extension (<code>Type/Doctrine/Descriptors/</code>).</p>
 <hr />
 <h2 id="t56-a-dbal-results-row-count-ignores-the-connections-driver">T56. A DBAL result's row count ignores the connection's driver<a class="headerlink" href="#t56-a-dbal-results-row-count-ignores-the-connections-driver" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$rows = $result-&gt;rowCount(); // int|numeric-string, though only mysqli returns a string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">$rows = $result-&gt;rowCount(); // int|numeric-string, though only mysqli returns a string</span>
 </code></pre></div>
 <p>DBAL 4 declares <code>Result::rowCount()</code> as <code>int|numeric-string</code>, because the
 <code>mysqli</code> driver can return a row count too large for an <code>int</code> as a string.
@@ -2321,14 +2365,14 @@ project's <code>doctrine.yaml</code>.</p>
 <hr />
 <h2 id="t58-newt-is-not-supported">T58. <code>new&lt;T&gt;</code> is not supported<a class="headerlink" href="#t58-newt-is-not-supported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">/**</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x"> * @template T of string</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x"> * @param T $class_name</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x"> * @return ($class_name is 'WP_Posts_List_Table'|'WP_Users_List_Table'|… ? new&lt;T&gt; : false)</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x"> */</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">function _get_list_table($class_name, $args = []) { … }</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">_get_list_table('WP_Posts_List_Table');   // want WP_Posts_List_Table, get new&lt;&lt;T&gt;&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/**</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x"> * @template T of string</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x"> * @param T $class_name</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x"> * @return ($class_name is 'WP_Posts_List_Table'|'WP_Users_List_Table'|… ? new&lt;T&gt; : false)</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x"> */</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">function _get_list_table($class_name, $args = []) { … }</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">_get_list_table('WP_Posts_List_Table');   // want WP_Posts_List_Table, get new&lt;&lt;T&gt;&gt;</span>
 </code></pre></div>
 <p><code>new&lt;T&gt;</code> is PHPStan's type for an instance of the class a string names,
 used where a function instantiates the class it is given by name. We
@@ -2340,22 +2384,22 @@ are marked with this.</p>
 <hr />
 <h2 id="t59-tk-on-a-class-template-is-not-resolved">T59. <code>T[K]</code> on a class template is not resolved<a class="headerlink" href="#t59-tk-on-a-class-template-is-not-resolved" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/**</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x"> * @template T of array = array&lt;string, mixed&gt;</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x"> * @implements ArrayAccess&lt;key-of&lt;T&gt;, value-of&lt;T&gt;&gt;</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x"> */</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">class WP_REST_Request implements ArrayAccess {</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">    /**</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">     * @template TOffset of key-of&lt;T&gt;</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">     * @param TOffset $key</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x">     * @return T[TOffset]|null</span>
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="x">     */</span>
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="x">    public function get_param($key) { … }</span>
-<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="x">}</span>
-<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>
-<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="x">/** @var WP_REST_Request&lt;array{id: int, name: string}&gt; $request */</span>
-<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="x">$request-&gt;get_param('id');   // want int|null, get array{id: int, name: string}['id']|null</span>
-<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="x">$request['id'];              // want int|null, get array{id: int, name: string}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/**</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x"> * @template T of array = array&lt;string, mixed&gt;</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x"> * @implements ArrayAccess&lt;key-of&lt;T&gt;, value-of&lt;T&gt;&gt;</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x"> */</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">class WP_REST_Request implements ArrayAccess {</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">    /**</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="x">     * @template TOffset of key-of&lt;T&gt;</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">     * @param TOffset $key</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="x">     * @return T[TOffset]|null</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="x">     */</span>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="x">    public function get_param($key) { … }</span>
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="x">}</span>
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a><span class="x">/** @var WP_REST_Request&lt;array{id: int, name: string}&gt; $request */</span>
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a><span class="x">$request-&gt;get_param('id');   // want int|null, get array{id: int, name: string}['id']|null</span>
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a><span class="x">$request['id'];              // want int|null, get array{id: int, name: string}</span>
 </code></pre></div>
 <p>An offset access type over a class template stays as written once the
 template is bound, and array access on the object (through
@@ -2367,14 +2411,14 @@ API endpoint that types its request this way gets every parameter wrong.
 <hr />
 <h2 id="t60-a-float-literal-is-typed-float-not-its-value">T60. A float literal is typed <code>float</code>, not its value<a class="headerlink" href="#t60-a-float-literal-is-typed-float-not-its-value" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/**</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x"> * @template T</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x"> * @param T $data</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x"> * @return (T is array|object|string ? string : T)</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x"> */</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">function maybe_serialize($data) { … }</span>
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">maybe_serialize(0.0);   // want 0.0, get float</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">/**</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x"> * @template T</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x"> * @param T $data</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x"> * @return (T is array|object|string ? string : T)</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x"> */</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x">function maybe_serialize($data) { … }</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="x">maybe_serialize(0.0);   // want 0.0, get float</span>
 </code></pre></div>
 <p>Integer, string and boolean literals keep their value as their type;
 float literals become <code>float</code>. A template bound to one, or a condition
@@ -2382,15 +2426,15 @@ over one, loses the value. 2 assertions of the WordPress stubs fixtures.</p>
 <hr />
 <h2 id="t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members">T62. A sealed hierarchy is not narrowed by ruling out its other members<a class="headerlink" href="#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">/** @psalm-inheritors LeafNode|TreeNode */</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">interface NodeInterface {}</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x">function at_index(NodeInterface $node): mixed {</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x">    if ($node instanceof LeafNode) {</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x">        return null;</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="x">    }</span>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="x">    $node-&gt;getChildren();   // Method 'getChildren' not found on class 'NodeInterface'</span>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">/** @psalm-inheritors LeafNode|TreeNode */</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">interface NodeInterface {}</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">function at_index(NodeInterface $node): mixed {</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="x">    if ($node instanceof LeafNode) {</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="x">        return null;</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="x">    }</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="x">    $node-&gt;getChildren();   // Method 'getChildren' not found on class 'NodeInterface'</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>@psalm-inheritors</code> and <code>@phpstan-sealed</code> list every class that may extend
 or implement the type. Once a guard rules out all but one, the subject is
