@@ -1,0 +1,24 @@
+// test: a template in the closure value type of an iterable parameter binds from each closure's return
+// feature: hover
+// expect: array<int, Socket|Stream>
+---
+<?php
+
+class Stream {}
+class Socket {}
+class Listener {
+    public function accept(): Socket { return new Socket(); }
+}
+
+/**
+ * @template Tk of array-key
+ * @template Tv
+ * @param iterable<Tk, (Closure(): Tv)> $tasks
+ * @return array<Tk, Tv>
+ */
+function concurrently(iterable $tasks): array { return []; }
+
+function test(Listener $listener): void {
+    $results = concurrently([$listener->accept(...), fn() => new Stream()]);
+    $r<>esults;
+}
