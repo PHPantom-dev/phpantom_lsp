@@ -152,6 +152,9 @@ catalogues together, the way a real Symfony project does.
   chain, so only `x` is reported. In `inTeamByEmail()`, wrap the
   `joinTeam()` call in an `if`: what another method declares counts only
   on the paths that call it.
+- In `UserRepository::namedTeamMembers()`, delete the `joinTeam()` call.
+  `onlyNamedTeams()` uses `t` and leaves it to its callers to declare, so
+  the query run without it is reported at `getQuery()`.
 - In `UserRepository::sortedByName()`, go-to-definition on `displayName`
   in the `Expr\OrderBy`. The DQL an expression object is built from reads
   like any other fragment.

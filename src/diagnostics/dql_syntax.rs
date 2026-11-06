@@ -16,6 +16,9 @@
 //! to one, is reported only once the type engine finds that method, and
 //! the methods it hands the builder on to in turn, and their bodies are
 //! known not to declare the variable on some path to the query.
+//! A variable such a method uses on the builder and leaves undeclared is
+//! reported at the `getQuery()` call of a caller that keeps the builder to
+//! itself, when some path through that caller never declares it.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -29,7 +32,7 @@ use crate::atom::Atom;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::resolution::FileLoaders;
 use crate::symbol_map::extraction::{PathEvent, undeclared_on_some_path};
-use crate::symbol_map::{DqlProvider, DqlSyntaxSite, SymbolMap};
+use crate::symbol_map::{DqlProvider, DqlRun, DqlSyntaxSite, SymbolMap};
 
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
@@ -38,6 +41,13 @@ pub(crate) const DQL_SYNTAX_ERROR_CODE: &str = "dql_syntax_error";
 
 /// Diagnostic code used for a DQL variable nothing declares.
 pub(crate) const UNKNOWN_DQL_VARIABLE_CODE: &str = "unknown_dql_variable";
+
+/// The class a `getQuery()` call is made on for the variables of the
+/// builder it runs to be judged.
+const QUERY_BUILDER: &str = "Doctrine\\ORM\\QueryBuilder";
+
+/// A diagnostic to report: the range it covers, its message and its code.
+type Report<'s> = (u32, u32, std::borrow::Cow<'s, str>, &'static str);
 
 impl Backend {
     /// Report each piece of DQL in the file at `uri` that does not follow
@@ -55,27 +65,43 @@ impl Backend {
             .iter()
             .filter(|site| super::incremental::reports_site(site.start))
             .collect();
-        if sites.is_empty() || !ctx.symbol_map.matches_source(content) {
+        let runs: Vec<&DqlRun> = ctx
+            .symbol_map
+            .dql_runs
+            .iter()
+            .filter(|run| super::incremental::reports_site(run.start))
+            .collect();
+        if (sites.is_empty() && runs.is_empty()) || !ctx.symbol_map.matches_source(content) {
             return;
         }
         let mut by_call: HashMap<u32, Vec<&DqlSyntaxSite>> = HashMap::new();
+        let mut receivers: HashMap<u32, &'static str> = HashMap::new();
         let mut wanted: HashSet<u32> = HashSet::new();
         let mut bodies: HashSet<u32> = HashSet::new();
         for site in &sites {
             by_call.entry(site.call).or_default().push(site);
+            receivers.insert(site.call, site.receiver);
             wanted.insert(site.call);
             if !site.requires.is_empty() {
                 wanted.extend(site.requires.iter().map(|provider| provider.call));
-                // The file's own methods may hand the builder on in turn.
-                wanted.extend(required_calls(&ctx.symbol_map));
                 bodies.extend(site.body);
             }
+        }
+        for run in &runs {
+            receivers.insert(run.start, QUERY_BUILDER);
+            wanted.insert(run.start);
+            wanted.extend(run.requires.iter().map(|provider| provider.call));
+            bodies.insert(run.body);
+        }
+        if !bodies.is_empty() {
+            // The file's own methods may hand the builder on in turn.
+            wanted.extend(required_calls(&ctx.symbol_map));
         }
 
         let _parse_guard = with_parse_cache(content);
         let loaders = self.file_loaders(&ctx.file);
         let own: Arc<str> = Arc::from(uri);
-        let mut reported: Vec<&DqlSyntaxSite> =
+        let mut reported: Vec<Report<'_>> =
             with_parsed_program(content, "dql_syntax", |program, content| {
                 let mut calls = Calls {
                     wanted: &wanted,
@@ -96,7 +122,7 @@ impl Backend {
                         let Receiver::Object(receiver) = found.receiver else {
                             return false;
                         };
-                        let Some(site) = by_call.get(&found.call).and_then(|s| s.first()) else {
+                        let Some(class) = receivers.get(&found.call) else {
                             return false;
                         };
                         let var_ctx = loaders.var_ctx_at(content, receiver.span().start.offset);
@@ -106,7 +132,7 @@ impl Backend {
                         .is_some_and(|ty| {
                             crate::class_lookup::is_subtype_of_named(
                                 &ty,
-                                site.receiver,
+                                class,
                                 loaders.resolved_class_loader(),
                             )
                         })
@@ -119,8 +145,10 @@ impl Backend {
                     calls: HashMap::new(),
                     maps: HashMap::from([(Arc::clone(&own), Arc::clone(&ctx.symbol_map))]),
                     read: HashSet::from([Arc::clone(&own)]),
+                    open: HashMap::new(),
+                    opening: HashSet::new(),
                 };
-                if !bodies.is_empty() || sites.iter().any(|site| !site.requires.is_empty()) {
+                if !bodies.is_empty() {
                     for found in &calls.found {
                         let methods =
                             self.call_targets(found, &loaders, content, uri, &ctx.symbol_map);
@@ -128,8 +156,8 @@ impl Backend {
                     }
                 }
                 let mut known: HashMap<DqlProvider, Option<Vec<Atom>>> = HashMap::new();
-                let mut settled: Vec<(u32, &str)> = Vec::new();
-                let mut reported: Vec<&DqlSyntaxSite> = Vec::new();
+                let mut settled: Vec<(u32, Atom)> = Vec::new();
+                let mut reported: Vec<Report<'_>> = Vec::new();
                 let mut confirmed_sites: Vec<&DqlSyntaxSite> = confirmed
                     .iter()
                     .filter_map(|call| by_call.get(call))
@@ -139,7 +167,7 @@ impl Backend {
                 confirmed_sites.sort_by_key(|site| (site.start, site.end));
                 for site in confirmed_sites {
                     if site.requires.is_empty() {
-                        reported.push(site);
+                        reported.push(report(site));
                         continue;
                     }
                     // An undeclared variable's site covers the variable.
@@ -148,9 +176,10 @@ impl Backend {
                         .unwrap_or_default();
                     // Each use some path may leave undeclared was kept, so
                     // only the first one that is goes out.
+                    let alias_atom = crate::atom::atom(alias);
                     if site
                         .body
-                        .is_some_and(|body| settled.contains(&(body, alias)))
+                        .is_some_and(|body| settled.contains(&(body, alias_atom)))
                     {
                         continue;
                     }
@@ -169,7 +198,7 @@ impl Backend {
                     let undeclared = declaring.is_empty()
                         || site.body.is_some_and(|body| {
                             undeclared_along_paths(
-                                site,
+                                site.start,
                                 alias,
                                 &declaring,
                                 body,
@@ -178,38 +207,108 @@ impl Backend {
                             )
                         });
                     if undeclared {
-                        settled.extend(site.body.map(|body| (body, alias)));
-                        reported.push(site);
+                        settled.extend(site.body.map(|body| (body, alias_atom)));
+                        reported.push(report(site));
+                    }
+                }
+
+                // The variables the methods a run builder comes from or is
+                // passed to use and leave undeclared.
+                for run in &runs {
+                    if !confirmed.contains(&run.start) {
+                        continue;
+                    }
+                    let mut open: Vec<(Atom, u32)> = Vec::new();
+                    let mut known_all = true;
+                    for provider in run.requires.iter() {
+                        let Some(uses) = providers.open_uses(&own, *provider) else {
+                            known_all = false;
+                            break;
+                        };
+                        for alias in uses {
+                            if !open.iter().any(|(a, _)| *a == alias) {
+                                open.push((alias, provider.call));
+                            }
+                        }
+                    }
+                    if !known_all {
+                        continue;
+                    }
+                    for (alias, from) in open {
+                        if settled.contains(&(run.body, alias)) {
+                            continue;
+                        }
+                        let declaring: Vec<u32> = run
+                            .requires
+                            .iter()
+                            .filter(|provider| {
+                                known
+                                    .entry(**provider)
+                                    .or_insert_with(|| providers.aliases(&own, **provider))
+                                    .as_ref()
+                                    .is_none_or(|aliases| aliases.contains(&alias))
+                            })
+                            .map(|provider| provider.call)
+                            .collect();
+                        if undeclared_along_paths(
+                            from,
+                            alias.as_str(),
+                            &declaring,
+                            run.body,
+                            &calls.statements,
+                            &ctx.symbol_map,
+                        ) {
+                            settled.push((run.body, alias));
+                            let method = method_name_at(content, from);
+                            reported.push((
+                                run.start,
+                                run.end,
+                                format!("Undefined DQL variable '{alias}', used by {method}()")
+                                    .into(),
+                                UNKNOWN_DQL_VARIABLE_CODE,
+                            ));
+                        }
                     }
                 }
                 reported
             });
 
-        reported.sort_by_key(|site| (site.start, site.end));
-        for site in reported {
-            let Some(range) = self.offset_range_to_lsp_range(
-                uri,
-                content,
-                site.start as usize,
-                site.end as usize,
-            ) else {
+        reported.sort_by_key(|(start, end, _, _)| (*start, *end));
+        for (start, end, message, code) in reported {
+            let Some(range) =
+                self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
+            else {
                 continue;
             };
             out.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::Error,
-                site.code,
-                site.message.to_string(),
+                code,
+                message.into_owned(),
             ));
         }
     }
 }
 
+/// The diagnostic `site` reports.
+fn report(site: &DqlSyntaxSite) -> Report<'_> {
+    (site.start, site.end, (&*site.message).into(), site.code)
+}
+
+/// The name of the method whose name starts at `offset` of `content`.
+fn method_name_at(content: &str, offset: u32) -> &str {
+    let rest = content.get(offset as usize..).unwrap_or_default();
+    let len = rest
+        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .unwrap_or(rest.len());
+    &rest[..len]
+}
+
 /// Whether some path through the function body starting at `body` uses
-/// the variable `alias` at `site` and never declares it, counting the
+/// the variable `alias` at `use_at` and never declares it, counting the
 /// calls `declaring` of other methods as declaring it.
 fn undeclared_along_paths(
-    site: &DqlSyntaxSite,
+    use_at: u32,
     alias: &str,
     declaring: &[u32],
     body: u32,
@@ -222,7 +321,7 @@ fn undeclared_along_paths(
     let Some(decls) = map.dql_body(body) else {
         return false;
     };
-    let mut events: Vec<(u32, PathEvent<'_>)> = std::iter::once((site.start, PathEvent::Use(0)))
+    let mut events: Vec<(u32, PathEvent<'_>)> = std::iter::once((use_at, PathEvent::Use(0)))
         .chain(
             decls
                 .decls
@@ -267,6 +366,11 @@ struct Providers<'b> {
     maps: HashMap<Arc<str>, Arc<SymbolMap>>,
     /// The files whose calls have been looked up.
     read: HashSet<Arc<str>>,
+    /// The variables each call of each file hands a builder to methods
+    /// that use and leave undeclared (see [`Providers::open_uses`]).
+    open: HashMap<(Arc<str>, DqlProvider), Option<Vec<Atom>>>,
+    /// The calls whose variables left undeclared are being looked up.
+    opening: HashSet<(Arc<str>, DqlProvider)>,
 }
 
 impl Providers<'_> {
@@ -313,6 +417,49 @@ impl Providers<'_> {
             }
         }
         Some(aliases)
+    }
+
+    /// The variables the methods the call `provider` of `file` reaches use
+    /// on the builder and leave for their callers to declare: the ones
+    /// their own bodies use, and the ones the methods they hand the builder
+    /// on to leave, less the ones they and those methods declare.  `None`
+    /// when any of them cannot be found or is not known to declare only
+    /// what its body spells.  A call met again while its own variables are
+    /// being looked up adds none.
+    fn open_uses(&mut self, file: &Arc<str>, provider: DqlProvider) -> Option<Vec<Atom>> {
+        let key = (Arc::clone(file), provider);
+        if let Some(done) = self.open.get(&key) {
+            return done.clone();
+        }
+        if !self.opening.insert(key.clone()) {
+            return Some(Vec::new());
+        }
+        let result = self.find_open_uses(file, provider);
+        self.opening.remove(&key);
+        self.open.insert(key, result.clone());
+        result
+    }
+
+    fn find_open_uses(&mut self, file: &Arc<str>, provider: DqlProvider) -> Option<Vec<Atom>> {
+        let methods = self.targets(file, provider.call)?;
+        let mut open: Vec<Atom> = Vec::new();
+        for method in methods.iter() {
+            let summary = method
+                .map
+                .dql_builder_method(method.name_offset, provider.slot)?;
+            let mut uses: Vec<Atom> = summary.uses.to_vec();
+            let mut declared: Vec<Atom> = summary.aliases.to_vec();
+            for required in summary.requires.iter() {
+                uses.extend(self.open_uses(&method.file, *required)?);
+                declared.extend(self.aliases(&method.file, *required)?);
+            }
+            for alias in uses {
+                if !declared.contains(&alias) && !open.contains(&alias) {
+                    open.push(alias);
+                }
+            }
+        }
+        Some(open)
     }
 
     /// The methods the call whose method name starts at `call` in `file`

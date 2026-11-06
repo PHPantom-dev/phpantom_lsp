@@ -795,35 +795,6 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ---
 
-## F73. DQL variables a returned query builder uses that its callers never declare
-
-**Impact: Low · Complexity: Medium**
-
-```php
-private function base(): QueryBuilder
-{
-    return $this->em->createQueryBuilder()
-        ->select('u')->from(User::class, 'u')
-        ->andWhere('t.id = 1');                  // `t` declared by no caller
-}
-
-$this->base()->getQuery();                       // PHPStan reports `t` here
-```
-
-A variable used on a builder a method returns is left for the method's
-callers to declare, so one that none of them declares is not reported.
-PHPStan reports it in the caller, where the query is run. The method's
-summary would carry the variables its builder uses and does not declare
-itself, and each caller would check them along its paths, the way it
-checks its own uses against what the methods it calls declare. The same
-goes for a variable a method uses on a builder it is passed.
-
-**Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`
-(`summarize_methods`, `report_undeclared`) and
-`src/diagnostics/dql_syntax.rs` (`Providers`).
-
----
-
 ## F45. Symfony events named by their class or a constant
 
 **Impact: Medium · Complexity: Medium**

@@ -35,8 +35,10 @@
 //! gets the builder from or passes it on to declare, which the diagnostic
 //! pass looks up once the type engine finds each method; each method's are
 //! recorded for its callers, with the calls it hands the builder on with.
-//! A builder a function body returns is left to its callers, which may
-//! declare more.
+//! A variable a method uses on a builder it returns, or is passed, is left
+//! to its callers, which may declare more: each method's are recorded too,
+//! and so is each `getQuery()` call made on a builder other methods hand
+//! to its function body, for the diagnostic pass to check there.
 //!
 //! Each query, and each fragment whose place in the query is known, is also
 //! checked against DQL's grammar.  Where one stops following it is recorded
@@ -219,6 +221,18 @@ pub(super) struct DqlPending<'a> {
     bodies: Vec<(u32, &'a [Statement<'a>])>,
     /// The methods, for what they declare on the builders they hand on.
     methods: Vec<MethodNote<'a>>,
+    /// The `getQuery()` calls, and the builder each is made on.
+    runs: Vec<PendingRun<'a>>,
+}
+
+/// A `getQuery()` call: the function body it is made in, where its method
+/// name starts and ends, and the builder it is made on.
+#[derive(Debug)]
+struct PendingRun<'a> {
+    scope: u32,
+    start: u32,
+    end: u32,
+    builder: &'a Expression<'a>,
 }
 
 /// Record the statements of the function body whose DQL table starts at
@@ -744,6 +758,15 @@ pub(super) fn record_dql_call<'a>(
         ctx.dql.receivers.push(variable.span.start.offset);
     }
     record_dql_passes(method_start, arguments, ctx, scope_start);
+    if method.eq_ignore_ascii_case("getQuery") && arguments.arguments.is_empty() {
+        ctx.dql.runs.push(PendingRun {
+            scope: scope_start,
+            start: method_start,
+            end: method_start + method.len() as u32,
+            builder: object,
+        });
+        return;
+    }
     let call = DqlCall {
         method_start,
         receiver: QUERY_BUILDER,
@@ -1204,6 +1227,7 @@ impl Subject<'_> {
 pub(super) fn finish_dql(ctx: &mut ExtractionCtx<'_>) {
     let pending = std::mem::take(&mut ctx.dql);
     summarize_methods(&pending, ctx);
+    record_runs(&pending, ctx);
     if pending.decls.is_empty() && pending.call_builders.is_empty() {
         report_undeclared(&pending, ctx);
         return;
@@ -1360,10 +1384,6 @@ fn report_undeclared(pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
         let Some(providers) = is_closed(table, pending, ctx) else {
             continue;
         };
-        let mut sites: Vec<&PendingUse> =
-            pending.uses.iter().filter(|s| s.table == table).collect();
-        sites.sort_by_key(|site| site.start);
-        let decls: Vec<&PendingDecl> = pending.decls.iter().filter(|d| d.table == table).collect();
         let body = match table {
             DqlTable::Scope(start) => pending
                 .bodies
@@ -1372,31 +1392,7 @@ fn report_undeclared(pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
                 .map(|&(_, statements)| (start, statements)),
             DqlTable::Query(_) => None,
         };
-        let declared = |alias: &str| decls.iter().any(|d| d.alias == alias);
-        let undeclared: Vec<bool> = match body {
-            // A variable declared somewhere in a function body may still be
-            // undeclared on some path through it to its query.
-            Some((_, statements)) if sites.iter().any(|site| declared(&site.alias)) => {
-                let aliases: Vec<&str> = sites.iter().map(|site| site.alias.as_str()).collect();
-                let mut events: Vec<(u32, PathEvent<'_>)> = sites
-                    .iter()
-                    .enumerate()
-                    .map(|(index, site)| (site.start, PathEvent::Use(index)))
-                    .chain(
-                        decls
-                            .iter()
-                            .map(|d| (d.at, PathEvent::Declare(d.alias.as_str()))),
-                    )
-                    .collect();
-                let on_paths = undeclared_on_some_path(statements, &mut events, &aliases);
-                sites
-                    .iter()
-                    .zip(on_paths)
-                    .map(|(site, bad)| !declared(&site.alias) || bad)
-                    .collect()
-            }
-            _ => sites.iter().map(|site| !declared(&site.alias)).collect(),
-        };
+        let (sites, undeclared) = undeclared_uses(table, pending);
         // What the other methods declare may cover an earlier use and leave
         // a later one bare, so each use is kept for the diagnostic pass.
         let deferred = match body {
@@ -1418,15 +1414,111 @@ fn report_undeclared(pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
         if let Some(start) = deferred
             && any
         {
-            ctx.dql_bodies.push(crate::symbol_map::DqlBody {
-                start,
-                decls: decls
-                    .iter()
-                    .map(|d| (d.at, crate::atom::atom(&d.alias)))
-                    .collect(),
-            });
+            note_body(start, pending, ctx);
         }
     }
+}
+
+/// Record the declarations of the function body starting at `start`, for
+/// the diagnostic pass to follow its paths again.
+fn note_body(start: u32, pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
+    if ctx.dql_bodies.iter().any(|body| body.start == start) {
+        return;
+    }
+    let table = DqlTable::Scope(start);
+    ctx.dql_bodies.push(crate::symbol_map::DqlBody {
+        start,
+        decls: pending
+            .decls
+            .iter()
+            .filter(|d| d.table == table)
+            .map(|d| (d.at, crate::atom::atom(&d.alias)))
+            .collect(),
+    });
+}
+
+/// Record each `getQuery()` call made on a builder that other methods
+/// create or are passed and that the call's function body otherwise keeps
+/// to itself, for the diagnostic pass to check the variables those methods
+/// leave undeclared.  A builder the body creates itself has its variables
+/// checked where they are used.
+fn record_runs(pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
+    for run in &pending.runs {
+        let table = DqlTable::Scope(run.scope);
+        if pending.opaque.contains(&table) {
+            continue;
+        }
+        let mut providers: Vec<DqlProvider> = Vec::new();
+        match builder_of(run.builder) {
+            Builder::Method(call) => providers.push(DqlProvider {
+                call,
+                slot: DqlSlot::Returned,
+            }),
+            Builder::Variable(name) => {
+                if !keeps_builder(&name, run.scope, pending, ctx, Keep::Report, &mut providers) {
+                    continue;
+                }
+            }
+            Builder::Created | Builder::Elsewhere => continue,
+        }
+        if providers.is_empty() {
+            continue;
+        }
+        providers.sort_by_key(|p| p.call);
+        providers.dedup();
+        note_body(run.scope, pending, ctx);
+        ctx.dql_runs.push(crate::symbol_map::DqlRun {
+            start: run.start,
+            end: run.end,
+            body: run.scope,
+            requires: providers.into_boxed_slice(),
+        });
+    }
+}
+
+/// The uses of variables in `table`, in source order, and whether each is
+/// undeclared by the table's own declarations on some path to it.
+fn undeclared_uses<'p>(
+    table: DqlTable,
+    pending: &'p DqlPending,
+) -> (Vec<&'p PendingUse>, Vec<bool>) {
+    let mut sites: Vec<&PendingUse> = pending.uses.iter().filter(|s| s.table == table).collect();
+    sites.sort_by_key(|site| site.start);
+    let decls: Vec<&PendingDecl> = pending.decls.iter().filter(|d| d.table == table).collect();
+    let statements = match table {
+        DqlTable::Scope(start) => pending
+            .bodies
+            .iter()
+            .find(|(s, _)| *s == start)
+            .map(|&(_, statements)| statements),
+        DqlTable::Query(_) => None,
+    };
+    let declared = |alias: &str| decls.iter().any(|d| d.alias == alias);
+    let undeclared: Vec<bool> = match statements {
+        // A variable declared somewhere in a function body may still be
+        // undeclared on some path through it to its query.
+        Some(statements) if sites.iter().any(|site| declared(&site.alias)) => {
+            let aliases: Vec<&str> = sites.iter().map(|site| site.alias.as_str()).collect();
+            let mut events: Vec<(u32, PathEvent<'_>)> = sites
+                .iter()
+                .enumerate()
+                .map(|(index, site)| (site.start, PathEvent::Use(index)))
+                .chain(
+                    decls
+                        .iter()
+                        .map(|d| (d.at, PathEvent::Declare(d.alias.as_str()))),
+                )
+                .collect();
+            let on_paths = undeclared_on_some_path(statements, &mut events, &aliases);
+            sites
+                .iter()
+                .zip(on_paths)
+                .map(|(site, bad)| !declared(&site.alias) || bad)
+                .collect()
+        }
+        _ => sites.iter().map(|site| !declared(&site.alias)).collect(),
+    };
+    (sites, undeclared)
 }
 
 fn push_undeclared(
@@ -2108,18 +2200,79 @@ fn summarize_methods(pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
                 slots.push((DqlSlot::Parameter(index as u32), providers));
             }
         }
+        let mut undeclared: Option<Vec<crate::atom::Atom>> = None;
         for (slot, mut providers) in slots {
             providers.sort_by_key(|p| p.call);
             providers.dedup();
+            let uses = if only_slot_builders(method, slot, table, pending) {
+                undeclared
+                    .get_or_insert_with(|| {
+                        let (sites, flags) = undeclared_uses(table, pending);
+                        let mut uses: Vec<crate::atom::Atom> = Vec::new();
+                        for (site, bad) in sites.iter().zip(flags) {
+                            let alias = crate::atom::atom(&site.alias);
+                            if bad && !uses.contains(&alias) {
+                                uses.push(alias);
+                            }
+                        }
+                        uses
+                    })
+                    .clone()
+                    .into_boxed_slice()
+            } else {
+                Box::default()
+            };
             summaries.push(crate::symbol_map::DqlBuilderMethod {
                 name_offset: method.name_offset,
                 slot,
                 aliases: aliases.clone().into_boxed_slice(),
+                uses,
                 requires: providers.into_boxed_slice(),
             });
         }
     }
     ctx.dql_builder_methods = summaries;
+}
+
+/// Whether every builder the DQL of the method's body `table` is given to
+/// is the one in `slot`, so the variables that DQL uses are used on it: for
+/// the builder it returns, one it creates, gets from another method, or
+/// returns from a variable; for a parameter, that parameter.
+fn only_slot_builders(
+    method: &MethodNote,
+    slot: DqlSlot,
+    table: DqlTable,
+    pending: &DqlPending,
+) -> bool {
+    let returned: Vec<String> = match slot {
+        DqlSlot::Returned => returned_values(method.scope_start, pending)
+            .filter_map(
+                |value| match value.and_then(|value| returned_builder(value)) {
+                    Some(Builder::Variable(name)) => Some(name),
+                    _ => None,
+                },
+            )
+            .collect(),
+        DqlSlot::Parameter(_) => Vec::new(),
+    };
+    let parameter = match slot {
+        DqlSlot::Parameter(index) => match method.parameters.get(index as usize) {
+            Some(Some((name, _))) => Some(*name),
+            _ => return false,
+        },
+        DqlSlot::Returned => None,
+    };
+    pending
+        .builders
+        .iter()
+        .filter(|(t, _)| *t == table)
+        .all(|(_, builder)| match (builder, parameter) {
+            (Builder::Variable(name), Some(parameter)) => name == parameter,
+            (_, Some(_)) => false,
+            (Builder::Created | Builder::Method(_), None) => true,
+            (Builder::Variable(name), None) => returned.contains(name),
+            (Builder::Elsewhere, None) => false,
+        })
 }
 
 /// Whether the variable `name` of the function body starting at

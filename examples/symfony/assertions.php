@@ -360,6 +360,8 @@ check('UserRepository::inTeamByEmail() builds DQL that joins t through joinTeam(
 check('A variable neither byEmail() nor joinTeam() declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.displayName = :name ORDER BY u.email ASC'));
 check('UserRepository::teamMembers() builds DQL that joins t through byEmailInTeam()', $dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE t.name = :team ORDER BY u.email ASC'));
 check('A variable no method along the chain declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE x.name = :team ORDER BY u.email ASC'));
+check('UserRepository::namedTeamMembers() builds DQL that joins the t onlyNamedTeams() uses', $dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE t.name IS NOT NULL ORDER BY u.email ASC'));
+check('A variable a method the builder is passed to uses, and nothing declares, fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.name IS NOT NULL ORDER BY u.email ASC'));
 (new SchemaTool($entityManager))->createSchema([
     $entityManager->getClassMetadata(User::class),
     $entityManager->getClassMetadata(Team::class),

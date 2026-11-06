@@ -247,6 +247,8 @@ struct ExtractionCtx<'a> {
     /// The DQL variables declared in each body whose undeclared variables
     /// wait on other methods.
     dql_bodies: Vec<crate::symbol_map::DqlBody>,
+    /// The `getQuery()` calls made on builders other methods hand on.
+    dql_runs: Vec<crate::symbol_map::DqlRun>,
 }
 
 /// A variable token's name without its `$`.
@@ -608,6 +610,7 @@ fn extract_symbol_map_inner(
         dql_syntax_errors: Vec::new(),
         dql_builder_methods: Vec::new(),
         dql_bodies: Vec::new(),
+        dql_runs: Vec::new(),
     };
 
     note_dql_body(0, program.statements.as_slice(), &mut ctx);
@@ -787,6 +790,7 @@ fn extract_symbol_map_inner(
         dql_syntax_errors: ctx.dql_syntax_errors,
         dql_builder_methods: ctx.dql_builder_methods,
         dql_bodies: ctx.dql_bodies,
+        dql_runs: ctx.dql_runs,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx
             .route_imports

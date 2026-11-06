@@ -348,6 +348,11 @@ pub(crate) struct SymbolMap {
     /// variables wait on what other methods declare.  Empty for every file
     /// with no such body.
     pub dql_bodies: Vec<DqlBody>,
+    /// Each `getQuery()` call made on a query builder that other methods
+    /// hand to the function body it is in, which keeps it to itself, for
+    /// the variables those methods use and leave undeclared.  Empty for
+    /// every file with no such call.
+    pub dql_runs: Vec<DqlRun>,
     /// Whether the file declares a Twig loader of the project's own: a
     /// class that is one, or a service tagged `twig.loader`.  Such a loader
     /// can serve any template name, so no name can be told missing.
@@ -819,6 +824,9 @@ pub(crate) struct DqlBuilderMethod {
     pub slot: DqlSlot,
     /// The variables its own body declares.
     pub aliases: Box<[crate::atom::Atom]>,
+    /// The variables its own body uses on the builder and leaves for the
+    /// callers to declare, on some path through it.
+    pub uses: Box<[crate::atom::Atom]>,
     /// The calls of other methods in its body that the builder comes from
     /// or is passed to, which declare variables on it too.
     pub requires: Box<[DqlProvider]>,
@@ -834,6 +842,21 @@ pub(crate) struct DqlBody {
     /// Where the method name of each declaring call starts, and the
     /// variable it declares.
     pub decls: Box<[(u32, crate::atom::Atom)]>,
+}
+
+/// A `getQuery()` call made on a query builder that other methods create
+/// or are passed, where the variables those methods use on the builder
+/// without declaring them must have been declared.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DqlRun {
+    /// Where the method name of the call starts and ends.
+    pub start: u32,
+    pub end: u32,
+    /// Where the function body the call is made in starts (see
+    /// [`SymbolMap::dql_bodies`]).
+    pub body: u32,
+    /// The calls of other methods that create or are handed the builder.
+    pub requires: Box<[DqlProvider]>,
 }
 
 impl SymbolMap {

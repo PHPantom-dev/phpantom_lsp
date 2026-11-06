@@ -170,6 +170,21 @@ final class UserRepository extends ServiceEntityRepository
     /**
      * @return list<User>
      */
+    public function namedTeamMembers(): array
+    {
+        // Try: delete the `joinTeam()` call. onlyNamedTeams() uses `t` and
+        // leaves it to its callers to declare, so the query run here
+        // without it is reported at getQuery().
+        $builder = $this->byEmail();
+        $this->joinTeam($builder);
+        $this->onlyNamedTeams($builder);
+
+        return $builder->getQuery()->getResult();
+    }
+
+    /**
+     * @return list<User>
+     */
     public function sortedByName(): array
     {
         // Try: go-to-definition on displayName. The DQL an expression object
@@ -192,6 +207,11 @@ final class UserRepository extends ServiceEntityRepository
         $this->joinTeam($builder);
 
         return $builder;
+    }
+
+    private function onlyNamedTeams(QueryBuilder $builder): void
+    {
+        $builder->andWhere('t.name IS NOT NULL');
     }
 
     private function joinTeam(QueryBuilder $builder): void
