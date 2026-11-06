@@ -45,6 +45,8 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
 use Symfony\Component\DependencyInjection\Loader\YamlFileLoader as ServicesYamlLoader;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+use Symfony\Component\Form\Extension\Core\Type\EmailType;
+use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
 use Symfony\Component\Form\Forms;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\HandleTrait;
@@ -53,9 +55,14 @@ use Symfony\Component\Routing\Loader\AttributeDirectoryLoader;
 use Symfony\Component\Routing\Loader\PhpFileLoader as RoutesPhpLoader;
 use Symfony\Component\Routing\Loader\YamlFileLoader as RoutesYamlLoader;
 use Symfony\Component\Routing\RequestContext;
+use Symfony\Component\Serializer\Mapping\Factory\ClassMetadataFactory;
+use Symfony\Component\Serializer\Mapping\Loader\AttributeLoader;
+use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
+use Symfony\Component\Serializer\Serializer;
 use Symfony\Component\Translation\Loader\XliffFileLoader;
 use Symfony\Component\Translation\Loader\YamlFileLoader as TranslationYamlLoader;
 use Symfony\Component\Translation\Translator;
+use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Validation;
 use Symfony\Component\Yaml\Yaml;
 use Twig\Environment;
@@ -105,6 +112,7 @@ $routes = $routeLoader->load('routes.yaml');
 check('app_demo is declared by the #[Route] on DemoController::index()', $routes->get('app_demo')?->getDefault('_controller') === DemoController::class . '::index');
 check('app_demo_legacy is declared in config/routes.yaml', $routes->get('app_demo_legacy')?->getDefault('_controller') === DemoController::class . '::legacy');
 check('The legacy route points at a method that exists', method_exists(DemoController::class, 'legacy'));
+check('app_demo_profile is declared by the #[Route] on DemoController::profile()', $routes->get('app_demo_profile')?->getDefault('_controller') === DemoController::class . '::profile');
 
 check("The admin import's name_prefix names DashboardController's route admin_dashboard", $routes->get('admin_dashboard')?->getDefault('_controller') === DashboardController::class . '::index');
 check("'dashboard' on its own is not a route", $routes->get('dashboard') === null);
@@ -254,12 +262,40 @@ check("The template's user.displayName and user.email read User's getters", str_
 // Each field RegistrationType adds reads and writes the data-class property
 // of the same name.
 $user = new User('ada@example.com', 'Ada');
-$form = Forms::createFormFactory()->create(RegistrationType::class, $user);
+// The validator's type extension gives every form its 'constraints' option.
+$formFactory = Forms::createFormFactoryBuilder()
+    ->addExtension(new ValidatorExtension(Validation::createValidator()))
+    ->getFormFactory();
+$form = $formFactory->create(RegistrationType::class, $user);
 check("The 'email' field reads User's email", $form->get('email')->getData() === 'ada@example.com');
 check("The 'displayName' field reads User's displayName", $form->get('displayName')->getData() === 'Ada');
 $form->submit(['email' => 'grace@example.com', 'displayName' => 'Grace']);
 check("The 'email' field writes User's email", $user->getEmail() === 'grace@example.com');
 check("The 'displayName' field writes User's displayName", $user->getDisplayName() === 'Grace');
+
+// The 'email' field's options are EmailType's, its parents', and the
+// validator extension's, and Length takes max as a constructor parameter.
+$emailConfig = $form->get('email')->getConfig();
+check("The 'email' field is an EmailType", $emailConfig->getType()->getInnerType() instanceof EmailType);
+check("'help' is an option the 'email' field takes", $emailConfig->getOption('help') === 'We never share it.');
+$constraints = $emailConfig->getOption('constraints');
+check("'constraints' holds Length(max: 180)", $constraints[0] instanceof Length && $constraints[0]->max === 180);
+$threwOnUnknownOption = false;
+try {
+    $formFactory->createBuilder(EmailType::class, null, ['hlep' => 'x']);
+} catch (\Symfony\Component\OptionsResolver\Exception\UndefinedOptionsException) {
+    $threwOnUnknownOption = true;
+}
+check('An option no type declares throws, as PHPantom reports it', $threwOnUnknownOption);
+
+// ─── Serializer groups ──────────────────────────────────────────────────────
+
+// The #[Groups] on User's getters put them in 'user:read' and 'user:list',
+// which DemoController::profile() serializes with.
+$serializer = new Serializer([new ObjectNormalizer(new ClassMetadataFactory(new AttributeLoader()))]);
+$ada = new User('ada@example.com', 'Ada');
+check("'user:list' holds displayName only", $serializer->normalize($ada, null, ['groups' => ['user:list']]) === ['displayName' => 'Ada']);
+check("'user:read' holds email and displayName", $serializer->normalize($ada, null, ['groups' => ['user:read']]) === ['email' => 'ada@example.com', 'displayName' => 'Ada']);
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 

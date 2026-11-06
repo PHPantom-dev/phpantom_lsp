@@ -10,8 +10,10 @@
 //! PHP through symbol-map extraction.  Template names are Twig's, so they
 //! are read in any project that uses Twig, Symfony or not.
 //!
-//! Event names and Messenger bus names are string keys too (see [`tags`]
-//! and [`messenger`]).  Form fields, validation mappings, and the listener
+//! Event names, Messenger bus names, and serializer groups are string keys
+//! too (see [`tags`], [`messenger`], and [`serializer`]).  A form type's
+//! options are read from its class and the classes it builds on whenever
+//! they are asked for (see [`form_options`]).  Form fields, validation mappings, and the listener
 //! methods an event subscription names name a class's members, so they are
 //! member accesses instead (see [`forms`] and [`validation`]).  The
 //! Messenger handlers a project registers are recorded beside the spans of
@@ -32,11 +34,13 @@
 pub(crate) mod bundles;
 pub(crate) mod config_tree;
 pub(crate) mod container;
+pub(crate) mod form_options;
 pub(crate) mod forms;
 pub(crate) mod messenger;
 pub(crate) mod resources;
 pub(crate) mod route_world;
 pub(crate) mod routes;
+pub(crate) mod serializer;
 pub(crate) mod tags;
 pub(crate) mod translations;
 pub(crate) mod validation;
@@ -121,6 +125,8 @@ pub(crate) struct SymfonyState {
     bundle_declarations: parking_lot::Mutex<Option<std::sync::Arc<bundles::BundleDeclarations>>>,
     /// The translation domains an undeclared key is reported in.
     judged_translation_domains: translations::JudgedDomains,
+    /// The form types and type extensions the installed packages declare.
+    vendor_form_classes: form_options::VendorFormClasses,
 }
 
 /// Whether `map` declares a service ID, a container parameter, a route, a

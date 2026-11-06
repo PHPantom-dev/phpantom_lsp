@@ -2,6 +2,8 @@
 
 namespace App\Entity;
 
+use Symfony\Component\Serializer\Attribute\Groups;
+
 final class User
 {
     public function __construct(
@@ -9,6 +11,7 @@ final class User
         private string $displayName,
     ) {}
 
+    #[Groups(['user:read'])]
     public function getEmail(): string
     {
         return $this->email;
@@ -19,6 +22,7 @@ final class User
         $this->email = $email;
     }
 
+    #[Groups(['user:read', 'user:list'])]
     public function getDisplayName(): string
     {
         return $this->displayName;

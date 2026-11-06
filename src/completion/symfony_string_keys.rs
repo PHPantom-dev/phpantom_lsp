@@ -21,7 +21,10 @@
 //!
 //! A form field is completed from its form type's data class, by the same
 //! reading of the form type the symbol map makes (see
-//! [`crate::symfony::forms`]), and a configuration key in
+//! [`crate::symfony::forms`]), a form option from the options the type
+//! accepts (see [`crate::symfony::form_options`]), a serializer group in a
+//! string the symbol map reads as one (see [`crate::symfony::serializer`]),
+//! and a configuration key in
 //! `config/packages/` from the keys declared under the one it is nested in
 //! (see [`crate::symfony::config_tree`]).
 //!
@@ -68,6 +71,18 @@ impl Backend {
         if self.is_symfony_project()
             && let Some(response) =
                 self.symfony_form_field_completion(content, literal_start, cursor, position, ctx)
+        {
+            return Some(response);
+        }
+        if self.is_symfony_project()
+            && let Some(response) = self.symfony_serializer_group_completion(
+                uri,
+                content,
+                literal_start,
+                cursor,
+                position,
+                ctx,
+            )
         {
             return Some(response);
         }
@@ -183,6 +198,105 @@ impl Backend {
         });
         string_key_response(
             properties,
+            tower_lsp_server::gen_lsp_types::CompletionItemKind::Property,
+            content,
+            literal_start,
+            position,
+        )
+    }
+
+    /// Complete a serializer group, in a string the symbol map reads as one
+    /// (see [`crate::symfony::serializer`]), once the type engine confirms
+    /// the receiver of a serializer call.
+    fn symfony_serializer_group_completion(
+        &self,
+        uri: &str,
+        content: &str,
+        literal_start: usize,
+        cursor: usize,
+        position: Position,
+        ctx: &FileContext,
+    ) -> Option<CompletionResponse> {
+        // `#[Groups]`, a `groups` key, or `AbstractNormalizer::GROUPS`.
+        let bytes = content.as_bytes();
+        if memchr::memmem::find(bytes, b"roups").is_none()
+            && memchr::memmem::find(bytes, b"GROUPS").is_none()
+        {
+            return None;
+        }
+        let start = literal_start as u32;
+        let loaders = self.file_loaders(ctx);
+        let resolve = |written: &str, offset: u32| ctx.resolve_name_at(written, offset);
+        let names_group = crate::parser::with_parsed_program(
+            content,
+            "symfony_serializer_groups",
+            |program, content| {
+                let strings = crate::symfony::serializer::group_strings(program, &resolve);
+                let string = strings
+                    .iter()
+                    .find(|string| string.start == start && cursor as u32 <= string.end)?;
+                let Some((receiver, class)) = string.receiver else {
+                    return Some(());
+                };
+                let var_ctx =
+                    loaders.var_ctx_at(content, mago_span::HasSpan::span(receiver).start.offset);
+                let ty = crate::type_engine::variable::iterable_elements::resolve_expression_type(
+                    receiver, &var_ctx,
+                )?;
+                class
+                    .targets()
+                    .iter()
+                    .any(|(fqn, _)| {
+                        crate::class_lookup::is_subtype_of_named(
+                            &ty,
+                            fqn,
+                            loaders.resolved_class_loader(),
+                        )
+                    })
+                    .then_some(())
+            },
+        );
+        names_group?;
+        self.symfony_key_response(
+            uri,
+            StringKeyKind::SerializerGroup,
+            content,
+            literal_start,
+            cursor,
+            position,
+        )
+    }
+
+    /// Complete an option of a form type, in the options array a call
+    /// passes the type (see [`crate::symfony::form_options`]).  The options
+    /// the array already sets are left out.
+    pub(crate) fn try_symfony_form_option_completion(
+        &self,
+        content: &str,
+        position: Position,
+        code: &CodeContext<'_>,
+        ctx: &FileContext,
+    ) -> Option<CompletionResponse> {
+        let cursor = position_to_offset(content, position) as usize;
+        let (quote, _) = code.open_string?;
+        let literal_start = quote + 1;
+        let start = literal_start as u32;
+        let (options, _, others) = self.form_options_at(content, ctx, |string| {
+            string.start == start && cursor as u32 <= string.end
+        })?;
+        let prefix = content.get(literal_start..cursor)?.as_bytes();
+        let names: Vec<String> = options
+            .names()
+            .into_iter()
+            .filter(|name| !others.contains(name))
+            .filter(|name| {
+                name.as_bytes()
+                    .get(..prefix.len())
+                    .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+            })
+            .collect();
+        string_key_response(
+            names,
             tower_lsp_server::gen_lsp_types::CompletionItemKind::Property,
             content,
             literal_start,

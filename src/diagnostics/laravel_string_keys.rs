@@ -96,7 +96,8 @@ impl CheckedStringKind {
             // by one that builds its context at runtime.  A module can add
             // an entity type in PHP, through `hook_entity_type_build()`.
             // Drupal sends a route parameter no path declares as the query
-            // string.
+            // string.  A serializer group nothing puts a member in selects
+            // nothing, which is no error either.
             StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRouteParameter
@@ -109,7 +110,8 @@ impl CheckedStringKind {
             | StringKeyKind::ContainerBinding
             | StringKeyKind::Env
             | StringKeyKind::SymfonyConfigKey
-            | StringKeyKind::SymfonyEvent => return None,
+            | StringKeyKind::SymfonyEvent
+            | StringKeyKind::SerializerGroup => return None,
         })
     }
 }

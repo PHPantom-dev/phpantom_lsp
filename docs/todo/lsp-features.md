@@ -1019,29 +1019,6 @@ or XML, so it needs a scan of the controller files' class members.
 
 ---
 
-## F54. Symfony form options, constraint options, and serializer groups
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$builder->add('email', EmailType::class, ['requird' => true]);  // a typo, not reported
-#[Assert\Length(mni: 3)]                                        // likewise
-#[Groups(['user:read'])]                                         // used where?
-```
-
-A form type's options are the ones its `configureOptions()` and its
-parents' define, and a constraint's are its constructor's parameters. The
-keys of a `createForm()` or `$builder->add()` options array neither
-complete nor get checked against them. Serializer groups, named by
-`#[Groups]`, `#[Context]`, the `groups` a serializer or a controller's
-`json()` is given, and the `groups` keys of a YAML serializer mapping,
-neither navigate between their uses nor complete.
-
-**Where to look:** `src/symfony/forms.rs`, `src/symfony/validation.rs`,
-and `references/symfony-language-tools` (`docs/features/metadata.rst`).
-
----
-
 ## F55. Symfony ExpressionLanguage strings
 
 **Impact: Low · Complexity: Medium-High**
@@ -1129,3 +1106,27 @@ When the domain has no catalogue yet, offer to create
 **Where to look:** `src/code_actions/insert_translation_key.rs`,
 `src/symfony/translations.rs` (`catalogue_spans`, `scan_yaml`,
 `scan_xliff`).
+
+---
+
+## F67. Symfony constraint options in YAML and XML validation mappings
+
+**Impact: Low · Complexity: Low-Medium**
+
+```yaml
+App\Entity\User:
+    properties:
+        displayName:
+            - Length: { mni: 2 }   # a typo, not reported
+```
+
+A constraint's options are its constructor's parameters, which a named
+argument in PHP is checked against and completes from. The option keys of
+a constraint in a validation mapping, the YAML mapping's and the
+`<option name="…">` of the XML one, neither complete nor get checked. The
+mapping already knows each constraint's class (see
+`src/symfony/validation.rs`), so its constructor's parameters are a class
+load away.
+
+**Where to look:** `src/symfony/validation.rs` (`scan_yaml`, `scan_xml`),
+and the named-argument check in `src/diagnostics/argument_count.rs`.

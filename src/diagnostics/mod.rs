@@ -287,6 +287,7 @@ mod stale;
 pub(crate) mod state;
 mod subject_cache;
 pub(crate) mod suppression;
+mod symfony_form_options;
 mod syntax_errors;
 mod trait_property_conflicts;
 mod type_errors;

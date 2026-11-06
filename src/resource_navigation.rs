@@ -343,6 +343,11 @@ impl Backend {
             if crate::symfony::validation::is_validation_mapping_uri(uri) {
                 spans.extend(crate::symfony::validation::validation_spans(uri, content));
             }
+            if crate::symfony::serializer::is_serializer_mapping_uri(uri) {
+                spans.extend(crate::symfony::serializer::serializer_mapping_spans(
+                    uri, content,
+                ));
+            }
             if crate::symfony::config_tree::is_bundle_config_uri(uri) {
                 spans.extend(crate::symfony::config_tree::config_key_spans(content));
             }

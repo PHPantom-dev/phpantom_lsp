@@ -365,6 +365,16 @@ pub(super) fn extract_from_attribute_lists<'a>(
                     emit_template_attribute_span(arg_list, ctx);
                 }
 
+                // `#[Groups(['user:read'])]` puts a member in serializer
+                // groups, and `#[Context]` and `#[MapRequestPayload]` name
+                // the groups they serialize with.
+                if ctx.symfony
+                    && let Some(attribute) =
+                        crate::symfony::serializer::groups_attribute(semantic_class_name)
+                {
+                    emit_serializer_group_spans(attribute, arg_list, ctx);
+                }
+
                 // `#[Middleware('auth')]` on a controller or an action names
                 // the middleware it runs, `#[WithoutMiddleware]` the
                 // middleware it leaves out.

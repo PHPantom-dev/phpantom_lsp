@@ -77,6 +77,7 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::SymfonyConfigKey
         | StringKeyKind::SymfonyEvent
         | StringKeyKind::MessengerBus
+        | StringKeyKind::SerializerGroup
         | StringKeyKind::YiiRoute
         | StringKeyKind::DrupalEntityType
         | StringKeyKind::DrupalRoute
@@ -316,6 +317,7 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::SymfonyConfigKey
         | StringKeyKind::SymfonyEvent
         | StringKeyKind::MessengerBus
+        | StringKeyKind::SerializerGroup
         | StringKeyKind::YiiRoute
         | StringKeyKind::DrupalEntityType
         | StringKeyKind::DrupalRoute

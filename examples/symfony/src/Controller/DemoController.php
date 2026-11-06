@@ -10,6 +10,7 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Attribute\Route;
@@ -85,6 +86,15 @@ final class DemoController extends AbstractController
             'title' => $title,
             'user' => new User('ada@example.com', 'Ada'),
         ]);
+    }
+
+    // Try: go-to-definition on 'user:list' to reach the #[Groups] on
+    // User::getDisplayName(), find the references of 'user:read', or
+    // complete a group inside a new '' in the list.
+    #[Route('/demo/{userId}/profile', name: 'app_demo_profile')]
+    public function profile(string $userId): JsonResponse
+    {
+        return $this->json(new User('ada@example.com', $userId), context: ['groups' => ['user:list']]);
     }
 
     // Try: find references on legacy(). The route in config/routes.yaml points

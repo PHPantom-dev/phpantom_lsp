@@ -48,6 +48,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
             CompletionItemKind::Event
         }
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
+        StringKeyKind::SerializerGroup => CompletionItemKind::EnumMember,
         StringKeyKind::YiiRouteArgument | StringKeyKind::DrupalRouteParameter => {
             CompletionItemKind::Field
         }
@@ -187,6 +188,7 @@ impl Backend {
             | StringKeyKind::TwigTemplate
             | StringKeyKind::SymfonyEvent
             | StringKeyKind::MessengerBus
+            | StringKeyKind::SerializerGroup
             | StringKeyKind::YiiRoute
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRoute => self.symfony_declared_names(*kind).into(),

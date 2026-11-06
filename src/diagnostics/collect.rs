@@ -159,6 +159,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_dynamic_member_name_diagnostics_with_context,
     ),
     always(
+        "unknown_form_option",
+        Backend::collect_form_option_diagnostics,
+    ),
+    always(
         "invalid_drupal_route_parameter",
         Backend::collect_drupal_route_parameter_diagnostics,
     ),

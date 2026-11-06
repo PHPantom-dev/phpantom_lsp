@@ -131,6 +131,11 @@ pub(crate) enum StringKeyKind {
     /// `framework.messenger.buses`, and read by `default_bus`,
     /// `#[AsMessageHandler(bus: …)]`, and a `BusNameStamp`.
     MessengerBus,
+    /// A Symfony serializer group: declared by each `#[Groups]` that puts a
+    /// property or method in it and by the `groups` of a YAML or XML
+    /// serializer mapping, and read by the `groups` of a serialization
+    /// context (see `symfony::serializer`).
+    SerializerGroup,
     /// A Yii view: the template a view renderer's `render()` family or a
     /// view's own `render()` loads, keyed by the path it names (see
     /// `yii::views`).
@@ -215,7 +220,8 @@ impl StringKeyKind {
             | Self::TranslationDomain
             | Self::SymfonyConfigKey
             | Self::SymfonyEvent
-            | Self::MessengerBus => KeyFramework::Symfony,
+            | Self::MessengerBus
+            | Self::SerializerGroup => KeyFramework::Symfony,
             Self::TwigTemplate
             | Self::TwigBlock
             | Self::TwigFilter
@@ -872,6 +878,10 @@ pub(crate) const DRUPAL_THEME_MANAGER: &str = "Drupal\\Core\\Theme\\ThemeManager
 /// container.
 pub(crate) const SYMFONY_CONTAINER_CONFIGURATOR_NS: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\";
+const SYMFONY_SERIALIZER: &str = "Symfony\\Component\\Serializer\\SerializerInterface";
+const SYMFONY_NORMALIZER: &str = "Symfony\\Component\\Serializer\\Normalizer\\NormalizerInterface";
+const SYMFONY_DENORMALIZER: &str =
+    "Symfony\\Component\\Serializer\\Normalizer\\DenormalizerInterface";
 /// The namespace of the PHP configurators that build Symfony's routes.
 pub(crate) const SYMFONY_ROUTING_CONFIGURATOR_NS: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\";
@@ -993,6 +1003,13 @@ pub(crate) enum ReceiverClass {
     ThemeHooks,
     /// Either of the two, for the methods they share.
     Hooks,
+    /// Symfony's serializer, normalizers, and denormalizers, whose
+    /// `serialize()`, `deserialize()`, `normalize()`, and `denormalize()`
+    /// take a context whose `groups` name serializer groups.
+    Serializer,
+    /// The `json()` shortcut a Symfony controller inherits, whose context
+    /// does too.
+    ControllerJson,
 }
 
 impl ReceiverClass {
@@ -1112,6 +1129,14 @@ impl ReceiverClass {
                 (DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook),
                 (DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook),
             ],
+            Self::Serializer => &[
+                (SYMFONY_SERIALIZER, StringKeyKind::SerializerGroup),
+                (SYMFONY_NORMALIZER, StringKeyKind::SerializerGroup),
+                (SYMFONY_DENORMALIZER, StringKeyKind::SerializerGroup),
+            ],
+            Self::ControllerJson => {
+                &[(SYMFONY_ABSTRACT_CONTROLLER, StringKeyKind::SerializerGroup)]
+            }
         }
     }
 

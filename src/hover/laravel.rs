@@ -349,6 +349,16 @@ impl Backend {
                 };
                 ("Event", detail)
             }
+            // Every member a group holds declares it.
+            StringKeyKind::SerializerGroup => {
+                let members = self.symfony_declaration_locations(*kind, key).len();
+                let detail = match members {
+                    0 => "Nothing in the project is in the group".to_string(),
+                    1 => "1 declaration in the project".to_string(),
+                    count => format!("{count} declarations in the project"),
+                };
+                ("Serializer group", detail)
+            }
             StringKeyKind::MessengerBus => {
                 let detail = self
                     .symfony_declaration_locations(*kind, key)

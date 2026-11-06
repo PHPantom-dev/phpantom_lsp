@@ -1312,4 +1312,59 @@ namespace App {
             "`Greeter` names `App\\Greeter`, not the global class, got: {diags:?}",
         );
     }
+
+    // ── Unknown named arguments ─────────────────────────────────────
+
+    /// A named argument no constructor parameter is named after throws,
+    /// in an attribute as in `new`, and is reported on its name.
+    #[test]
+    fn flags_unknown_named_argument_to_constructor_and_attribute() {
+        let php = r#"<?php
+#[\Attribute]
+class Length {
+    public function __construct(public ?int $min = null, public ?int $max = null) {}
+}
+class Form {
+    #[Length(mni: 3, max: 5)]
+    public string $name = '';
+}
+function test(): void {
+    new Length(min: 1, maks: 2);
+}
+"#;
+        let diags = collect(php);
+        let found: Vec<(u32, &str)> = diags
+            .iter()
+            .filter(|d| d.code == Some(Code::String("unknown_named_argument".to_string())))
+            .map(|d| (d.range.start.line, message_text(&d.message)))
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                (6, "Unknown named parameter $mni"),
+                (10, "Unknown named parameter $maks"),
+            ],
+            "got: {diags:?}",
+        );
+        assert_eq!(diags[0].range.start.character, 13);
+        assert_eq!(diags[0].range.end.character, 16);
+    }
+
+    /// A variadic parameter collects the names nothing else takes, and a
+    /// class with no constructor ignores its arguments.
+    #[test]
+    fn no_unknown_named_argument_for_variadic_or_constructorless_class() {
+        let php = r#"<?php
+class Collects {
+    public function __construct(int $first, mixed ...$rest) {}
+}
+class Plain {}
+function test(): void {
+    new Collects(first: 1, anything: 2);
+    new Plain(whatever: 1);
+}
+"#;
+        let diags = collect(php);
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
 }

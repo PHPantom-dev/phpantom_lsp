@@ -63,6 +63,14 @@ impl Backend {
             return vec![location];
         }
 
+        // An option of a Symfony form type, in the options array a call
+        // passes the type.
+        let options =
+            self.form_option_definition(uri, content, position_to_offset(content, position));
+        if !options.is_empty() {
+            return options;
+        }
+
         // Request input keys: jump to the validation rule that declares them.
         if let Some(loc) = laravel::resolve_request_field_definition(self, uri, content, position) {
             return vec![loc];

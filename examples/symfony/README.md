@@ -74,6 +74,16 @@ catalogues together, the way a real Symfony project does.
   to the definition of `email`, find the references of `$displayName` in
   `src/Entity/User.php`, or complete a field inside `->add('')`. A constraint
   such as `NotBlank` goes to its class.
+- Form options complete from the form type. In
+  `src/Form/RegistrationType.php`, complete a key in the options array of
+  the `email` field, go to the definition of `'help'`, or misspell it to see
+  it reported. A constraint's options are its constructor's parameters, so a
+  misspelled `max` in `Length(max: 180)` is reported too.
+- Serializer groups navigate between the `#[Groups]` that put a member in
+  them and the contexts that serialize with them. In `DemoController`, go to
+  the definition of `user:list` in `profile()` to reach
+  `User::getDisplayName()`, find the references of `user:read` in
+  `src/Entity/User.php`, or complete a group in the `groups` list.
 - Bundle configuration keys navigate between the schema in
   `src/DependencyInjection/Configuration.php` and
   `config/packages/acme_demo.yaml`. Go to the definition of `dsn`, find the

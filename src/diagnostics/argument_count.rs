@@ -2,7 +2,8 @@
 //!
 //! Walk the precomputed [`CallSite`] entries in the symbol map and flag
 //! every call that passes too few or too many arguments relative to the
-//! resolved callable's parameter list.
+//! resolved callable's parameter list, and every named argument a
+//! constructor (or an attribute, which calls one) has no parameter for.
 //!
 //! Diagnostics use `Severity::Error` because passing the wrong number
 //! of arguments crashes at runtime with a `TypeError`.
@@ -34,6 +35,10 @@ use super::helpers::{
 
 /// Diagnostic code used for argument-count diagnostics.
 pub(crate) const ARGUMENT_COUNT_MISMATCH_CODE: &str = "argument_count_mismatch";
+
+/// Diagnostic code for a named argument no parameter of a constructor is
+/// named after, which PHP throws on.
+pub(crate) const UNKNOWN_NAMED_ARGUMENT_CODE: &str = "unknown_named_argument";
 
 /// Alternative minimum argument counts for built-in functions whose
 /// signatures in phpstorm-stubs declare more required parameters than
@@ -314,6 +319,18 @@ impl Backend {
             let params = &resolved.parameters;
             let actual_args = call_site.arg_count;
 
+            // ── Unknown named arguments ─────────────────────────────
+            // A constructor is never routed through `__call`, so a name its
+            // parameters do not declare throws, unless a variadic parameter
+            // collects it.  Attributes are recorded as `new` call sites, so
+            // `#[Length(mni: 3)]` is checked here too.
+            if expr.starts_with("new ")
+                && !resolved.reads_func_args
+                && !params.iter().any(|p| p.is_variadic)
+            {
+                self.report_unknown_named_arguments(uri, content, &call_site, params, out);
+            }
+
             let mut required_count = params.iter().filter(|p| p.is_required).count() as u32;
 
             // Consult the overload map: if this function has an
@@ -455,6 +472,47 @@ impl Backend {
                     message,
                 ));
             }
+        }
+    }
+
+    /// Report each named argument of `call_site` that none of `params` is
+    /// named after.
+    fn report_unknown_named_arguments(
+        &self,
+        uri: &str,
+        content: &str,
+        call_site: &crate::symbol_map::CallSite<'_>,
+        params: &[crate::types::ParameterInfo],
+        out: &mut Vec<Diagnostic>,
+    ) {
+        for (name, &index) in call_site
+            .named_arg_names
+            .iter()
+            .zip(call_site.named_arg_indices)
+        {
+            if params
+                .iter()
+                .any(|p| p.name.strip_prefix('$').unwrap_or(&p.name) == name)
+            {
+                continue;
+            }
+            let Some(&start) = call_site.arg_offsets.get(index as usize) else {
+                continue;
+            };
+            let Some(range) = self.offset_range_to_lsp_range(
+                uri,
+                content,
+                start as usize,
+                start as usize + name.len(),
+            ) else {
+                continue;
+            };
+            out.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::Error,
+                UNKNOWN_NAMED_ARGUMENT_CODE,
+                format!("Unknown named parameter ${name}"),
+            ));
         }
     }
 }

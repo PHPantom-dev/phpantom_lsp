@@ -579,3 +579,25 @@ worth a Warning. PhpStorm reports both.
 **Where to look:** `src/diagnostics/enum_errors.rs`, and the enum's case
 values on `ClassInfo`.
 
+---
+
+## D43. Unknown named arguments to methods and functions are not reported
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$mailer->send(to: $user, subjct: 'Hi');   // Error: Unknown named parameter $subjct
+```
+
+A named argument no parameter of a constructor takes is reported
+(`unknown_named_argument`), in `new` and in attributes alike. A method or
+function call is not checked yet. It needs the call target to say whether
+the call is routed through `__call` or `__callStatic` (an `@method` tag, a
+Laravel macro or scope, a facade), which collects unknown names into its
+arguments instead of throwing, and the built-in functions' parameter names
+need to be checked against PHP's own, which named arguments bind to.
+
+**Where to look:** `src/diagnostics/argument_count.rs`
+(`report_unknown_named_arguments`), and
+`ResolvedCallableTarget` in `src/types/function.rs`, which does not record
+whether the target is a virtual method.

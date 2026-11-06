@@ -108,6 +108,17 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Symfony form options ────────────────────────────────
+        // `$builder->add('email', EmailType::class, ['|' => …])`, wherever
+        // the form component is used.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_symfony_form_option_completion(content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
         // ── Symfony and Yii names ───────────────────────────────
         // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`,
         // `$translator->trans('|')`, in any project that uses Twig,
