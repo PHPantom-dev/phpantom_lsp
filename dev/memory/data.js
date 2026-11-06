@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793968539934,
+  "lastUpdate": 1793969761473,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10496,6 +10496,60 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_wordpress_plugin",
             "value": 85.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 98.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c5f0abd6fc32b36076bbfea840cfee4f3fc589e8",
+          "message": "Symfony constraint options in validation mappings",
+          "timestamp": "2026-11-06T13:33:44+01:00",
+          "tree_id": "b2490ca9152bf8d346d1609db8feb7fdedd5b014",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c5f0abd6fc32b36076bbfea840cfee4f3fc589e8"
+        },
+        "date": 1793969749120,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 445.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 42.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 85.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 87.2,
             "unit": "MiB"
           },
           {
