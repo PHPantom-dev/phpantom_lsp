@@ -3,7 +3,8 @@
 A standalone editor playground for PHPantom on Drupal 11. It is a
 `drupal/recommended-project` site with one custom module, `acme`, and one
 theme, `acme_theme`, declaring a service, a route, a content entity type,
-hooks, and a theme hook the way a real Drupal module declares them.
+hooks, a theme hook, permissions, and configuration the way a real Drupal
+module declares them.
 
 Run `composer install` here first. Composer puts core and contrib into
 `web/`, which is git-ignored apart from the custom module and theme.
