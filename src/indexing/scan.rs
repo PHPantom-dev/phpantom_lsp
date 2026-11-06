@@ -146,8 +146,18 @@ impl Backend {
         }
 
         // A nested project whose dependencies were installed after startup
-        // was not one discovery could find, so it is indexed now.
+        // was not one discovery could find, so it is indexed now.  A bin
+        // namespace is not one: the rescan of the project owning it above
+        // has already read it.
         let vendor_dirs = self.workspace.vendor_dir_paths.lock().clone();
+        let bin_targets: Vec<PathBuf> = self
+            .workspace
+            .composer_projects
+            .read()
+            .iter()
+            .filter_map(|project| project.bin_target.as_deref())
+            .flat_map(path_aliases)
+            .collect();
         let mut fresh: Vec<PathBuf> = changed_files
             .iter()
             .filter_map(|file| file.parent())
@@ -155,6 +165,7 @@ impl Backend {
                 !root_aliases.iter().any(|alias| dir == alias)
                     && !known.iter().any(|sub_root| holds(sub_root, dir))
                     && !vendor_dirs.iter().any(|vendor| dir.starts_with(vendor))
+                    && !bin_targets.iter().any(|target| dir.starts_with(target))
             })
             .map(Path::to_path_buf)
             .collect();
@@ -174,13 +185,15 @@ impl Backend {
             }
         }
 
-        // An update may have moved PHPUnit to another major version.
+        // An update may have moved PHPUnit to another major version, in a
+        // project or in one of its bin namespaces.
         let project_roots: Vec<PathBuf> = self
             .workspace
             .composer_projects
             .read()
             .iter()
-            .map(|project| project.root.clone())
+            .flat_map(|project| std::iter::once(&project.root).chain(&project.bin_namespace_roots))
+            .cloned()
             .collect();
         self.set_phpunit_major(
             std::iter::once(root)
@@ -229,32 +242,54 @@ impl Backend {
         // clone before `composer install`), so registering it again here
         // is what lets the shared vendor filters cache both raw and
         // canonical spellings.
-        let (vendor_dir, vendor_path) =
+        let (vendor_dir, vendor_path, bin_namespaces) =
             self.register_composer_project_paths(project_root, Some(pkg), subproject);
 
         // Rebuild vendor classmap, tracking dependency provenance so
         // completion ranking stays accurate after a composer change.
-        let explicit_deps = composer::explicit_dependency_names(pkg);
-        let mut vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
-            project_root,
-            &vendor_dir,
-            &HashSet::new(),
-            &explicit_deps,
-            &self.index_filters(),
-            None,
-            Some(self.followed_links()),
-        );
-        let vendor_package_roots = std::mem::take(&mut vendor_scan.package_roots);
+        let filters = self.index_filters();
+        let scan_vendor =
+            |root: &Path, vendor_dir: &str, pkg: Option<&composer::ComposerPackage>| {
+                let explicit_deps = pkg
+                    .map(composer::explicit_dependency_names)
+                    .unwrap_or_default();
+                classmap_scanner::scan_vendor_packages_with_skip(
+                    root,
+                    vendor_dir,
+                    &HashSet::new(),
+                    &explicit_deps,
+                    &filters,
+                    None,
+                    Some(self.followed_links()),
+                )
+            };
+        let mut vendor_scan = scan_vendor(project_root, &vendor_dir, Some(pkg));
+        let mut vendor_package_roots = std::mem::take(&mut vendor_scan.package_roots);
+        let mut trees = path_aliases(&vendor_path);
+        // The bin namespaces are rescanned with the project, so their
+        // classes keep ranking behind its own vendor's.
+        for namespace in &bin_namespaces {
+            let mut namespace_scan = scan_vendor(
+                &namespace.root,
+                &namespace.vendor_dir,
+                namespace.package.as_ref(),
+            );
+            vendor_package_roots.append(&mut namespace_scan.package_roots);
+            vendor_scan.absorb_missing(namespace_scan);
+            trees.extend(path_aliases(&namespace.vendor_path()));
+        }
 
-        // Everything the old vendor tree contributed goes, so symbols
+        // Everything the old vendor trees contributed goes, so symbols
         // removed by a `composer update` no longer resolve.
-        self.symbols
-            .replace_tree(&path_aliases(&vendor_path), vendor_scan);
+        self.symbols.replace_tree(&trees, vendor_scan);
 
         self.set_project_package_roots(project_root, vendor_package_roots);
 
         // Rescan autoload files (they may have changed).
         self.scan_autoload_files(project_root, &vendor_dir, None);
+        for namespace in &bin_namespaces {
+            self.scan_autoload_files(&namespace.root, &namespace.vendor_dir, None);
+        }
     }
 
     /// Register where a Composer project keeps its code: the PSR-4
@@ -262,14 +297,16 @@ impl Backend {
     /// its vendor directory, and the stub packages it installed.
     ///
     /// A subproject's own mappings are made absolute; the workspace root's
-    /// stay relative to it.  Returns the vendor directory both as
-    /// `composer.json` spells it and as an absolute path.
+    /// stay relative to it.  The vendor directories of the project's bin
+    /// namespaces are registered as its own.  Returns the vendor directory
+    /// both as `composer.json` spells it and as an absolute path, and the
+    /// bin namespaces.
     pub(super) fn register_composer_project_paths(
         &self,
         project_root: &Path,
         composer_json: Option<&composer::ComposerPackage>,
         subproject: bool,
-    ) -> (String, PathBuf) {
+    ) -> (String, PathBuf, Vec<composer::BinNamespace>) {
         let (mut mappings, vendor_dir) = match composer_json {
             Some(pkg) => (
                 composer::extract_psr4_mappings_from_package(pkg),
@@ -296,18 +333,39 @@ impl Backend {
             mappings.extend(composer::path_repo_psr4_mappings(project_root, installed));
         }
         self.set_project_psr4_mappings(project_root, mappings);
-        let stub_packages = installed
-            .as_ref()
-            .map(composer::stub_package_roots)
+
+        let bin_target =
+            composer_json.and_then(|pkg| composer::bin_target_directory(project_root, pkg));
+        let bin_namespaces = composer_json
+            .map(|pkg| composer::bin_namespaces(project_root, pkg))
             .unwrap_or_default();
-        let linked_packages = installed
-            .as_ref()
-            .map(composer::linked_package_roots)
-            .unwrap_or_default();
-        let installed_packages = installed
-            .as_ref()
-            .map(composer::installed_package_roots)
-            .unwrap_or_default();
+        let mut bin_vendor_paths = Vec::new();
+        let mut all_installed = Vec::new();
+        all_installed.extend(installed);
+        for namespace in &bin_namespaces {
+            let namespace_vendor = namespace.vendor_path();
+            self.add_vendor_dir(&namespace_vendor);
+            if namespace_vendor.is_dir() {
+                bin_vendor_paths.extend(path_aliases(&namespace_vendor));
+            }
+            all_installed.extend(composer::read_installed_packages(
+                &namespace.root,
+                &namespace.vendor_dir,
+            ));
+        }
+
+        let stub_packages = all_installed
+            .iter()
+            .flat_map(composer::stub_package_roots)
+            .collect();
+        let linked_packages = all_installed
+            .iter()
+            .flat_map(composer::linked_package_roots)
+            .collect();
+        let installed_packages = all_installed
+            .iter()
+            .flat_map(composer::installed_package_roots)
+            .collect();
         let vendor_paths = if vendor_path.is_dir() {
             path_aliases(&vendor_path)
         } else {
@@ -318,6 +376,12 @@ impl Backend {
             let project = composer_project_entry(&mut projects, project_root);
             project.stub_packages = stub_packages;
             project.vendor_paths = vendor_paths;
+            project.bin_target = bin_target;
+            project.bin_namespace_roots = bin_namespaces
+                .iter()
+                .map(|namespace| namespace.root.clone())
+                .collect();
+            project.bin_vendor_paths = bin_vendor_paths;
             project.linked_packages = linked_packages;
             project.installed_packages = installed_packages;
             *self.workspace.installed_package_uri_prefixes.lock() = projects
@@ -328,7 +392,7 @@ impl Backend {
         }
         self.workspace.forget_project_scopes();
 
-        (vendor_dir, vendor_path)
+        (vendor_dir, vendor_path, bin_namespaces)
     }
 
     /// Replace the PSR-4 mappings `project_root` contributed.

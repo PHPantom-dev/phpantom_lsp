@@ -325,3 +325,182 @@ async fn a_drupal_site_reads_its_hook_files_as_php_everywhere() {
         "the call in demo.install must be found: {locations:?}"
     );
 }
+
+/// A root project using `bamarni/composer-bin-plugin`, whose `phpunit` bin
+/// namespace installs `PHPUnit\Framework\<class>` for each of `classes`
+/// at PHPUnit `version`.
+fn write_bin_plugin_project(root: &Path, plugin: bool, classes: &[&str], version: &str) {
+    let require = if plugin {
+        r#""require-dev": { "bamarni/composer-bin-plugin": "^1.8" },"#
+    } else {
+        ""
+    };
+    write(
+        &root.join("composer.json"),
+        &format!(r#"{{ {require} "autoload": {{ "psr-4": {{ "App\\": "src/" }} }} }}"#),
+    );
+    let namespace = root.join("vendor-bin/phpunit");
+    write(
+        &namespace.join("composer.json"),
+        r#"{ "require": { "phpunit/phpunit": "*" } }"#,
+    );
+    write(
+        &namespace.join("composer.lock"),
+        &format!(r#"{{ "packages": [{{ "name": "phpunit/phpunit", "version": "{version}" }}] }}"#),
+    );
+    write(
+        &namespace.join("vendor/composer/installed.json"),
+        r#"{ "packages": [ {
+            "name": "phpunit/phpunit",
+            "install-path": "../phpunit/phpunit",
+            "autoload": { "psr-4": { "PHPUnit\\": "src/" } }
+        } ] }"#,
+    );
+    let src = namespace.join("vendor/phpunit/phpunit/src");
+    if src.exists() {
+        std::fs::remove_dir_all(&src).unwrap();
+    }
+    for class in classes {
+        write(
+            &src.join(format!("Framework/{class}.php")),
+            &format!("<?php\nnamespace PHPUnit\\Framework;\nclass {class} {{}}\n"),
+        );
+    }
+}
+
+fn indexed_uri(backend: &Backend, fqn: &str) -> Option<String> {
+    backend.symbols.fqn_uri_index.read().get(fqn).cloned()
+}
+
+fn is_composer_project(backend: &Backend, dir: &Path) -> bool {
+    backend
+        .workspace
+        .composer_projects
+        .read()
+        .iter()
+        .any(|project| project.root == dir)
+}
+
+#[tokio::test]
+async fn a_bin_namespace_installs_tools_for_the_root_project() {
+    let dir = tempfile::tempdir().unwrap();
+    write_bin_plugin_project(dir.path(), true, &["TestCase"], "10.5.38");
+    // A nested project of its own, so the root's files run in a scope.
+    write_subproject(&dir.path().join("platform"), &["Client"]);
+
+    let backend = index_root_project(dir.path()).await;
+
+    let namespace = dir.path().join("vendor-bin/phpunit");
+    assert!(!is_composer_project(&backend, &namespace));
+    let uri = indexed_uri(&backend, "PHPUnit\\Framework\\TestCase")
+        .expect("the class the bin namespace installs must be indexed");
+    let test_uri = crate::util::path_to_uri(&dir.path().join("tests/FooTest.php"));
+    let scope = backend
+        .project_scope_for(&test_uri)
+        .expect("the root has a scope beside platform/");
+    assert!(scope.sees(&uri), "the root's files must see {uri}");
+    let platform_uri = crate::util::path_to_uri(&dir.path().join("platform/src/A.php"));
+    let platform_scope = backend.project_scope_for(&platform_uri).unwrap();
+    assert!(
+        !platform_scope.sees(&uri),
+        "another project must not see the root's tools"
+    );
+
+    // Library code: never analysed or edited as the project's own.
+    assert!(
+        backend
+            .workspace
+            .vendor_dir_paths
+            .lock()
+            .contains(&namespace.join("vendor")),
+        "the bin namespace's vendor must be registered as library code"
+    );
+    assert_eq!(
+        backend
+            .symbols
+            .fqn_origin_index
+            .read()
+            .get("PHPUnit\\Framework\\TestCase")
+            .copied(),
+        Some(ClassCompletionOrigin::VendorExplicit)
+    );
+    assert_eq!(backend.phpunit_major(), Some(10));
+}
+
+#[tokio::test]
+async fn without_the_plugin_a_vendor_bin_project_stays_a_nested_project() {
+    let dir = tempfile::tempdir().unwrap();
+    write_bin_plugin_project(dir.path(), false, &["TestCase"], "10.5.38");
+
+    let backend = index_root_project(dir.path()).await;
+
+    assert!(is_composer_project(
+        &backend,
+        &dir.path().join("vendor-bin/phpunit")
+    ));
+    assert!(indexes(&backend, "PHPUnit\\Framework\\TestCase"));
+}
+
+#[tokio::test]
+async fn the_root_vendor_wins_over_a_bin_namespace() {
+    let dir = tempfile::tempdir().unwrap();
+    write_bin_plugin_project(dir.path(), true, &["TestCase"], "10.5.38");
+    write(
+        &dir.path().join("vendor/composer/installed.json"),
+        r#"{ "packages": [ {
+            "name": "phpunit/phpunit",
+            "install-path": "../phpunit/phpunit",
+            "autoload": { "psr-4": { "PHPUnit\\": "src/" } }
+        } ] }"#,
+    );
+    write(
+        &dir.path()
+            .join("vendor/phpunit/phpunit/src/Framework/TestCase.php"),
+        "<?php\nnamespace PHPUnit\\Framework;\nclass TestCase {}\n",
+    );
+    let root_copy = crate::util::path_to_uri(
+        &dunce::canonicalize(
+            dir.path()
+                .join("vendor/phpunit/phpunit/src/Framework/TestCase.php"),
+        )
+        .unwrap(),
+    );
+
+    let backend = index_root_project(dir.path()).await;
+    assert_eq!(
+        indexed_uri(&backend, "PHPUnit\\Framework\\TestCase"),
+        Some(root_copy.clone())
+    );
+
+    // …and still does after the bin namespace is updated.
+    let lock = dir.path().join("vendor-bin/phpunit/composer.lock");
+    backend.rescan_composer_indexes(dir.path(), &[lock]);
+    assert_eq!(
+        indexed_uri(&backend, "PHPUnit\\Framework\\TestCase"),
+        Some(root_copy)
+    );
+}
+
+#[tokio::test]
+async fn an_update_inside_a_bin_namespace_is_picked_up() {
+    let dir = tempfile::tempdir().unwrap();
+    write_bin_plugin_project(dir.path(), true, &["TestCase"], "9.6.20");
+
+    let backend = index_root_project(dir.path()).await;
+    assert_eq!(backend.phpunit_major(), Some(9));
+
+    write_bin_plugin_project(dir.path(), true, &["Assert"], "10.5.38");
+    let lock = dir.path().join("vendor-bin/phpunit/composer.lock");
+    backend.rescan_composer_indexes(dir.path(), &[lock]);
+
+    assert!(indexes(&backend, "PHPUnit\\Framework\\Assert"));
+    assert!(
+        !indexes(&backend, "PHPUnit\\Framework\\TestCase"),
+        "a class the update removed must stop resolving"
+    );
+    assert!(
+        !is_composer_project(&backend, &dir.path().join("vendor-bin/phpunit")),
+        "the update must not index the namespace as a nested project"
+    );
+    assert_eq!(backend.phpunit_major(), Some(10));
+}

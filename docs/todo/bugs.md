@@ -79,53 +79,7 @@ No outstanding items.
 
 ## Templates
 
-### B706. A template nested in an iterable parameter's value type binds to the whole argument
-
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-/**
- * @template Tk of array-key
- * @template Tv
- * @param iterable<Tk, (Closure(): Tv)> $tasks
- * @return array<Tk, Tv>
- */
-function concurrently(iterable $tasks): array { … }
-
-[$server, $client] = concurrently([$listener->accept(...), fn(): Stream => connect()]);
-$server->writeAll('…');   // Cannot access method 'writeAll' on type 'list{Closure(): Stream, …}'
-```
-
-`Tk` is inferred from the keys, but `Tv` is bound to the whole array
-literal (`list{Closure(): Stream, Closure(): Stream}`) instead of to the
-return type of each closure in it. A lone `@param Closure(): Tv` infers
-`Tv` correctly, so the closure-return binding is there; it is not applied
-when the closure type is the value type of an `iterable`/`array`
-parameter. The values should each bind `Tv` from their return type,
-first-class callables included, and the bindings union.
-
-The same happens when the value type is a generic class rather than a
-closure:
-
-```php
-/**
- * @template Tk of array-key
- * @template Tv
- * @param array<Tk, TypeInterface<Tv>> $elements
- * @return TypeInterface<array<Tk, Tv>>
- */
-function shape(array $elements): TypeInterface { … }
-
-shape(['x' => int(), 'label' => string()])->coerce($data);
-// array<string, array{x: TypeInterface<int>, label: TypeInterface<string>}>,
-// want array<string, int|string>
-```
-
-So the fix belongs where an argument's element types are matched against
-the parameter's value type, not in the closure-return binding.
-
-Found by `analyze` on azjezz/psl: `Async\concurrently()` and
-`Async\all()` in its tests (about 70 false positives), and `Type\shape()`.
+No outstanding items.
 
 ## Framework names in strings
 
