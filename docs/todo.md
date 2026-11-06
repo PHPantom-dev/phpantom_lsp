@@ -141,6 +141,7 @@ ships, remove every row that names it.
 | DR20 | [Complete route names built in code](todo/drupal.md#dr20-complete-route-names-built-in-code) | Low-Medium | Medium |
 | DR21 | [Return types core's docblocks leave wide](todo/drupal.md#dr21-return-types-cores-docblocks-leave-wide) | Medium | Low-Medium |
 | DR22 | [Complete permissions built in code](todo/drupal.md#dr22-complete-permissions-built-in-code) | Low-Medium | Medium |
+| DR23 | [Warn on unknown permission names](todo/drupal.md#dr23-warn-on-unknown-permission-names) | Medium | Low-Medium |
 
 ## Yii
 

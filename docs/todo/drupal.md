@@ -331,3 +331,25 @@ and on most sites from the exported configuration, which
 [DR4](#dr4-entity-field-access) reads. A name built from something the
 site's files do not hold could be kept as a pattern, as route builders'
 names are.
+
+---
+
+## DR23. Warn on unknown permission names
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$account->hasPermission('administer acme ordres');
+$account->hasPermission('administer acme+access content');
+```
+
+A permission name no `*.permissions.yml` declares is a typo or a module
+the site lacks, and Drupal does not throw for it: the check fails, and the
+mistake shows only as access denied. `hasPermission()` checks one exact
+name, so `'administer acme+access content'` is a name of its own; `+` and
+`,` only combine permissions in a route's `_permission`. Report a name
+nothing declares wherever permission names are read: the access checks,
+the access result helpers, the user module's role functions, each part of
+a route's `_permission`, and an entity type's `admin_permission`. This
+depends on [DR22](#dr22-complete-permissions-built-in-code): the names
+permission callbacks build would otherwise be reported.
