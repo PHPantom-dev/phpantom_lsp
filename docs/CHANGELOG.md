@@ -486,6 +486,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Memory benchmarks wait for indexing and idle workers.** RSS sampling now waits across consecutive indexing phases and allows temporary parse allocations to settle before measuring. Contributed by @shuvroroy.
 - **Collection inference performance.** Completion after collection calls is faster, with broader benchmarks to track its performance. Contributed by @shuvroroy.
 - **Pull request benchmarks no longer fail on a slow runner.** Each benchmark runner measures both the PR and its base, so the 30% regression check reflects the change rather than which machine ran it. Contributed by @shuvroroy. Closes #489.
 - **Faster benchmark checks on pull requests.** Latency benchmarks now run split across four runners, and benchmark alerts on fork pull requests show up in the job summary instead of failing on a permission error. Contributed by @shuvroroy.
