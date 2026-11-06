@@ -59,6 +59,9 @@ pub(crate) struct LaravelStringKeyCache {
     /// Every authorization ability the project knows: `Gate::define()`
     /// registrations plus the methods of every policy class, sorted.
     pub gate_abilities: Option<std::sync::Arc<[String]>>,
+    /// The listeners Laravel's event discovery registers, for the code
+    /// lenses that link an event and its listeners.
+    pub discovered_listeners: Option<Arc<[super::related::DiscoveredListener]>>,
 }
 
 /// Compute-once guards for the entries of [`LaravelStringKeyCache`].
@@ -88,6 +91,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub blade_blocks: parking_lot::Mutex<()>,
     pub shared_view_vars: parking_lot::Mutex<()>,
     pub gate_abilities: parking_lot::Mutex<()>,
+    pub discovered_listeners: parking_lot::Mutex<()>,
 }
 
 impl LaravelStringKeyCache {
@@ -108,6 +112,11 @@ impl LaravelStringKeyCache {
         // every policy class, so an edit to either invalidates the set.  The
         // token is `Gate::` rather than `Gate` so an unrelated `Gateway` does
         // not throw the enumeration away on every keystroke.
+        // Discovery reads the classes under a `Listeners` namespace, which
+        // PSR-4 puts under a `Listeners` directory.
+        if uri.contains("/Listeners/") {
+            self.discovered_listeners = None;
+        }
         if uri.ends_with("Policy.php")
             || memchr::memmem::find(content.as_bytes(), b"Gate::").is_some()
         {

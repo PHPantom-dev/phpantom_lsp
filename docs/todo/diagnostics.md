@@ -465,7 +465,7 @@ The extension's fixtures are the `entity_*.fixture` fixtures in
 
 ---
 
-## D33. Private properties nothing reads or writes are not reported
+## D33. Private members nothing uses are not reported
 
 **Impact: Low-Medium · Complexity: Medium**
 
@@ -494,6 +494,16 @@ Gedmo's), or the check flags correct entities.
 
 The Doctrine extension's fixtures are `unused_private_property*.fixture`
 and `gedmo_property_assign*.fixture` in `tests/fixtures/phpstan_doctrine/`.
+
+Private methods and constants nothing in the class (or a closure bound to
+it) calls or reads are dead the same way, and are simpler: no framework
+writes them. Report all three dimmed, with the `Unnecessary` tag the way
+an unused import is, and offer "Remove unused member" (the fix H19 wires
+to PHPStan's `method.unused` and friends) on the native diagnostic too. A
+method a string names (`[$this, 'handle']`, `'handle'` in a callable
+position, a Laravel or Symfony convention that calls it by name) counts as
+used. PhpStorm reports unused private methods, properties and constants
+natively.
 
 **Where to look:** the unused-variable check (`src/diagnostics/unused_variables.rs`)
 for the read/write bookkeeping, the Doctrine mapping index in
@@ -580,3 +590,85 @@ need to be checked against PHP's own, which named arguments bind to.
 (`report_unknown_named_arguments`), and
 `ResolvedCallableTarget` in `src/types/function.rs`, which does not record
 whether the target is a virtual method.
+
+---
+
+## D44. A function that can end without returning a value is not reported
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+function score(int $x): int {
+    if ($x > 0) {
+        return 1;
+    }
+}   // TypeError: score(): Return value must be of type int, none returned
+```
+
+When the end of a function or method body is reachable and its declared
+return type does not accept the implicit `null` (anything but `void`,
+`never`, `mixed`, `null` or a nullable type), PHP throws a `TypeError`
+there, so Error severity. A generator, an abstract or interface method,
+and a body that ends in `throw`, `exit` or a `never`-returning call are not
+affected; the reachability flow `unreachable_code` already computes
+answers whether the end is reachable. PhpStorm reports this as "Missing
+'return' statement", and PHPStan as `return.missing`.
+
+**Where to look:** `src/diagnostics/unreachable_code.rs` (the flow that
+decides whether a statement list can complete normally) and
+`src/diagnostics/return_type_errors.rs` (the declared return type).
+
+---
+
+## D45. An object without `__toString()` used as a string is not reported
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+final class Invoice {}
+
+echo $invoice;                // Error: Object of class Invoice could not be converted to string
+$label = 'No. ' . $invoice;   // same
+$text = "Invoice $invoice";   // same
+```
+
+`echo`, `print`, concatenation, interpolation, a `(string)` cast and
+string functions all convert their operand, and an object whose class has
+no `__toString()` (and is not `Stringable`) throws. A `string` parameter
+is already covered by the type-mismatch check; these conversions are not.
+Severity follows the unknown-member rule: Error when the class is final or
+an enum, Warning when a subclass could still add the method. PhpStorm
+reports it as "Method '__toString' is not implemented".
+
+**Where to look:** the binary-operator and `echo` handling in the
+forward walker's diagnostic pass (`src/type_engine/variable/forward_walk/`),
+and how `src/diagnostics/unknown_members/` grades its severity for final
+and non-final classes.
+
+---
+
+## D46. The result of a `void` call is used
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+$sent = $mailer->send($message);   // send(): void, so $sent is always null
+if ($logger->flush()) { … }        // never true
+return $this->log($event);         // in a non-void function: returns null
+```
+
+A function or method declared `void` (or `never`) returns nothing, so using
+its result is a mistake: the caller expected a value it will never get, or
+meant to write `null`. Report it wherever the call's value is consumed: an
+assignment, an argument, an operand, a condition, `echo`, or a `return`
+with a value. A call that is its own expression statement is fine. Judge
+by the native return type, since a `@return void` over an untyped
+signature does not stop the body returning something. Warning severity. The `return $this->log();`
+early-exit shorthand is caught too, and reads better as two statements.
+PhpStorm reports this as "'void' method result used", and PHPStan as
+`method.void` / `function.void`.
+
+**Where to look:** the forward walker already resolves each call's return
+type, and `src/diagnostics/discarded_results.rs` already decides when a
+call's value is consumed (it reports the opposite case, a `#[\NoDiscard]`
+result that is not).

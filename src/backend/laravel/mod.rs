@@ -1,8 +1,8 @@
 //! Laravel self-scan: the index-building passes that read the project's
 //! own source (service providers, macro registrations, morph maps, gates,
-//! console commands, middleware, published resources, migrations) and the incremental
-//! refreshes that re-run one of them when a file the pass depends on
-//! changes.
+//! event listeners and observers, console commands, middleware, published
+//! resources, migrations) and the incremental refreshes that re-run one of
+//! them when a file the pass depends on changes.
 //!
 //! The indexes these passes fill are consumed by
 //! [`crate::virtual_members::laravel`]; this module is only the scanner.
@@ -12,12 +12,14 @@
 mod class_loading;
 mod commands;
 mod date_class;
+mod events;
 mod gates;
 mod macros;
 mod middleware;
 mod morph_map;
 mod pivots;
 mod provider_resources;
+mod related;
 mod schema;
 mod state;
 mod storage;
@@ -152,6 +154,7 @@ impl Backend {
         self.build_provider_resources(&providers);
         self.build_laravel_morph_map_index(&providers);
         self.build_laravel_gate_index(&providers);
+        self.build_laravel_event_index(&providers);
         self.build_laravel_middleware_index(&providers);
     }
 
@@ -229,6 +232,7 @@ impl Backend {
         self.refresh_laravel_command_index(uri);
         self.refresh_laravel_morph_map(uri, "");
         self.refresh_laravel_gates(uri, "");
+        self.refresh_laravel_events(uri, "");
         self.refresh_laravel_middleware(uri, "");
         self.forget_laravel_provider_resources(uri);
     }

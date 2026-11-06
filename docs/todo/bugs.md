@@ -25,7 +25,31 @@ No outstanding items.
 
 ## Type comparison
 
-No outstanding items.
+### B709. A docblock member the native type cannot hold survives when the native type is not all classes
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @return resource|Socket|false|null */      // phpstorm-stubs' socket_import_stream()
+function socket_import_stream($stream): Socket|false {}
+
+$socket = socket_import_stream($stream);
+socket_get_option($socket, …);   // expects Socket, got resource|Socket|null
+```
+
+PHP guarantees the native type, so a docblock can only narrow it: the
+effective type is the docblock's members the native type can hold. With
+`Socket|false` that is `Socket|false`; `resource` and `null` cannot come
+back. `doc_members_native_can_hold` in `src/docblock/type_override.rs`
+drops such members only when every native member names a class, so a
+native union with a scalar member (`false`, `int`, `string`) keeps them
+all. Judge each docblock member against the native members whatever they
+are, keeping the members some native member can hold (a class member holds
+any object, `false` holds `false`, `bool` holds `true` and `false`, and
+so on), and fall back to the native type when none is left.
+
+Found by `analyze` on azjezz/psl (14 false positives from
+`socket_import_stream()`).
 
 ## Conditional return types
 

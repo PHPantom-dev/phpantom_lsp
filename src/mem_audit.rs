@@ -1902,6 +1902,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         *backend.laravel.pivots.write() = Default::default();
         *backend.laravel.commands.write() = Default::default();
         *backend.laravel.gates.write() = Default::default();
+        *backend.laravel.events.write() = Default::default();
         *backend.laravel.runtime_config_keys.write() = Default::default();
     });
     probe("blade_uris", &mut || {

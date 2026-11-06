@@ -258,6 +258,7 @@ mod laravel_named_resources;
 mod laravel_path_helpers;
 mod laravel_provider_refresh;
 mod laravel_references;
+mod laravel_related_files;
 mod laravel_request_input;
 mod laravel_request_keys;
 mod laravel_resource_registrations;

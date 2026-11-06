@@ -167,6 +167,11 @@ impl Backend {
         // files that mention neither `Gate` nor `$policies`.
         self.refresh_laravel_gates(uri, content);
 
+        // Keep the listener and observer registrations coherent with edits
+        // to the providers that register them.  Cheap no-op for files that
+        // mention neither `listen` nor `observe`.
+        self.refresh_laravel_events(uri, content);
+
         // Keep the middleware aliases and groups coherent with edits to the
         // files that register them.  Cheap no-op for files that spell none
         // of the registration methods or properties.

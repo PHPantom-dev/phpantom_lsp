@@ -203,6 +203,7 @@ pub(crate) fn extract_laravel_metadata<'a>(
         });
 
     let policy_class = extract_use_policy_attribute(&class.attribute_lists, content);
+    let related_classes = extract_related_class_attributes(&class.attribute_lists, content);
 
     let (property_casts, method_casts) = extract_cast_sources(class.members.iter(), content);
     let mut declared = 0;
@@ -327,6 +328,7 @@ pub(crate) fn extract_laravel_metadata<'a>(
         deleted_at_name,
         custom_builder,
         policy_class,
+        related_classes,
         belongs_to_many_pivots,
         morph_type_columns,
         config_related_models,

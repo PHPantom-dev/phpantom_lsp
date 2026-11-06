@@ -118,6 +118,7 @@ pub(crate) mod config_values;
 mod const_eval;
 pub(crate) mod database_schema;
 mod env_vars;
+pub(crate) mod events;
 mod expr_walker;
 mod facade;
 mod factory;
@@ -222,7 +223,7 @@ pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,
 };
-pub(crate) use table_names::{model_schema_is_known, model_table_name};
+pub(crate) use table_names::{model_connection_and_table, model_schema_is_known, model_table_name};
 pub(crate) use trans_catalog::TranslationCatalog;
 pub(crate) use trans_json::find_json_trans_references;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
@@ -272,7 +273,8 @@ pub use facade::LaravelFacadeProvider;
 pub(crate) use facade::facade_concrete_class;
 pub use factory::LaravelFactoryProvider;
 pub(crate) use factory::{
-    factory_model_type, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
+    FACTORY_FQN, extends_eloquent_factory, factory_for_model, factory_model_type, is_factory_class,
+    is_has_factory_trait, model_to_factory_fqn,
 };
 pub(crate) use factory_count::{
     carry_factory_count, fluent_factory_count, resolve_factory_count_return,

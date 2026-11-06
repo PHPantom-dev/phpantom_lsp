@@ -670,21 +670,6 @@ including grouped imports, without treating unrelated classes named
 
 Editor features Laravel Idea has that do not live inside a string.
 
-#### L66. Related-file navigation for models, events, and listeners
-
-**Impact: Medium · Complexity: Medium**
-
-Laravel Idea links an Eloquent model to its factory, policy, observer,
-migrations, JSON resource, and custom collection, and an event
-to its listeners and back. We navigate none of these. The links are
-conventions or static registrations: `HasFactory` and the factory's
-model, `Gate::policy()`/`#[UsePolicy]`/the `Policies\{Model}Policy`
-guess, `#[ObservedBy]`/`::observe()`, `Event::listen()` and listener
-`handle(Event $e)` signatures (Laravel's event discovery reads exactly
-that type hint). Expose them as a code lens on the class or through
-go-to-implementation, whichever reads better in practice. The migrations
-link reuses the table map `database_schema/` already builds.
-
 #### L67. Laravel refactoring intentions
 
 **Impact: Low-Medium · Complexity: Medium**

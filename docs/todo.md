@@ -32,12 +32,13 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| D46 | [The result of a `void` call is used](todo/diagnostics.md#d46-the-result-of-a-void-call-is-used) | Low-Medium | Low |
+| D44 | [A function that can end without returning a value is not reported](todo/diagnostics.md#d44-a-function-that-can-end-without-returning-a-value-is-not-reported) | Medium | Low-Medium |
+| D45 | [An object without `__toString()` used as a string is not reported](todo/diagnostics.md#d45-an-object-without-__tostring-used-as-a-string-is-not-reported) | Medium | Low-Medium |
 | D41 | [A thrown exception nothing catches or documents is not reported](todo/diagnostics.md#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported) | Medium      | Medium      |
-| L66 | [Related-file navigation for models, events, and listeners](todo/laravel.md#l66-related-file-navigation-for-models-events-and-listeners) | Medium | Medium |
+| D33 | [Private members nothing uses are not reported](todo/diagnostics.md#d33-private-members-nothing-uses-are-not-reported) | Low-Medium  | Medium      |
+| D43 | [Unknown named arguments to methods and functions are not reported](todo/diagnostics.md#d43-unknown-named-arguments-to-methods-and-functions-are-not-reported) | Low-Medium  | Medium      |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (assets, Inertia) | Medium | Medium |
-| T68 | [A DQL field is typed by its property, not its column's type](todo/type-inference.md#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type) | Low         | Medium      |
-| T69 | [`IDENTITY()` in a DQL `SELECT` is `mixed`](todo/type-inference.md#t69-identity-in-a-dql-select-is-mixed) | Low         | Low-Medium  |
-| T65 | [The expression builder's fragments are not literal strings](todo/type-inference.md#t65-the-expression-builders-fragments-are-not-literal-strings) | Low         | Low-Medium  |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -176,7 +177,6 @@ ships, remove every row that names it.
 | L56 | [Typed Laravel connection names](todo/laravel.md#l56-typed-laravel-connection-names)                                                                                        | Medium      | Medium      |
 | L58 | [Laravel rate limiter names](todo/laravel.md#l58-laravel-rate-limiter-names)                                                                                                | Medium      | Medium      |
 | L53 | [Collection key types from the column for `keyBy` / `groupBy` / `pluck`](todo/laravel.md#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck)                   | Medium      | Medium      |
-| L66 | [Related-file navigation for models, events, and listeners](todo/laravel.md#l66-related-file-navigation-for-models-events-and-listeners) | Medium | Medium |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (assets, Inertia) | Medium | Medium |
 | BL20 | [Port Bladestan's tests](todo/blade.md#bl20-port-bladestans-tests) | Medium | Medium |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
@@ -224,12 +224,15 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| D46 | [The result of a `void` call is used](todo/diagnostics.md#d46-the-result-of-a-void-call-is-used) | Low-Medium | Low |
 | D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
 | D41 | [A thrown exception nothing catches or documents is not reported](todo/diagnostics.md#d41-a-thrown-exception-nothing-catches-or-documents-is-not-reported) | Medium      | Medium      |
+| D44 | [A function that can end without returning a value is not reported](todo/diagnostics.md#d44-a-function-that-can-end-without-returning-a-value-is-not-reported) | Medium | Low-Medium |
+| D45 | [An object without `__toString()` used as a string is not reported](todo/diagnostics.md#d45-an-object-without-__tostring-used-as-a-string-is-not-reported) | Medium | Low-Medium |
 | D43 | [Unknown named arguments to methods and functions are not reported](todo/diagnostics.md#d43-unknown-named-arguments-to-methods-and-functions-are-not-reported) | Low-Medium  | Medium      |
 | D19 | [`invalid_member_access` cannot tell a property read from a write](todo/diagnostics.md#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
-| D33 | [Private properties nothing reads or writes are not reported](todo/diagnostics.md#d33-private-properties-nothing-reads-or-writes-are-not-reported) | Low-Medium  | Medium      |
+| D33 | [Private members nothing uses are not reported](todo/diagnostics.md#d33-private-members-nothing-uses-are-not-reported) | Low-Medium  | Medium      |
 | D20 | [`Foo::$bar` and `Foo::bar` are the same span](todo/diagnostics.md#d20-foobar-and-foobar-are-the-same-span)                                                                  | Low         | Medium      |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Medium      |
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |
