@@ -354,3 +354,49 @@ implementation cannot be read, would silence every site. Report a name
 only once those hooks are read, or with a rule that knows which names
 such an implementation can add. A suggestion such as
 `acme_greeting__compact` is valid when its base hook is.
+
+---
+
+## DR25. Warn on unknown plugin IDs
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$fields['total'] = BaseFieldDefinition::create('decimel');
+$block = $this->blockManager->createInstance('acme_order_sumary');
+```
+
+A plugin ID that no plugin of its type declares is a typo or a module the
+site lacks. The plugin manager throws for it, except for widgets and
+formatters, which silently fall back to the field type's default. Report
+one wherever [DR10](#dr10-plugin-ids) reads plugin IDs: field types,
+widgets and formatters, constraints, and a plugin manager's
+`createInstance()`. A derivative ID (`system_menu_block:main`) is known
+only at run time, so an ID whose base plugin has a deriver must not
+warn. This depends on DR10.
+
+---
+
+## DR26. Annotation class names
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+/**
+ * @Block(
+ *   id = "acme_order_summary",
+ *   admin_label = @Translation("Order summary"),
+ * )
+ */
+final class OrderSummaryBlock extends BlockBase { … }
+```
+
+Plugins written before Drupal 10.2 declare themselves in a docblock
+annotation, and many contributed modules still do. `@Block` and
+`@Translation` name annotation classes, but Drupal's annotated plugin
+discovery finds them without a `use` import: it reads a plugin type's
+annotation class and namespaces from its plugin manager, not from the
+file. Once [B707](bugs.md#b707-a-docblock-annotation-does-not-name-its-class)
+reads annotations through the imports, resolve a name the imports don't
+cover through the namespaces of the plugin type the class is discovered
+for, so that go-to-definition, hover, and references reach the class.

@@ -150,6 +150,40 @@ resolves, and so does every name once the whole project is indexed (as
 the imports from `import_block_at`, and how a file loaded on demand
 records its `use` map in its `FileState`.
 
+### B707. A docblock annotation does not name its class
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+use Doctrine\ORM\Mapping as ORM;   // Unused import 'Doctrine\ORM\Mapping'
+use Symfony\Component\Routing\Annotation\Route;   // Unused import
+
+/** @ORM\Entity */
+final class User
+{
+    /** @Route("/users") */
+    public function list(): Response { … }
+}
+```
+
+Doctrine-style annotations (Doctrine ORM, older Symfony, JMS, Drupal
+plugins) name a class with their tag, resolved through the file's `use`
+imports like any other class name. The tag is read as an unknown docblock
+tag instead, so an import only an annotation uses is reported as unused,
+and the quick fix and `phpantom_lsp fix` remove it, which breaks the
+annotation at run time. Go-to-definition, hover, references and rename
+miss the class too.
+
+Record an annotation tag (`@` then a name, at the start of a docblock
+line or inside another annotation's arguments) as a class reference when
+its name resolves to a class, the way a docblock type is. A tag PHPDoc
+or a tool defines (`@param`, `@phpstan-*`, `@psalm-*`) is never one, and
+a lowercase tag with no class behind it stays silent.
+
+**Where to look:** `extract_docblock_symbols` (`src/symbol_map/docblock.rs`),
+which emits the class references `unused_imports.rs` and the navigation
+features read.
+
 ## Code actions
 
 No outstanding items.

@@ -141,6 +141,8 @@ ships, remove every row that names it.
 | DR22 | [Complete permissions built in code](todo/drupal.md#dr22-complete-permissions-built-in-code) | Low-Medium | Medium |
 | DR23 | [Warn on unknown permission names](todo/drupal.md#dr23-warn-on-unknown-permission-names) | Medium | Low-Medium |
 | DR24 | [Warn on unknown theme hook names](todo/drupal.md#dr24-warn-on-unknown-theme-hook-names) | Low-Medium | Medium-High |
+| DR25 | [Warn on unknown plugin IDs](todo/drupal.md#dr25-warn-on-unknown-plugin-ids) | Medium | Low-Medium |
+| DR26 | [Annotation class names](todo/drupal.md#dr26-annotation-class-names) | Low-Medium | Low-Medium |
 
 ## Yii
 
