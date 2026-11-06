@@ -2468,33 +2468,10 @@ PHPStan's Symfony extension (<code>Rules/Symfony/Undefined*Rule</code>,
 <code>Rules/Symfony/Invalid*DefaultValueRule</code>,
 <code>Type/Symfony/InputInterface*Extension</code>).</p>
 <hr />
-<h2 id="f71-dql-variables-of-a-query-builder-other-code-handles">F71. DQL variables of a query builder other code handles<a class="headerlink" href="#f71-dql-variables-of-a-query-builder-other-code-handles" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$qb = $this-&gt;createQb();                  // `e` declared in createQb()</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$qb-&gt;andWhere('t.id = 1')-&gt;getQuery();    // `t` declared nowhere</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">$qb = $em-&gt;createQueryBuilder()-&gt;from(User::class, 'u');</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">$this-&gt;joinTeams($qb);</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">$qb-&gt;andWhere('t.id = 1')-&gt;getQuery();</span>
-</code></pre></div>
-<p>A DQL variable a query builder uses but never declares, on some path
-through the function body that builds it, is reported. Nothing is
-reported for a builder that comes from a parameter, a property, or
-another method, or that is passed to one, since its variables may be
-declared out of sight. PHPStan's Doctrine extension reads the body of a
-method that returns a builder, so it reports the first case above.</p>
-<p>A builder another method of the project returns can be read from that
-method's body, the way the type engine replays a single fluent chain to
-type the query it builds (see T64). One passed to a method is harder: the
-method may join anything onto it.</p>
-<p><strong>Where to look:</strong> <code>src/symbol_map/extraction/doctrine_dql.rs</code>
-(<code>report_undeclared</code>, <code>is_closed</code>), <code>src/doctrine/query.rs</code>
-(<code>QueryBuilderState</code>).</p>
-<hr />
 <h2 id="f69-dql-in-expression-objects-and-other-methods-query-builders">F69. DQL in expression objects and other methods' query builders<a class="headerlink" href="#f69-dql-in-expression-objects-and-other-methods-query-builders" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">$qb-&gt;add('orderBy', new Expr\OrderBy('e.name', 'ASC'));</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">$this-&gt;createQb()-&gt;andWhere('e.nonexistent = 1'); // `e` declared in createQb()</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$qb-&gt;add('orderBy', new Expr\OrderBy('e.name', 'ASC'));</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$this-&gt;createQb()-&gt;andWhere('e.nonexistent = 1'); // `e` declared in createQb()</span>
 </code></pre></div>
 <p>The DQL a query builder method or an <code>expr()</code> call takes is read, with the
 variables the builder calls of the same function body declare. The DQL an
@@ -2504,6 +2481,36 @@ another method returns, whose variables that method declares.</p>
 <p>The fixture is <code>query_builder_dql.fixture</code> in
 <code>tests/fixtures/phpstan_doctrine/</code>.</p>
 <p><strong>Where to look:</strong> <code>src/symbol_map/extraction/doctrine_dql.rs</code>.</p>
+<hr />
+<h2 id="f72-dql-variables-of-a-query-builder-a-chain-of-methods-handles">F72. DQL variables of a query builder a chain of methods handles<a class="headerlink" href="#f72-dql-variables-of-a-query-builder-a-chain-of-methods-handles" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">private function base(): QueryBuilder</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">{</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">    return $this-&gt;createQb()-&gt;join('e.team', 't');  // builder from another method</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">}</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">private function joinTeams(QueryBuilder $qb): void</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="x">{</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">    $this-&gt;joinOwner($qb);                          // passed on again</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="x">}</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="x">$qb = self::createQb();                             // static call</span>
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="x">$qb-&gt;andWhere('x.id = 1')-&gt;getQuery();              // `x` not reported</span>
+</code></pre></div>
+<p>A builder another method returns, or that is passed to one, counts the
+variables that method's body declares, but only when that body creates the
+builder itself or only calls the methods of the one it is passed. One the
+method gets from a third method, or passes on to one, is not followed, so
+a variable used on it is not reported. Nor is one a static call or a call
+on a variable (<code>$repo-&gt;createQb()</code>) hands over. A variable such a method
+declares also counts on every path through the caller, not only the paths
+that make the call.</p>
+<p>The other direction is not reported either: a variable a method's returned
+builder uses, which none of its callers declare. PHPStan reports it in the
+caller, where the query is run.</p>
+<p><strong>Where to look:</strong> <code>src/symbol_map/extraction/doctrine_dql.rs</code>
+(<code>summarize_methods</code>, <code>keeps_builder</code>, <code>builder_of</code>) and
+<code>src/diagnostics/dql_syntax.rs</code> (<code>providing_methods</code>).</p>
 <hr />
 <h2 id="f45-symfony-events-named-by-their-class-or-a-constant">F45. Symfony events named by their class or a constant<a class="headerlink" href="#f45-symfony-events-named-by-their-class-or-a-constant" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
