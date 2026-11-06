@@ -39,12 +39,19 @@ impl Backend {
             self.init_single_project(root, php_version, composer_package, progress)
                 .await;
         } else {
-            let subprojects = composer::discover_subproject_roots(root);
+            let (subprojects, drupal_tree) = composer::discover_workspace_projects(root);
             if subprojects.is_empty() {
-                self.init_no_composer(root, php_version, progress).await;
-            } else {
-                self.init_monorepo(root, &subprojects, php_version, progress)
+                self.init_no_composer(root, drupal_tree.as_deref(), php_version, progress)
                     .await;
+            } else {
+                self.init_monorepo(
+                    root,
+                    &subprojects,
+                    drupal_tree.as_deref(),
+                    php_version,
+                    progress,
+                )
+                .await;
             }
         }
         // The editor opens files while the walk runs, and a file read
@@ -413,30 +420,13 @@ impl Backend {
         self.symbols.merge_scan(scan);
         self.set_project_package_roots(root, package_roots);
 
-        // ── Drupal: scan web-root directories (gitignore bypassed) ──
-        // Drupal's .gitignore excludes web/core, web/modules/contrib,
-        // etc. because they are managed by Composer — but those paths
-        // contain every base interface and hook definition that modules
-        // depend on.  detect_drupal_web_root() returns None for
-        // non-Drupal projects so this block is a no-op in that case.
+        // detect_drupal_web_root() returns None for non-Drupal projects,
+        // so this block is a no-op in that case.
         if let Some(drupal_web_root) = drupal_web_root {
-            self.note_drupal_web_root(&drupal_web_root);
             if let Some(p) = progress {
                 p.set_scope(at(55), at(59), "Scanning Drupal directories");
             }
-            let (drupal_result, declaration_files) =
-                classmap_scanner::scan_drupal_directories(&drupal_web_root, &filters, progress);
-            self.note_drupal_declaration_files(declaration_files.declarations);
-            self.note_drupal_service_providers(declaration_files.service_providers);
-            let drupal_count = drupal_result.classmap.len()
-                + drupal_result.function_index.len()
-                + drupal_result.constant_index.len();
-            self.symbols.merge_scan(drupal_result);
-            tracing::info!(
-                "PHPantom: Drupal web root {:?}, {} symbols indexed",
-                drupal_web_root,
-                drupal_count
-            );
+            self.index_drupal_web_root(&drupal_web_root, &filters, progress);
         }
 
         // ── PSR-0 (legacy) classmap ─────────────────────────────────
@@ -486,6 +476,38 @@ impl Backend {
         }
 
         source_label
+    }
+
+    /// Index the Drupal web root at `web_root`, walked with `.gitignore`
+    /// bypassed: a site's `.gitignore` leaves out core and the contributed
+    /// extensions Composer installs, which hold every base interface and
+    /// hook definition the site's own modules depend on.  Records the web
+    /// root and the declaration files, hook files and service providers
+    /// the walk finds.
+    ///
+    /// The caller marks the project as Drupal (see
+    /// [`Self::mark_drupal_project`]) before compiling `filters`, or the
+    /// project's other walks read no `.module`, `.install`, … file as PHP.
+    fn index_drupal_web_root(
+        &self,
+        web_root: &Path,
+        filters: &std::sync::Arc<classmap_scanner::IndexFilters>,
+        progress: Option<&crate::progress::ScanProgress>,
+    ) {
+        self.note_drupal_web_root(web_root);
+        let (drupal_result, declaration_files) =
+            classmap_scanner::scan_drupal_directories(web_root, filters, progress);
+        self.note_drupal_declaration_files(declaration_files.declarations);
+        self.note_drupal_service_providers(declaration_files.service_providers);
+        let drupal_count = drupal_result.classmap.len()
+            + drupal_result.function_index.len()
+            + drupal_result.constant_index.len();
+        self.symbols.merge_scan(drupal_result);
+        tracing::info!(
+            "PHPantom: Drupal web root {:?}, {} symbols indexed",
+            web_root,
+            drupal_count
+        );
     }
 
     /// The classes, functions and constants the vendor directory of one
@@ -548,11 +570,14 @@ impl Backend {
     /// Each subproject is indexed the way a single Composer project is
     /// (see [`Self::index_composer_project`]).  After all subprojects
     /// are processed, a gitignore-aware full-scan picks up loose PHP files
-    /// outside any subproject directory.
+    /// outside any subproject directory.  A Drupal tree no subproject owns,
+    /// with its web root at `drupal_tree`, is indexed beside them the way
+    /// [`Self::init_no_composer`] indexes one.
     pub(crate) async fn init_monorepo(
         &self,
         root: &Path,
         subprojects: &[(PathBuf, String)],
+        drupal_tree: Option<&Path>,
         php_version: crate::types::PhpVersion,
         progress: Option<&crate::progress::ScanProgress>,
     ) {
@@ -594,10 +619,17 @@ impl Backend {
         // Doctrine in any subproject turns its lenses on workspace-wide.
         let mut any_doctrine = false;
         let mut any_symfony = false;
-        let mut any_twig = false;
+        // Drupal's templates are Twig, as `drupal/core` makes them in a
+        // Composer project.
+        let mut any_twig = drupal_tree.is_some();
         let mut any_yii = false;
         let mut phpunit_major: Option<u8> = None;
         self.clear_drupal_web_roots();
+        // Marked before any walk compiles the filters, so every walk sees
+        // Drupal's `.module`, `.install`, … files as PHP.
+        if drupal_tree.is_some() {
+            self.mark_drupal_project();
+        }
 
         for (sub_idx, (sub_root, _)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;
@@ -674,21 +706,31 @@ impl Backend {
         // ── Full-scan loose files ───────────────────────────────────
         // Walk the workspace for PHP files outside any subproject
         // directory, using gitignore-aware walking.
+        let walk_hi = if drupal_tree.is_some() { 83 } else { 85 };
         if let Some(p) = progress {
             p.set_label_prefix("");
-            p.set_scope(80, 85, "Scanning loose PHP files");
+            p.set_scope(80, walk_hi, "Scanning loose PHP files");
         }
 
+        skip_dirs.extend(drupal_tree.map(drupal_core_dir));
+        let filters = self.index_filters();
         let extra_roots = self.claim_extra_roots();
         let scan = classmap_scanner::scan_roots_full(
             &[root.to_path_buf()],
             &extra_roots,
             &skip_dirs,
-            &self.index_filters(),
+            &filters,
             progress,
             Some(self.followed_links()),
         );
         self.symbols.merge_scan(scan);
+
+        if let Some(web_root) = drupal_tree {
+            if let Some(p) = progress {
+                p.set_scope(walk_hi, 85, "Scanning Drupal directories");
+            }
+            self.index_drupal_web_root(web_root, &filters, progress);
+        }
 
         self.finish_discovery(
             root,
@@ -700,22 +742,28 @@ impl Backend {
         .await;
     }
 
-    /// Initialize a pure non-Composer workspace (no `composer.json`
-    /// anywhere).  Full-scans all PHP files in the workspace.
+    /// Initialize a non-Composer workspace (no root `composer.json`, and
+    /// no subproject to index on its own).  Full-scans all PHP files in the
+    /// workspace, and when the workspace is a Drupal tree with its web root
+    /// at `drupal_web_root`, indexes that web root the way a Composer
+    /// project's is.
     pub(crate) async fn init_no_composer(
         &self,
         root: &Path,
+        drupal_web_root: Option<&Path>,
         php_version: crate::types::PhpVersion,
         progress: Option<&crate::progress::ScanProgress>,
     ) {
-        self.log(
-            MessageType::Info,
-            "PHPantom: No composer.json found. Scanning workspace for PHP classes.".to_string(),
-        )
-        .await;
+        let message = if drupal_web_root.is_some() {
+            "PHPantom: No composer.json found. Scanning the Drupal site for PHP classes."
+        } else {
+            "PHPantom: No composer.json found. Scanning workspace for PHP classes."
+        };
+        self.log(MessageType::Info, message.to_string()).await;
 
+        let walk_hi = if drupal_web_root.is_some() { 75 } else { 85 };
         if let Some(p) = progress {
-            p.set_scope(10, 85, "Scanning workspace for PHP files");
+            p.set_scope(10, walk_hi, "Scanning workspace for PHP files");
         }
 
         // No composer.json means no Laravel/Illuminate dependency, so
@@ -725,18 +773,42 @@ impl Backend {
             .laravel_mut()
             .set_enabled(false);
 
+        // Marked before the filters are read, as for a Composer project,
+        // so the walk sees Drupal's `.module`, `.install`, … files as PHP.
+        // Drupal's templates are Twig, as `drupal/core` makes them in a
+        // Composer project.
+        if drupal_web_root.is_some() {
+            self.clear_drupal_web_roots();
+            self.mark_drupal_project();
+            self.set_is_twig(true);
+        }
+        let filters = self.index_filters();
+
         let extra_roots = self.claim_extra_roots();
+        let skip_dirs: HashSet<PathBuf> =
+            drupal_web_root.map(drupal_core_dir).into_iter().collect();
         let scan = classmap_scanner::scan_roots_full(
             &[root.to_path_buf()],
             &extra_roots,
-            &HashSet::new(),
-            &self.index_filters(),
+            &skip_dirs,
+            &filters,
             progress,
             Some(self.followed_links()),
         );
         self.symbols.merge_scan(scan);
 
-        self.finish_discovery(root, php_version, "workspace scan", &[], progress)
+        let source = match drupal_web_root {
+            Some(web_root) => {
+                if let Some(p) = progress {
+                    p.set_scope(walk_hi, 85, "Scanning Drupal directories");
+                }
+                self.index_drupal_web_root(web_root, &filters, progress);
+                "Drupal site scan"
+            }
+            None => "workspace scan",
+        };
+
+        self.finish_discovery(root, php_version, source, &[], progress)
             .await;
     }
 
@@ -792,6 +864,15 @@ impl Backend {
         )
         .await;
     }
+}
+
+/// The `core/` folder of the Drupal web root at `web_root`, which the
+/// workspace walk skips because the Drupal scan walks it anyway, so core
+/// is parsed once.  The extension folders stay in the walk: it follows
+/// symlinks, such as a custom module linked in from elsewhere, and the
+/// Drupal scan does not.
+fn drupal_core_dir(web_root: &Path) -> PathBuf {
+    web_root.join("core")
 }
 
 #[cfg(test)]
