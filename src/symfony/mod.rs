@@ -222,6 +222,7 @@ impl Backend {
         self.note_drupal_hook_declarations(uri, Some(map));
         self.note_drupal_theme_hook_sources(uri, Some(map));
         self.note_drupal_library_builder_sources(uri, Some(map));
+        self.note_drupal_theme_suggestions(map);
         let was_declaring = self.symfony.declaring_uris.read().contains(uri);
         // Only take the write lock when the answer changes.
         if was_declaring == declares {

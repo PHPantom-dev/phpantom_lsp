@@ -277,6 +277,8 @@ check('acme_theme overrides the acme_greeting template', is_file("$theme/templat
 check('GreetingController::greet() renders acme_greeting with its variables', str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#theme' => 'acme_greeting',\n            '#name' => \$name,\n            '#greeting' =>"));
 check('GreetingController::compactGreet() renders the acme_greeting__compact suggestion', str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#theme' => 'acme_greeting__compact'") && str_starts_with('acme_greeting__compact', 'acme_greeting__') && !isset($themeHooks['acme_greeting__compact']));
 check('acme_theme draws the suggestion with acme-greeting--compact.html.twig', is_file("$theme/templates/acme-greeting--compact.html.twig"));
+check('GreetingController::greet() passes a string as #name', (string) (new ReflectionMethod(GreetingController::class, 'greet'))->getParameters()[0]->getType() === 'string');
+check("core turns a theme hook template's attributes variables into an Attribute, which has addClass()", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeManager.php"), "foreach (['attributes', 'title_attributes', 'content_attributes'] as \$key) {") && method_exists(\Drupal\Core\Template\Attribute::class, 'addClass'));
 check("core's ThemeCommonElements declares item_list, drawn by system's item-list.html.twig", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeCommonElements.php"), "      'item_list' => [\n        'variables' => [\n          'items' => [],") && is_file("$web/core/modules/system/templates/item-list.html.twig"));
 
 // The module documents, invokes, and implements its own hook, and

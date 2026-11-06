@@ -148,8 +148,16 @@ fn site() -> Vec<(&'static str, &'static str)> {
 
 /// An initialized site holding [`site`] on disk and `open` open.
 async fn drupal(open: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfile::TempDir) {
+    drupal_with(&[], open).await
+}
+
+/// [`drupal`] with `extra` on disk as well.
+async fn drupal_with(
+    extra: &[(&str, &str)],
+    open: &[(&str, &str)],
+) -> (phpantom_lsp::Backend, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    for (path, content) in site() {
+    for (path, content) in site().into_iter().chain(extra.iter().copied()) {
         let full = dir.path().join(path);
         std::fs::create_dir_all(full.parent().unwrap()).unwrap();
         std::fs::write(full, content).unwrap();
@@ -229,8 +237,19 @@ async fn definitions(
     inside: usize,
 ) -> Vec<(String, u32)> {
     let php = uri_for(dir, CONTROLLER_PATH);
+    locations(backend, dir, &php, position_in(CONTROLLER, needle, inside)).await
+}
+
+/// The files, relative to `dir`, and lines go-to-definition lists at
+/// `position` of the open file `uri`.
+async fn locations(
+    backend: &phpantom_lsp::Backend,
+    dir: &tempfile::TempDir,
+    uri: &Uri,
+    position: Position,
+) -> Vec<(String, u32)> {
     let root = Uri::from_file_path(dir.path()).unwrap().to_string();
-    definitions_at(backend, &php, position_in(CONTROLLER, needle, inside))
+    definitions_at(backend, uri, position)
         .await
         .into_iter()
         .map(|location| {
@@ -557,6 +576,356 @@ async fn editing_an_implementation_or_a_template_refreshes_the_hooks() {
         found.iter().any(|(path, _)| path == form_override),
         "{found:?}"
     );
+}
+
+/// The variables completion offers inside the `{{ }}` of the template
+/// `path` whose text is `template`, opened.
+async fn template_variables(
+    backend: &phpantom_lsp::Backend,
+    dir: &tempfile::TempDir,
+    path: &str,
+    template: &str,
+) -> Vec<String> {
+    let uri = uri_for(dir, path);
+    crate::common::open_document(backend, &uri, "twig", template).await;
+    labels_at(backend, &uri, position_in(template, "{{ }}", 3)).await
+}
+
+/// The variables Drupal adds to every template a theme hook draws.
+const DEFAULT_VARIABLES: [&str; 11] = [
+    "attributes",
+    "title_attributes",
+    "content_attributes",
+    "title_prefix",
+    "title_suffix",
+    "db_is_active",
+    "is_admin",
+    "logged_in",
+    "user",
+    "directory",
+    "theme_hook_original",
+];
+
+#[tokio::test]
+async fn a_core_template_receives_its_hooks_variables_and_drupals_defaults() {
+    let (backend, dir) = drupal(&[]).await;
+    let labels =
+        template_variables(&backend, &dir, ITEM_LIST_TEMPLATE_PATH, "<ul>{{ }}</ul>\n").await;
+    for expected in ["items", "title", "list_type"]
+        .into_iter()
+        .chain(DEFAULT_VARIABLES)
+    {
+        assert!(
+            labels.contains(&expected.to_string()),
+            "{expected} in {labels:?}"
+        );
+    }
+    assert!(!labels.contains(&"rows".to_string()), "{labels:?}");
+}
+
+#[tokio::test]
+async fn a_default_template_and_an_override_receive_the_hooks_variables() {
+    let (backend, dir) = drupal(&[(CONTROLLER_PATH, CONTROLLER)]).await;
+    let line_of = |needle: &str| {
+        ACME_HOOKS[..ACME_HOOKS.find(needle).unwrap()]
+            .matches('\n')
+            .count() as u32
+    };
+    let controller_line = CONTROLLER[..CONTROLLER.find("'#greeting'").unwrap()]
+        .matches('\n')
+        .count() as u32;
+    for path in [GREETING_TEMPLATE_PATH, OVERRIDE_PATH] {
+        let template = "<p>{{ }}</p>\n<p>{{ greeting }}</p>\n";
+        let labels = template_variables(&backend, &dir, path, template).await;
+        for expected in ["name", "greeting"].into_iter().chain(DEFAULT_VARIABLES) {
+            assert!(
+                labels.contains(&expected.to_string()),
+                "{path}: {expected} in {labels:?}"
+            );
+        }
+        // The declaration comes first, then the render arrays that pass it.
+        let found = locations(
+            &backend,
+            &dir,
+            &uri_for(&dir, path),
+            position_in(template, "greeting }}", 1),
+        )
+        .await;
+        assert_eq!(
+            found,
+            vec![
+                (ACME_HOOKS_PATH.to_string(), line_of("'greeting' =>")),
+                (CONTROLLER_PATH.to_string(), controller_line),
+            ],
+            "{path}"
+        );
+        let position = position_in(template, "greeting }}", 1);
+        let text = hover_text_at(
+            &backend,
+            &uri_for(&dir, path),
+            position.line,
+            position.character,
+        )
+        .await
+        .unwrap_or_default();
+        assert!(
+            text.contains("Declared by the theme hook `acme_greeting`"),
+            "{path}: {text}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_suggestion_template_receives_what_the_suggestion_and_its_hook_pass() {
+    let (backend, dir) = drupal(&[(CONTROLLER_PATH, CONTROLLER)]).await;
+    let template = "<small>{{ }}</small>\n<small>{{ name }}</small>\n";
+    let labels = template_variables(&backend, &dir, SUGGESTION_PATH, template).await;
+    for expected in ["name", "greeting"].into_iter().chain(DEFAULT_VARIABLES) {
+        assert!(
+            labels.contains(&expected.to_string()),
+            "{expected} in {labels:?}"
+        );
+    }
+    let line_in = |content: &str, needle: &str| {
+        content[..content.find(needle).unwrap()]
+            .matches('\n')
+            .count() as u32
+    };
+    let found = locations(
+        &backend,
+        &dir,
+        &uri_for(&dir, SUGGESTION_PATH),
+        position_in(template, "name }}", 1),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![
+            (
+                ACME_HOOKS_PATH.to_string(),
+                line_in(ACME_HOOKS, "'name' =>")
+            ),
+            (
+                CONTROLLER_PATH.to_string(),
+                line_in(CONTROLLER, "'#name' => $name,")
+            ),
+            (
+                CONTROLLER_PATH.to_string(),
+                line_in(CONTROLLER, "'#name' => $name]")
+            ),
+        ]
+    );
+}
+
+/// A suggestion no theme writes a template for is drawn with its hook's
+/// templates, which take what its render arrays pass; one a theme writes a
+/// template for passes nothing to them.
+#[tokio::test]
+async fn a_hooks_templates_receive_what_its_unclaimed_suggestions_pass() {
+    let wide_path = "web/modules/custom/acme/src/Controller/WideController.php";
+    let wide = "<?php\nnamespace Drupal\\acme\\Controller;\n\nfinal class WideController {\n  public function wide(string $who): array {\n    return ['#theme' => 'acme_greeting__wide', '#name' => $who];\n  }\n}\n";
+    let (backend, dir) = drupal(&[(CONTROLLER_PATH, CONTROLLER), (wide_path, wide)]).await;
+    let line_in = |content: &str, needle: &str| {
+        content[..content.find(needle).unwrap()]
+            .matches('\n')
+            .count() as u32
+    };
+    let template = "<p>{{ name }}</p>\n";
+    crate::common::open_document(
+        &backend,
+        &uri_for(&dir, GREETING_TEMPLATE_PATH),
+        "twig",
+        template,
+    )
+    .await;
+    let found = locations(
+        &backend,
+        &dir,
+        &uri_for(&dir, GREETING_TEMPLATE_PATH),
+        position_in(template, "name }}", 1),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![
+            (
+                ACME_HOOKS_PATH.to_string(),
+                line_in(ACME_HOOKS, "'name' =>")
+            ),
+            (
+                CONTROLLER_PATH.to_string(),
+                line_in(CONTROLLER, "'#name' => $name,")
+            ),
+            (wide_path.to_string(), line_in(wide, "'#name'")),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_render_element_template_receives_the_element() {
+    let (backend, dir) = drupal(&[]).await;
+    let path = "web/modules/custom/acme/templates/acme-form.html.twig";
+    let template = "{{ }}\n{{ form }}\n";
+    let labels = template_variables(&backend, &dir, path, template).await;
+    for expected in ["form"].into_iter().chain(DEFAULT_VARIABLES) {
+        assert!(
+            labels.contains(&expected.to_string()),
+            "{expected} in {labels:?}"
+        );
+    }
+    let line = ACME_HOOKS[..ACME_HOOKS.find("'render element' => 'form'").unwrap()]
+        .matches('\n')
+        .count() as u32;
+    assert_eq!(
+        locations(
+            &backend,
+            &dir,
+            &uri_for(&dir, path),
+            position_in(template, "form }}", 1)
+        )
+        .await,
+        vec![(ACME_HOOKS_PATH.to_string(), line)]
+    );
+}
+
+const ATTRIBUTE: (&str, &str) = (
+    "web/core/lib/Drupal/Core/Template/Attribute.php",
+    "<?php\nnamespace Drupal\\Core\\Template;\nclass Attribute {\n    public function addClass(...$classes): static { return $this; }\n    public function setAttribute(string $attribute, mixed $value): static { return $this; }\n}\n",
+);
+
+const NOTES_INFO: (&str, &str) = (
+    "web/modules/custom/notes/notes.info.yml",
+    "name: Notes\ntype: module\n",
+);
+
+const NOTES_MODULE: (&str, &str) = (
+    "web/modules/custom/notes/notes.module",
+    "<?php\n\nfunction notes_theme() {\n  return [\n    'notes_teaser' => [\n      'variables' => ['note' => NULL, 'attributes' => []],\n    ],\n  ];\n}\n",
+);
+
+const NOTE: (&str, &str) = (
+    "web/modules/custom/notes/src/Note.php",
+    "<?php\nnamespace Drupal\\notes;\nclass Note {\n    public function label(): string { return ''; }\n    public function isPinned(): bool { return false; }\n}\n",
+);
+
+const NOTE_CONTROLLER: &str = r#"<?php
+namespace Drupal\notes;
+
+final class NoteController {
+  public function show(Note $note): array {
+    return [
+      '#theme' => 'notes_teaser',
+      '#note' => $note,
+      '#attributes' => ['class' => ['teaser']],
+      '#undeclared' => $note,
+    ];
+  }
+}
+"#;
+const NOTE_CONTROLLER_PATH: &str = "web/modules/custom/notes/src/NoteController.php";
+
+const TEASER_PATH: &str = "web/modules/custom/notes/templates/notes-teaser.html.twig";
+const TEASER: &str =
+    "<article{{ attributes. }}>\n{{ note. }}\n{{ note }} {{ title_attributes }}\n</article>\n";
+
+/// A site with the module `notes`, whose controller passes a `Note` to
+/// its `notes_teaser` template, open.
+async fn notes_site() -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
+    let (backend, dir) = drupal_with(
+        &[
+            ATTRIBUTE,
+            NOTES_INFO,
+            NOTES_MODULE,
+            NOTE,
+            (TEASER_PATH, TEASER),
+            (
+                "web/modules/custom/notes/notes.routing.yml",
+                "notes.show:\n  path: '/notes'\n",
+            ),
+        ],
+        &[(NOTE_CONTROLLER_PATH, NOTE_CONTROLLER)],
+    )
+    .await;
+    let teaser = uri_for(&dir, TEASER_PATH);
+    crate::common::open_document(&backend, &teaser, "twig", TEASER).await;
+    (backend, dir, teaser)
+}
+
+#[tokio::test]
+async fn a_variable_holds_what_the_render_arrays_pass() {
+    let (backend, dir, teaser) = notes_site().await;
+    let position = position_in(TEASER, "note. }}", 5);
+    let labels = labels_at(&backend, &teaser, position).await;
+    for expected in ["label", "pinned"] {
+        assert!(
+            labels.contains(&expected.to_string()),
+            "{expected} in {labels:?}"
+        );
+    }
+    let position = position_in(TEASER, "note }}", 1);
+    let text = hover_text_at(&backend, &teaser, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(text.contains("`Drupal\\notes\\Note`"), "{text}");
+    assert!(
+        text.contains("Passed by `web/modules/custom/notes/src/NoteController.php`"),
+        "{text}"
+    );
+    // A key the hook does not declare is not handed to its template.
+    let labels = template_variables(&backend, &dir, TEASER_PATH, "{{ }}\n").await;
+    assert!(!labels.contains(&"undeclared".to_string()), "{labels:?}");
+}
+
+#[tokio::test]
+async fn the_attributes_variables_hold_a_template_attribute() {
+    let (backend, _dir, teaser) = notes_site().await;
+    // Declared by the hook and passed as an array, but Drupal turns it into
+    // an `Attribute` before the template sees it.
+    let labels = labels_at(&backend, &teaser, position_in(TEASER, "attributes. }}", 11)).await;
+    for expected in ["addClass", "setAttribute"] {
+        assert!(
+            labels.contains(&expected.to_string()),
+            "{expected} in {labels:?}"
+        );
+    }
+    let position = position_in(TEASER, "title_attributes }}", 1);
+    let text = hover_text_at(&backend, &teaser, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(
+        text.contains("`Drupal\\Core\\Template\\Attribute`"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn a_template_no_theme_hook_claims_receives_nothing_from_drupal() {
+    let (backend, dir) = drupal(&[(CONTROLLER_PATH, CONTROLLER)]).await;
+    let labels = template_variables(
+        &backend,
+        &dir,
+        "web/modules/custom/acme/templates/acme-orphan.html.twig",
+        "{{ }}\n",
+    )
+    .await;
+    assert_eq!(labels, ["_charset", "_context", "_self"]);
+}
+
+#[tokio::test]
+async fn a_template_reports_no_unknown_variables() {
+    let (backend, _dir, teaser) = notes_site().await;
+    // The route name nothing declares shows the template is judged.
+    let body =
+        "{{ note.label }} {{ nowhere }} {{ attributes.nothing }} {{ path('notes.nowhere') }}\n";
+    crate::common::open_document(&backend, &teaser, "twig", body).await;
+    let mut diagnostics = Vec::new();
+    backend.collect_resource_diagnostics(teaser.as_str(), body, &mut diagnostics);
+    let reported: Vec<&str> = diagnostics
+        .iter()
+        .map(|diagnostic| crate::common::message_text(&diagnostic.message))
+        .collect();
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert!(reported[0].contains("notes.nowhere"), "{reported:?}");
 }
 
 #[tokio::test]

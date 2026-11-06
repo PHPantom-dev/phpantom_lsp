@@ -615,12 +615,14 @@ pub(crate) enum TwigCallableTarget {
 }
 
 /// The variables one render of a Twig template hands it: the keys of a
-/// `render()`'s context array, of a templated email's `context()`, or of
-/// what a `#[Template]` action returns.
+/// `render()`'s context array, of a templated email's `context()`, of
+/// what a `#[Template]` action returns, or the `#` keys of a Drupal render
+/// array, without the `#`.
 ///
 /// Keyed by the template name it renders, whose span (or typed receiver
 /// site, for a `render()` only its receiver's type confirms) starts at
-/// [`Self::template_start`].
+/// [`Self::template_start`]; a render array's by the theme hook its
+/// `#theme` names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TwigContextSite {
     pub template_start: u32,

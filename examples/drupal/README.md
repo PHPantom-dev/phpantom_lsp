@@ -110,6 +110,12 @@ Run `composer install` here first. Composer puts core and contrib into
   go to the definition of `'#name'`. In `compactGreet()`,
   `'acme_greeting__compact'` is a suggestion: it leads to `acme_greeting` and
   to `acme_theme`'s `acme-greeting--compact.html.twig`.
+- A theme hook's templates receive its variables, typed by the render
+  arrays that pass them, and the variables Drupal adds to every template.
+  In `web/modules/custom/acme/templates/acme-greeting.html.twig`, hover
+  `name` to see the `string` `GreetingController::greet()` passes, go to its
+  definition in `AcmeHooks::theme()`, or complete after `attributes.` to see
+  core's `Attribute` methods.
 - Library names navigate between the libraries file that declares them and
   the render arrays, templates, and YAML that attach them. In
   `web/modules/custom/acme/src/Controller/GreetingController.php`, hover

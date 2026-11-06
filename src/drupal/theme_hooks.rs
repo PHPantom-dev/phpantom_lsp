@@ -89,8 +89,9 @@ pub(crate) struct ThemeHookEntry {
     pub name: Named,
     /// The keys of its `variables`.
     pub variables: Vec<Named>,
-    /// Its `render element`: the one variable its template receives.
-    pub render_element: Option<String>,
+    /// Its `render element`: the one variable its template receives, and
+    /// the byte range of its name.
+    pub render_element: Option<Named>,
     /// Its `base hook`, whose variables and preprocessing it shares.
     pub base_hook: Option<String>,
     /// Its `template`, the file name without [`TEMPLATE_SUFFIX`].
@@ -538,7 +539,15 @@ impl<'ast, 'arena> ArrayReader<'_, 'ast, 'arena> {
                         }
                     }
                 }
-                "render element" => hook.render_element = text(),
+                "render element" => {
+                    hook.render_element = resolved_string_literal(entry.value, self.content).map(
+                        |(name, start, end)| Named {
+                            name: name.to_string(),
+                            start: start as u32,
+                            end: end as u32,
+                        },
+                    );
+                }
                 "base hook" => hook.base_hook = text(),
                 "template" => hook.template = text(),
                 "path" => hook.path = text(),
@@ -1049,7 +1058,7 @@ impl Backend {
         }
         let source = self.drupal_theme_hook_variable_source(hook);
         if let Some(element) = &source.entry.render_element {
-            lines.push(format!("Render element `{element}`"));
+            lines.push(format!("Render element `{}`", element.name));
         } else if !source.entry.variables.is_empty() {
             let names: Vec<String> = source
                 .entry
@@ -1228,7 +1237,12 @@ class AcmeHooks {
         let label = &box_.variables[0];
         assert_eq!(&php[label.start as usize..label.end as usize], "label");
         let form = &read.entries[1];
-        assert_eq!(form.render_element.as_deref(), Some("form"));
+        assert_eq!(
+            form.render_element
+                .as_ref()
+                .map(|element| element.name.as_str()),
+            Some("form")
+        );
         assert_eq!(form.template.as_deref(), Some("form/acme-form"));
         let card = &read.entries[2];
         assert_eq!(card.base_hook.as_deref(), Some("acme_box"));

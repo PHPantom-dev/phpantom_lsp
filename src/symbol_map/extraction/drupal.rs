@@ -905,7 +905,9 @@ fn extension_of(fqn: &str) -> Option<&str> {
 /// string or a list of names, and its `#theme_wrappers`, a list of names or
 /// of names keying their own variables.  When `#theme` is one name, every
 /// other `#` key may pass one of the hook's variables, which is decided
-/// when it is looked up.
+/// when it is looked up, and the array is a render of the hook's templates
+/// (a [`TwigContextSite`](crate::symbol_map::TwigContextSite) keyed by the
+/// `#theme` value's span) passing those keys without the `#`.
 pub(in crate::symbol_map::extraction) fn emit_drupal_render_array_spans(
     elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
     ctx: &mut ExtractionCtx<'_>,
@@ -924,18 +926,43 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_render_array_spans(
         };
         match key {
             "#theme" => {
-                hook = resolved_string_literal(entry.value, ctx.content).map(|(name, _, _)| name);
+                hook = resolved_string_literal(entry.value, ctx.content);
                 push_theme_hook_spans(entry.value, false, ctx);
             }
             "#theme_wrappers" => push_theme_hook_spans(entry.value, true, ctx),
-            _ if key.len() > 1 && key.starts_with('#') => keys.push((key, start, end)),
+            _ if key.len() > 1 && key.starts_with('#') && !is_render_api_key(key) => {
+                let span = entry.value.span();
+                keys.push((key, start, end, (span.start.offset, span.end.offset)));
+            }
             _ => {}
         }
     }
-    let Some(hook) = hook else {
+    let Some((hook, hook_start, _)) = hook else {
         return;
     };
-    for (key, start, end) in keys {
+    let vars: Vec<crate::symbol_map::TwigContextVar> = keys
+        .iter()
+        .filter(|(key, ..)| crate::twig::variables::is_twig_variable_name(&key[1..]))
+        .map(
+            |(key, start, end, (value_start, value_end))| crate::symbol_map::TwigContextVar {
+                name: crate::atom::atom(&key[1..]),
+                start: *start as u32 + 1,
+                end: *end as u32,
+                value: crate::symbol_map::TwigContextValue::Expression {
+                    start: *value_start,
+                    end: *value_end,
+                },
+            },
+        )
+        .collect();
+    if !vars.is_empty() {
+        ctx.twig_contexts.push(crate::symbol_map::TwigContextSite {
+            template_start: hook_start as u32,
+            vars,
+            shape: None,
+        });
+    }
+    for (key, start, end, _) in keys {
         ctx.spans.push(SymbolSpan {
             start: start as u32,
             end: end as u32,
@@ -947,6 +974,38 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_render_array_spans(
             },
         });
     }
+}
+
+/// The render array keys Drupal's renderer reads itself, which no theme
+/// hook declares as a variable, sorted.
+const RENDER_API_KEYS: [&str; 23] = [
+    "#access",
+    "#access_callback",
+    "#after_build",
+    "#allowed_tags",
+    "#attached",
+    "#cache",
+    "#cache_properties",
+    "#create_placeholder",
+    "#defaults_loaded",
+    "#lazy_builder",
+    "#markup",
+    "#plain_text",
+    "#post_render",
+    "#pre_render",
+    "#prefix",
+    "#printed",
+    "#process",
+    "#render_children",
+    "#sorted",
+    "#states",
+    "#suffix",
+    "#type",
+    "#weight",
+];
+
+fn is_render_api_key(key: &str) -> bool {
+    RENDER_API_KEYS.binary_search(&key).is_ok()
 }
 
 /// Record the theme hooks `$build['#theme'] = …` and
@@ -3407,5 +3466,62 @@ $build['more']['#theme'] = 'item_list';
             ]
         );
         assert!(render_array_reads(php, false).is_empty());
+    }
+
+    /// A render array whose `#theme` is one name renders that hook's
+    /// templates with its other `#` keys, without the `#`.
+    #[test]
+    fn a_theme_render_array_passes_its_hash_keys_to_the_hooks_templates() {
+        let php = r#"<?php
+$build = [
+  '#theme' => 'acme_greeting',
+  '#name' => $name,
+  '#' => 1,
+  '#not-a-name' => 2,
+  '#cache' => ['max-age' => 0],
+  '#weight' => 5,
+  'child' => ['#theme' => ['acme_box__wide', 'acme_box'], '#label' => 'x'],
+];
+$build['more']['#theme'] = 'item_list';
+"#;
+        assert!(RENDER_API_KEYS.is_sorted());
+        let map = map_of(php, true);
+        // The renderer's own keys pass nothing.
+        assert!(!map.spans.iter().any(|span| matches!(
+            &span.kind,
+            SymbolKind::StringKey { kind: StringKeyKind::DrupalThemeHookVariable, key, .. }
+                if key.ends_with("#cache") || key.ends_with("#weight")
+        )));
+        let sites: Vec<(String, Vec<(String, String)>)> = map
+            .twig_contexts
+            .iter()
+            .map(|site| {
+                let start = site.template_start as usize;
+                let hook = &php[start..start + php[start..].find('\'').unwrap()];
+                let vars = site
+                    .vars
+                    .iter()
+                    .map(|var| {
+                        assert_eq!(&php[var.start as usize..var.end as usize], &*var.name);
+                        let value = match var.value {
+                            crate::symbol_map::TwigContextValue::Expression { start, end } => {
+                                php[start as usize..end as usize].to_string()
+                            }
+                            other => format!("{other:?}"),
+                        };
+                        (var.name.to_string(), value)
+                    })
+                    .collect();
+                (hook.to_string(), vars)
+            })
+            .collect();
+        assert_eq!(
+            sites,
+            vec![(
+                "acme_greeting".to_string(),
+                vec![("name".to_string(), "$name".to_string())]
+            )]
+        );
+        assert!(map_of(php, false).twig_contexts.is_empty());
     }
 }

@@ -26,6 +26,7 @@ pub(crate) mod links;
 pub(crate) mod permissions;
 pub(crate) mod routing;
 pub(crate) mod service_providers;
+pub(crate) mod template_variables;
 pub(crate) mod theme_hooks;
 pub(crate) mod types;
 pub(crate) mod upcasting;
@@ -63,6 +64,9 @@ pub(crate) struct DrupalState {
     /// The extensions that build libraries in code, until a file that
     /// implements the hook changes.
     library_builders: RwLock<Option<std::sync::Arc<libraries::LibraryBuilders>>>,
+    /// The theme hook suggestions (`<hook>__<detail>`) render arrays name,
+    /// sorted; see [`template_variables`].
+    theme_suggestions: RwLock<Option<std::sync::Arc<std::collections::BTreeSet<String>>>>,
     /// The services each service provider's `alter()` gives another class,
     /// keyed by the provider's URI; see [`service_providers`].
     service_replacements: RwLock<BTreeMap<String, Vec<(Atom, Atom)>>>,
@@ -356,6 +360,7 @@ impl Backend {
         self.drupal.templates.write().clear();
         *self.drupal.theme_hook_index.write() = None;
         *self.drupal.library_builders.write() = None;
+        *self.drupal.theme_suggestions.write() = None;
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
         self.drupal.default_config_files.write().clear();

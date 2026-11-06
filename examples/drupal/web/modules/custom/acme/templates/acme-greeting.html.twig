@@ -16,5 +16,9 @@
    lands on its key in acme.libraries.yml, or complete a library name inside
    the quotes. #}
 {{ attach_library('acme/greeting') }}
+{# Try: hover `name`, a `string` GreetingController::greet() passes as
+   '#name', or go to its definition, which lands on its key in
+   AcmeHooks::theme(). Complete after `attributes.` to see the methods of
+   core's template Attribute, which Drupal adds to every template. #}
 <p{{ attributes.addClass('acme-greeting') }} data-name="{{ name }}">{{ greeting }}</p>
 <a href="{{ path('acme.greeting', {'name': 'World'}) }}">{{ 'Greet the world'|t }}</a>
