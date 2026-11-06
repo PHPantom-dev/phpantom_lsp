@@ -202,6 +202,7 @@ jobs:
       - run: find examples/yii/src examples/yii/config examples/yii/resources -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: find examples/wordpress/wp-content -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: find examples/drupal/web/modules/custom examples/drupal/web/themes/custom -type f \( -name '*.php' -o -name '*.module' -o -name '*.theme' \) -print0 | xargs -0 -n1 php -l
+      - run: find examples/tempest/app -name '*.php' -print0 | xargs -0 -n1 php -l
 
   benchmark:
     name: Benchmark
@@ -478,7 +479,7 @@ jobs:
           shared-key: build
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.5"
           tools: composer
       - name: Set up musl build
         run: |
@@ -523,7 +524,7 @@ jobs:
           shared-key: build
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.5"
           tools: composer
       - name: Set up musl build
         run: |
