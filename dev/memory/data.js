@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793929992163,
+  "lastUpdate": 1793932876617,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10393,6 +10393,60 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 104.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3046a26e3ea43a22e5056a3e85002e77b6d3fbd7",
+          "message": "Doctrine entity fields in repository calls",
+          "timestamp": "2026-11-06T03:18:31+01:00",
+          "tree_id": "ffdefd4d6dc0ec133b344a6387cf9393ec111a7f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3046a26e3ea43a22e5056a3e85002e77b6d3fbd7"
+        },
+        "date": 1793932862117,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 606.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 46,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 88.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 75.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 127.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 98.9,
             "unit": "MiB"
           }
         ]
