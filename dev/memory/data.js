@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794001282305,
+  "lastUpdate": 1794002911836,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11041,6 +11041,60 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 93.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "giuseppe.esposito@sparkfabrik.com",
+            "name": "Giuseppe.Esposito",
+            "username": "giuseppe-esposito-87"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1da06838638e7b47981125e76fbd41efe35aca01",
+          "message": "Drupal configuration schema read again one file at a time\n\nEditing a configuration schema file, in a buffer or on disk, reads only that file again. The other files keep their parsed entries and trees, and an event whose text did not change reads nothing. A schema file changed on disk keeps its place in the list, so the first declaration of a key still wins, and closing an unsaved new configuration file of a test module drops its names.\n\nAssisted-by: claude-code/claude-opus-5-5",
+          "timestamp": "2026-11-06T22:37:13+01:00",
+          "tree_id": "641bd6f4f45e35514ff2a3ae98407b3bd252f5fb",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1da06838638e7b47981125e76fbd41efe35aca01"
+        },
+        "date": 1794002898029,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 554.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 48,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 76.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 143.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 98.3,
             "unit": "MiB"
           }
         ]
