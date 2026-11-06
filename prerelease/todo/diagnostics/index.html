@@ -1122,6 +1122,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d43-unknown-named-arguments-to-methods-and-functions-are-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D43. Unknown named arguments to methods and functions are not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1774,6 +1785,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d43-unknown-named-arguments-to-methods-and-functions-are-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D43. Unknown named arguments to methods and functions are not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2284,6 +2306,22 @@ severity. <code>tryFrom()</code> with such a literal always returns <code>null</
 worth a Warning. PhpStorm reports both.</p>
 <p><strong>Where to look:</strong> <code>src/diagnostics/enum_errors.rs</code>, and the enum's case
 values on <code>ClassInfo</code>.</p>
+<hr />
+<h2 id="d43-unknown-named-arguments-to-methods-and-functions-are-not-reported">D43. Unknown named arguments to methods and functions are not reported<a class="headerlink" href="#d43-unknown-named-arguments-to-methods-and-functions-are-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$mailer-&gt;send(to: $user, subjct: 'Hi');   // Error: Unknown named parameter $subjct</span>
+</code></pre></div>
+<p>A named argument no parameter of a constructor takes is reported
+(<code>unknown_named_argument</code>), in <code>new</code> and in attributes alike. A method or
+function call is not checked yet. It needs the call target to say whether
+the call is routed through <code>__call</code> or <code>__callStatic</code> (an <code>@method</code> tag, a
+Laravel macro or scope, a facade), which collects unknown names into its
+arguments instead of throwing, and the built-in functions' parameter names
+need to be checked against PHP's own, which named arguments bind to.</p>
+<p><strong>Where to look:</strong> <code>src/diagnostics/argument_count.rs</code>
+(<code>report_unknown_named_arguments</code>), and
+<code>ResolvedCallableTarget</code> in <code>src/types/function.rs</code>, which does not record
+whether the target is a virtual method.</p>
 
 
 
