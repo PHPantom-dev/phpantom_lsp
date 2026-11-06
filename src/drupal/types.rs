@@ -336,7 +336,12 @@ pub(crate) fn config_object_type(
     class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&crate::virtual_members::ResolvedClassCache>,
 ) -> Option<PhpType> {
-    if !backend.is_drupal_project() || !reads_config_object(owner, method_name, class_loader) {
+    // Drupal refuses a configuration name without a namespace, so the far
+    // more common `get('field_name')` of an entity skips the subtype walks.
+    if !name.contains('.')
+        || !backend.is_drupal_project()
+        || !reads_config_object(owner, method_name, class_loader)
+    {
         return None;
     }
     let merged =
