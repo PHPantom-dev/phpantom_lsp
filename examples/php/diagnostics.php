@@ -611,6 +611,27 @@ class UnhandledMatchDemo
 }
 
 
+// ── Diagnostic: Values No Enum Case Is Backed By ────────────────────────────
+// `from()` throws a `ValueError` for a value no case of the enum is backed by,
+// and `tryFrom()` returns `null` for it.  When the value is known, a call that
+// can never find a case is reported.
+
+class EnumFromDemo
+{
+    public function parse(): void
+    {
+        // Error — the case is named Active, but backed by 'active':
+        Scaffolding\Status::from('Active');
+
+        // Warning — no Priority case is backed by 4, so this is always null:
+        Scaffolding\Priority::tryFrom(4);
+
+        // No diagnostic — Status::Pending is backed by 'pending':
+        Scaffolding\Status::from('pending');
+    }
+}
+
+
 // ── Diagnostic: Dynamic Member Names ────────────────────────────────────────
 // A member name written as an expression has to be usable as a name.  A
 // property name is converted to a string, so a `Stringable` object works and

@@ -560,27 +560,6 @@ PHPStan's `MissingCheckedExceptionInThrowsCheck`.
 
 ---
 
-## D42. `from()` with a literal no enum case backs is not reported
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-enum Status: string { case Active = 'active'; }
-
-Status::from('Active');      // ValueError at runtime
-Status::tryFrom('Active');   // always null
-```
-
-When the argument is a literal and the enum is known, whether a case backs
-it is decidable, and `from()` throwing a `ValueError` is a crash, so Error
-severity. `tryFrom()` with such a literal always returns `null`, which is
-worth a Warning. PhpStorm reports both.
-
-**Where to look:** `src/diagnostics/enum_errors.rs`, and the enum's case
-values on `ClassInfo`.
-
----
-
 ## D43. Unknown named arguments to methods and functions are not reported
 
 **Impact: Low-Medium · Complexity: Medium**

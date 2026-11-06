@@ -2176,6 +2176,14 @@ function runDemoAssertions(): void
     } catch (\Error) {
     }
 
+    try {
+        Scaffolding\Status::from('Active');
+        assert(false, "Status::from('Active') throws: no case is backed by 'Active'");
+    } catch (\ValueError) {
+    }
+    assert(Scaffolding\Priority::tryFrom(4) === null, 'no Priority case is backed by 4');
+    assert(Scaffolding\Status::from('pending') === Scaffolding\Status::Pending, "'pending' backs Status::Pending");
+
     echo "All assertions passed.\n";
 }
 

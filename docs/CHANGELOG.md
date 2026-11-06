@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Values no enum case is backed by.** A `from()` call with a value no case of the enum is backed by, such as `Status::from('Active')` when the case is backed by `'active'`, is reported as an error, since it throws a `ValueError`. The same value passed to `tryFrom()` is a warning, since the call always returns `null`.
 - **Symfony form options.** The keys of the options array a form builder's `add()`, a form factory's `create()`, or a controller's `createForm()` passes complete from the options the form type accepts, its parent types and the installed type extensions included, and jump to where each is declared. An option the type does not accept, such as `'requird'`, is reported.
 - **DQL variables of a query builder another method builds.** A query builder another method creates and returns, or that is passed to a method that joins onto it, is checked for DQL variables nothing declares, counting the ones that method declares. A variable a method's returned builder uses is left for its caller to declare.
 - **DQL variables declared on only some branches.** A query builder that uses a DQL variable it only joins under an `if`, a `switch` case, or a loop that may not run is reported, at the use, when some path builds the query without declaring it.
