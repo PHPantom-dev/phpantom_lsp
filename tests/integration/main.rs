@@ -197,6 +197,7 @@ mod diagnostics_unknown_members;
 mod diagnostics_unreachable_code;
 mod diagnostics_unused_variables;
 mod docblock_types;
+mod doctrine_repositories;
 mod document_highlight;
 mod document_links;
 mod document_symbols;

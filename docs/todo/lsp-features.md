@@ -299,13 +299,12 @@ name a repository, and the repository's own
 `parent::__construct()`) names its entity. A pair that breaks the naming
 convention gets no lens.
 
-The attribute needs reading at parse time, with its class name resolved
-the way the parser resolves `extends`, into `ClassInfo` (a field every
-class pays for, or a slot in an optional per-class box). The
-entity-to-repository direction can then read the entity's `ClassInfo`,
-and the repository-to-entity direction the first generic argument of
-its `ServiceEntityRepository`/`EntityRepository` ancestor in
-`extends_generics`. T45 needs the same attribute.
+The parser already records the attribute's repository, fully qualified,
+in `ClassInfo::doctrine_repository`, which is what types
+`getRepository()`. The entity-to-repository direction can read it, and
+the repository-to-entity direction the first generic argument of its
+`ServiceEntityRepository`/`EntityRepository` ancestor in
+`extends_generics`.
 
 **Where to look:** `src/framework.rs`
 (`doctrine_repository_fqns_for_entity`,
@@ -810,8 +809,8 @@ An entity's repository answers `findBy<Field>()`, `findOneBy<Field>()`, and
 `findOneBy()`, `count()`, and `findBy()`'s `$orderBy` take field names as
 array keys. None of the magic methods resolve, and the keys neither
 complete, navigate, nor get checked. The magic methods are virtual members
-of the repository, the way Eloquent's are, which needs the repository's
-entity (T45). The keys are member references to the entity's mapped
+of the repository, the way Eloquent's are, keyed on the entity
+`getRepository()` binds or the repository's own `@extends`. The keys are member references to the entity's mapped
 properties, the same member spans a form field and a validation mapping
 record.
 
@@ -845,7 +844,7 @@ and `getResult()` is `mixed` where the query settles it (`list<User>`, or
 an array shape for a scalar select). PHPStan's Doctrine extension parses the
 DQL with Doctrine's own parser and the booted metadata; PHPantom would need
 a DQL reader of its own over the static mapping, with the query builder's
-chain followed the way T45's repository is.
+chain followed the way `getRepository()`'s repository is.
 
 Navigation and completion of the entity and field names are the cheaper
 half and the one an editor user notices; result types follow. The extension

@@ -281,6 +281,7 @@ $entity = (string) $mapping->entity['name'];
 $repository = (string) $mapping->entity['repository-class'];
 check('The XML mapping names the User entity', $entity === User::class);
 check('The XML mapping names a ServiceEntityRepository', is_subclass_of($repository, ServiceEntityRepository::class));
+check('The mapped repository declares withEmail()', method_exists($repository, 'withEmail'));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

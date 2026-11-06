@@ -523,6 +523,13 @@ pub struct ClassInfo {
     /// When `#[\Attribute]` is used without arguments, the default is
     /// [`attribute_target::TARGET_ALL`] (all targets).
     pub attribute_targets: u8,
+    /// The repository class a Doctrine entity names in
+    /// `#[ORM\Entity(repositoryClass: ...)]`, fully qualified.
+    ///
+    /// `None` when the class carries no such attribute.  A YAML or XML
+    /// mapping can name a repository too; those pairs live in the
+    /// backend's Doctrine mapping index, not here.
+    pub doctrine_repository: Option<Atom>,
     /// Laravel-specific metadata (custom collections, casts, attribute
     /// defaults, column names). `None` for non-Laravel classes to avoid
     /// per-class allocation overhead.
@@ -810,6 +817,7 @@ impl ClassInfo {
             || self.deprecation_message != other.deprecation_message
             || self.deprecated_replacement != other.deprecated_replacement
             || self.attribute_targets != other.attribute_targets
+            || self.doctrine_repository != other.doctrine_repository
             || self.template_params != other.template_params
             || self.template_param_bounds != other.template_param_bounds
             || self.template_param_defaults != other.template_param_defaults

@@ -251,6 +251,10 @@ pub(super) fn extract_class<'a>(
         class_docblock_start: doc_info.docblock_start,
         doc_members: doc_info.doc_members,
         attribute_targets: attr_targets,
+        doctrine_repository: attributes::extract_doctrine_repository_class(
+            &class.attribute_lists,
+            doc_ctx,
+        ),
         laravel: Some(Box::new(laravel_metadata)),
         ..Default::default()
     }

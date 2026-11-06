@@ -7,11 +7,67 @@
 //! attribute class may be applied.
 
 use mago_span::HasSpan;
+use mago_syntax::cst::argument::PartialArgument;
 use mago_syntax::cst::attribute::AttributeList;
 use mago_syntax::cst::sequence::Sequence;
 
-use crate::atom::last_segment;
+use crate::atom::{Atom, atom, bytes_to_str, last_segment};
 use crate::types::attribute_target;
+
+use super::DocblockCtx;
+
+/// Doctrine ORM's entity mapping attribute.
+const DOCTRINE_ENTITY: &str = "Doctrine\\ORM\\Mapping\\Entity";
+
+/// The repository class `#[ORM\Entity(repositoryClass: ...)]` names, in
+/// the form name resolution qualifies along with the class's other
+/// references: an `X::class` as written, and a string, which PHP never
+/// reads through the file's imports, as a fully-qualified `\X`.
+///
+/// The attribute's own name is read through the file's imports and
+/// namespace; without a [`DocblockCtx`] the name as written is taken to be
+/// fully qualified.
+pub(super) fn extract_doctrine_repository_class(
+    attribute_lists: &Sequence<'_, AttributeList<'_>>,
+    ctx: Option<&DocblockCtx<'_>>,
+) -> Option<Atom> {
+    let attr = attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+        .find(|attr| {
+            let raw = bytes_to_str(attr.name.value());
+            match ctx {
+                Some(ctx) => crate::names::resolve_to_fqn(raw, &ctx.use_map, &ctx.namespace)
+                    .eq_ignore_ascii_case(DOCTRINE_ENTITY),
+                None => raw
+                    .strip_prefix('\\')
+                    .unwrap_or(raw)
+                    .eq_ignore_ascii_case(DOCTRINE_ENTITY),
+            }
+        })?;
+    // `repositoryClass` is the attribute constructor's first parameter.
+    let arguments = &attr.argument_list.as_ref()?.arguments;
+    let value = match arguments.first()? {
+        PartialArgument::Positional(positional) => positional.value,
+        PartialArgument::Named(_) => arguments.iter().find_map(|arg| match arg {
+            PartialArgument::Named(named) if named.name.value == b"repositoryClass" => {
+                Some(named.value)
+            }
+            _ => None,
+        })?,
+        _ => return None,
+    };
+    if let Some(name) = crate::parser::class_fetch_identifier(value) {
+        return Some(atom(bytes_to_str(name.value())));
+    }
+    let span = value.span();
+    let text = ctx?
+        .content
+        .get(span.start.offset as usize..span.end.offset as usize)?;
+    let name = crate::util::unescape_php_string_literal(text.trim())?;
+    let name = name.trim().trim_start_matches('\\');
+    (!name.is_empty()).then(|| atom(&format!("\\{name}")))
+}
 
 /// Extract the PHP attribute target bitmask from a class's attribute lists.
 ///

@@ -97,6 +97,9 @@ catalogues together, the way a real Symfony project does.
   `HandleTrait::handle()` gets back from the message's handler.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
+- In `DemoController`, hover `$users`. `getRepository(User::class)` returns
+  the `UserRepository` the Doctrine mapping names, so its own
+  `withEmail()` completes.
 
 ## Getting started
 

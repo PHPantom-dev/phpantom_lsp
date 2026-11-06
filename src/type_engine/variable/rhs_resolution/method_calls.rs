@@ -259,6 +259,19 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             {
                 return result;
             }
+            if let Some(ty) = crate::type_engine::call_resolution::repository_at_call(
+                owner,
+                &method_name,
+                &arg_refs,
+                &rctx,
+            ) {
+                return crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+                    ty,
+                    "",
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
+                );
+            }
             if let Some(result) = super::drupal_calls::try_resolve_entity_storage_type(
                 owner,
                 &method_name,

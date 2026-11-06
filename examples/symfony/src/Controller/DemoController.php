@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Entity\User;
 use App\Event\OrderPlaced;
 use App\Message\SendWelcomeEmail;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -20,6 +21,7 @@ final class DemoController extends AbstractController
         private readonly TranslatorInterface $translator,
         private readonly EventDispatcherInterface $events,
         private readonly MessageBusInterface $commandBus,
+        private readonly EntityManagerInterface $entityManager,
         // Try: go-to-definition on the parameter name, declared in
         // config/services.php.
         #[Autowire(param: 'app.sender_name')]
@@ -46,6 +48,11 @@ final class DemoController extends AbstractController
         // container builder, or complete inside get('') to see the services
         // the installed bundles declare too, such as 'cache.app'.
         $container->get('app.default_mailer')->send($userId);
+        // Try: hover $users, or complete after $users->. The mapping in
+        // config/doctrine/User.orm.xml names UserRepository as the entity's
+        // repository, so getRepository() returns it, not EntityRepository.
+        $users = $this->entityManager->getRepository(User::class);
+        $users->withEmail('ada@example.com');
         // Try: complete a route name inside generateUrl('').
         $this->generateUrl('app_demo', ['userId' => $userId]);
         // Try: go-to-definition on a translation key, or complete one inside

@@ -10,4 +10,11 @@ use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
  */
 final class UserRepository extends ServiceEntityRepository
 {
+    /**
+     * @return list<User>
+     */
+    public function withEmail(string $email): array
+    {
+        return $this->findBy(['email' => $email]);
+    }
 }
