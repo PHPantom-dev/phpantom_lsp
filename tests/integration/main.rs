@@ -209,6 +209,7 @@ mod drupal_directories;
 mod drupal_entities;
 mod drupal_hooks;
 mod drupal_mixed_workspace;
+mod drupal_permissions;
 mod drupal_routes;
 mod drupal_services;
 mod duplicate_class_declarations;

@@ -21,6 +21,7 @@ use Drupal\acme\Hook\AcmeHooks;
 use Drupal\acme\NoteCounter;
 use Drupal\Component\FileCache\FileCacheFactory;
 use Drupal\Component\Serialization\Yaml;
+use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
@@ -35,6 +36,7 @@ use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Language\LanguageManager;
+use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Link;
 use Drupal\Core\Url;
 use Drupal\language\ConfigurableLanguageManager;
@@ -208,6 +210,24 @@ check('acme.note declares the {acme_note} parameter', str_contains($routes['acme
 check('NoteController::view() names its parameter after the acme_note entity type', $noteParameter->getName() === ($noteType['id'] ?? null));
 check('NoteController::view() hints the parameter with an interface Note implements, so Drupal upcasts it', $noteParameter->getType()?->getName() === EntityInterface::class && is_subclass_of(Note::class, EntityInterface::class));
 check("acme.note's title callback is NoteController::title(), which receives the same parameter", ltrim($routes['acme.note']['defaults']['_title_callback'] ?? '', '\\') === NoteController::class . '::title' && (new ReflectionMethod(NoteController::class, 'title'))->getParameters()[0]->getName() === 'acme_note');
+
+// ─── Permissions ────────────────────────────────────────────────────────────
+
+$permissions = Yaml::decode((string) file_get_contents("$module/acme.permissions.yml"));
+$corePermissions = Yaml::decode((string) file_get_contents("$web/core/modules/system/system.permissions.yml"));
+$noteAccessSource = (string) file_get_contents("$module/src/NoteAccess.php");
+check('acme.permissions.yml declares administer acme with a title and a description', isset($permissions['administer acme']['title'], $permissions['administer acme']['description']));
+check('administer acme is restricted to trusted roles', ($permissions['administer acme']['restrict access'] ?? false) === true);
+check('acme.permissions.yml declares view acme notes', isset($permissions['view acme notes']['title']));
+check("core's system.permissions.yml declares access content", isset($corePermissions['access content']));
+check('NoteAccess::canManage() checks administer acme', str_contains($noteAccessSource, "\$account->hasPermission('administer acme')"));
+check('AccountInterface::hasPermission() takes the permission first', (new ReflectionMethod(AccountInterface::class, 'hasPermission'))->getParameters()[0]->getName() === 'permission');
+check('NoteAccess::view() lists access content and view acme notes', str_contains($noteAccessSource, "AccessResult::allowedIfHasPermissions(\$account, ['access content', 'view acme notes'], 'OR')"));
+check('AccessResult::allowedIfHasPermissions() takes the permissions second', (new ReflectionMethod(AccessResult::class, 'allowedIfHasPermissions'))->getParameters()[1]->getName() === 'permissions');
+$noteRequirement = $routes['acme.note']['requirements']['_permission'] ?? '';
+check('acme.note requires either of two acme permissions', explode('+', $noteRequirement) === ['view acme notes', 'administer acme'] && array_diff(explode('+', $noteRequirement), array_keys($permissions)) === []);
+check("PermissionAccessCheck reads a route's `+` as any of its permissions", str_contains((string) file_get_contents("$web/core/modules/user/src/Access/PermissionAccessCheck.php"), "explode('+', \$permission);"));
+check("acme_note's admin permission is administer acme, which acme.permissions.yml declares", $noteDefinition->getAdminPermission() === 'administer acme' && isset($permissions['administer acme']));
 
 // ─── Hooks and theme hooks ──────────────────────────────────────────────────
 

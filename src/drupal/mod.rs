@@ -19,6 +19,7 @@ use parking_lot::RwLock;
 pub(crate) mod computed_hooks;
 pub(crate) mod hooks;
 pub(crate) mod links;
+pub(crate) mod permissions;
 pub(crate) mod routing;
 pub(crate) mod service_providers;
 pub(crate) mod types;
@@ -62,6 +63,8 @@ pub(crate) enum DeclarationFile {
     Routing,
     /// `<extension>.links.{menu,task,action,contextual}.yml`.
     Links,
+    /// `<extension>.permissions.yml`.
+    Permissions,
 }
 
 /// The kind of declaration file the file name at the end of `path` is, if
@@ -73,6 +76,8 @@ fn declaration_file_kind(path: &str) -> Option<DeclarationFile> {
         Some(DeclarationFile::Services)
     } else if name.ends_with(".routing.yml") {
         Some(DeclarationFile::Routing)
+    } else if name.ends_with(".permissions.yml") {
+        Some(DeclarationFile::Permissions)
     } else if [
         ".links.menu.yml",
         ".links.task.yml",
@@ -217,7 +222,7 @@ pub(crate) fn matches_route_pattern(pattern: &str, name: &str) -> bool {
 }
 
 /// Whether `path` is a file Drupal reads declarations from: a services,
-/// routing, or links file, or an extension's `*.info.yml`.
+/// routing, links, or permissions file, or an extension's `*.info.yml`.
 pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())

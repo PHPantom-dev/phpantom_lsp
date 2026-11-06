@@ -75,6 +75,15 @@ Run `composer install` here first. Composer puts core and contrib into
   the implementation in `src/Hook/AcmeHooks.php` and the documentation in
   `acme.api.php`. Type `function acme_` on a new line of `acme.module` to
   complete a hook with its documented signature.
+- Permission names navigate between the permissions file that declares
+  them and the code and routes that require them. In
+  `web/modules/custom/acme/src/NoteAccess.php`, hover `'administer acme'` to
+  read its title and description from `acme.permissions.yml`, go to the
+  definition of `'access content'`, which lands in core's
+  `system.permissions.yml`, or complete a permission inside
+  `hasPermission('')`. Each part of the `_permission` of `acme.note` in
+  `acme.routing.yml` and the `admin_permission` of `Note` navigate and
+  complete too.
 - A module's service provider may build a service from a class of its own.
   In `acme_french_site_name()` in `web/modules/custom/acme/acme.module`,
   hover `$languageManager`: core declares `language_manager` as

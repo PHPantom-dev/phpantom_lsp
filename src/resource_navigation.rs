@@ -307,6 +307,9 @@ impl Backend {
                     spans = crate::drupal::links::links_route_spans(content);
                     spans.extend(crate::drupal::links::links_parameter_spans(content));
                 }
+                crate::drupal::DeclarationFile::Permissions => {
+                    spans = crate::drupal::permissions::permissions_spans(content);
+                }
             }
         } else if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
             declares_twig_loader = crate::symfony::tags::tags_twig_loader(content);

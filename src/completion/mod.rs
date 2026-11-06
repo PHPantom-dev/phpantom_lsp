@@ -80,6 +80,7 @@ pub(crate) mod builder;
 pub(crate) mod command_params;
 mod doctrine_fields;
 pub(crate) mod drupal_hooks;
+mod drupal_permissions;
 mod drupal_route_params;
 pub(crate) mod eloquent_model_attributes;
 pub(crate) mod eloquent_string;

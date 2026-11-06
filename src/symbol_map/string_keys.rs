@@ -182,6 +182,11 @@ pub(crate) enum StringKeyKind {
     /// theme manager's calls that invoke it, and read by the implementations
     /// a `#[Hook]` attribute or a procedural function's name make.
     DrupalHook,
+    /// A Drupal permission name: declared by a top-level key of a
+    /// permissions file, and read by an account's or a role's
+    /// `hasPermission()`, the access result helpers, a route's
+    /// `_permission` requirement, and an entity type's `admin_permission`.
+    DrupalPermission,
 }
 
 impl StringKeyKind {
@@ -232,7 +237,8 @@ impl StringKeyKind {
             Self::DrupalEntityType
             | Self::DrupalRoute
             | Self::DrupalRouteParameter
-            | Self::DrupalHook => KeyFramework::Drupal,
+            | Self::DrupalHook
+            | Self::DrupalPermission => KeyFramework::Drupal,
         }
     }
 
@@ -873,6 +879,11 @@ const DRUPAL_ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterfac
 const DRUPAL_ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
 pub(crate) const DRUPAL_MODULE_HANDLER: &str = "Drupal\\Core\\Extension\\ModuleHandlerInterface";
 pub(crate) const DRUPAL_THEME_MANAGER: &str = "Drupal\\Core\\Theme\\ThemeManagerInterface";
+const DRUPAL_ACCOUNT: &str = "Drupal\\Core\\Session\\AccountInterface";
+const DRUPAL_ROLE: &str = "Drupal\\user\\RoleInterface";
+const DRUPAL_PERMISSION_CHECKER: &str = "Drupal\\Core\\Session\\PermissionCheckerInterface";
+const DRUPAL_CALCULATED_PERMISSIONS_ITEM: &str =
+    "Drupal\\Core\\Session\\CalculatedPermissionsItemInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -1003,6 +1014,13 @@ pub(crate) enum ReceiverClass {
     ThemeHooks,
     /// Either of the two, for the methods they share.
     Hooks,
+    /// What `hasPermission()` takes a permission name first on: an
+    /// account, a role, the permission checker, and a calculated
+    /// permissions item.
+    PermissionCheck,
+    /// A Drupal role, whose `grantPermission()` and `revokePermission()`
+    /// take a permission name.
+    RolePermissions,
     /// Symfony's serializer, normalizers, and denormalizers, whose
     /// `serialize()`, `deserialize()`, `normalize()`, and `denormalize()`
     /// take a context whose `groups` name serializer groups.
@@ -1129,6 +1147,16 @@ impl ReceiverClass {
                 (DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook),
                 (DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook),
             ],
+            Self::PermissionCheck => &[
+                (DRUPAL_ACCOUNT, StringKeyKind::DrupalPermission),
+                (DRUPAL_ROLE, StringKeyKind::DrupalPermission),
+                (DRUPAL_PERMISSION_CHECKER, StringKeyKind::DrupalPermission),
+                (
+                    DRUPAL_CALCULATED_PERMISSIONS_ITEM,
+                    StringKeyKind::DrupalPermission,
+                ),
+            ],
+            Self::RolePermissions => &[(DRUPAL_ROLE, StringKeyKind::DrupalPermission)],
             Self::Serializer => &[
                 (SYMFONY_SERIALIZER, StringKeyKind::SerializerGroup),
                 (SYMFONY_NORMALIZER, StringKeyKind::SerializerGroup),

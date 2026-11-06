@@ -97,11 +97,14 @@ impl CheckedStringKind {
             // an entity type in PHP, through `hook_entity_type_build()`.
             // Drupal sends a route parameter no path declares as the query
             // string.  A serializer group nothing puts a member in selects
-            // nothing, which is no error either.
+            // nothing, which is no error either.  A module can declare
+            // permissions in PHP, through a permissions file's
+            // `permission_callbacks`.
             StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalHook
+            | StringKeyKind::DrupalPermission
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack

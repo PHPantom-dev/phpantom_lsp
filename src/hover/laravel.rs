@@ -113,6 +113,7 @@ impl Backend {
         let view_path;
         let (label, detail) = match kind {
             StringKeyKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
+            StringKeyKind::DrupalPermission => ("Permission", self.drupal_permission_detail(key)),
             StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
             StringKeyKind::TwigBlock => (
                 "Block",

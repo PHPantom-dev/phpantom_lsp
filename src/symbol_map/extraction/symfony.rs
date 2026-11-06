@@ -150,6 +150,10 @@ pub(crate) fn symfony_receiver_method(
         {
             Some((ReceiverClass::EntityTypeManager, false))
         }
+        0 if is("hasPermission") => Some((ReceiverClass::PermissionCheck, false)),
+        0 if is("grantPermission") || is("revokePermission") => {
+            Some((ReceiverClass::RolePermissions, false))
+        }
         0 if is("addListener") => Some((ReceiverClass::EventListeners, true)),
         0 if is("removeListener")
             || is("hasListeners")

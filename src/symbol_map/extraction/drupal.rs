@@ -43,8 +43,18 @@ const ENTITY_TYPE_KINDS: [EntityTypeKind; 3] = [
     },
 ];
 
+/// Whether `attribute`, a resolved class name, is one of the attributes
+/// that declare an entity type.
+pub(crate) fn is_entity_type_attribute(attribute: &str) -> bool {
+    let attribute = attribute.trim_start_matches('\\');
+    ENTITY_TYPE_KINDS
+        .iter()
+        .any(|kind| kind.attribute.eq_ignore_ascii_case(attribute))
+}
+
 /// Record the entity type `class` declares: a span over its ID, and the
-/// class and storage the ID stands for.
+/// class and storage the ID stands for, and a span over the permission its
+/// `admin_permission` names.
 pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
     class: &Class<'_>,
     ctx: &mut ExtractionCtx<'_>,
@@ -53,6 +63,7 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
         return;
     }
     let mut found = Vec::new();
+    let mut admin_permissions = Vec::new();
     for kind in &ENTITY_TYPE_KINDS {
         for attribute in attributes_named(&class.attribute_lists, kind.attribute, ctx) {
             let mut id = None;
@@ -64,6 +75,16 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
                         if let Some(named) = handler_class(value, "storage", ctx) {
                             storage = Some(named);
                         }
+                    }
+                    "admin_permission" => {
+                        push_laravel_string_span(
+                            StringKeyKind::DrupalPermission,
+                            false,
+                            false,
+                            value,
+                            ctx.content,
+                            &mut admin_permissions,
+                        );
                     }
                     _ => {}
                 }
@@ -78,10 +99,14 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
         && doc.contains("EntityType(")
     {
         found.extend(annotation_entity_type(doc, offset));
+        if !found.is_empty() {
+            admin_permissions.extend(annotation_admin_permission(doc, offset));
+        }
     }
     if found.is_empty() {
         return;
     }
+    ctx.spans.extend(admin_permissions);
     let Some(fqn) = ctx
         .resolved_name_at(class.name.span.start.offset)
         .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
@@ -148,12 +173,15 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
     // Drupal's discovery reads attributes only, never `@Route` annotations.
     let class_routes = route_declarations(&class.attribute_lists, None, class, ctx);
     let class_details = route_details(&class.attribute_lists, ctx);
+    let mut spans: Vec<SymbolSpan> = class_details
+        .iter()
+        .flat_map(|details| details.permissions.iter().cloned())
+        .collect();
     let prefix = match class_routes.first().map(|route| &route.name) {
         Some(RouteName::Literal(name, _, _)) => name.as_str(),
         _ => "",
     };
     let is_named = |route: &&RouteDeclaration| matches!(route.name, RouteName::Literal(..));
-    let mut spans = Vec::new();
     let mut sites = Vec::new();
     let mut aliases = Vec::new();
     let mut route_count = 0usize;
@@ -169,6 +197,11 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
         invokable |= is_invoke;
         let routes = route_declarations(&method.attribute_lists, None, class, ctx);
         let details = route_details(&method.attribute_lists, ctx);
+        spans.extend(
+            details
+                .iter()
+                .flat_map(|details| details.permissions.iter().cloned()),
+        );
         any_method_route |= !routes.is_empty();
         let named = routes.iter().filter(is_named).count();
         route_count += named;
@@ -246,6 +279,8 @@ struct RouteDetails {
     title_callback: Option<String>,
     entity_view: Option<String>,
     entity_form: Option<String>,
+    /// The spans of the permissions its `_permission` requirement names.
+    permissions: Vec<SymbolSpan>,
 }
 
 /// The details of each `#[Route]` among `attribute_lists`, in the order
@@ -293,6 +328,9 @@ fn route_details(
                     details.entity_form = default("_entity_form")
                         .and_then(|form| crate::drupal::routing::entity_type_of(&form));
                     details.defaults = default_values(value, content);
+                }
+                "requirements" => {
+                    push_requirements_permissions(value, content, &mut details.permissions);
                 }
                 _ => {}
             }
@@ -1182,6 +1220,155 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_url_spans(
     }
 }
 
+/// Record the permissions `new Route()` requires: the `_permission` of its
+/// requirements array, the third argument.
+pub(in crate::symbol_map::extraction) fn emit_drupal_route_permission_spans(
+    class: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Expression::Identifier(identifier) = class else {
+        return;
+    };
+    let resolved = ctx
+        .resolved_name_at(identifier.span().start.offset)
+        .unwrap_or_else(|| bytes_to_str(identifier.value()));
+    if resolved
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case(SYMFONY_ROUTE)
+        && let Some(requirements) = argument_at(argument_list, 2, b"requirements")
+    {
+        push_requirements_permissions(requirements, ctx.content, &mut ctx.spans);
+    }
+}
+
+const SYMFONY_ROUTE: &str = "Symfony\\Component\\Routing\\Route";
+
+/// Record the permissions a method call reads: the `_permission` a route's
+/// `setRequirement()` or `setRequirements()` sets.  The calls that check a
+/// permission on an account or a role are recorded with the receiver they
+/// need (see `symfony_receiver_method`).
+pub(in crate::symbol_map::extraction) fn emit_drupal_requirement_permission_spans(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let is = |name: &str| member_name.eq_ignore_ascii_case(name);
+    if !ctx.drupal || !(is("setRequirement") || is("setRequirements")) {
+        return;
+    }
+    if is("setRequirement") {
+        let is_permission = argument_at(argument_list, 0, b"key")
+            .and_then(|key| resolved_string_literal(key, ctx.content))
+            .is_some_and(|(key, _, _)| key == "_permission");
+        if is_permission && let Some(value) = argument_at(argument_list, 1, b"regex") {
+            push_requirement_permissions(value, ctx.content, &mut ctx.spans);
+        }
+    } else if let Some(requirements) = argument_at(argument_list, 0, b"requirements") {
+        push_requirements_permissions(requirements, ctx.content, &mut ctx.spans);
+    }
+}
+
+/// Record the permissions a static call reads: the second argument of
+/// `AccessResult::allowedIfHasPermission()`, and each one in the array
+/// `allowedIfHasPermissions()` takes second.
+pub(in crate::symbol_map::extraction) fn emit_drupal_static_permission_spans(
+    class: &str,
+    method: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some(list) = crate::drupal::permissions::static_permission_call(class, method) else {
+        return;
+    };
+    let Some(argument) = argument_at(argument_list, 1, b"permission")
+        .or_else(|| argument_at(argument_list, 1, b"permissions"))
+    else {
+        return;
+    };
+    if list {
+        push_permission_list(argument, ctx.content, &mut ctx.spans);
+    } else {
+        push_laravel_string_span(
+            StringKeyKind::DrupalPermission,
+            false,
+            false,
+            argument,
+            ctx.content,
+            &mut ctx.spans,
+        );
+    }
+}
+
+/// Record the permissions `user_role_grant_permissions()` and
+/// `user_role_revoke_permissions()`, written as `written`, take in the
+/// array they take second.
+pub(in crate::symbol_map::extraction) fn emit_drupal_function_permission_spans(
+    written: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || !crate::drupal::permissions::is_role_permissions_function(written) {
+        return;
+    }
+    if let Some(permissions) = argument_at(argument_list, 1, b"permissions") {
+        push_permission_list(permissions, ctx.content, &mut ctx.spans);
+    }
+}
+
+/// Push a span for each permission an array literal lists.
+fn push_permission_list(list: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
+    let Some(elements) = crate::parser::array_literal_elements(list) else {
+        return;
+    };
+    for element in elements.iter() {
+        if let ArrayElement::Value(value) = element {
+            push_laravel_string_span(
+                StringKeyKind::DrupalPermission,
+                false,
+                false,
+                value.value,
+                content,
+                spans,
+            );
+        }
+    }
+}
+
+/// Push the spans of the permissions a requirements array's `_permission`
+/// names.
+fn push_requirements_permissions(
+    requirements: &Expression<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    if let Some(value) = array_entry(requirements, "_permission", content) {
+        push_requirement_permissions(value, content, spans);
+    }
+}
+
+/// Push the spans of the permissions a `_permission` requirement written
+/// as `value` names, each part of an `a+b` or `a,b` on its own.
+fn push_requirement_permissions(
+    value: &Expression<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    // A string with escapes reads differently from its text, whose
+    // offsets the parts would not match.
+    if let Some((text, start, end)) = resolved_string_literal(value, content)
+        && text.len() == end - start
+    {
+        spans.extend(crate::drupal::permissions::requirement_spans(text, start));
+    }
+}
+
 /// Record the route name a call reads in its positional argument `index`,
 /// or in the `route_name:` argument that names it, and the parameters of
 /// that route it passes in the argument after it, or in the
@@ -1348,6 +1535,29 @@ fn annotation_entity_type(doc: &str, offset: u32) -> Option<(String, u32, u32, O
     })
 }
 
+/// The span of the permission the `admin_permission` of an entity type
+/// annotation in the docblock `doc`, which starts at `offset` in the file,
+/// names.
+fn annotation_admin_permission(doc: &str, offset: u32) -> Option<SymbolSpan> {
+    let body = ENTITY_TYPE_KINDS
+        .iter()
+        .find_map(|kind| Some(doc.find(kind.annotation)? + kind.annotation.len()))?;
+    let entry = annotation_entries(doc, body)
+        .into_iter()
+        .find(|entry| entry.path.is_empty() && entry.key == "admin_permission")?;
+    let key = &doc[entry.value_start..entry.value_end];
+    (!key.is_empty()).then(|| SymbolSpan {
+        start: offset + entry.value_start as u32,
+        end: offset + entry.value_end as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalPermission,
+            key: key.to_string(),
+            is_write: false,
+            is_optional: false,
+        },
+    })
+}
+
 /// A `key = "value"` pair of an annotation, with the keys of the `{…}`
 /// blocks around it.
 struct AnnotationEntry<'d> {
@@ -1484,6 +1694,116 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Each method that checks or changes a permission reaches the classes
+    /// that have it, and no other table claims the method first.
+    #[test]
+    fn every_permission_method_reaches_its_drupal_classes() {
+        for (method, classes) in [
+            (
+                "hasPermission",
+                &[
+                    "Drupal\\Core\\Session\\AccountInterface",
+                    "Drupal\\user\\RoleInterface",
+                    "Drupal\\Core\\Session\\PermissionCheckerInterface",
+                    "Drupal\\Core\\Session\\CalculatedPermissionsItemInterface",
+                ][..],
+            ),
+            ("grantPermission", &["Drupal\\user\\RoleInterface"][..]),
+            ("revokePermission", &["Drupal\\user\\RoleInterface"][..]),
+        ] {
+            let (receiver, is_write) =
+                crate::symbol_map::extraction::symfony_receiver_method(method, 0)
+                    .unwrap_or_else(|| panic!("{method} names no permission"));
+            assert!(!is_write, "{method}");
+            for class in classes {
+                assert!(
+                    receiver
+                        .targets()
+                        .contains(&(*class, StringKeyKind::DrupalPermission)),
+                    "{method}: {receiver:?} has no {class} target"
+                );
+            }
+            assert!(hook_invocation(method, 0).is_none(), "{method}");
+            assert!(
+                crate::drupal::route_parameter_call(method).is_none(),
+                "{method}"
+            );
+        }
+    }
+
+    /// Each permission a requirement, a list, or an entity type names is a
+    /// span over its own text.
+    #[test]
+    fn permission_spans_cover_each_name() {
+        let php = r#"<?php
+namespace Drupal\acme;
+use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+use Symfony\Component\Routing\Route;
+#[ContentEntityType(id: 'acme_note', admin_permission: 'administer acme')]
+class Note {
+    public function run($account, $route): void {
+        new Route('/a', [], ['_permission' => 'a+b']);
+        new Route('/a', requirements: ['_permission' => 'c,d+e']);
+        $route->setRequirement('_permission', 'f');
+        $route->setRequirement('_format', 'json');
+        AccessResult::allowedIfHasPermissions($account, ['g', 'h'], 'OR');
+        AccessResult::allowedIfHasPermission($account, 'i');
+        user_role_grant_permissions('editor', ['j']);
+    }
+}
+"#;
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: true,
+                twig: false,
+                doctrine: false,
+            },
+            None,
+        );
+        let found: Vec<&str> = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalPermission,
+                    key,
+                    ..
+                } => {
+                    let text = &php[span.start as usize..span.end as usize];
+                    assert_eq!(key, text);
+                    Some(text)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "administer acme",
+                "a",
+                "b",
+                "c",
+                "d+e",
+                "f",
+                "g",
+                "h",
+                "i",
+                "j"
+            ]
+        );
     }
 
     /// The entity type IDs, classes, and storages `php` declares.

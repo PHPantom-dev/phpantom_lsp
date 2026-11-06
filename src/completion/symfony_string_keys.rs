@@ -445,6 +445,11 @@ impl Backend {
         cursor: usize,
         ctx: &FileContext,
     ) -> Option<StringKeyKind> {
+        // Resolving the receiver is the costly part, and is wasted on a
+        // call whose every kind of key the project does not read.
+        if !receiver.names_any(|kind| self.string_key_kind_enabled(kind)) {
+            return None;
+        }
         let loaders = self.file_loaders(ctx);
         let class_loader = loaders.resolved_class_loader();
         let rctx = loaders.resolution_ctx_at(content, cursor as u32);
@@ -462,7 +467,7 @@ impl Backend {
             })
     }
 
-    fn symfony_key_response(
+    pub(crate) fn symfony_key_response(
         &self,
         uri: &str,
         kind: StringKeyKind,
@@ -626,7 +631,11 @@ impl Backend {
                     StringKeyKind::DrupalRoute,
                     crate::drupal::links::links_route_name_start(content, cursor)?,
                 ),
-                crate::drupal::DeclarationFile::Routing => return None,
+                crate::drupal::DeclarationFile::Routing => (
+                    StringKeyKind::DrupalPermission,
+                    crate::drupal::permissions::routing_permission_start(content, cursor)?,
+                ),
+                crate::drupal::DeclarationFile::Permissions => return None,
             }
         } else if !is_symfony {
             return None;
@@ -727,6 +736,11 @@ fn attribute_key(
             ArgumentSlot::Named("hook") | ArgumentSlot::Positional(0)
         )
         .then_some((StringKeyKind::DrupalHook, literal_start));
+    }
+    if matches!(slot, ArgumentSlot::Named("admin_permission"))
+        && crate::symbol_map::extraction::is_entity_type_attribute(&attribute)
+    {
+        return Some((StringKeyKind::DrupalPermission, literal_start));
     }
     if is_message_handler_attribute(&attribute) {
         return matches!(

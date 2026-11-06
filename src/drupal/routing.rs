@@ -379,7 +379,8 @@ pub(crate) fn entity_type_of(value: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The entity type and service spans of a routing file, in source order.
+/// The entity type, service, and permission spans of a routing file, in
+/// source order.
 pub(crate) fn routing_value_spans(content: &str) -> Vec<SymbolSpan> {
     let mut spans = Vec::new();
     for (line_start, line) in crate::framework::line_offsets(content) {
@@ -397,6 +398,13 @@ pub(crate) fn routing_value_spans(content: &str) -> Vec<SymbolSpan> {
         let trimmed = raw.trim_start();
         let (value, (quote, _)) = crate::framework::strip_yaml_quotes(trimmed.trim_end());
         let value_start = line_start + indent + colon + 1 + (raw.len() - trimmed.len()) + quote;
+        if key == "_permission" {
+            spans.extend(crate::drupal::permissions::requirement_spans(
+                value,
+                value_start,
+            ));
+            continue;
+        }
         let found = match key {
             // `node.edit` is the form `edit` of the entity type `node`, and
             // `node.full` its view mode `full`.
@@ -442,7 +450,7 @@ mod tests {
 
     #[test]
     fn entity_and_service_defaults_read_their_names() {
-        let yaml = "a:\n  path: '/a'\n  defaults:\n    _entity_form: 'node.edit'\n    _entity_view: node.full\n    _entity_list: node_type\n    _controller: acme.greeter:greet\n    _title_callback: '\\Drupal\\acme\\Title::get'\n  requirements:\n    _entity_access: node.update\n";
+        let yaml = "a:\n  path: '/a'\n  defaults:\n    _entity_form: 'node.edit'\n    _entity_view: node.full\n    _entity_list: node_type\n    _controller: acme.greeter:greet\n    _title_callback: '\\Drupal\\acme\\Title::get'\n  requirements:\n    _entity_access: node.update\n    _permission: 'access content+administer acme'\n";
         let found: Vec<(&str, StringKeyKind)> = routing_value_spans(yaml)
             .iter()
             .map(|span| {
@@ -459,6 +467,8 @@ mod tests {
                 ("node", StringKeyKind::DrupalEntityType),
                 ("node_type", StringKeyKind::DrupalEntityType),
                 ("acme.greeter", StringKeyKind::ServiceId),
+                ("access content", StringKeyKind::DrupalPermission),
+                ("administer acme", StringKeyKind::DrupalPermission),
             ]
         );
     }
