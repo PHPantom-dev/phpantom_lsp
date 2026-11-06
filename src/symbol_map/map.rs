@@ -257,6 +257,13 @@ pub(crate) struct SymbolMap {
     /// A call cast to `(void)`, or used in any other way, is not one of
     /// these.
     pub discarded_calls: Vec<(u32, u32)>,
+    /// `(start, args_start)` of every function, method, and static method
+    /// call whose value something reads, sorted by `args_start`.  A call is left out when its
+    /// value goes nowhere: a call statement, a call cast to `(void)`, the
+    /// right-hand side of `&&`, `||`, `and`, `or` or `??` and a branch of
+    /// a ternary or `match` whose own value goes nowhere, a `for` header
+    /// expression whose value is dropped, and an arrow function's body.
+    pub used_result_calls: Vec<(u32, u32)>,
     /// Breakable block boundaries `(start_offset, end_offset)` where
     /// `break` is valid (loops and `switch`).
     pub breakable_scopes: Vec<(u32, u32)>,

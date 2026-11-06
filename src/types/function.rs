@@ -36,6 +36,10 @@ pub(crate) struct ResolvedCallableTarget {
     /// Whether discarding the callable's result is reported, because it
     /// carries `#[\NoDiscard]`.
     pub no_discard: bool,
+    /// Whether the callable's native return type is `void`, so a call to
+    /// it has no value to use.  A docblock `@return void` does not count,
+    /// as nothing stops an untyped body returning a value.
+    pub native_void: bool,
     /// Alternate parameter lists from overloaded function declarations.
     ///
     /// Populated from `FunctionInfo::overloads` when resolving standalone

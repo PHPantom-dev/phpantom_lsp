@@ -456,6 +456,10 @@ fn extract_function_call<'a>(
             extract_from_expression(func_call.function, ctx, scope_start);
         }
     }
+    ctx.value_calls.push((
+        func_call.span().start.offset,
+        func_call.argument_list.left_parenthesis.end.offset,
+    ));
     let func_text = invoked_callee_text(func_call.function);
     if !func_text.is_empty() {
         emit_call_site(
@@ -510,6 +514,10 @@ fn extract_method_call<'a>(
         );
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
+        ctx.value_calls.push((
+            object.span().start.offset,
+            argument_list.left_parenthesis.end.offset,
+        ));
         emit_call_site(
             format!("{}->{}", subject_text, member_name),
             argument_list,
@@ -587,6 +595,10 @@ fn extract_static_method_call<'a>(
             &static_call.argument_list,
             ctx,
         );
+        ctx.value_calls.push((
+            static_call.span().start.offset,
+            static_call.argument_list.left_parenthesis.end.offset,
+        ));
         emit_call_site(
             format!("{}::{}", subject_text, member_name),
             &static_call.argument_list,

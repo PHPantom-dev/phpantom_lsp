@@ -609,6 +609,41 @@ class DiscardedResultDemo
 }
 
 
+// ── Diagnostic: Used void Results ───────────────────────────────────────────
+// A function or method declared `void` returns nothing, so reading its result
+// always gets `null`.  The call usually meant to return something, or the
+// caller meant to write `null`.
+
+class VoidResultDemo
+{
+    public function flush(): void {}
+
+    public function demo(bool $ready): void
+    {
+        // Warning — `$flushed` is always null:
+        $flushed = $this->flush();
+        echo $flushed;
+
+        // Warning — the condition is never true:
+        if ($this->flush()) {
+            echo 'flushed';
+        }
+
+        // No diagnostic — the call is a statement of its own:
+        $this->flush();
+
+        // No diagnostic — the value of the whole expression goes nowhere:
+        $ready && $this->flush();
+    }
+
+    public function relay()
+    {
+        // Warning — returns null, and reads better as two statements:
+        return $this->flush();
+    }
+}
+
+
 // ── Diagnostic: Unhandled Match Values ──────────────────────────────────────
 // A `match` without a `default` arm throws `UnhandledMatchError` for any value
 // none of its arms names.  When the subject is an enum, a `bool`, or a set of

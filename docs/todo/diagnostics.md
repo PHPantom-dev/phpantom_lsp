@@ -659,30 +659,3 @@ forward walker's diagnostic pass (`src/type_engine/variable/forward_walk/`),
 and how `src/diagnostics/unknown_members/` grades its severity for final
 and non-final classes.
 
----
-
-## D46. The result of a `void` call is used
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-$sent = $mailer->send($message);   // send(): void, so $sent is always null
-if ($logger->flush()) { … }        // never true
-return $this->log($event);         // in a non-void function: returns null
-```
-
-A function or method declared `void` (or `never`) returns nothing, so using
-its result is a mistake: the caller expected a value it will never get, or
-meant to write `null`. Report it wherever the call's value is consumed: an
-assignment, an argument, an operand, a condition, `echo`, or a `return`
-with a value. A call that is its own expression statement is fine. Judge
-by the native return type, since a `@return void` over an untyped
-signature does not stop the body returning something. Warning severity. The `return $this->log();`
-early-exit shorthand is caught too, and reads better as two statements.
-PhpStorm reports this as "'void' method result used", and PHPStan as
-`method.void` / `function.void`.
-
-**Where to look:** the forward walker already resolves each call's return
-type, and `src/diagnostics/discarded_results.rs` already decides when a
-call's value is consumed (it reports the opposite case, a `#[\NoDiscard]`
-result that is not).

@@ -261,6 +261,10 @@ impl Backend {
                 return_type: result_method.return_type.clone(),
                 reads_func_args: result_method.reads_func_args,
                 no_discard: result_method.is_no_discard,
+                native_void: result_method
+                    .native_return_type
+                    .as_ref()
+                    .is_some_and(PhpType::is_void),
                 owner_class: Some(owner.fqn()),
                 self_bound_params,
                 ..Default::default()
@@ -289,6 +293,7 @@ impl Backend {
                 return_type: m.return_type.clone(),
                 reads_func_args: m.reads_func_args,
                 no_discard: m.is_no_discard,
+                native_void: m.native_return_type.as_ref().is_some_and(PhpType::is_void),
                 owner_class: Some(owner.fqn()),
                 ..Default::default()
             };
@@ -383,6 +388,10 @@ impl Backend {
             return_type: result_method.return_type.clone(),
             reads_func_args: result_method.reads_func_args,
             no_discard: result_method.is_no_discard,
+            native_void: result_method
+                .native_return_type
+                .as_ref()
+                .is_some_and(PhpType::is_void),
             owner_class: Some(owner.fqn()),
             self_bound_params,
             ..Default::default()
@@ -396,6 +405,10 @@ impl Backend {
             return_type: func.return_type.clone(),
             reads_func_args: func.reads_func_args,
             no_discard: func.is_no_discard,
+            native_void: func
+                .native_return_type
+                .as_ref()
+                .is_some_and(PhpType::is_void),
             overloads: func.overloads.clone(),
             ..Default::default()
         }
@@ -440,6 +453,10 @@ impl Backend {
                     parameters: parameters.into(),
                     return_type: func.return_type.clone(),
                     no_discard: func.is_no_discard,
+                    native_void: func
+                        .native_return_type
+                        .as_ref()
+                        .is_some_and(PhpType::is_void),
                     self_bound_params: super::template_subs::self_bound_template_params(
                         &func.template_bindings,
                         &func.parameters,

@@ -311,6 +311,7 @@ mod unused_imports;
 pub(crate) mod unused_variables;
 pub(crate) mod use_statements;
 mod validation_strings;
+mod void_results;
 pub(crate) mod workspace;
 
 use tower_lsp_server::gen_lsp_types::*;

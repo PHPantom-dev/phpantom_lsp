@@ -60,6 +60,11 @@ struct ExtractionCtx<'a> {
     call_sites: CallSites,
     /// `(start, args_start)` of each call written as a statement of its own.
     discarded_calls: Vec<(u32, u32)>,
+    /// `(start, args_start)` of each function, method, and static method
+    /// call.
+    value_calls: Vec<(u32, u32)>,
+    /// `args_start` of each call whose value nothing reads.
+    unused_result_calls: Vec<u32>,
     /// Ranges where `break` is valid (loops and `switch`).
     breakable_scopes: Vec<(u32, u32)>,
     /// Ranges where `continue` is valid (loops only).
@@ -545,6 +550,8 @@ fn extract_symbol_map_inner(
         template_defs: Vec::new(),
         call_sites: CallSites::default(),
         discarded_calls: Vec::new(),
+        value_calls: Vec::new(),
+        unused_result_calls: Vec::new(),
         breakable_scopes: Vec::new(),
         loop_scopes: Vec::new(),
         switch_scopes: Vec::new(),
@@ -727,6 +734,7 @@ fn extract_symbol_map_inner(
     ctx.discarded_calls
         .sort_unstable_by_key(|&(_, args_start)| args_start);
     ctx.discarded_calls.shrink_to_fit();
+    let used_result_calls = used_result_calls(ctx.value_calls, ctx.unused_result_calls);
     ctx.breakable_scopes.sort_by_key(|s| s.0);
     ctx.loop_scopes.sort_by_key(|s| s.0);
     ctx.switch_scopes.sort_by_key(|s| s.0);
@@ -765,6 +773,7 @@ fn extract_symbol_map_inner(
         template_defs: ctx.template_defs,
         call_sites: ctx.call_sites,
         discarded_calls: ctx.discarded_calls,
+        used_result_calls,
         breakable_scopes: ctx.breakable_scopes,
         loop_scopes: ctx.loop_scopes,
         switch_scopes: ctx.switch_scopes,
@@ -800,4 +809,18 @@ fn extract_symbol_map_inner(
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
         source_hash: None,
     }
+}
+
+/// The calls of `value_calls` that are not in `unused`: those whose value
+/// something reads, sorted.
+fn used_result_calls(mut value_calls: Vec<(u32, u32)>, mut unused: Vec<u32>) -> Vec<(u32, u32)> {
+    value_calls.sort_unstable_by_key(|&(_, args_start)| args_start);
+    unused.sort_unstable();
+    let mut unused = unused.into_iter().peekable();
+    value_calls.retain(|&(_, call)| {
+        while unused.next_if(|&u| u < call).is_some() {}
+        unused.peek() != Some(&call)
+    });
+    value_calls.shrink_to_fit();
+    value_calls
 }

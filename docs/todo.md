@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| D46 | [The result of a `void` call is used](todo/diagnostics.md#d46-the-result-of-a-void-call-is-used) | Low-Medium | Low |
 | D44 | [A function that can end without returning a value is not reported](todo/diagnostics.md#d44-a-function-that-can-end-without-returning-a-value-is-not-reported) | Medium | Low-Medium |
 | D45 | [An object without `__toString()` used as a string is not reported](todo/diagnostics.md#d45-an-object-without-__tostring-used-as-a-string-is-not-reported) | Medium | Low-Medium |
 | D47 | [`JSON_THROW_ON_ERROR` does not make `json_decode()` throw `JsonException`](todo/diagnostics.md#d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception) | Medium      | Medium      |
@@ -224,7 +223,6 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| D46 | [The result of a `void` call is used](todo/diagnostics.md#d46-the-result-of-a-void-call-is-used) | Low-Medium | Low |
 | D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
 | D47 | [`JSON_THROW_ON_ERROR` does not make `json_decode()` throw `JsonException`](todo/diagnostics.md#d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception) | Medium      | Medium      |
 | D48 | [A `catch` its `try` cannot reach is not reported](todo/diagnostics.md#d48-a-catch-its-try-cannot-reach-is-not-reported) | Low-Medium  | Medium      |

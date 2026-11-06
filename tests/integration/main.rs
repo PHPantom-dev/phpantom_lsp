@@ -198,6 +198,7 @@ mod diagnostics_unknown_functions;
 mod diagnostics_unknown_members;
 mod diagnostics_unreachable_code;
 mod diagnostics_unused_variables;
+mod diagnostics_void_results;
 mod docblock_types;
 mod doctrine_dql;
 mod doctrine_entity_fields;

@@ -57,5 +57,8 @@ pub(super) fn extract_arrow_function_expr<'a>(
     if let Some(ref return_type) = arrow.return_type_hint {
         extract_from_hint_ctx(&return_type.hint, &mut ctx.spans, ClassRefContext::TypeHint);
     }
+    // What an arrow function returns is up to its caller to use, so its
+    // body is read like a statement of its own.
+    super::super::statements::record_unused_results(arrow.expression, ctx);
     extract_from_expression(arrow.expression, ctx, arrow_scope_start);
 }
