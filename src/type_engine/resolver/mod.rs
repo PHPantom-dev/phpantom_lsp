@@ -491,9 +491,17 @@ fn resolve_call_subject(
     // of alternatives.  The same holds for an intersection inside a
     // union (`(A&I)|B`).
     if let Some(h) = hint {
-        let hint_names_a_class = matches!(h.kind(), TypeKind::Generic(g) if classes
-            .iter()
-            .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()));
+        let generic_names_a_class = |t: &PhpType| {
+            matches!(t.kind(), TypeKind::Generic(g) if classes
+                .iter()
+                .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()))
+        };
+        // A union of such generics (`Config<'a'>|ImmutableConfig<'a'>`)
+        // carries them for each of its classes.
+        let hint_names_a_class = match h.kind() {
+            TypeKind::Union(members) => members.iter().any(generic_names_a_class),
+            _ => generic_names_a_class(&h),
+        };
         let is_intersection = match h.kind() {
             TypeKind::Intersection(_) => true,
             TypeKind::Union(members) => members

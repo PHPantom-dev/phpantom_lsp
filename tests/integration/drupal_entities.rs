@@ -482,3 +482,60 @@ async fn entity_query_ids_go_to_their_declaration_and_complete() {
     assert!(labels.contains(&"acme_note".to_string()), "{labels:?}");
     assert!(labels.contains(&"acme_style".to_string()), "{labels:?}");
 }
+
+/// An entity type ID two classes declare, each with its own storage, loads
+/// either entity when the load is chained straight on `getStorage()`.
+#[tokio::test]
+async fn a_chained_load_on_an_id_declared_twice_is_either_entity() {
+    let note = NOTE.replace(
+        "class Note {}",
+        "class Note {\n    public function noteOnly(): void {}\n}",
+    );
+    let other = r#"<?php
+namespace Drupal\acme\Entity;
+
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+
+#[ContentEntityType(
+    id: 'acme_note',
+    handlers: ['storage' => OtherStorage::class],
+)]
+class OtherNote {
+    public function otherOnly(): void {}
+}
+
+class OtherStorage extends \Drupal\Core\Entity\Sql\SqlContentEntityStorage {}
+"#;
+    let chained = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Entity\EntityTypeManagerInterface;
+
+final class Chained {
+    public function run(EntityTypeManagerInterface $manager): void {
+        $manager->getStorage('acme_note')->load(1)?->noteOnly();
+        $manager->getStorage('acme_note')->load(1)?->otherOnly();
+    }
+}
+"#;
+    let path = "web/modules/custom/acme/src/Chained.php";
+    let other_path = "web/modules/custom/acme/src/Entity/OtherNote.php";
+    let mut files: Vec<(&str, &str)> = STORAGE_STUBS.to_vec();
+    files.extend([
+        (MANAGER_PATH, MANAGER),
+        (NOTE_PATH, note.as_str()),
+        (other_path, other),
+        (path, chained),
+    ]);
+    let (backend, dir) = workspace(&files).await;
+    let php = uri_for(&dir, path);
+    for (needle, target) in [
+        ("load(1)?->noteOnly", NOTE_PATH),
+        ("load(1)?->otherOnly", other_path),
+    ] {
+        let inside = needle.rfind('>').unwrap() + 2;
+        let found = definitions_at(&backend, &php, position_in(chained, needle, inside)).await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!(found[0].uri, uri_for(&dir, target), "{needle}");
+    }
+}
