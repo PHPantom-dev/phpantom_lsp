@@ -19,7 +19,10 @@ final class Greeter
     public function greet(string $name): string
     {
         // Try: complete after `$this->configFactory->`. The methods come
-        // from core's ConfigFactoryInterface.
+        // from core's ConfigFactoryInterface. Go to the definition of
+        // 'system.site', which lists core's default configuration and schema
+        // entry, or complete a configuration name inside `get('')`. Complete
+        // a key of system.site inside the second `get('')`.
         $siteName = $this->configFactory->get('system.site')->get('name');
 
         $greeting = strtr($this->format, [

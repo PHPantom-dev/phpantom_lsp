@@ -81,8 +81,11 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::YiiRoute
         | StringKeyKind::DrupalEntityType
         | StringKeyKind::DrupalRoute
-        | StringKeyKind::DrupalRouteParameter => backend.symfony_declaration_locations(*kind, key),
+        | StringKeyKind::DrupalRouteParameter
+        | StringKeyKind::DrupalPermission => backend.symfony_declaration_locations(*kind, key),
         StringKeyKind::DrupalHook => backend.drupal_hook_documentation(key),
+        StringKeyKind::DrupalConfigName => backend.drupal_config_locations(key),
+        StringKeyKind::DrupalConfigKey => backend.drupal_config_key_locations(key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
         StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
@@ -321,7 +324,8 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::YiiRoute
         | StringKeyKind::DrupalEntityType
         | StringKeyKind::DrupalRoute
-        | StringKeyKind::DrupalRouteParameter => {
+        | StringKeyKind::DrupalRouteParameter
+        | StringKeyKind::DrupalPermission => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // A documented pattern stands for every hook that fills it in.
@@ -335,7 +339,9 @@ pub(crate) fn find_laravel_string_key_references(
         // declarations are too.
         StringKeyKind::TranslationDomain
         | StringKeyKind::YiiRouteArgument
-        | StringKeyKind::SymfonyRoute => {
+        | StringKeyKind::SymfonyRoute
+        | StringKeyKind::DrupalConfigName
+        | StringKeyKind::DrupalConfigKey => {
             find_string_key_usages(kind, key, backend, snapshot, false)
         }
         // Two spellings of one view share no key, so the renders are found

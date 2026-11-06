@@ -182,6 +182,24 @@ pub(crate) enum StringKeyKind {
     /// theme manager's calls that invoke it, and read by the implementations
     /// a `#[Hook]` attribute or a procedural function's name make.
     DrupalHook,
+    /// A Drupal permission name: declared by a top-level key of a
+    /// permissions file, and read by an account's or a role's
+    /// `hasPermission()`, the access result helpers, a route's
+    /// `_permission` requirement, and an entity type's `admin_permission`.
+    DrupalPermission,
+    /// A Drupal configuration name: declared by a default configuration
+    /// file's name and by a configuration schema entry (see
+    /// `drupal::config`), and read by `\Drupal::config()`, the config
+    /// factory, the `config()` shortcut of controllers and forms, a config
+    /// form's `getEditableConfigNames()`, and a form element's
+    /// `#config_target`.
+    DrupalConfigName,
+    /// A key of a Drupal configuration object, keyed by the object's name
+    /// as well as the key (see `drupal::config_keys::config_key`):
+    /// declared by the object's configuration schema, and read by a config
+    /// object's `get()`, `set()`, and `clear()`, the part after the `:` of
+    /// a `#config_target`, and a `ConfigTarget`'s property path.
+    DrupalConfigKey,
 }
 
 impl StringKeyKind {
@@ -232,7 +250,10 @@ impl StringKeyKind {
             Self::DrupalEntityType
             | Self::DrupalRoute
             | Self::DrupalRouteParameter
-            | Self::DrupalHook => KeyFramework::Drupal,
+            | Self::DrupalHook
+            | Self::DrupalPermission
+            | Self::DrupalConfigName
+            | Self::DrupalConfigKey => KeyFramework::Drupal,
         }
     }
 
@@ -873,6 +894,14 @@ const DRUPAL_ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterfac
 const DRUPAL_ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
 pub(crate) const DRUPAL_MODULE_HANDLER: &str = "Drupal\\Core\\Extension\\ModuleHandlerInterface";
 pub(crate) const DRUPAL_THEME_MANAGER: &str = "Drupal\\Core\\Theme\\ThemeManagerInterface";
+pub(crate) const DRUPAL_CONFIG_FACTORY: &str = "Drupal\\Core\\Config\\ConfigFactoryInterface";
+const DRUPAL_CONFIG_BASE: &str = "Drupal\\Core\\Config\\ConfigBase";
+const DRUPAL_CONFIG: &str = "Drupal\\Core\\Config\\Config";
+const DRUPAL_ACCOUNT: &str = "Drupal\\Core\\Session\\AccountInterface";
+const DRUPAL_ROLE: &str = "Drupal\\user\\RoleInterface";
+const DRUPAL_PERMISSION_CHECKER: &str = "Drupal\\Core\\Session\\PermissionCheckerInterface";
+const DRUPAL_CALCULATED_PERMISSIONS_ITEM: &str =
+    "Drupal\\Core\\Session\\CalculatedPermissionsItemInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -903,7 +932,10 @@ pub(crate) enum ReceiverClass {
     MailTemplate,
     /// What `get()` and `has()` look a name up in: a service container, or
     /// one of Symfony's parameter bags, whose same two methods take a
-    /// parameter name instead.
+    /// parameter name instead, or Drupal's config factory, whose `get()`
+    /// takes a configuration name, or a Drupal config object, whose `get()`
+    /// takes one of its keys; the object it is comes from its type (see
+    /// `drupal::types`).
     ContainerLookup,
     /// What `getParameter()`, `hasParameter()`, and `setParameter()` take a
     /// container parameter name in: the container itself, and the
@@ -1003,6 +1035,24 @@ pub(crate) enum ReceiverClass {
     ThemeHooks,
     /// Either of the two, for the methods they share.
     Hooks,
+    /// What `hasPermission()` takes a permission name first on: an
+    /// account, a role, the permission checker, and a calculated
+    /// permissions item.
+    PermissionCheck,
+    /// A Drupal role, whose `grantPermission()` and `revokePermission()`
+    /// take a permission name.
+    RolePermissions,
+    /// Drupal's config factory, whose `getEditable()` takes a
+    /// configuration name and `loadMultiple()` a list of them; its `get()`
+    /// is a [`Self::ContainerLookup`].
+    ConfigFactory,
+    /// What has Drupal's `config()` shortcut, which takes a configuration
+    /// name: a controller or a form, a config form included.
+    ConfigShortcut,
+    /// An editable Drupal config object, whose `set()` and `clear()` take
+    /// one of its keys; an `ImmutableConfig` throws on both.  Its `get()`
+    /// is a [`Self::ContainerLookup`], as every config object's is.
+    EditableConfigKeys,
     /// Symfony's serializer, normalizers, and denormalizers, whose
     /// `serialize()`, `deserialize()`, `normalize()`, and `denormalize()`
     /// take a context whose `groups` name serializer groups.
@@ -1032,6 +1082,8 @@ impl ReceiverClass {
             // A container bag is a PSR container too, so it has to be asked
             // about first.
             Self::ContainerLookup => &[
+                (DRUPAL_CONFIG_FACTORY, StringKeyKind::DrupalConfigName),
+                (DRUPAL_CONFIG_BASE, StringKeyKind::DrupalConfigKey),
                 (SYMFONY_CONTAINER_BAG, ContainerParameter),
                 (SYMFONY_PARAMETER_BAG, ContainerParameter),
                 (PSR_CONTAINER, ServiceId),
@@ -1128,6 +1180,22 @@ impl ReceiverClass {
             Self::Hooks => &[
                 (DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook),
                 (DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook),
+            ],
+            Self::PermissionCheck => &[
+                (DRUPAL_ACCOUNT, StringKeyKind::DrupalPermission),
+                (DRUPAL_ROLE, StringKeyKind::DrupalPermission),
+                (DRUPAL_PERMISSION_CHECKER, StringKeyKind::DrupalPermission),
+                (
+                    DRUPAL_CALCULATED_PERMISSIONS_ITEM,
+                    StringKeyKind::DrupalPermission,
+                ),
+            ],
+            Self::RolePermissions => &[(DRUPAL_ROLE, StringKeyKind::DrupalPermission)],
+            Self::ConfigFactory => &[(DRUPAL_CONFIG_FACTORY, StringKeyKind::DrupalConfigName)],
+            Self::EditableConfigKeys => &[(DRUPAL_CONFIG, StringKeyKind::DrupalConfigKey)],
+            Self::ConfigShortcut => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalConfigName),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalConfigName),
             ],
             Self::Serializer => &[
                 (SYMFONY_SERIALIZER, StringKeyKind::SerializerGroup),
@@ -1226,6 +1294,13 @@ impl TypedReceiverSite {
     /// Whether this site, once confirmed, could name `key` as a `kind`.
     /// The reference index files a site under each kind it could become.
     pub(crate) fn may_name(&self, kind: StringKeyKind, key: &str) -> bool {
+        // A configuration key's site holds the key alone; the object's
+        // name comes with its receiver's type.
+        let key = if kind == StringKeyKind::DrupalConfigKey {
+            crate::drupal::config_keys::split_config_key(key).1
+        } else {
+            key
+        };
         self.key == key
             && self
                 .receiver

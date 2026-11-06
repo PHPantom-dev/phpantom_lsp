@@ -113,6 +113,12 @@ impl Backend {
         let view_path;
         let (label, detail) = match kind {
             StringKeyKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
+            StringKeyKind::DrupalPermission => ("Permission", self.drupal_permission_detail(key)),
+            StringKeyKind::DrupalConfigName => ("Configuration", self.drupal_config_detail(key)),
+            StringKeyKind::DrupalConfigKey => {
+                shown = crate::drupal::config_keys::split_config_key(key).1;
+                ("Configuration key", self.drupal_config_key_detail(key))
+            }
             StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
             StringKeyKind::TwigBlock => (
                 "Block",

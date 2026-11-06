@@ -6,8 +6,11 @@ module, theme, and profile, with the Drupal file extensions (`.module`,
 `.install`, `.theme`, …), are indexed past `.gitignore`, and
 the services the `*.services.yml` files declare, the entity types
 entity classes declare, the routes the routing files, route attributes,
-and route builders declare, and the hooks the `*.api.php` files document
-and the extensions implement are read. Nothing reads fields yet.
+and route builders declare, the hooks the `*.api.php` files document
+and the extensions implement, the permissions the `*.permissions.yml`
+files declare, and the configuration objects and keys the default
+configuration and the configuration schema declare are read. Nothing
+reads fields yet.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -24,9 +27,9 @@ is what they expect from an editor.
 **Benchmarks.** `benches/memory_usage.py` measures memory on a site that
 installs core into `web/core` through Composer (`memory_drupal_module`),
 next to the other framework scenarios. `benches/drupal_completion.rs`
-measures completion of service IDs, route names, entity type IDs, hook
-names, and hook implementations over a generated site with many custom
-modules. Every item that adds a name Drupal declares adds its case to
+measures completion of service IDs, route names, entity type IDs,
+permission names, configuration names, hook names, and hook
+implementations over a generated site with many custom modules. Every item that adds a name Drupal declares adds its case to
 it.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
@@ -86,22 +89,6 @@ return [
 The Twig support already finds templates outside Symfony, and a
 template's variables from the renders that name it; a theme hook's
 variables would be one more source of them (see `src/twig/variables.rs`).
-
----
-
-## DR8. Permission and configuration names
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$account->hasPermission('administer acme orders');
-\Drupal::config('acme.settings')->get('notify_email');
-```
-
-Permissions are declared in `<module>.permissions.yml` (and by
-permission callbacks), configuration objects in `config/install` and
-`config/schema`. Complete and navigate both, and complete the keys
-`get()` reads from the schema.
 
 ---
 
@@ -319,3 +306,50 @@ type. Give both the precise type, through the same mechanism as the
 other framework corrections ([E7](external-stubs.md#e7-stub-based-framework-patches)
 if it has shipped), so a `string` parameter takes the plain
 `toString()` and the extender's methods resolve.
+
+---
+
+## DR22. Complete permissions built in code
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$account->hasPermission('create article content');
+$account->hasPermission('use text format basic_html');
+```
+
+Permissions a permissions file builds through its
+`permission_callbacks` neither complete nor go to a definition, since no
+key of the file declares them. Ten of core's permissions files do, among
+them node, taxonomy, media, block content, and filter, which build one
+set of permissions per bundle or text format. Read them from where
+Drupal builds them: each callback returns an array keyed by names such as
+`"create $type_id content"`, and the bundles and formats the names are
+built from are configuration entities (`node.type.*`,
+`filter.format.*`). Their names come from the default configuration,
+and on most sites from the exported configuration, which
+[DR4](#dr4-entity-field-access) reads. A name built from something the
+site's files do not hold could be kept as a pattern, as route builders'
+names are.
+
+---
+
+## DR23. Warn on unknown permission names
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$account->hasPermission('administer acme ordres');
+$account->hasPermission('administer acme+access content');
+```
+
+A permission name no `*.permissions.yml` declares is a typo or a module
+the site lacks, and Drupal does not throw for it: the check fails, and the
+mistake shows only as access denied. `hasPermission()` checks one exact
+name, so `'administer acme+access content'` is a name of its own; `+` and
+`,` only combine permissions in a route's `_permission`. Report a name
+nothing declares wherever permission names are read: the access checks,
+the access result helpers, the user module's role functions, each part of
+a route's `_permission`, and an entity type's `admin_permission`. This
+depends on [DR22](#dr22-complete-permissions-built-in-code): the names
+permission callbacks build would otherwise be reported.

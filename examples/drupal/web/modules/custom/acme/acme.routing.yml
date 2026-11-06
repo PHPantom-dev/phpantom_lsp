@@ -19,4 +19,6 @@ acme.note:
     _controller: '\Drupal\acme\Controller\NoteController::view'
     _title_callback: '\Drupal\acme\Controller\NoteController::title'
   requirements:
-    _permission: 'access content'
+    # Try: go to the definition of either permission. A visitor needs one
+    # of them; `,` would ask for both.
+    _permission: 'view acme notes+administer acme'

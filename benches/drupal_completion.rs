@@ -7,13 +7,16 @@ use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
 /// Custom modules in the generated site, each declaring `SERVICES`
-/// services, `ROUTES` routes, `ENTITY_TYPES` entity types, and documenting
-/// `HOOKS` hooks, and implementing the hooks the module before it
-/// documents.
+/// services, `ROUTES` routes, `ENTITY_TYPES` entity types, `PERMISSIONS`
+/// permissions, and `CONFIGS` configuration objects, with their default
+/// configuration and schema, and documenting `HOOKS` hooks, and
+/// implementing the hooks the module before it documents.
 const MODULES: usize = 30;
 const SERVICES: usize = 10;
 const ROUTES: usize = 10;
 const ENTITY_TYPES: usize = 3;
+const PERMISSIONS: usize = 10;
+const CONFIGS: usize = 10;
 const HOOKS: usize = 10;
 
 const COMPOSER: &str = r#"{
@@ -22,12 +25,12 @@ const COMPOSER: &str = r#"{
 }"#;
 
 /// Just enough of core, where Composer puts it, for the type engine to
-/// tell a container, the entity type manager, the module handler, and a
-/// URL from any other receiver.
+/// tell a container, the entity type manager, the module handler, an
+/// account, and a URL from any other receiver.
 const STUBS: &[(&str, &str)] = &[
     (
         "web/core/lib/Drupal.php",
-        "<?php\nclass Drupal {\n    public static function service(string $id): object {}\n    public static function hasService(string $id): bool {}\n}\n",
+        "<?php\nclass Drupal {\n    public static function service(string $id): object {}\n    public static function hasService(string $id): bool {}\n    public static function config($name) {}\n}\n",
     ),
     (
         "web/core/lib/Drupal/Core/Url.php",
@@ -46,6 +49,10 @@ const STUBS: &[(&str, &str)] = &[
         "<?php\nnamespace Drupal\\Core\\Extension;\ninterface ModuleHandlerInterface {\n    public function invokeAll($hook, array $args = []);\n    public function invoke($module, $hook, array $args = []);\n    public function alter($type, &$data, &$context1 = NULL, &$context2 = NULL);\n}\n",
     ),
     (
+        "web/core/lib/Drupal/Core/Session/AccountInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Session;\ninterface AccountInterface {\n    public function hasPermission(string $permission);\n}\n",
+    ),
+    (
         "web/core/lib/Drupal/Core/Hook/Attribute/Hook.php",
         "<?php\nnamespace Drupal\\Core\\Hook\\Attribute;\n#[\\Attribute]\nclass Hook {\n    public function __construct(public string $hook, public string $method = '', public ?string $module = NULL) {}\n}\n",
     ),
@@ -59,6 +66,7 @@ namespace Drupal\acme;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Hook\Attribute\Hook;
+use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Url;
 
 final class Consumer
@@ -66,6 +74,7 @@ final class Consumer
     public function __construct(
         private EntityTypeManagerInterface $manager,
         private ModuleHandlerInterface $modules,
+        private AccountInterface $account,
     ) {}
 
     #[Hook('mod1_')]
@@ -75,6 +84,8 @@ final class Consumer
         Url::fromRoute('mod1.');
         $this->manager->getStorage('mod1_');
         $this->modules->invokeAll('mod1_');
+        $this->account->hasPermission('administer mod1 ');
+        \Drupal::config('mod1.');
     }
 }
 "#;
@@ -120,6 +131,28 @@ fn generate_site() -> Vec<(String, String)> {
             );
         }
         files.push((format!("{dir}/mod{m}.routing.yml"), routing));
+
+        let mut permissions = String::new();
+        for p in 0..PERMISSIONS {
+            let _ = writeln!(
+                permissions,
+                "administer mod{m} thing{p}:\n  title: 'Administer thing {p} of module {m}'"
+            );
+        }
+        files.push((format!("{dir}/mod{m}.permissions.yml"), permissions));
+
+        let mut schema = String::new();
+        for c in 0..CONFIGS {
+            files.push((
+                format!("{dir}/config/install/mod{m}.setting{c}.yml"),
+                "enabled: true\n".to_string(),
+            ));
+            let _ = writeln!(
+                schema,
+                "mod{m}.setting{c}:\n  type: config_object\n  label: 'Setting {c} of module {m}'"
+            );
+        }
+        files.push((format!("{dir}/config/schema/mod{m}.schema.yml"), schema));
 
         for e in 0..ENTITY_TYPES {
             files.push((
@@ -275,6 +308,20 @@ fn bench_drupal_name_completion(c: &mut Criterion) {
             CONSUMER_PHP,
             "getStorage('mod1_'",
             "mod1_entity2",
+        ),
+        (
+            "permission_name",
+            &consumer,
+            CONSUMER_PHP,
+            "hasPermission('administer mod1 '",
+            "administer mod1 thing7",
+        ),
+        (
+            "config_name",
+            &consumer,
+            CONSUMER_PHP,
+            "config('mod1.'",
+            "mod1.setting7",
         ),
         (
             "hook_name_invoke_all",

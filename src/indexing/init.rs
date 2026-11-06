@@ -499,6 +499,10 @@ impl Backend {
             classmap_scanner::scan_drupal_directories(web_root, filters, progress);
         self.note_drupal_declaration_files(declaration_files.declarations);
         self.note_drupal_service_providers(declaration_files.service_providers);
+        self.note_drupal_config_files(
+            declaration_files.default_config,
+            declaration_files.config_schemas,
+        );
         let drupal_count = drupal_result.classmap.len()
             + drupal_result.function_index.len()
             + drupal_result.constant_index.len();

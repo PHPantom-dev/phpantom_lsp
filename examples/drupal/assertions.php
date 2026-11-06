@@ -16,11 +16,14 @@ require_once __DIR__ . '/vendor/autoload.php';
 use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Controller\NoteController;
 use Drupal\acme\Entity\Note;
+use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
 use Drupal\acme\Hook\AcmeHooks;
 use Drupal\acme\NoteCounter;
 use Drupal\Component\FileCache\FileCacheFactory;
 use Drupal\Component\Serialization\Yaml;
+use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Config\ConfigBase;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
@@ -33,8 +36,11 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeManager;
 use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
+use Drupal\Core\Form\ConfigFormBase;
+use Drupal\Core\Form\ConfigTarget;
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Language\LanguageManager;
+use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Link;
 use Drupal\Core\Url;
 use Drupal\language\ConfigurableLanguageManager;
@@ -208,6 +214,44 @@ check('acme.note declares the {acme_note} parameter', str_contains($routes['acme
 check('NoteController::view() names its parameter after the acme_note entity type', $noteParameter->getName() === ($noteType['id'] ?? null));
 check('NoteController::view() hints the parameter with an interface Note implements, so Drupal upcasts it', $noteParameter->getType()?->getName() === EntityInterface::class && is_subclass_of(Note::class, EntityInterface::class));
 check("acme.note's title callback is NoteController::title(), which receives the same parameter", ltrim($routes['acme.note']['defaults']['_title_callback'] ?? '', '\\') === NoteController::class . '::title' && (new ReflectionMethod(NoteController::class, 'title'))->getParameters()[0]->getName() === 'acme_note');
+
+// ─── Permissions ────────────────────────────────────────────────────────────
+
+$permissions = Yaml::decode((string) file_get_contents("$module/acme.permissions.yml"));
+$corePermissions = Yaml::decode((string) file_get_contents("$web/core/modules/system/system.permissions.yml"));
+$noteAccessSource = (string) file_get_contents("$module/src/NoteAccess.php");
+check('acme.permissions.yml declares administer acme with a title and a description', isset($permissions['administer acme']['title'], $permissions['administer acme']['description']));
+check('administer acme is restricted to trusted roles', ($permissions['administer acme']['restrict access'] ?? false) === true);
+check('acme.permissions.yml declares view acme notes', isset($permissions['view acme notes']['title']));
+check("core's system.permissions.yml declares access content", isset($corePermissions['access content']));
+check('NoteAccess::canManage() checks administer acme', str_contains($noteAccessSource, "\$account->hasPermission('administer acme')"));
+check('AccountInterface::hasPermission() takes the permission first', (new ReflectionMethod(AccountInterface::class, 'hasPermission'))->getParameters()[0]->getName() === 'permission');
+check('NoteAccess::view() lists access content and view acme notes', str_contains($noteAccessSource, "AccessResult::allowedIfHasPermissions(\$account, ['access content', 'view acme notes'], 'OR')"));
+check('AccessResult::allowedIfHasPermissions() takes the permissions second', (new ReflectionMethod(AccessResult::class, 'allowedIfHasPermissions'))->getParameters()[1]->getName() === 'permissions');
+$noteRequirement = $routes['acme.note']['requirements']['_permission'] ?? '';
+check('acme.note requires either of two acme permissions', explode('+', $noteRequirement) === ['view acme notes', 'administer acme'] && array_diff(explode('+', $noteRequirement), array_keys($permissions)) === []);
+check("PermissionAccessCheck reads a route's `+` as any of its permissions", str_contains((string) file_get_contents("$web/core/modules/user/src/Access/PermissionAccessCheck.php"), "explode('+', \$permission);"));
+check("acme_note's admin permission is administer acme, which acme.permissions.yml declares", $noteDefinition->getAdminPermission() === 'administer acme' && isset($permissions['administer acme']));
+
+// ─── Configuration ──────────────────────────────────────────────────────────
+
+$acmeSchema = Yaml::decode((string) file_get_contents("$module/config/schema/acme.schema.yml"));
+$systemSchema = Yaml::decode((string) file_get_contents("$web/core/modules/system/config/schema/system.schema.yml"));
+$editableNames = new ReflectionMethod(SettingsForm::class, 'getEditableConfigNames');
+$settingsSource = (string) file_get_contents("$module/src/Form/SettingsForm.php");
+check('acme ships default configuration for acme.settings', is_file("$module/config/install/acme.settings.yml"));
+check('acme.schema.yml describes acme.settings as a configuration object', ($acmeSchema['acme.settings']['type'] ?? null) === 'config_object');
+check('acme.settings is a valid configuration name', ConfigBase::validateName('acme.settings') === null);
+check('SettingsForm edits acme.settings', $editableNames->invoke((new ReflectionClass(SettingsForm::class))->newInstanceWithoutConstructor()) === ['acme.settings']);
+check('SettingsForm is a config form', is_subclass_of(SettingsForm::class, ConfigFormBase::class));
+check("SettingsForm's #config_target names acme.settings before its key", str_contains($settingsSource, "'#config_target' => 'acme.settings:notify_email'") && ConfigTarget::fromString('acme.settings:notify_email')->configName === 'acme.settings');
+check('acme.settings declares the notify_email key the form targets', isset($acmeSchema['acme.settings']['mapping']['notify_email']) && array_key_exists('notify_email', Yaml::decode((string) file_get_contents("$module/config/install/acme.settings.yml"))));
+check('acme.schema.yml declares the notifications.email key SettingsForm reads and sets', ($acmeSchema['acme.settings']['mapping']['notifications']['mapping']['email']['type'] ?? null) === 'boolean' && str_contains($settingsSource, "->get('notifications.email')") && str_contains($settingsSource, "->set('notifications.email', "));
+check('the default acme.settings sets notifications.email', (Yaml::decode((string) file_get_contents("$module/config/install/acme.settings.yml"))['notifications']['email'] ?? null) === true);
+check('ConfigFormBaseTrait::config() gives an editable Config for the names getEditableConfigNames() lists', str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/ConfigFormBaseTrait.php"), '@return \\Drupal\\Core\\Config\\Config|\\Drupal\\Core\\Config\\ImmutableConfig'));
+check('Only an ImmutableConfig refuses set()', (new ReflectionMethod(\Drupal\Core\Config\ImmutableConfig::class, 'set'))->getDeclaringClass()->getName() === \Drupal\Core\Config\ImmutableConfig::class);
+check('Greeter reads system.site', str_contains((string) file_get_contents("$module/src/Greeter.php"), "->get('system.site')"));
+check("core's system module ships and describes system.site", is_file("$web/core/modules/system/config/install/system.site.yml") && ($systemSchema['system.site']['type'] ?? null) === 'config_object');
 
 // ─── Hooks and theme hooks ──────────────────────────────────────────────────
 

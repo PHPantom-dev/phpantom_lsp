@@ -170,6 +170,25 @@ impl Backend {
                         site.receiver,
                         loaders.resolved_class_loader(),
                     ) {
+                        if kind == StringKeyKind::DrupalConfigKey {
+                            // The key is one of the object's whose name its
+                            // type carries.
+                            let editable = site.receiver == ReceiverClass::EditableConfigKeys;
+                            for name in self.drupal_config_names_of(
+                                &ty,
+                                editable,
+                                loaders.resolved_class_loader(),
+                            ) {
+                                let mut span = site.to_span(kind);
+                                if let crate::symbol_map::SymbolKind::StringKey { key, .. } =
+                                    &mut span.kind
+                                {
+                                    *key = crate::drupal::config_keys::config_key(&name, &site.key);
+                                }
+                                confirmed.push(span);
+                            }
+                            continue;
+                        }
                         confirmed.push(site.to_span(kind));
                     }
                 }
@@ -191,12 +210,24 @@ impl Backend {
         receiver: ReceiverClass,
         class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<StringKeyKind> {
-        if let Some((_, kind)) = receiver
-            .targets()
-            .iter()
-            .find(|(fqn, _)| crate::class_lookup::is_subtype_of_named(ty, fqn, class_loader))
-        {
+        // A Drupal target is not worth a subtype check outside Drupal: a
+        // Symfony project's `get()` is never asked about the config factory.
+        if let Some((_, kind)) = receiver.targets().iter().find(|(fqn, kind)| {
+            (kind.framework() != crate::symbol_map::KeyFramework::Drupal
+                || self.is_drupal_project())
+                && crate::class_lookup::is_subtype_of_named(ty, fqn, class_loader)
+        }) {
             return Some(*kind);
+        }
+        // A class that uses core's `ConfigFormBaseTrait` has its `config()`,
+        // and a trait is no type a target can name.
+        if receiver == ReceiverClass::ConfigShortcut && self.is_drupal_project() {
+            return ty
+                .top_level_class_names()
+                .iter()
+                .filter_map(|class| class_loader(crate::class_lookup::Fqn::new(class)))
+                .any(|class| crate::drupal::config::uses_config_form_trait(&class, class_loader))
+                .then_some(StringKeyKind::DrupalConfigName);
         }
         if !receiver.follows_wrappers() {
             return None;

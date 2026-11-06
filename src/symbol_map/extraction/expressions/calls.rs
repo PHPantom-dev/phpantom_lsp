@@ -45,6 +45,8 @@ pub(super) fn extract_instantiation_expr<'a>(
         emit_symfony_instantiation_spans(inst.class, args, ctx);
         emit_twig_callable_instantiation(inst.class, args, ctx);
         emit_drupal_url_spans(inst.class, args, ctx);
+        emit_drupal_route_permission_spans(inst.class, args, ctx);
+        emit_drupal_config_target_spans(inst.class, args, ctx);
         if !class_text.is_empty() {
             emit_call_site(
                 format!("new {}", class_text),
@@ -423,6 +425,7 @@ fn extract_function_call<'a>(
                 ctx,
             );
             emit_wordpress_hook_span(raw, &func_call.argument_list, ctx);
+            emit_drupal_function_permission_spans(raw, &func_call.argument_list, ctx);
             if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
                 ctx.content,
                 name_clean,
@@ -490,6 +493,9 @@ fn extract_method_call<'a>(
         record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
         record_drupal_route_parameter_sites(&member_name, argument_list, ctx);
         record_drupal_hook_invocations(&member_name, argument_list, ctx);
+        emit_drupal_requirement_permission_spans(&member_name, argument_list, ctx);
+        record_drupal_config_list_sites(&member_name, argument_list, ctx);
+        record_drupal_config_key_sites(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
         emit_entity_field_spans(object, &member_name, argument_list, ctx);
@@ -619,6 +625,14 @@ fn extract_static_method_call<'a>(
                 &mut ctx.spans,
             );
         }
+        if ctx.drupal && crate::drupal::is_config_lookup(semantic_subject, &member_name) {
+            try_emit_laravel_string_span(
+                crate::symbol_map::StringKeyKind::DrupalConfigName,
+                &static_call.argument_list,
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
         if ctx.drupal && crate::drupal::is_entity_query(semantic_subject, &member_name) {
             try_emit_laravel_string_span(
                 crate::symbol_map::StringKeyKind::DrupalEntityType,
@@ -633,6 +647,12 @@ fn extract_static_method_call<'a>(
         {
             emit_drupal_route_span(index, &static_call.argument_list, ctx);
         }
+        emit_drupal_static_permission_spans(
+            semantic_subject,
+            &member_name,
+            &static_call.argument_list,
+            ctx,
+        );
     }
     extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);
 }

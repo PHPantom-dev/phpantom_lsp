@@ -108,6 +108,36 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Drupal permissions ──────────────────────────────────
+        // The lists and requirement arrays that name permissions, which
+        // the Symfony names below do not read.  An account's
+        // `hasPermission('|')` is left to them, which confirm its receiver.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_drupal_permission_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── Drupal configuration names and keys ─────────────────
+        // The lists that name configuration objects, a form element's
+        // `#config_target`, and the keys a config object's `set()` and
+        // `clear()` write.  A `get()`'s keys come with the Symfony names
+        // below, which resolve its receiver as a container lookup's.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self
+                .try_drupal_config_key_completion(content, position, code, ctx)
+                .or_else(|| {
+                    self.try_drupal_config_name_completion(uri, content, position, code, ctx)
+                })
+        {
+            return Some(response);
+        }
+
         // ── Symfony form options ────────────────────────────────
         // `$builder->add('email', EmailType::class, ['|' => …])`, wherever
         // the form component is used.

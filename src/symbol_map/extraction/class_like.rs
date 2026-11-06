@@ -28,6 +28,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_drupal_hook_attribute_spans(class, ctx);
     emit_drupal_computed_hook_sites(&class.members, class.name.span.start.offset, ctx);
     emit_drupal_route_builder_spans(&class.members, class.name.span.start.offset, ctx);
+    emit_drupal_editable_config_spans(&class.members, ctx);
 
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {

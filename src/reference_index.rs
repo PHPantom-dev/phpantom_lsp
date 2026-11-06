@@ -65,6 +65,15 @@ pub(crate) fn string_key_reference_key(kind: StringKeyKind, key: &str) -> Refere
                 key: crate::symbol_map::laravel_resources::config_key(resource, key),
             }
         }
+        // A config object's `get()` holds the key alone, its object's name
+        // coming with the receiver's type, so a key is filed and found
+        // without the name.
+        StringKeyKind::DrupalConfigKey => ReferenceIndexKey::StringKey {
+            kind,
+            key: crate::drupal::config_keys::split_config_key(key)
+                .1
+                .to_string(),
+        },
         _ => ReferenceIndexKey::StringKey {
             kind,
             key: key.to_string(),
@@ -784,7 +793,7 @@ impl Backend {
             }
             let mut kinds: Vec<StringKeyKind> = Vec::with_capacity(2);
             for (_, kind) in site.receiver.targets() {
-                if !kinds.contains(kind) {
+                if enabled(*kind) && !kinds.contains(kind) {
                     kinds.push(*kind);
                 }
             }
@@ -1543,6 +1552,39 @@ mod tests {
             }])
             .expect("workspace should be marked indexed");
         assert!(candidates.is_empty());
+    }
+
+    /// A typed receiver's candidate is filed only under the kinds the
+    /// project reads: a Symfony `->get('page')` could be a Drupal config
+    /// factory's or config object's read, but never is outside Drupal.
+    #[test]
+    fn typed_receiver_candidates_file_only_enabled_kinds() {
+        let backend = Backend::new_test();
+        backend.set_is_symfony(true);
+        let map = SymbolMap {
+            typed_receiver_sites: vec![crate::symbol_map::TypedReceiverSite {
+                start: 0,
+                end: 4,
+                key: "page".to_string(),
+                is_write: false,
+                is_optional: false,
+                guards: 0,
+                receiver: crate::symbol_map::ReceiverClass::ContainerLookup,
+            }],
+            ..SymbolMap::default()
+        };
+        let kinds: Vec<StringKeyKind> = backend
+            .reference_entries_for_symbol_map("file:///project/src/Foo.php", &map)
+            .into_iter()
+            .filter_map(|(key, _)| match key {
+                ReferenceIndexKey::StringKey { kind, .. } => Some(kind),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [StringKeyKind::ContainerParameter, StringKeyKind::ServiceId]
+        );
     }
 
     #[test]

@@ -688,6 +688,10 @@ pub fn scan_drupal_directories(
                 if crate::drupal::is_hook_php_file(path, web_root) {
                     declaration_files.declarations.push(path.to_path_buf());
                 }
+            } else if crate::drupal::config::is_default_config_file(path, web_root) {
+                declaration_files.default_config.push(path.to_path_buf());
+            } else if crate::drupal::config::is_schema_file(path, web_root) {
+                declaration_files.config_schemas.push(path.to_path_buf());
             } else if crate::drupal::is_declaration_file(path, web_root) {
                 declaration_files.declarations.push(path.to_path_buf());
             }
@@ -711,6 +715,11 @@ pub struct DrupalDeclarationFiles {
     /// The service providers whose `alter()` may give a service another
     /// class (see `drupal::service_providers`).
     pub service_providers: Vec<PathBuf>,
+    /// The default configuration files, which are never parsed (see
+    /// `drupal::config`).
+    pub default_config: Vec<PathBuf>,
+    /// The configuration schema files.
+    pub config_schemas: Vec<PathBuf>,
 }
 
 /// The extensions besides `.php` that Drupal treats as PHP source.

@@ -92,6 +92,11 @@ impl Backend {
     ) -> bool {
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let changes = self.spell_changes_as_indexed(&params.changes);
+        // Default configuration files are never indexed, and an open schema
+        // file is skipped below, so both are followed before that.
+        if self.is_drupal_project() {
+            self.note_drupal_config_changes(&changes);
+        }
         if self.is_symfony_project()
             && changes.iter().any(|change| {
                 crate::symfony::translations::is_translation_setup_uri(change.uri.as_str())
