@@ -137,11 +137,29 @@ final class UserRepository extends ServiceEntityRepository
     public function inTeamByEmail(string $team): array
     {
         // Try: delete the `joinTeam()` call. The `t` it joins onto the
-        // builder is then declared nowhere, and that is reported.
+        // builder is then declared nowhere, and that is reported. Or wrap
+        // the call in an `if ($team !== '') { ... }`: the query built
+        // without it uses `t` undeclared, and that is reported too.
         $builder = $this->byEmail();
         $this->joinTeam($builder);
 
         return $builder->andWhere('t.name = :team')
+            ->setParameter('team', $team)
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * @return list<User>
+     */
+    public function teamMembers(string $team): array
+    {
+        // Try: change `t.name` to `x.name`. The builder comes from
+        // byEmailInTeam(), which gets it from byEmail() and passes it on to
+        // joinTeam(), so `u` and `t` are declared along that chain and `x`
+        // is reported.
+        return $this->byEmailInTeam()
+            ->andWhere('t.name = :team')
             ->setParameter('team', $team)
             ->getQuery()
             ->getResult();
@@ -164,6 +182,14 @@ final class UserRepository extends ServiceEntityRepository
     private function byEmail(): QueryBuilder
     {
         return $this->createQueryBuilder('u')->orderBy('u.email', 'ASC');
+    }
+
+    private function byEmailInTeam(): QueryBuilder
+    {
+        $builder = $this->byEmail();
+        $this->joinTeam($builder);
+
+        return $builder;
     }
 
     private function joinTeam(QueryBuilder $builder): void

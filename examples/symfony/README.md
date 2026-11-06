@@ -144,6 +144,12 @@ catalogues together, the way a real Symfony project does.
   The variables a builder uses are checked against the ones declared by
   the method that creates it and the methods it is passed to, so the `t`
   nothing joins is reported.
+- In `UserRepository::teamMembers()`, change `t.name` to `x.name`. The
+  builder comes from a method that gets it from another and passes it on
+  to a third, and the variables each declares are followed along the
+  chain, so only `x` is reported. In `inTeamByEmail()`, wrap the
+  `joinTeam()` call in an `if`: what another method declares counts only
+  on the paths that call it.
 - In `UserRepository::sortedByName()`, go-to-definition on `displayName`
   in the `Expr\OrderBy`. The DQL an expression object is built from reads
   like any other fragment.

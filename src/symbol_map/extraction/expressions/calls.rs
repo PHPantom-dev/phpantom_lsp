@@ -568,6 +568,12 @@ fn extract_static_method_call<'a>(
 
     if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
         let member_name = crate::atom::atom_bytes(ident.value);
+        record_dql_passes(
+            ident.span.start.offset,
+            &static_call.argument_list,
+            ctx,
+            scope_start,
+        );
         if member_name.eq_ignore_ascii_case("macro") {
             try_emit_laravel_macro_string_span(
                 &static_call.argument_list,

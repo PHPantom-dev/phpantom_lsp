@@ -341,6 +341,10 @@ pub(crate) struct SymbolMap {
     /// returns or is passed, for the callers that build a query on it.
     /// Empty for every file whose methods hand no builder on.
     pub dql_builder_methods: Vec<DqlBuilderMethod>,
+    /// The DQL variables declared in each function body whose undeclared
+    /// variables wait on what other methods declare.  Empty for every file
+    /// with no such body.
+    pub dql_bodies: Vec<DqlBody>,
     /// Whether the file declares a Twig loader of the project's own: a
     /// class that is one, or a service tagged `twig.loader`.  Such a loader
     /// can serve any template name, so no name can be told missing.
@@ -775,13 +779,18 @@ pub(crate) struct DqlSyntaxSite {
     pub receiver: &'static str,
     /// The calls of other methods that create or are handed the query
     /// builder the variable is used on.  The variable is undeclared only
-    /// when each of them is known to declare what it declares, and none
-    /// declares the variable.
+    /// when each of them is known to declare what it declares, and the
+    /// ones that declare the variable leave some path through the function
+    /// body without it.
     pub requires: Box<[DqlProvider]>,
+    /// Where the function body the variable is used in starts, when the
+    /// paths through it are followed again once the calls in `requires`
+    /// are known (see [`SymbolMap::dql_bodies`]).
+    pub body: Option<u32>,
 }
 
 /// Where a method's query builder comes in or goes out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum DqlSlot {
     /// The builder the method returns.
     Returned,
@@ -791,7 +800,7 @@ pub(crate) enum DqlSlot {
 
 /// A call of another method that a query builder comes from or is passed
 /// to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct DqlProvider {
     /// Where the method name of the call starts.
     pub call: u32,
@@ -805,7 +814,23 @@ pub(crate) struct DqlBuilderMethod {
     /// Where the method's name starts.
     pub name_offset: u32,
     pub slot: DqlSlot,
+    /// The variables its own body declares.
     pub aliases: Box<[crate::atom::Atom]>,
+    /// The calls of other methods in its body that the builder comes from
+    /// or is passed to, which declare variables on it too.
+    pub requires: Box<[DqlProvider]>,
+}
+
+/// The DQL variables a function body's query builder calls declare, and
+/// where, for following the paths through the body again once the other
+/// methods it calls are known.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DqlBody {
+    /// Where the body starts.
+    pub start: u32,
+    /// Where the method name of each declaring call starts, and the
+    /// variable it declares.
+    pub decls: Box<[(u32, crate::atom::Atom)]>,
 }
 
 impl SymbolMap {
@@ -819,17 +844,20 @@ impl SymbolMap {
             .map(|site| &*site.subject)
     }
 
-    /// The DQL variables the method whose name starts at `name_offset`
-    /// declares on the builder in `slot`, when it is known to declare no
-    /// others.
-    pub(crate) fn dql_builder_aliases(
+    /// What the method whose name starts at `name_offset` declares on the
+    /// builder in `slot`, when it is known to declare nothing else.
+    pub(crate) fn dql_builder_method(
         &self,
         name_offset: u32,
         slot: DqlSlot,
-    ) -> Option<&[crate::atom::Atom]> {
+    ) -> Option<&DqlBuilderMethod> {
         self.dql_builder_methods
             .iter()
             .find(|method| method.name_offset == name_offset && method.slot == slot)
-            .map(|method| &*method.aliases)
+    }
+
+    /// The DQL variables the function body starting at `start` declares.
+    pub(crate) fn dql_body(&self, start: u32) -> Option<&DqlBody> {
+        self.dql_bodies.iter().find(|body| body.start == start)
     }
 }

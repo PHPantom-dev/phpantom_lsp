@@ -1066,3 +1066,154 @@ abstract class BaseUsers {
     .await;
     assert_eq!(errors, vec![undefined("t")]);
 }
+
+#[tokio::test]
+async fn a_variable_a_chain_of_methods_declares_is_not_reported() {
+    // The builder comes from a method that gets it from another, and is
+    // passed to a method that passes it on to another, which passes it back.
+    let errors = undeclared_with(
+        "    private EntityManagerInterface $em;
+
+    private function createQb(): QueryBuilder
+    {
+        return $this->em->createQueryBuilder()->select('e')->from(User::class, 'e');
+    }
+
+    private function base(): QueryBuilder
+    {
+        return $this->createQb()->join('e.team', 't');
+    }
+
+    private function filtered(): QueryBuilder
+    {
+        $qb = $this->base();
+        $qb->andWhere('t.id = 1');
+        return $qb;
+    }
+
+    private function joinTeams(QueryBuilder $qb, bool $again): void
+    {
+        $qb->join('u.team', 's');
+        $this->joinOwner($qb, $again);
+    }
+
+    private function joinOwner(QueryBuilder $qb, bool $again): void
+    {
+        $qb->join('s.owner', 'o');
+        if ($again) {
+            $this->joinTeams($qb, false);
+        }
+    }
+
+    public function fromAChain(): void
+    {
+        $this->filtered()->andWhere('e.id = 1 AND t.id = 1 AND x.id = 1')->getQuery();
+    }
+
+    public function passedOn(): void
+    {
+        $qb = $this->em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        $this->joinTeams($qb, true);
+        $qb->andWhere('s.id = 1 AND o.id = 1 AND p.id = 1')->getQuery();
+    }",
+        &[],
+    )
+    .await;
+    assert_eq!(errors, vec![undefined("x"), undefined("p")]);
+}
+
+#[tokio::test]
+async fn a_variable_a_static_call_or_another_object_s_builder_declares_is_not_reported() {
+    let errors = undeclared_with(
+        "    private static function createQb(EntityManagerInterface $em): QueryBuilder
+    {
+        return $em->createQueryBuilder()->select('e')->from(User::class, 'e');
+    }
+
+    private static function joinTeams(QueryBuilder $qb): void
+    {
+        $qb->join('e.team', 't');
+    }
+
+    public function run(EntityManagerInterface $em, Builders $builders): void
+    {
+        $qb = self::createQb($em);
+        static::joinTeams($qb);
+        $qb->andWhere('e.id = 1 AND t.id = 1 AND x.id = 1')->getQuery();
+        $builders->forTeams()->andWhere('g.id = 1 AND m.id = 1 AND y.id = 1')->getQuery();
+    }",
+        &[(
+            "src/Service/Builders.php",
+            "<?php
+namespace App\\Service;
+use App\\Entity\\Team;
+use Doctrine\\ORM\\EntityManagerInterface;
+use Doctrine\\ORM\\QueryBuilder;
+final class Builders {
+    private EntityManagerInterface $em;
+    private function base(): QueryBuilder
+    {
+        return $this->em->createQueryBuilder()->select('g')->from(Team::class, 'g');
+    }
+    public function forTeams(): QueryBuilder
+    {
+        $qb = $this->base();
+        $this->joinMembers($qb);
+        return $qb;
+    }
+    private function joinMembers(QueryBuilder $qb): void
+    {
+        $qb->join('g.members', 'm');
+    }
+}
+",
+        )],
+    )
+    .await;
+    assert_eq!(errors, vec![undefined("x"), undefined("y")]);
+}
+
+#[tokio::test]
+async fn a_variable_another_method_declares_counts_only_on_the_paths_that_call_it() {
+    let errors = undeclared_with(
+        "    private function joinTeams(QueryBuilder $qb): void
+    {
+        $qb->join('u.team', 't');
+    }
+
+    public function sometimes(EntityManagerInterface $em, bool $withTeam): void
+    {
+        $qb = $em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        if ($withTeam) {
+            $this->joinTeams($qb);
+        }
+        $qb->andWhere('t.id = 1')->getQuery();
+    }
+
+    public function laterOnly(EntityManagerInterface $em, bool $withTeam): void
+    {
+        $qb = $em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        if ($withTeam) {
+            $this->joinTeams($qb);
+            $qb->andWhere('t.id = 1');
+        } else {
+            $qb->andWhere('t.id = 2');
+        }
+        $qb->getQuery();
+    }
+
+    public function always(EntityManagerInterface $em, bool $withTeam): void
+    {
+        $qb = $em->createQueryBuilder()->select('u')->from(User::class, 'u');
+        if ($withTeam) {
+            $this->joinTeams($qb);
+        } else {
+            $qb->join('u.team', 't');
+        }
+        $qb->andWhere('t.id = 3')->getQuery();
+    }",
+        &[],
+    )
+    .await;
+    assert_eq!(errors, vec![undefined("t"), undefined("t")]);
+}

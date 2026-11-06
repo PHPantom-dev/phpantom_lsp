@@ -795,41 +795,32 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ---
 
-## F72. DQL variables of a query builder a chain of methods handles
+## F73. DQL variables a returned query builder uses that its callers never declare
 
 **Impact: Low · Complexity: Medium**
 
 ```php
 private function base(): QueryBuilder
 {
-    return $this->createQb()->join('e.team', 't');  // builder from another method
+    return $this->em->createQueryBuilder()
+        ->select('u')->from(User::class, 'u')
+        ->andWhere('t.id = 1');                  // `t` declared by no caller
 }
 
-private function joinTeams(QueryBuilder $qb): void
-{
-    $this->joinOwner($qb);                          // passed on again
-}
-
-$qb = self::createQb();                             // static call
-$qb->andWhere('x.id = 1')->getQuery();              // `x` not reported
+$this->base()->getQuery();                       // PHPStan reports `t` here
 ```
 
-A builder another method returns, or that is passed to one, counts the
-variables that method's body declares, but only when that body creates the
-builder itself or only calls the methods of the one it is passed. One the
-method gets from a third method, or passes on to one, is not followed, so
-a variable used on it is not reported. Nor is one a static call or a call
-on a variable (`$repo->createQb()`) hands over. A variable such a method
-declares also counts on every path through the caller, not only the paths
-that make the call.
-
-The other direction is not reported either: a variable a method's returned
-builder uses, which none of its callers declare. PHPStan reports it in the
-caller, where the query is run.
+A variable used on a builder a method returns is left for the method's
+callers to declare, so one that none of them declares is not reported.
+PHPStan reports it in the caller, where the query is run. The method's
+summary would carry the variables its builder uses and does not declare
+itself, and each caller would check them along its paths, the way it
+checks its own uses against what the methods it calls declare. The same
+goes for a variable a method uses on a builder it is passed.
 
 **Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`
-(`summarize_methods`, `keeps_builder`, `builder_of`) and
-`src/diagnostics/dql_syntax.rs` (`providing_methods`).
+(`summarize_methods`, `report_undeclared`) and
+`src/diagnostics/dql_syntax.rs` (`Providers`).
 
 ---
 

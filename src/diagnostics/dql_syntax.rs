@@ -13,8 +13,9 @@
 //! object.
 //!
 //! A variable used on a builder another method returns, or that is passed
-//! to one, is reported only once the type engine finds that method and its
-//! body is known not to declare the variable.
+//! to one, is reported only once the type engine finds that method, and
+//! the methods it hands the builder on to in turn, and their bodies are
+//! known not to declare the variable on some path to the query.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -26,6 +27,8 @@ use tower_lsp_server::gen_lsp_types::*;
 use crate::Backend;
 use crate::atom::Atom;
 use crate::parser::{with_parse_cache, with_parsed_program};
+use crate::resolution::FileLoaders;
+use crate::symbol_map::extraction::{PathEvent, undeclared_on_some_path};
 use crate::symbol_map::{DqlProvider, DqlSyntaxSite, SymbolMap};
 
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
@@ -56,39 +59,51 @@ impl Backend {
             return;
         }
         let mut by_call: HashMap<u32, Vec<&DqlSyntaxSite>> = HashMap::new();
-        let mut providers: HashSet<u32> = HashSet::new();
-        for site in sites {
+        let mut wanted: HashSet<u32> = HashSet::new();
+        let mut bodies: HashSet<u32> = HashSet::new();
+        for site in &sites {
             by_call.entry(site.call).or_default().push(site);
-            providers.extend(site.requires.iter().map(|provider| provider.call));
+            wanted.insert(site.call);
+            if !site.requires.is_empty() {
+                wanted.extend(site.requires.iter().map(|provider| provider.call));
+                // The file's own methods may hand the builder on in turn.
+                wanted.extend(required_calls(&ctx.symbol_map));
+                bodies.extend(site.body);
+            }
         }
-        let mut wanted: HashSet<u32> = by_call.keys().copied().collect();
-        wanted.extend(&providers);
 
         let _parse_guard = with_parse_cache(content);
         let loaders = self.file_loaders(&ctx.file);
-        let (confirmed, provided) =
+        let own: Arc<str> = Arc::from(uri);
+        let mut reported: Vec<&DqlSyntaxSite> =
             with_parsed_program(content, "dql_syntax", |program, content| {
                 let mut calls = Calls {
                     wanted: &wanted,
+                    bodies: &bodies,
                     found: Vec::new(),
+                    statements: Vec::new(),
                 };
+                if bodies.contains(&0) {
+                    calls.statements.push((0, program.statements.as_slice()));
+                }
                 for statement in program.statements.iter() {
                     mago_syntax::walker::Walker::walk_statement(&CallFinder, statement, &mut calls);
                 }
-                let resolve = |receiver: &Expression<'_>| {
-                    let var_ctx = loaders.var_ctx_at(content, receiver.span().start.offset);
-                    crate::type_engine::variable::iterable_elements::resolve_expression_type(
-                        receiver, &var_ctx,
-                    )
-                };
-                let confirmed: Vec<u32> = calls
+                let confirmed: HashSet<u32> = calls
                     .found
                     .iter()
-                    .filter(|&&(method_start, receiver, _)| {
-                        let Some(site) = by_call.get(&method_start).and_then(|s| s.first()) else {
+                    .filter(|found| {
+                        let Receiver::Object(receiver) = found.receiver else {
                             return false;
                         };
-                        resolve(receiver).is_some_and(|ty| {
+                        let Some(site) = by_call.get(&found.call).and_then(|s| s.first()) else {
+                            return false;
+                        };
+                        let var_ctx = loaders.var_ctx_at(content, receiver.span().start.offset);
+                        crate::type_engine::variable::iterable_elements::resolve_expression_type(
+                            receiver, &var_ctx,
+                        )
+                        .is_some_and(|ty| {
                             crate::class_lookup::is_subtype_of_named(
                                 &ty,
                                 site.receiver,
@@ -96,44 +111,80 @@ impl Backend {
                             )
                         })
                     })
-                    .map(|&(method_start, _, _)| method_start)
+                    .map(|found| found.call)
                     .collect();
-                // The other methods each call reaches, for the variables
-                // their bodies declare.
-                let provided: HashMap<u32, Vec<ProvidingMethod>> = calls
-                    .found
+
+                let mut providers = Providers {
+                    backend: self,
+                    calls: HashMap::new(),
+                    maps: HashMap::from([(Arc::clone(&own), Arc::clone(&ctx.symbol_map))]),
+                    read: HashSet::from([Arc::clone(&own)]),
+                };
+                if !bodies.is_empty() || sites.iter().any(|site| !site.requires.is_empty()) {
+                    for found in &calls.found {
+                        let methods =
+                            self.call_targets(found, &loaders, content, uri, &ctx.symbol_map);
+                        providers.insert(&own, found.call, methods);
+                    }
+                }
+                let mut known: HashMap<DqlProvider, Option<Vec<Atom>>> = HashMap::new();
+                let mut settled: Vec<(u32, &str)> = Vec::new();
+                let mut reported: Vec<&DqlSyntaxSite> = Vec::new();
+                let mut confirmed_sites: Vec<&DqlSyntaxSite> = confirmed
                     .iter()
-                    .filter(|(method_start, _, _)| providers.contains(method_start))
-                    .filter_map(|&(method_start, receiver, method)| {
-                        let ty = resolve(receiver)?;
-                        let methods = self.providing_methods(
-                            &ty,
-                            method,
-                            uri,
-                            &ctx.symbol_map,
-                            loaders.resolved_class_loader(),
-                        )?;
-                        Some((method_start, methods))
-                    })
+                    .filter_map(|call| by_call.get(call))
+                    .flatten()
+                    .copied()
                     .collect();
-                (confirmed, provided)
+                confirmed_sites.sort_by_key(|site| (site.start, site.end));
+                for site in confirmed_sites {
+                    if site.requires.is_empty() {
+                        reported.push(site);
+                        continue;
+                    }
+                    // An undeclared variable's site covers the variable.
+                    let alias = content
+                        .get(site.start as usize..site.end as usize)
+                        .unwrap_or_default();
+                    // Each use some path may leave undeclared was kept, so
+                    // only the first one that is goes out.
+                    if site
+                        .body
+                        .is_some_and(|body| settled.contains(&(body, alias)))
+                    {
+                        continue;
+                    }
+                    let declaring: Vec<u32> = site
+                        .requires
+                        .iter()
+                        .filter(|provider| {
+                            known
+                                .entry(**provider)
+                                .or_insert_with(|| providers.aliases(&own, **provider))
+                                .as_ref()
+                                .is_none_or(|aliases| aliases.iter().any(|a| a.as_str() == alias))
+                        })
+                        .map(|provider| provider.call)
+                        .collect();
+                    let undeclared = declaring.is_empty()
+                        || site.body.is_some_and(|body| {
+                            undeclared_along_paths(
+                                site,
+                                alias,
+                                &declaring,
+                                body,
+                                &calls.statements,
+                                &ctx.symbol_map,
+                            )
+                        });
+                    if undeclared {
+                        settled.extend(site.body.map(|body| (body, alias)));
+                        reported.push(site);
+                    }
+                }
+                reported
             });
 
-        let mut reported: Vec<&DqlSyntaxSite> = confirmed
-            .iter()
-            .filter_map(|method_start| by_call.get(method_start))
-            .flatten()
-            .copied()
-            .filter(|site| {
-                // An undeclared variable's site covers the variable.
-                let alias = content
-                    .get(site.start as usize..site.end as usize)
-                    .unwrap_or_default();
-                site.requires
-                    .iter()
-                    .all(|provider| leaves_undeclared(provider, alias, &provided))
-            })
-            .collect();
         reported.sort_by_key(|site| (site.start, site.end));
         for site in reported {
             let Some(range) = self.offset_range_to_lsp_range(
@@ -154,32 +205,216 @@ impl Backend {
     }
 }
 
-/// A method a call reaches: the symbol map of the file that declares it,
-/// and where its name starts there.
+/// Whether some path through the function body starting at `body` uses
+/// the variable `alias` at `site` and never declares it, counting the
+/// calls `declaring` of other methods as declaring it.
+fn undeclared_along_paths(
+    site: &DqlSyntaxSite,
+    alias: &str,
+    declaring: &[u32],
+    body: u32,
+    statements: &[(u32, &[Statement<'_>])],
+    map: &SymbolMap,
+) -> bool {
+    let Some(&(_, statements)) = statements.iter().find(|(start, _)| *start == body) else {
+        return false;
+    };
+    let Some(decls) = map.dql_body(body) else {
+        return false;
+    };
+    let mut events: Vec<(u32, PathEvent<'_>)> = std::iter::once((site.start, PathEvent::Use(0)))
+        .chain(
+            decls
+                .decls
+                .iter()
+                .filter(|(_, a)| a.as_str() == alias)
+                .map(|(at, _)| (*at, PathEvent::Declare(alias))),
+        )
+        .chain(declaring.iter().map(|&at| (at, PathEvent::Declare(alias))))
+        .collect();
+    undeclared_on_some_path(statements, &mut events, &[alias])
+        .first()
+        .copied()
+        .unwrap_or(false)
+}
+
+/// The calls the methods of the file behind `map` hand a builder on with.
+fn required_calls(map: &SymbolMap) -> impl Iterator<Item = u32> + '_ {
+    map.dql_builder_methods
+        .iter()
+        .flat_map(|method| method.requires.iter().map(|provider| provider.call))
+}
+
+/// A method a call reaches: the file that declares it, the symbol map of
+/// that file, and where its name starts there.
 struct ProvidingMethod {
+    file: Arc<str>,
     map: Arc<SymbolMap>,
     name_offset: u32,
 }
 
-/// Whether the call `provider` reaches only methods known to declare no
-/// variable but the ones their bodies spell, and none of them `alias`.
-fn leaves_undeclared(
-    provider: &DqlProvider,
-    alias: &str,
-    provided: &HashMap<u32, Vec<ProvidingMethod>>,
-) -> bool {
-    let Some(methods) = provided.get(&provider.call) else {
-        return false;
-    };
-    methods.iter().all(|method| {
-        method
-            .map
-            .dql_builder_aliases(method.name_offset, provider.slot)
-            .is_some_and(|aliases: &[Atom]| !aliases.iter().any(|a| a.as_str() == alias))
-    })
+/// The methods a call reaches.
+type Targets = Arc<[ProvidingMethod]>;
+
+/// The methods the calls that hand a builder on reach, found file by file
+/// as the methods are followed.
+struct Providers<'b> {
+    backend: &'b Backend,
+    /// The methods each call of each file reaches, `None` when any of them
+    /// cannot be found.
+    calls: HashMap<(Arc<str>, u32), Option<Targets>>,
+    /// The symbol map of each file a method was found in.
+    maps: HashMap<Arc<str>, Arc<SymbolMap>>,
+    /// The files whose calls have been looked up.
+    read: HashSet<Arc<str>>,
+}
+
+impl Providers<'_> {
+    fn insert(&mut self, file: &Arc<str>, call: u32, methods: Option<Vec<ProvidingMethod>>) {
+        let methods: Option<Targets> = methods.map(|methods| {
+            for method in &methods {
+                self.maps
+                    .entry(Arc::clone(&method.file))
+                    .or_insert_with(|| Arc::clone(&method.map));
+            }
+            methods.into()
+        });
+        self.calls.insert((Arc::clone(file), call), methods);
+    }
+
+    /// The variables the methods the call `provider` of `file` reaches
+    /// declare on the builder, and the methods they hand it on to, and so
+    /// on.  `None` when any of them cannot be found or is not known to
+    /// declare only what its body spells.
+    fn aliases(&mut self, file: &Arc<str>, provider: DqlProvider) -> Option<Vec<Atom>> {
+        let mut aliases: Vec<Atom> = Vec::new();
+        let mut seen: HashSet<(Arc<str>, DqlProvider)> = HashSet::new();
+        let mut pending = vec![(Arc::clone(file), provider)];
+        while let Some((file, provider)) = pending.pop() {
+            if !seen.insert((Arc::clone(&file), provider)) {
+                continue;
+            }
+            let methods = self.targets(&file, provider.call)?;
+            for method in methods.iter() {
+                let summary = method
+                    .map
+                    .dql_builder_method(method.name_offset, provider.slot)?;
+                for alias in summary.aliases.iter() {
+                    if !aliases.contains(alias) {
+                        aliases.push(*alias);
+                    }
+                }
+                pending.extend(
+                    summary
+                        .requires
+                        .iter()
+                        .map(|required| (Arc::clone(&method.file), *required)),
+                );
+            }
+        }
+        Some(aliases)
+    }
+
+    /// The methods the call whose method name starts at `call` in `file`
+    /// reaches.
+    fn targets(&mut self, file: &Arc<str>, call: u32) -> Option<Targets> {
+        if !self.read.contains(file) {
+            self.read_file(file);
+        }
+        self.calls.get(&(Arc::clone(file), call)).cloned().flatten()
+    }
+
+    /// Look up the methods each call the methods of `file` hand a builder
+    /// on with reaches.  The calls are resolved in their own file, whose
+    /// offsets have nothing to do with the file the diagnostic pass is
+    /// checking, so neither of its caches may answer for them.
+    fn read_file(&mut self, file: &Arc<str>) {
+        self.read.insert(Arc::clone(file));
+        let Some(map) = self.maps.get(file).cloned() else {
+            return;
+        };
+        let wanted: HashSet<u32> = required_calls(&map).collect();
+        if wanted.is_empty() {
+            return;
+        }
+        let backend = self.backend;
+        let Some(content) = backend.get_file_content_arc(file) else {
+            return;
+        };
+        let _isolated = (
+            crate::type_engine::variable::forward_walk::suspend_diagnostic_scope(),
+            crate::type_engine::resolver::with_isolated_chain_cache(),
+        );
+        let file_ctx = backend.file_context(file);
+        let loaders = backend.file_loaders(&file_ctx);
+        let no_bodies = HashSet::new();
+        let found: Vec<(u32, Option<Vec<ProvidingMethod>>)> =
+            with_parsed_program(&content, "dql_providers", |program, content| {
+                let mut calls = Calls {
+                    wanted: &wanted,
+                    bodies: &no_bodies,
+                    found: Vec::new(),
+                    statements: Vec::new(),
+                };
+                for statement in program.statements.iter() {
+                    mago_syntax::walker::Walker::walk_statement(&CallFinder, statement, &mut calls);
+                }
+                calls
+                    .found
+                    .iter()
+                    .map(|found| {
+                        (
+                            found.call,
+                            backend.call_targets(found, &loaders, content, file, &map),
+                        )
+                    })
+                    .collect()
+            });
+        for (call, methods) in found {
+            self.insert(file, call, methods);
+        }
+    }
 }
 
 impl Backend {
+    /// The methods the call `found`, read from `content` of the file at
+    /// `uri`, reaches.
+    fn call_targets(
+        &self,
+        found: &FoundCall<'_, '_>,
+        loaders: &FileLoaders<'_>,
+        content: &str,
+        uri: &str,
+        map: &Arc<SymbolMap>,
+    ) -> Option<Vec<ProvidingMethod>> {
+        let (expr, class) = match found.receiver {
+            Receiver::Object(expr) => (expr, false),
+            Receiver::Class(expr) => (expr, true),
+        };
+        let var_ctx = loaders.var_ctx_at(content, expr.span().start.offset);
+        let ty = match expr {
+            Expression::Self_(_)
+            | Expression::Static(_)
+            | Expression::Parent(_)
+            | Expression::Identifier(_)
+                if class =>
+            {
+                let name = crate::class_lookup::class_expression_name(
+                    expr,
+                    var_ctx.current_class,
+                    var_ctx.file.all_classes,
+                    var_ctx.file.source_class_loader,
+                    var_ctx.file.source_imports,
+                )?;
+                crate::php_type::PhpType::named(crate::atom::atom(&name))
+            }
+            _ => crate::type_engine::variable::iterable_elements::resolve_expression_type(
+                expr, &var_ctx,
+            )?,
+        };
+        self.providing_methods(&ty, found.method, uri, map, loaders.resolved_class_loader())
+    }
+
     /// The method `method` of each class `receiver` may be, with the symbol
     /// map of the file that declares it.  `None` when any of them cannot
     /// be found.
@@ -232,7 +467,11 @@ impl Backend {
                         )),
                     }
                 };
-                Some(ProvidingMethod { map, name_offset })
+                Some(ProvidingMethod {
+                    file: Arc::from(file),
+                    map,
+                    name_offset,
+                })
             })
             .collect()
     }
@@ -266,27 +505,48 @@ fn read_dql_builder_methods(uri: &str, content: &str) -> SymbolMap {
     }
 }
 
-/// The calls the walk is after, and the receiver and method name of the
-/// ones it found: for a `new`, the object it makes, and no name.
+/// What a call is made on: an object, or a class.  A `new` is made on the
+/// object it makes.
+#[derive(Clone, Copy)]
+enum Receiver<'ast, 'arena> {
+    Object(&'ast Expression<'arena>),
+    Class(&'ast Expression<'arena>),
+}
+
+/// A call the walk is after: where its method name starts, or the class
+/// name of a `new`, what it is made on, and the method's name, empty for a
+/// `new`.
+struct FoundCall<'ast, 'arena> {
+    call: u32,
+    receiver: Receiver<'ast, 'arena>,
+    method: &'arena str,
+}
+
+/// The calls and function bodies the walk is after, and the ones it found.
 struct Calls<'w, 'ast, 'arena> {
     wanted: &'w HashSet<u32>,
-    found: Vec<(u32, &'ast Expression<'arena>, &'arena str)>,
+    /// Where the bodies start, by their opening brace.
+    bodies: &'w HashSet<u32>,
+    found: Vec<FoundCall<'ast, 'arena>>,
+    statements: Vec<(u32, &'ast [Statement<'arena>])>,
 }
 
 struct CallFinder;
 
 impl CallFinder {
     fn visit<'ast, 'arena>(
-        object: &'ast Expression<'arena>,
+        receiver: Receiver<'ast, 'arena>,
         method: &'ast ClassLikeMemberSelector<'arena>,
         calls: &mut Calls<'_, 'ast, 'arena>,
     ) {
         if let ClassLikeMemberSelector::Identifier(name) = method {
             let start = name.span.start.offset;
             if calls.wanted.contains(&start) {
-                calls
-                    .found
-                    .push((start, object, crate::atom::bytes_to_str(name.value)));
+                calls.found.push(FoundCall {
+                    call: start,
+                    receiver,
+                    method: crate::atom::bytes_to_str(name.value),
+                });
             }
         }
     }
@@ -300,7 +560,7 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, Calls<'w, 'ast,
         node: &'ast MethodCall<'arena>,
         calls: &mut Calls<'w, 'ast, 'arena>,
     ) {
-        Self::visit(node.object, &node.method, calls);
+        Self::visit(Receiver::Object(node.object), &node.method, calls);
     }
 
     fn walk_in_null_safe_method_call(
@@ -308,7 +568,22 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, Calls<'w, 'ast,
         node: &'ast NullSafeMethodCall<'arena>,
         calls: &mut Calls<'w, 'ast, 'arena>,
     ) {
-        Self::visit(node.object, &node.method, calls);
+        Self::visit(Receiver::Object(node.object), &node.method, calls);
+    }
+
+    fn walk_in_static_method_call(
+        &self,
+        node: &'ast StaticMethodCall<'arena>,
+        calls: &mut Calls<'w, 'ast, 'arena>,
+    ) {
+        Self::visit(Receiver::Class(node.class), &node.method, calls);
+    }
+
+    fn walk_in_block(&self, node: &'ast Block<'arena>, calls: &mut Calls<'w, 'ast, 'arena>) {
+        let start = node.left_brace.start.offset;
+        if calls.bodies.contains(&start) {
+            calls.statements.push((start, node.statements.as_slice()));
+        }
     }
 
     /// An expression object constructed with DQL is confirmed by the
@@ -321,7 +596,11 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, Calls<'w, 'ast,
         if let Expression::Instantiation(instantiation) = node {
             let start = instantiation.class.span().start.offset;
             if calls.wanted.contains(&start) {
-                calls.found.push((start, node, ""));
+                calls.found.push(FoundCall {
+                    call: start,
+                    receiver: Receiver::Object(node),
+                    method: "",
+                });
             }
         }
     }

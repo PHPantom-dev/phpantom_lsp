@@ -231,6 +231,9 @@ struct ExtractionCtx<'a> {
     dql_syntax_errors: Vec<crate::symbol_map::DqlSyntaxSite>,
     /// What each method declares on the builders it hands on.
     dql_builder_methods: Vec<crate::symbol_map::DqlBuilderMethod>,
+    /// The DQL variables declared in each body whose undeclared variables
+    /// wait on other methods.
+    dql_bodies: Vec<crate::symbol_map::DqlBody>,
 }
 
 /// A variable token's name without its `$`.
@@ -350,6 +353,7 @@ mod yii_routes;
 
 use class_like::*;
 use doctrine_dql::*;
+pub(crate) use doctrine_dql::{PathEvent, undeclared_on_some_path};
 use doctrine_fields::*;
 use drupal::*;
 use expressions::*;
@@ -586,6 +590,7 @@ fn extract_symbol_map_inner(
         dql_aliases: Vec::new(),
         dql_syntax_errors: Vec::new(),
         dql_builder_methods: Vec::new(),
+        dql_bodies: Vec::new(),
     };
 
     note_dql_body(0, program.statements.as_slice(), &mut ctx);
@@ -762,6 +767,7 @@ fn extract_symbol_map_inner(
         dql_aliases: ctx.dql_aliases,
         dql_syntax_errors: ctx.dql_syntax_errors,
         dql_builder_methods: ctx.dql_builder_methods,
+        dql_bodies: ctx.dql_bodies,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx
             .route_imports
