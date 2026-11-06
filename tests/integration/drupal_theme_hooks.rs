@@ -931,7 +931,7 @@ async fn a_template_reports_no_unknown_variables() {
 #[tokio::test]
 async fn render_arrays_outside_drupal_name_no_theme_hooks() {
     let backend = crate::common::create_test_backend();
-    let uri = Uri::from_file_path("/tmp/plain/src/Page.php").unwrap();
+    let uri = Uri::from_file_path(std::env::temp_dir().join("plain/src/Page.php")).unwrap();
     let php = "<?php\n$build = ['#theme' => '', '#name' => 'x'];\n";
     let labels = crate::common::complete_labels_at(&backend, &uri, php, 1, 23).await;
     assert!(labels.is_empty(), "{labels:?}");

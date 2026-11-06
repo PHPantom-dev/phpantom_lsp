@@ -237,11 +237,8 @@ fn resolve_member_owner(
         .into_iter()
         .map(|name| name.trim_start_matches('\\').to_string())
         .collect();
-    match docblock_ref {
-        DocblockMemberRef::MockedMethod => {
-            names = crate::mock_methods::mocked_class_names(names, is_static, &class_loader);
-        }
-        _ => {}
+    if docblock_ref == DocblockMemberRef::MockedMethod {
+        names = crate::mock_methods::mocked_class_names(names, is_static, &class_loader);
     }
     (names.len() == 1).then(|| names.swap_remove(0))
 }
