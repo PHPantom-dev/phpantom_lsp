@@ -8,9 +8,11 @@ the services the `*.services.yml` files declare, the entity types
 entity classes declare, the routes the routing files, route attributes,
 and route builders declare, the hooks the `*.api.php` files document
 and the extensions implement, the permissions the `*.permissions.yml`
-files declare, and the configuration objects and keys the default
-configuration and the configuration schema declare are read. Nothing
-reads fields yet.
+files declare, the configuration objects and keys the default
+configuration and the configuration schema declare, the theme hooks
+`hook_theme()` implementations declare, the render elements element
+classes declare, and the libraries the `*.libraries.yml` files declare
+are read. Nothing reads fields yet.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -28,9 +30,10 @@ is what they expect from an editor.
 installs core into `web/core` through Composer (`memory_drupal_module`),
 next to the other framework scenarios. `benches/drupal_completion.rs`
 measures completion of service IDs, route names, entity type IDs,
-permission names, configuration names, hook names, and hook
-implementations over a generated site with many custom modules. Every item that adds a name Drupal declares adds its case to
-it.
+permission names, configuration names, render element names, hook names,
+theme hook names, library names, and hook implementations over a
+generated site with many custom modules. Every item that adds a name
+Drupal declares adds its case to it.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
@@ -66,32 +69,6 @@ names and report a misspelt one.
 
 ---
 
-## DR7. Render arrays, theme hooks, and libraries
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-return [
-    '#theme' => 'acme_order_summary',
-    '#order' => $order,
-    '#attached' => ['library' => ['acme/order-summary']],
-];
-```
-
-- **`#theme`** names a theme hook a `hook_theme()` implementation
-  declares, which renders `templates/acme-order-summary.html.twig`.
-  Navigate from the string to both, complete it, and complete the
-  `#`-prefixed variables the hook declares.
-- **`#type`** names a render or form element class
-  (`#[RenderElement('details')]`, `#[FormElement('textfield')]`).
-- **Libraries** in `#attached` name entries in `<module>.libraries.yml`.
-
-The Twig support already finds templates outside Symfony, and a
-template's variables from the renders that name it; a theme hook's
-variables would be one more source of them (see `src/twig/variables.rs`).
-
----
-
 ## DR10. Plugin IDs
 
 **Impact: Medium · Complexity: Medium**
@@ -107,9 +84,11 @@ Blocks, field types, formatters, widgets, queue workers, and the other
 plugin types declare an ID in an attribute (or, in older code, a
 docblock annotation). Complete and navigate plugin IDs where a plugin
 manager takes one (`createInstance()`, `getDefinition()`,
-`hasDefinition()`), and in the YAML and render arrays that name them
-(`'#type'` is [DR7](#dr7-render-arrays-theme-hooks-and-libraries)), and
-type `createInstance()` as the plugin class.
+`hasDefinition()`), and in the YAML that names them, and type
+`createInstance()` as the plugin class. Render elements, the plugins a
+render array's `'#type'` names, already complete and navigate, and the
+reader that finds their attributes and annotations takes the attribute
+class as a parameter, so the other plugin types can reuse it.
 
 ---
 
@@ -353,3 +332,25 @@ the access result helpers, the user module's role functions, each part of
 a route's `_permission`, and an entity type's `admin_permission`. This
 depends on [DR22](#dr22-complete-permissions-built-in-code): the names
 permission callbacks build would otherwise be reported.
+
+---
+
+## DR24. Warn on unknown theme hook names
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```php
+return ['#theme' => 'acme_order_sumary', '#order' => $order];
+```
+
+A `#theme` that names no theme hook never reaches a template: Drupal
+logs a warning and renders only the array's children and `#markup`. Render element and library names are reported when
+nothing declares them, but theme hook names are not, because the hooks
+read from `hook_theme()` implementations are not all of them. Views, in
+core, and some contributed modules build their hooks in a loop or from
+other calls, which are not read, and a hook name does not say which
+extension declares it, so the only safe rule, silence wherever an
+implementation cannot be read, would silence every site. Report a name
+only once those hooks are read, or with a rule that knows which names
+such an implementation can add. A suggestion such as
+`acme_greeting__compact` is valid when its base hook is.
