@@ -87,11 +87,22 @@ impl Backend {
             return Some(response);
         }
 
+        let mut receiver_type = None;
         let (kind, prefix_start) = self
-            .symfony_call_key(content, cursor, code, ctx)
+            .symfony_call_key(content, cursor, code, ctx, &mut receiver_type)
             .map(|kind| (kind, literal_start))
             .or_else(|| attribute_key(content, code, literal, literal_start, ctx))
             .filter(|(kind, _)| self.string_key_kind_enabled(*kind))?;
+        // A config object's `get()`: its keys come from the name its type,
+        // resolved once above, carries.
+        if kind == StringKeyKind::DrupalConfigKey {
+            let names = self.drupal_config_names_of(
+                receiver_type.as_ref()?,
+                false,
+                self.file_loaders(ctx).resolved_class_loader(),
+            );
+            return self.drupal_config_key_response(&names, content, prefix_start, position);
+        }
         if kind == StringKeyKind::YiiRouteArgument {
             let arguments = handler_at(ctx, literal_start as u32)
                 .and_then(|handler| self.yii_handler_arguments(&handler))
@@ -347,6 +358,7 @@ impl Backend {
         cursor: usize,
         code: &CodeContext<'_>,
         ctx: &FileContext,
+        receiver_type: &mut Option<crate::php_type::PhpType>,
     ) -> Option<StringKeyKind> {
         // A name is the argument itself, not an element of an array one.
         if !matches!(code.last_code_byte(), Some(b'(' | b',')) {
@@ -416,14 +428,18 @@ impl Backend {
                 ctx,
             );
         }
-        self.receiver_call_key(
+        // The receiver's type is kept for what it carries besides its
+        // class: a config object's name.
+        let (receiver, _) = symfony_receiver_method(&call.method_name, call.arg_index)?;
+        let (kind, ty) = self.receiver_key_and_type(
             subject,
-            &call.method_name,
-            call.arg_index,
+            (receiver, &call.method_name, call.arg_index),
             content,
             cursor,
             ctx,
-        )
+        )?;
+        *receiver_type = Some(ty);
+        Some(kind)
     }
 
     /// What the argument `index` of a call of `method` on `subject`, written
@@ -451,6 +467,19 @@ impl Backend {
         cursor: usize,
         ctx: &FileContext,
     ) -> Option<StringKeyKind> {
+        self.receiver_key_and_type(subject, (receiver, method, index), content, cursor, ctx)
+            .map(|(kind, _)| kind)
+    }
+
+    /// [`Self::receiver_key_for`], with the type the receiver resolved to.
+    fn receiver_key_and_type(
+        &self,
+        subject: &str,
+        (receiver, method, index): (crate::symbol_map::ReceiverClass, &str, usize),
+        content: &str,
+        cursor: usize,
+        ctx: &FileContext,
+    ) -> Option<(StringKeyKind, crate::php_type::PhpType)> {
         // Resolving the receiver is the costly part, and is wasted on a
         // call whose every kind of key the project does not read.
         if !receiver.names_any(|kind| self.string_key_kind_enabled(kind)) {
@@ -461,8 +490,8 @@ impl Backend {
         let rctx = loaders.resolution_ctx_at(content, cursor as u32);
         crate::type_engine::resolver::resolve_target_classes(subject, AccessKind::Arrow, &rctx)
             .into_iter()
-            .filter_map(|resolved| resolved.class_info)
-            .find_map(|class| {
+            .find_map(|resolved| {
+                let class = resolved.class_info?;
                 self.typed_receiver_key_kind(
                     &crate::php_type::PhpType::named(class.fqn()),
                     method,
@@ -470,6 +499,7 @@ impl Backend {
                     receiver,
                     class_loader,
                 )
+                .map(|kind| (kind, resolved.type_string))
             })
     }
 

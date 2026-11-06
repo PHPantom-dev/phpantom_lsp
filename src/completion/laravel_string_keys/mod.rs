@@ -37,6 +37,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
         StringKeyKind::DrupalPermission => CompletionItemKind::Constant,
         StringKeyKind::DrupalConfigName => CompletionItemKind::File,
+        StringKeyKind::DrupalConfigKey => CompletionItemKind::Field,
         StringKeyKind::TranslationDomain => CompletionItemKind::Module,
         StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
         StringKeyKind::Middleware => CompletionItemKind::Class,
@@ -214,6 +215,7 @@ impl Backend {
             | StringKeyKind::SymfonyConfigKey
             | StringKeyKind::YiiRouteArgument
             | StringKeyKind::DrupalRouteParameter
+            | StringKeyKind::DrupalConfigKey
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::TwigBlock

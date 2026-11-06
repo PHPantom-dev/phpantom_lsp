@@ -311,3 +311,111 @@ enum Query {
     Count,
     Execute,
 }
+
+const CONFIG_FACTORY: &str = crate::symbol_map::DRUPAL_CONFIG_FACTORY;
+/// The classes whose `config()` shortcut reads a configuration object.
+const CONFIG_SHORTCUTS: [&str; 2] = [
+    "Drupal\\Core\\Controller\\ControllerBase",
+    "Drupal\\Core\\Form\\FormBase",
+];
+
+/// What a call that reads a configuration object by its name returns:
+/// whatever the method declares, with the name added as a type argument
+/// to each class it names (`ImmutableConfig<'acme.settings'>`, both halves
+/// of a config form's `Config|ImmutableConfig`), so the keys a `get()` on
+/// it reads are known wherever it goes.
+///
+/// The calls are `\Drupal::config()`, a config factory's `get()` and
+/// `getEditable()`, and the `config()` of a controller or a form.  `None`
+/// for another call, or one whose method declares no class.
+pub(crate) fn config_object_type(
+    backend: &Backend,
+    owner: &ClassInfo,
+    method_name: &str,
+    name: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+    cache: Option<&crate::virtual_members::ResolvedClassCache>,
+) -> Option<PhpType> {
+    if !backend.is_drupal_project() || !reads_config_object(owner, method_name, class_loader) {
+        return None;
+    }
+    let merged =
+        crate::virtual_members::resolve_class_fully_maybe_cached(owner, class_loader, cache);
+    let declared = merged.get_method_ci(method_name)?.return_type.clone()?;
+    tag_config_type(&declared, name)
+}
+
+/// Whether a call of `method_name` on `owner` reads a configuration object
+/// by the name it takes first.
+fn reads_config_object(
+    owner: &ClassInfo,
+    method_name: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> bool {
+    let is = |name: &str| method_name.eq_ignore_ascii_case(name);
+    if is("config") {
+        owner.fqn().trim_start_matches('\\') == "Drupal"
+            || CONFIG_SHORTCUTS
+                .iter()
+                .any(|base| crate::class_lookup::is_subtype_of(owner, base, class_loader))
+            || super::config::uses_config_form_trait(owner, class_loader)
+    } else if is("get") || is("getEditable") {
+        crate::class_lookup::is_subtype_of(owner, CONFIG_FACTORY, class_loader)
+    } else {
+        false
+    }
+}
+
+/// `declared` with the configuration name `name` added to each class it
+/// names, or `None` when it names none.
+fn tag_config_type(declared: &PhpType, name: &str) -> Option<PhpType> {
+    match declared.kind() {
+        TypeKind::Named(class) => Some(PhpType::generic(
+            class.as_str(),
+            vec![PhpType::literal_string_value(name)],
+        )),
+        TypeKind::Union(members) => {
+            let mut tagged_any = false;
+            let members = members
+                .iter()
+                .map(|member| match tag_config_type(member, name) {
+                    Some(tagged) => {
+                        tagged_any = true;
+                        tagged
+                    }
+                    None => member.clone(),
+                })
+                .collect();
+            tagged_any.then(|| PhpType::union(members))
+        }
+        _ => None,
+    }
+}
+
+/// The configuration names a config object's type carries, one per tagged
+/// class it can be: what [`config_object_type`] added.
+pub(crate) fn config_names_of(ty: &PhpType) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_config_names(ty, &mut names);
+    names
+}
+
+fn collect_config_names(ty: &PhpType, names: &mut Vec<String>) {
+    match ty.kind() {
+        TypeKind::Generic(generic) => {
+            if let [argument] = generic.args.as_slice()
+                && let TypeKind::Literal(literal) = argument.kind()
+                && let Some(name) = literal.string_content()
+                && !names.iter().any(|known| *known == *name)
+            {
+                names.push(name.to_string());
+            }
+        }
+        TypeKind::Union(members) => {
+            for member in members {
+                collect_config_names(member, names);
+            }
+        }
+        _ => {}
+    }
+}

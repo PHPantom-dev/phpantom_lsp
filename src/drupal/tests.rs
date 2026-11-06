@@ -67,6 +67,57 @@ fn services_files_in_the_web_root_declare_services_and_parameters() {
     assert_eq!(classes, vec!["Drupal\\acme\\Greeter".to_string()]);
 }
 
+/// Default configuration gives names by its file names alone, so editing
+/// one keeps the configuration index; a schema edit, and a test module's
+/// file opening or closing, drop it.
+#[test]
+fn only_what_changes_the_names_drops_the_configuration_index() {
+    let (backend, dir) = drupal_backend(&[]);
+    let default = dir
+        .path()
+        .join("web/modules/custom/acme/config/install/acme.settings.yml");
+    let schema = "web/modules/custom/acme/config/schema/acme.schema.yml";
+    let fixture =
+        "web/core/modules/system/tests/modules/config_test/config/install/config_test.system.yml";
+    backend.note_drupal_config_files(vec![default.clone()], Vec::new());
+    let first = backend.drupal_config_index();
+
+    backend.note_drupal_config_document(&crate::util::path_to_uri(&default));
+    assert!(std::sync::Arc::ptr_eq(
+        &first,
+        &backend.drupal_config_index()
+    ));
+
+    backend.note_drupal_config_document(&uri(dir.path(), schema));
+    let second = backend.drupal_config_index();
+    assert!(!std::sync::Arc::ptr_eq(&first, &second));
+
+    let fixture_uri = uri(dir.path(), fixture);
+    backend.open_files.write().insert(
+        fixture_uri.clone(),
+        std::sync::Arc::new("a: b\n".to_string()),
+    );
+    backend.note_drupal_config_document(&fixture_uri);
+    let opened = backend.drupal_config_index();
+    assert!(!std::sync::Arc::ptr_eq(&second, &opened));
+    assert!(opened.names().contains(&"config_test.system".to_string()));
+    // Typing in it changes no name.
+    backend.note_drupal_config_document(&fixture_uri);
+    assert!(std::sync::Arc::ptr_eq(
+        &opened,
+        &backend.drupal_config_index()
+    ));
+
+    backend.open_files.write().remove(&fixture_uri);
+    backend.note_drupal_config_document(&fixture_uri);
+    assert!(
+        !backend
+            .drupal_config_index()
+            .names()
+            .contains(&"config_test.system".to_string())
+    );
+}
+
 #[test]
 fn a_routing_file_under_a_config_directory_is_drupals_in_a_symfony_site() {
     // Core's `config` module puts a `config` segment on the way to its

@@ -107,6 +107,7 @@ impl CheckedStringKind {
             | StringKeyKind::DrupalHook
             | StringKeyKind::DrupalPermission
             | StringKeyKind::DrupalConfigName
+            | StringKeyKind::DrupalConfigKey
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack

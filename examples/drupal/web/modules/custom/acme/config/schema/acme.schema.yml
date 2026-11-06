@@ -7,3 +7,10 @@ acme.settings:
     notify_email:
       type: email
       label: 'Notification email'
+    notifications:
+      type: mapping
+      label: 'Notifications'
+      mapping:
+        email:
+          type: boolean
+          label: 'Send notifications by email'

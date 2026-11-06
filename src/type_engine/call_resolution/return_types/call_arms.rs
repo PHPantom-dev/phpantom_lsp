@@ -104,6 +104,37 @@ impl Backend {
             }
             return classes;
         }
+        // A configuration object read by its name carries the name.
+        if let Some(backend) = in_drupal
+            && (method_name.eq_ignore_ascii_case("config")
+                || method_name.eq_ignore_ascii_case("get")
+                || method_name.eq_ignore_ascii_case("getEditable"))
+            && let Some(name) = first_literal_text_arg(text_args, "name")
+            && let Some(ty) = lhs_resolved
+                .iter()
+                .filter_map(|resolved| resolved.class_info.as_deref())
+                .find_map(|owner| {
+                    crate::drupal::types::config_object_type(
+                        backend,
+                        owner,
+                        method_name,
+                        name,
+                        ctx.file.class_loader,
+                        ctx.resolved_class_cache,
+                    )
+                })
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
         if method_name.eq_ignore_ascii_case("getStorage")
             && let Some(backend) = in_drupal
             && let Some(id) = first_literal_text_arg(text_args, "entity_type_id")
@@ -117,8 +148,8 @@ impl Backend {
                     ctx.file.class_loader,
                 ) {
                     // A chain carries one hint: with two declarations of the
-                    // ID it is their union, which a following load cannot
-                    // read a single entity from.
+                    // ID it is the union of their tagged storages, and a
+                    // load on it gives either entity.
                     let (classes, types): (Vec<_>, Vec<_>) = storages.into_iter().unzip();
                     if let Some(ref mut hint_out) = return_type_hint_out {
                         **hint_out = Some(crate::php_type::PhpType::union(types));
@@ -447,6 +478,32 @@ impl Backend {
                 ctx.file.class_loader,
             )
         {
+            return classes;
+        }
+        // `\Drupal::config('acme.settings')` carries the name it reads.
+        if method_name.eq_ignore_ascii_case("config")
+            && let Some(ref owner) = owner_class
+            && let Some(backend) = ctx.file.backend
+            && backend.is_drupal_project()
+            && let Some(name) = first_literal_text_arg(text_args, "name")
+            && let Some(ty) = crate::drupal::types::config_object_type(
+                backend,
+                owner,
+                method_name,
+                name,
+                ctx.file.class_loader,
+                ctx.resolved_class_cache,
+            )
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
             return classes;
         }
         // `\Drupal::entityQuery('node')` is a query tagged with the entity

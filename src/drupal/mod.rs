@@ -18,6 +18,7 @@ use parking_lot::RwLock;
 
 pub(crate) mod computed_hooks;
 pub(crate) mod config;
+pub(crate) mod config_keys;
 pub(crate) mod hooks;
 pub(crate) mod links;
 pub(crate) mod permissions;

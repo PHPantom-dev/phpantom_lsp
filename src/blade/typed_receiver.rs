@@ -170,6 +170,25 @@ impl Backend {
                         site.receiver,
                         loaders.resolved_class_loader(),
                     ) {
+                        if kind == StringKeyKind::DrupalConfigKey {
+                            // The key is one of the object's whose name its
+                            // type carries.
+                            let editable = site.receiver == ReceiverClass::EditableConfigKeys;
+                            for name in self.drupal_config_names_of(
+                                &ty,
+                                editable,
+                                loaders.resolved_class_loader(),
+                            ) {
+                                let mut span = site.to_span(kind);
+                                if let crate::symbol_map::SymbolKind::StringKey { key, .. } =
+                                    &mut span.kind
+                                {
+                                    *key = crate::drupal::config_keys::config_key(&name, &site.key);
+                                }
+                                confirmed.push(span);
+                            }
+                            continue;
+                        }
                         confirmed.push(site.to_span(kind));
                     }
                 }

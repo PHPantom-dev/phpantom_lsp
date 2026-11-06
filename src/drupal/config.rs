@@ -145,6 +145,12 @@ pub(crate) struct ConfigIndex {
     defaults: HashMap<String, Vec<PathBuf>>,
     /// Each top-level schema entry, by its key, the first one read kept.
     schema: HashMap<String, SchemaEntry>,
+    /// The schema files read for their keys, by URI (see
+    /// [`super::config_keys`]).
+    pub(super) trees: parking_lot::Mutex<HashMap<String, Arc<Vec<super::config_keys::YamlNode>>>>,
+    /// The test modules' files that were open when it was read, which
+    /// count only while they are.
+    open_test_files: Vec<(PathBuf, bool)>,
 }
 
 impl ConfigIndex {
@@ -187,6 +193,11 @@ impl ConfigIndex {
     /// Every configuration name, sorted.
     pub(crate) fn names(&self) -> &[String] {
         &self.names
+    }
+
+    /// The schema entry under the key `key` itself.
+    pub(crate) fn schema_named(&self, key: &str) -> Option<&SchemaEntry> {
+        self.schema.get(key)
     }
 
     /// The default configuration files that ship `name`.
@@ -282,7 +293,7 @@ fn schema_entries(uri: &str, content: &str) -> Vec<(String, SchemaEntry)> {
 /// Where the key of a YAML `key: value` line ends: at the first `:`
 /// followed by a space or the end of the line, outside quotes.  A key such
 /// as `block.settings.system_menu_block:*` holds a `:` of its own.
-fn yaml_key_end(text: &str) -> Option<usize> {
+pub(super) fn yaml_key_end(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut quote = None;
     for (at, byte) in bytes.iter().enumerate() {
@@ -317,7 +328,8 @@ impl Backend {
         let mut schema_files = self.drupal.config_schema_files.read().clone();
         // A test module's files count while they are open, as its other
         // declaration files do.
-        for (path, is_schema) in self.open_drupal_test_config_files() {
+        let open_test_files = self.open_drupal_test_config_files();
+        for (path, is_schema) in open_test_files.iter().cloned() {
             let files = if is_schema {
                 &mut schema_files
             } else {
@@ -335,21 +347,24 @@ impl Backend {
                 Some((uri, content))
             })
             .collect();
-        let index = Arc::new(ConfigIndex::build(
+        let mut index = ConfigIndex::build(
             &defaults,
             schemas
                 .iter()
                 .map(|(uri, content)| (uri.as_str(), content.as_str())),
-        ));
+        );
+        index.open_test_files = open_test_files;
+        let index = Arc::new(index);
         *self.drupal.config_index.write() = Some(Arc::clone(&index));
         index
     }
 
     /// The open default configuration and schema files of test modules,
-    /// each with whether it is a schema file.
+    /// each with whether it is a schema file, sorted.
     fn open_drupal_test_config_files(&self) -> Vec<(PathBuf, bool)> {
         let roots = self.drupal.web_roots.read().clone();
-        self.open_files
+        let mut files: Vec<(PathBuf, bool)> = self
+            .open_files
             .read()
             .keys()
             .filter(|uri| uri.ends_with(".yml") && uri.contains("/config/"))
@@ -362,7 +377,9 @@ impl Backend {
                 (in_test_module && (is_schema || has_default_config_shape(&path)))
                     .then_some((path, is_schema))
             })
-            .collect()
+            .collect();
+        files.sort_unstable();
+        files
     }
 
     /// Every configuration name of the site, sorted.
@@ -471,9 +488,11 @@ impl Backend {
         }
     }
 
-    /// Read a configuration file that was opened, edited, or closed again
-    /// the next time a name is asked for: an open schema file is read from
-    /// its buffer, and an open test module's files count.
+    /// Read the configuration again the next time a name is asked for when
+    /// a document change can change it: a schema file is read from its
+    /// buffer while it is open, and a test module's files count while they
+    /// are.  A default configuration file gives its name by its path
+    /// alone, so editing one changes nothing.
     pub(crate) fn note_drupal_config_document(&self, uri: &str) {
         if !self.is_drupal_project()
             || !uri.ends_with(".yml")
@@ -483,7 +502,12 @@ impl Backend {
         {
             return;
         }
-        if self.drupal.config_index.read().is_some() {
+        let stale = match self.drupal.config_index.read().as_ref() {
+            None => false,
+            Some(_) if uri.contains("/config/schema/") => true,
+            Some(index) => index.open_test_files != self.open_drupal_test_config_files(),
+        };
+        if stale {
             *self.drupal.config_index.write() = None;
         }
     }

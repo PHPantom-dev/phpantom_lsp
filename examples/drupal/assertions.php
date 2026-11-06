@@ -246,6 +246,10 @@ check('SettingsForm edits acme.settings', $editableNames->invoke((new Reflection
 check('SettingsForm is a config form', is_subclass_of(SettingsForm::class, ConfigFormBase::class));
 check("SettingsForm's #config_target names acme.settings before its key", str_contains($settingsSource, "'#config_target' => 'acme.settings:notify_email'") && ConfigTarget::fromString('acme.settings:notify_email')->configName === 'acme.settings');
 check('acme.settings declares the notify_email key the form targets', isset($acmeSchema['acme.settings']['mapping']['notify_email']) && array_key_exists('notify_email', Yaml::decode((string) file_get_contents("$module/config/install/acme.settings.yml"))));
+check('acme.schema.yml declares the notifications.email key SettingsForm reads and sets', ($acmeSchema['acme.settings']['mapping']['notifications']['mapping']['email']['type'] ?? null) === 'boolean' && str_contains($settingsSource, "->get('notifications.email')") && str_contains($settingsSource, "->set('notifications.email', "));
+check('the default acme.settings sets notifications.email', (Yaml::decode((string) file_get_contents("$module/config/install/acme.settings.yml"))['notifications']['email'] ?? null) === true);
+check('ConfigFormBaseTrait::config() gives an editable Config for the names getEditableConfigNames() lists', str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/ConfigFormBaseTrait.php"), '@return \\Drupal\\Core\\Config\\Config|\\Drupal\\Core\\Config\\ImmutableConfig'));
+check('Only an ImmutableConfig refuses set()', (new ReflectionMethod(\Drupal\Core\Config\ImmutableConfig::class, 'set'))->getDeclaringClass()->getName() === \Drupal\Core\Config\ImmutableConfig::class);
 check('Greeter reads system.site', str_contains((string) file_get_contents("$module/src/Greeter.php"), "->get('system.site')"));
 check("core's system module ships and describes system.site", is_file("$web/core/modules/system/config/install/system.site.yml") && ($systemSchema['system.site']['type'] ?? null) === 'config_object');
 

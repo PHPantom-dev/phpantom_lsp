@@ -65,6 +65,15 @@ pub(crate) fn string_key_reference_key(kind: StringKeyKind, key: &str) -> Refere
                 key: crate::symbol_map::laravel_resources::config_key(resource, key),
             }
         }
+        // A config object's `get()` holds the key alone, its object's name
+        // coming with the receiver's type, so a key is filed and found
+        // without the name.
+        StringKeyKind::DrupalConfigKey => ReferenceIndexKey::StringKey {
+            kind,
+            key: crate::drupal::config_keys::split_config_key(key)
+                .1
+                .to_string(),
+        },
         _ => ReferenceIndexKey::StringKey {
             kind,
             key: key.to_string(),

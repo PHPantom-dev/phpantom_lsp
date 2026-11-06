@@ -92,6 +92,13 @@ Run `composer install` here first. Composer puts core and contrib into
   entry in `config/schema/acme.schema.yml`, or complete a configuration name
   inside `['']`. In `web/modules/custom/acme/src/Greeter.php`, go to the
   definition of `'system.site'`, which core ships.
+- Configuration keys complete and navigate from the schema of the object
+  they belong to. In `SettingsForm`, complete a key inside `get('')` or
+  `set('')` on `$this->config('acme.settings')`, one level at a time after
+  `notifications.`, or after the `:` of the `#config_target`, and go to the
+  definition of `'notify_email'`, which lands on its line in
+  `acme.schema.yml`. Hover `$settings`, whose type carries the name it was
+  read by.
 - A module's service provider may build a service from a class of its own.
   In `acme_french_site_name()` in `web/modules/custom/acme/acme.module`,
   hover `$languageManager`: core declares `language_manager` as

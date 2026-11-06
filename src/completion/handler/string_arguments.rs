@@ -121,14 +121,19 @@ impl Backend {
             return Some(response);
         }
 
-        // ── Drupal configuration names ──────────────────────────
-        // The lists that name configuration objects, and a form element's
-        // `#config_target`.
+        // ── Drupal configuration names and keys ─────────────────
+        // The lists that name configuration objects, a form element's
+        // `#config_target`, and the keys a config object's `set()` and
+        // `clear()` write.  A `get()`'s keys come with the Symfony names
+        // below, which resolve its receiver as a container lookup's.
         if matches!(string_ctx, StringContext::InStringLiteral)
             && self.is_drupal_project()
             && let Some(code) = code_ctx.as_ref()
-            && let Some(response) =
-                self.try_drupal_config_name_completion(uri, content, position, code, ctx)
+            && let Some(response) = self
+                .try_drupal_config_key_completion(content, position, code, ctx)
+                .or_else(|| {
+                    self.try_drupal_config_name_completion(uri, content, position, code, ctx)
+                })
         {
             return Some(response);
         }
