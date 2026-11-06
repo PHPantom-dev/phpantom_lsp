@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793984794464,
+  "lastUpdate": 1793989645577,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -10825,6 +10825,60 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 107.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "4638858+giuseppe-esposito-87@users.noreply.github.com",
+            "name": "Giuseppe Esposito",
+            "username": "giuseppe-esposito-87"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8b5d9271a28fc4be4081c08c890966518103b2a6",
+          "message": "Drupal permission and configuration names",
+          "timestamp": "2026-11-06T19:04:14+01:00",
+          "tree_id": "eb5b5a92d80d4d65acc73f5693bd7c00cc032c29",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8b5d9271a28fc4be4081c08c890966518103b2a6"
+        },
+        "date": 1793989631105,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 604.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 46.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 76.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 102.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 96.2,
             "unit": "MiB"
           }
         ]
