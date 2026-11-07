@@ -388,3 +388,69 @@ async fn tempest_discovery_registered_tag_attributes_follow_unsaved_content() {
         1
     );
 }
+
+#[tokio::test]
+async fn tempest_discovery_bootstrap_and_indexed_registrations_tolerate_incomplete_configuration() {
+    let bootstrap = r"<?php
+use Tempest\View\{ViewConfig, ViewComponent};
+use Tempest\Discovery\DiscoveryLocation;
+new DiscoveryLocation;
+new DiscoveryLocation('App', $unknown);
+new $dynamic;
+$config = new ViewConfig();
+$config->$method();
+$config->unrelated();
+$config->addViewComponents(...[...['card' => __DIR__.'/ui/x-card.view.php'], 'empty' => '', 'unknown' => $unknown]);
+new ViewConfig(viewComponents: [
+    new ViewComponent('x-unkeyed', '', __DIR__.'/ui/x-unkeyed.view.php', false),
+    $unknown => new ViewComponent('x-unknown', '', __DIR__.'/ui/x-unknown.view.php', false),
+]);
+new ViewConfig(viewComponents: $unknown);
+return $config;
+";
+    let setup = r"<?php namespace App;
+$config = new \Tempest\View\ViewConfig();
+$config->addViewComponent(__DIR__.'/../ui/x-indexed.view.php');
+class OtherConfig { public function addViewComponent(string $path): self { return $this; } }
+$other = new OtherConfig();
+$other->addViewComponent(__DIR__.'/../ui/x-unrelated.view.php');
+";
+    let source = "<x-card /><x-indexed /><x-unkeyed /><x-unknown /><x-unrelated />";
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        &[
+            ("tempest", bootstrap),
+            ("app/setup.php", setup),
+            ("app/page.view.php", source),
+            ("ui/x-card.view.php", "Card"),
+            ("ui/x-indexed.view.php", "Indexed"),
+            ("ui/x-unkeyed.view.php", "Unkeyed"),
+            ("ui/x-unknown.view.php", "Unknown"),
+            ("ui/x-unrelated.view.php", "Unrelated"),
+            (
+                "vendor/composer/installed.json",
+                r#"{"packages":[{"extra":{"tempest":{"can-discover":true}}},{"name":"acme/no-autoload","extra":{"tempest":{"can-discover":true}}}]}"#,
+            ),
+        ],
+    );
+    open_php(&backend, &workspace_uri(&backend, "app/setup.php"), setup).await;
+    let uri = workspace_uri(&backend, "app/page.view.php");
+    open_php(&backend, &uri, source).await;
+    for (name, expected) in [
+        ("x-card", 1),
+        ("x-indexed", 1),
+        ("x-unkeyed", 0),
+        ("x-unknown", 0),
+        ("x-unrelated", 0),
+    ] {
+        let pos = position_of(source, name);
+        assert_eq!(
+            definition_locations(
+                goto_definition_at(&backend, &uri, pos.line, pos.character + 2).await
+            )
+            .len(),
+            expected,
+            "{name}"
+        );
+    }
+}

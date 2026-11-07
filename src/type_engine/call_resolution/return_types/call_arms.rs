@@ -1352,3 +1352,35 @@ fn first_literal_text_arg<'t>(text_args: &'t str, name: &str) -> Option<&'t str>
     let first = crate::call_args::first_param_text_arg(&args, name)?;
     crate::text_scan::unquote_php_string(first.trim())
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::Backend;
+    use crate::php_type::PhpType;
+
+    #[test]
+    fn text_call_resolution_keeps_a_builtin_path_literal() {
+        let backend = Backend::new_test();
+        let directory = tempfile::tempdir().unwrap();
+        let uri = crate::util::path_to_uri(&directory.path().join("path.php"));
+        let file = backend.file_context(&uri);
+        let loaders = backend.file_loaders(&file);
+        let ctx = loaders.resolution_ctx_at("<?php", 0);
+        let mut hint = None;
+        let classes = Backend::return_types_of_function_call(
+            "\\dirname",
+            "'views/page.php'",
+            &ctx,
+            Some(&mut hint),
+        );
+        assert!(classes.is_empty());
+        assert_eq!(hint, Some(PhpType::literal_string_value("views")));
+        Backend::return_types_of_function_call("dirname", "__FILE__", &ctx, Some(&mut hint));
+        assert_eq!(
+            hint,
+            Some(PhpType::literal_string_value(
+                directory.path().to_string_lossy()
+            ))
+        );
+    }
+}

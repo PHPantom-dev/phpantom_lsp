@@ -10,6 +10,7 @@ mod paths;
 pub(crate) mod preprocessor;
 mod syntax;
 mod view_data;
+mod wrappers;
 
 pub(crate) use discovery::TempestState;
 
@@ -21,5 +22,3 @@ pub(crate) fn is_view(uri: &str) -> bool {
 
 #[cfg(test)]
 mod tests;
-
-mod wrappers;
