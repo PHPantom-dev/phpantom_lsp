@@ -182,25 +182,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B713. Hover shows two `class-string`s that share a short name as one
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-namespace App;
-
-/** @param class-string<\App\C>|class-string<\Other\C> $s */
-function foo(string $s): void {
-    $s; // hover: $s = class-string<C>
-}
-```
-
-Hover shortens every class name in a type to its short name, so the two
-members print the same and the union shows one of them. A union of the
-classes themselves does not have this problem: each gets its own block
-under its namespace. The same collapse hides `C::class|E::class` with `E`
-an import of another namespace's `C`, which is why that assertion in
-`tests/psalm_assertions/const_values.php` is skipped.
-
-**Where to look:** `shorten_php_type` (`src/hover/formatting.rs`), which
-shortens before the union is printed.
+No outstanding items.

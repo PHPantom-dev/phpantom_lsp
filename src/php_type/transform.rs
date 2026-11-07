@@ -297,12 +297,51 @@ impl PhpType {
     ///
     /// For example, `App\Models\User|null` becomes `User|null`, and
     /// `array<int, App\Models\User>` becomes `array<int, User>`.
+    ///
+    /// Two different classes that share a short name stay apart: each keeps
+    /// its fully-qualified name (with a leading `\`), so
+    /// `class-string<App\C>|class-string<Other\C>` does not print as one
+    /// class. Callable kinds (`Closure`, `callable`) are not class names in
+    /// that sense and are always shortened.
     pub fn shorten(&self) -> PhpType {
+        // (short name, full name) of the first class seen per short name,
+        // and the short names that turned out to name more than one class.
+        let mut seen: Vec<(&str, &str)> = Vec::new();
+        let mut ambiguous: Vec<&str> = Vec::new();
+        self.for_each_class_name(&mut |name| {
+            let full = crate::util::strip_fqn_prefix(name);
+            let short = Self::short_name_of(full);
+            match seen.iter().find(|(s, _)| s.eq_ignore_ascii_case(short)) {
+                Some((_, first)) => {
+                    if !first.eq_ignore_ascii_case(full)
+                        && !ambiguous.iter().any(|a| a.eq_ignore_ascii_case(short))
+                    {
+                        ambiguous.push(short);
+                    }
+                }
+                None => seen.push((short, full)),
+            }
+        });
+        self.shorten_except(&ambiguous)
+    }
+
+    /// [`shorten`](Self::shorten) with the short names in `ambiguous`
+    /// left fully qualified.
+    fn shorten_except(&self, ambiguous: &[&str]) -> PhpType {
+        let short = |name: &str| -> Atom {
+            let full = crate::util::strip_fqn_prefix(name);
+            let s = Self::short_name_of(full);
+            if ambiguous.iter().any(|a| a.eq_ignore_ascii_case(s)) && !is_keyword_type(full) {
+                atom(&format!("\\{full}"))
+            } else {
+                atom(s)
+            }
+        };
         match self.raw_kind() {
-            TypeKind::Named(s) => PhpType::named(atom(Self::short_name_of(s))),
-            TypeKind::Generic(g) => PhpType::generic(
-                Self::short_name_of(&g.name),
-                g.args.iter().map(|a| a.shorten()).collect(),
+            TypeKind::Named(s) => PhpType::named(short(s)),
+            TypeKind::Generic(g) => PhpType::generic_atom(
+                short(&g.name),
+                g.args.iter().map(|a| a.shorten_except(ambiguous)).collect(),
             ),
             TypeKind::Callable(c) => PhpType::callable_type(CallableType {
                 kind: atom(Self::short_name_of(&c.kind)),
@@ -310,16 +349,19 @@ impl PhpType {
                     .params
                     .iter()
                     .map(|p| CallableParam {
-                        type_hint: p.type_hint.shorten(),
+                        type_hint: p.type_hint.shorten_except(ambiguous),
                         optional: p.optional,
                         variadic: p.variadic,
                     })
                     .collect(),
-                return_type: c.return_type.as_ref().map(|rt| rt.shorten()),
+                return_type: c
+                    .return_type
+                    .as_ref()
+                    .map(|rt| rt.shorten_except(ambiguous)),
             }),
-            TypeKind::StaticType(s) => PhpType::static_type(atom(Self::short_name_of(s))),
-            TypeKind::ThisType(s) => PhpType::this_type(atom(Self::short_name_of(s))),
-            _ => self.map_children(&|t| t.shorten()),
+            TypeKind::StaticType(s) => PhpType::static_type(short(s)),
+            TypeKind::ThisType(s) => PhpType::this_type(short(s)),
+            _ => self.map_children(&|t| t.shorten_except(ambiguous)),
         }
     }
 
@@ -943,91 +985,99 @@ impl PhpType {
 
     /// Recursive helper for [`extract_class_names`].
     fn collect_class_names(&self, names: &mut Vec<String>) {
+        self.for_each_class_name(&mut |s| {
+            if !names.iter().any(|n| n == s) {
+                names.push(s.to_string());
+            }
+        });
+    }
+
+    /// Call `f` with every class-like name in this type, recursively, in
+    /// the order they appear (repeats included). Keywords and empty names
+    /// are skipped.
+    fn for_each_class_name<'a>(&'a self, f: &mut impl FnMut(&'a str)) {
         match self.raw_kind() {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
             | TypeKind::TemplateParam(_, inner)
             | TypeKind::ClassNameLiteral(inner)
             | TypeKind::EnumCase(inner, _)
-            | TypeKind::DqlBuilder(inner, _) => inner.collect_class_names(names),
+            | TypeKind::DqlBuilder(inner, _) => inner.for_each_class_name(f),
             TypeKind::UnsealedShape(unsealed) => {
-                unsealed.shape.collect_class_names(names);
-                unsealed.key.collect_class_names(names);
-                unsealed.value.collect_class_names(names);
+                unsealed.shape.for_each_class_name(f);
+                unsealed.key.for_each_class_name(f);
+                unsealed.value.for_each_class_name(f);
             }
             TypeKind::Named(s) => {
-                if !is_keyword_type(s) && !s.is_empty() && !names.iter().any(|n| n == s.as_str()) {
-                    names.push(s.to_string());
+                if !is_keyword_type(s) && !s.is_empty() {
+                    f(s.as_str());
                 }
             }
 
-            TypeKind::Nullable(inner) => inner.collect_class_names(names),
+            TypeKind::Nullable(inner) => inner.for_each_class_name(f),
 
             TypeKind::Union(types) | TypeKind::Intersection(types) => {
                 for t in types {
-                    t.collect_class_names(names);
+                    t.for_each_class_name(f);
                 }
             }
 
             TypeKind::Generic(g) => {
-                if !is_keyword_type(&g.name)
-                    && !g.name.is_empty()
-                    && !names.iter().any(|n| n == g.name.as_str())
-                {
-                    names.push(g.name.to_string());
+                if !is_keyword_type(&g.name) && !g.name.is_empty() {
+                    f(g.name.as_str());
                 }
                 for a in &g.args {
-                    a.collect_class_names(names);
+                    a.for_each_class_name(f);
                 }
             }
 
-            TypeKind::Array(inner) => inner.collect_class_names(names),
+            TypeKind::Array(inner) => inner.for_each_class_name(f),
 
             TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
                 for e in entries {
-                    e.value_type.collect_class_names(names);
+                    e.value_type.for_each_class_name(f);
                 }
             }
 
             TypeKind::Callable(c) => {
                 for p in &c.params {
-                    p.type_hint.collect_class_names(names);
+                    p.type_hint.for_each_class_name(f);
                 }
                 if let Some(ret) = &c.return_type {
-                    ret.collect_class_names(names);
+                    ret.for_each_class_name(f);
                 }
             }
 
             TypeKind::ClassString(inner) => {
                 if let Some(t) = inner {
-                    t.collect_class_names(names);
+                    t.for_each_class_name(f);
                 }
             }
 
             TypeKind::InterfaceString(inner) => {
                 if let Some(t) = inner {
-                    t.collect_class_names(names);
+                    t.for_each_class_name(f);
                 }
             }
 
             TypeKind::KeyOf(inner) | TypeKind::ValueOf(inner) => {
-                inner.collect_class_names(names);
+                inner.for_each_class_name(f);
             }
 
             TypeKind::IndexAccess(base, index) => {
-                base.collect_class_names(names);
-                index.collect_class_names(names);
+                base.for_each_class_name(f);
+                index.for_each_class_name(f);
             }
 
             TypeKind::Conditional(c) => {
-                c.condition.collect_class_names(names);
-                c.then_type.collect_class_names(names);
-                c.else_type.collect_class_names(names);
+                c.condition.for_each_class_name(f);
+                c.then_type.for_each_class_name(f);
+                c.else_type.for_each_class_name(f);
             }
 
             TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
-                if !s.is_empty() && !names.iter().any(|n| n == s.as_str()) {
-                    names.push(s.to_string());
+                if !s.is_empty() {
+                    f(s.as_str());
                 }
             }
 

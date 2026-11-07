@@ -9250,6 +9250,26 @@ function formatUtfDate(string $tz): void {
 }
 
 #[test]
+fn hover_variable_keeps_class_strings_sharing_a_short_name_apart() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+namespace App;
+
+/** @param class-string<\App\C>|class-string<\Other\C> $s */
+function foo(string $s): void {
+    $s;
+}
+"#;
+
+    let text = crate::common::hover_last(&backend, content, "$s;");
+    assert!(
+        text.contains("$s = class-string<\\App\\C>|class-string<\\Other\\C>"),
+        "both classes should be shown, got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_function_shows_class_string_param_type() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

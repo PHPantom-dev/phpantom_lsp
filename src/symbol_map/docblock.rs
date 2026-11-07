@@ -1094,9 +1094,17 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
         type_ast::Type::Variable(_) => {}
 
         // ── Member / Alias references ───────────────────────────────
-        type_ast::Type::MemberReference(_) | type_ast::Type::AliasReference(_) => {
-            // These are rare PHPStan types — not navigable in our system.
+        // ── Member references (`Foo::class`, `Foo::BAR`, `Foo::*`) ──
+        type_ast::Type::MemberReference(m) => {
+            let id_span = m.kind.span();
+            emit_identifier_span(
+                crate::php_type::reference_kind_name(&m.kind),
+                id_span.start.offset,
+                id_span.end.offset,
+                sink.spans,
+            );
         }
+        type_ast::Type::AliasReference(_) => {}
 
         // ── Keyword types (int, string, bool, void, etc.) ───────────
         // All keyword types are non-navigable *except* `static`, `self`,
