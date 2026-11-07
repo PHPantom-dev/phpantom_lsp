@@ -1211,3 +1211,97 @@ fn current_spelling_wins_over_old_in_one_file() {
     let config = load_config(dir.path()).unwrap();
     assert!(!config.diagnostics.magic_properties_enabled());
 }
+
+#[test]
+fn unknown_keys_are_reported_with_their_file_and_dotted_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global").join(CONFIG_FILE_NAME);
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(&global, "[php]\nversion = \"8.1\"\nflavour = \"vanilla\"\n").unwrap();
+
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let project_file = project.join(CONFIG_FILE_NAME);
+    std::fs::write(
+        &project_file,
+        "typo = 1\n\n[diagnostics]\nworkspace = true\nunused-parameter = true\n",
+    )
+    .unwrap();
+
+    let loaded = load_config_with_warnings(&project, Some(&global)).unwrap();
+    assert!(loaded.config.diagnostics.workspace_enabled());
+    assert_eq!(loaded.config.php.version.as_deref(), Some("8.1"));
+    let mut unknown = loaded.warnings;
+    unknown.sort_by_key(|w| w.to_string());
+    assert_eq!(
+        unknown,
+        vec![
+            ConfigWarning::UnknownKey {
+                file: project_file.clone(),
+                key: "diagnostics.unused-parameter".to_string(),
+            },
+            ConfigWarning::UnknownKey {
+                file: global.clone(),
+                key: "php.flavour".to_string(),
+            },
+            ConfigWarning::UnknownKey {
+                file: project_file.clone(),
+                key: "typo".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn known_keys_report_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(CONFIG_FILE_NAME),
+        "[php]\nversion = \"8.3\"\n\n[semantic-tokens]\nmode = \"full\"\n\n[indexing]\nstrategy = \"composer\"\n",
+    )
+    .unwrap();
+    let loaded = load_config_with_warnings(dir.path(), None).unwrap();
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+}
+
+#[test]
+fn unknown_key_message_names_the_key_and_the_file() {
+    let warning = ConfigWarning::UnknownKey {
+        file: PathBuf::from("project").join(CONFIG_FILE_NAME),
+        key: "diagnostics.unused-parameter".to_string(),
+    };
+    let message = warning.to_string();
+    assert!(
+        message.contains("`diagnostics.unused-parameter`"),
+        "{message}"
+    );
+    assert!(message.contains(CONFIG_FILE_NAME), "{message}");
+}
+
+#[test]
+fn old_spellings_are_reported_with_their_new_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join(CONFIG_FILE_NAME);
+    std::fs::write(
+        &file,
+        "[diagnostics]\nreport-magic-properties = true\n\n[semantic_tokens]\nmode = \"full\"\n",
+    )
+    .unwrap();
+    let loaded = load_config_with_warnings(dir.path(), None).unwrap();
+    assert!(loaded.config.diagnostics.magic_properties_enabled());
+    assert_eq!(
+        loaded.warnings,
+        vec![
+            ConfigWarning::RenamedKey {
+                file: file.clone(),
+                old: "semantic_tokens".to_string(),
+                new: "semantic-tokens".to_string(),
+            },
+            ConfigWarning::RenamedKey {
+                file: file.clone(),
+                old: "diagnostics.report-magic-properties".to_string(),
+                new: "diagnostics.magic-properties".to_string(),
+            },
+        ]
+    );
+}

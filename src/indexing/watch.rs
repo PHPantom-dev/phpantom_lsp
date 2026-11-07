@@ -460,8 +460,14 @@ impl Backend {
         let was_diagnosing = self.diagnostics_enabled();
         let previous_hint_kinds = self.inlay_hint_kinds();
 
-        match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
-            Ok(cfg) => self.set_config(cfg),
+        match crate::config::load_config_with_warnings(
+            root,
+            self.workspace.global_config_path.as_deref(),
+        ) {
+            Ok(loaded) => {
+                self.warn_config(&loaded.warnings);
+                self.set_config(loaded.config);
+            }
             Err(e) => {
                 self.log_detached(
                     MessageType::Warning,

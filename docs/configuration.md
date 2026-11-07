@@ -53,6 +53,12 @@ saving either file. The exceptions are settings that shape the initial
 workspace scan, such as the PHP version and indexing strategy below --
 those still need a restart to fully apply.
 
+A key PHPantom does not know, such as a typo or a setting from a newer
+release, is ignored with a warning that names the key and the file it
+is in. The editor shows it when the config loads, and `analyze`, `fix`,
+`format`, and `move` print it on stderr. The rest of the config still
+applies.
+
 The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/phpantom_lsp/blob/main/config-schema.json).
 
 #### Compatibility
@@ -69,12 +75,13 @@ that has to keep working.
 
 Every section and key is spelled in kebab-case. A name that was spelled
 differently before 1.0 is still read under its old spelling, with a
-warning in the log, so an older config keeps working.
+warning that names the new one, so an older config keeps working.
 
 The schema a generated `.phpantom.toml` points at is served from the
 `main` branch, so it always describes the newest release. An editor may
-therefore offer a key your installed version does not know yet; check
-the [changelog](CHANGELOG.md) when a setting seems to have no effect.
+therefore offer a key your installed version does not know yet. Such a
+key is reported as unknown; check the [changelog](CHANGELOG.md) for the
+release that added it.
 
 ### `[php]`
 

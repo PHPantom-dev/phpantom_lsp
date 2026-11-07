@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use tower_lsp_server::gen_lsp_types::{DocumentChange, Edit, TextEdit, Uri, WorkspaceEdit};
 
 use crate::analyse::dispatch_report;
-use crate::{Backend, composer, config};
+use crate::{Backend, composer};
 
 use super::{MoveOptions, MovePlan, MoveSummary, MoveWarning, output, residual};
 
@@ -59,8 +59,7 @@ pub async fn run(options: MoveOptions) -> i32 {
 pub async fn execute(options: &MoveOptions) -> Result<MoveSummary, String> {
     let root = dunce::canonicalize(&options.workspace_root)
         .map_err(|e| format!("cannot resolve project root: {e}"))?;
-    let cfg = config::load_config_from(&root, options.global_config.as_deref())
-        .unwrap_or_else(|_| config::Config::default());
+    let cfg = crate::analyse::load_config_or_default(&root, options.global_config.as_deref());
 
     let backend = Backend::new_headless_refactoring();
     crate::analyse::open_headless_project(&backend, &root, cfg).await;

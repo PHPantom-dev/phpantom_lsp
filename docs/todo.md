@@ -32,8 +32,7 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| X20 | [Warn about unknown configuration keys](todo/indexing.md#x20-warn-about-unknown-configuration-keys) | Medium      | Low         |
-| X21 | [Keep `config-schema.json` in step with the config structs](todo/indexing.md#x21-keep-config-schemajson-in-step-with-the-config-structs) (builds on X20) | Low-Medium  | Low         |
+| X21 | [Keep `config-schema.json` in step with the config structs](todo/indexing.md#x21-keep-config-schemajson-in-step-with-the-config-structs) | Low-Medium  | Low         |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets

@@ -358,24 +358,6 @@ configured. Maintainer's call on the semantics; whichever way it
 goes, the chosen behaviour needs a test and a sentence in
 [`configuration.md`](../configuration.md).
 
-## X20. Warn about unknown configuration keys
-
-**Impact: Medium · Complexity: Low**
-
-`.phpantom.toml` is deserialized with serde's default behaviour, so a
-key PHPantom does not know is dropped without a word: a typo such as
-`unused-parameter = true` or a key from a newer release silently does
-nothing. Collect the unknown keys while deserializing (the
-`serde_ignored` crate wraps the deserializer for exactly this) and
-report each one, with its file and dotted path, as a warning in the
-editor (`window/showMessage` once per config load, plus the log) and
-on stderr from `analyze`, `fix`, and `format`. Keep it a warning, never
-an error, so a config written for a newer release still loads.
-
-The renamed-key table in `src/config/mod.rs` already rewrites old
-spellings and warns about them on stderr; route that warning through
-the same reporting so an editor user sees it too.
-
 ## X21. Keep `config-schema.json` in step with the config structs
 
 **Impact: Low-Medium · Complexity: Low**
@@ -388,5 +370,5 @@ and the config structs and fails when a section or key exists in one
 but not the other. Either generate the schema from the structs (e.g.
 `schemars`, keeping the hand-written descriptions as doc comments), or
 deserialize a TOML document built from every schema key and assert
-that X20's unknown-key collector reports nothing, and that every
-`Config` field has a schema key.
+that `load_config_with_warnings` reports no unknown key, and that
+every `Config` field has a schema key.
