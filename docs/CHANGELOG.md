@@ -147,6 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Integers cast from a `ctype_digit()`-checked value.** After `ctype_digit($delay)` passes, `(int) $delay` and `intval($delay)` are known not to be negative, so passing them to a parameter such as `sleep()`'s `int<0, max>` is no longer reported.
 - **WordPress core's translation and hook functions.** Calls to `__()`, `add_filter()`, `home_url()` and the other functions WordPress core also declares as no-ops for its script loader now use their real declarations, so they are no longer reported as passing too many arguments, and hover and signature help describe the right function.
 - **`ctype_digit()` narrows what it checks.** A string that passes `ctype_digit()` is now a `numeric-string`, and an integer is narrowed to the values the check accepts in either branch.
 - **`(int)` casts keep what the value says.** Casting an integer range with `(int)` now keeps the range, and casting `null`, a `bool`, or an array gives `0` or `1`, instead of a plain `int`.

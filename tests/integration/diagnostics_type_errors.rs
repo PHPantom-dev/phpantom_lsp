@@ -17737,3 +17737,58 @@ class Magic {
         assert_eq!(lines, vec![inside_line], "got: {diags:?}");
     }
 }
+
+/// A value that passed `ctype_digit()` holds only digits, so casting it to
+/// `int` cannot give a negative number, until the value is written again.
+#[test]
+fn int_cast_of_a_ctype_digit_checked_value_is_non_negative() {
+    let php = r#"<?php
+namespace App;
+
+function guarded(string $delay): void {
+    if (!ctype_digit($delay)) {
+        return;
+    }
+    sleep((int) $delay);
+}
+
+function inBody(mixed $delay): void {
+    if (\ctype_digit($delay) && $delay !== '') {
+        sleep((int) $delay);
+    }
+}
+
+function inElse(string $delay): void {
+    if (!ctype_digit($delay)) {
+        return;
+    } else {
+        sleep(intval($delay));
+    }
+}
+
+function unchecked(string $delay): void {
+    sleep((int) $delay);
+}
+
+function wrongBranch(string $delay): void {
+    if (ctype_digit($delay)) {
+        return;
+    }
+    sleep((int) $delay);
+}
+
+function rewritten(string $delay, string $other): void {
+    if (ctype_digit($delay)) {
+        $delay = $other;
+        sleep((int) $delay);
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    let lines: Vec<u32> = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "type_mismatch_argument"))
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(lines, vec![25, 32, 38], "got: {diags:?}");
+}

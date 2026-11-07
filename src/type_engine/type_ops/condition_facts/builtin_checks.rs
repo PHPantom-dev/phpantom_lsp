@@ -604,6 +604,35 @@ pub(crate) fn try_extract_type_guard(
     }
 }
 
+/// Detect `ctype_digit($x)`, returning the scope key of `(int) $x` and
+/// whether the check is negated.
+///
+/// A string that passes holds only the digits 0-9, and an int that passes
+/// is an ASCII digit code or at least 256, so either way `(int) $x` cannot
+/// be negative.
+pub(in crate::type_engine) fn try_extract_ctype_digit_int_cast(
+    expr: &Expression<'_>,
+) -> Option<(String, bool)> {
+    let (inner, negated) = crate::parser::unwrap_negation(expr);
+    let Expression::Call(Call::Function(fc)) = inner else {
+        return None;
+    };
+    let Expression::Identifier(ident) = fc.function else {
+        return None;
+    };
+    if !bytes_to_str(ident.value())
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case("ctype_digit")
+    {
+        return None;
+    }
+    let mut args = fc.argument_list.arguments.iter();
+    let (Some(arg), None) = (args.next(), args.next()) else {
+        return None;
+    };
+    Some((conversion_call_key("intval", argument_value(arg))?, negated))
+}
+
 /// Resolution `type_matches_guard` needs for the kinds whose answer is
 /// nominal rather than structural.
 ///

@@ -41,38 +41,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B692. `(int)` of a `ctype_digit()`-checked string is not non-negative
-
-**Impact: Low · Complexity: Medium**
-
-```php
-function wait(string $delay): void {
-    if (!ctype_digit($delay)) {
-        return;
-    }
-    sleep((int) $delay);   // expects int<0, max>, got int
-}
-```
-
-A string that passes `ctype_digit()` holds only the digits 0-9 (and is
-never empty), so casting it to `int` cannot give a negative number: an
-oversized one saturates at `PHP_INT_MAX`. `sleep()`'s `int<0, max>`
-parameter should accept it. The check narrows `$delay` to
-`numeric-string`, as PHPStan, Psalm and Mago all do, but a
-`numeric-string` can hold `"-1"`, so the cast gives `int`. None of those
-tools proves this call safe either. PHPStan reports nothing here only
-because its function map declares `sleep()` and `usleep()` as taking a
-plain `int`. phpstorm-stubs and Mago both declare `int<0, max>`, which
-matches PHP 8 throwing a `ValueError` on a negative.
-
-Fixing it needs a string refinement below `numeric-string` for digit-only
-strings (PHPStan's `decimal-int-string` does not fit: it admits `"-1"` and
-rejects `"007"`), which the `ctype_digit()` guard produces and `(int)`
-maps to `int<0, max>`. Every place that handles the `string` refinements
-(subtyping, display, joins) would have to learn it.
-
-Found in a Laravel project's API client, which sleeps for the number of
-seconds a rate-limit message names.
+No outstanding items.
 
 ## Array types
 
