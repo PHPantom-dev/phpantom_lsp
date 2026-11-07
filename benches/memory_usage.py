@@ -231,8 +231,10 @@ final class ReportController extends ControllerBase
 # Timeout for the LSP to finish indexing (seconds).
 INDEX_TIMEOUT = 120
 
-# How long to wait after didOpen for the server to settle (seconds).
-SETTLE_TIME = 2
+# Wait beyond Tokio's default 10-second blocking-thread idle timeout.
+# Until those workers exit, their allocators can retain temporary parse pages,
+# making an idle RSS measurement depend on which worker handled the parse.
+SETTLE_TIME = 12
 
 # Number of RSS samples to take and average.
 RSS_SAMPLES = 5
@@ -469,10 +471,9 @@ class LspClient:
     def wait_for_indexing(self, timeout: float = INDEX_TIMEOUT) -> None:
         """Block until PHPantom finishes indexing.
 
-        PHPantom sends ``$/progress`` with ``kind: "end"`` when indexing
-        finishes.  We also accept a quiet period as a fallback for
-        workspaces where indexing is trivial and no progress tokens are
-        emitted.
+        Wait for every progress token to end, then for a quiet period:
+        startup indexing ends before the full-index phase begins. The
+        quiet period also handles trivial workspaces without progress.
         """
         deadline = time.monotonic() + timeout
         active_tokens: set[str] = set()
@@ -502,8 +503,6 @@ class LspClient:
                     active_tokens.add(token)
                 elif kind == "end":
                     active_tokens.discard(token)
-                    if not active_tokens:
-                        return
 
         raise TimeoutError(f"Indexing did not finish within {timeout}s")
 

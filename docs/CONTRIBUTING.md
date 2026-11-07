@@ -88,8 +88,8 @@ python3 benches/ci_benchmarks.py run --build-dir /tmp/phpantom-benchmarks \
 ```
 
 CI uses static musl binaries; these commands use your local Cargo target.
-Run the sharding helper's tests with
-`python3 -m unittest discover -s benches -p 'test_ci_benchmarks.py'`.
+Run the benchmark helpers' tests with
+`python3 -m unittest discover -s benches -p 'test_*.py'`.
 
 Latency and memory benchmark comparisons appear in the job summaries.
 A regression over 30% fails the comparison check. Latency compares the raw
