@@ -121,6 +121,20 @@ impl PhpType {
         }
     }
 
+    /// Whether this (documented) type is the `native` hint with nothing but
+    /// its spelled-out `null` left out: `string` against `?string`, or
+    /// `int|string` against `int|string|null`.
+    ///
+    /// A type that refines the hint (`non-empty-string` against `?string`)
+    /// says something the hint does not, so it does not count.
+    pub fn omits_only_null_of(&self, native: &PhpType) -> bool {
+        native.has_null_member()
+            && !self.accepts_null()
+            && native
+                .non_null_type()
+                .is_some_and(|core| self.equivalent(&core))
+    }
+
     /// Whether a [`TypeKind::Conditional`] appears anywhere in this type tree.
     ///
     /// Used as a cheap guard before running the (cloning) nested-conditional

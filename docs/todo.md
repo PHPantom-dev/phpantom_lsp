@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| D49 | [A `@param` that leaves out the `null` its nullable hint allows is not hinted](todo/diagnostics.md#d49-a-param-that-leaves-out-the-null-its-nullable-hint-allows-is-not-hinted) | Low         | Low-Medium  |
 | D48 | [A `catch` its `try` cannot reach is not reported](todo/diagnostics.md#d48-a-catch-its-try-cannot-reach-is-not-reported) | Low-Medium  | Medium      |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Medium      |
 | C6  | [`#[ExpectedValues]` parameter value suggestions](todo/completion.md#c6-expectedvalues-parameter-value-suggestions)                                                                                                                             | Low         | Medium      |
