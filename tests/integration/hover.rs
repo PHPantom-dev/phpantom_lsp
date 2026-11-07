@@ -17417,3 +17417,23 @@ async fn test_hover_attribute_named_argument() {
         "a label naming a plain parameter is not the property of its name"
     );
 }
+
+/// `foreach` over a `RecursiveIteratorIterator` binds the key and value the
+/// wrapped iterator iterates as, not the iterator itself.
+#[test]
+fn recursive_iterator_iterator_binds_the_wrapped_key_and_value() {
+    let backend = create_test_backend_with_full_stubs();
+    let php = r#"<?php
+/** @param array<string, int> $data */
+function size(array $data): void {
+    $leaves = new RecursiveIteratorIterator(new RecursiveArrayIterator($data));
+    foreach ($leaves as $key => $datum) {
+        echo $datum, $key;
+    }
+}
+"#;
+    let value = crate::common::hover_last(&backend, php, "$datum, $key");
+    assert!(value.contains("$datum = int"), "{value}");
+    let key = crate::common::hover_last(&backend, php, "$key;");
+    assert!(key.contains("$key = string"), "{key}");
+}

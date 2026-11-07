@@ -423,8 +423,8 @@ class Repro {
 }
 
 /// The directory-walk idiom: `RecursiveIteratorIterator` binds its
-/// `@template` from the iterator it is constructed with and reaches that
-/// iterator's element type through `@mixin`.
+/// `@template` from the iterator it is constructed with and iterates as
+/// that iterator does.
 #[test]
 fn recursive_iterator_iterator_iterates_the_wrapped_iterator() {
     assert_clean(

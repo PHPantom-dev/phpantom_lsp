@@ -147,6 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`foreach` over a `RecursiveIteratorIterator`.** Looping over a `RecursiveIteratorIterator` now gives the keys and values of the iterator it wraps, rather than the wrapped iterator itself, so `new RecursiveIteratorIterator(new RecursiveArrayIterator($data))` yields `$data`'s elements.
+- **Generic iterator parameters check their class.** Passing an iterator to a parameter typed with a generic iterator interface, such as `RecursiveIterator<int, string>`, is now reported when the iterator does not implement that interface.
 - **Closures declared to return `float`.** A closure or arrow function declared `: float` is now shown returning `float` even when its body computes an integer, since PHP converts the value on return.
 - **Docblock annotations name their class.** A Doctrine-style annotation such as `@ORM\Entity` or `@Route("/users")`, including one nested in another's arguments, now counts as a use of the import it goes through, so that import is no longer reported as unused or removed by the quick fix and `phpantom_lsp fix`. Go-to-definition, hover, references, and rename reach the annotation's class.
 - **Method bodies in files not yet opened.** A method with no return type, or one that returns a Doctrine query builder, declared in a file the editor has not opened now reads the class names in its body through that file's imports, so `return new User();` gives the imported `User` rather than a class of that name in the method's own namespace.

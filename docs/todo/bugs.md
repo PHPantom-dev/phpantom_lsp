@@ -33,39 +33,7 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B711. `foreach` over a `RecursiveIteratorIterator` gives the wrapped iterator
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @param array<string, int> $data */
-function size(array $data): int {
-    $leaves = new RecursiveIteratorIterator(new RecursiveArrayIterator($data));
-    foreach ($leaves as $datum) {
-        strlen((string) $datum);
-        // Object of class RecursiveArrayIterator cannot be converted to string
-    }
-}
-```
-
-A `RecursiveIteratorIterator` yields the elements of the iterator it
-wraps (the leaves, in the default mode), not the iterator. Our stub patch
-makes the class generic over the wrapped iterator,
-`RecursiveIteratorIterator<RecursiveArrayIterator<string, int>>`, and
-declares no traversal binding. `foreach` then reads the lone template
-argument as the element type, so `$datum` is the iterator. A directory
-walk only looks right because `RecursiveDirectoryIterator` extends
-`SplFileInfo`.
-
-The element type is the wrapped iterator's own element type (`int` here,
-`SplFileInfo` for a directory walk with the default flags), and the key
-its key type.
-
-**Where to look:** `patch_recursive_iterator_iterator`
-(`src/stub_patches/classes.rs`) and the single-argument reading in
-`iteration_value_type` (`src/type_engine/variable/iterable_elements.rs`).
-
-Found by `analyze` on WordPress (`WpOrg\Requests\Transport\Curl`).
+No outstanding items.
 
 ## Reachability
 

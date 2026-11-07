@@ -16073,6 +16073,48 @@ function f(\ArrayIterator $it): void {
     );
 }
 
+/// A generic iterator parameter still names a class: being `Traversable`
+/// is not enough to pass for a `RecursiveIterator<…>`.
+#[test]
+fn a_generic_iterator_parameter_checks_the_class_it_names() {
+    let wrong = r#"<?php
+/** @param RecursiveIterator<int, string> $it */
+function g($it): void {}
+g(new ArrayIterator([]));
+"#;
+    let diags = collect_with_full_stubs(wrong);
+    assert!(
+        has_type_error(&diags),
+        "an ArrayIterator is no RecursiveIterator: {diags:?}"
+    );
+    let right = r#"<?php
+/** @param RecursiveIterator<int, string> $it */
+function g($it): void {}
+g(new RecursiveArrayIterator([]));
+"#;
+    let diags = collect_with_full_stubs(right);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+/// A `RecursiveIteratorIterator` yields the leaves of the iterator it
+/// wraps, not that iterator.
+#[test]
+fn recursive_iterator_iterator_yields_the_wrapped_elements() {
+    let php = r#"<?php
+/** @param array<string, int> $data */
+function size(array $data): int {
+    $total = 0;
+    $leaves = new RecursiveIteratorIterator(new RecursiveArrayIterator($data));
+    foreach ($leaves as $datum) {
+        $total += strlen((string) $datum);
+    }
+    return $total;
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
 const BARE_GENERIC_DEFAULT_PRELUDE: &str = r#"<?php
 final class Resp {}
 final class Prom {}
