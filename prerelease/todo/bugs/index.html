@@ -851,23 +851,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b709-a-docblock-member-the-native-type-cannot-hold-survives-when-the-native-type-is-not-all-classes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B709. A docblock member the native type cannot hold survives when the native type is not all classes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1575,23 +1558,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b709-a-docblock-member-the-native-type-cannot-hold-survives-when-the-native-type-is-not-all-classes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B709. A docblock member the native type cannot hold survives when the native type is not all classes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1855,26 +1821,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<h3 id="b709-a-docblock-member-the-native-type-cannot-hold-survives-when-the-native-type-is-not-all-classes">B709. A docblock member the native type cannot hold survives when the native type is not all classes<a class="headerlink" href="#b709-a-docblock-member-the-native-type-cannot-hold-survives-when-the-native-type-is-not-all-classes" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @return resource|Socket|false|null */      // phpstorm-stubs' socket_import_stream()</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function socket_import_stream($stream): Socket|false {}</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">$socket = socket_import_stream($stream);</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">socket_get_option($socket, …);   // expects Socket, got resource|Socket|null</span>
-</code></pre></div>
-<p>PHP guarantees the native type, so a docblock can only narrow it: the
-effective type is the docblock's members the native type can hold. With
-<code>Socket|false</code> that is <code>Socket|false</code>; <code>resource</code> and <code>null</code> cannot come
-back. <code>doc_members_native_can_hold</code> in <code>src/docblock/type_override.rs</code>
-drops such members only when every native member names a class, so a
-native union with a scalar member (<code>false</code>, <code>int</code>, <code>string</code>) keeps them
-all. Judge each docblock member against the native members whatever they
-are, keeping the members some native member can hold (a class member holds
-any object, <code>false</code> holds <code>false</code>, <code>bool</code> holds <code>true</code> and <code>false</code>, and
-so on), and fall back to the native type when none is left.</p>
-<p>Found by <code>analyze</code> on azjezz/psl (14 false positives from
-<code>socket_import_stream()</code>).</p>
+<p>No outstanding items.</p>
 <h2 id="conditional-return-types">Conditional return types<a class="headerlink" href="#conditional-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
@@ -1884,12 +1831,12 @@ so on), and fall back to the native type when none is left.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b692-int-of-a-ctype_digit-checked-string-is-not-non-negative">B692. <code>(int)</code> of a <code>ctype_digit()</code>-checked string is not non-negative<a class="headerlink" href="#b692-int-of-a-ctype_digit-checked-string-is-not-non-negative" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function wait(string $delay): void {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    if (!ctype_digit($delay)) {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">        return;</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    }</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    sleep((int) $delay);   // expects int&lt;0, max&gt;, got int</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function wait(string $delay): void {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    if (!ctype_digit($delay)) {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        return;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    }</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    sleep((int) $delay);   // expects int&lt;0, max&gt;, got int</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>A string that passes <code>ctype_digit()</code> holds only the digits 0-9, so casting
 it to <code>int</code> cannot give a negative number, and <code>sleep()</code>'s
@@ -1913,13 +1860,13 @@ seconds a rate-limit message names.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first">B704. A function declared in two files resolves to whichever is found first<a class="headerlink" href="#b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function __() {}</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function __() {}</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
 </code></pre></div>
 <p>WordPress core declares nineteen of its functions a second time as
 no-ops for its script loader. Calls across the project resolve to the
@@ -1935,21 +1882,21 @@ parameters, or sits in a file only one entry point includes), prefer it
 for hover and go-to-definition, and offer the others alongside.</p>
 <h3 id="b705-a-method-body-in-a-file-not-yet-opened-is-read-without-its-imports">B705. A method body in a file not yet opened is read without its imports<a class="headerlink" href="#b705-a-method-body-in-a-file-not-yet-opened-is-read-without-its-imports" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// src/Repository/Queries.php, loaded through PSR-4</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">namespace App\Repository;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">use App\Entity\User;</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">final class Queries {</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    public function make() { return new User(); }</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    public function users(): QueryBuilder</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">    {</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">        return $this-&gt;em-&gt;createQueryBuilder()-&gt;select('u')-&gt;from(User::class, 'u');</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">    }</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">}</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="x">// src/Service/Users.php, the open file</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="x">$queries-&gt;make();    // App\Repository\User, expected App\Entity\User</span>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="x">$queries-&gt;users()-&gt;getQuery()-&gt;getResult();   // mixed, expected list&lt;User&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// src/Repository/Queries.php, loaded through PSR-4</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">namespace App\Repository;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">use App\Entity\User;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">final class Queries {</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    public function make() { return new User(); }</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    public function users(): QueryBuilder</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    {</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">        return $this-&gt;em-&gt;createQueryBuilder()-&gt;select('u')-&gt;from(User::class, 'u');</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">    }</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">}</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">// src/Service/Users.php, the open file</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">$queries-&gt;make();    // App\Repository\User, expected App\Entity\User</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">$queries-&gt;users()-&gt;getQuery()-&gt;getResult();   // mixed, expected list&lt;User&gt;</span>
 </code></pre></div>
 <p>When a method declares no return type, or returns a Doctrine query
 builder, its type is read from its body. A class name the body writes
@@ -1964,15 +1911,15 @@ the imports from <code>import_block_at</code>, and how a file loaded on demand
 records its <code>use</code> map in its <code>FileState</code>.</p>
 <h3 id="b707-a-docblock-annotation-does-not-name-its-class">B707. A docblock annotation does not name its class<a class="headerlink" href="#b707-a-docblock-annotation-does-not-name-its-class" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">use Doctrine\ORM\Mapping as ORM;   // Unused import 'Doctrine\ORM\Mapping'</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">use Symfony\Component\Routing\Annotation\Route;   // Unused import</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">/** @ORM\Entity */</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">final class User</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">{</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">    /** @Route("/users") */</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">    public function list(): Response { … }</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">use Doctrine\ORM\Mapping as ORM;   // Unused import 'Doctrine\ORM\Mapping'</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">use Symfony\Component\Routing\Annotation\Route;   // Unused import</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">/** @ORM\Entity */</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">final class User</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">{</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    /** @Route("/users") */</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">    public function list(): Response { … }</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">}</span>
 </code></pre></div>
 <p>Doctrine-style annotations (Doctrine ORM, older Symfony, JMS, Drupal
 plugins) name a class with their tag, resolved through the file's <code>use</code>
@@ -1994,11 +1941,11 @@ features read.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b710-a-method-the-call-site-cannot-see-is-checked-although-__call-takes-the-call">B710. A method the call site cannot see is checked although <code>__call</code> takes the call<a class="headerlink" href="#b710-a-method-the-call-site-cannot-see-is-checked-although-__call-takes-the-call" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Magic {</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    public function __call(string $name, array $args): mixed { return null; }</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    protected function hidden(int $value): void {}</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">}</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">$magic-&gt;hidden(); // Error: Expected 1 argument, got 0</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Magic {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    public function __call(string $name, array $args): mixed { return null; }</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    protected function hidden(int $value): void {}</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">}</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">$magic-&gt;hidden(); // Error: Expected 1 argument, got 0</span>
 </code></pre></div>
 <p>A call from outside the class to a method it cannot reach goes to
 <code>__call</code> (or <code>__callStatic</code>), which takes any arguments, but the
@@ -2015,10 +1962,10 @@ reachability; <code>diagnostics/member_visibility.rs</code> already decides it f
 the visibility diagnostic.</p>
 <h3 id="b706-a-doctrine-mapping-file-is-not-read-until-the-workspace-index-ends">B706. A Doctrine mapping file is not read until the workspace index ends<a class="headerlink" href="#b706-a-doctrine-mapping-file-is-not-read-until-the-workspace-index-ends" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// config/doctrine/User.orm.xml maps User, with a `team` association</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$em-&gt;createQuery('SELECT t.name FROM App\Entity\User u JOIN u.team t');</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">// Query&lt;mixed, mixed&gt; right after the editor starts,</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">// Query&lt;null, array{name: string}&gt; a few seconds later</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// config/doctrine/User.orm.xml maps User, with a `team` association</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$em-&gt;createQuery('SELECT t.name FROM App\Entity\User u JOIN u.team t');</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">// Query&lt;mixed, mixed&gt; right after the editor starts,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">// Query&lt;null, array{name: string}&gt; a few seconds later</span>
 </code></pre></div>
 <p>The XML and YAML mapping files are indexed with the other resource files,
 in the last step of the background workspace index
