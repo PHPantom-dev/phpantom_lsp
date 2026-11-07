@@ -68,44 +68,6 @@ to variables are not collected there, so they get no signature help.
 
 ---
 
-## S3. Multiple overloaded signatures
-**Impact: Low · Complexity: Medium-High**
-
-Some PHP functions have multiple signatures depending on argument count
-or types.  For example, `array_map` can be called as:
-
-```php
-array_map(callable $callback, array $array): array
-array_map(null, array ...$arrays): array
-```
-
-The LSP protocol supports returning multiple `SignatureInformation`
-entries with an `activeSignature` index.  Today we return a single
-signature.
-
-#### Current state
-
-phpstorm-stubs define multiple function entries (or parameter variants
-annotated with `#[PhpStormStubsElementAvailable]`) for overloaded
-functions.  Our PHP-version filtering selects one variant.  We don't
-model true overloads.
-
-#### Implementation
-
-This is a deeper change:
-
-1. When a function has multiple stub entries (or when a class has
-   multiple `__construct` signatures for different PHP versions),
-   collect all applicable signatures.
-2. Return them all in the `signatures` array.
-3. Set `activeSignature` based on argument-count matching: pick the
-   first signature whose parameter count accommodates the current
-   argument count.
-
-**Deferred** — the single-signature approach covers 99% of real usage.
-
----
-
 ## S4. Named argument awareness in active parameter
 **Impact: Low · Complexity: Medium**
 

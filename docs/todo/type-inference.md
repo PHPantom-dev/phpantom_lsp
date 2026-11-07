@@ -703,27 +703,6 @@ API endpoint that types its request this way gets every parameter wrong.
 
 ---
 
-## T60. A float literal is typed `float`, not its value
-
-**Impact: Low · Complexity: Low**
-
-```php
-/**
- * @template T
- * @param T $data
- * @return (T is array|object|string ? string : T)
- */
-function maybe_serialize($data) { … }
-
-maybe_serialize(0.0);   // want 0.0, get float
-```
-
-Integer, string and boolean literals keep their value as their type;
-float literals become `float`. A template bound to one, or a condition
-over one, loses the value. 2 assertions of the WordPress stubs fixtures.
-
----
-
 ## T62. A sealed hierarchy is not narrowed by ruling out its other members
 
 **Impact: Medium · Complexity: Medium**
