@@ -15186,6 +15186,29 @@ class Demo {
     );
 }
 
+/// PHP converts an `int` returned through a declared `float` to a float, so
+/// the closure returns `float` however its body computes the value.
+#[test]
+fn hover_closure_declared_float_return_is_not_narrowed_to_int() {
+    let backend = create_test_backend();
+    let uri = "file:///closure_float_return.php";
+    let content = r#"<?php
+function test(): void {
+    $half = static fn (int $x): float => $x / 2;
+    $same = fn (int $x): int|float => $x;
+    $half;
+    $same;
+}
+"#;
+
+    let hover =
+        hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $half")).to_string();
+    assert!(hover.contains("Closure(int): float"), "{hover}");
+    let hover =
+        hover_text(&hover_at(&backend, uri, content, 5, 6).expect("hover $same")).to_string();
+    assert!(hover.contains("Closure(int): int"), "{hover}");
+}
+
 #[test]
 fn hover_generator_closure_infers_return_type() {
     let backend = create_test_backend();

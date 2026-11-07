@@ -145,6 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Closures declared to return `float`.** A closure or arrow function declared `: float` is now shown returning `float` even when its body computes an integer, since PHP converts the value on return.
 - **Docblock annotations name their class.** A Doctrine-style annotation such as `@ORM\Entity` or `@Route("/users")`, including one nested in another's arguments, now counts as a use of the import it goes through, so that import is no longer reported as unused or removed by the quick fix and `phpantom_lsp fix`. Go-to-definition, hover, references, and rename reach the annotation's class.
 - **Method bodies in files not yet opened.** A method with no return type, or one that returns a Doctrine query builder, declared in a file the editor has not opened now reads the class names in its body through that file's imports, so `return new User();` gives the imported `User` rather than a class of that name in the method's own namespace.
 - **Doctrine mapping files right after startup.** An entity mapped by an XML or YAML file now has its fields, magic finders, and DQL types as soon as the editor starts, instead of only once the background index has finished.
