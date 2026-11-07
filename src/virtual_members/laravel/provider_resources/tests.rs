@@ -364,6 +364,53 @@ fn package_tools_config_files_are_read_from_every_name() {
     assert!(unnamed.open_config_namespace);
 }
 
+/// `hasRoute()`/`hasRoutes()` load `routes/<name>.php` from the package root,
+/// with array arguments flattened and runtime names skipped.  No `name()` is
+/// needed: the file name does not depend on it.
+#[test]
+fn package_tools_route_files_are_read_from_every_name() {
+    let scan = |provider_path: &str, chain: &str| {
+        let content = format!(
+            "<?php\nclass BillingServiceProvider extends PackageServiceProvider {{\n    public function configurePackage(Package $package): void {{\n        $package{chain};\n    }}\n}}\n"
+        );
+        extract_provider_resources(
+            &content,
+            Path::new(provider_path),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        )
+        .route_files
+    };
+    let routes = Path::new("/ws/vendor/acme/billing/src").join("../routes");
+
+    assert_eq!(
+        scan(
+            "/ws/vendor/acme/billing/src/BillingServiceProvider.php",
+            "->name('billing')->hasRoute('web')->hasViews()"
+        ),
+        vec![routes.join("web.php")]
+    );
+    assert_eq!(
+        scan(
+            "/ws/vendor/acme/billing/src/BillingServiceProvider.php",
+            "->hasRoutes('web', ['api', ['admin']], $this->extra())"
+        ),
+        vec![
+            routes.join("web.php"),
+            routes.join("api.php"),
+            routes.join("admin.php")
+        ]
+    );
+    assert_eq!(
+        scan(
+            "/ws/vendor/acme/billing/src/Providers/BillingServiceProvider.php",
+            "->hasRoutes('web')"
+        ),
+        vec![Path::new("/ws/vendor/acme/billing/src").join("../routes/web.php")]
+    );
+}
+
 /// A registration may name its file through any of Laravel's path helpers,
 /// and `lang_path()` follows the framework into `resources/lang` when a
 /// project still keeps its translations there.

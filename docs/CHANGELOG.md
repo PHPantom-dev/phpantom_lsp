@@ -492,6 +492,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Laravel name completion beyond the first argument.** Completion now offers a name wherever the finished call names one: the view in `View::renderWhen($ok, '…')` or `Route::view('/about', '…')`, the ability in `$this->authorizeForUser($user, '…')`, the morph types in `whereHasMorph('commentable', ['…'])`, and every entry of a list such as `Gate::any([…])`. View names are also offered in `view()->make('…')` and a mailable's `$this->view('…')`, and route names are no longer offered in `$request->route('…')`, which reads a route parameter.
 - **Service providers in a `config/app.php` written with `array()`.** Only the classes listed under `providers` are now read as service providers, as they already were for the `[…]` spelling.
 - **Route files nothing visibly loads.** A route file in a subdirectory of `routes/` that no route file or service provider loads, as when `web.php` requires a whole directory through `glob()`, now has its routes completed and checked under their own names instead of reported as unknown.
+- **Routes of `laravel-package-tools` packages.** Route files a package registers with `$package->hasRoutes()`, as Filament does, are now read, so their routes complete and are no longer reported as unknown.
 - **Edits to route files outside `routes/`.** Editing a route file loaded from elsewhere, such as a module's route file that a service provider loads, now updates route completion, diagnostics and go-to-definition right away.
 
 #### Blade templates
