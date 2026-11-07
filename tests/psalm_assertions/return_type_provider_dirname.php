@@ -15,7 +15,7 @@ namespace PsalmTest_return_type_provider_dirname_2 {
     $foo = rand(0, 1) ? "" : "world";
     $dir = dirname($foo, 20);
 
-    // PHPantom folds both possible inputs to the same parent directory.
-    assertType("'.'", $dir);
+    // PHPantom preserves both literal results, including the empty input.
+    assertType("''|'.'", $dir);
 }
 

@@ -94,7 +94,9 @@ impl Backend {
         let changes = self.spell_changes_as_indexed(&params.changes);
         for change in changes.iter() {
             if change.kind != FileChangeType::Changed
-                && change.uri.as_str().ends_with(".config.php")
+                && (change.uri.as_str().ends_with(".config.php")
+                    || change.uri.as_str().ends_with("/tempest")
+                    || change.uri.as_str().ends_with("/public/index.php"))
             {
                 self.invalidate_tempest_views();
             } else {
@@ -338,10 +340,12 @@ impl Backend {
                     .push((uri_str, file_path, change.kind));
                 continue;
             }
-            let is_php = std::path::Path::new(path_str)
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| filters.is_php_extension(ext));
+            // Tempest's CLI bootstrap is PHP without a filename extension.
+            let is_php = path_str.ends_with("/tempest")
+                || std::path::Path::new(path_str)
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| filters.is_php_extension(ext));
             if !is_php {
                 continue;
             }
@@ -596,6 +600,7 @@ impl Backend {
             .collect();
         patterns.extend([
             ("**/*.php".to_string(), watch_all),
+            ("**/tempest".to_string(), watch_all),
             ("**/*.{yaml,yml,xml}".to_string(), watch_all),
             ("**/*.{yaml,yml,xml}.dist".to_string(), watch_all),
             ("**/composer.json".to_string(), WatchKind::Change),
