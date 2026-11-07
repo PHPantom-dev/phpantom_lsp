@@ -95,6 +95,7 @@ pub(crate) struct TemplateLowering {
     /// one still describing the current scope (see
     /// [`Backend::apply_ast_index_parse_results_batch`]).
     scope: Option<BladeScope>,
+    tempest_scope: Option<Arc<crate::tempest::inference::Scope>>,
 }
 
 impl Backend {
@@ -262,11 +263,21 @@ impl Backend {
     /// refresh passes own the cache; this path only reads it.
     pub(crate) fn lower_template(&self, uri: &str, content: &str) -> Option<TemplateLowering> {
         if self.is_tempest_view(uri) {
-            let (virtual_php, source_map) = crate::tempest::preprocessor::preprocess(content);
+            self.tempest
+                .has_views
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            let scope = self.tempest.scopes.read().get(uri).cloned();
+            let (virtual_php, source_map) = match scope.as_deref() {
+                Some(scope) => {
+                    crate::tempest::preprocessor::preprocess_with_scope(content, Some(scope))
+                }
+                None => crate::tempest::preprocessor::preprocess(content),
+            };
             return Some(TemplateLowering {
                 virtual_php: Arc::new(virtual_php),
                 source_map,
                 scope: None,
+                tempest_scope: scope,
             });
         }
         if !self.is_blade_file(uri) {
@@ -297,6 +308,7 @@ impl Backend {
             virtual_php: Arc::new(virtual_php),
             source_map,
             scope: Some(injected),
+            tempest_scope: None,
         })
     }
 
@@ -377,6 +389,15 @@ impl Backend {
             match result {
                 AstIndexParseResult::Update(update) => {
                     if open_uris.contains_key(&update.uri) {
+                        continue;
+                    }
+                    if crate::tempest::is_view(&update.uri)
+                        && update
+                            .template
+                            .as_ref()
+                            .and_then(|t| t.tempest_scope.as_ref())
+                            != self.tempest.scopes.read().get(&update.uri)
+                    {
                         continue;
                     }
                     if let Some(scope) = update.template.as_ref().and_then(|t| t.scope.as_ref()) {

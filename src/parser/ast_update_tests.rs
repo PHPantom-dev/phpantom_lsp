@@ -453,6 +453,27 @@ fn stale_scope_batch_does_not_clobber_a_fresher_reinference() {
     );
 }
 
+#[test]
+fn stale_tempest_index_batch_keeps_the_current_inferred_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let view = dir.path().join("shop.view.php");
+    let caller = dir.path().join("caller.php");
+    let template = "{{ $count + 1 }}";
+    let php = "<?php \\Tempest\\View\\view(__DIR__.'/shop.view.php', count: 3);";
+    std::fs::write(&view, template).unwrap();
+    std::fs::write(&caller, php).unwrap();
+    let uri = crate::util::path_to_uri(&view);
+    let backend = Backend::new_test();
+    let stale = backend.parse_ast_index_update_for_index(&uri, template);
+    backend.update_ast(&crate::util::path_to_uri(&caller), php);
+    backend.update_ast(&uri, template);
+    backend.refresh_tempest_inference();
+    let fresh = backend.template_virtual_php_arc(&uri).unwrap();
+    assert!(fresh.contains("@var 3 $count"));
+    backend.apply_ast_index_parse_results_batch(vec![stale]);
+    assert_eq!(backend.template_virtual_php_arc(&uri).unwrap(), fresh);
+}
+
 /// A `belongsToMany` body with `->as(...)`, `->using(...)`, and
 /// `->withPivot(...)` must populate `belongs_to_many_pivots`, with the
 /// pivot class resolved to an FQN.

@@ -477,6 +477,7 @@ impl Backend {
                 !phase1_uris.is_empty() || !phase2_work.is_empty() || !resource_work.is_empty();
             if !already_indexed || discovered_new_files {
                 self.refresh_blade_injected_vars();
+                self.refresh_tempest_inference();
             } else {
                 tracing::info!(
                     "ensure_workspace_indexed: skipping Blade re-inference; refresh found no new files"

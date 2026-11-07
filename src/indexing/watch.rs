@@ -187,6 +187,7 @@ impl Backend {
             self.update_laravel_migrations(&batch.migration_changes);
         }
 
+        self.refresh_tempest_inference();
         true
     }
 
