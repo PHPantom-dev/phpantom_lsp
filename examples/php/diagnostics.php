@@ -644,6 +644,36 @@ class VoidResultDemo
 }
 
 
+// ── Diagnostic: Objects Used as Strings ─────────────────────────────────────
+// `echo`, concatenation, interpolation and a `(string)` cast call an object's
+// `__toString()`, and an object without one throws an `Error`.  It is an error
+// when the class is final or an enum, and a warning when a subclass could
+// still add the method.
+
+class StringConversionDemo
+{
+    public function demo(
+        Scaffolding\TextTag $tag,
+        Scaffolding\User $user,
+        Scaffolding\ScaffoldingFieldLabel $label,
+    ): void {
+        // Error — TextTag is final and has no __toString():
+        echo $tag;
+        echo 'Tag: ' . $tag;
+        echo "Tag: {$tag}";
+
+        // Error — an enum can never have __toString():
+        echo Scaffolding\Mode::Manual;
+
+        // Warning — a subclass of User could add __toString():
+        echo (string) $user;
+
+        // No diagnostic — the class declares __toString():
+        echo $label;
+    }
+}
+
+
 // ── Diagnostic: Missing Return ──────────────────────────────────────────────
 // Running off the end of a function returns `null`, which a return type that
 // does not accept it turns into a `TypeError`.

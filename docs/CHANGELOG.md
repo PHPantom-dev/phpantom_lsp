@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Objects used as strings.** Echoing, concatenating, interpolating, or casting to `string` an object whose class has no `__toString()` is reported, since PHP throws an `Error` there. It is an error when the class is final or an enum, and a warning when a subclass could still add the method.
 - **Functions that can end without returning.** A function, method, or closure whose return type does not accept `null` is reported as an error when it can reach its closing brace without returning a value, since PHP throws a `TypeError` there. A body that always ends in a `throw`, an `exit`, or a call to a `never`-returning function is left alone, and so is a `switch` whose cases cover every value its subject can hold.
 - **Using the result of a `void` call.** Reading the result of a function or method declared `void`, whether assigning it, passing it on, testing it in a condition, or returning it, is reported as a warning, since the value is always `null`. A call that is a statement of its own is left alone.
 - **Laravel asset paths and Inertia pages.** The paths `asset()`, `mix()`, `@vite` and `Vite::asset()` name, and the pages `Inertia::render()`, `inertia()` and `Route::inertia()` render, complete from the files on disk, jump to the file, and are reported when nothing is there. An unknown Inertia page gets a quick fix that creates it. Page directories and extensions are read from `config/inertia.php`.

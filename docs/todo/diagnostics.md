@@ -581,31 +581,3 @@ would work without PHPStan.
 
 Only a body whose every call declares what it throws can rule a catch
 out, so this stays quiet wherever an undeclared call could throw anything.
-
----
-
-## D45. An object without `__toString()` used as a string is not reported
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-final class Invoice {}
-
-echo $invoice;                // Error: Object of class Invoice could not be converted to string
-$label = 'No. ' . $invoice;   // same
-$text = "Invoice $invoice";   // same
-```
-
-`echo`, `print`, concatenation, interpolation, a `(string)` cast and
-string functions all convert their operand, and an object whose class has
-no `__toString()` (and is not `Stringable`) throws. A `string` parameter
-is already covered by the type-mismatch check; these conversions are not.
-Severity follows the unknown-member rule: Error when the class is final or
-an enum, Warning when a subclass could still add the method. PhpStorm
-reports it as "Method '__toString' is not implemented".
-
-**Where to look:** the binary-operator and `echo` handling in the
-forward walker's diagnostic pass (`src/type_engine/variable/forward_walk/`),
-and how `src/diagnostics/unknown_members/` grades its severity for final
-and non-final classes.
-

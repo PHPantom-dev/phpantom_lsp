@@ -187,6 +187,7 @@ mod diagnostics_psr4_mismatch;
 mod diagnostics_reachability;
 mod diagnostics_readonly_writes;
 mod diagnostics_return_type_errors;
+mod diagnostics_string_conversions;
 mod diagnostics_syntax_errors;
 mod diagnostics_trait_property_conflicts;
 mod diagnostics_type_errors;

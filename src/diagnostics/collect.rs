@@ -92,6 +92,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_argument_type_diagnostics_with_context,
     ),
     always(
+        "invalid_string_conversion",
+        Backend::collect_string_conversion_diagnostics_with_context,
+    ),
+    always(
         "type_mismatch_return",
         Backend::collect_return_type_diagnostics_with_context,
     ),

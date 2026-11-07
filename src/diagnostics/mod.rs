@@ -116,6 +116,9 @@
 //! - **Type mismatch diagnostics** — report argument, return, and
 //!   property-assignment values whose type does not satisfy the
 //!   declared/inferred type.
+//! - **String conversion diagnostics** — report an object used as a
+//!   string (`echo`, concatenation, interpolation, a `(string)` cast)
+//!   whose class has no `__toString()`.
 //! - **Member visibility diagnostics** — report a `private` or
 //!   `protected` property, method, or class constant reached from a
 //!   scope PHP does not let see it.  Emitted from the unknown-member
@@ -292,6 +295,7 @@ mod readonly_writes;
 mod return_type_errors;
 mod stale;
 pub(crate) mod state;
+mod string_conversions;
 mod subject_cache;
 pub(crate) mod suppression;
 mod symfony_constraint_options;
