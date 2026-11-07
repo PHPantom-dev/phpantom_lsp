@@ -17,7 +17,7 @@ can refine inferred types. Components use Composer and configured discovery
 roots, including explicit registrations. The files in `app/*.config.php`
 configure components outside the autoload root; `ConfiguredViews.php` passes
 a constant path through a View helper. In `resources/configured.view.php`,
-follow the configured component tags and inspect the inferred book data.
+complete or follow the configured component tags and inspect the inferred book data.
 
 Verify the playground with:
 

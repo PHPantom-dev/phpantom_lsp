@@ -69,9 +69,6 @@ impl Backend {
         };
         if tag.name_span.start <= offset && offset <= tag.name_span.end {
             let prefix = &source[tag.name_span.start..offset];
-            if !prefix.starts_with('x') {
-                return empty();
-            }
             let components = self.tempest_components();
             let mut names: Vec<_> = components
                 .keys()
