@@ -394,6 +394,11 @@ pub(super) fn extract_from_expression<'a>(
             extract_partial_application_expr(partial, ctx, scope_start)
         }
 
+        // ── A Yii path alias a string starts with: `'@runtime/logs'` ──
+        Expression::Literal(Literal::String(literal)) if ctx.yii => {
+            record_yii_alias(literal, ctx);
+        }
+
         // Any expression variant without an explicit arm: descend generically
         // so nested expressions/statements still get extracted.  Non-navigable
         // leaves (literals, etc.) have no such children, so this is a no-op for

@@ -347,5 +347,6 @@ mod type_hierarchy;
 mod watched_files;
 mod wordpress_hooks;
 mod workspace_symbols;
+mod yii_aliases;
 mod yii_routes;
 mod yii_views;

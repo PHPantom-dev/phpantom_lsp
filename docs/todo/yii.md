@@ -3,10 +3,10 @@
 Known gaps and missing features in PHPantom's Yii support. Yii 3 is
 built from small, typed components with little magic, so the generic
 engine already types most of it. On top of that, route names, route
-arguments, and view names complete, navigate, and are checked. What is
-still missing is the navigation between the rest of the names Yii
-keeps in configuration (DI definitions, `$params` keys, alias
-declarations) and the code and files they point to.
+arguments, and view names complete, navigate, and are checked, and path
+aliases navigate to their declarations. What is still missing is the
+navigation between the rest of the names Yii keeps in configuration (DI
+definitions, `$params` keys) and the code and files they point to.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).
@@ -77,34 +77,6 @@ the files in each, and packages contribute their own through
 
 **Where to look:** the Symfony container support (`src/symfony/container.rs`)
 for the navigation and rename side.
-
----
-
-## Y5. Alias definitions
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-// config/common/aliases.php, required as params['yiisoft/aliases']['aliases']
-return [
-    '@root' => dirname(__DIR__, 2),
-    '@views' => '@root/resources/views',
-];
-
-$aliases->get('@runtime/logs');
-public ?string $sourcePath = '@assetsSource/main';   // an asset bundle
-```
-
-An alias (`yiisoft/aliases`) names a path in a string starting with
-`@`, and aliases are defined in terms of each other. Navigate from an
-alias in any string to its definition, complete alias names, and,
-where the definition resolves to a path in the project, navigate from
-the whole string to the file or directory it names.
-
-View names already resolve their `@views/...` paths through
-`src/yii/aliases.rs`, which reads the aliases from every params file
-under `config/` that names `yiisoft/aliases`. It records only the path
-each alias resolves to, so this item adds where each one is declared.
 
 ---
 

@@ -69,6 +69,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::YiiRoute
+        | StringKeyKind::YiiAlias
         | StringKeyKind::DrupalRoute
         | StringKeyKind::DrupalThemeHook
         | StringKeyKind::DrupalLibrary
@@ -241,6 +242,9 @@ impl Backend {
             | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
             | StringKeyKind::YiiView => Arc::new([]),
+            // Any string can start with an alias, so the names are offered
+            // wherever one is typed (`crate::completion::yii_aliases`).
+            StringKeyKind::YiiAlias => Arc::new([]),
             // A path is completed a directory at a time from the files on
             // disk (see `try_laravel_string_key_completion_inner`).
             StringKeyKind::Asset | StringKeyKind::ViteAsset => Arc::new([]),

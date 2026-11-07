@@ -35,6 +35,11 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `__DIR__ . '/template'` instead, and `index.php` renders `'_card'` from
   beside itself. Open `resources/views/blog/_card.php` for the lens listing
   the calls that render it.
+- Open `src/Web/Shared/Layout/Main/MainAsset.php`. Go to the definition of
+  `'@assetsSource'` in `$sourcePath`, which lands on its declaration in
+  `config/common/aliases.php`, or hover it for the path it stands for. The
+  rest of the string, `/main`, links to the `assets/main` directory, and an
+  `@` typed in any string completes the declared aliases.
 
 ## Getting started
 

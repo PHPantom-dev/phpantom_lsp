@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Yii aliases.** In a Yii project, an alias such as `@runtime` at the start of any string jumps to the configuration that declares it, lists the strings that name it, and completes from the declared aliases. Hovering it shows the path it stands for, and the rest of the string links to the file or directory it names.
 - **Objects used as strings.** Echoing, concatenating, interpolating, or casting to `string` an object whose class has no `__toString()` is reported, since PHP throws an `Error` there. It is an error when the class is final or an enum, and a warning when a subclass could still add the method.
 - **Private members nothing uses.** A private method, constant, or property its class never uses is dimmed, with a quick fix that removes it. A private property the class writes but never reads is dimmed too, and one it reads but never writes, and that has no default, is reported since it always holds `null`. Members a framework reads or writes by reflection, such as Doctrine's mapped fields, are left alone.
 - **Functions that can end without returning.** A function, method, or closure whose return type does not accept `null` is reported as an error when it can reach its closing brace without returning a value, since PHP throws a `TypeError` there. A body that always ends in a `throw`, an `exit`, or a call to a `never`-returning function is left alone, and so is a `switch` whose cases cover every value its subject can hold.

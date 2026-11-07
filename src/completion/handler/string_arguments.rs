@@ -184,6 +184,17 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Yii aliases ─────────────────────────────────────────
+        // `'@|'` in any string, before the names a call's string could
+        // otherwise be read as.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_alias_completion(content, position, code)
+        {
+            return Some(response);
+        }
+
         // ── Symfony and Yii names ───────────────────────────────
         // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`,
         // `$translator->trans('|')`, in any project that uses Twig,

@@ -95,6 +95,7 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::DrupalThemeHook => backend.drupal_theme_hook_definitions(key),
         StringKeyKind::DrupalThemeHookVariable => backend.drupal_theme_variable_definitions(key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
+        StringKeyKind::YiiAlias => backend.yii_alias_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
         StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
@@ -360,6 +361,17 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::DrupalThemeHook
         | StringKeyKind::DrupalThemeHookVariable => {
             find_string_key_usages(kind, key, backend, snapshot, false)
+        }
+        // The string that declares an alias is a span like any use, but
+        // only the configuration says it declares one.
+        StringKeyKind::YiiAlias => {
+            let declared = backend.yii_alias_definitions(key);
+            let mut locations = find_string_key_usages(kind, key, backend, snapshot, true);
+            locations.retain(|location| !declared.contains(location));
+            if include_declaration {
+                locations.extend(declared);
+            }
+            return locations;
         }
         // Two spellings of one view share no key, so the renders are found
         // by the file they name rather than in the key's snapshot.

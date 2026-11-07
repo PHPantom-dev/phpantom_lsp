@@ -465,6 +465,9 @@ impl Backend {
                     );
                 ("View", detail)
             }
+            // Strings start with an `@` for many reasons besides an alias,
+            // so only a declared one is shown.
+            StringKeyKind::YiiAlias => ("Alias", self.yii_alias_detail(key)?),
             StringKeyKind::WordPressHook => ("Hook", self.wordpress_hook_detail(key)),
             StringKeyKind::DrupalRenderElement => {
                 ("Render element", self.drupal_render_element_detail(key))

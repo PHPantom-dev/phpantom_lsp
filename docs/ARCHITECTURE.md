@@ -101,7 +101,7 @@ src/
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
 ├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields and options, validation mappings, serializer groups, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
 ├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner, block names paired across the templates that extend, use, or embed each other, the filters and functions extensions declare (the installed packages' read from disk), and the variables a template reads, traced to the renders, templates, and globals that pass them and typed by what those pass, with the attributes read off them
-├── yii/                    # Yii views and the path aliases they are named through (the alias table read from the params files, view keys resolved to templates), and route names and route arguments (route paths and handlers, looked up in the declaring files' route side tables)
+├── yii/                    # Yii views and the path aliases they are named through (the alias table read from the params files, with where each alias is declared, view keys resolved to templates), and route names and route arguments (route paths and handlers, looked up in the declaring files' route side tables)
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 ├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/

@@ -58,6 +58,8 @@ $container = $runner->getContainer();
 $aliases = $container->get(Aliases::class);
 check('@views is declared in config/common/aliases.php', $aliases->get('@views') === __DIR__ . '/resources/views');
 check('@views/blog is a directory', is_dir($aliases->get('@views/blog')));
+check('@assetsSource is declared in config/common/aliases.php', $aliases->get('@assetsSource') === __DIR__ . '/assets');
+check("MainAsset's @assetsSource/main is a directory", is_dir($aliases->get('@assetsSource/main')));
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
 

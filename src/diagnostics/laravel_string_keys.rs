@@ -115,8 +115,11 @@ impl CheckedStringKind {
             // too, by the configuration a site exports and by code.  Views
             // and other modules declare theme hooks in loops, which are not
             // read, and a render array may pass anything besides a hook's
-            // variables.
-            StringKeyKind::WordPressHook
+            // variables.  A Yii alias can be set at runtime with
+            // `Aliases::set()`, and an `@` starts plenty of strings that
+            // name no path.
+            StringKeyKind::YiiAlias
+            | StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalHook

@@ -167,6 +167,10 @@ pub(crate) enum StringKeyKind {
     /// under the routes that dispatch to that handler, whose paths declare
     /// it.
     YiiRouteArgument,
+    /// A Yii path alias: the `@name` a string starts with (`'@runtime/logs'`
+    /// names `@runtime`), in any string of a Yii project.  Declared under
+    /// `params['yiisoft/aliases']['aliases']` (see `yii::aliases`).
+    YiiAlias,
     /// A WordPress hook name: declared by each place that fires it (a
     /// `do_action()`, an `apply_filters()`, and their `_ref_array` and
     /// `_deprecated` forms), and read by `add_action()`, `add_filter()`, and
@@ -285,7 +289,9 @@ impl StringKeyKind {
             | Self::TwigFilter
             | Self::TwigFunction
             | Self::TwigVariable => KeyFramework::Twig,
-            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument => KeyFramework::Yii,
+            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument | Self::YiiAlias => {
+                KeyFramework::Yii
+            }
             Self::WordPressHook => KeyFramework::WordPress,
             Self::DrupalEntityType
             | Self::DrupalRoute

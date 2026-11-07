@@ -75,6 +75,7 @@ use Yiisoft\Yii\View\Renderer\WebViewRenderer;
 final class ConsumerController
 {
     private WebViewRenderer $viewRenderer;
+    private string $logs = '@';
 
     public function __construct(WebViewRenderer $viewRenderer)
     {
@@ -313,6 +314,7 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             "render(''",
             "_partial",
         ),
+        ("alias_name", &view_uri, VIEW_CONSUMER_PHP, "'@'", "@views"),
         (
             "route_name",
             &route_uri,
