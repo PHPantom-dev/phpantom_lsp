@@ -88,7 +88,7 @@ fn content_of(path: &str) -> &'static str {
 }
 
 fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
-    Uri::from_file_path(dunce::canonicalize(dir.path()).unwrap().join(rel)).unwrap()
+    Uri::from_file_path(dir.path().join(rel)).unwrap()
 }
 
 /// The position `inside` bytes into the first occurrence of `needle`.
@@ -252,7 +252,7 @@ async fn hovering_an_alias_shows_its_path() {
 #[tokio::test]
 async fn the_path_after_an_alias_links_to_what_it_names() {
     let (backend, dir) = workspace(&["src/Web/Asset.php"]).await;
-    let root = dunce::canonicalize(dir.path()).unwrap();
+    let root = dir.path();
     let uri = uri_for(&dir, "src/Web/Asset.php");
     let links = backend
         .handle_document_link(uri.as_str(), ASSET_PHP)
