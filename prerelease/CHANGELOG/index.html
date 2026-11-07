@@ -6052,6 +6052,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Class constants as docblock types.</strong> A docblock type that names class constants, such as <code>@param Status::ACTIVE $status</code>, <code>@return self::STATUS_*</code>, or <code>@param Foo::class|Bar::class $name</code>, now stands for the values those constants hold. A <code>switch</code> with a case for each of them counts as covering every value, and passing anything else is reported.</li>
 <li><strong>Each enum case is a type of its own.</strong> Comparing an enum with one of its cases, or a backed enum's <code>value</code> with a case's backing value, narrows it to that case, or to the cases left, in <code>if</code>/<code>elseif</code> chains, guard clauses, <code>match</code> arms and strict <code>in_array()</code> checks, and a value known to be one case reads that case's own <code>name</code> and <code>value</code>. A case passed to a <code>value-of&lt;T&gt;</code> template no longer reports every other case's value as a mismatch.</li>
 <li><strong>Array shapes are sealed.</strong> An array with a key that a shape like <code>array{foo: int}</code> does not declare no longer satisfies it, whether the key is written at the call site or comes from the value's own declared shape. Write <code>array{foo: int, ...}</code> to accept other keys.</li>
+<li><strong>Static file paths.</strong> Paths built from <code>__DIR__</code>, <code>__FILE__</code>, and <code>dirname()</code> keep their known values across files and inherited constants. Contributed by @shuvroroy.</li>
 </ul>
 <h4 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h4>
 <ul>
@@ -6151,6 +6152,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <ul>
 <li><strong>Tempest View completion and navigation.</strong> In a Tempest project, PHP expressions in <code>.view.php</code> templates use imports and <code>@var</code> annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to <code>Tempest\View\view()</code> also complete and navigate. Contributed by @shuvroroy.</li>
 <li><strong>Tempest view data inference.</strong> Templates infer data passed by callers and components, including custom View objects and slot scope. Explicit <code>@var</code> annotations can refine inferred types. Contributed by @shuvroroy.</li>
+<li><strong>Configured Tempest views.</strong> Component completion and navigation read Tempest discovery configuration and explicit registrations, including registered names without an <code>x-</code> prefix. View helpers pass their callers' data to templates through statically known paths. Contributed by @shuvroroy.</li>
 </ul>
 <h4 id="configuration-and-indexing">Configuration and indexing<a class="headerlink" href="#configuration-and-indexing" title="Permanent link">&para;</a></h4>
 <ul>

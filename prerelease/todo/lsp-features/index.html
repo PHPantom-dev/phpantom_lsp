@@ -2698,17 +2698,6 @@ When the domain has no catalogue yet, offer to create
 <p><strong>Where to look:</strong> <code>src/code_actions/insert_translation_key.rs</code>,
 <code>src/symfony/translations.rs</code> (<code>catalogue_spans</code>, <code>scan_yaml</code>,
 <code>scan_xliff</code>).</p>
-<hr />
-<h2 id="f74-configured-tempest-view-discovery">F74. Configured Tempest view discovery<a class="headerlink" href="#f74-configured-tempest-view-discovery" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<p>Read additional discovery locations and component registrations from
-Tempest configuration, including <code>ViewConfig::addViewComponent()</code> and
-<code>addViewComponents()</code>. Resolve statically knowable paths through variables,
-constants, and view wrappers, keeping declaration-file path context.
-Refresh the catalogue when configuration changes and verify the resulting
-names with Tempest's own discovery and renderer.</p>
-<p><strong>Where to look:</strong> <code>src/tempest/discovery.rs</code>, <code>src/tempest/paths.rs</code>, and
-<code>src/symbol_map/extraction/tempest.rs</code>.</p>
 
 
 
