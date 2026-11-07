@@ -992,28 +992,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b705-a-method-body-in-a-file-not-yet-opened-is-read-without-its-imports" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B705. A method body in a file not yet opened is read without its imports
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b707-a-docblock-annotation-does-not-name-its-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B707. A docblock annotation does not name its class
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1671,28 +1649,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b705-a-method-body-in-a-file-not-yet-opened-is-read-without-its-imports" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B705. A method body in a file not yet opened is read without its imports
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b707-a-docblock-annotation-does-not-name-its-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B707. A docblock annotation does not name its class
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1824,62 +1780,6 @@ accepts it, and its return type is the join of theirs. Where one
 declaration is plainly the real one (the other has an empty body and no
 parameters, or sits in a file only one entry point includes), prefer it
 for hover and go-to-definition, and offer the others alongside.</p>
-<h3 id="b705-a-method-body-in-a-file-not-yet-opened-is-read-without-its-imports">B705. A method body in a file not yet opened is read without its imports<a class="headerlink" href="#b705-a-method-body-in-a-file-not-yet-opened-is-read-without-its-imports" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// src/Repository/Queries.php, loaded through PSR-4</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">namespace App\Repository;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">use App\Entity\User;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">final class Queries {</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    public function make() { return new User(); }</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    public function users(): QueryBuilder</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    {</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">        return $this-&gt;em-&gt;createQueryBuilder()-&gt;select('u')-&gt;from(User::class, 'u');</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">    }</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">}</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">// src/Service/Users.php, the open file</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">$queries-&gt;make();    // App\Repository\User, expected App\Entity\User</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">$queries-&gt;users()-&gt;getQuery()-&gt;getResult();   // mixed, expected list&lt;User&gt;</span>
-</code></pre></div>
-<p>When a method declares no return type, or returns a Doctrine query
-builder, its type is read from its body. A class name the body writes
-resolves against the declaring file's namespace but not its <code>use</code>
-imports, when that file was loaded on demand rather than opened or
-indexed: <code>User</code> becomes <code>App\Repository\User</code>. A fully-qualified name
-resolves, and so does every name once the whole project is indexed (as
-<code>analyze</code> does), so it shows in the editor rather than the CLI.</p>
-<p><strong>Where to look:</strong> <code>Backend::infer_return_type_at</code>
-(<code>src/code_actions/phpstan/fix_return_type/inference.rs</code>), which takes
-the imports from <code>import_block_at</code>, and how a file loaded on demand
-records its <code>use</code> map in its <code>FileState</code>.</p>
-<h3 id="b707-a-docblock-annotation-does-not-name-its-class">B707. A docblock annotation does not name its class<a class="headerlink" href="#b707-a-docblock-annotation-does-not-name-its-class" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">use Doctrine\ORM\Mapping as ORM;   // Unused import 'Doctrine\ORM\Mapping'</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">use Symfony\Component\Routing\Annotation\Route;   // Unused import</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">/** @ORM\Entity */</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">final class User</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">{</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    /** @Route("/users") */</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">    public function list(): Response { … }</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">}</span>
-</code></pre></div>
-<p>Doctrine-style annotations (Doctrine ORM, older Symfony, JMS, Drupal
-plugins) name a class with their tag, resolved through the file's <code>use</code>
-imports like any other class name. The tag is read as an unknown docblock
-tag instead, so an import only an annotation uses is reported as unused,
-and the quick fix and <code>phpantom_lsp fix</code> remove it, which breaks the
-annotation at run time. Go-to-definition, hover, references and rename
-miss the class too.</p>
-<p>Record an annotation tag (<code>@</code> then a name, at the start of a docblock
-line or inside another annotation's arguments) as a class reference when
-its name resolves to a class, the way a docblock type is. A tag PHPDoc
-or a tool defines (<code>@param</code>, <code>@phpstan-*</code>, <code>@psalm-*</code>) is never one, and
-a lowercase tag with no class behind it stays silent.</p>
-<p><strong>Where to look:</strong> <code>extract_docblock_symbols</code> (<code>src/symbol_map/docblock.rs</code>),
-which emits the class references <code>unused_imports.rs</code> and the navigation
-features read.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>

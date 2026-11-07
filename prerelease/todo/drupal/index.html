@@ -1759,10 +1759,10 @@ annotation, and many contributed modules still do. <code>@Block</code> and
 <code>@Translation</code> name annotation classes, but Drupal's annotated plugin
 discovery finds them without a <code>use</code> import: it reads a plugin type's
 annotation class and namespaces from its plugin manager, not from the
-file. Once <a href="../bugs/#b707-a-docblock-annotation-does-not-name-its-class">B707</a>
-reads annotations through the imports, resolve a name the imports don't
-cover through the namespaces of the plugin type the class is discovered
-for, so that go-to-definition, hover, and references reach the class.</p>
+file. Annotations are read through the imports already; resolve a name
+the imports don't cover through the namespaces of the plugin type the
+class is discovered for, so that go-to-definition, hover, and references
+reach the class.</p>
 
 
 
