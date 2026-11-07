@@ -143,6 +143,7 @@ fn span_name(kind: &SymbolKind) -> Option<&str> {
         | SymbolKind::MemberDeclaration { name, .. }
         | SymbolKind::NamespaceDeclaration { name } => Some(name.as_str()),
         SymbolKind::MemberAccess { member_name, .. } => Some(member_name.as_str()),
+        SymbolKind::NamedArgument { name, .. } => Some(name.as_str()),
         SymbolKind::LaravelMacroString { name } => Some(name),
         SymbolKind::StringKey { key, .. } => Some(key),
         SymbolKind::SelfStaticParent(_)
@@ -169,6 +170,10 @@ fn expected_text(kind: &SymbolKind) -> Expected<'_> {
         {
             Expected::Exact(name.as_str())
         }
+        // Every site a label is reached through spells the parameter's name:
+        // the parameter's own `$name` token, the promoted property's accesses,
+        // and the other labels that bind the same parameter.
+        SymbolKind::NamedArgument { name, .. } => Expected::Exact(name.as_str()),
         SymbolKind::LaravelMacroString { name } => Expected::Exact(name),
         SymbolKind::StringKey { key, .. } => Expected::Key(key),
         _ => Expected::Name,
@@ -236,6 +241,7 @@ pub(super) fn is_valid_new_name(kind: &SymbolKind, new_name: &str) -> bool {
         SymbolKind::Variable { .. }
         | SymbolKind::CompactVariable { .. }
         | SymbolKind::MemberAccess { .. }
+        | SymbolKind::NamedArgument { .. }
         | SymbolKind::MemberDeclaration { .. } => {
             let bare = new_name.strip_prefix('$').unwrap_or(new_name);
             !bare.contains('\\') && bare != "this" && is_name_token(bare)

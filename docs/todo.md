@@ -210,7 +210,9 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| D44 | [A named argument at PHP's own functions and classes is checked against the stub, not against PHP](todo/diagnostics.md#d44-a-named-argument-at-phps-own-functions-and-classes-is-checked-against-the-stub-not-against-php) | Low-Medium  | Medium      |
 | D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
+| D45 | [A promoted parameter's own `@deprecated` does not deprecate the property](todo/diagnostics.md#d45-a-promoted-parameters-own-deprecated-does-not-deprecate-the-property) | Low         | Low         |
 | D19 | [`invalid_member_access` cannot tell a property read from a write](todo/diagnostics.md#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
 | D20 | [`Foo::$bar` and `Foo::bar` are the same span](todo/diagnostics.md#d20-foobar-and-foobar-are-the-same-span)                                                                  | Low         | Medium      |
@@ -265,6 +267,8 @@ ships, remove every row that names it.
 | C3  | Go-to-definition for array shape keys via bracket access                                                                                                                    | Low-Medium  | Medium      |
 | C10 | [Deprecation markers on class-name completions from all sources](todo/completion.md#c10-deprecation-markers-on-class-name-completions-from-all-sources)                     | Low         | Medium      |
 | C12 | [The implicit `$value` of a `set` hook is not offered by variable completion](todo/completion.md#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion) | Low         | Medium      |
+| F70 | [A label at a call with no signature to bind](todo/lsp-features.md#f70-a-label-at-a-call-with-no-signature-to-bind)                                                                                                        | Low-Medium  | Medium      |
+| F71 | [Hover on a parameter at its declaration](todo/lsp-features.md#f71-hover-on-a-parameter-at-its-declaration)                                                                                          | Low         | Low         |
 | S4  | Named argument awareness in active parameter                                                                                                                                | Low         | Medium      |
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Medium      |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |

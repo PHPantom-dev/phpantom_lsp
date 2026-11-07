@@ -176,15 +176,6 @@ pub(crate) enum DocblockMemberRef {
     /// [`crate::doctrine::managed_entity_classes`]), and drops the span
     /// when there is neither.
     EntityField,
-    /// A named argument's label in an attribute, `#[Foo(bar: 1)]`, with the
-    /// attribute class as the subject.
-    ///
-    /// The label names a constructor parameter, which is the property `bar`
-    /// only when the constructor promotes it.  A consumer that resolves the
-    /// subject keeps only the classes whose constructor does (see
-    /// [`crate::class_lookup::constructor_promotes`]), and drops the span
-    /// otherwise.
-    AttributeNamedArg,
     /// A method or property a Yii DI definition names by a key,
     /// `'setLogger()'` or `'$pageSize'`, with the class the definition
     /// builds as the subject (see [`crate::yii::definitions`]).
@@ -207,10 +198,7 @@ impl DocblockMemberRef {
     /// Whether a target that resolves to nothing is acceptable rather than
     /// a diagnostic.
     pub(crate) fn tolerates_missing_target(self) -> bool {
-        matches!(
-            self,
-            Self::See | Self::PropertyPath | Self::AttributeNamedArg
-        )
+        matches!(self, Self::See | Self::PropertyPath)
     }
 }
 
@@ -425,6 +413,29 @@ pub(crate) enum SymbolKind {
         is_method: bool,
     },
 
+    /// A named-argument label: the `name` in `new SelectField(name: 1)` or
+    /// in `$field->render(name: 1)`.
+    ///
+    /// A label is a *reference* to a parameter rather than an access: the
+    /// parameter it names belongs to the call's callee, which is why the
+    /// span records the call site it came from instead of a receiver of its
+    /// own.  The span covers the label alone, without its `:`, because that
+    /// is the text PHP reads as the parameter's name and so the text a
+    /// rename has to replace.
+    NamedArgument {
+        /// The label as written, without the `$` the parameter's declaration
+        /// carries.
+        name: Atom,
+        /// `args_start` of the [`CallSite`](super::CallSite) this argument
+        /// belongs to, which holds the callee the parameter is looked up on.
+        ///
+        /// Recorded rather than the callee text itself: every call already
+        /// pays for its site in the file's call-site arena, and a second
+        /// copy of the expression per named argument would be a heap
+        /// allocation per label for information the file already stores.
+        call_args_start: u32,
+    },
+
     /// A namespace name at its declaration site (`namespace App\Models;`).
     /// Used by the rename handler to support namespace renaming.
     NamespaceDeclaration {
@@ -509,6 +520,7 @@ impl SymbolKind {
             | Self::FunctionCall { .. }
             | Self::ConstantReference { .. }
             | Self::MemberDeclaration { .. }
+            | Self::NamedArgument { .. }
             | Self::NamespaceDeclaration { .. } => 0,
             Self::LaravelMacroString { name, .. } | Self::CommandOwnParam { name, .. } => {
                 name.capacity()

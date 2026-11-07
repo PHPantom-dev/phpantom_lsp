@@ -31,10 +31,12 @@ mod variable;
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::class_lookup::find_class_at_offset;
 use crate::references::MemberRefKind;
 use crate::resolution::FileLoaders;
 use crate::symbol_map::{SymbolKind, SymbolSpan};
+use crate::type_engine::call_resolution::NamedArgumentDeclaration;
 use crate::types::*;
 
 use formatting::*;
@@ -224,6 +226,44 @@ impl Backend {
         Some(hover)
     }
 
+    /// Hover for a named-argument label: the property it fills when the
+    /// parameter promotes one, and the parameter itself otherwise.
+    ///
+    /// A label is the only spelling of a parameter outside its declaration,
+    /// so it is worth the same hover the parameter would show.  This is what
+    /// makes `#[Foo(bar: 1)]` hover `bar` whether or not `Foo`'s constructor
+    /// promotes it, and what hovers a label at a built-in, whose declaration
+    /// has no text to navigate to.
+    fn hover_named_argument(&self, uri: &str, content: &str, symbol: &SymbolSpan) -> Option<Hover> {
+        let declaration = self.named_argument_declaration(uri, content, symbol)?;
+        if declaration.promotes_property
+            && let Some(hover) = self.hover_promoted_property(&declaration)
+        {
+            return Some(hover);
+        }
+        Some(make_hover(parameter_hover_body(declaration.parameter?)))
+    }
+
+    /// The hover of the property a promoted parameter declares, which is the
+    /// member a label naming that parameter is also a reference to.
+    fn hover_promoted_property(&self, declaration: &NamedArgumentDeclaration) -> Option<Hover> {
+        let owner = self.find_or_load_class(declaration.class.as_ref()?)?;
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
+        let bare = declaration
+            .parameter
+            .as_ref()
+            .map(|parameter| parameter.bare_name());
+        // The promoted property is declared at its parameter's own token; a
+        // property of the same name elsewhere is a different member.
+        let property = owner.properties.iter().find(|property| {
+            declaration
+                .name_token
+                .is_some_and(|token| property.name_offset == token.0)
+                || bare.is_some_and(|name| property.name == name)
+        })?;
+        Some(self.hover_for_property(property, &owner, &class_loader))
+    }
+
     /// Dispatch a symbol-map hit to the hover path for its kind.
     fn hover_from_symbol(
         &self,
@@ -279,6 +319,7 @@ impl Backend {
                 MemberRefKind::of_access(symbol)?,
                 *docblock_ref,
             ),
+            SymbolKind::NamedArgument { .. } => self.hover_named_argument(uri, content, symbol),
             SymbolKind::ClassReference {
                 name,
                 is_fqn,
@@ -408,6 +449,36 @@ fn identifier_token_at(content: &str, offset: usize) -> Option<(bool, String, u3
     let name = content[start..end].to_string();
     let token_start = if is_variable { start - 1 } else { start };
     Some((is_variable, name, token_start as u32))
+}
+
+/// A parameter as hover spells its declaration: the type it accepts, the
+/// `&` or `...` it was written with, its default, and its `@param` text.
+fn parameter_hover_body(parameter: ParameterInfo) -> String {
+    let mut line = String::from("```php\n<?php\n");
+    if let Some(ty) = parameter
+        .type_hint
+        .as_ref()
+        .or(parameter.native_type_hint.as_ref())
+    {
+        line.push_str(&ty.to_string());
+        line.push(' ');
+    }
+    if parameter.is_reference {
+        line.push('&');
+    }
+    if parameter.is_variadic {
+        line.push_str("...");
+    }
+    line.push_str(&parameter.name);
+    if let Some(default) = &parameter.default_value {
+        line.push_str(" = ");
+        line.push_str(default);
+    }
+    let block = format!("{line}\n```");
+    match &parameter.description {
+        Some(description) => format!("{block}\n\n{description}"),
+        None => block,
+    }
 }
 
 #[cfg(test)]

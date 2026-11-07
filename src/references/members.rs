@@ -18,7 +18,6 @@ use crate::references::eloquent::EloquentMagicMember;
 use crate::references::member_scope::MemberScope;
 use crate::references::push_location;
 use crate::references::receivers::ReceiverWalk;
-use crate::symbol_map::DocblockMemberRef;
 use crate::symbol_map::SymbolKind;
 use crate::symbol_map::SymbolMap;
 use crate::symbol_map::SymbolSpan;
@@ -88,8 +87,6 @@ impl MemberRefKind {
         };
         Some(if *is_method_call {
             Self::Method
-        } else if *docblock_ref == DocblockMemberRef::AttributeNamedArg {
-            Self::Property
         } else if docblock_ref.is_reference() {
             Self::Either
         } else if *is_static && (span.end - span.start) as usize == member_name.len() {
@@ -394,9 +391,14 @@ impl Backend {
         // Only a query that filters by hierarchy can rule a file out; the
         // name-only fallback accepts any receiver, so one such query in the
         // batch keeps every candidate.
-        let filtered: Option<Vec<(Atom, &MemberScope)>> = prepared
+        let filtered: Option<Vec<(Atom, &MemberScope, MemberRefKind)>> = prepared
             .iter()
-            .map(|query| query.hierarchy.as_ref().map(|h| (query.member, h)))
+            .map(|query| {
+                query
+                    .hierarchy
+                    .as_ref()
+                    .map(|h| (query.member, h, query.kind))
+            })
             .collect();
         if let Some(filtered) = filtered {
             snapshot.retain(|(uri, symbol_map)| {
@@ -404,7 +406,7 @@ impl Backend {
             });
         }
 
-        let scan_file =
+        let scan_accesses =
             |file: &CandidateFile<'_>, symbol_map: &Arc<SymbolMap>| -> Vec<(usize, Location)> {
                 let file_uri = file.uri();
                 let mut span_indices = Vec::new();
@@ -542,6 +544,27 @@ impl Backend {
                 matches
             };
 
+        // A promoted property is also written as a label at the call that
+        // fills its constructor parameter, a spelling no receiver walk of
+        // `scan_accesses` ever sees, so a file's labels are gathered beside
+        // the accesses it holds.
+        let scan_file = |file: &CandidateFile<'_>, symbol_map: &Arc<SymbolMap>| {
+            let mut matches = scan_accesses(file, symbol_map);
+            let label_queries = prepared
+                .iter()
+                .enumerate()
+                .filter_map(|(query_index, query)| {
+                    let worth_resolving = query.kind.admits(MemberRefKind::Property)
+                        && symbol_map
+                            .named_argument_indices(query.member.as_str())
+                            .iter()
+                            .any(|&index| symbol_map.label_constructs(index));
+                    worth_resolving.then_some((query_index, query.member, query.hierarchy.as_ref()))
+                });
+            matches.extend(self.label_matches_for_queries(file, symbol_map, label_queries));
+            matches
+        };
+
         let mut locations = vec![Vec::new(); queries.len()];
         for (query_index, location) in
             self.scan_candidate_snapshot(snapshot, "Scanning for member references", scan_file)
@@ -624,11 +647,23 @@ impl Backend {
                                 _ => false,
                             }
                         });
+                // A label that fills a promoted property is a reference to
+                // the member under a spelling no receiver walk speaks for, so
+                // one keeps the file worth reading.
+                let names_a_property_label = target_kind.admits(MemberRefKind::Property)
+                    && symbol_map
+                        .named_argument_indices(target_member)
+                        .iter()
+                        .any(|&index| symbol_map.label_constructs(index));
                 // A file whose accesses to the name all settle on a class
                 // outside the hierarchy is answered here rather than read.
-                let has_member_access_match = names_the_member
+                let has_member_access_match = (names_the_member || names_a_property_label)
                     && hierarchy.is_none_or(|hier| {
-                        !self.member_accesses_ruled_out(file_uri, symbol_map, &[(member, hier)])
+                        !self.member_accesses_ruled_out(
+                            file_uri,
+                            symbol_map,
+                            &[(member, hier, target_kind)],
+                        )
                     });
 
                 if has_member_access_match {
@@ -762,6 +797,13 @@ impl Backend {
             kind: target_kind,
         } = searched;
         let access_indices = symbol_map.member_access_indices(&member);
+
+        // A promoted property is also written as a label at the call that
+        // fills its constructor parameter, which no receiver resolution
+        // finds.
+        if target_kind.admits(MemberRefKind::Property) {
+            self.push_property_label_matches(file, symbol_map, &member, hierarchy, locations);
+        }
 
         let Some(hierarchy) = hierarchy else {
             for &span_index in access_indices {
