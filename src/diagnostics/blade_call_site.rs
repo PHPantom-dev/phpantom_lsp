@@ -36,11 +36,11 @@ use super::helpers::make_diagnostic;
 use super::type_errors::is_type_compatible;
 
 /// A declared variable the call site does not pass.
-const MISSING_CODE: &str = "missing_view_variable";
+const MISSING_CODE: &str = "missing_blade_variable";
 /// A passed variable the template has no use for.
-const UNUSED_CODE: &str = "unused_view_variable";
+const UNUSED_CODE: &str = "unused_blade_variable";
 /// A passed variable whose type the declaration does not accept.
-const TYPE_MISMATCH_CODE: &str = "type_mismatch_view_variable";
+const TYPE_MISMATCH_CODE: &str = "type_mismatch_blade_variable";
 
 impl Backend {
     /// Check every view render in `uri` against the contract the template

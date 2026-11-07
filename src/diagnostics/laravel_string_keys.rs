@@ -518,7 +518,7 @@ impl<'a> DeclaredKeys<'a> {
                 Some((
                     names_key_or_group(&self.trans_keys, key),
                     "translation key",
-                    "invalid_laravel_trans",
+                    "invalid_laravel_translation",
                 ))
             }
             CheckedStringKind::Command => self.commands_indexed.then(|| {
@@ -757,7 +757,7 @@ impl<'a> DeclaredKeys<'a> {
             .twig_templates
             .binary_search_by(|name| name.as_str().cmp(key))
             .is_ok();
-        Some((valid, "template", "invalid_symfony_template"))
+        Some((valid, "template", "invalid_twig_template"))
     }
 
     /// A service ID spelled as a class name is that class, which an
@@ -965,7 +965,7 @@ impl Backend {
                 out.push(helpers::make_diagnostic(
                     range,
                     DiagnosticSeverity::Warning,
-                    "invalid_command_parameter",
+                    "invalid_laravel_command_parameter",
                     format!("Unknown command {label} '{name}'"),
                 ));
             }

@@ -6758,27 +6758,35 @@ fn new_same_namespace_class_wins_over_global_stub() {
     );
 }
 
-/// The guard against regressing global resolution: when a namespace has no
-/// class of the given short name, `new Iterator()` must still resolve to the
-/// global SPL stub, so a member the stub does not declare is flagged.
+/// PHP never resolves an unqualified class name to a global class: with no
+/// `App\Other\Iterator`, `new Iterator()` names a class that does not exist,
+/// even though the global SPL `\Iterator` does.  The member access on it
+/// reports the missing class, not a missing member.
 #[test]
-fn new_falls_back_to_global_stub_when_no_same_namespace_class() {
+fn new_does_not_fall_back_to_a_global_class_of_the_same_short_name() {
     let composer_json = r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#;
 
-    // No project `App\Other\Iterator` exists, so the global stub is correct.
     let (backend, _dir) =
         create_psr4_workspace_with_stubs(composer_json, &[], &[("Iterator", ITERATOR_STUB)]);
 
     let uri = "file:///consumer.php";
     let text = "<?php\nnamespace App\\Other;\nclass Consumer {\n    public function run(): void {\n        $it = new Iterator();\n        $it->accept();\n    }\n}\n";
 
-    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
-    assert!(
-        diags
-            .iter()
-            .any(|d| message_text(&d.message).contains("accept")),
-        "`new Iterator()` with no same-namespace class must resolve to the \
-         global stub, which has no `accept()`, got: {diags:?}"
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    let on_accept: Vec<_> = diags
+        .iter()
+        .filter(|d| message_text(&d.message).contains("accept"))
+        .collect();
+    assert_eq!(on_accept.len(), 1, "got: {diags:?}");
+    assert_eq!(
+        on_accept[0].code,
+        Some(Code::String("unknown_class".to_string()))
+    );
+    assert_eq!(
+        message_text(&on_accept[0].message),
+        "Cannot check method accept(), because type App\\Other\\Iterator could not be resolved"
     );
 }
 

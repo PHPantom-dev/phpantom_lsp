@@ -29,7 +29,7 @@ use crate::php_type::PhpType;
 use super::helpers::make_diagnostic;
 
 /// A declaration the layout above it does not accept.
-const COVARIANCE_CODE: &str = "blade_signature_widens_layout";
+const COVARIANCE_CODE: &str = "incompatible_blade_signature";
 /// A second `@bladestan-signature` block in one template.
 const DUPLICATE_CODE: &str = "duplicate_blade_signature";
 

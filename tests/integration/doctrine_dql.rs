@@ -625,7 +625,7 @@ async fn syntax_errors(body: &str) -> Vec<(String, String)> {
     backend.collect_slow_diagnostics(uri.as_str(), &content, &mut out);
     let lines: Vec<&str> = content.lines().collect();
     out.iter()
-        .filter(|d| d.code == Some(Code::String("dql_syntax_error".into())))
+        .filter(|d| d.code == Some(Code::String("invalid_dql_syntax".into())))
         .map(|d| {
             let line = lines[d.range.start.line as usize];
             let covered = if d.range.start.line == d.range.end.line {
@@ -766,7 +766,7 @@ async fn undeclared_in(
     backend.collect_slow_diagnostics(uri.as_str(), &content, &mut out);
     let lines: Vec<&str> = content.lines().collect();
     out.iter()
-        .filter(|d| d.code == Some(Code::String("unknown_dql_variable".into())))
+        .filter(|d| d.code == Some(Code::String("invalid_dql_alias".into())))
         .map(|d| {
             let line = lines[d.range.start.line as usize];
             let covered = &line[d.range.start.character as usize..d.range.end.character as usize];

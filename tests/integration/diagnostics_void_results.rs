@@ -14,7 +14,7 @@ fn collect(php: &str) -> Vec<Diagnostic> {
     out.retain(|d| {
         d.code
             .as_ref()
-            .is_some_and(|c| matches!(c, Code::String(s) if s == "void_result_used"))
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "used_void_result"))
     });
     out
 }

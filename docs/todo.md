@@ -35,7 +35,6 @@ contributor even though it's short.
 | X20 | [Warn about unknown configuration keys](todo/indexing.md#x20-warn-about-unknown-configuration-keys) | Medium      | Low         |
 | X21 | [Keep `config-schema.json` in step with the config structs](todo/indexing.md#x21-keep-config-schemajson-in-step-with-the-config-structs) (builds on X20) | Low-Medium  | Low         |
 | X19 | [Make the configuration format consistent before 1.0](todo/indexing.md#x19-make-the-configuration-format-consistent-before-10) (builds on X20) | Medium      | Low-Medium  |
-| D51 | [Settle the diagnostic identifiers before 1.0](todo/diagnostics.md#d51-settle-the-diagnostic-identifiers-before-10) | Medium      | Low-Medium  |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -215,11 +214,12 @@ ships, remove every row that names it.
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
-| D19 | [`invalid_member_access` cannot tell a property read from a write](todo/diagnostics.md#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
+| D19 | [`inaccessible_member` cannot tell a property read from a write](todo/diagnostics.md#d19-inaccessible_member-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
 | D20 | [`Foo::$bar` and `Foo::bar` are the same span](todo/diagnostics.md#d20-foobar-and-foobar-are-the-same-span)                                                                  | Low         | Medium      |
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |
 | D50 | [`unused-parameters` skips methods a subclass can override](todo/diagnostics.md#d50-unused-parameters-skips-methods-a-subclass-can-override) | Low         | Medium-High |
+| D52 | [`incompatible_override` only checks a `static` return type](todo/diagnostics.md#d52-incompatible_override-only-checks-a-static-return-type) | Medium      | Medium-High |
 
 ## Code Generation & Refactoring
 

@@ -104,7 +104,7 @@ pub(crate) const UNKNOWN_MEMBER_CODE: &str = "unknown_member";
 
 /// Diagnostic code for a field a Doctrine repository call names that the
 /// entity does not map.
-pub(crate) const UNKNOWN_ENTITY_FIELD_CODE: &str = "unknown_entity_field";
+pub(crate) const UNKNOWN_ENTITY_FIELD_CODE: &str = "invalid_doctrine_field";
 
 /// Diagnostic code for a member that some classes of a union declare and
 /// others do not.  Opt-in through `partial-union-members`.
@@ -342,10 +342,12 @@ impl UnknownMemberPass<'_> {
                 if type_str == "SoapClient" || type_str == "\\SoapClient" {
                     return MemberCheckResult::Ok;
                 }
+                // The class the subject's type names cannot be found, so
+                // what is missing is the class, not the member.
                 self.push_chain_break(
                     access,
                     DiagnosticSeverity::Warning,
-                    UNKNOWN_MEMBER_CODE,
+                    super::unknown_classes::UNKNOWN_CLASS_CODE,
                     format!(
                         "Cannot check {} {}, because type {} could not be resolved",
                         access.kind_label(),

@@ -3,7 +3,7 @@
 // Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testDynamicWhere.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/query-builder-dynamic.php
-// codes: unknown_class, unknown_entity_field
+// codes: unknown_class, invalid_doctrine_field
 // expect_diagnostic: 40: Could not analyse QueryBuilder with dynamic arguments. // SKIP: a query builder with dynamic arguments is not reported
 // expect_diagnostic: 45: Could not analyse QueryBuilder with dynamic arguments. // SKIP: a query builder with dynamic arguments is not reported
 // expect_diagnostic: 51: Could not analyse QueryBuilder with dynamic arguments. // SKIP: a query builder with dynamic arguments is not reported

@@ -16,7 +16,7 @@ use crate::symfony::validation::{ConstraintOptions, constraint_option_keys};
 use super::helpers::make_diagnostic;
 
 /// Diagnostic code used for an option a constraint does not take.
-pub(crate) const UNKNOWN_CONSTRAINT_OPTION_CODE: &str = "unknown_constraint_option";
+pub(crate) const UNKNOWN_CONSTRAINT_OPTION_CODE: &str = "invalid_symfony_constraint_option";
 
 impl Backend {
     /// Report each option key of a constraint in the validation mapping at

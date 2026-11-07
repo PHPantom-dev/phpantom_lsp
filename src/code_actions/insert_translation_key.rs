@@ -25,7 +25,7 @@ impl Backend {
             .diagnostics
             .iter()
             .filter(|diagnostic| {
-                matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_trans")
+                matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_translation")
             })
             .map(|diagnostic| {
                 (

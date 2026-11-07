@@ -1503,8 +1503,10 @@ pub fn blade_undefined_variables(backend: &Backend, uri: &Uri) -> Vec<String> {
         .collect()
 }
 
-/// Parse `text` as `uri` and return the `unknown_member` diagnostics the
-/// slow pass reports, with its per-file scope cache live.
+/// Parse `text` as `uri` and return the diagnostics the slow pass reports
+/// on member accesses, with its per-file scope cache live: the
+/// `unknown_member` ones, and the `unknown_class` ones for a member whose
+/// subject names a class that cannot be found.
 pub fn unknown_member_diagnostics_with_scope_cache(
     backend: &Backend,
     uri: &str,
@@ -1513,10 +1515,12 @@ pub fn unknown_member_diagnostics_with_scope_cache(
     backend.update_ast(uri, text);
     let mut out = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut out);
-    out.retain(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
+    out.retain(|d| match &d.code {
+        Some(Code::String(s)) if s == "unknown_member" => true,
+        Some(Code::String(s)) if s == "unknown_class" => {
+            message_text(&d.message).starts_with("Cannot check ")
+        }
+        _ => false,
     });
     out
 }

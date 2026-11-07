@@ -179,7 +179,7 @@ fn unknown_options(
     backend.collect_slow_diagnostics(uri_for(dir, rel).as_str(), content, &mut diagnostics);
     diagnostics
         .into_iter()
-        .filter(|d| d.code == Some(Code::String("unknown_form_option".to_string())))
+        .filter(|d| d.code == Some(Code::String("invalid_symfony_form_option".to_string())))
         .map(|d| crate::common::message_text(&d.message).to_string())
         .collect()
 }

@@ -3,7 +3,7 @@
 // Ported from PHPStan's Doctrine extension, RepositoryMethodCallRuleTest::testRule.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/repository-findBy-etc.php
-// codes: unknown_entity_field, unknown_member
+// codes: invalid_doctrine_field, unknown_member
 // expect_diagnostic: 23: Field 'transient' is not mapped on entity PHPStan\Rules\Doctrine\ORM\MyEntity
 // expect_diagnostic: 24: Field 'nonexistent' is not mapped on entity PHPStan\Rules\Doctrine\ORM\MyEntity
 // expect_diagnostic: 25: Field 'nonexistent' is not mapped on entity PHPStan\Rules\Doctrine\ORM\MyEntity

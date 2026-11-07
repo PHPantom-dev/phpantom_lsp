@@ -76,7 +76,7 @@ use crate::inheritance::ancestors;
 use crate::types::{ClassInfo, ClassLikeKind, Visibility};
 
 /// Diagnostic code for an access to a member the calling scope may not see.
-pub(crate) const INVALID_MEMBER_ACCESS_CODE: &str = "invalid_member_access";
+pub(crate) const INVALID_MEMBER_ACCESS_CODE: &str = "inaccessible_member";
 
 /// What one branch of a union type says about the access.
 enum BranchVerdict {

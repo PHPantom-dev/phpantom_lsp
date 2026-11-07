@@ -17,7 +17,7 @@ fn retain_visibility(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
     diagnostics.retain(|d| {
         d.code
             .as_ref()
-            .is_some_and(|c| matches!(c, Code::String(s) if s == "invalid_member_access"))
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "inaccessible_member"))
     });
     diagnostics
 }
@@ -208,7 +208,7 @@ class Child extends Base {
 "#;
     let codes = all_codes(php);
     assert!(
-        codes.contains(&"invalid_member_access".to_string()),
+        codes.contains(&"inaccessible_member".to_string()),
         "expected an access violation, got {codes:?}"
     );
     assert!(
@@ -1083,6 +1083,6 @@ echo $account->pin;
     assert_eq!(diags[0].source.as_deref(), Some("phpantom"));
     assert!(matches!(
         diags[0].code,
-        Some(Code::String(ref s)) if s == "invalid_member_access"
+        Some(Code::String(ref s)) if s == "inaccessible_member"
     ));
 }

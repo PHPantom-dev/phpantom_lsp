@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Command line
 
 - **Filter `analyze` by diagnostic code.** `--code unused_import` reports only that code and `--exclude-code unused_import` leaves it out. Both are repeatable and work with `--severity` and every output format. Contributed by @stubbedev.
-- **`fix` replaces deprecated calls.** The new `deprecated` rule rewrites every call to a function or method whose `#[Deprecated(replacement: "...")]` names a replacement, across the whole project. An import the rewrite leaves unused is removed in the same run.
+- **`fix` replaces deprecated calls.** The new `deprecated_usage` rule rewrites every call to a function or method whose `#[Deprecated(replacement: "...")]` names a replacement, across the whole project. An import the rewrite leaves unused is removed in the same run.
 
 #### Editing and navigation
 
@@ -168,6 +168,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pull diagnostics are advertised to every client.** Editors and tools that check the server's capabilities now see pull diagnostic support even when they don't declare it themselves, and a pull returns the diagnostics last published. Editors without pull support still receive pushed diagnostics as before.
 - **laravel-ide-helper files come back through `include`.** To index `_ide_helper.php` or `_ide_helper_models.php`, list them under `[indexing] include`. A leading `!` in `[indexing] exclude` no longer does it, since `!` now only undoes your own exclude patterns.
 - **Diagnostic messages read the same way across every check.** Names are written the way PHP spells them, without quotes (`Class App\Models\User not found`, `Unused variable $total`), members carry their class (`Method App\Models\User::save() not found`), string values stay quoted, and type mismatches read `expects X, got Y`. An `[[diagnostics.ignore]]` rule that matches on `message` may need updating; one that matches on `identifier` keeps working.
+- **Diagnostic identifiers follow one naming scheme.** Ahead of 1.0, these were renamed: `invalid_member_access` is now `inaccessible_member`, `invalid_laravel_trans` is `invalid_laravel_translation`, `invalid_command_parameter` is `invalid_laravel_command_parameter`, `missing_view_variable`, `unused_view_variable` and `type_mismatch_view_variable` are `missing_blade_variable`, `unused_blade_variable` and `type_mismatch_blade_variable`, and `blade_signature_widens_layout` is `incompatible_blade_signature`. The old names keep working in `[[diagnostics.ignore]]`, `@phpantom-ignore` and `analyze --code`, and the config and command line warn when they meet one. The [Diagnostics Reference](diagnostics.md) lists every identifier.
+- **A member used on a class that cannot be found is reported as `unknown_class`.** "Cannot check method save(), because type App\Models\User could not be resolved" used to carry `unknown_member`. It now carries `unknown_class`, so ignoring missing classes covers it too, and `unknown_member` is left for members a class really lacks.
 - **Updated embedded phpstorm-stubs.** Adds the `ps`, `proctitle`, and `yaz` extensions, updates Judy and Relay, and corrects many parameter and return types to match the PHP documentation, including `oci_fetch_object()`, `pg_loopen()`, and nullable RdKafka message payloads.
 
 #### Performance and memory

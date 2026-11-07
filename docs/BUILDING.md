@@ -149,8 +149,8 @@ demonstrates `invalid_laravel_command`,
 `->withoutMiddleware('bakery.closed')` demonstrates
 `invalid_laravel_middleware`, and one `view('welcome', …)`
 call both leaves out a variable the template declares and passes a
-misspelled key, demonstrating `missing_view_variable` and
-`unused_view_variable`. So it must report exactly
+misspelled key, demonstrating `missing_blade_variable` and
+`unused_blade_variable`. So it must report exactly
 `[ERROR] Found 4 errors`, on those three lines. Any other count, or an
 error on a different line, is a regression.
 

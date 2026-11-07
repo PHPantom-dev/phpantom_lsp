@@ -3,7 +3,7 @@
 // Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testRule.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/query-builder-dql.php
-// codes: unknown_class, unknown_entity_field, dql_syntax_error
+// codes: unknown_class, invalid_doctrine_field, invalid_dql_syntax
 // PHPantom reports a name on the line its string spells it, where upstream reports the line the call starts on.
 // expect_diagnostic: 34: DQL expects end of string, got ')'
 // expect_diagnostic: 43: DQL expects end of string, got ')'

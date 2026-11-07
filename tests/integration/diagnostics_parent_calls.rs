@@ -38,7 +38,7 @@ fn collect(tests: &str) -> Vec<String> {
     .map(|d| {
         assert_eq!(
             d.code,
-            Some(Code::String("missing_parent_call".to_string()))
+            Some(Code::String("missing_phpunit_parent_call".to_string()))
         );
         assert_eq!(d.severity, Some(DiagnosticSeverity::Warning));
         message_text(&d.message).to_string()

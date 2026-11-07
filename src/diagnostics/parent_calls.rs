@@ -21,7 +21,7 @@ use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, MAX_TRAIT_DE
 
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
-pub(crate) const MISSING_PARENT_CALL_CODE: &str = "missing_parent_call";
+pub(crate) const MISSING_PARENT_CALL_CODE: &str = "missing_phpunit_parent_call";
 
 const PHPUNIT_TEST_CASE: &str = "PHPUnit\\Framework\\TestCase";
 

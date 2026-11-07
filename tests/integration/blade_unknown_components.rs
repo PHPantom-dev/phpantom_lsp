@@ -115,7 +115,7 @@ async fn a_misspelt_blade_component_is_reported_on_its_name() {
     assert_eq!(
         unknown_components(&backend, &uri),
         vec![(
-            "unknown_blade_component".to_string(),
+            "invalid_blade_component".to_string(),
             "Unknown Blade component 'buttons.bakc'".to_string(),
             1,
             3
@@ -134,7 +134,7 @@ async fn a_misspelt_livewire_component_is_reported() {
     assert_eq!(
         unknown_components(&backend, &uri),
         vec![(
-            "unknown_livewire_component".to_string(),
+            "invalid_livewire_component".to_string(),
             "Unknown Livewire component 'orders.overveiw'".to_string(),
             1,
             10

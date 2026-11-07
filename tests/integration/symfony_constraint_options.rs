@@ -109,7 +109,12 @@ fn unknown_options(
     let lines: Vec<&str> = content.lines().collect();
     diagnostics
         .into_iter()
-        .filter(|d| d.code == Some(Code::String("unknown_constraint_option".to_string())))
+        .filter(|d| {
+            d.code
+                == Some(Code::String(
+                    "invalid_symfony_constraint_option".to_string(),
+                ))
+        })
         .map(|d| {
             let line = lines[d.range.start.line as usize];
             let covered =

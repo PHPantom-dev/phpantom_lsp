@@ -266,7 +266,7 @@ cleaned up in seconds rather than file by file.
 ```sh
 phpantom_lsp fix                                  # apply all preferred fixers
 phpantom_lsp fix --rule unused_import             # only remove unused imports
-phpantom_lsp fix --rule unused_import --rule deprecated  # multiple rules
+phpantom_lsp fix --rule unused_import --rule deprecated_usage  # multiple rules
 phpantom_lsp fix --dry-run                        # preview without writing
 phpantom_lsp fix src/                             # restrict to a subdirectory
 phpantom_lsp fix src/Foo.php                      # fix a single file
@@ -296,7 +296,7 @@ phpantom_lsp fix --project-root /path/to/app      # explicit project root
 
 | Rule            | Description                                                                                                       |
 | --------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `deprecated`    | Rewrite calls to deprecated functions and methods whose `#[Deprecated(replacement: "...")]` names a replacement |
+| `deprecated_usage` | Rewrite calls to deprecated functions and methods whose `#[Deprecated(replacement: "...")]` names a replacement |
 | `unused_import` | Remove unused `use` statements                                                                                    |
 
 Rules run in that order, so an import that a rewritten call leaves

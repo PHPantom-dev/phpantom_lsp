@@ -31,9 +31,9 @@ const UNEXPECTED_CODE: &str = "unexpected_blade_component_tag";
 /// A tag the template never closes.
 const UNCLOSED_CODE: &str = "unclosed_blade_component_tag";
 /// An `<x-…>` tag no class or template answers to.
-pub(crate) const UNKNOWN_BLADE_CODE: &str = "unknown_blade_component";
+pub(crate) const UNKNOWN_BLADE_CODE: &str = "invalid_blade_component";
 /// A `<livewire:…>` tag no component answers to.
-pub(crate) const UNKNOWN_LIVEWIRE_CODE: &str = "unknown_livewire_component";
+pub(crate) const UNKNOWN_LIVEWIRE_CODE: &str = "invalid_livewire_component";
 
 /// The code and message reported for a `kind` tag named `name` that names
 /// nothing.

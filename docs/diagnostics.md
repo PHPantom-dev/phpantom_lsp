@@ -15,18 +15,24 @@ them on in [`[diagnostics]`](configuration.md#diagnostics); their rows
 name the key. Framework checks run only in a project PHPantom detects as
 using that framework, and need no setting.
 
+An identifier starts with the kind of problem (`unknown_`, `invalid_`,
+`missing_`, `unused_`, `type_mismatch_`, and so on). One that belongs to
+a framework or template language names it next, as in
+`invalid_laravel_route` or `unclosed_blade_directive`. A name a framework
+expects to be declared somewhere, but is not, is always `invalid_`.
+
 ## PHP code
 
 | Identifier | Severity | Reports |
 | --- | --- | --- |
 | `syntax_error` | Error | Code that does not parse. |
-| `unknown_class` | Warning | A class, interface, trait, or enum that cannot be found. |
+| `unknown_class` | Warning | A class, interface, trait, or enum that cannot be found, including one named by the type of a value whose member is used. |
 | `unknown_function` | Error | A function call that cannot be resolved. |
 | `unknown_member` | Warning | A method, property, or constant the resolved class does not have. `report-magic-properties` widens it to classes with `__get`. |
 | `partial_union_member` | Warning | A member only some classes of a union declare. Off unless `partial-union-members` is on. |
 | `unresolved_member_access` | Hint | `->`, `?->`, or `::` on a value whose type is `mixed` or could not be worked out. Off unless `unresolved-member-access` is on. |
 | `scalar_member_access` | Error | `->` or `::` on a scalar, `null`, or an array. |
-| `invalid_member_access` | Error | A `private` or `protected` member reached from where it is not visible. |
+| `inaccessible_member` | Error | A `private` or `protected` member reached from where it is not visible. |
 | `invalid_member_name` | Error | A dynamic member name (`$object->{$name}`) whose value has the wrong type. |
 | `unknown_variable` | Error | A variable read before anything defines it. |
 | `unknown_offset` | Warning | A destructuring offset the array's type rules out. |
@@ -37,9 +43,10 @@ using that framework, and need no setting.
 | `type_mismatch_property` | Error | A value assigned to a property whose type does not accept it. |
 | `invalid_string_conversion` | Error or Warning | An object without `__toString()` used as a string. Warning when it only might be one. |
 | `invalid_readonly_write` | Error | A write to a `readonly` property from outside its class, or a second write. |
-| `uninitialized_property` | Warning | A typed property with no default that nothing writes, or one read on a new object before anything writes it. |
+| `uninitialized_property` | Warning | A typed property with no default that nothing writes. |
+| `uninitialized_property_read` | Warning | A typed property read on a new object before anything writes it. |
 | `missing_return` | Error | A function that can end without returning the value it promises. |
-| `void_result_used` | Warning | The result of a `void` call used as a value. |
+| `used_void_result` | Warning | The result of a `void` call used as a value. |
 | `discarded_return_value` | Warning | A `#[\NoDiscard]` call whose result is thrown away. |
 | `unhandled_match` | Error | A `match` without `default` that leaves some values of its subject unhandled. |
 | `unreachable_match_arm` | Warning | A `match` arm that can never be identical to the subject. |
@@ -84,11 +91,11 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 
 | Identifier | Severity | Reports |
 | --- | --- | --- |
-| `invalid_data_provider` | Error or Warning | A data provider that is not `public`, or not `static` where the PHPUnit version requires it. |
-| `missing_parent_call` | Warning | A `setUp()` or `tearDown()` override that skips a parent that does work. |
-| `unknown_entity_field` | Warning | A field in a repository call that the entity does not map. |
-| `dql_syntax_error` | Error | A DQL string that does not parse. |
-| `unknown_dql_variable` | Error | A DQL alias nothing in the query declares. |
+| `invalid_phpunit_data_provider` | Error or Warning | A data provider that is not `public`, or not `static` where the PHPUnit version requires it. |
+| `missing_phpunit_parent_call` | Warning | A `setUp()` or `tearDown()` override that skips a parent that does work. |
+| `invalid_doctrine_field` | Warning | A field in a repository call that the entity does not map. |
+| `invalid_dql_syntax` | Error | A DQL string that does not parse. |
+| `invalid_dql_alias` | Error | A DQL alias nothing in the query declares. |
 
 ## Laravel and Blade
 
@@ -97,11 +104,11 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_laravel_route` | Warning | A route name no route declares. |
 | `invalid_laravel_view` | Warning | A view name with no template. |
 | `invalid_laravel_config` | Warning | A `config()` key no config file declares. |
-| `invalid_laravel_trans` | Warning | A translation key no language file declares. |
+| `invalid_laravel_translation` | Warning | A translation key no language file declares. |
 | `invalid_laravel_middleware` | Warning | A middleware alias or group that is not registered. |
 | `invalid_laravel_ability` | Warning | A gate or policy ability that is not defined, or not for the given model. |
 | `invalid_laravel_command` | Warning | An Artisan command name that is not registered. |
-| `invalid_command_parameter` | Warning | An `argument()` or `option()` name the command's signature does not declare. |
+| `invalid_laravel_command_parameter` | Warning | An `argument()` or `option()` name the command's signature does not declare. |
 | `invalid_laravel_morph_alias` | Warning | A morph type alias not in the enforced morph map. |
 | `invalid_laravel_asset` | Warning | An `asset()` path that does not exist. |
 | `invalid_laravel_mix_asset` | Warning | A `mix()` asset not in the Mix manifest. |
@@ -115,13 +122,13 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_laravel_mailer` | Warning | A mailer not in the config. |
 | `invalid_laravel_queue_connection` | Warning | A queue connection not in the config. |
 | `invalid_laravel_storage_disk` | Warning | A storage disk not in the config. |
-| `invalid_validation_rule` | Warning | A validation rule name Laravel does not have. |
-| `invalid_validation_message` | Warning | A form request `messages()` or `attributes()` key naming an unknown field or rule. |
-| `missing_view_variable` | Error | A variable a Blade template declares that the call site does not pass. |
-| `unused_view_variable` | Warning | A variable passed to a view that the template does not use. |
-| `type_mismatch_view_variable` | Error | A variable passed to a view whose type the template's declaration does not accept. |
-| `unknown_blade_component` | Warning | An `<x-…>` tag with no component class or template. |
-| `unknown_livewire_component` | Warning | A `<livewire:…>` tag with no component. |
+| `invalid_laravel_validation_rule` | Warning | A validation rule name Laravel does not have. |
+| `invalid_laravel_validation_message` | Warning | A form request `messages()` or `attributes()` key naming an unknown field or rule. |
+| `missing_blade_variable` | Error | A variable a Blade template declares that the call site does not pass. |
+| `unused_blade_variable` | Warning | A variable passed to a view that the template does not use. |
+| `type_mismatch_blade_variable` | Error | A variable passed to a view whose type the template's declaration does not accept. |
+| `invalid_blade_component` | Warning | An `<x-…>` tag with no component class or template. |
+| `invalid_livewire_component` | Warning | A `<livewire:…>` tag with no component. |
 | `unclosed_blade_component_tag` | Error | An `<x-…>` tag that is never closed. |
 | `unexpected_blade_component_tag` | Error | A closing component tag with nothing open. |
 | `mismatched_blade_component_tag` | Error | A closing component tag that closes a different tag. |
@@ -131,7 +138,7 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `unrendered_blade_section` | Warning | A `@section` no layout yields. |
 | `unrendered_blade_stack` | Warning | A `@push` to a stack no layout renders. |
 | `duplicate_blade_signature` | Error | A second `@bladestan-signature` block in one template. |
-| `blade_signature_widens_layout` | Error | A `@bladestan-signature` the parent layout does not accept. |
+| `incompatible_blade_signature` | Error | A `@bladestan-signature` the parent layout does not accept. |
 
 ## Symfony and Twig
 
@@ -142,11 +149,11 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_symfony_parameter` | Warning | A container parameter that is not declared. |
 | `invalid_symfony_translation` | Warning | A translation key missing from its domain. |
 | `invalid_symfony_messenger_bus` | Warning | A Messenger bus that is not configured. |
-| `invalid_symfony_template` | Warning | A Twig template name with no template. |
+| `invalid_twig_template` | Warning | A Twig template name with no template. |
 | `invalid_twig_filter` | Warning | A Twig filter that is not declared. |
 | `invalid_twig_function` | Warning | A Twig function that is not declared. |
-| `unknown_form_option` | Error | An option the form type does not accept. |
-| `unknown_constraint_option` | Error | An option the validation constraint does not take. |
+| `invalid_symfony_form_option` | Error | An option the form type does not accept. |
+| `invalid_symfony_constraint_option` | Error | An option the validation constraint does not take. |
 
 ## Yii
 
@@ -175,3 +182,20 @@ keep the tool's own identifier: PHPStan's error identifier (such as
 `UnusedLocalVariable`), and the Mago issue code (such as
 `invalid-return-statement`). Both `[[diagnostics.ignore]]` and
 `@phpantom-ignore` match them the same way.
+
+## Renamed identifiers
+
+These identifiers were renamed. The old spelling still works in
+`[[diagnostics.ignore]]`, `@phpantom-ignore`, and `analyze --code` and
+`--exclude-code`; the config and the command line warn when they meet
+one.
+
+| Old | New |
+| --- | --- |
+| `invalid_member_access` | `inaccessible_member` |
+| `invalid_laravel_trans` | `invalid_laravel_translation` |
+| `invalid_command_parameter` | `invalid_laravel_command_parameter` |
+| `missing_view_variable` | `missing_blade_variable` |
+| `unused_view_variable` | `unused_blade_variable` |
+| `type_mismatch_view_variable` | `type_mismatch_blade_variable` |
+| `blade_signature_widens_layout` | `incompatible_blade_signature` |

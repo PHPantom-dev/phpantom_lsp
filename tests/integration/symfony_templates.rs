@@ -331,7 +331,7 @@ async fn only_missing_project_templates_are_reported() {
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(Code::String(code)) if code == "invalid_symfony_template"
+                Some(Code::String(code)) if code == "invalid_twig_template"
             )
         })
         .map(|diagnostic| message_text(&diagnostic.message).to_string())
@@ -342,7 +342,7 @@ async fn only_missing_project_templates_are_reported() {
     );
 }
 
-/// The `invalid_symfony_template` messages a slow-diagnostics pass reports
+/// The `invalid_twig_template` messages a slow-diagnostics pass reports
 /// for the PHP `content`.
 fn php_template_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<String> {
     let mut diagnostics = Vec::new();
@@ -352,7 +352,7 @@ fn php_template_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<Str
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(Code::String(code)) if code == "invalid_symfony_template"
+                Some(Code::String(code)) if code == "invalid_twig_template"
             )
         })
         .map(|diagnostic| message_text(&diagnostic.message).to_string())
@@ -506,7 +506,7 @@ const BROKEN_TWIG: &str = "{% extends 'base.html.twig' %}
 {% endblock %}
 ";
 
-/// The `invalid_symfony_template` messages reported in the template at
+/// The `invalid_twig_template` messages reported in the template at
 /// `uri`, with the line each is on.
 fn template_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<(String, u32)> {
     let mut diagnostics = Vec::new();
@@ -516,7 +516,7 @@ fn template_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<(String
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(Code::String(code)) if code == "invalid_symfony_template"
+                Some(Code::String(code)) if code == "invalid_twig_template"
             )
         })
         .map(|diagnostic| {

@@ -37,10 +37,10 @@ use crate::symbol_map::{DqlProvider, DqlRun, DqlSyntaxSite, SymbolMap};
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 /// Diagnostic code used for DQL that does not parse.
-pub(crate) const DQL_SYNTAX_ERROR_CODE: &str = "dql_syntax_error";
+pub(crate) const DQL_SYNTAX_ERROR_CODE: &str = "invalid_dql_syntax";
 
 /// Diagnostic code used for a DQL variable nothing declares.
-pub(crate) const UNKNOWN_DQL_VARIABLE_CODE: &str = "unknown_dql_variable";
+pub(crate) const UNKNOWN_DQL_VARIABLE_CODE: &str = "invalid_dql_alias";
 
 /// The class a `getQuery()` call is made on for the variables of the
 /// builder it runs to be judged.

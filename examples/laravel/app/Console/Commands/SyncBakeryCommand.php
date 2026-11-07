@@ -42,7 +42,7 @@ class SyncBakeryCommand extends Command
         $since = $this->option('since');
 
         // Referencing a name that is NOT in the signature above is flagged
-        // as `invalid_command_parameter` (uncomment to see the diagnostic):
+        // as `invalid_laravel_command_parameter` (uncomment to see the diagnostic):
         // $this->argument('kitchen');
 
         // `$this->call('...')` inside a command runs another Artisan command,

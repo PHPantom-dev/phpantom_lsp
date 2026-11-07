@@ -93,8 +93,18 @@ pub struct CodeFilter {
 impl CodeFilter {
     /// Keep the codes in `only` (every code when it is empty), minus the
     /// codes in `excluded`.
+    /// An old spelling of a renamed code is read as its current one.
     pub fn new(only: Vec<String>, excluded: Vec<String>) -> Self {
-        Self { only, excluded }
+        let current = |codes: Vec<String>, flag: &str| {
+            codes
+                .iter()
+                .map(|code| crate::diagnostics::identifiers::current_identifier_or_warn(code, flag))
+                .collect()
+        };
+        Self {
+            only: current(only, "--code"),
+            excluded: current(excluded, "--exclude-code"),
+        }
     }
 
     /// Whether a diagnostic with `code` is kept. A diagnostic without a code
@@ -197,9 +207,9 @@ mod tests {
 
     #[test]
     fn only_keeps_the_named_codes() {
-        let filter = filter(&["unused_import", "deprecated"], &[]);
+        let filter = filter(&["unused_import", "deprecated_usage"], &[]);
         assert!(filter.passes(Some("unused_import")));
-        assert!(filter.passes(Some("deprecated")));
+        assert!(filter.passes(Some("deprecated_usage")));
         assert!(!filter.passes(Some("unknown_class")));
     }
 
@@ -224,9 +234,23 @@ mod tests {
 
     #[test]
     fn unmatched_names_the_requested_codes_nothing_reported() {
-        let filter = filter(&["unused_import", "unused_imprt", "deprecated"], &["x"]);
-        let reported = ["deprecated", "unused_import", "deprecated"];
+        let filter = filter(
+            &["unused_import", "unused_imprt", "deprecated_usage"],
+            &["x"],
+        );
+        let reported = ["deprecated_usage", "unused_import", "deprecated_usage"];
         assert_eq!(filter.unmatched(reported.into_iter()), vec!["unused_imprt"]);
+    }
+
+    #[test]
+    fn an_old_spelling_matches_the_renamed_code() {
+        let only = filter(&["invalid_laravel_trans"], &[]);
+        assert!(only.passes(Some("invalid_laravel_translation")));
+        assert!(
+            only.unmatched(["invalid_laravel_translation"].into_iter())
+                .is_empty()
+        );
+        assert!(!filter(&[], &["invalid_member_access"]).passes(Some("inaccessible_member")));
     }
 
     #[test]

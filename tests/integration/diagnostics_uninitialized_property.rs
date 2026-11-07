@@ -7,13 +7,16 @@ use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/// The declaration check's and the read check's messages, which tell the
+/// two apart.
 fn collect_on(backend: &Backend, php: &str) -> Vec<String> {
     collect_diagnostics_with(backend, php, Backend::collect_slow_diagnostics)
         .into_iter()
         .filter(|d| {
-            d.code
-                .as_ref()
-                .is_some_and(|c| matches!(c, Code::String(s) if s == "uninitialized_property"))
+            d.code.as_ref().is_some_and(|c| {
+                matches!(c, Code::String(s)
+                    if s == "uninitialized_property" || s == "uninitialized_property_read")
+            })
         })
         .map(|d| {
             assert_eq!(d.severity, Some(DiagnosticSeverity::Warning));
@@ -462,7 +465,7 @@ fn the_read_diagnostic_covers_the_property_access() {
     );
     let diag = diags
         .iter()
-        .find(|d| matches!(&d.code, Some(Code::String(s)) if s == "uninitialized_property"))
+        .find(|d| matches!(&d.code, Some(Code::String(s)) if s == "uninitialized_property_read"))
         .expect("diagnostic");
     assert_eq!(diag.range.start, Position::new(12, 5));
     assert_eq!(diag.range.end, Position::new(12, 19));

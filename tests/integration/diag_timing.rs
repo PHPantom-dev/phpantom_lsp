@@ -132,9 +132,9 @@ class Consumer {
     let unknown_member: Vec<_> = out
         .iter()
         .filter(|d| {
-            d.code
-                .as_ref()
-                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class"),
+            )
         })
         .collect();
 
@@ -194,9 +194,9 @@ class Worker {
     let unknown_member: Vec<_> = out
         .iter()
         .filter(|d| {
-            d.code
-                .as_ref()
-                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class"),
+            )
         })
         .collect();
 
@@ -255,9 +255,9 @@ class TimePeriod {
     let unknown: Vec<_> = out
         .iter()
         .filter(|d| {
-            d.code
-                .as_ref()
-                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class"),
+            )
         })
         .collect();
 
@@ -309,9 +309,9 @@ class Vet {
     let unknown_member: Vec<_> = out
         .iter()
         .filter(|d| {
-            d.code
-                .as_ref()
-                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class"),
+            )
         })
         .collect();
 
@@ -376,7 +376,7 @@ final class DecimalCast implements CastsAttributes {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -498,7 +498,7 @@ function test(Animal $pet): string {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -545,7 +545,7 @@ function test(UserContract $user, ?int $dept_id): int {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -592,7 +592,7 @@ function describe(Dog|Cat $pet): string {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -636,7 +636,7 @@ function describe(Base $item): string {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -2220,7 +2220,7 @@ class Controller {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -2275,7 +2275,7 @@ class Walker {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class" || s == "unresolved_member_access")
             })
         })
         .collect();
