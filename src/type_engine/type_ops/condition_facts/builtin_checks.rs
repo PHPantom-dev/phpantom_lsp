@@ -11,6 +11,7 @@ use crate::types::{ClassInfo, ClassLikeKind, ResolvedType};
 use mago_syntax::cst::*;
 
 use super::super::conditional::extract_class_string_from_expr;
+use super::super::int_interval::IntInterval;
 use crate::type_engine::resolver::WrittenNames;
 
 use super::*;
@@ -269,6 +270,10 @@ pub(crate) enum TypeGuardKind {
     /// `is_iterable` / `@phpstan-assert iterable`: an array or anything
     /// `foreach` can walk, i.e. a `Traversable`.
     Iterable,
+    /// `ctype_digit`: a non-empty string of the digits `0`-`9`, or an
+    /// integer whose byte or decimal spelling is one (see
+    /// [`CTYPE_DIGIT_INTS`]).
+    CtypeDigit,
 }
 
 /// Return the canonical `PhpType` that a type-guard narrows `mixed` to.
@@ -298,6 +303,14 @@ pub(crate) fn guard_kind_to_narrowed_type(kind: TypeGuardKind) -> PhpType {
         // `iterable` is PHP's own name for exactly this union, so keeping
         // the keyword says more than spelling it out would.
         TypeGuardKind::Iterable => PhpType::named(atom("iterable")),
+        TypeGuardKind::CtypeDigit => {
+            let mut members: Vec<PhpType> = CTYPE_DIGIT_INTS
+                .iter()
+                .map(|interval| interval.into_type())
+                .collect();
+            members.push(PhpType::numeric_string());
+            PhpType::union(members)
+        }
     }
 }
 
@@ -322,6 +335,7 @@ pub(crate) fn type_guard_kind_from_name(name: &str) -> Option<TypeGuardKind> {
         "is_scalar" => TypeGuardKind::Scalar,
         "is_resource" => TypeGuardKind::Resource,
         "is_iterable" => TypeGuardKind::Iterable,
+        "ctype_digit" => TypeGuardKind::CtypeDigit,
         _ => return None,
     })
 }
@@ -630,6 +644,8 @@ fn type_matches_guard(
         }
         TypeGuardKind::Resource => ty.is_subtype_of(&PhpType::named(atom("resource"))),
         TypeGuardKind::Iterable => type_is_iterable(ty, class_loader),
+        TypeGuardKind::CtypeDigit => ctype_digit_split(ty)
+            .is_some_and(|(passing, failing)| passing.is_some() && failing.is_none()),
     }
 }
 
@@ -803,6 +819,10 @@ fn filter_type_by_guard(
     if kind == TypeGuardKind::Numeric && keep_matching {
         let narrowed = narrow_to_numeric_inclusive(ty);
         return (narrowed != ty.clone()).then_some(narrowed);
+    }
+
+    if kind == TypeGuardKind::CtypeDigit {
+        return filter_by_ctype_digit(ty, keep_matching);
     }
 
     if kind == TypeGuardKind::Callable
@@ -984,6 +1004,120 @@ fn expand_pseudo_type_for_guard(ty: &PhpType) -> Option<PhpType> {
         }
         _ => None,
     }
+}
+
+/// The integers `ctype_digit()` accepts. PHP reads an integer from -128 to
+/// 255 as a byte, and only the bytes `0`-`9` are digits; any other integer
+/// is read as its decimal spelling, which is all digits from 256 up and
+/// starts with a `-` below -128.
+const CTYPE_DIGIT_INTS: [IntInterval; 2] = [
+    IntInterval {
+        min: Some(48),
+        max: Some(57),
+    },
+    IntInterval {
+        min: Some(256),
+        max: None,
+    },
+];
+
+/// The integers `ctype_digit()` rejects: the complement of
+/// [`CTYPE_DIGIT_INTS`].
+const CTYPE_NON_DIGIT_INTS: [IntInterval; 2] = [
+    IntInterval {
+        min: None,
+        max: Some(47),
+    },
+    IntInterval {
+        min: Some(58),
+        max: Some(255),
+    },
+];
+
+/// Narrow `ty` to the values that land in the branch of `ctype_digit()`
+/// selected by `keep_matching`, with [`filter_type_by_guard`]'s return
+/// convention.
+///
+/// Passing proves a string is numeric, but failing proves nothing about
+/// it, since a numeric string can have a sign or a decimal point. So only
+/// the passing branch refines a string, while integers are split exactly
+/// in both.
+fn filter_by_ctype_digit(ty: &PhpType, keep_matching: bool) -> Option<PhpType> {
+    if ty.is_mixed() {
+        return keep_matching.then(|| guard_kind_to_narrowed_type(TypeGuardKind::CtypeDigit));
+    }
+    let null = PhpType::null();
+    let members: Vec<&PhpType> = match ty.kind() {
+        TypeKind::Nullable(inner) => {
+            let mut members = inner.union_members();
+            members.push(&null);
+            members
+        }
+        _ => ty.union_members(),
+    };
+    let mut kept: Vec<PhpType> = Vec::with_capacity(members.len());
+    let mut changed = false;
+    for member in members {
+        let (passing, failing) =
+            ctype_digit_split(member).unwrap_or_else(|| (None, Some(member.clone())));
+        let part = if keep_matching { passing } else { failing };
+        changed |= part.as_ref() != Some(member);
+        kept.extend(part);
+    }
+    if !changed {
+        return None;
+    }
+    Some(if kept.is_empty() {
+        PhpType::empty_sentinel()
+    } else {
+        PhpType::union(kept)
+    })
+}
+
+/// Split the non-union type `ty` into the values `ctype_digit()` accepts
+/// and the ones it rejects, either side `None` when it holds no value.
+///
+/// Returns `None` for a type that is neither an integer nor a string, which
+/// `ctype_digit()` rejects outright. `mixed` is the caller's to handle.
+fn ctype_digit_split(ty: &PhpType) -> Option<(Option<PhpType>, Option<PhpType>)> {
+    if let Some(interval) = IntInterval::of_int(ty) {
+        let pieces = |ranges: &[IntInterval; 2]| -> Option<PhpType> {
+            let parts: Vec<PhpType> = ranges
+                .iter()
+                .filter_map(|range| interval.intersect(*range))
+                .map(IntInterval::into_type)
+                .collect();
+            (!parts.is_empty()).then(|| PhpType::union(parts))
+        };
+        let passing = pieces(&CTYPE_DIGIT_INTS);
+        let failing = pieces(&CTYPE_NON_DIGIT_INTS);
+        // A side that keeps every value keeps the type as it was written,
+        // so `int<50, 52>` does not come back as an equal but different
+        // spelling.
+        return Some(match (passing, failing) {
+            (Some(_), None) => (Some(ty.clone()), None),
+            (None, Some(_)) => (None, Some(ty.clone())),
+            split => split,
+        });
+    }
+    if let Some(literal) = ty.as_literal() {
+        let content = literal.string_content()?;
+        let digits = !content.is_empty() && content.bytes().all(|b| b.is_ascii_digit());
+        return Some(if digits {
+            (Some(ty.clone()), None)
+        } else {
+            (None, Some(ty.clone()))
+        });
+    }
+    if ty.is_subtype_of(&PhpType::string()) {
+        let numeric = if ty.is_subtype_of(&PhpType::numeric_string()) {
+            ty.clone()
+        } else {
+            PhpType::numeric_string()
+        };
+        return Some((Some(numeric), Some(ty.clone())));
+    }
+    None
 }
 
 /// Narrow a type to what `is_numeric()` guarantees, keeping string-like
