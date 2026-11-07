@@ -147,6 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **WordPress core's translation and hook functions.** Calls to `__()`, `add_filter()`, `home_url()` and the other functions WordPress core also declares as no-ops for its script loader now use their real declarations, so they are no longer reported as passing too many arguments, and hover and signature help describe the right function.
 - **Constants written into an array in a loop.** An array built in a loop from a constant, such as `$labels[$node] = self::WHITE`, now keeps the constant's value as its element type instead of widening it to `int`, so passing it to a parameter that accepts only those values is no longer reported.
 - **Variables after a `try` whose body always returns.** When a `try` body always returns or throws, the code after the statement now sees only what the `catch` blocks left behind, so a variable set in a `catch` has that value afterwards instead of also keeping the one it had before the `try`.
 - **`foreach` over a `RecursiveIteratorIterator`.** Looping over a `RecursiveIteratorIterator` now gives the keys and values of the iterator it wraps, rather than the wrapped iterator itself, so `new RecursiveIteratorIterator(new RecursiveArrayIterator($data))` yields `$data`'s elements.

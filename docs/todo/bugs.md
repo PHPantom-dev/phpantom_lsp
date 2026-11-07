@@ -87,33 +87,7 @@ No outstanding items.
 
 ## Name resolution
 
-### B704. A function declared in two files resolves to whichever is found first
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-// wp-admin/includes/noop.php, loaded only by load-scripts.php
-function __() {}
-
-// wp-includes/l10n.php, loaded everywhere else
-function __( $text, $domain = 'default' ) { … }
-
-__( 'Hello' );   // Expected 0 arguments, got 1
-```
-
-WordPress core declares nineteen of its functions a second time as
-no-ops for its script loader. Calls across the project resolve to the
-no-op, so with `extra-arguments` on WordPress core gets 17,435
-argument-count reports (13 once `noop.php` is excluded, the same 13
-PhpStorm reports), and hover, signature help, and return types all
-describe the wrong declaration. PHP only ever loads one of them, and
-nothing in the call says which.
-
-When a name has several declarations, a call is valid if any of them
-accepts it, and its return type is the join of theirs. Where one
-declaration is plainly the real one (the other has an empty body and no
-parameters, or sits in a file only one entry point includes), prefer it
-for hover and go-to-definition, and offer the others alongside.
+No outstanding items.
 
 ## Code actions
 

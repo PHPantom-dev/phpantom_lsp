@@ -132,3 +132,49 @@ async fn reparsing_losing_file_does_not_steal_ownership() {
         "a_typed.php should still win even though b_untyped.php was reparsed"
     );
 }
+
+const WP_NOOPS: &str = "file:///wp/wp-admin/includes/noop.php";
+const WP_L10N: &str = "file:///wp/wp-includes/l10n.php";
+
+/// WordPress core declares some of its functions again as no-ops for its
+/// script loader. PHP never loads those beside the real ones, so the real
+/// declaration wins although the no-ops' file sorts first, and a name only
+/// the no-ops declare stays theirs.
+#[tokio::test]
+async fn wordpress_script_loader_noops_give_way_to_the_real_declaration() {
+    for noops_first in [true, false] {
+        let backend = create_test_backend();
+        let noops = "<?php\nfunction __() {}\nfunction get_file( $path ) {}\n";
+        let l10n = "<?php\nfunction __( $text, $domain = 'default' ) { return $text; }\n";
+        if noops_first {
+            backend.update_ast(WP_NOOPS, noops);
+            backend.update_ast(WP_L10N, l10n);
+        } else {
+            backend.update_ast(WP_L10N, l10n);
+            backend.update_ast(WP_NOOPS, noops);
+        }
+
+        let fmap = backend.global_functions().read();
+        let (uri, info) = fmap.get("__").expect("__ should be indexed");
+        assert_eq!(uri, WP_L10N);
+        assert_eq!(info.parameters.len(), 2);
+        let (uri, _) = fmap.get("get_file").expect("get_file should be indexed");
+        assert_eq!(uri, WP_NOOPS);
+    }
+}
+
+/// The no-ops take the name back only once the real declaration is gone.
+#[tokio::test]
+async fn wordpress_script_loader_noops_take_over_when_the_real_declaration_goes() {
+    let backend = create_test_backend();
+    backend.update_ast(WP_NOOPS, "<?php\nfunction __() {}\n");
+    backend.update_ast(
+        WP_L10N,
+        "<?php\nfunction __( $text, $domain = 'default' ) { return $text; }\n",
+    );
+    backend.update_ast(WP_L10N, "<?php\n");
+
+    let fmap = backend.global_functions().read();
+    let (uri, _) = fmap.get("__").expect("__ should remain from noop.php");
+    assert_eq!(uri, WP_NOOPS);
+}

@@ -851,3 +851,47 @@ fn scan_drupal_directories_records_templates_outside_tests() {
     );
     assert!(files.declarations.is_empty());
 }
+
+#[test]
+fn wordpress_script_loader_noops_give_way_to_the_real_declarations() {
+    let dir = tempfile::tempdir().unwrap();
+    let includes = dir.path().join("wp-admin").join("includes");
+    let wp_includes = dir.path().join("wp-includes");
+    std::fs::create_dir_all(&includes).unwrap();
+    std::fs::create_dir_all(&wp_includes).unwrap();
+    std::fs::write(
+        includes.join("noop.php"),
+        "<?php\nfunction __() {}\nfunction get_file( $path ) {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        wp_includes.join("l10n.php"),
+        "<?php\nfunction __( $text, $domain = 'default' ) {}\n",
+    )
+    .unwrap();
+
+    let skip = std::collections::HashSet::new();
+    let result =
+        scan_workspace_fallback_full(dir.path(), &skip, &IndexFilters::empty(), None, None);
+    assert!(
+        result.function_index["__"].ends_with("wp-includes/l10n.php"),
+        "{:?}",
+        result.function_index
+    );
+    assert!(result.function_index["get_file"].ends_with("wp-admin/includes/noop.php"));
+
+    // Folding the scans together decides the same way in either order.
+    let noops = || {
+        let path = includes.join("noop.php");
+        WorkspaceScanResult::from_file(crate::classmap_scanner::scan_file_full(&path), &path)
+    };
+    let l10n = || {
+        let path = wp_includes.join("l10n.php");
+        WorkspaceScanResult::from_file(crate::classmap_scanner::scan_file_full(&path), &path)
+    };
+    for (mut into, from) in [(noops(), l10n()), (l10n(), noops())] {
+        into.absorb_missing(from);
+        assert!(into.function_index["__"].ends_with("wp-includes/l10n.php"));
+        assert!(into.function_index["get_file"].ends_with("wp-admin/includes/noop.php"));
+    }
+}
