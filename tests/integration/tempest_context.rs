@@ -193,6 +193,75 @@ final class BookView implements View {
 }
 
 #[tokio::test]
+async fn tempest_context_component_arguments_and_slots_use_the_component_scope() {
+    let source = r#"<?php $outside = new \App\Book(); ?>
+<x-card :entry="$selected" label="Selected">
+    {{ $local->summary() }}
+    <x-slot name="header">{{ $entry->title }} {{ $label }}</x-slot>
+</x-card>"#;
+    let component = "<h2><x-slot name=\"header\" /></h2>\n<?php $local = $entry; ?>\n<x-slot />\n{{ $entry->title }}";
+    let caller = "<?php \\Tempest\\View\\view(__DIR__ . '/page.view.php', selected: new \\App\\Book(), entry: 42);";
+    let (backend, _dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("app/Book.php", BOOK),
+            ("app/Controller.php", caller),
+            ("app/page.view.php", source),
+            ("app/x-card.view.php", component),
+        ],
+    );
+    open_php(
+        &backend,
+        &workspace_uri(&backend, "app/Controller.php"),
+        caller,
+    )
+    .await;
+    let uri = workspace_uri(&backend, "app/page.view.php");
+    open_php(&backend, &uri, source).await;
+    assert_eq!(template_diagnostics(&backend, &uri), Vec::<String>::new());
+    for needle in ["summary()", "title"] {
+        assert!(
+            hover_on(&backend, &uri, source, needle)
+                .await
+                .contains("string")
+        );
+    }
+    let component_uri = workspace_uri(&backend, "app/x-card.view.php");
+    open_php(&backend, &component_uri, component).await;
+    assert_eq!(
+        template_diagnostics(&backend, &component_uri),
+        Vec::<String>::new()
+    );
+    assert!(
+        hover_on(&backend, &component_uri, component, "title")
+            .await
+            .contains("string")
+    );
+}
+
+#[tokio::test]
+async fn tempest_context_slots_do_not_capture_the_callers_locals() {
+    let source = "<?php $outside = new \\App\\Book(); ?>\n<x-card>{{ $outside->title }}</x-card>";
+    let (backend, _dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("app/Book.php", BOOK),
+            ("app/page.view.php", source),
+            ("app/x-card.view.php", "<x-slot />"),
+        ],
+    );
+    let uri = workspace_uri(&backend, "app/page.view.php");
+    open_php(&backend, &uri, source).await;
+    let diagnostics = template_diagnostics(&backend, &uri);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message.contains("Undefined variable '$outside'")),
+        "{diagnostics:?}"
+    );
+}
+
+#[tokio::test]
 async fn tempest_context_names_stay_in_the_declaring_namespace() {
     let classes = r"<?php
 namespace { class Entry { public function globalOnly(): string {} } }
@@ -288,6 +357,97 @@ new Page(__DIR__.'/generic.view.php', data: ['entry' => new \App\Book()]);
                 .contains("string")
         );
     }
+}
+
+#[tokio::test]
+async fn tempest_context_foreach_component_globals_and_slot_imports() {
+    let source = r#"<x-card :foreach="$books as $book" :selected="$book" flag :enabled data-label="Read">
+        <?php use App\Book as Imported; /** @var Imported $explicit */ ?>
+        {{ $book->title }} {{ $selected->summary() }} {{ $explicit->title }}
+        <x-child :entry="$selected" />
+    </x-card>"#;
+    let card =
+        "{{ $book->title }} {{ $selected->summary() }} {{ $dataLabel }} {{ $enabled }}<x-slot />";
+    let child = "{{ $entry->title }} {{ $book->title }}";
+    let caller =
+        "<?php \\Tempest\\View\\view(__DIR__.'/page.view.php', books: [new \\App\\Book()]);";
+    let (backend, _dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("app/Book.php", BOOK),
+            ("app/Controller.php", caller),
+            ("app/page.view.php", source),
+            ("app/x-card.view.php", card),
+            ("app/x-child.view.php", child),
+        ],
+    );
+    open_php(
+        &backend,
+        &workspace_uri(&backend, "app/Controller.php"),
+        caller,
+    )
+    .await;
+    for (path, source) in [
+        ("app/page.view.php", source),
+        ("app/x-card.view.php", card),
+        ("app/x-child.view.php", child),
+    ] {
+        let uri = workspace_uri(&backend, path);
+        open_php(&backend, &uri, source).await;
+        assert_eq!(
+            template_diagnostics(&backend, &uri),
+            Vec::<String>::new(),
+            "{path}"
+        );
+        assert!(
+            hover_on(&backend, &uri, source, "title")
+                .await
+                .contains("string")
+        );
+    }
+}
+
+#[tokio::test]
+async fn tempest_context_project_component_override_and_invocation_specific_slots() {
+    let source = r#"<x-card :entry="new \App\Book()">{{ $local->summary() }}</x-card>
+<x-card :entry="new \App\Count()">{{ $local->total() }}</x-card>"#;
+    let project = "<?php $local = $entry; ?><x-slot define=\"default\" />";
+    let vendor = "<?php $local = false; ?><x-slot />";
+    let (backend, _dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("app/Book.php", BOOK),
+            (
+                "app/Count.php",
+                "<?php namespace App; class Count { public function total(): int {} }",
+            ),
+            ("app/page.view.php", source),
+            ("app/x-card.view.php", project),
+            (".gitignore", "/vendor/\n"),
+            (
+                "vendor/composer/installed.json",
+                r#"{"packages":[{"name":"acme/views","install-path":"../acme/views"}]}"#,
+            ),
+            (
+                "vendor/acme/views/composer.json",
+                r#"{"autoload":{"psr-4":{"Acme\\":"src/"}}}"#,
+            ),
+            ("vendor/acme/views/src/x-card.view.php", vendor),
+        ],
+    );
+    let uri = workspace_uri(&backend, "app/page.view.php");
+    open_php(&backend, &uri, source).await;
+    assert_eq!(template_diagnostics(&backend, &uri), Vec::<String>::new());
+    assert!(
+        hover_on(&backend, &uri, source, "summary()")
+            .await
+            .contains("string")
+    );
+    assert!(
+        hover_on(&backend, &uri, source, "total()")
+            .await
+            .contains("int")
+    );
 }
 
 #[tokio::test]

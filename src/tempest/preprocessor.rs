@@ -12,6 +12,7 @@ struct OpenTag<'a> {
     name: &'a str,
     blocks: usize,
     branch_depth: Option<usize>,
+    isolated: bool,
 }
 
 /// Produce virtual PHP with exact mappings for every copied expression.
@@ -41,6 +42,9 @@ pub(crate) fn preprocess_with_scope(
             Token::Tag(tag) if tag.closing => {
                 if let Some(index) = stack.iter().rposition(|open| open.name == tag.name) {
                     for open in stack.drain(index..).rev() {
+                        if open.isolated {
+                            out.insert("});\n");
+                        }
                         let keep = if followed_by_branch && open.name == tag.name {
                             open.branch_depth.unwrap_or(0)
                         } else {
@@ -138,6 +142,24 @@ pub(crate) fn preprocess_with_scope(
                         }
                     }
                 }
+                // Zero-width anchors locate a component call or slot outlet
+                // in its PHP scope without pretending its HTML is PHP code.
+                if tag.name.starts_with("x-") {
+                    out.insert("\n ");
+                    out.copy(tag.span.start..tag.span.start);
+                    out.insert(" \n");
+                }
+                if let Some(names) = scope.and_then(|scope| scope.slot_reads.get(&tag.span.start)) {
+                    for name in names {
+                        out.insert(&format!("${name};\n"));
+                    }
+                }
+                let isolated = !tag.self_closing
+                    && scope.is_some_and(|scope| scope.regions.contains_key(&tag.span.start));
+                if isolated {
+                    out.insert("(function () {\n");
+                    out.scope(&scope.unwrap().regions[&tag.span.start]);
+                }
                 if tag.self_closing {
                     let keep = if followed_by_branch {
                         branch_depth.unwrap_or(0)
@@ -153,12 +175,16 @@ pub(crate) fn preprocess_with_scope(
                         name: tag.name,
                         blocks,
                         branch_depth,
+                        isolated,
                     });
                 }
             }
         }
     }
     for open in stack.into_iter().rev() {
+        if open.isolated {
+            out.insert("});\n");
+        }
         for _ in 0..open.blocks {
             out.insert("}");
         }
