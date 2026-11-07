@@ -24,7 +24,7 @@ render(entry: new Entry(), path: __DIR__.'/page.view.php');
 render();
 render(path: $unknown, entry: false);
 render(path: 'missing.view.php', entry: false);
-render(path: 'app/' . 'page.view.php', entry: false);
+render(path: 'missing/' . 'page.view.php', entry: false);
 render(path: 'app/page.view.php', ...$unknownData);
 "#;
     let (backend, _dir) = create_psr4_workspace(

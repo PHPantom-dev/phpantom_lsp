@@ -687,11 +687,14 @@ impl Backend {
             // are all literals has one answer, and other arguments
             // can still decide a refinement of `string`.  It names
             // no class, so it travels purely as the hint.
-            if crate::type_engine::variable::string_func_rules::has_string_func_rule(func_name)
-                && let Some(folded) =
-                    crate::type_engine::variable::string_func_rules::string_func_return_type(
-                        func_name, &fn_args,
-                    )
+            if crate::type_engine::variable::string_func_rules::is_builtin_string_function(
+                func_name,
+                ctx.function_loader,
+                ctx.cursor_offset,
+            ) && let Some(folded) =
+                crate::type_engine::variable::string_func_rules::string_func_return_type(
+                    func_name, &fn_args,
+                )
             {
                 if let Some(ref mut hint_out) = return_type_hint_out {
                     **hint_out = Some(folded);

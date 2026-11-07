@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Class constants as docblock types.** A docblock type that names class constants, such as `@param Status::ACTIVE $status`, `@return self::STATUS_*`, or `@param Foo::class|Bar::class $name`, now stands for the values those constants hold. A `switch` with a case for each of them counts as covering every value, and passing anything else is reported.
 - **Each enum case is a type of its own.** Comparing an enum with one of its cases, or a backed enum's `value` with a case's backing value, narrows it to that case, or to the cases left, in `if`/`elseif` chains, guard clauses, `match` arms and strict `in_array()` checks, and a value known to be one case reads that case's own `name` and `value`. A case passed to a `value-of<T>` template no longer reports every other case's value as a mismatch.
 - **Array shapes are sealed.** An array with a key that a shape like `array{foo: int}` does not declare no longer satisfies it, whether the key is written at the call site or comes from the value's own declared shape. Write `array{foo: int, ...}` to accept other keys.
+- **Static file paths.** Paths built from `__DIR__`, `__FILE__`, and `dirname()` keep their known values across files and inherited constants. Contributed by @shuvroroy.
 
 #### Testing
 

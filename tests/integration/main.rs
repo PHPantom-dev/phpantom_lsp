@@ -230,6 +230,7 @@ mod drupal_theme_hooks;
 mod duplicate_class_declarations;
 mod duplicate_function_declarations;
 mod expression_evaluation_order;
+mod file_paths;
 mod fix_cli;
 mod folding_blade;
 mod folding_ranges;

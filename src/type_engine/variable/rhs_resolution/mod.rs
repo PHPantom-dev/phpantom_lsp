@@ -90,6 +90,7 @@ mod static_calls;
 mod symfony_calls;
 mod unary_prefix;
 
+pub(crate) use magic_constants::file_magic_constant_type;
 pub(crate) use scalar_fold::{fold_concat_types, is_literal_string_type};
 
 use arithmetic::resolve_binary_result_type;

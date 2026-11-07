@@ -36,6 +36,14 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
         let trimmed = arg_text.trim();
+        if trimmed.eq_ignore_ascii_case("__DIR__") || trimmed.eq_ignore_ascii_case("__FILE__") {
+            return Some(
+                crate::type_engine::variable::rhs_resolution::file_magic_constant_type(
+                    ctx.file.uri,
+                    trimmed.eq_ignore_ascii_case("__DIR__"),
+                ),
+            );
+        }
 
         // A closure literal or a first-class callable (`$this->build(...)`)
         // is a `Closure` with the signature it was written with, the same
