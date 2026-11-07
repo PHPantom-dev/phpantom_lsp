@@ -366,6 +366,46 @@ async fn tempest_discovery_new_configuration_refreshes_a_warm_catalogue() {
 }
 
 #[tokio::test]
+async fn tempest_discovery_completes_registered_tag_names_without_an_x_prefix() {
+    use crate::common::{completion_response, response_items};
+    let config = "<?php return new \\Tempest\\View\\ViewConfig(viewComponents: ['notice' => new \\Tempest\\View\\ViewComponent('internal', '', __DIR__.'/../ui/panel.view.php', false)]);";
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        &[
+            ("app/page.view.php", ""),
+            ("app/views.config.php", config),
+            ("ui/panel.view.php", "Notice"),
+            ("app/x-card.view.php", "Card"),
+        ],
+    );
+    let uri = workspace_uri(&backend, "app/page.view.php");
+    for (source, cursor, start, end, expected) in [
+        ("<not", 4, 1, 4, Some("notice")),
+        ("</not>", 5, 2, 5, Some("notice")),
+        ("<notice />", 4, 1, 7, Some("notice")),
+        ("<x-ca", 5, 1, 5, Some("x-card")),
+        ("<div>", 4, 1, 4, None),
+    ] {
+        open_php(&backend, &uri, source).await;
+        let items =
+            response_items(completion_response(&backend, &uri, 0, cursor, None).await).unwrap();
+        if let Some(expected) = expected {
+            assert_eq!(items.len(), 1, "{source}: {items:?}");
+            assert_eq!(items[0].label, expected);
+            assert_eq!(
+                items[0].text_edit,
+                Some(CompletionItemTextEdit::TextEdit(TextEdit {
+                    range: Range::new(Position::new(0, start), Position::new(0, end)),
+                    new_text: expected.to_string(),
+                })),
+            );
+        } else {
+            assert!(items.is_empty(), "{source}: {items:?}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn tempest_discovery_registered_tag_attributes_follow_unsaved_content() {
     use crate::common::{completion_response, response_labels};
     let source = "<notice  />";

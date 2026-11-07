@@ -1520,6 +1520,3 @@ locals at the receiving component's outlet for that invocation. Component
 attributes override global view data without inheriting arbitrary caller
 locals. A work queue propagates changed scopes through component calls;
 recursive component inference is bounded.
-
-Configured discovery remains in
-[the feature backlog](todo/lsp-features.md#f74-configured-tempest-view-discovery).

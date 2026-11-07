@@ -149,6 +149,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Registered Tempest component names.** Tag completion now offers explicitly registered components whose names do not start with `x-`. Contributed by @shuvroroy.
 - **Property types on an annotated `$this`.** Reading a property through an explicitly typed `$this` now preserves its type in assignments and loops, including Tempest views. Contributed by @shuvroroy.
 - **Closures declared to return `float`.** A closure or arrow function declared `: float` is now shown returning `float` even when its body computes an integer, since PHP converts the value on return.
 - **Docblock annotations name their class.** A Doctrine-style annotation such as `@ORM\Entity` or `@Route("/users")`, including one nested in another's arguments, now counts as a use of the import it goes through, so that import is no longer reported as unused or removed by the quick fix and `phpantom_lsp fix`. Go-to-definition, hover, references, and rename reach the annotation's class.

@@ -1,3 +1,3 @@
-<!-- Try: follow x-summary and book-notice to their configured component files. -->
+<!-- Try: complete book-notice, then follow either tag to its configured component file. -->
 <x-summary :book="$book" />
 <book-notice :message="$book->title" />
