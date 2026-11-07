@@ -1183,17 +1183,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T26. Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1532,17 +1521,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T26. Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1813,61 +1791,16 @@ within the same impact tier.</p>
 </tbody>
 </table>
 <hr />
-<h2 id="t26-class-constants-named-as-docblock-types-foobar-foobar_">T26. Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)<a class="headerlink" href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>A class constant named in a type position is not read at all: <code>@param
-Foo::BAR $x</code>, <code>@param self::FOO|self::BAR $x</code> and <code>@param C::class|D::class
-$x</code> all stay as unresolved text (or fall back to the native hint), where
-PHPStan and Psalm give the constant's value (<code>'bar'</code>, <code>'bar'|'foo'</code>,
-<code>'App\C'|'App\D'</code>). The same constants are read when they are the operand
-of <code>key-of&lt;&gt;</code>/<code>value-of&lt;&gt;</code>, through <code>constant_operand_shape</code>, so the value
-lookup exists; the bare reference just never reaches it. Found porting
-Psalm's <code>ConstValuesTest</code> and <code>ReconcilerTest</code>; the assertions are <code>// SKIP</code>
-in <code>tests/psalm_assertions/const_values.php</code> and
-<code>tests/psalm_assertions/type_reconciliation_reconciler.php</code>.</p>
-<p>Falling back to the native hint is not harmless. A method declared
-<code>@return self::STATUS_*</code> over a native <code>int</code> reads as <code>int</code>, so passing its
-result to a parameter typed <code>1|2</code> is reported. Likewise a <code>switch</code> over a
-<code>@param self::*</code> value with a <code>case</code> for every constant and no <code>default</code>
-cannot be seen to cover every value, so a method that returns from every
-case is reported as <code>missing_return</code> (twice in phpstan-src:
-<code>ClassNameUsageLocation::createMessage()</code>, and the variance closure in
-<code>TypeNodeResolver::resolveGenericTypeNode()</code>, whose parameter is inferred
-from a <code>(self::VARIANCE_*)[]</code> property).</p>
-<p>The wildcard form resolves a pattern like <code>Foo::BAR_*</code> to the union of all
-matching constant types on the class. PHPStan supports this syntax in
-docblock type strings:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Status {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    const STATUS_ACTIVE = 1;</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    const STATUS_INACTIVE = 2;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    const STATUS_PENDING = 3;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">}</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">/** @param Status::STATUS_* $status */</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">function setStatus(int $status): void { ... }</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">// $status should resolve to 1|2|3</span>
-</code></pre></div>
-<p>When the type engine encounters a constant pattern containing <code>*</code>,
-it should:</p>
-<ol>
-<li>Resolve the class (<code>Status</code>).</li>
-<li>Enumerate all constants matching the glob pattern (<code>STATUS_*</code>).</li>
-<li>Build a union of their literal types.</li>
-</ol>
-<p><strong>References:</strong>
-- PHPStan: <code>ConstantWildcardType</code> / constant enum resolution.
-- Phpactor: <code>GlobbedConstantUnionType</code>.</p>
-<hr />
 <h2 id="t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it">T49. A closure passed to a constructor gets no parameter types from it<a class="headerlink" href="#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    /** @param callable(Bar): void $cb */</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    public function __construct(callable $cb) {}</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">new Foo(function ($bar) {</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    $bar-&gt;  // PHPantom: nothing. Passed to a method instead: Bar</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">});</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    /** @param callable(Bar): void $cb */</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    public function __construct(callable $cb) {}</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">new Foo(function ($bar) {</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    $bar-&gt;  // PHPantom: nothing. Passed to a method instead: Bar</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">});</span>
 </code></pre></div>
 <p>A closure passed to a function's or method's typed callable parameter gets
 its parameter types from it, but <code>infer_callable_params_for_call</code>
@@ -1912,17 +1845,17 @@ resolves to the value declared on the <em>current</em> class, even though a
 subclass may redeclare it. This is unsound in the false-positive
 direction, since the narrowed literal can drive a bogus argument-type
 mismatch or mark a live <code>match</code> arm dead.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    const NO_TYPE = 1;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    /** @var string */</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    const TYPE = 'foo';</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    public function doFoo(): void {</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">        self::NO_TYPE;      // 1      (correct)</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">        static::NO_TYPE;    // 1      (PHPStan: mixed — a child may redeclare it)</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">        static::TYPE;       // 'foo'  (PHPStan: string — a child must respect @var)</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">    }</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    const NO_TYPE = 1;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    /** @var string */</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    const TYPE = 'foo';</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    public function doFoo(): void {</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">        self::NO_TYPE;      // 1      (correct)</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">        static::NO_TYPE;    // 1      (PHPStan: mixed — a child may redeclare it)</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">        static::TYPE;       // 'foo'  (PHPStan: string — a child must respect @var)</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">    }</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">}</span>
 </code></pre></div>
 <p>PHPStan's model: <code>self::</code> always yields the declared value. <code>static::</code>
 (and <code>$this::</code>) yields the value only when it cannot be overridden, i.e.
@@ -1992,17 +1925,17 @@ key) the fallback can never be assigned, so <code>$string ??= 1</code> is still
 <hr />
 <h2 id="t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later">T46. Template arguments are not inferred from how the object is used later<a class="headerlink" href="#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @template T */</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">class Box {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    /** @param T $item */</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    public function add($item): void {}</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    /** @return T */</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    public function first() {}</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">}</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">$box = new Box();</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">$box-&gt;add(new Foo);</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">$box-&gt;first()-&gt;  // PHPStan 2.3: Foo; PHPantom: mixed (`Box&lt;mixed&gt;`)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">class Box {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    /** @param T $item */</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    public function add($item): void {}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    /** @return T */</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    public function first() {}</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">}</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">$box = new Box();</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">$box-&gt;add(new Foo);</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">$box-&gt;first()-&gt;  // PHPStan 2.3: Foo; PHPantom: mixed (`Box&lt;mixed&gt;`)</span>
 </code></pre></div>
 <p>A <code>new</code> whose constructor leaves a template open erases it to its default,
 then its bound, then <code>mixed</code> (<code>default_type_arg</code> in
@@ -2074,10 +2007,10 @@ whole-body pre-passes <code>seed_static_locals</code> and
 <hr />
 <h2 id="t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used">T47. A closure assigned to a variable gets no parameter types from where it is used<a class="headerlink" href="#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$byName = function ($a, $b) {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    return $a-&gt;  // PHPStan 2.3: User; PHPantom: nothing</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">};</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">usort($users, $byName);   // list&lt;User&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$byName = function ($a, $b) {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    return $a-&gt;  // PHPStan 2.3: User; PHPantom: nothing</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">};</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">usort($users, $byName);   // list&lt;User&gt;</span>
 </code></pre></div>
 <p>A closure literal passed straight to a typed callable parameter already
 gets its parameter types, generics included (<code>try_enter_closure_expr</code> →
@@ -2136,17 +2069,17 @@ nested closures typed from an expected return type, generator escapes.</p>
 <hr />
 <h2 id="t41-a-reading-of-the-callees-body-overrides-a-declared-param-out">T41. A reading of the callee's body overrides a declared <code>@param-out</code><a class="headerlink" href="#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/**</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x"> * @param-out list&lt;string&gt; $lines</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x"> */</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function readInto(string $path, ?array &amp;$lines = null): int {</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    $lines = [];</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    // … filled through a helper the walk cannot follow …</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">    return 0;</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">}</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">readInto($path, $lines);</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x">$lines; // array{}, where the tag promises list&lt;string&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/**</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x"> * @param-out list&lt;string&gt; $lines</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x"> */</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">function readInto(string $path, ?array &amp;$lines = null): int {</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    $lines = [];</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    // … filled through a helper the walk cannot follow …</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">    return 0;</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">}</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">readInto($path, $lines);</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="x">$lines; // array{}, where the tag promises list&lt;string&gt;</span>
 </code></pre></div>
 <p>The tag is read: <code>ParameterInfo::param_out_type</code> holds it and
 <code>ParameterInfo::out_type()</code> prefers it over the declared type and the
@@ -2164,19 +2097,19 @@ author did not spell out for the write.</p>
 <p>Found while porting Mago's <code>issue_870.php</code>. A class can declare its own
 <code>@type</code>/<code>@phpstan-type</code> alias and hand it to its own parent's template
 parameter via <code>self::</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @template TData as array&lt;string, mixed&gt; */</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">abstract class Car {</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    /** @return TData */</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    abstract function getData(): array;</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">/**</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x"> * @type DataArray = array{'Gewicht': int}</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="x"> * @extends Car&lt;self::DataArray&gt;</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="x"> */</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="x">class RedCar extends Car {</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="x">    public function getData(): array { return ['Gewicht' =&gt; 1000]; }</span>
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @template TData as array&lt;string, mixed&gt; */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">abstract class Car {</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    /** @return TData */</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    abstract function getData(): array;</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">}</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">/**</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x"> * @type DataArray = array{'Gewicht': int}</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x"> * @extends Car&lt;self::DataArray&gt;</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x"> */</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x">class RedCar extends Car {</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="x">    public function getData(): array { return ['Gewicht' =&gt; 1000]; }</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>getData()</code>'s inherited <code>@return TData</code> should resolve to the
 <code>DataArray</code> shape (offering <code>Gewicht</code> for array-key completion), but it
@@ -2233,9 +2166,9 @@ Symfony extension (<code>src/Type/Symfony/</code>, <code>stubs/</code>).</p>
 <hr />
 <h2 id="t53-doctrine-collections-narrowed-by-isempty">T53. Doctrine collections narrowed by <code>isEmpty()</code><a class="headerlink" href="#t53-doctrine-collections-narrowed-by-isempty" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">if (!$order-&gt;lines-&gt;isEmpty()) {</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    $first = $order-&gt;lines-&gt;first(); // OrderLine|false, should be OrderLine</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">if (!$order-&gt;lines-&gt;isEmpty()) {</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    $first = $order-&gt;lines-&gt;first(); // OrderLine|false, should be OrderLine</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>Collection::first()</code> and <code>last()</code> return <code>T|false</code>; once <code>isEmpty()</code> has
 been ruled out they cannot return <code>false</code>. This is a narrowing of the
@@ -2250,9 +2183,9 @@ Doctrine extension (<code>Type/Doctrine/Collection/IsEmptyTypeSpecifyingExtensio
 <hr />
 <h2 id="t54-messenger-handlers-a-service-tag-registers">T54. Messenger handlers a service tag registers<a class="headerlink" href="#t54-messenger-handlers-a-service-tag-registers" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">services</span><span class="p">:</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span><span class="nt">App\Handler\GetOrderHandler</span><span class="p">:</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">        </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">messenger.message_handler</span><span class="p p-Indicator">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">services</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">    </span><span class="nt">App\Handler\GetOrderHandler</span><span class="p">:</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">        </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">messenger.message_handler</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <p>A query bus's <code>HandleTrait::handle()</code> returns what the message's one
 handler returns, but only a handler <code>#[AsMessageHandler]</code> registers is
@@ -2278,10 +2211,10 @@ tagged in <code>tests/phpstan_symfony/config/services.xml</code>.</p>
 <hr />
 <h2 id="t55-symfony-array-parameters-are-typed-as-plain-array">T55. Symfony array parameters are typed as plain <code>array</code><a class="headerlink" href="#t55-symfony-array-parameters-are-typed-as-plain-array" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">parameters</span><span class="p">:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span><span class="nt">app.locales</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">en</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">da</span><span class="p p-Indicator">]</span><span class="w">        </span><span class="c1"># array, PHPStan says array&lt;int, string&gt;</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">app.mailer</span><span class="p">:</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">        </span><span class="nt">dsn</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">smtp://localhost</span><span class="w">    </span><span class="c1"># array, PHPStan says array{dsn: string}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">parameters</span><span class="p">:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span><span class="nt">app.locales</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">en</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">da</span><span class="p p-Indicator">]</span><span class="w">        </span><span class="c1"># array, PHPStan says array&lt;int, string&gt;</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">app.mailer</span><span class="p">:</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">        </span><span class="nt">dsn</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">smtp://localhost</span><span class="w">    </span><span class="c1"># array, PHPStan says array{dsn: string}</span>
 </code></pre></div>
 <p><code>getParameter()</code> is typed by the parameter's declared value, but an
 array value is typed as <code>array</code> whatever it holds. PHPStan's Symfony
@@ -2299,7 +2232,7 @@ extension's fixtures declare theirs that way, in
 <hr />
 <h2 id="t65-the-expression-builders-fragments-are-not-literal-strings">T65. The expression builder's fragments are not literal strings<a class="headerlink" href="#t65-the-expression-builders-fragments-are-not-literal-strings" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">$qb-&gt;expr()-&gt;isNull('u.name'); // string, not 'u.name IS NULL'</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$qb-&gt;expr()-&gt;isNull('u.name'); // string, not 'u.name IS NULL'</span>
 </code></pre></div>
 <p>The expression builder's methods that build a DQL fragment as a string
 (<code>isNull()</code>, <code>between()</code>, <code>countDistinct()</code>, …) return <code>string</code>. PHPStan's
@@ -2314,11 +2247,11 @@ a query takes it.</p>
 <hr />
 <h2 id="t68-a-dql-field-is-typed-by-its-property-not-its-columns-type">T68. A DQL field is typed by its property, not its column's type<a class="headerlink" href="#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">#[ORM\Column(type: 'bigint')]</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">public int $views;</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">$em-&gt;createQuery('SELECT u.views FROM App\Entity\User u')</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">    -&gt;getResult(); // list&lt;array{views: int}&gt;, though DBAL 4 gives int|string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">#[ORM\Column(type: 'bigint')]</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">public int $views;</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">$em-&gt;createQuery('SELECT u.views FROM App\Entity\User u')</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    -&gt;getResult(); // list&lt;array{views: int}&gt;, though DBAL 4 gives int|string</span>
 </code></pre></div>
 <p>A selected field is typed by the type its entity declares for the
 property, but a scalar result is converted by the column's Doctrine type,
@@ -2336,8 +2269,8 @@ Doctrine extension (<code>Type/Doctrine/Descriptors/</code>).</p>
 <hr />
 <h2 id="t69-identity-in-a-dql-select-is-mixed">T69. <code>IDENTITY()</code> in a DQL <code>SELECT</code> is <code>mixed</code><a class="headerlink" href="#t69-identity-in-a-dql-select-is-mixed" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$em-&gt;createQuery('SELECT IDENTITY(p.author) AS author FROM App\Entity\Post p')</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    -&gt;getResult(); // list&lt;array{author: mixed}&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$em-&gt;createQuery('SELECT IDENTITY(p.author) AS author FROM App\Entity\Post p')</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    -&gt;getResult(); // list&lt;array{author: mixed}&gt;</span>
 </code></pre></div>
 <p><code>IDENTITY()</code> gives the foreign key a to-one association holds: the
 identifier column of the entity it targets, <code>null</code> when the join column is
@@ -2352,7 +2285,7 @@ PHPStan's Doctrine extension (<code>QueryResultTypeWalker::walkFunction()</code>
 <hr />
 <h2 id="t56-a-dbal-results-row-count-ignores-the-connections-driver">T56. A DBAL result's row count ignores the connection's driver<a class="headerlink" href="#t56-a-dbal-results-row-count-ignores-the-connections-driver" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">$rows = $result-&gt;rowCount(); // int|numeric-string, though only mysqli returns a string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$rows = $result-&gt;rowCount(); // int|numeric-string, though only mysqli returns a string</span>
 </code></pre></div>
 <p>DBAL 4 declares <code>Result::rowCount()</code> as <code>int|numeric-string</code>, because the
 <code>mysqli</code> driver can return a row count too large for an <code>int</code> as a string.
@@ -2369,14 +2302,14 @@ extension (<code>Type/Doctrine/DBAL/*RowCountReturnTypeExtension</code>).</p>
 <hr />
 <h2 id="t58-newt-is-not-supported">T58. <code>new&lt;T&gt;</code> is not supported<a class="headerlink" href="#t58-newt-is-not-supported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/**</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x"> * @template T of string</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x"> * @param T $class_name</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x"> * @return ($class_name is 'WP_Posts_List_Table'|'WP_Users_List_Table'|… ? new&lt;T&gt; : false)</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x"> */</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">function _get_list_table($class_name, $args = []) { … }</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">_get_list_table('WP_Posts_List_Table');   // want WP_Posts_List_Table, get new&lt;&lt;T&gt;&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">/**</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x"> * @template T of string</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x"> * @param T $class_name</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x"> * @return ($class_name is 'WP_Posts_List_Table'|'WP_Users_List_Table'|… ? new&lt;T&gt; : false)</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x"> */</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">function _get_list_table($class_name, $args = []) { … }</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">_get_list_table('WP_Posts_List_Table');   // want WP_Posts_List_Table, get new&lt;&lt;T&gt;&gt;</span>
 </code></pre></div>
 <p><code>new&lt;T&gt;</code> is PHPStan's type for an instance of the class a string names,
 used where a function instantiates the class it is given by name. We
@@ -2388,22 +2321,22 @@ are marked with this.</p>
 <hr />
 <h2 id="t59-tk-on-a-class-template-is-not-resolved">T59. <code>T[K]</code> on a class template is not resolved<a class="headerlink" href="#t59-tk-on-a-class-template-is-not-resolved" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/**</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x"> * @template T of array = array&lt;string, mixed&gt;</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x"> * @implements ArrayAccess&lt;key-of&lt;T&gt;, value-of&lt;T&gt;&gt;</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x"> */</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">class WP_REST_Request implements ArrayAccess {</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">    /**</span>
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="x">     * @template TOffset of key-of&lt;T&gt;</span>
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">     * @param TOffset $key</span>
-<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="x">     * @return T[TOffset]|null</span>
-<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="x">     */</span>
-<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="x">    public function get_param($key) { … }</span>
-<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="x">}</span>
-<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>
-<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a><span class="x">/** @var WP_REST_Request&lt;array{id: int, name: string}&gt; $request */</span>
-<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a><span class="x">$request-&gt;get_param('id');   // want int|null, get array{id: int, name: string}['id']|null</span>
-<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a><span class="x">$request['id'];              // want int|null, get array{id: int, name: string}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/**</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x"> * @template T of array = array&lt;string, mixed&gt;</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x"> * @implements ArrayAccess&lt;key-of&lt;T&gt;, value-of&lt;T&gt;&gt;</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x"> */</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">class WP_REST_Request implements ArrayAccess {</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">    /**</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">     * @template TOffset of key-of&lt;T&gt;</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">     * @param TOffset $key</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x">     * @return T[TOffset]|null</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="x">     */</span>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="x">    public function get_param($key) { … }</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="x">}</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="x">/** @var WP_REST_Request&lt;array{id: int, name: string}&gt; $request */</span>
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="x">$request-&gt;get_param('id');   // want int|null, get array{id: int, name: string}['id']|null</span>
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="x">$request['id'];              // want int|null, get array{id: int, name: string}</span>
 </code></pre></div>
 <p>An offset access type over a class template stays as written once the
 template is bound, and array access on the object (through
@@ -2415,14 +2348,14 @@ API endpoint that types its request this way gets every parameter wrong.
 <hr />
 <h2 id="t60-a-float-literal-is-typed-float-not-its-value">T60. A float literal is typed <code>float</code>, not its value<a class="headerlink" href="#t60-a-float-literal-is-typed-float-not-its-value" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">/**</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x"> * @template T</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x"> * @param T $data</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x"> * @return (T is array|object|string ? string : T)</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x"> */</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x">function maybe_serialize($data) { … }</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="x">maybe_serialize(0.0);   // want 0.0, get float</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/**</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x"> * @template T</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x"> * @param T $data</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x"> * @return (T is array|object|string ? string : T)</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x"> */</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">function maybe_serialize($data) { … }</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">maybe_serialize(0.0);   // want 0.0, get float</span>
 </code></pre></div>
 <p>Integer, string and boolean literals keep their value as their type;
 float literals become <code>float</code>. A template bound to one, or a condition
@@ -2430,15 +2363,15 @@ over one, loses the value. 2 assertions of the WordPress stubs fixtures.</p>
 <hr />
 <h2 id="t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members">T62. A sealed hierarchy is not narrowed by ruling out its other members<a class="headerlink" href="#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">/** @psalm-inheritors LeafNode|TreeNode */</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">interface NodeInterface {}</span>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">function at_index(NodeInterface $node): mixed {</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="x">    if ($node instanceof LeafNode) {</span>
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="x">        return null;</span>
-<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="x">    }</span>
-<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="x">    $node-&gt;getChildren();   // Method 'getChildren' not found on class 'NodeInterface'</span>
-<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">/** @psalm-inheritors LeafNode|TreeNode */</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">interface NodeInterface {}</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x">function at_index(NodeInterface $node): mixed {</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x">    if ($node instanceof LeafNode) {</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x">        return null;</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="x">    }</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="x">    $node-&gt;getChildren();   // Method 'getChildren' not found on class 'NodeInterface'</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>@psalm-inheritors</code> and <code>@phpstan-sealed</code> list every class that may extend
 or implement the type. Once a guard rules out all but one, the subject is

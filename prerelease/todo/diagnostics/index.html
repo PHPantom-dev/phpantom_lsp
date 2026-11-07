@@ -1100,6 +1100,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d49-a-param-that-leaves-out-the-null-its-nullable-hint-allows-is-not-hinted" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D49. A <code>@param</code> that leaves out the <code>null</code> its nullable hint allows is not hinted
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1730,6 +1741,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d49-a-param-that-leaves-out-the-null-its-nullable-hint-allows-is-not-hinted" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D49. A <code>@param</code> that leaves out the <code>null</code> its nullable hint allows is not hinted
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2184,6 +2206,32 @@ reports the clause itself. With a diagnostic for it, PHPStan's fix (H24)
 would work without PHPStan.</p>
 <p>Only a body whose every call declares what it throws can rule a catch
 out, so this stays quiet wherever an undeclared call could throw anything.</p>
+<hr />
+<h2 id="d49-a-param-that-leaves-out-the-null-its-nullable-hint-allows-is-not-hinted">D49. A <code>@param</code> that leaves out the <code>null</code> its nullable hint allows is not hinted<a class="headerlink" href="#d49-a-param-that-leaves-out-the-null-its-nullable-hint-allows-is-not-hinted" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/**</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x"> * @param string $name</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x"> */</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">function greet(?string $name): void {}   // PhpStorm: PhpDocSignatureInspection</span>
+</code></pre></div>
+<p>PhpStorm marks a <code>@param</code> (or <code>@return</code>) whose type is narrower than a
+nullable native hint only by the <code>null</code>: the docblock says <code>string</code>, the
+signature accepts <code>null</code> too. It is a weak warning there, so PhpStorm users
+expect it out of the box. The conformance suite's
+<code>phpdoc_advanced_param_typehint_nullable_mismatch</code> test measures it, and it
+is the one test there that a competing IDE passes and PHPantom does not.</p>
+<p>This is a documentation-completeness hint, not a type error, and it must not
+change what the type engine reads. <code>src/diagnostics/docblock_native_mismatch.rs</code>
+deliberately stays silent on this pairing, since the native <code>null</code> carries
+over to the documented type the way PHPStan's <code>TypehintHelper::decideType</code>
+does, so <code>$name</code> keeps reading as <code>string|null</code>. Psalm and PHPStan maintainers
+both declined the check as cosmetic (psalm#3785, phpstan#6016).</p>
+<p><strong>Fix:</strong> Report it at <code>Hint</code> severity next to the existing check (same walk,
+opposite direction), only when the documented type differs from the hint by
+nothing but the missing <code>null</code>. A docblock that refines the hint
+(<code>@param non-empty-string</code> on <code>?string</code>) says something the hint does not
+and stays quiet (check what PhpStorm does there before deciding). Offer the "Update docblock" action
+as the quick fix to add the <code>|null</code>.</p>
 
 
 

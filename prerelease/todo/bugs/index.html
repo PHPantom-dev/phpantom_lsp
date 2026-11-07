@@ -951,6 +951,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b714-a-constant-written-into-an-array-in-a-loop-loses-its-literal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B714. A constant written into an array in a loop loses its literal
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1053,6 +1070,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B712. A used <code>void</code> result is judged by one member of a union
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b713-hover-shows-two-class-strings-that-share-a-short-name-as-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B713. Hover shows two <code>class-string</code>s that share a short name as one
       </span>
     </span>
   </a>
@@ -1653,6 +1681,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b714-a-constant-written-into-an-array-in-a-loop-loses-its-literal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B714. A constant written into an array in a loop loses its literal
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1755,6 +1800,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B712. A used <code>void</code> result is judged by one member of a union
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b713-hover-shows-two-class-strings-that-share-a-short-name-as-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B713. Hover shows two <code>class-string</code>s that share a short name as one
       </span>
     </span>
   </a>
@@ -1888,7 +1944,31 @@ matches PHP 8 throwing a <code>ValueError</code> on a negative.</p>
 <p>Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b714-a-constant-written-into-an-array-in-a-loop-loses-its-literal">B714. A constant written into an array in a loop loses its literal<a class="headerlink" href="#b714-a-constant-written-into-an-array-in-a-loop-loses-its-literal" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">private const int WHITE = 0;</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">/** @param array&lt;int, self::WHITE|self::GRAY|self::BLACK&gt; $labels */</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">private static function check(array $labels): void {}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">$labels = [];</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">foreach ($nodes as $node) {</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">    $labels[$node] = self::WHITE;</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">}</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">self::check($labels);</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">// Argument 1 ($labels) expects array&lt;int, 0|1|2&gt;, got array&lt;int, int&gt;</span>
+</code></pre></div>
+<p>The same write outside a loop keeps <code>array&lt;int, 0&gt;</code>, and PHPStan keeps
+the literal in the loop too. A keyed or appended write inside a loop body
+widens the value's scalar literals before storing it, so a fixed-point
+re-walk cannot grow a literal union (or a concatenated string) once per
+pass. That is only needed when the value changes from one pass to the
+next; a constant, or any value whose type the re-walk leaves unchanged,
+should keep its literal.</p>
+<p><strong>Where to look:</strong> the <code>in_loop</code> widening in
+<code>merge_nested_array_write_inner</code> and <code>pushed_value</code>
+(<code>src/type_engine/variable/array_shape_writes.rs</code>).</p>
+<p>Found by <code>analyze</code> on Vytrvalec Server (<code>App\Algorithm\Graph::hasCycle()</code>).</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
@@ -1900,13 +1980,13 @@ seconds a rate-limit message names.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first">B704. A function declared in two files resolves to whichever is found first<a class="headerlink" href="#b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function __() {}</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function __() {}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
 </code></pre></div>
 <p>WordPress core declares nineteen of its functions a second time as
 no-ops for its script loader. Calls across the project resolve to the
@@ -1925,11 +2005,11 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b712-a-used-void-result-is-judged-by-one-member-of-a-union">B712. A used <code>void</code> result is judged by one member of a union<a class="headerlink" href="#b712-a-used-void-result-is-judged-by-one-member-of-a-union" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @var LoggerInterface|ObjectProphecy */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">private $logger;</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">$this-&gt;logger-&gt;warning('x')-&gt;shouldBeCalled();</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">// Result of method LoggerInterface::warning() (void) is used</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @var LoggerInterface|ObjectProphecy */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">private $logger;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">$this-&gt;logger-&gt;warning('x')-&gt;shouldBeCalled();</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">// Result of method LoggerInterface::warning() (void) is used</span>
 </code></pre></div>
 <p>The call's result is <code>null</code> only if every class the receiver can be
 returns nothing. <code>ObjectProphecy</code> answers the call through <code>__call</code>,
@@ -1943,7 +2023,23 @@ member that answers it, through a declared method or <code>__call</code>, is nat
 (<code>src/diagnostics/void_results.rs</code>), which reads <code>native_void</code> off the
 single target <code>resolve_callable_target_at_offset</code> returns.</p>
 <p>Found by <code>analyze</code> on Drupal core's Prophecy-based tests.</p>
-<p>No outstanding items.</p>
+<h3 id="b713-hover-shows-two-class-strings-that-share-a-short-name-as-one">B713. Hover shows two <code>class-string</code>s that share a short name as one<a class="headerlink" href="#b713-hover-shows-two-class-strings-that-share-a-short-name-as-one" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">namespace App;</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">/** @param class-string&lt;\App\C&gt;|class-string&lt;\Other\C&gt; $s */</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">function foo(string $s): void {</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">    $s; // hover: $s = class-string&lt;C&gt;</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>Hover shortens every class name in a type to its short name, so the two
+members print the same and the union shows one of them. A union of the
+classes themselves does not have this problem: each gets its own block
+under its namespace. The same collapse hides <code>C::class|E::class</code> with <code>E</code>
+an import of another namespace's <code>C</code>, which is why that assertion in
+<code>tests/psalm_assertions/const_values.php</code> is skipped.</p>
+<p><strong>Where to look:</strong> <code>shorten_php_type</code> (<code>src/hover/formatting.rs</code>), which
+shortens before the union is printed.</p>
 
 
 
