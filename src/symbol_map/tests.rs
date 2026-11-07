@@ -5995,3 +5995,32 @@ fn an_environment_variable_is_read_from_both_spellings() {
         );
     }
 }
+
+/// Two body-less declarations opening no scope of their own still own their
+/// parameters: each takes the first definition of the name that follows its
+/// own name token, not the other's.
+#[test]
+fn function_parameter_definition_distinguishes_body_less_declarations() {
+    let php = "<?php\ninterface A { public function m(string $x): void; }\nabstract class B { abstract public function n(int $x): int; }\n";
+    let map = parse_and_extract(php);
+
+    let declarations: Vec<u32> = php
+        .match_indices("function ")
+        .map(|(offset, token)| offset as u32 + token.len() as u32)
+        .collect();
+    let parameters: Vec<u32> = php
+        .match_indices("$x")
+        .map(|(offset, _)| offset as u32)
+        .collect();
+    assert_eq!(declarations.len(), 2, "both declarations found");
+    assert_eq!(parameters.len(), 2, "both parameters found");
+
+    for (declaration, parameter) in declarations.iter().zip(&parameters) {
+        assert_eq!(
+            map.function_parameter_definition(*declaration, "x")
+                .map(|def| def.offset),
+            Some(*parameter),
+            "the declaration at byte {declaration} owns the parameter at byte {parameter}"
+        );
+    }
+}

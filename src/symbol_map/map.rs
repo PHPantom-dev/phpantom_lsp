@@ -485,22 +485,37 @@ impl SymbolMap {
         Some(self.named_function_bodies[index].1)
     }
 
-    /// The parameter named `name` (without its `$`) of the function whose body
-    /// starts at `body_start`.
+    /// The indices into [`Self::var_defs`] of every definition of `name` in
+    /// the scope that opens at `scope_start`, in source order.
     ///
-    /// PHP allows one parameter of a name per function-like, so the run of
-    /// definitions of that name in that scope holds at most one.
-    pub(crate) fn parameter_in_scope(&self, body_start: u32, name: &str) -> Option<&VarDefSite> {
+    /// `var_defs_by_name` is sorted by `(scope_start, name, offset)`, so the
+    /// definitions of one name in one scope are one contiguous run, already
+    /// ordered by offset: the binary search finds where it starts, and the
+    /// run itself is read forward from there.
+    fn var_def_run(&self, scope_start: u32, name: &str) -> &[u32] {
         let key = |index: &u32| {
             let def = &self.var_defs[*index as usize];
             (def.scope_start, def.name.as_str())
         };
         let first = self
             .var_defs_by_name
-            .partition_point(|index| key(index) < (body_start, name));
-        self.var_defs_by_name[first..]
+            .partition_point(|index| key(index) < (scope_start, name));
+        let rest = &self.var_defs_by_name[first..];
+        let len = rest
             .iter()
-            .take_while(|index| key(index) == (body_start, name))
+            .take_while(|index| key(index) == (scope_start, name))
+            .count();
+        &rest[..len]
+    }
+
+    /// The parameter named `name` (without its `$`) of the function whose body
+    /// starts at `body_start`.
+    ///
+    /// PHP allows one parameter of a name per function-like, so the run of
+    /// definitions of that name in that scope holds at most one.
+    pub(crate) fn parameter_in_scope(&self, body_start: u32, name: &str) -> Option<&VarDefSite> {
+        self.var_def_run(body_start, name)
+            .iter()
             .map(|&index| &self.var_defs[index as usize])
             .find(|def| def.kind == VarDefKind::Parameter)
     }
@@ -528,11 +543,11 @@ impl SymbolMap {
         if body_start != 0 {
             return self.parameter_in_scope(body_start, name);
         }
-        self.var_defs
+        self.var_def_run(0, name)
             .iter()
-            .filter(|def| def.kind == VarDefKind::Parameter && def.scope_start == 0)
-            .filter(|def| def.name == name && def.offset > name_offset)
-            .min_by_key(|def| def.offset)
+            .map(|&index| &self.var_defs[index as usize])
+            .filter(|def| def.kind == VarDefKind::Parameter)
+            .find(|def| def.offset > name_offset)
     }
 
     /// Whether the label at `span_index` is written at a call that constructs
@@ -738,16 +753,9 @@ impl SymbolMap {
         // Prefer the most recent one, but if a shallower (outer) definition
         // exists, prefer it over a deeper (conditional) one when the cursor
         // is outside the conditional block.
-        let key = |&i: &u32| {
-            let d = &self.var_defs[i as usize];
-            (d.scope_start, d.name.as_str())
-        };
-        let first = self
-            .var_defs_by_name
-            .partition_point(|i| key(i) < (scope_start, var_name));
-        let run = self.var_defs_by_name[first..]
+        let run = self
+            .var_def_run(scope_start, var_name)
             .iter()
-            .take_while(|i| key(i) == (scope_start, var_name))
             .map(|&i| &self.var_defs[i as usize]);
 
         let mut best: Option<&VarDefSite> = None;

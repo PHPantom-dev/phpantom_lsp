@@ -17,12 +17,6 @@ use mago_syntax::cst::{
 use crate::atom::bytes_to_str;
 use crate::types::ParameterInfo;
 
-/// Strip the leading `$` from a parameter name (e.g. `"$text"` → `"text"`).
-fn param_name_bare(param: &ParameterInfo) -> &str {
-    let name = param.name.as_str();
-    name.strip_prefix('$').unwrap_or(name)
-}
-
 /// For each parameter in `params`, find the call argument that supplies it.
 ///
 /// PHP binding rules: positional arguments fill parameters left to right;
@@ -59,7 +53,7 @@ pub(crate) fn bind_args_to_params<'b>(
             }
             Argument::Named(named) => {
                 let name = bytes_to_str(named.name.value);
-                if let Some(idx) = params.iter().position(|p| param_name_bare(p) == name) {
+                if let Some(idx) = params.iter().position(|p| p.bare_name() == name) {
                     bound[idx] = Some(named.value);
                 }
             }
@@ -107,7 +101,7 @@ pub(crate) fn resolve_declared_arg_indices(
             }
             Argument::Named(named) => {
                 let name = bytes_to_str(named.name.value);
-                params.iter().position(|p| param_name_bare(p) == name)
+                params.iter().position(|p| p.bare_name() == name)
             }
         })
         .collect()
@@ -214,7 +208,7 @@ pub(crate) fn bind_text_args_to_params(
                 next_positional += 1;
             }
             Some(n) => {
-                if let Some(idx) = params.iter().position(|p| param_name_bare(p) == n) {
+                if let Some(idx) = params.iter().position(|p| p.bare_name() == n) {
                     bound[idx] = Some(value.to_string());
                 }
             }
@@ -388,7 +382,7 @@ pub(crate) fn partial_application_params(
                 open.extend((0..params.len()).filter(|&i| !taken[i]));
                 break;
             }
-            (Some(name), _) => params.iter().position(|p| param_name_bare(p) == name),
+            (Some(name), _) => params.iter().position(|p| p.bare_name() == name),
             (None, _) => {
                 let at = position.min(params.len().saturating_sub(1));
                 position += 1;
@@ -428,7 +422,7 @@ pub(crate) fn missing_required_params<'a>(
                 return false;
             }
             let filled_positionally = (*idx as u32) < positional_count;
-            let filled_by_name = named_arg_names.clone().any(|n| n == param_name_bare(p));
+            let filled_by_name = named_arg_names.clone().any(|n| n == p.bare_name());
             !filled_positionally && !filled_by_name
         })
         .map(|(_, p)| p.name.to_string())

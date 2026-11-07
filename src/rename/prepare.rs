@@ -131,6 +131,18 @@ impl Backend {
             return None;
         }
 
+        // A label whose parameter the engine reads but cannot show — one at a
+        // built-in an embedded stub describes — has no declaration for the
+        // rename to start from, so offering it would enter rename mode only to
+        // produce no edits, as references from such a label are empty.
+        if let SymbolKind::NamedArgument { .. } = &span.kind
+            && !self
+                .named_argument_location(uri, content, &span)
+                .is_some_and(|declaration| declaration.name_token.is_some())
+        {
+            return None;
+        }
+
         // Namespace rename: offer the full namespace so the user can edit
         // multiple segments at once.
         if let SymbolKind::NamespaceDeclaration { ref name } = span.kind {
