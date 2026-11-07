@@ -10096,11 +10096,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 1025.2,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 46.1,
             "unit": "MiB"
@@ -10149,11 +10144,6 @@ window.BENCHMARK_DATA = {
         "date": 1793917263781,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 424.8,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 44.7,
@@ -10204,11 +10194,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 316.4,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 45.5,
             "unit": "MiB"
@@ -10257,11 +10242,6 @@ window.BENCHMARK_DATA = {
         "date": 1793928246708,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 276.8,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 42.8,
@@ -10312,11 +10292,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 513.8,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 46.1,
             "unit": "MiB"
@@ -10365,11 +10340,6 @@ window.BENCHMARK_DATA = {
         "date": 1793929984127,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 272.8,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 47.7,
@@ -10420,11 +10390,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 606.4,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 46,
             "unit": "MiB"
@@ -10473,11 +10438,6 @@ window.BENCHMARK_DATA = {
         "date": 1793968527551,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 444.1,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 46,
@@ -10528,11 +10488,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 445.7,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 42.1,
             "unit": "MiB"
@@ -10581,11 +10536,6 @@ window.BENCHMARK_DATA = {
         "date": 1793971530116,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 271.7,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 45.6,
@@ -10636,11 +10586,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 595.4,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 46.7,
             "unit": "MiB"
@@ -10689,11 +10634,6 @@ window.BENCHMARK_DATA = {
         "date": 1793981433670,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 516.7,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 46,
@@ -10744,11 +10684,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 470.5,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 44.9,
             "unit": "MiB"
@@ -10797,11 +10732,6 @@ window.BENCHMARK_DATA = {
         "date": 1793984782623,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 273.1,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 45.1,
@@ -10852,11 +10782,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 604.9,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 46.7,
             "unit": "MiB"
@@ -10905,11 +10830,6 @@ window.BENCHMARK_DATA = {
         "date": 1793991090090,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 280.3,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 46.3,
@@ -10960,11 +10880,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 601.7,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 45.9,
             "unit": "MiB"
@@ -11013,11 +10928,6 @@ window.BENCHMARK_DATA = {
         "date": 1794001270603,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 489.4,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 45.3,
@@ -11068,11 +10978,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 554.1,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 48,
             "unit": "MiB"
@@ -11121,11 +11026,6 @@ window.BENCHMARK_DATA = {
         "date": 1794004176325,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 279.8,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 46.7,
@@ -11176,11 +11076,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 433.1,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 47.1,
             "unit": "MiB"
@@ -11229,11 +11124,6 @@ window.BENCHMARK_DATA = {
         "date": 1794009363568,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 583.7,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 46.7,
@@ -11284,11 +11174,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 282,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 46.4,
             "unit": "MiB"
@@ -11337,11 +11222,6 @@ window.BENCHMARK_DATA = {
         "date": 1794018704367,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 626.3,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 43.4,
@@ -11392,11 +11272,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 435.1,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 45.6,
             "unit": "MiB"
@@ -11445,11 +11320,6 @@ window.BENCHMARK_DATA = {
         "date": 1794022572146,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 277.8,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 46.5,
@@ -11500,11 +11370,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 277.8,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 47.4,
             "unit": "MiB"
@@ -11553,11 +11418,6 @@ window.BENCHMARK_DATA = {
         "date": 1794060133134,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 282,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 45.9,
@@ -11608,11 +11468,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 443.9,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 47.1,
             "unit": "MiB"
@@ -11662,11 +11517,6 @@ window.BENCHMARK_DATA = {
         "tool": "customSmallerIsBetter",
         "benches": [
           {
-            "name": "memory_drupal_module",
-            "value": 333.4,
-            "unit": "MiB"
-          },
-          {
             "name": "memory_hello_world",
             "value": 47.1,
             "unit": "MiB"
@@ -11715,11 +11565,6 @@ window.BENCHMARK_DATA = {
         "date": 1794068582550,
         "tool": "customSmallerIsBetter",
         "benches": [
-          {
-            "name": "memory_drupal_module",
-            "value": 287.9,
-            "unit": "MiB"
-          },
           {
             "name": "memory_hello_world",
             "value": 46.7,
