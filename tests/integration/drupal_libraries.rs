@@ -437,7 +437,7 @@ fn unknown_libraries(
 fn reported(found: &[(&str, u32)]) -> Vec<(String, u32)> {
     found
         .iter()
-        .map(|(name, line)| (format!("Unknown library: '{name}'"), *line))
+        .map(|(name, line)| (format!("Unknown library '{name}'"), *line))
         .collect()
 }
 

@@ -122,6 +122,22 @@ Example:
 - **`analyze` takes more than one path.** `phpantom_lsp analyze app/ lib/Helper.php tests/` checks everything named, so a pre-commit hook or CI step can pass only the changed files.
 ```
 
+## Diagnostic messages
+
+A diagnostic's message is the text users read most, in the editor and in CI logs, so every check writes it the same way. Where PHP itself reports the same mistake at runtime, use PHP's wording (`Cannot instantiate interface App\Shape`, `Undefined variable $total`).
+
+- Write one sentence that starts with a capital letter and has no final period. PHP's short form also counts: an adjective, the kind, and the name (`Unused import App\Models\User`, `Unknown middleware 'auth.admin'`). Don't write a label and a colon (`Dead catch: …`), and don't start with a name, a `$`, or an `@`; lead with its kind instead (`Method …`, `Directive @if …`).
+- Write a name the way PHP code spells it, without quotes: classes fully qualified and without a leading backslash (`App\Models\User`), functions with `()` (`App\helper()`), and members on their class whenever it is known: `User::save()`, `User::$name`, `User::MAX`. Variables and parameters keep their `$`.
+- Call each kind of thing by its name: a constant is a constant, not a member. When two checks report the same fact, they use the same words.
+- Put a value written in the code as a string in single quotes, the way PHP writes the literal: route, view, config, and translation keys, array keys, option names (`Unknown view 'emails.welcome'`). A token from a parser goes in single quotes too (`Unexpected token '}'`).
+- Write types the way a docblock does, without quotes (`int`, `array<string, User>`, `?string`).
+- Report a type mismatch as `… expects X, got Y`, with what was expected first: `Argument 1 ($id) expects int, got string`, `Property App\User::$name expects string, got null`, `Return expects int, got string`. Extra detail goes in parentheses at the end.
+- Add a clause that says what to do only when there is one obvious fix, after a semicolon: `Readonly property App\Point::$x is never initialized; assign it in the constructor`.
+- Say what is wrong in plain words rather than the vocabulary of the PHP RFCs (`Nothing in the try block throws App\NotFound`, not `Dead catch`). No em-dashes.
+- Text quoted from the user's code, such as the reason in an `@deprecated` tag, follows a colon as written, without its final period. Messages from PHPStan, PHPCS, PHPMD, and Mago are passed on as the tool wrote them.
+
+The [Diagnostics Reference](diagnostics.md) lists every identifier; a new check adds its row there.
+
 ## Documentation
 
 The documentation site is built with [Zensical](https://zensical.org/).

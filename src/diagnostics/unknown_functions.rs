@@ -188,7 +188,7 @@ impl Backend {
                 None => continue,
             };
 
-            let message = format!("Function '{}' not found", name);
+            let message = format!("Function {}() not found", name.trim_start_matches('\\'));
 
             out.push(make_diagnostic(
                 range,

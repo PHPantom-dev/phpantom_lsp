@@ -115,7 +115,7 @@ impl Backend {
                 range,
                 DiagnosticSeverity::Warning,
                 VOID_RESULT_USED_CODE,
-                format!("Result of {callee} (void) is used"),
+                format!("Result of {callee} is used, but it returns void"),
             ));
         }
     }

@@ -112,9 +112,7 @@ impl Backend {
                 range,
                 DiagnosticSeverity::Warning,
                 DISCARDED_RETURN_VALUE_CODE,
-                format!(
-                    "The return value of {callee} should either be used or intentionally ignored by casting it as (void)"
-                ),
+                format!("Result of {callee} must be used; cast the call to (void) to discard it"),
             ));
         }
     }

@@ -149,8 +149,8 @@ impl Backend {
                         "View '{}' expects ${} of type {}, got {}",
                         view_name,
                         var.name,
-                        declared.conditionals_as_branch_unions(),
-                        var.ty,
+                        super::helpers::shown_type(&declared.conditionals_as_branch_unions()),
+                        super::helpers::shown_type(&var.ty),
                     ),
                 ));
             }
@@ -220,7 +220,9 @@ impl Backend {
                         MISSING_CODE,
                         format!(
                             "View '{}' expects ${} of type {}, which is not passed",
-                            view_name, name, ty,
+                            view_name,
+                            name,
+                            super::helpers::shown_type(ty),
                         ),
                     ));
                 }
@@ -302,11 +304,11 @@ impl Backend {
             DiagnosticSeverity::Error,
             TYPE_MISMATCH_CODE,
             format!(
-                "View '{}' expects ${} of type {}, but {} given by the surrounding scope",
+                "View '{}' expects ${} of type {}, got {} from the surrounding scope",
                 view_name,
                 name,
-                declared.conditionals_as_branch_unions(),
-                actual,
+                super::helpers::shown_type(&declared.conditionals_as_branch_unions()),
+                super::helpers::shown_type(&actual),
             ),
         ));
     }

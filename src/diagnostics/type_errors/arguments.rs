@@ -855,7 +855,7 @@ impl ArgumentCheck<'_> {
                 range,
                 DiagnosticSeverity::Warning,
                 "invalid_laravel_view",
-                format!("Unknown view: '{view}'"),
+                format!("Unknown view '{view}'"),
             ));
         }
         true
@@ -892,9 +892,9 @@ impl ArgumentCheck<'_> {
                     DiagnosticSeverity::Error,
                     TYPE_MISMATCH_ARGUMENT_CODE,
                     format!(
-                        "'{}' is not a known property of {}",
+                        "Property {}::${} not found",
+                        model_fqn.trim_start_matches('\\'),
                         lit,
-                        crate::util::short_name(&model_fqn),
                     ),
                 ));
             }
@@ -991,7 +991,7 @@ impl ArgumentCheck<'_> {
         // rather than as the absence of one, so say what the call
         // site actually did.
         if arg_type.is_void() {
-            message.push_str(" (the expression returns no value)");
+            message.push_str(" (from a call that returns nothing)");
         }
         // Two shapes that differ by a key the developer forgot
         // read as two long type expressions to diff by eye. Name

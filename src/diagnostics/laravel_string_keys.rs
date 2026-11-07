@@ -966,7 +966,7 @@ impl Backend {
                     range,
                     DiagnosticSeverity::Warning,
                     "invalid_command_parameter",
-                    format!("Unknown command {}: '{}'", label, name),
+                    format!("Unknown command {label} '{name}'"),
                 ));
             }
         }
@@ -1058,7 +1058,7 @@ impl Backend {
         for &(kind, key, start, end) in &key_spans {
             // An ability is judged against the model the check names, so
             // it reports which model rather than the shared
-            // "Unknown <kind>: '<key>'" message the others share.
+            // "Unknown <kind> '<key>'" message the others share.
             if kind == CheckedStringKind::GateAbility {
                 if !declared.gate_abilities.is_empty()
                     && let Some(message) = self.gate_ability_problem(
@@ -1089,10 +1089,10 @@ impl Backend {
                 // domain.
                 let message = match kind {
                     CheckedStringKind::YiiView => {
-                        format!("Unknown {}: '{}'", label, self.yii_view_display(key))
+                        format!("Unknown {} '{}'", label, self.yii_view_display(key))
                     }
                     CheckedStringKind::YiiRouteArgument => format!(
-                        "Unknown {}: '{}'",
+                        "Unknown {} '{}'",
                         label,
                         crate::yii::routes::split_route_argument_key(key).1
                     ),
@@ -1106,16 +1106,16 @@ impl Backend {
                             })
                             .unwrap_or_else(|| method.to_string());
                         format!(
-                            "Unknown {label}: '{name}' is not a parameter of {}::{method}()",
-                            crate::util::short_name(class)
+                            "Method {}::{method}() has no parameter ${name}",
+                            class.trim_start_matches('\\')
                         )
                     }
                     CheckedStringKind::SymfonyTranslation => {
                         let (domain, message) =
                             crate::symfony::translations::split_translation_key(key);
-                        format!("Unknown {label}: '{message}' in domain '{domain}'")
+                        format!("Unknown {label} '{message}' in domain '{domain}'")
                     }
-                    _ => format!("Unknown {}: '{}'", label, key),
+                    _ => format!("Unknown {label} '{key}'"),
                 };
                 out.push(helpers::make_diagnostic(
                     range,
@@ -1161,9 +1161,9 @@ impl Backend {
                 return None;
             }
             return Some(format!(
-                "Ability '{}' is not defined for '{}' (policy {})",
+                "Ability '{}' is not defined for {} by policy {}",
                 ability,
-                model_fqn,
+                model_fqn.trim_start_matches('\\'),
                 policy.fqn()
             ));
         }
@@ -1174,7 +1174,7 @@ impl Backend {
         {
             return None;
         }
-        Some(format!("Unknown ability: '{}'", ability))
+        Some(format!("Unknown ability '{ability}'"))
     }
 
     /// The FQN of the model a gate check named, when the symbol map recorded

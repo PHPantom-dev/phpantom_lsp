@@ -496,7 +496,7 @@ mod tests {
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("unknown_class".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Class 'Foo' not found".to_string().into(),
+            message: "Class Foo not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan.clone(), precise.clone()];
@@ -599,7 +599,7 @@ mod tests {
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("unknown_class".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Class 'Bar' not found".to_string().into(),
+            message: "Class Bar not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan.clone(), precise_other_line.clone()];
@@ -625,7 +625,7 @@ mod tests {
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("unknown_class".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Class 'Foo' not found".to_string().into(),
+            message: "Class Foo not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan_precise.clone(), native_precise.clone()];

@@ -52,13 +52,13 @@ impl BlockImbalance for Imbalance {
             }
             Imbalance::Unexpected { found, opener, .. } => (
                 UNEXPECTED_CODE,
-                format!("@{found} closes nothing: no @{opener} is open here"),
+                format!("Closing directive @{found} has no open @{opener} to close"),
             ),
             Imbalance::Unclosed {
                 opener, expected, ..
             } => (
                 UNCLOSED_CODE,
-                format!("@{opener} is never closed: this block needs a matching @{expected}"),
+                format!("Directive @{opener} is never closed; close it with @{expected}"),
             ),
         }
     }

@@ -43,7 +43,7 @@ class CurrencyHelper {\n\
         diags
             .into_iter()
             .map(|d| message_text(&d.message).to_string())
-            .filter(|m| !m.contains("Function 'e' not found"))
+            .filter(|m| !m.contains("Function e() not found"))
             .collect()
     }
 
@@ -88,7 +88,7 @@ class CurrencyHelper {\n\
         .await;
         assert_eq!(
             diags,
-            vec!["Method 'noSuchMethod' not found on class 'App\\Helpers\\CurrencyHelper'"],
+            vec!["Method App\\Helpers\\CurrencyHelper::noSuchMethod() not found"],
             "$money must resolve to the imported class"
         );
     }
@@ -98,7 +98,7 @@ class CurrencyHelper {\n\
     #[tokio::test]
     async fn an_unimported_short_name_is_still_unknown() {
         let diags = diagnose("{{ CurrencyHelper::formatPrice(1) }}\n").await;
-        assert_eq!(diags, vec!["Class 'CurrencyHelper' not found"]);
+        assert_eq!(diags, vec!["Class CurrencyHelper not found"]);
     }
 
     /// A `use` inside a template must not shift the mapping between Blade
@@ -199,7 +199,7 @@ class CurrencyHelper {\n\
         assert_eq!(diags.len(), 1, "{:?}", diags);
         assert_eq!(
             message_text(&diags[0].message),
-            "Unused import 'App\\Helpers\\CurrencyHelper'"
+            "Unused import App\\Helpers\\CurrencyHelper"
         );
         assert_eq!(
             diags[0].range,
@@ -217,7 +217,7 @@ class CurrencyHelper {\n\
         assert_eq!(diags.len(), 1, "{:?}", diags);
         assert_eq!(
             message_text(&diags[0].message),
-            "Unused import 'App\\Helpers\\DateHelper'"
+            "Unused import App\\Helpers\\DateHelper"
         );
         assert_eq!(diags[0].range, range_of(view, "DateHelper as Dates"));
     }

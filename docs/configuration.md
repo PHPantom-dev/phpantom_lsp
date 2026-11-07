@@ -55,11 +55,34 @@ those still need a restart to fully apply.
 
 The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/phpantom_lsp/blob/main/config-schema.json).
 
+#### Compatibility
+
+From 1.0, the configuration format is stable: a key that works in one
+1.x release keeps working, with the same meaning, in every later 1.x
+release. New keys and sections can be added, and a new key's default is
+chosen so that a config written for an earlier release behaves the same.
+The same promise covers the [diagnostic identifiers](diagnostics.md)
+that `[[diagnostics.ignore]]` and `@phpantom-ignore` match on. The
+wording of a diagnostic's message is not covered and can be improved in
+any release, so prefer `identifier` over `message` in an ignore rule
+that has to keep working.
+
+The schema a generated `.phpantom.toml` points at is served from the
+`main` branch, so it always describes the newest release. An editor may
+therefore offer a key your installed version does not know yet; check
+the [changelog](CHANGELOG.md) when a setting seems to have no effect.
+
 ### `[php]`
 
 | Key       | Type   | Default                     | Description |
 | --------- | ------ | --------------------------- | ----------- |
 | `version` | string | Inferred from composer.json | Override the detected PHP version (e.g. `"8.3"`). |
+
+PHPantom understands PHP syntax up to 8.5. The version, taken from the
+`php` requirement in `composer.json` when this key is unset and 8.5
+when neither says, decides which built-in functions, classes, and
+constants exist, and which version-specific diagnostics and code
+actions apply.
 
 ### `[diagnostics]`
 
@@ -93,8 +116,32 @@ path = "tests/**"
 
 [[diagnostics.ignore]]
 identifier = "deprecated_usage"
-message = "^Call to deprecated function some_legacy_helper\\(\\)"
+message = "^Function some_legacy_helper\\(\\) is deprecated"
 ```
+
+The identifiers are listed in the [Diagnostics Reference](diagnostics.md).
+
+#### Inline suppression
+
+To silence one diagnostic where it happens rather than project-wide, put
+an `@phpantom-ignore` comment on the same line, or on its own line just
+above:
+
+```php
+$legacy->magicCall(); // @phpantom-ignore unknown_member
+
+// @phpantom-ignore unused_variable, deprecated_usage
+$unused = some_legacy_helper();
+
+/* @phpantom-ignore */
+$everything->on($this, 'line');
+```
+
+List one or more identifiers, separated by commas, to suppress only
+those. Leave them out to suppress every diagnostic on the line. A
+comment applies to the line a diagnostic starts on, and it covers
+diagnostics from external tools (PHPStan, PHPCS, PHPMD, Mago) shown in
+the editor as well as PHPantom's own. `analyze` honours it too.
 
 ### `[indexing]`
 

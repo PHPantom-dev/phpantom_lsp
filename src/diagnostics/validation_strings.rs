@@ -64,7 +64,7 @@ impl Backend {
                                 range,
                                 DiagnosticSeverity::Warning,
                                 "invalid_validation_rule",
-                                format!("Unknown validation rule '{name}'."),
+                                format!("Unknown validation rule '{name}'"),
                             ));
                         }
                     }
@@ -93,7 +93,7 @@ impl Backend {
                             range,
                             DiagnosticSeverity::Warning,
                             "invalid_validation_message",
-                            format!("Unknown validation field or rule in '{key}'."),
+                            format!("Unknown validation field or rule in '{key}'"),
                         ));
                     }
                 }

@@ -263,8 +263,7 @@ impl Backend {
                             reported.push((
                                 run.start,
                                 run.end,
-                                format!("Undefined DQL variable '{alias}', used by {method}()")
-                                    .into(),
+                                format!("Undefined DQL variable '{alias}' in {method}()").into(),
                                 UNKNOWN_DQL_VARIABLE_CODE,
                             ));
                         }

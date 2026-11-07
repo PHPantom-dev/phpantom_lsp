@@ -282,7 +282,7 @@ async fn diagnostics(body: &str) -> Vec<String> {
 }
 
 fn unmapped(field: &str, entity: &str) -> String {
-    format!("Field '{field}' is not mapped on entity 'App\\Entity\\{entity}'")
+    format!("Field '{field}' is not mapped on entity App\\Entity\\{entity}")
 }
 
 #[tokio::test]
@@ -297,7 +297,7 @@ async fn a_query_reports_unmapped_fields_and_unknown_entities() {
     assert_eq!(
         messages,
         vec![
-            "Class 'App\\Entity\\Missing' not found".to_string(),
+            "Class App\\Entity\\Missing not found".to_string(),
             unmapped("plainPassword", "User"),
             unmapped("size", "Team"),
             unmapped("nope", "Team"),
@@ -639,7 +639,10 @@ async fn syntax_errors(body: &str) -> Vec<(String, String)> {
 }
 
 fn pair(covered: &str, message: &str) -> (String, String) {
-    (covered.to_string(), format!("DQL syntax error: {message}"))
+    let expected = message
+        .strip_prefix("expected ")
+        .expect("every case states what was expected");
+    (covered.to_string(), format!("DQL expects {expected}"))
 }
 
 #[tokio::test]
@@ -1221,7 +1224,7 @@ async fn a_variable_another_method_declares_counts_only_on_the_paths_that_call_i
 fn undefined_in_run(alias: &str, method: &str) -> (String, String) {
     (
         "getQuery".to_string(),
-        format!("Undefined DQL variable '{alias}', used by {method}()"),
+        format!("Undefined DQL variable '{alias}' in {method}()"),
     )
 }
 

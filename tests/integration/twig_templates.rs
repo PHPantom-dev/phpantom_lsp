@@ -222,7 +222,7 @@ async fn only_missing_names_of_a_template_extension_are_reported() {
         .collect();
     assert_eq!(
         reported,
-        vec!["Unknown template: 'missing.html'".to_string()]
+        vec!["Unknown template 'missing.html'".to_string()]
     );
 }
 

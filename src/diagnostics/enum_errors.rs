@@ -56,13 +56,13 @@ impl Backend {
             let backed = class_info.backed_type.is_some();
 
             for case in &enum_cases {
-                let (enum_name, case_name) = (&class_info.name, &case.name);
+                let (enum_name, case_name) = (class_info.fqn(), &case.name);
                 let message = match (backed, case.enum_value.is_some()) {
                     (true, false) => format!(
-                        "Enum case '{enum_name}::{case_name}' must have a value, enum '{enum_name}' is a backed enum"
+                        "Enum case {enum_name}::{case_name} must have a value, because {enum_name} is a backed enum"
                     ),
                     (false, true) => format!(
-                        "Enum case '{enum_name}::{case_name}' must not have a value, enum '{enum_name}' is not a backed enum"
+                        "Enum case {enum_name}::{case_name} must not have a value, because {enum_name} is not a backed enum"
                     ),
                     _ => continue,
                 };
@@ -135,10 +135,7 @@ fn detect_invalid_backing_type(
         range,
         DiagnosticSeverity::Error,
         "invalid_enum_backing_type",
-        format!(
-            "Enum backing type must be 'int' or 'string', got '{}'",
-            type_name
-        ),
+        format!("Enum backing type must be int or string, got {}", type_name),
     ));
     true
 }
@@ -173,8 +170,10 @@ fn check_duplicate_values(
                 DiagnosticSeverity::Error,
                 "invalid_enum_case",
                 format!(
-                    "Duplicate value {} in enum '{}': case '{}' and case '{}' share the same value",
-                    value, class_info.name, case.name, first_name
+                    "Enum cases {enum_name}::{first_name} and {enum_name}::{} have the same value {}",
+                    case.name,
+                    value,
+                    enum_name = class_info.fqn(),
                 ),
             ));
         } else {

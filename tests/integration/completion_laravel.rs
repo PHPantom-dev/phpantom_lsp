@@ -9020,7 +9020,7 @@ async fn test_factory_model_property_resolves_single_model_returns_through_base(
     );
     assert_eq!(
         message_text(&return_mismatches[0].message),
-        "Return type App\\Models\\Documents\\Draft is incompatible with declared return type Database\\Factories\\DraftFactory",
+        "Return expects Database\\Factories\\DraftFactory, got App\\Models\\Documents\\Draft",
         "the mismatch should name the built model rather than Eloquent's base Model"
     );
 }

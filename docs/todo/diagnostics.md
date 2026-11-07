@@ -384,3 +384,66 @@ before the diagnostic runs, or a separate workspace-wide pass.
 
 **Where to look:** `src/diagnostics/unused_parameters.rs` (`can_be_overridden`)
 and `src/definition/implementation.rs` (`find_implementors`).
+
+---
+
+## D51. Settle the diagnostic identifiers before 1.0
+
+**Impact: Medium · Complexity: Low-Medium**
+
+From 1.0 the identifiers in the [Diagnostics Reference](../diagnostics.md)
+are a public interface: users write them into `[[diagnostics.ignore]]`,
+`@phpantom-ignore` comments, and `analyze --code`, so renaming one later
+silently re-enables every diagnostic it used to suppress. Review the
+full list once and rename what does not follow one scheme. The
+convention in `src/diagnostics/mod.rs` reserves `unknown_*` for
+symbols that could not be resolved and `invalid_*` for structural
+violations; the list does not keep to it:
+
+- **"Name not declared" has two prefixes.** Framework names use
+  `invalid_<framework>_*` (`invalid_laravel_route`), but
+  `unknown_form_option`, `unknown_constraint_option`,
+  `unknown_blade_component`, `unknown_livewire_component`,
+  `unknown_entity_field`, and `unknown_dql_variable` use `unknown_*`.
+- **The framework sits in different places.** A prefix in
+  `invalid_laravel_route`, the middle in `unknown_blade_component` and
+  `unclosed_blade_directive`, the start in
+  `blade_signature_widens_layout`. Some Laravel-only codes name no
+  framework at all (`invalid_command_parameter`,
+  `invalid_validation_rule`, `invalid_validation_message`), and the
+  Inertia page is `invalid_inertia_page` beside
+  `invalid_laravel_vite_asset`.
+- **Same word, two spellings.** `invalid_laravel_trans` vs
+  `invalid_symfony_translation`; `missing_view_variable` /
+  `unused_view_variable` vs `unrendered_blade_section` for the same
+  templates; Twig template names report as `invalid_symfony_template`
+  while filters and functions are `invalid_twig_*`.
+- **Word order.** `void_result_used` vs `discarded_return_value`.
+- **The member-access family.** `invalid_member_access` is about
+  visibility while `scalar_member_access` and `unresolved_member_access`
+  are about the subject's type, and `unknown_member` is also emitted when
+  the subject's class could not be resolved, which overlaps
+  `unresolved_member_access`.
+- **One code for two problems.** `uninitialized_property` covers both
+  "never initialized" and "read before anything writes it";
+  `unused_property` covers both "never read" and "only written";
+  `invalid_enum_case` covers a missing or extra value as well as a
+  duplicate one. Decide per pair whether a user would want to silence
+  one without the other.
+- **A broad name for a narrow check.** `incompatible_override` only
+  checks a parent's `static` return type. Either name it for that or
+  let it grow into the general override check.
+- **Severity.** `unknown_class` is a Warning while `unknown_function`
+  and `unknown_variable` are Errors.
+- **Names that look like identifiers but are not.** The `analyze`
+  timing labels `invalid_string_key`, `unused_private_member`,
+  `match_type_mismatch`, and `enum_error` read like codes, and an
+  ignore rule written with one matches nothing. The `fix` rule for
+  deprecated calls is `deprecated`, not `deprecated_usage`. Rename them
+  to match the codes they produce, or make it impossible to mistake them
+  for codes.
+
+Keep each old identifier working for the ignore rules, inline comments,
+and `--code` by mapping it to the new one (X20's warning hook can report
+the old spelling as deprecated), update the reference page, and list
+every rename in the changelog.

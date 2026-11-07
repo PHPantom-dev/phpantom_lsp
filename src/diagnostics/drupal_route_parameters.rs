@@ -83,7 +83,8 @@ impl Backend {
                         DiagnosticSeverity::Warning,
                         INVALID_DRUPAL_ROUTE_PARAMETER_CODE,
                         format!(
-                            "Drupal passes `${name}` the raw ID, which the `{hint}` hint rejects: no route that reaches this method upcasts it"
+                            "Drupal passes ${name} the raw ID, which its type {} rejects, because no route to this method upcasts it",
+                            hint.trim_start_matches('\\')
                         ),
                     ));
                 }

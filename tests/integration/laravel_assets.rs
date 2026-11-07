@@ -53,8 +53,8 @@ async fn a_missing_public_asset_is_reported() {
     assert_eq!(
         diagnostics(&backend, &uri, &caller, "invalid_laravel_asset"),
         vec![
-            "Unknown asset: 'css/missing.css'".to_string(),
-            "Unknown asset: 'js/missing.js'".to_string(),
+            "Unknown asset 'css/missing.css'".to_string(),
+            "Unknown asset 'js/missing.js'".to_string(),
         ]
     );
     let found = definitions_at(&backend, &uri, &caller, "css/app.css").await;
@@ -82,7 +82,7 @@ async fn a_mix_entry_is_checked_against_the_manifest() {
 
     assert_eq!(
         diagnostics(&backend, &uri, &caller, "invalid_laravel_mix_asset"),
-        vec!["Unknown Mix asset: 'js/admin.js'".to_string()]
+        vec!["Unknown Mix asset 'js/admin.js'".to_string()]
     );
     let found = definitions_at(&backend, &uri, &caller, "js/app.js").await;
     assert!(
@@ -111,7 +111,7 @@ async fn a_vite_entry_point_is_checked_against_the_source_files() {
 
     assert_eq!(
         diagnostics(&backend, &uri, &caller, "invalid_laravel_vite_asset"),
-        vec!["Unknown Vite asset: 'resources/images/missing.svg'".to_string()]
+        vec!["Unknown Vite asset 'resources/images/missing.svg'".to_string()]
     );
 
     let template = open_blade_template(&backend, "resources/views/layout.blade.php").await;
@@ -119,7 +119,7 @@ async fn a_vite_entry_point_is_checked_against_the_source_files() {
         .expect("template");
     assert_eq!(
         diagnostics(&backend, &template, &content, "invalid_laravel_vite_asset"),
-        vec!["Unknown Vite asset: 'resources/css/app.css'".to_string()]
+        vec!["Unknown Vite asset 'resources/css/app.css'".to_string()]
     );
 }
 
@@ -136,7 +136,7 @@ async fn an_inertia_page_is_checked_against_the_page_directories() {
 
     assert_eq!(
         diagnostics(&backend, &uri, &caller, "invalid_inertia_page"),
-        vec!["Unknown Inertia page: 'Users/Show'".to_string()]
+        vec!["Unknown Inertia page 'Users/Show'".to_string()]
     );
     let found = definitions_at(&backend, &uri, &caller, "Users/Index").await;
     assert!(

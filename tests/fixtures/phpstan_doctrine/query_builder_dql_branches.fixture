@@ -10,5 +10,5 @@
 // expect_diagnostic: 53: Undefined DQL variable 'p'
 // expect_diagnostic: 87: Undefined DQL variable 't'
 // expect_diagnostic: 102: Undefined DQL variable 't'
-// expect_diagnostic: 104: Field 'foo' is not mapped on entity 'PHPStan\Rules\Doctrine\ORM\MyEntity'
+// expect_diagnostic: 104: Field 'foo' is not mapped on entity PHPStan\Rules\Doctrine\ORM\MyEntity
 ---

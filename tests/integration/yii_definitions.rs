@@ -265,7 +265,7 @@ async fn a_definition_written_in_php_names_its_own_class() {
             WIDGET_PHP,
             "invalid_yii_definition_argument"
         ),
-        vec!["Unknown argument: 'titel' is not a parameter of Card::__construct()".to_string()]
+        vec!["Method App\\Blog\\Card::__construct() has no parameter $titel".to_string()]
     );
 }
 
@@ -309,9 +309,12 @@ async fn names_the_class_does_not_have_are_reported() {
     );
     unknown_members.sort();
     assert_eq!(unknown_members.len(), 2, "{unknown_members:?}");
-    assert!(unknown_members[0].contains("'nope'"), "{unknown_members:?}");
     assert!(
-        unknown_members[1].contains("'setLoger'"),
+        unknown_members[1].contains("::$nope "),
+        "{unknown_members:?}"
+    );
+    assert!(
+        unknown_members[0].contains("::setLoger("),
         "{unknown_members:?}"
     );
     assert_eq!(
@@ -323,7 +326,7 @@ async fn names_the_class_does_not_have_are_reported() {
             "invalid_yii_definition_argument"
         ),
         vec![
-            "Unknown argument: 'missing' is not a parameter of InMemoryPostRepository::__construct()"
+            "Method App\\Blog\\InMemoryPostRepository::__construct() has no parameter $missing"
                 .to_string()
         ]
     );

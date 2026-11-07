@@ -150,8 +150,8 @@ async fn an_unknown_element_name_is_reported() {
     assert_eq!(
         unknown_elements(&backend, &php, BUILDER),
         [
-            "Unknown render element: 'acme_crad'",
-            "Unknown render element: 'element_test_probe'",
+            "Unknown render element 'acme_crad'",
+            "Unknown render element 'element_test_probe'",
         ]
     );
 
@@ -159,7 +159,7 @@ async fn an_unknown_element_name_is_reported() {
     crate::common::open_php(&backend, &uri_for(&dir, PROBE_PATH), PROBE).await;
     assert_eq!(
         unknown_elements(&backend, &php, BUILDER),
-        ["Unknown render element: 'acme_crad'"]
+        ["Unknown render element 'acme_crad'"]
     );
 
     // Test code is not judged.

@@ -98,7 +98,7 @@ function slashed(): void {
         assert_eq!(diags.len(), 2, "got: {diags:?}");
         for d in &diags {
             assert_eq!(d.severity, Some(DiagnosticSeverity::Error));
-            assert!(message_text(&d.message).contains("Cannot instantiate interface 'App\\Shape'"));
+            assert!(message_text(&d.message).contains("Cannot instantiate interface App\\Shape"));
         }
         assert_eq!(diags[0].range.start, Position::new(5, 8));
         assert_eq!(diags[0].range.end, Position::new(5, 10));
@@ -449,7 +449,7 @@ function test() {
         );
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
-        assert!(message_text(&diags[0].message).contains("Enum"));
+        assert!(message_text(&diags[0].message).contains("enum Color"));
     }
 
     #[test]

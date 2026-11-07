@@ -189,7 +189,7 @@ async fn options_no_type_declares_are_reported() {
     let (backend, dir) = workspace(&files()).await;
     assert_eq!(
         unknown_options(&backend, &dir, "src/Form/RegistrationType.php", FORM_PHP),
-        vec!["Unknown form option 'requird' for EmailType".to_string()],
+        vec!["Unknown form option 'requird' for Symfony\\Component\\Form\\Extension\\Core\\Type\\EmailType".to_string()],
     );
     assert_eq!(
         unknown_options(
@@ -198,7 +198,7 @@ async fn options_no_type_declares_are_reported() {
             "src/Controller/SignupController.php",
             CONTROLLER_PHP
         ),
-        vec!["Unknown form option 'newsleter' for RegistrationType".to_string()],
+        vec!["Unknown form option 'newsleter' for App\\Form\\RegistrationType".to_string()],
     );
 }
 

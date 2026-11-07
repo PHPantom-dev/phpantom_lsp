@@ -70,10 +70,10 @@ namespace Tests\Feature {
     assert_eq!(
         collect(tests),
         vec![
-            "Missing call to parent::setUp()",
-            "Missing call to parent::tearDown()",
-            "Missing call to parent::setUpBeforeClass()",
-            "Missing call to parent::tearDownAfterClass()",
+            "This override does not call parent::setUp()",
+            "This override does not call parent::tearDown()",
+            "This override does not call parent::setUpBeforeClass()",
+            "This override does not call parent::tearDownAfterClass()",
         ]
     );
 }
@@ -121,7 +121,10 @@ namespace Tests\Feature {
     }
 }
 "#;
-    assert_eq!(collect(tests), vec!["Missing call to parent::setUp()"]);
+    assert_eq!(
+        collect(tests),
+        vec!["This override does not call parent::setUp()"]
+    );
 }
 
 /// `TestCase`'s own hooks are empty, an abstract one cannot be called,
@@ -181,5 +184,8 @@ namespace Tests\Unit {
     }
 }
 "#;
-    assert_eq!(collect(tests), vec!["Missing call to parent::setUp()"]);
+    assert_eq!(
+        collect(tests),
+        vec!["This override does not call parent::setUp()"]
+    );
 }

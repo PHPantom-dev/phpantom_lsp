@@ -249,23 +249,8 @@ phpantom_lsp analyze --debug -vv                 # trace file-by-file progress
 
 The analyze command reports the same diagnostics you see in your editor.
 Each has a rule identifier shown below the message, which is what `--code`
-and `--exclude-code` take. The most common ones are:
-
-| Identifier                | Severity | Description                                          |
-| ------------------------- | -------- | ---------------------------------------------------- |
-| `syntax_error`            | Error    | PHP parse errors                                     |
-| `unknown_class`           | Warning  | Class, interface, trait, or enum not resolvable      |
-| `unknown_member`          | Warning  | Property or method not found on the resolved class   |
-| `partial_union_member`    | Warning  | Member only some classes of a union declare (opt-in) |
-| `unknown_function`        | Error    | Function call not resolvable                         |
-| `argument_count_mismatch` | Error    | Wrong number of arguments to a function or method    |
-| `missing_implementation`  | Error    | Missing required interface or abstract methods       |
-| `scalar_member_access`    | Error    | Member access on a scalar type (int, string, etc.)   |
-| `invalid_member_access`   | Error    | `private` or `protected` member reached from outside |
-| `unused_import`           | Hint     | `use` statement with no references in the file       |
-| `unreachable_code`        | Hint     | Statements after a `return`, `throw`, `exit`, or `break` |
-| `dead_catch`              | Warning  | `catch` for an exception its `try` cannot throw       |
-| `deprecated_usage`        | Hint     | Reference to a `@deprecated` symbol                  |
+and `--exclude-code` take. The [Diagnostics Reference](diagnostics.md)
+lists every identifier with its severity and what it reports.
 
 ---
 
@@ -323,9 +308,9 @@ unused is removed in the same run.
  ------ -------------------------------------------
    Line   src/Service/UserService.php
  ------ -------------------------------------------
-    5     Unused import 'App\Models\LegacyUser'
+    5     Unused import App\Models\LegacyUser
           🔧  unused_import
-    6     Unused import 'App\Support\OldHelper'
+    6     Unused import App\Support\OldHelper
           🔧  unused_import
  ------ -------------------------------------------
 
@@ -342,7 +327,7 @@ phpantom_lsp fix --dry-run --project-root /path/to/app
  ------ -------------------------------------------
    Line   src/Service/UserService.php
  ------ -------------------------------------------
-    5     Unused import 'App\Models\LegacyUser'
+    5     Unused import App\Models\LegacyUser
           🔧  unused_import
  ------ -------------------------------------------
 

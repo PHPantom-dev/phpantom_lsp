@@ -138,11 +138,11 @@ async fn options_a_constraint_does_not_take_are_reported() {
         ),
         vec![
             (
-                "Unknown option 'mesage' for constraint NotBlank".to_string(),
+                "Unknown option 'mesage' for constraint Symfony\\Component\\Validator\\Constraints\\NotBlank".to_string(),
                 "mesage".to_string()
             ),
             (
-                "Unknown option 'mni' for constraint Length".to_string(),
+                "Unknown option 'mni' for constraint Symfony\\Component\\Validator\\Constraints\\Length".to_string(),
                 "mni".to_string()
             ),
         ],
@@ -150,7 +150,7 @@ async fn options_a_constraint_does_not_take_are_reported() {
     assert_eq!(
         unknown_options(&backend, &dir, "config/validator/User.xml", VALIDATION_XML),
         vec![(
-            "Unknown option 'mxa' for constraint Length".to_string(),
+            "Unknown option 'mxa' for constraint Symfony\\Component\\Validator\\Constraints\\Length".to_string(),
             "mxa".to_string()
         )],
     );

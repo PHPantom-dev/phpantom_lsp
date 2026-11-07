@@ -45,9 +45,7 @@ final class User
 "#;
     assert_eq!(
         collect(php),
-        vec![
-            "Property App\\User::$name is never initialized; give it a default value or assign it in the constructor"
-        ]
+        vec!["Property App\\User::$name is never initialized"]
     );
 }
 
@@ -117,12 +115,7 @@ fn a_private_property_of_an_abstract_class_is_reported() {
 #[test]
 fn an_anonymous_class_property_is_reported() {
     let php = "<?php\n$box = new class { protected int $size; };\n";
-    assert_eq!(
-        collect(php),
-        vec![
-            "Property $size is never initialized; give it a default value or assign it in the constructor"
-        ]
-    );
+    assert_eq!(collect(php), vec!["Property $size is never initialized"]);
 }
 
 #[test]
@@ -198,9 +191,7 @@ final class Service
 "#;
     assert_eq!(
         collect(php),
-        vec![
-            "Property Service::$promoted is never initialized; give it a default value or assign it in the constructor"
-        ]
+        vec!["Property Service::$promoted is never initialized"]
     );
 }
 
@@ -354,9 +345,7 @@ final class Presenter
 "#;
     assert_eq!(
         collect(php),
-        vec![
-            "Property Presenter::$plain is never initialized; give it a default value or assign it in the constructor"
-        ]
+        vec!["Property Presenter::$plain is never initialized"]
     );
 }
 
@@ -387,9 +376,7 @@ class Product
 "#;
     assert_eq!(
         collect(php),
-        vec![
-            "Property App\\Product::$name is never initialized; give it a default value or assign it in the constructor"
-        ]
+        vec!["Property App\\Product::$name is never initialized"]
     );
 }
 
@@ -431,9 +418,7 @@ class SnapshotWithConstructor
 "#;
     assert_eq!(
         collect(php),
-        vec![
-            "Property SnapshotWithConstructor::$id is never initialized; give it a default value or assign it in the constructor"
-        ]
+        vec!["Property SnapshotWithConstructor::$id is never initialized"]
     );
 }
 

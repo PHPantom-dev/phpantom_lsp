@@ -322,9 +322,14 @@ impl UnknownMemberPass<'_> {
                 DiagnosticSeverity::Error,
                 SCALAR_MEMBER_ACCESS_CODE,
                 format!(
-                    "Cannot access {} '{}' on type '{}'",
+                    "Cannot {} {} {} on {}",
+                    if access.is_method_call {
+                        "call"
+                    } else {
+                        "access"
+                    },
                     access.kind_label(),
-                    access.member_name,
+                    access.spelled(None),
                     scalar,
                 ),
                 out,
@@ -342,10 +347,10 @@ impl UnknownMemberPass<'_> {
                     DiagnosticSeverity::Warning,
                     UNKNOWN_MEMBER_CODE,
                     format!(
-                        "Cannot verify {} '{}' — subject type '{}' could not be resolved",
+                        "Cannot check {} {}, because type {} could not be resolved",
                         access.kind_label(),
-                        access.member_name,
-                        unresolved,
+                        access.spelled(None),
+                        super::helpers::shown_type(unresolved),
                     ),
                     out,
                 )
@@ -370,22 +375,22 @@ impl UnknownMemberPass<'_> {
                     // engine can resolve (a dynamic property name, an
                     // arithmetic result), so there is nothing to quote.
                     format!(
-                        "Cannot verify {} '{}' — the type of its subject could not be resolved",
+                        "Cannot check {} {}, because the type of its subject could not be resolved",
                         access.kind_label(),
-                        access.member_name,
+                        access.spelled(None),
                     )
                 } else if matches!(outcome, SubjectOutcome::Mixed) {
                     format!(
-                        "Cannot verify {} '{}' — type of '{}' is 'mixed'",
+                        "Cannot check {} {}, because {} is mixed",
                         access.kind_label(),
-                        access.member_name,
+                        access.spelled(None),
                         subject_display,
                     )
                 } else {
                     format!(
-                        "Cannot verify {} '{}' — type of '{}' could not be resolved",
+                        "Cannot check {} {}, because the type of {} could not be resolved",
                         access.kind_label(),
-                        access.member_name,
+                        access.spelled(None),
                         subject_display,
                     )
                 };

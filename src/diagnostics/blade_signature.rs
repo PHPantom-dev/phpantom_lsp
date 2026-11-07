@@ -121,7 +121,9 @@ impl Backend {
                 DiagnosticSeverity::Error,
                 COVARIANCE_CODE,
                 format!(
-                    "Layout '{layout}' declares ${name} as {inherited}, which {declared} does not satisfy: a template may narrow its layout's declaration, never widen it",
+                    "Layout '{layout}' declares ${name} as {}, which {} does not narrow",
+                    super::helpers::shown_type(&inherited),
+                    super::helpers::shown_type(&declared),
                 ),
             ));
         }

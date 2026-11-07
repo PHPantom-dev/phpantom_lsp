@@ -138,7 +138,7 @@ impl super::arguments::ArgumentCheck<'_> {
         let Some(range) = self.range(start, end) else {
             return;
         };
-        let enum_name = &enum_info.name;
+        let enum_name = enum_info.fqn();
         let (severity, consequence) = if throws {
             (DiagnosticSeverity::Error, "throws a ValueError")
         } else {
@@ -149,7 +149,7 @@ impl super::arguments::ArgumentCheck<'_> {
             severity,
             UNKNOWN_ENUM_VALUE_CODE,
             format!(
-                "No case of enum '{enum_name}' is backed by {arg_type}, so {enum_name}::{method}() {consequence}"
+                "No case of enum {enum_name} is backed by {arg_type}, so {enum_name}::{method}() {consequence}"
             ),
         ));
     }

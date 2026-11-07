@@ -82,12 +82,12 @@ impl Backend {
                     ) else {
                         continue;
                     };
-                    let short = form_type.rsplit('\\').next().unwrap_or(&form_type);
+                    let class = form_type.trim_start_matches('\\');
                     out.push(make_diagnostic(
                         range,
                         DiagnosticSeverity::Error,
                         UNKNOWN_FORM_OPTION_CODE,
-                        format!("Unknown form option '{name}' for {short}"),
+                        format!("Unknown form option '{name}' for {class}"),
                     ));
                 }
             }

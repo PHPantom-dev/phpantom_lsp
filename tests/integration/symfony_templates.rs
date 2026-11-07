@@ -338,7 +338,7 @@ async fn only_missing_project_templates_are_reported() {
         .collect();
     assert_eq!(
         reported,
-        vec!["Unknown template: 'missing/page.html.twig'".to_string()]
+        vec!["Unknown template 'missing/page.html.twig'".to_string()]
     );
 }
 
@@ -408,14 +408,14 @@ final class TwigTest
     let uri = uri_for(&dir, "src/Controller/GuardedController.php");
     assert_eq!(
         php_template_problems(&backend, &uri, guarded),
-        vec!["Unknown template: 'missing/fallback.html.twig'".to_string()]
+        vec!["Unknown template 'missing/fallback.html.twig'".to_string()]
     );
     // An environment the file builds has its own templates, but one handed
     // in is the application's.
     let uri = uri_for(&dir, "src/Tests/TwigTest.php");
     assert_eq!(
         php_template_problems(&backend, &uri, test),
-        vec!["Unknown template: 'missing/app.html.twig'".to_string()]
+        vec!["Unknown template 'missing/app.html.twig'".to_string()]
     );
 }
 
@@ -540,7 +540,7 @@ async fn missing_templates_a_template_names_are_reported() {
 
     assert_eq!(
         template_problems(&backend, &uri, BROKEN_TWIG),
-        vec![("Unknown template: 'partials/crad.html.twig'".to_string(), 2)]
+        vec![("Unknown template 'partials/crad.html.twig'".to_string(), 2)]
     );
 
     // A template that names only what exists has nothing to report.

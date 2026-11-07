@@ -384,8 +384,12 @@ impl Backend {
                     None
                 } else {
                     Some(format!(
-                        "Missing required argument{}: {}",
-                        if missing.len() == 1 { "" } else { "s" },
+                        "Expected {} for {}",
+                        if missing.len() == 1 {
+                            "an argument"
+                        } else {
+                            "arguments"
+                        },
                         missing.join(", "),
                     ))
                 }

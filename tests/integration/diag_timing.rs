@@ -696,7 +696,7 @@ class RefundCallback {
         }
 
         if (!is_string($data->status)) {
-            throw new MobilepayRefundCallbackException('Unknown status: ' . gettype($data->status));
+            throw new MobilepayRefundCallbackException('Unknown status ' . gettype($data->status));
         }
 
         switch ($data->status) {
@@ -707,7 +707,7 @@ class RefundCallback {
                 $refundService->setFailed($refund, $statusText);
                 break;
             default:
-                throw new MobilepayRefundCallbackException('Unknown status: ' . $data->status);
+                throw new MobilepayRefundCallbackException('Unknown status ' . $data->status);
         }
     }
 }

@@ -2,10 +2,11 @@
 name = "phpantom_lsp"
 version = "0.11.1"
 edition = "2024"
+rust-version = "1.99"
 license = "MIT"
 description = "Fast PHP language server with deep type intelligence. Generics, Laravel, PHPStan annotations. Ready in an instant."
 repository = "https://github.com/PHPantom-dev/phpantom_lsp"
-documentation = "https://docs.rs/phpantom_lsp/latest/phpantom_lsp/"
+documentation = "https://phpantom-dev.github.io/phpantom_lsp/latest/"
 readme = "README.md"
 exclude = [".gitignore", ".github/*", "target/*"]
 

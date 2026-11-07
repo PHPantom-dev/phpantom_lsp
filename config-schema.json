@@ -181,6 +181,22 @@
         }
       }
     },
+    "inlay_hints": {
+      "type": "object",
+      "description": "Controls which kinds of inlay hint are shown. The editor can switch a kind off too, but cannot switch one back on over this section.",
+      "properties": {
+        "parameter-names": {
+          "type": "boolean",
+          "description": "Parameter names before the arguments of a call, such as `needle:`, along with the `&` of a by-reference parameter.",
+          "default": true
+        },
+        "closure-types": {
+          "type": "boolean",
+          "description": "Inferred parameter and return types on closures and arrow functions that do not declare them.",
+          "default": true
+        }
+      }
+    },
     "laravel": {
       "type": "object",
       "description": "Laravel-specific analysis settings.",

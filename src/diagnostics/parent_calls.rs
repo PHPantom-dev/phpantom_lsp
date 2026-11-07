@@ -98,7 +98,7 @@ impl Backend {
             range,
             DiagnosticSeverity::Warning,
             MISSING_PARENT_CALL_CODE,
-            format!("Missing call to parent::{}()", finding.name),
+            format!("This override does not call parent::{}()", finding.name),
         ))
     }
 

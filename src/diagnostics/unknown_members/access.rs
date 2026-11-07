@@ -29,6 +29,9 @@ pub(super) struct MemberAccessSite<'a> {
     pub(super) member_name: &'a str,
     pub(super) is_static: bool,
     pub(super) is_method_call: bool,
+    /// Whether a static access names a property (`Foo::$bar`) rather
+    /// than a constant (`Foo::BAR`).
+    pub(super) is_static_property: bool,
     pub(super) is_docblock_ref: bool,
     pub(super) is_nullsafe: bool,
     /// Whether the member is the method a mock expectation names, which
@@ -142,6 +145,17 @@ impl<'a> MemberAccessSite<'a> {
             member_name,
             is_static,
             is_method_call: *is_method_call,
+            // The name is stored without the `$` that `Foo::$bar` and a
+            // Yii definition's `'$bar'` key write just before it, or at
+            // the start of the span.
+            is_static_property: is_static
+                && !*is_method_call
+                && filters
+                    .source
+                    .text()
+                    .as_bytes()
+                    .get(span.start.saturating_sub(1) as usize..=span.start as usize)
+                    .is_some_and(|bytes| bytes.contains(&b'$')),
             is_docblock_ref: docblock_ref.is_reference(),
             is_nullsafe: *is_nullsafe,
             mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
@@ -173,12 +187,39 @@ impl<'a> MemberAccessSite<'a> {
         self.subject_text.starts_with('$')
     }
 
-    /// "method" or "property", for messages.
+    /// "method", "property", or "constant", for messages.
     pub(super) fn kind_label(&self) -> &'static str {
         if self.is_method_call {
             "method"
+        } else if self.is_static && !self.is_static_property {
+            "constant"
         } else {
             "property"
+        }
+    }
+
+    /// [`Self::kind_label`] at the start of a message.
+    pub(super) fn kind_title(&self) -> &'static str {
+        match self.kind_label() {
+            "method" => "Method",
+            "constant" => "Constant",
+            _ => "Property",
+        }
+    }
+
+    /// The member as PHP spells it, on `owner` when there is one:
+    /// `Foo::bar()`, `Foo::$bar`, `Foo::BAR`, or `bar()`, `$bar`, `BAR`.
+    pub(super) fn spelled(&self, owner: Option<&str>) -> String {
+        let member = if self.is_method_call {
+            format!("{}()", self.member_name)
+        } else if self.is_static && !self.is_static_property {
+            self.member_name.to_string()
+        } else {
+            format!("${}", self.member_name.trim_start_matches('$'))
+        };
+        match owner {
+            Some(owner) => format!("{owner}::{member}"),
+            None => member,
         }
     }
 }

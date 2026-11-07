@@ -24,7 +24,7 @@ pub(crate) struct FileState {
     /// next request parses it again.
     pub(crate) symbol_map: Option<Arc<SymbolMap>>,
     /// Errors from the Mago parser, as `(message, start, end)`.  When the
-    /// parser panics, a single "Parse failed" entry.
+    /// parser panics, a single "could not parse" entry.
     pub(crate) parse_errors: Vec<ParseErrorEntry>,
     /// The file's `use` statement mappings (short name → fully qualified
     /// name).  For example, `use Klarna\Rest\Resource;` produces

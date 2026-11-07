@@ -38,11 +38,21 @@ pub(crate) const MISSING_RETURN_CODE: &str = "missing_return";
 
 /// A function-like with a body and a native return type.
 struct Candidate<'ast, 'arena> {
-    /// How the message names it: `Function score()`, `Method get()`, or
-    /// `Closure`.
-    name: String,
+    kind: CandidateKind,
+    /// Its name as declared, empty for a closure.
+    name: &'ast str,
+    /// Where its declaration starts, to find the namespace or class it
+    /// belongs to.
+    offset: u32,
     hint: &'ast Hint<'arena>,
     body: &'ast Block<'arena>,
+}
+
+#[derive(Clone, Copy)]
+enum CandidateKind {
+    Function,
+    Method,
+    Closure,
 }
 
 struct CollectCandidates;
@@ -55,7 +65,9 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<Candidate<'ast, 'arena>>> for Collec
     ) {
         if let Some(hint) = &function.return_type_hint {
             found.push(Candidate {
-                name: format!("Function {}()", bytes_to_str(function.name.value)),
+                kind: CandidateKind::Function,
+                name: bytes_to_str(function.name.value),
+                offset: function.span().start.offset,
                 hint: &hint.hint,
                 body: &function.body,
             });
@@ -71,7 +83,9 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<Candidate<'ast, 'arena>>> for Collec
             && let MethodBody::Concrete(body) = &method.body
         {
             found.push(Candidate {
-                name: format!("Method {}()", bytes_to_str(method.name.value)),
+                kind: CandidateKind::Method,
+                name: bytes_to_str(method.name.value),
+                offset: method.span().start.offset,
                 hint: &hint.hint,
                 body,
             });
@@ -85,11 +99,33 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<Candidate<'ast, 'arena>>> for Collec
     ) {
         if let Some(hint) = &closure.return_type_hint {
             found.push(Candidate {
-                name: "Closure".to_string(),
+                kind: CandidateKind::Closure,
+                name: "",
+                offset: closure.span().start.offset,
                 hint: &hint.hint,
                 body: &closure.body,
             });
         }
+    }
+}
+
+/// How the message names `candidate`: `Function App\\score()`,
+/// `Method App\\Scorer::get()`, or `Closure`.
+fn candidate_label(candidate: &Candidate<'_, '_>, file: &crate::types::FileContext) -> String {
+    match candidate.kind {
+        CandidateKind::Function => match file.namespace_at(candidate.offset) {
+            Some(ns) if !ns.is_empty() => format!("Function {ns}\\{}()", candidate.name),
+            _ => format!("Function {}()", candidate.name),
+        },
+        CandidateKind::Method => {
+            match crate::class_lookup::find_class_at_offset(&file.classes, candidate.offset) {
+                Some(class) if !class.name.starts_with("__anonymous@") => {
+                    format!("Method {}::{}()", class.fqn(), candidate.name)
+                }
+                _ => format!("Method {}()", candidate.name),
+            }
+        }
+        CandidateKind::Closure => "Closure".to_string(),
     }
 }
 
@@ -163,7 +199,7 @@ impl Backend {
                     MISSING_RETURN_CODE,
                     format!(
                         "{} should return {declared} but can reach its end without returning",
-                        candidate.name,
+                        candidate_label(&candidate, &ctx.file),
                     ),
                 ));
             }
