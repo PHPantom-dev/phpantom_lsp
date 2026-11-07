@@ -8,6 +8,132 @@
 
 use crate::text_scan;
 
+/// Freeze file magic constants before an initializer is read from another
+/// file or inherited from a parent or trait. Strings and comments retain
+/// their source spelling; only the parser's magic-constant tokens change.
+pub(crate) fn expand_file_constants(expression: &str, uri: &str) -> Option<String> {
+    if !mentions_file_constant(expression) {
+        return None;
+    }
+    let path = crate::util::uri_to_path(uri)?;
+    let path = dunce::canonicalize(&path).unwrap_or(path);
+    let directory = path.parent().unwrap_or(&path);
+    use mago_span::HasSpan;
+    use mago_syntax::{cst::MagicConstant, walker::Walker};
+    struct Constants;
+    impl<'ast, 'arena> Walker<'ast, 'arena, Vec<(usize, usize, bool)>> for Constants {
+        fn walk_in_magic_constant(
+            &self,
+            magic: &'ast MagicConstant<'arena>,
+            spans: &mut Vec<(usize, usize, bool)>,
+        ) {
+            if matches!(magic, MagicConstant::Directory(_) | MagicConstant::File(_)) {
+                let span = magic.span();
+                spans.push((
+                    span.start.offset as usize,
+                    span.end.offset as usize,
+                    matches!(magic, MagicConstant::Directory(_)),
+                ));
+            }
+        }
+    }
+    let source = format!("<?php {expression};");
+    crate::parser::with_parsed_program(&source, "file_constant_initializer", |program, _| {
+        let mut spans = Vec::new();
+        Constants.walk_program(program, &mut spans);
+        if spans.is_empty() {
+            return None;
+        }
+        let mut output = expression.to_owned();
+        for (start, end, is_directory) in spans.into_iter().rev() {
+            let value = if is_directory { directory } else { &path };
+            let literal =
+                crate::php_type::LiteralValue::string_value(value.to_string_lossy()).as_raw();
+            output.replace_range(start - 6..end - 6, &literal);
+        }
+        Some(output)
+    })
+}
+
+/// Whether `expression` spells `__DIR__` or `__FILE__` in any case, so the
+/// parse in [`expand_file_constants`] runs only where it can change anything.
+fn mentions_file_constant(expression: &str) -> bool {
+    contains_ignore_ascii_case(expression, "__DIR__")
+        || contains_ignore_ascii_case(expression, "__FILE__")
+}
+
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+/// Freeze `__DIR__` and `__FILE__` in a class's constant and parameter
+/// initializers to the declaring file, on every path that indexes
+/// a class from source.  PHP substitutes them at compile time, so the value
+/// read through inheritance or from a call site in another file is the
+/// declaring file's.
+pub(crate) fn expand_class_file_constants(class: &mut crate::types::ClassInfo, uri: &str) {
+    use std::sync::Arc;
+    if class.constants.iter().any(|constant| {
+        constant
+            .value
+            .as_deref()
+            .is_some_and(mentions_file_constant)
+    }) {
+        for constant in class.constants.make_mut() {
+            if let Some(value) = constant
+                .value
+                .as_deref()
+                .and_then(|value| expand_file_constants(value, uri))
+            {
+                Arc::make_mut(constant).value = Some(value);
+            }
+        }
+    }
+    if class
+        .methods
+        .iter()
+        .any(|method| mentions_in_parameters(&method.parameters))
+    {
+        for method in class.methods.make_mut() {
+            if mentions_in_parameters(&method.parameters) {
+                expand_parameter_file_constants(&mut Arc::make_mut(method).parameters, uri);
+            }
+        }
+    }
+}
+
+fn mentions_in_parameters(parameters: &[crate::types::ParameterInfo]) -> bool {
+    parameters.iter().any(|parameter| {
+        parameter
+            .default_value
+            .as_deref()
+            .is_some_and(mentions_file_constant)
+    })
+}
+
+/// Freeze `__DIR__` and `__FILE__` in parameter defaults to the declaring
+/// file, so a caller elsewhere that omits the argument reads the callee's.
+pub(crate) fn expand_parameter_file_constants(
+    parameters: &mut crate::types::SharedVec<crate::types::ParameterInfo>,
+    uri: &str,
+) {
+    if !mentions_in_parameters(parameters) {
+        return;
+    }
+    for parameter in parameters.make_mut() {
+        if let Some(value) = parameter
+            .default_value
+            .as_deref()
+            .and_then(|value| expand_file_constants(value, uri))
+        {
+            parameter.default_value = Some(value);
+        }
+    }
+}
+
 /// `expression` with the class of every `Class::member` access in it
 /// (`Defaults::MODE`, `Defaults::class`, `Suit::Hearts->value`) spelled
 /// fully qualified, with a leading `\`, or `None` when no class in it needs
@@ -183,7 +309,34 @@ fn is_name_byte(b: u8) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::qualify_class_names;
+    use super::{expand_file_constants, qualify_class_names};
+
+    #[test]
+    fn file_constants_expand_only_actual_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dunce::canonicalize(dir.path())
+            .unwrap()
+            .join("unsaved-constant-definition.php");
+        let uri = crate::util::path_to_uri(&path);
+        let quoted = crate::php_type::LiteralValue::string_value(path.to_string_lossy()).as_raw();
+        assert_eq!(expand_file_constants("__file__", &uri), Some(quoted));
+        assert!(expand_file_constants("__DIR__ . __FILE__", &uri).is_some());
+        for expression in [
+            "42",
+            "__LINE__",
+            "'__DIR__'",
+            "\"__FILE__\"",
+            "1 /* __DIR__ */",
+            "<<<'TEXT'\n__FILE__\nTEXT",
+        ] {
+            assert_eq!(
+                expand_file_constants(expression, &uri),
+                None,
+                "{expression}"
+            );
+        }
+        assert_eq!(expand_file_constants("__DIR__", "untitled:constants"), None);
+    }
 
     /// Resolves the way the declaring file of these tests would: `Defaults`
     /// is imported from `Vendor`, and anything else is in `Lib`.

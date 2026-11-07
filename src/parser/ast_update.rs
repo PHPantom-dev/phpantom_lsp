@@ -520,6 +520,10 @@ impl Backend {
             }
         }
 
+        for func in &mut functions {
+            super::initializers::expand_parameter_file_constants(&mut func.parameters, uri);
+        }
+
         Self::qualify_function_names(
             &mut functions,
             &decls.namespace_spans,
@@ -543,6 +547,9 @@ impl Backend {
         let defines: Vec<(String, DefineInfo)> = define_entries
             .into_iter()
             .map(|(name, offset, value)| {
+                let value = value.map(|value| {
+                    super::initializers::expand_file_constants(&value, uri).unwrap_or(value)
+                });
                 (
                     name,
                     DefineInfo {
@@ -574,6 +581,7 @@ impl Backend {
             .classes_with_ns
             .into_iter()
             .map(|(mut cls, ns, _)| {
+                super::initializers::expand_class_file_constants(&mut cls, uri);
                 cls.file_namespace = ns.as_deref().map(atom);
                 cls.cache_fqn_in_uri(uri);
                 // Keyed by FQN, so this has to wait until the class

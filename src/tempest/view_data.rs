@@ -1,6 +1,7 @@
 //! PHP render sites. Expression types always come from the shared engine.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
@@ -101,6 +102,33 @@ pub(super) fn literal_path<'a>(expr: &'a Expression<'_>) -> Option<(&'a str, boo
     Some((crate::atom::literal_bytes_to_str(literal.value?)?, relative))
 }
 
+/// Resolve known path values with the same engine that types the caller's
+/// variables, constants, arrays and expressions.
+pub(super) fn path_definition(
+    backend: &Backend,
+    uri: &str,
+    expr: &Expression<'_>,
+    content: &str,
+    loaders: &FileLoaders<'_>,
+) -> Option<tower_lsp_server::gen_lsp_types::Location> {
+    if let Some((name, relative)) = literal_path(expr) {
+        return backend.tempest_view_definition(uri, name, relative);
+    }
+    let ty = expression_type(expr, content, loaders);
+    let name = ty.as_literal()?.string_content()?;
+    backend.tempest_view_definition(uri, &name, false)
+}
+
+/// The data one caller file supplies to views.
+#[derive(Default)]
+pub(super) struct Collected {
+    pub(super) targets: Vec<(String, Scope)>,
+    /// Custom View classes this caller instantiates with its own data.
+    pub(super) instantiated: HashSet<String>,
+    /// Other files declaring the View helpers this caller's data went through.
+    pub(super) dependencies: HashSet<String>,
+}
+
 /// Collect each render chain once, including its final `data()` overrides.
 pub(super) fn collect(
     backend: &Backend,
@@ -108,135 +136,246 @@ pub(super) fn collect(
     file: &FileContext,
     content: &str,
     custom: &BTreeMap<String, super::custom_views::CustomView>,
-    instantiated: &mut HashSet<String>,
-) -> Vec<(String, Scope)> {
-    let loaders = backend.file_loaders(file);
-    let _engine = crate::type_engine::call_resolution::activate_type_engine_caches();
-    let _parse = crate::parser::with_parse_cache(content);
-    crate::parser::with_parsed_program(content, "tempest_view_data", |program, content| {
-        let mut expressions = Vec::new();
-        Calls.walk_program(program, &mut expressions);
-        let mut seen = HashSet::new();
-        let mut result = Vec::new();
-        for expr in expressions {
-            let mut root = expr;
-            let mut chained = Vec::new();
-            loop {
-                match root {
-                    Expression::Parenthesized(paren) => root = paren.expression,
-                    Expression::Call(Call::Method(call)) if matches!(&call.method, ClassLikeMemberSelector::Identifier(name) if name.value.eq_ignore_ascii_case(b"data")) =>
-                    {
-                        chained.push(&call.argument_list);
-                        root = call.object;
-                    }
-                    _ => break,
-                }
+    wrappers: &super::wrappers::Names,
+) -> Collected {
+    let mut context = RenderContext {
+        backend,
+        custom,
+        instantiated: HashSet::new(),
+        wrappers,
+        dependencies: HashSet::new(),
+        active: HashSet::new(),
+        memo: HashMap::new(),
+    };
+    let targets = context.collect(uri, file, content, None);
+    Collected {
+        targets,
+        instantiated: context.instantiated,
+        dependencies: context.dependencies,
+    }
+}
+
+struct RenderContext<'a> {
+    backend: &'a Backend,
+    custom: &'a BTreeMap<String, super::custom_views::CustomView>,
+    instantiated: HashSet<String>,
+    wrappers: &'a super::wrappers::Names,
+    /// Files declaring the helpers walked, whose edits change this data.
+    dependencies: HashSet<String>,
+    /// Helpers being read, to cut recursion where a helper reaches itself.
+    active: HashSet<(String, u32)>,
+    /// Data each helper produced for a given set of argument types, so a
+    /// helper reached from several call sites with the same arguments is
+    /// read once however the calls branch.
+    memo: HashMap<HelperKey, Rc<Vec<(String, Scope)>>>,
+}
+
+/// A helper declaration and the argument types it is read under.
+type HelperKey = (String, u32, Vec<PhpType>);
+
+impl RenderContext<'_> {
+    /// The data a helper's body passes to views under `invocation`'s
+    /// arguments, read once per distinct input.  A helper that reaches
+    /// itself contributes nothing on the inner call.
+    fn helper(&mut self, invocation: super::wrappers::Invocation) -> Rc<Vec<(String, Scope)>> {
+        let key = (
+            invocation.uri.clone(),
+            invocation.offset,
+            invocation.arguments.clone(),
+        );
+        if let Some(found) = self.memo.get(&key) {
+            return Rc::clone(found);
+        }
+        let active = (invocation.uri.clone(), invocation.offset);
+        if !self.active.insert(active.clone()) {
+            return Rc::default();
+        }
+        self.dependencies.insert(invocation.uri.clone());
+        let found = Rc::new(
+            self.backend
+                .analysable_content(&invocation.uri)
+                .map(|body| {
+                    let declaration_file = self.backend.file_context(&invocation.uri);
+                    self.collect(&invocation.uri, &declaration_file, &body, Some(&invocation))
+                })
+                .unwrap_or_default(),
+        );
+        self.active.remove(&active);
+        self.memo.insert(key, Rc::clone(&found));
+        found
+    }
+
+    fn collect(
+        &mut self,
+        uri: &str,
+        file: &FileContext,
+        content: &str,
+        invocation: Option<&super::wrappers::Invocation>,
+    ) -> Vec<(String, Scope)> {
+        let backend = self.backend;
+        let custom = self.custom;
+        let loaders = backend.file_loaders(file);
+        let _engine = crate::type_engine::call_resolution::activate_type_engine_caches();
+        let _parse = crate::parser::with_parse_cache(content);
+        crate::parser::with_parsed_program(content, "tempest_view_data", |program, content| {
+            let declaration = invocation
+                .and_then(|invocation| super::wrappers::declaration(program, invocation.offset));
+            if invocation.is_some() && declaration.is_none() {
+                return Vec::new();
             }
-            let generic = match root {
-                Expression::Instantiation(new) => match new.class {
-                    Expression::Identifier(name)
-                        if file
-                            .resolve_name_at(bytes_to_str(name.value()), name.span().start.offset)
-                            .trim_start_matches('\\')
-                            .eq_ignore_ascii_case("Tempest\\View\\GenericView") =>
-                    {
-                        new.argument_list.as_ref()
+            let _arguments = declaration.zip(invocation).map(|((start, _), invocation)| {
+                crate::type_engine::call_resolution::with_declaration_arguments(
+                    uri,
+                    start,
+                    &invocation.arguments,
+                )
+            });
+            let mut expressions = Vec::new();
+            Calls.walk_program(program, &mut expressions);
+            let mut seen = HashSet::new();
+            let mut result = Vec::new();
+            for expr in expressions {
+                if declaration.is_some_and(|(start, end)| {
+                    expr.span().start.offset < start || expr.span().end.offset > end
+                }) {
+                    continue;
+                }
+                let mut root = expr;
+                let mut chained = Vec::new();
+                loop {
+                    match root {
+                        Expression::Parenthesized(paren) => root = paren.expression,
+                        Expression::Call(Call::Method(call)) if matches!(&call.method, ClassLikeMemberSelector::Identifier(name) if name.value.eq_ignore_ascii_case(b"data")) =>
+                        {
+                            chained.push(&call.argument_list);
+                            root = call.object;
+                        }
+                        _ => break,
                     }
+                }
+                let generic = match root {
+                    Expression::Instantiation(new) => match new.class {
+                        Expression::Identifier(name)
+                            if file
+                                .resolve_name_at(
+                                    bytes_to_str(name.value()),
+                                    name.span().start.offset,
+                                )
+                                .trim_start_matches('\\')
+                                .eq_ignore_ascii_case("Tempest\\View\\GenericView") =>
+                        {
+                            new.argument_list.as_ref()
+                        }
+                        _ => None,
+                    },
                     _ => None,
-                },
-                _ => None,
-            };
-            if generic.is_none()
-                && !matches!(root, Expression::Call(Call::Function(_)))
-                && !chained.is_empty()
-            {
+                };
+                if generic.is_none()
+                    && !matches!(root, Expression::Call(Call::Function(_)))
+                    && !chained.is_empty()
+                {
+                    let ty = expression_type(root, content, &loaders);
+                    if let Some(name) = ty.base_name()
+                        && let Some(view) = custom.get(name.trim_start_matches('\\'))
+                        && let Some(class) =
+                            loaders.resolved_class_loader()(crate::class_lookup::Fqn::new(name))
+                    {
+                        if !seen.insert(root.span().start.offset) {
+                            continue;
+                        }
+                        let mut scope = view.scope.clone();
+                        for args in chained.into_iter().rev() {
+                            arguments(args, false, content, &loaders, &mut scope.vars);
+                        }
+                        super::custom_views::bind_this(backend, &class, &mut scope);
+                        scope.globals = scope.vars.clone();
+                        self.instantiated
+                            .insert(name.trim_start_matches('\\').to_owned());
+                        result.push((view.target.clone(), scope));
+                        continue;
+                    }
+                }
                 if !seen.insert(root.span().start.offset) {
                     continue;
                 }
-                let ty = expression_type(root, content, &loaders);
-                if let Some(name) = ty.base_name()
-                    && let Some(view) = custom.get(name.trim_start_matches('\\'))
-                    && let Some(class) =
-                        loaders.resolved_class_loader()(crate::class_lookup::Fqn::new(name))
-                {
-                    let mut scope = view.scope.clone();
-                    for args in chained.into_iter().rev() {
-                        arguments(args, false, content, &loaders, &mut scope.vars);
+                let Some(args) = generic.or_else(|| view_arguments(root, file)) else {
+                    if let Some(invocation) =
+                        super::wrappers::invocation(backend, root, content, file, self.wrappers)
+                    {
+                        for (target, scope) in self.helper(invocation).iter() {
+                            let mut scope = scope.clone();
+                            for args in chained.iter().rev() {
+                                arguments(args, false, content, &loaders, &mut scope.vars);
+                            }
+                            scope.globals = scope.vars.clone();
+                            result.push((target.clone(), scope));
+                        }
                     }
-                    super::custom_views::bind_this(backend, &class, &mut scope);
-                    scope.globals = scope.vars.clone();
-                    instantiated.insert(name.trim_start_matches('\\').to_owned());
-                    result.push((view.target.clone(), scope));
-                }
-                continue;
-            }
-            if !seen.insert(root.span().start.offset) {
-                continue;
-            }
-            let args = if let Some(args) = generic {
-                args
-            } else {
-                let Expression::Call(Call::Function(call)) = root else {
                     continue;
                 };
-                let Expression::Identifier(name) = call.function else {
-                    continue;
-                };
-                let offset = name.span().start.offset;
-                let (resolved, _) = crate::names::function_lookup_names(
-                    bytes_to_str(name.value()),
-                    file.use_map_at(offset),
-                    &file.symbol_imports_at(offset).functions,
-                    file.namespace_at(offset),
-                );
-                if !resolved
-                    .trim_start_matches('\\')
-                    .eq_ignore_ascii_case("Tempest\\View\\view")
-                {
-                    continue;
-                }
-                &call.argument_list
-            };
-            let path = args
-                .arguments
-                .iter()
-                .enumerate()
-                .find_map(|(i, arg)| match arg {
-                    Argument::Named(arg) if arg.name.value == b"path" => Some(arg.value),
-                    Argument::Positional(arg) if i == 0 && arg.ellipsis.is_none() => {
-                        Some(arg.value)
-                    }
-                    _ => None,
-                });
-            let Some((path, relative)) = path.and_then(literal_path) else {
-                continue;
-            };
-            let Some(target) = backend.tempest_view_definition(uri, path, relative) else {
-                continue;
-            };
-            let mut scope = Scope::default();
-            if generic.is_some() {
-                for (index, arg) in args.arguments.iter().enumerate() {
-                    let data = match arg {
-                        Argument::Named(arg) if arg.name.value == b"data" => Some(arg.value),
-                        Argument::Positional(arg) if index == 1 => Some(arg.value),
+                let path = args
+                    .arguments
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, arg)| match arg {
+                        Argument::Named(arg) if arg.name.value == b"path" => Some(arg.value),
+                        Argument::Positional(arg) if i == 0 && arg.ellipsis.is_none() => {
+                            Some(arg.value)
+                        }
                         _ => None,
-                    };
-                    if let Some(data) = data {
-                        shape_vars(&expression_type(data, content, &loaders), &mut scope.vars);
+                    });
+                let Some(target) =
+                    path.and_then(|path| path_definition(backend, uri, path, content, &loaders))
+                else {
+                    continue;
+                };
+                let mut scope = Scope::default();
+                if generic.is_some() {
+                    for (index, arg) in args.arguments.iter().enumerate() {
+                        let data = match arg {
+                            Argument::Named(arg) if arg.name.value == b"data" => Some(arg.value),
+                            Argument::Positional(arg) if index == 1 => Some(arg.value),
+                            _ => None,
+                        };
+                        if let Some(data) = data {
+                            shape_vars(&expression_type(data, content, &loaders), &mut scope.vars);
+                        }
                     }
+                } else {
+                    arguments(args, true, content, &loaders, &mut scope.vars);
                 }
-            } else {
-                arguments(args, true, content, &loaders, &mut scope.vars);
+                for args in chained.into_iter().rev() {
+                    arguments(args, false, content, &loaders, &mut scope.vars);
+                }
+                scope.globals = scope.vars.clone();
+                result.push((target.uri.to_string(), scope));
             }
-            for args in chained.into_iter().rev() {
-                arguments(args, false, content, &loaders, &mut scope.vars);
-            }
-            scope.globals = scope.vars.clone();
-            result.push((target.uri.to_string(), scope));
-        }
-        result
-    })
+            result
+        })
+    }
+}
+
+fn view_arguments<'a>(
+    expr: &'a Expression<'a>,
+    file: &FileContext,
+) -> Option<&'a ArgumentList<'a>> {
+    let Expression::Call(Call::Function(call)) = expr else {
+        return None;
+    };
+    let Expression::Identifier(name) = call.function else {
+        return None;
+    };
+    let offset = name.span().start.offset;
+    let (resolved, _) = crate::names::function_lookup_names(
+        bytes_to_str(name.value()),
+        file.use_map_at(offset),
+        &file.symbol_imports_at(offset).functions,
+        file.namespace_at(offset),
+    );
+    resolved
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case("Tempest\\View\\view")
+        .then_some(&call.argument_list)
 }
 
 struct Calls;
@@ -249,7 +388,8 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast Expression<'arena>>> for Calls
     ) {
         if matches!(
             expr,
-            Expression::Call(Call::Function(_) | Call::Method(_)) | Expression::Instantiation(_)
+            Expression::Call(Call::Function(_) | Call::Method(_) | Call::StaticMethod(_))
+                | Expression::Instantiation(_)
         ) {
             calls.push(expr);
         }

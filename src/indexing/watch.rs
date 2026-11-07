@@ -92,12 +92,24 @@ impl Backend {
     ) -> bool {
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let changes = self.spell_changes_as_indexed(&params.changes);
+        let is_tempest = self.is_tempest_project();
+        for change in changes.iter().filter(|_| is_tempest) {
+            if change.kind != FileChangeType::Changed
+                && (change.uri.as_str().ends_with(".config.php")
+                    || change.uri.as_str().ends_with("/tempest")
+                    || change.uri.as_str().ends_with("/public/index.php"))
+            {
+                self.invalidate_tempest_views();
+            } else {
+                self.note_tempest_php_change(change.uri.as_str());
+            }
+        }
         // Default configuration files are never indexed, and an open schema
         // file is skipped below, so both are followed before that.
         if self.is_drupal_project() {
             self.note_drupal_config_changes(&changes);
         }
-        if self.is_tempest_project()
+        if is_tempest
             && changes.iter().any(|change| {
                 let uri = change.uri.as_str();
                 (crate::tempest::is_view(uri) && change.kind != FileChangeType::Changed)
@@ -211,6 +223,7 @@ impl Backend {
         // migration discovery walks directories.
         let is_open = |uri: &str| self.open_files.read().contains_key(uri);
         let is_twig = self.is_twig_project();
+        let is_tempest = self.is_tempest_project();
         let laravel_config = self.config().laravel;
         let filters = self.index_filters();
         let translations = self.laravel.string_key_cache.read().translations.clone();
@@ -334,10 +347,12 @@ impl Backend {
                     .push((uri_str, file_path, change.kind));
                 continue;
             }
-            let is_php = std::path::Path::new(path_str)
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| filters.is_php_extension(ext));
+            // Tempest's CLI bootstrap is PHP without a filename extension.
+            let is_php = (is_tempest && path_str.ends_with("/tempest"))
+                || std::path::Path::new(path_str)
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| filters.is_php_extension(ext));
             if !is_php {
                 continue;
             }
@@ -584,6 +599,7 @@ impl Backend {
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let is_symfony = self.is_symfony_project();
         let is_twig = self.is_twig_project();
+        let is_tempest = self.is_tempest_project();
 
         // Create, change, and delete: what every watcher but the two
         // Composer ones asks for.
@@ -609,6 +625,10 @@ impl Backend {
         }
         if is_twig {
             patterns.push(("**/*.{twig,html,htm}".to_string(), watch_all));
+        }
+        if is_tempest {
+            // Tempest's CLI bootstrap is PHP without a filename extension.
+            patterns.push(("**/tempest".to_string(), watch_all));
         }
         if is_laravel {
             patterns.extend([
@@ -661,6 +681,7 @@ impl Backend {
                 is_laravel,
                 is_symfony,
                 is_twig,
+                is_tempest,
                 followed_links,
             },
         )
@@ -696,7 +717,7 @@ impl Backend {
     }
 
     /// Re-push the `workspace/didChangeWatchedFiles` registration when
-    /// `[indexing] extensions`, the Laravel classification, or the set of
+    /// `[indexing] extensions`, the framework classification, or the set of
     /// followed symlinks has changed since the last registration.
     ///
     /// Guarded on an actual change so an unrelated config edit does not

@@ -5,6 +5,10 @@ declare(strict_types=1);
 use App\Book;
 use App\BookController;
 use App\BookView;
+use App\ConfiguredViews;
+use Tempest\Container\GenericContainer;
+use Tempest\Discovery\BootDiscovery;
+use Tempest\View\ViewComponentDiscovery;
 use Tempest\View\Renderers\TempestViewRenderer;
 use Tempest\View\ViewConfig;
 
@@ -12,9 +16,16 @@ use function Tempest\View\view;
 
 require __DIR__ . '/vendor/autoload.php';
 
-$config = new ViewConfig();
-$config->addViewComponents(__DIR__ . '/app/components/x-card.view.php');
-$config->addViewComponents(__DIR__ . '/app/components/x-book.view.php');
+/** @var ViewConfig $config */
+$config = require __DIR__ . '/app/views.config.php';
+$discovery = require __DIR__ . '/app/discovery.config.php';
+$container = new GenericContainer();
+$container->singleton(ViewConfig::class, $config);
+new BootDiscovery($container, $discovery)([ViewComponentDiscovery::class]);
+if (!isset($config->viewComponents['x-summary'], $config->viewComponents['book-notice'])
+    || isset($config->viewComponents['x-private'])) {
+    throw new RuntimeException('Configured component discovery produced the wrong names.');
+}
 $renderer = TempestViewRenderer::make(viewConfig: $config);
 
 $html = $renderer->render(new BookController()->index());
@@ -65,6 +76,13 @@ $scopes = $renderer->render(view(
 ));
 if (!str_contains($scopes, 'Attribute') || !str_contains($scopes, 'Attribute|isolated') || str_contains($scopes, 'Global')) {
     throw new RuntimeException('Component arguments and slot locals use the wrong scope.');
+}
+
+$configured = $renderer->render(new ConfiguredViews()->example());
+foreach (['<h2>Configured views</h2>', '<aside>Configured views</aside>'] as $expected) {
+    if (!str_contains($configured, $expected)) {
+        throw new RuntimeException("Missing configured component or wrapper data: {$expected}");
+    }
 }
 
 echo "Tempest view assertions passed.\n";

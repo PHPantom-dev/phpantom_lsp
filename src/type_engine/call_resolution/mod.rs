@@ -84,6 +84,7 @@ mod out_param;
 mod reflection;
 mod return_types;
 mod target_cache;
+pub(crate) use target_cache::{declaration_param_types, with_declaration_arguments};
 mod template_binding;
 mod template_subs;
 

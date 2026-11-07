@@ -2,6 +2,7 @@
 
 mod component_context;
 mod components;
+mod configuration;
 mod custom_views;
 mod discovery;
 pub(crate) mod inference;
@@ -9,6 +10,7 @@ mod paths;
 pub(crate) mod preprocessor;
 mod syntax;
 mod view_data;
+mod wrappers;
 
 pub(crate) use discovery::TempestState;
 

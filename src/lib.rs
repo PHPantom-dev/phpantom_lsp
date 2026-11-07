@@ -153,6 +153,9 @@ pub(crate) struct WatchedFileInputs {
     pub(crate) is_symfony: bool,
     /// Whether the project uses Twig, which adds the template watchers.
     pub(crate) is_twig: bool,
+    /// Whether the project renders Tempest views, which adds the watcher
+    /// for Tempest's extensionless CLI bootstrap.
+    pub(crate) is_tempest: bool,
     /// Directory symlinks the index reached through, one relative-pattern
     /// watcher each. Empty when the client cannot match a relative
     /// pattern, since then there is nothing to ask it for.

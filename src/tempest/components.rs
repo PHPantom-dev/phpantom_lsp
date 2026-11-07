@@ -69,9 +69,6 @@ impl Backend {
         };
         if tag.name_span.start <= offset && offset <= tag.name_span.end {
             let prefix = &source[tag.name_span.start..offset];
-            if !prefix.starts_with('x') {
-                return empty();
-            }
             let components = self.tempest_components();
             let mut names: Vec<_> = components
                 .keys()
@@ -136,7 +133,7 @@ impl Backend {
                 )
             })
             .collect();
-        if tag.name.starts_with("x-") {
+        {
             let components = self.tempest_components();
             if let Some(path) = components.get(tag.name)
                 && let Some(component) = self.get_file_content_arc(&crate::util::path_to_uri(path))

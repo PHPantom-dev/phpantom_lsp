@@ -3,9 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use super::view_data::Collected;
 use crate::Backend;
+use crate::file_state::FileState;
 use crate::php_type::{PhpType, ShapeEntry};
-use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap};
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 
 /// Inferred declarations, kept below annotations written in the template.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -77,20 +79,20 @@ pub(crate) struct Memo {
     /// View implementations as of the last PHP change; `None` until the
     /// first refresh, which is then a full one.
     custom: Option<Arc<BTreeMap<String, super::custom_views::CustomView>>>,
+    /// View helper names as of the last refresh; a change rescans callers.
+    wrappers: Option<Arc<super::wrappers::Names>>,
     /// Data each render caller supplied, by caller URI.
-    callers: BTreeMap<String, Caller>,
+    callers: BTreeMap<String, Collected>,
     calls: super::component_context::CallMemo,
 }
 
-struct Caller {
-    targets: Vec<(String, Scope)>,
-    /// Custom View classes this caller instantiates with its own data.
-    instantiated: HashSet<String>,
-}
-
-/// Whether a file's symbol map can supply data to a view: a literal view
-/// path, a `data()` call, or a `GenericView` reference.
-fn renders_views(map: &SymbolMap) -> bool {
+/// Whether a file can supply data to a view: a literal view path, a
+/// `data()` call, a `GenericView` reference, or a call to `view()` or to a
+/// helper declared to return a View.
+fn renders_views(file: &FileState, wrappers: &super::wrappers::Names) -> bool {
+    let Some(map) = file.symbol_map.as_deref() else {
+        return false;
+    };
     map.spans.iter().any(|span| match &span.kind {
         SymbolKind::StringKey {
             kind: StringKeyKind::TempestView { .. },
@@ -100,10 +102,27 @@ fn renders_views(map: &SymbolMap) -> bool {
             member_name,
             is_method_call: true,
             ..
-        } => member_name.eq_ignore_ascii_case("data"),
+        } => {
+            member_name.eq_ignore_ascii_case("data")
+                || wrappers.methods.contains(&member_name.to_ascii_lowercase())
+        }
         SymbolKind::ClassReference { name, .. } => name
             .trim_start_matches('\\')
             .eq_ignore_ascii_case("Tempest\\View\\GenericView"),
+        SymbolKind::FunctionCall {
+            name,
+            is_definition: false,
+            ..
+        } => {
+            let name = file
+                .resolved_names
+                .as_ref()
+                .and_then(|names| names.get(span.start))
+                .unwrap_or(name)
+                .trim_start_matches('\\');
+            name.eq_ignore_ascii_case("Tempest\\View\\view")
+                || wrappers.functions.contains(&name.to_ascii_lowercase())
+        }
         _ => false,
     })
 }
@@ -127,8 +146,10 @@ impl Backend {
             && (super::is_view(uri)
                 || self.tempest.sources.read().contains(uri)
                 || self
-                    .symbol_map_for(uri)
-                    .is_some_and(|map| renders_views(&map)))
+                    .files
+                    .read()
+                    .get(uri)
+                    .is_some_and(|file| renders_views(file, &self.tempest.wrappers.read())))
     }
 
     /// Recompute view inference from scratch: after a save, a watcher batch
@@ -171,30 +192,50 @@ impl Backend {
         if edited.is_none() {
             *memo = Memo::default();
         }
+        let wrappers = Arc::new(super::wrappers::names(self));
         let custom = match (&memo.custom, edited) {
             (Some(custom), Some(uri)) if !self.may_declare_custom_view(uri, custom) => {
                 Arc::clone(custom)
             }
             _ => Arc::new(super::custom_views::collect(self)),
         };
-        let rescan = memo.custom.as_ref() != Some(&custom);
+        let rescan =
+            memo.custom.as_ref() != Some(&custom) || memo.wrappers.as_ref() != Some(&wrappers);
         memo.custom = Some(Arc::clone(&custom));
+        memo.wrappers = Some(Arc::clone(&wrappers));
+        *self.tempest.wrappers.write() = Arc::clone(&wrappers);
         if rescan {
             memo.callers.clear();
             let callers: Vec<_> = self
                 .files
                 .read()
                 .iter()
-                .filter(|(_, file)| file.symbol_map.as_deref().is_some_and(renders_views))
+                .filter(|(_, file)| renders_views(file, &wrappers))
                 .map(|(uri, _)| uri.clone())
                 .collect();
             for uri in callers {
-                self.collect_caller(&uri, &custom, &mut memo.callers);
+                self.collect_caller(&uri, &custom, &wrappers, &mut memo.callers);
             }
         } else if let Some(uri) = edited {
-            self.collect_caller(uri, &custom, &mut memo.callers);
+            // A helper body is read under each caller's arguments, so the
+            // callers that went through an edited helper are walked again.
+            let dependents: Vec<String> = memo
+                .callers
+                .iter()
+                .filter(|(caller, data)| *caller != uri && data.dependencies.contains(uri))
+                .map(|(caller, _)| caller.clone())
+                .collect();
+            self.collect_caller(uri, &custom, &wrappers, &mut memo.callers);
+            for caller in dependents {
+                self.collect_caller(&caller, &custom, &wrappers, &mut memo.callers);
+            }
         }
         let mut sources: HashSet<String> = memo.callers.keys().cloned().collect();
+        sources.extend(
+            memo.callers
+                .values()
+                .flat_map(|caller| caller.dependencies.iter().cloned()),
+        );
         sources.extend(custom.values().map(|view| view.source.clone()));
         *self.tempest.sources.write() = sources;
         let mut scopes: HashMap<String, Scope> = HashMap::new();
@@ -255,29 +296,26 @@ impl Backend {
         &self,
         uri: &str,
         custom: &BTreeMap<String, super::custom_views::CustomView>,
-        callers: &mut BTreeMap<String, Caller>,
+        wrappers: &super::wrappers::Names,
+        callers: &mut BTreeMap<String, Collected>,
     ) {
-        let Some(map) = self.symbol_map_for(uri).filter(|map| renders_views(map)) else {
+        let map = self
+            .files
+            .read()
+            .get(uri)
+            .filter(|file| renders_views(file, wrappers))
+            .and_then(|file| file.symbol_map.clone());
+        let Some(map) = map else {
             callers.remove(uri);
             return;
         };
-        let mut caller = Caller {
-            targets: Vec::new(),
-            instantiated: HashSet::new(),
-        };
+        let mut caller = Collected::default();
         if let Some(content) = self.analysable_content(uri)
             && map.matches_source(&content)
             && (map.source_hash.is_none() || map.built_from(&content))
         {
             let file = self.file_context(uri);
-            caller.targets = super::view_data::collect(
-                self,
-                uri,
-                &file,
-                &content,
-                custom,
-                &mut caller.instantiated,
-            );
+            caller = super::view_data::collect(self, uri, &file, &content, custom, wrappers);
         }
         callers.insert(uri.to_owned(), caller);
     }

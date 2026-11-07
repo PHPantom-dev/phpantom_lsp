@@ -282,6 +282,7 @@ impl Backend {
                 }
                 .map(crate::atom::atom);
             }
+            crate::parser::expand_class_file_constants(cls, uri);
             cls.cache_fqn_in_uri(uri);
         }
 

@@ -74,8 +74,8 @@ pub(super) fn resolve_hint_keywords(
 /// The type an operator expression produces, for the operators whose
 /// answer can be read from the source text without a full parse.
 ///
-/// Concatenation (`$a . $b`) always yields `string`, whatever its operands
-/// are. The elvis operator (`$body ?: ''`) yields the union of both sides —
+/// Concatenation (`$a . $b`) keeps its value when both operands are known
+/// scalars, otherwise it yields `string`. The elvis operator (`$body ?: ''`) yields the union of both sides —
 /// resolved recursively through [`Backend::resolve_arg_text_to_type`], the
 /// same way assigning the expression to a variable first would resolve
 /// through the AST-based `resolve_conditional_chain`.
@@ -90,7 +90,12 @@ pub(in crate::type_engine::call_resolution) fn resolve_operator_type(
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     if contains_top_level_concat(text) {
-        return Some(PhpType::named(atom("string")));
+        return Some(
+            crate::type_engine::type_ops::const_fold::fold_string_concatenation(text, &|term| {
+                Backend::resolve_arg_text_to_type(term, ctx)
+            })
+            .unwrap_or_else(PhpType::string),
+        );
     }
     // A bitwise or integer expression over constants is the value PHP
     // computes for it (`JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR` is one mask,
