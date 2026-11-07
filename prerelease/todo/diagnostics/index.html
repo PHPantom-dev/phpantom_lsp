@@ -1056,17 +1056,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#d48-a-catch-its-try-cannot-reach-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D48. A <code>catch</code> its <code>try</code> cannot reach is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1653,17 +1642,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#d48-a-catch-its-try-cannot-reach-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D48. A <code>catch</code> its <code>try</code> cannot reach is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2030,23 +2008,6 @@ generated fields into the index would let the check treat both kinds the
 same.</p>
 <p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index, which
 D31 also needs) and <code>src/diagnostics/uninitialized_properties.rs</code>.</p>
-<hr />
-<h2 id="d48-a-catch-its-try-cannot-reach-is-not-reported">D48. A <code>catch</code> its <code>try</code> cannot reach is not reported<a class="headerlink" href="#d48-a-catch-its-try-cannot-reach-is-not-reported" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">try {</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    $this-&gt;repo-&gt;save($user);        // @throws ORMException only</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">} catch (JsonException $e) {         // can never run: not reported</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>PhpStorm reports a <code>catch</code> whose class nothing in the <code>try</code> body can throw,
-and so does PHPStan (<code>catch.neverThrown</code>). The reachability check already
-works out what a <code>try</code> body can throw (<code>ThrowPoints</code> in
-<code>src/type_engine/variable/forward_walk/throw_points.rs</code>), and treats a
-catch no exception can reach as dead code for variable flow, but nothing
-reports the clause itself. With a diagnostic for it, PHPStan's fix (H24)
-would work without PHPStan.</p>
-<p>Only a body whose every call declares what it throws can rule a catch
-out, so this stays quiet wherever an undeclared call could throw anything.</p>
 
 
 
