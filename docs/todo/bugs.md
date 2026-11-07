@@ -214,33 +214,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B712. A used `void` result is judged by one member of a union
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-/** @var LoggerInterface|ObjectProphecy */
-private $logger;
-
-$this->logger->warning('x')->shouldBeCalled();
-// Result of method LoggerInterface::warning() (void) is used
-```
-
-The call's result is `null` only if every class the receiver can be
-returns nothing. `ObjectProphecy` answers the call through `__call`,
-which returns a `MethodProphecy`, so the result is used correctly. The
-check takes the first union member that declares the method and asks
-only it: `Logger|Mock` is reported and `Mock|Logger` is not, when `Mock`
-declares `warning()` with a return value. Report the call only when every
-member that answers it, through a declared method or `__call`, is natively
-`void`.
-
-**Where to look:** `collect_void_result_diagnostics_with_context`
-(`src/diagnostics/void_results.rs`), which reads `native_void` off the
-single target `resolve_callable_target_at_offset` returns.
-
-Found by `analyze` on Drupal core's Prophecy-based tests.
-
 ### B713. Hover shows two `class-string`s that share a short name as one
 
 **Impact: Low · Complexity: Low-Medium**

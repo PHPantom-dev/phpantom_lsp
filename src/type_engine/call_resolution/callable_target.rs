@@ -149,9 +149,20 @@ impl Backend {
             )
         };
 
-        resolved_types
+        let mut target = resolved_types
             .iter()
-            .find_map(|rt| Self::method_target_on_receiver(rt, method_name, rctx, args_text))
+            .find_map(|rt| Self::method_target_on_receiver(rt, method_name, rctx, args_text))?;
+
+        // The call returns nothing only if every receiver that answers it,
+        // through the method itself or `__call`, returns nothing.
+        if target.native_void && resolved_types.len() > 1 {
+            target.native_void = resolved_types.iter().all(|rt| {
+                Self::method_target_on_receiver(rt, method_name, rctx, None)
+                    .or_else(|| Self::method_target_on_receiver(rt, "__call", rctx, None))
+                    .is_none_or(|t| t.native_void)
+            });
+        }
+        Some(target)
     }
 
     /// The method `method_name` on one resolved receiver type as a
@@ -1024,6 +1035,10 @@ fn unreachable_method_target(
         }]
         .into(),
         return_type: handler.return_type.clone(),
+        native_void: handler
+            .native_return_type
+            .as_ref()
+            .is_some_and(PhpType::is_void),
         accepts_any_args: true,
         binds_named_args: false,
         owner_class: Some(class.fqn()),
