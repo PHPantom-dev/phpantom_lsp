@@ -1182,17 +1182,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x20-warn-about-unknown-configuration-keys" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X20. Warn about unknown configuration keys
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x21-keep-config-schemajson-in-step-with-the-config-structs" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1726,17 +1715,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x20-warn-about-unknown-configuration-keys" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X20. Warn about unknown configuration keys
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x21-keep-config-schemajson-in-step-with-the-config-structs" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2117,20 +2095,6 @@ but include a warning in the rename response when excludes are
 configured. Maintainer's call on the semantics; whichever way it
 goes, the chosen behaviour needs a test and a sentence in
 <a href="../../configuration/"><code>configuration.md</code></a>.</p>
-<h2 id="x20-warn-about-unknown-configuration-keys">X20. Warn about unknown configuration keys<a class="headerlink" href="#x20-warn-about-unknown-configuration-keys" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<p><code>.phpantom.toml</code> is deserialized with serde's default behaviour, so a
-key PHPantom does not know is dropped without a word: a typo such as
-<code>unused-parameter = true</code> or a key from a newer release silently does
-nothing. Collect the unknown keys while deserializing (the
-<code>serde_ignored</code> crate wraps the deserializer for exactly this) and
-report each one, with its file and dotted path, as a warning in the
-editor (<code>window/showMessage</code> once per config load, plus the log) and
-on stderr from <code>analyze</code>, <code>fix</code>, and <code>format</code>. Keep it a warning, never
-an error, so a config written for a newer release still loads.</p>
-<p>The renamed-key table in <code>src/config/mod.rs</code> already rewrites old
-spellings and warns about them on stderr; route that warning through
-the same reporting so an editor user sees it too.</p>
 <h2 id="x21-keep-config-schemajson-in-step-with-the-config-structs">X21. Keep <code>config-schema.json</code> in step with the config structs<a class="headerlink" href="#x21-keep-config-schemajson-in-step-with-the-config-structs" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
 <p><code>config-schema.json</code> is maintained by hand and only a checkbox in the
@@ -2141,8 +2105,8 @@ and the config structs and fails when a section or key exists in one
 but not the other. Either generate the schema from the structs (e.g.
 <code>schemars</code>, keeping the hand-written descriptions as doc comments), or
 deserialize a TOML document built from every schema key and assert
-that X20's unknown-key collector reports nothing, and that every
-<code>Config</code> field has a schema key.</p>
+that <code>load_config_with_warnings</code> reports no unknown key, and that
+every <code>Config</code> field has a schema key.</p>
 
 
 
