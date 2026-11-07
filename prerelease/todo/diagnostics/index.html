@@ -1079,17 +1079,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d33-private-members-nothing-uses-are-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D33. Private members nothing uses are not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1720,17 +1709,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d33-private-members-nothing-uses-are-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D33. Private members nothing uses are not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2177,43 +2155,6 @@ The extension's fixtures are the <code>entity_*.fixture</code> fixtures in
 <code>tests/phpstan_doctrine/rules/Doctrine/ORM/</code>, whose custom column types
 <code>entity-manager.php</code> registers.</p>
 <hr />
-<h2 id="d33-private-members-nothing-uses-are-not-reported">D33. Private members nothing uses are not reported<a class="headerlink" href="#d33-private-members-nothing-uses-are-not-reported" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">final class Invoice</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">{</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    private string $legacyNumber; // never read</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    private int $total;           // read, never written</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">}</span>
-</code></pre></div>
-<p>A private property nothing outside the class can reach is dead when the
-class never reads it, and holds only its default when the class never
-writes it. A typed one without a default is already reported by
-<code>uninitialized_property</code> when the class never writes it; its write
-bookkeeping in <code>src/diagnostics/uninitialized_properties.rs</code> is a starting
-point for the rest. Both are a bug or leftover code more often than not, and PHPStan
-reports them (<code>property.unused</code>, <code>property.onlyRead</code>, <code>property.onlyWritten</code>).</p>
-<p>Frameworks read and write properties PHP code does not: Doctrine writes an
-entity's generated identifier and every mapped field when it hydrates, and
-reads them when it flushes; Gedmo writes the fields its attributes mark;
-Symfony writes a <code>#[Required]</code> property while autowiring. Those count as
-read and written (PHPStan's Doctrine extension models Doctrine's and
-Gedmo's), or the check flags correct entities.</p>
-<p>The Doctrine extension's fixtures are <code>unused_private_property*.fixture</code>
-and <code>gedmo_property_assign*.fixture</code> in <code>tests/fixtures/phpstan_doctrine/</code>.</p>
-<p>Private methods and constants nothing in the class (or a closure bound to
-it) calls or reads are dead the same way, and are simpler: no framework
-writes them. Report all three dimmed, with the <code>Unnecessary</code> tag the way
-an unused import is, and offer "Remove unused member" (the fix H19 wires
-to PHPStan's <code>method.unused</code> and friends) on the native diagnostic too. A
-method a string names (<code>[$this, 'handle']</code>, <code>'handle'</code> in a callable
-position, a Laravel or Symfony convention that calls it by name) counts as
-used. PhpStorm reports unused private methods, properties and constants
-natively.</p>
-<p><strong>Where to look:</strong> the unused-variable check (<code>src/diagnostics/unused_variables.rs</code>)
-for the read/write bookkeeping, the Doctrine mapping index in
-<code>src/framework.rs</code>, and PHPStan's <code>UnusedPrivatePropertyRule</code> with the
-Doctrine extension's <code>PropertiesExtension</code>s.</p>
-<hr />
 <h2 id="d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties">D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties<a class="headerlink" href="#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p><code>uninitialized_property</code> reads a Doctrine entity's mapping attributes to
@@ -2229,10 +2170,10 @@ D31 also needs) and <code>src/diagnostics/uninitialized_properties.rs</code>.</p
 <hr />
 <h2 id="d48-a-catch-its-try-cannot-reach-is-not-reported">D48. A <code>catch</code> its <code>try</code> cannot reach is not reported<a class="headerlink" href="#d48-a-catch-its-try-cannot-reach-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">try {</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    $this-&gt;repo-&gt;save($user);        // @throws ORMException only</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">} catch (JsonException $e) {         // can never run: not reported</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">try {</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    $this-&gt;repo-&gt;save($user);        // @throws ORMException only</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">} catch (JsonException $e) {         // can never run: not reported</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>PhpStorm reports a <code>catch</code> whose class nothing in the <code>try</code> body can throw,
 and so does PHPStan (<code>catch.neverThrown</code>). The reachability check already

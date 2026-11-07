@@ -1348,11 +1348,13 @@
 
 
 <h1 id="phpantom-yii">PHPantom — Yii<a class="headerlink" href="#phpantom-yii" title="Permanent link">&para;</a></h1>
-<p>Known gaps and missing features in PHPantom's Yii support. Today Yii
-gets only the generic engine. Yii 3 is built from small, typed
-components with little magic, so the engine already types most of it;
-what is missing is the navigation between the names Yii keeps in
-configuration and the code and files they point to.</p>
+<p>Known gaps and missing features in PHPantom's Yii support. Yii 3 is
+built from small, typed components with little magic, so the generic
+engine already types most of it. On top of that, route names, route
+arguments, and view names complete, navigate, and are checked. What is
+still missing is the navigation between the rest of the names Yii
+keeps in configuration (DI definitions, <code>$params</code> keys, alias
+declarations) and the code and files they point to.</p>
 <p>The items below are what the Yii team asked for in
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/discussions/505">discussion #505</a>.
 <code>examples/yii/</code> (generated from <code>yiisoft/app</code>) is the playground, with a
