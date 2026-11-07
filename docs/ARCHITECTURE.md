@@ -1502,5 +1502,24 @@ resolves paths from the project, caller, and discovery roots. References
 compare the resolved file, since identical relative paths in two callers
 can name different views.
 
-Render-call data inference and configured discovery are tracked in
-[the feature backlog](todo/lsp-features.md#f73-tempest-view-context-inference).
+`tempest/view_data.rs` resolves render arguments through the shared type
+engine in the caller's namespace. Custom View declarations supply the
+renderer proxy's `$this` type; only explicit view data becomes local
+variables. `tempest/inference.rs` caches these declarations before parsing,
+and refreshes them after indexing, saves, and changes to a view or to a file
+that renders one; edits to any other file skip the refresh. Indexing, saves
+and watcher batches recompute everything. An unsaved edit reuses the data
+of every other render caller, and the results of every component call whose
+two templates and incoming scope are unchanged, so typing in one view
+re-evaluates only the calls that edit reaches. A stale indexing batch cannot
+overwrite a lowering built with newer inferred data.
+
+Component arguments are evaluated in the caller, while slot contents are
+lowered into isolated closures. `tempest/component_context.rs` resolves slot
+locals at the receiving component's outlet for that invocation. Component
+attributes override global view data without inheriting arbitrary caller
+locals. A work queue propagates changed scopes through component calls;
+recursive component inference is bounded.
+
+Configured discovery remains in
+[the feature backlog](todo/lsp-features.md#f74-configured-tempest-view-discovery).

@@ -1,16 +1,22 @@
 //! Lazy discovery of `.view.php` files under Composer's autoload roots.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 
 use crate::{Backend, composer};
 
 #[derive(Default)]
 pub(crate) struct TempestState {
     catalog: Mutex<Option<Arc<Catalog>>>,
+    pub(crate) has_views: std::sync::atomic::AtomicBool,
+    pub(super) refresh: Mutex<super::inference::Memo>,
+    pub(crate) scopes: RwLock<HashMap<String, Arc<super::inference::Scope>>>,
+    /// Files the last refresh read view data from: render callers and
+    /// custom View declarations.
+    pub(super) sources: RwLock<HashSet<String>>,
 }
 
 #[derive(Default)]
@@ -18,6 +24,13 @@ pub(super) struct Catalog {
     pub(super) roots: Vec<PathBuf>,
     pub(super) files: Vec<PathBuf>,
     pub(super) components: BTreeMap<String, PathBuf>,
+}
+
+/// Match indexed paths while retaining the URI of an unsaved buffer.
+pub(super) fn canonical_uri(uri: &str) -> String {
+    crate::util::uri_to_path(uri)
+        .and_then(|path| dunce::canonicalize(path).ok())
+        .map_or_else(|| uri.to_owned(), |path| crate::util::path_to_uri(&path))
 }
 
 impl Backend {

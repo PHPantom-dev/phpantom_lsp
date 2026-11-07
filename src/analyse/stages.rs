@@ -213,6 +213,7 @@ pub(super) fn index_project(
         backend.ensure_workspace_index_ready_with_progress(None);
     } else {
         backend.refresh_blade_injected_vars();
+        backend.refresh_tempest_inference();
     }
 
     IndexedProject {

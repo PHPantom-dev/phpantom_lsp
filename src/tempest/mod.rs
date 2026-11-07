@@ -1,10 +1,14 @@
 //! Tempest View templates, lowered to PHP for the shared type engine.
 
+mod component_context;
 mod components;
+mod custom_views;
 mod discovery;
+pub(crate) mod inference;
 mod paths;
 pub(crate) mod preprocessor;
 mod syntax;
+mod view_data;
 
 pub(crate) use discovery::TempestState;
 

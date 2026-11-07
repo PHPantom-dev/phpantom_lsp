@@ -1075,23 +1075,6 @@ When the domain has no catalogue yet, offer to create
 
 ---
 
-## F73. Tempest view context inference
-
-**Impact: Medium-High · Complexity: High**
-
-Infer template data from `Tempest\View\view()` named arguments and custom
-`View` objects, including the object bound as `$this`. Component attributes
-and named slots must get the scope Tempest renders them in: a slot does not
-simply inherit every local variable of the template that writes it. Preserve
-explicit `@var` annotations and use the shared type engine for expressions.
-Recompute affected views when a caller changes, and test conflicting short
-class names across namespaces and component overrides.
-
-**Where to look:** `src/tempest/`, `src/blade/call_site_inference.rs`,
-`src/type_engine/variable/forward_walk/`, and `examples/tempest/`.
-
----
-
 ## F74. Configured Tempest view discovery
 
 **Impact: Medium · Complexity: Medium-High**
