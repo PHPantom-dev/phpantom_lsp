@@ -161,6 +161,92 @@ class Service {
 }
 
 #[test]
+fn json_throw_on_error_makes_json_calls_throw_json_exception() {
+    let text = r#"<?php
+namespace App;
+
+class Settings {
+    const FLAGS = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;
+
+    public function load(string $json): array {
+        return json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+    }
+
+    public function positional(string $json): mixed {
+        return json_decode($json, true, 512, \JSON_BIGINT_AS_STRING | \JSON_THROW_ON_ERROR);
+    }
+
+    public function save(array $data): string {
+        return json_encode($data, self::FLAGS);
+    }
+
+    public function numeric(array $data): string {
+        return json_encode($data, 4194304);
+    }
+}
+"#;
+    let diags = diagnostics_on(&backend(true), text);
+    assert_eq!(
+        messages_with_code(&diags, CODE),
+        vec![unhandled("JsonException"); 4],
+        "got: {diags:?}"
+    );
+    let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+    assert_eq!(lines, vec![7, 11, 15, 19]);
+}
+
+#[test]
+fn json_calls_without_the_throw_flag_throw_nothing() {
+    let text = r#"<?php
+function load(string $json, int $flags): array {
+    $a = json_decode($json, true);
+    $b = json_decode($json, true, 512, JSON_BIGINT_AS_STRING);
+    $c = json_decode($json, true, 512, $flags);
+    $d = json_encode($a, JSON_PRETTY_PRINT);
+    // The depth, not the flags: 4194304 here is no flag.
+    $e = json_decode($json, true, 4194304);
+    return [$a, $b, $c, $d, $e];
+}
+"#;
+    assert!(messages(text).is_empty(), "got: {:?}", messages(text));
+}
+
+#[test]
+fn json_exception_is_covered_by_a_catch_or_a_throws_tag() {
+    let text = r#"<?php
+/** @throws \JsonException */
+function declared(string $json): mixed {
+    return json_decode($json, flags: JSON_THROW_ON_ERROR);
+}
+
+function caught(string $json): mixed {
+    try {
+        return json_decode($json, flags: JSON_THROW_ON_ERROR);
+    } catch (\JsonException $e) {
+        return null;
+    }
+}
+"#;
+    assert!(messages(text).is_empty(), "got: {:?}", messages(text));
+}
+
+#[test]
+fn a_namespaced_json_decode_is_not_the_builtin() {
+    let text = r#"<?php
+namespace App;
+
+function json_decode(string $json, bool $assoc = false, int $depth = 512, int $flags = 0): mixed {
+    return null;
+}
+
+function load(string $json): mixed {
+    return json_decode($json, flags: JSON_THROW_ON_ERROR);
+}
+"#;
+    assert!(messages(text).is_empty(), "got: {:?}", messages(text));
+}
+
+#[test]
 fn unchecked_exceptions_are_not_reported() {
     let text = r#"<?php
 function load(int $n): void {

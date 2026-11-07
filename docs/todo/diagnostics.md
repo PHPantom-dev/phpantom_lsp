@@ -530,36 +530,6 @@ D31 also needs) and `src/diagnostics/uninitialized_properties.rs`.
 
 ---
 
-## D47. `JSON_THROW_ON_ERROR` does not make `json_decode()` throw `JsonException`
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** Loads the settings. */
-function load(string $path): array
-{
-    return json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
-    // JsonException is neither caught nor in a @throws tag: not reported
-}
-```
-
-The opt-in `unhandled_exception` diagnostic reports what a callee declares
-with `@throws`. `json_decode()` and `json_encode()` only throw
-`JsonException` when their flags include `JSON_THROW_ON_ERROR`, so the stub
-cannot declare it, and nothing is reported. `@throws` completion and
-"Update docblock" miss it the same way, and so does a `catch (JsonException
-$e)` the reachability check judges.
-
-What a call throws needs to depend on its arguments, the way PHPStan's
-`DynamicFunctionThrowTypeExtension`s let the flags decide. Read the flags
-argument by position or by name, as a constant or a `|` of constants.
-
-**Where to look:** `src/completion/source/throws_analysis/uncaught.rs`
-(`function_call`), `src/type_engine/variable/forward_walk/throw_points.rs`,
-and PHPStan's `JsonThrowTypeExtension`.
-
----
-
 ## D48. A `catch` its `try` cannot reach is not reported
 
 **Impact: Low-Medium · Complexity: Medium**

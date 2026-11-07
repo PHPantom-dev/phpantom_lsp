@@ -519,7 +519,22 @@ impl<'ast, 'arena> ThrowSiteSink<'ast, 'arena> for Analysis<'_, '_> {
         if let Some(function_loader) = self.ctx.function_loader
             && let Some(function) = function_loader(bytes_to_str(ident.value()), span.start.offset)
         {
-            self.add_declared((span.start.offset, span.end.offset), &function.throws);
+            let range = (span.start.offset, span.end.offset);
+            self.add_declared(range, &function.throws);
+            if !crate::type_engine::type_ops::call_site_returns::has_call_site_throws(&function) {
+                return;
+            }
+            let var_ctx = self.var_ctx(span.start.offset);
+            let rctx = var_ctx.as_resolution_ctx();
+            let resolve = |text: &str| crate::Backend::resolve_arg_text_to_type(text, &rctx);
+            if let Some(thrown) = crate::type_engine::type_ops::call_site_returns::call_site_throws(
+                &function,
+                &call.argument_list,
+                self.content,
+                Some(&resolve),
+            ) {
+                self.add_declared(range, &[thrown]);
+            }
         }
     }
 

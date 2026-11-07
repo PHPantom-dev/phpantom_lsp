@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| D47 | [`JSON_THROW_ON_ERROR` does not make `json_decode()` throw `JsonException`](todo/diagnostics.md#d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception) | Medium      | Medium      |
 | D33 | [Private members nothing uses are not reported](todo/diagnostics.md#d33-private-members-nothing-uses-are-not-reported) | Low-Medium  | Medium      |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
@@ -220,7 +219,6 @@ ships, remove every row that names it.
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
-| D47 | [`JSON_THROW_ON_ERROR` does not make `json_decode()` throw `JsonException`](todo/diagnostics.md#d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception) | Medium      | Medium      |
 | D48 | [A `catch` its `try` cannot reach is not reported](todo/diagnostics.md#d48-a-catch-its-try-cannot-reach-is-not-reported) | Low-Medium  | Medium      |
 | D19 | [`invalid_member_access` cannot tell a property read from a write](todo/diagnostics.md#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

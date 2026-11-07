@@ -7,7 +7,9 @@
 //! and `additional_text_edits` are emitted to auto-import exception classes
 //! that are not yet in the file's `use` list.
 
-use crate::common::{complete_at, create_psr4_workspace, create_test_backend};
+use crate::common::{
+    complete_at, create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
+};
 use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: extract `@throws` completion items from a list.
@@ -1839,4 +1841,56 @@ async fn test_throws_propagated_outside_try_block() {
         smart.iter().map(|i| &i.label).collect::<Vec<_>>()
     );
     assert_eq!(smart[0].label, "@throws Exception");
+}
+
+/// `JSON_THROW_ON_ERROR` makes `json_decode()` throw `JsonException`, which
+/// no `@throws` tag on the builtin can declare.
+#[tokio::test]
+async fn test_throws_json_throw_on_error() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = Uri::parse("file:///throws_json.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function load(string $json): array {\n",
+        "    $plain = json_decode($json, true);\n",
+        "    return json_decode($json, true, flags: JSON_THROW_ON_ERROR);\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 2, 4).await;
+    let labels: Vec<&str> = throws_items(&items)
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+    assert!(labels.contains(&"@throws JsonException"), "got: {labels:?}");
+}
+
+/// Without `JSON_THROW_ON_ERROR`, `json_decode()` reports failure through its
+/// return value and throws no `JsonException`.
+#[tokio::test]
+async fn test_throws_json_without_throw_on_error() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = Uri::parse("file:///throws_json_plain.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function load(string $json): array {\n",
+        "    return json_decode($json, true, 512, JSON_BIGINT_AS_STRING);\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 2, 4).await;
+    let labels: Vec<&str> = throws_items(&items)
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+    assert!(
+        !labels.contains(&"@throws JsonException"),
+        "got: {labels:?}"
+    );
 }

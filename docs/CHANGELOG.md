@@ -142,6 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`JSON_THROW_ON_ERROR` throws `JsonException`.** A `json_decode()` or `json_encode()` call whose flags include `JSON_THROW_ON_ERROR` now counts as throwing `JsonException`, so `@throws` completion and "Update docblock" suggest it, and what a `catch (JsonException $e)` block assigns is no longer lost after the `try`.
 - **Trait methods imported under another name.** A class whose `use` block renames a trait method (`isLocal as isSafe`) is no longer told it must implement the abstract method that name already implements.
 - **Tools installed with the Composer bin plugin.** In a project using `bamarni/composer-bin-plugin`, classes from the tools under `vendor-bin/` (PHPUnit's `TestCase`, say) resolve again without un-ignoring their vendor directories, and stay out of analysis like any other vendor code. PHPUnit's version is read from there too.
 - **Templates in the value type of an array parameter.** A function taking `iterable<Tk, (Closure(): Tv)>` or `array<Tk, TypeInterface<Tv>>` now infers `Tv` from each element of the array passed to it, closures and first-class callables included, instead of from the whole array.
