@@ -23,7 +23,7 @@
 
 use super::*;
 use crate::symbol_map::{
-    ContainerValue, ContainerValueSite, KeyFramework, MessengerHandlerSite, ReceiverClass,
+    ContainerValue, ContainerValueSite, MessengerHandlerSite, ReceiverClass, ReceiverFrameworks,
     RouteImport, SYMFONY_CONTAINER_CONFIGURATOR_NS, SYMFONY_ROUTING_CONFIGURATOR, StringKeyKind,
 };
 use crate::symfony::translations::{DEFAULT_DOMAIN, is_domain_name, translation_key};
@@ -225,16 +225,19 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         // container lookup.  Only Symfony declares services and parameters
         // in PHP; in Drupal a `setParameter()` is far more often a
         // validator's or a query's than the container's.
-        let records = |kind: StringKeyKind| match kind.framework() {
-            KeyFramework::ServiceContainer if is_write => ctx.symfony,
-            KeyFramework::ServiceContainer => ctx.service_container,
-            KeyFramework::Symfony => ctx.symfony,
-            KeyFramework::Twig => ctx.twig,
-            KeyFramework::Yii => ctx.yii,
-            KeyFramework::Drupal => ctx.drupal,
-            KeyFramework::Laravel | KeyFramework::WordPress | KeyFramework::Tempest => false,
+        let frameworks = ReceiverFrameworks {
+            laravel: false,
+            service_container: if is_write {
+                ctx.symfony
+            } else {
+                ctx.service_container
+            },
+            symfony: ctx.symfony,
+            twig: ctx.twig,
+            yii: ctx.yii,
+            drupal: ctx.drupal,
         };
-        if !receiver.names_any(records) {
+        if !receiver.names_any(|kind| frameworks.enables(kind)) {
             continue;
         }
         let namespaces = receiver.configurator_namespaces();

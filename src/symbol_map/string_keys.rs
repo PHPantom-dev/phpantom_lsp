@@ -374,6 +374,39 @@ pub(crate) enum KeyFramework {
     Drupal,
 }
 
+/// Frameworks whose method receivers may contribute string-key candidates.
+/// Function-only keys do not participate, even in a mixed-framework project.
+pub(crate) struct ReceiverFrameworks {
+    /// Laravel's typed helpers are available.
+    pub laravel: bool,
+    /// Service-container keys are available for this operation.
+    pub service_container: bool,
+    /// Symfony's application keys are available.
+    pub symfony: bool,
+    /// Twig's template keys are available.
+    pub twig: bool,
+    /// Yii's application keys are available.
+    pub yii: bool,
+    /// Drupal's application keys are available.
+    pub drupal: bool,
+}
+
+impl ReceiverFrameworks {
+    /// Whether a receiver may record a key of this kind in this project.
+    #[inline]
+    pub(crate) fn enables(&self, kind: StringKeyKind) -> bool {
+        match kind.framework() {
+            KeyFramework::Laravel => self.laravel,
+            KeyFramework::ServiceContainer => self.service_container,
+            KeyFramework::Symfony => self.symfony,
+            KeyFramework::Twig => self.twig,
+            KeyFramework::Yii => self.yii,
+            KeyFramework::Drupal => self.drupal,
+            KeyFramework::WordPress | KeyFramework::Tempest => false,
+        }
+    }
+}
+
 /// A workspace symbol whose presence suppresses an otherwise-valid framework
 /// runtime fallback.
 ///

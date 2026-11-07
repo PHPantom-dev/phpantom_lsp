@@ -165,18 +165,8 @@ impl TemplateSourceMap {
         let (best_idx, best_b, best_p) = anchor_at(line_adj, pos.character, AnchorSide::Php);
         let mut char_offset = pos.character.saturating_sub(best_p);
 
-        if let Some((next_b, next_p)) = line_adj.get(best_idx + 1) {
+        if let Some((next_b, _)) = line_adj.get(best_idx + 1) {
             let max_b_offset = next_b.saturating_sub(best_b);
-            let max_p_offset = next_p.saturating_sub(best_p);
-
-            if max_p_offset == 0 {
-                // PHP boilerplate mapped to zero-width Blade point?
-                // This shouldn't happen with our anchor strategy, but be safe.
-                return Some(Position {
-                    line: line as u32,
-                    character: best_b,
-                });
-            }
 
             if max_b_offset == 0 {
                 // PHP boilerplate mapped to a single Blade position.
@@ -255,6 +245,16 @@ mod tests {
         // Past the last anchor: it applies, with no cap to hold it back.
         assert_eq!(map.blade_to_php(at(0, 25)), at(prologue, 45));
         assert_eq!(map.try_php_to_blade(at(prologue, 45)), Some(at(0, 25)));
+    }
+
+    #[test]
+    fn equal_php_anchors_select_the_last_template_position() {
+        let map = map(vec![vec![(0, 0), (3, 8), (7, 8), (10, 12)]]);
+        let prologue = map.prologue_lines;
+        assert_eq!(map.try_php_to_blade(at(prologue, 7)), Some(at(0, 3)));
+        assert_eq!(map.try_php_to_blade(at(prologue, 8)), Some(at(0, 7)));
+        assert_eq!(map.try_php_to_blade(at(prologue, 9)), Some(at(0, 8)));
+        assert_eq!(map.blade_to_php(at(0, 5)), at(prologue, 8));
     }
 
     /// A Blade column inside text that was replaced by generated PHP maps
@@ -349,6 +349,7 @@ mod tests {
             // Unknown to the project: the name becomes a comment, and the
             // bound attribute behind it a `blade_bound_attr_directive(` call.
             "<x-panel :author=\"$posts->first()?->author\" heading=\"Latest\">",
+            "<livewire:panel :author=\"$posts->first()?->author\">",
             // A constructor call, whose name becomes a single space, and the
             // bound attribute that is its argument an assignment.
             "<x-card :bakery=\"$bakery\">",

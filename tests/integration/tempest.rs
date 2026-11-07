@@ -126,6 +126,36 @@ fn uri(relative: &str) -> Uri {
 }
 
 #[tokio::test]
+async fn tempest_view_paths_are_not_judged_as_laravel_view_names() {
+    use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, with_code, workspace_uri};
+    let (backend, _dir) = create_psr4_workspace(
+        LARAVEL_APP_COMPOSER,
+        &[("app/page.view.php", "<p>Tempest</p>")],
+    );
+    let uri = workspace_uri(&backend, "app/Controller.php");
+    let source = "<?php\nuse function Tempest\\View\\view;\nview('page.view.php');\nview(__DIR__ . '/page.view.php');\n\\view('missing-laravel-view');\n";
+    open_php(&backend, &uri, source).await;
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);
+    let invalid_views = with_code(diagnostics, "invalid_laravel_view");
+    assert_eq!(invalid_views.len(), 1, "{invalid_views:?}");
+    assert_eq!(
+        invalid_views[0].range.start,
+        position_of(source, "missing-laravel-view")
+    );
+    for needle in ["page.view.php'", "/page.view.php'"] {
+        let position = position_of(source, needle);
+        assert_eq!(
+            definition_locations(
+                goto_definition_at(&backend, &uri, position.line, position.character + 1).await
+            )
+            .len(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
 async fn tempest_components_complete_navigate_and_refresh_after_creation() {
     use crate::common::{create_psr4_workspace, workspace_uri};
     use tower_lsp_server::LanguageServer;

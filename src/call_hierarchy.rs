@@ -565,6 +565,41 @@ fn push_unique_range(ranges: &mut Vec<Range>, range: Range) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn blade_hierarchy_translation_preserves_virtual_item_data_and_source_ranges() {
+        let backend = Backend::new_test();
+        let uri = crate::util::path_to_uri(&std::env::temp_dir().join("hierarchy.blade.php"));
+        let source = "<p>📚 {{ renderLabel() }}</p>\r\n";
+        backend
+            .open_files
+            .write()
+            .insert(uri.clone(), Arc::new(source.to_string()));
+        backend.update_ast(&uri, source);
+        let start = source.find("renderLabel").unwrap();
+        let selection = byte_range_to_lsp_range(source, start, start + "renderLabel".len());
+        let range = byte_range_to_lsp_range(source, start, start + "renderLabel()".len());
+        let virtual_selection = backend.translate_template_range_to_php(&uri, selection);
+        let virtual_range = backend.translate_template_range_to_php(&uri, range);
+        let data = serde_json::json!({"kind": "php", "offset": 42});
+        let mut item = CallHierarchyItem {
+            name: "renderLabel".to_string(),
+            kind: LspSymbolKind::Function,
+            tags: None,
+            detail: None,
+            uri: crate::util::parse_url(&uri).unwrap(),
+            range: virtual_range,
+            selection_range: virtual_selection,
+            data: Some(data.clone()),
+        };
+        backend.translate_item_to_blade(&mut item);
+        assert_eq!(item.range, range);
+        assert_eq!(item.selection_range, selection);
+        assert_eq!(item.data, Some(data));
+        let mut call_ranges = [virtual_selection];
+        backend.translate_ranges_to_blade(&uri, &mut call_ranges);
+        assert_eq!(call_ranges, [selection]);
+    }
+
     const URI: &str = "file:///call_hierarchy.php";
 
     fn parse(content: &str) -> Backend {
