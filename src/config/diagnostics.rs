@@ -74,6 +74,14 @@ pub struct DiagnosticsConfig {
     #[serde(rename = "unhandled-exceptions")]
     pub unhandled_exceptions: Option<bool>,
 
+    /// Report a parameter a function, closure, or method never reads.
+    ///
+    /// Off by default: an unused parameter is often deliberate (a
+    /// callback that ignores what it is handed, a stub kept for its
+    /// signature), so whether it is worth flagging is a matter of style.
+    #[serde(rename = "unused-parameters")]
+    pub unused_parameters: Option<bool>,
+
     /// The exception classes `unhandled-exceptions` leaves alone, along
     /// with every class extending them.
     ///
@@ -224,6 +232,13 @@ impl DiagnosticsConfig {
     /// Defaults to `false` (off) when not explicitly set.
     pub fn unhandled_exceptions_enabled(&self) -> bool {
         self.unhandled_exceptions.unwrap_or(false)
+    }
+
+    /// Whether the unused-parameters diagnostic is enabled.
+    ///
+    /// Defaults to `false` (off) when not explicitly set.
+    pub fn unused_parameters_enabled(&self) -> bool {
+        self.unused_parameters.unwrap_or(false)
     }
 
     /// The exception classes, without a leading `\`, that

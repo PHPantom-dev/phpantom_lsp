@@ -106,6 +106,9 @@ fn prompt_diagnostic_toggles() -> Vec<&'static str> {
     ) {
         diagnostics.push("unhandled-exceptions = true");
     }
+    if prompt_bool("Report parameters a function never reads?", false) {
+        diagnostics.push("unused-parameters = true");
+    }
     if prompt_bool(
         "Report a type mismatch when the only problem is a possible null or false?",
         false,

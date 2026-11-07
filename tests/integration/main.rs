@@ -202,6 +202,7 @@ mod diagnostics_unknown_classes;
 mod diagnostics_unknown_functions;
 mod diagnostics_unknown_members;
 mod diagnostics_unreachable_code;
+mod diagnostics_unused_parameters;
 mod diagnostics_unused_private_member;
 mod diagnostics_unused_variables;
 mod diagnostics_void_results;

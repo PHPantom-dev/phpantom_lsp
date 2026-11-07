@@ -65,6 +65,11 @@
           "description": "Report a throw, or a call whose callee declares @throws, where the exception is neither caught nor covered by a @throws tag of the enclosing function or method. Exceptions extending a class in unchecked-exceptions are not reported.",
           "default": false
         },
+        "unused-parameters": {
+          "type": "boolean",
+          "description": "Report a parameter a function, closure, or method never reads, after the last one it does read. Methods whose signature an interface, a parent class, or a possible override dictates are left alone, and so are parameters named with a $_ prefix.",
+          "default": false
+        },
         "unchecked-exceptions": {
           "type": "array",
           "items": { "type": "string" },

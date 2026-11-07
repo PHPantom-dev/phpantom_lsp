@@ -29,28 +29,38 @@ use super::{
 pub(super) fn body_reads_func_args<'a>(
     statements: impl Iterator<Item = &'a Statement<'a>>,
 ) -> bool {
-    struct Walker;
-    impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, bool> for Walker {
-        fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, found: &mut bool) {
-            if let Expression::Identifier(ident) = call.function {
-                let name = bytes_to_str(ident.value());
-                let name = name.strip_prefix('\\').unwrap_or(name);
-                *found |= ["func_get_args", "func_get_arg", "func_num_args"]
-                    .iter()
-                    .any(|f| name.eq_ignore_ascii_case(f));
-            }
-        }
-        fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut bool) {}
-        fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut bool) {}
-        fn walk_anonymous_class(&self, _: &'ast AnonymousClass<'arena>, _: &mut bool) {}
-        fn walk_function(&self, _: &'ast Function<'arena>, _: &mut bool) {}
-        fn walk_class(&self, _: &'ast Class<'arena>, _: &mut bool) {}
-    }
     let mut found = false;
     for stmt in statements {
-        mago_syntax::walker::Walker::walk_statement(&Walker, stmt, &mut found);
+        mago_syntax::walker::Walker::walk_statement(&FuncArgsWalker, stmt, &mut found);
     }
     found
+}
+
+/// [`body_reads_func_args`] for any scope body, an arrow function's
+/// expression included.
+pub(crate) fn scope_body_reads_func_args(body: crate::scope_collector::ScopeBody<'_, '_>) -> bool {
+    let mut found = false;
+    body.walk_with(&FuncArgsWalker, &mut found);
+    found
+}
+
+struct FuncArgsWalker;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, bool> for FuncArgsWalker {
+    fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, found: &mut bool) {
+        if let Expression::Identifier(ident) = call.function {
+            let name = bytes_to_str(ident.value());
+            let name = name.strip_prefix('\\').unwrap_or(name);
+            *found |= ["func_get_args", "func_get_arg", "func_num_args"]
+                .iter()
+                .any(|f| name.eq_ignore_ascii_case(f));
+        }
+    }
+    fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut bool) {}
+    fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut bool) {}
+    fn walk_anonymous_class(&self, _: &'ast AnonymousClass<'arena>, _: &mut bool) {}
+    fn walk_function(&self, _: &'ast Function<'arena>, _: &mut bool) {}
+    fn walk_class(&self, _: &'ast Class<'arena>, _: &mut bool) {}
 }
 
 /// Try to extract the guarded function name from a

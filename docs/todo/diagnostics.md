@@ -48,33 +48,6 @@ proxies:
 
 ---
 
-## D15. Unused parameter diagnostic
-
-**Impact: Low · Complexity: Medium**
-
-Flag function and method parameters that are never read inside the
-body. The `unused_variable` diagnostic deliberately skips parameters
-because false positives are common for callbacks, interface
-implementations, and framework conventions (e.g. Laravel event
-listeners) that require specific parameter signatures even when not
-all parameters are used. Users can now silence false positives with
-`// @phpantom-ignore unused_parameter`.
-
-### Scope
-
-1. Function and method parameters (including closures and arrow
-   functions) that are never read inside their body.
-2. Constructor parameters that are not promoted and never read.
-
-### Exclusions
-
-- Parameters named `$_` or starting with `$_` (intentional discard).
-- Promoted constructor parameters (they are property assignments).
-- Parameters in abstract methods and interface method signatures
-  (no body to check).
-
----
-
 ## D16. `unreachable_match_arm` ignores literal subject types
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -387,3 +360,27 @@ same.
 
 **Where to look:** `src/framework.rs` (the Doctrine mapping index, which
 D31 also needs) and `src/diagnostics/uninitialized_properties.rs`.
+
+---
+
+## D50. `unused-parameters` skips methods a subclass can override
+
+**Impact: Low · Complexity: Medium-High**
+
+The opt-in `unused_parameter` diagnostic only judges a public or protected
+method when nothing can override it: a final method, or one in a final
+class, an enum, or an anonymous class. A method in an open class is part
+of a contract, and an override may read the parameter its base ignores
+(a no-op hook such as `protected function boot($app) {}` is the common
+case), so flagging it from the method alone would be wrong.
+
+Psalm's `PossiblyUnusedParam` settles this with the whole program: a
+parameter is unused only when no override of the method reads it either.
+Doing that here needs the project's subclasses of the class, which
+`find_implementors()` can list but only once the workspace index is
+complete, so the answer would change as indexing progresses. A
+deterministic version needs the reverse inheritance index to be complete
+before the diagnostic runs, or a separate workspace-wide pass.
+
+**Where to look:** `src/diagnostics/unused_parameters.rs` (`can_be_overridden`)
+and `src/definition/implementation.rs` (`find_implementors`).
