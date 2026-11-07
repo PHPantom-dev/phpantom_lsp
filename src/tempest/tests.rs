@@ -105,3 +105,26 @@ fn tempest_native_php_terminates_statements_but_keeps_docblocks_attached() {
     let (php, _) = preprocess("<?php $s = <<<'HTML'\n?> {{ not_php }}\nHTML\n?>{{ $s }}");
     assert!(php.contains("HTML\n\n;\necho"), "{php}");
 }
+
+#[test]
+fn view_files_outside_a_tempest_project_stay_plain_php() {
+    let backend = crate::Backend::new_test();
+    let uri = crate::util::path_to_uri(&std::env::temp_dir().join("plain/page.view.php"));
+    let uri = uri.as_str();
+    let source = "<?php $title = 'Home'; ?>\n<div :class=\"{ open: isOpen }\">{{ title }}</div>\n";
+
+    backend.set_is_tempest(false);
+    backend.update_ast(uri, source);
+    assert!(!backend.is_php_template(uri));
+    assert!(backend.template_virtual_php_arc(uri).is_none());
+    assert!(
+        backend
+            .tempest_source_completion(uri, Position::new(1, 6))
+            .is_none()
+    );
+
+    backend.set_is_tempest(true);
+    backend.update_ast(uri, source);
+    assert!(backend.is_php_template(uri));
+    assert!(backend.template_virtual_php_arc(uri).is_some());
+}

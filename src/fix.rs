@@ -239,7 +239,7 @@ pub fn fix_deprecated(backend: &Backend, uri: &str, content: &str) -> (String, V
     loop {
         // A template's calls are found in the virtual PHP it lowers to,
         // and each rewrite is moved back into the template's own text.
-        let template = if backend.is_blade_file(uri) {
+        let template = if backend.is_php_template(uri) {
             let Some(template) = backend.template_text_of(uri, &current) else {
                 break;
             };

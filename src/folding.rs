@@ -42,14 +42,16 @@ impl Backend {
                 ranges
             });
 
-        if self.is_blade_file(uri) {
+        if self.is_php_template(uri) {
             ranges = ranges
                 .into_iter()
                 .filter_map(|r| self.translate_folding_range(uri, r))
                 .collect();
-            if let Some(raw) = self.get_file_content_arc(uri) {
-                collect_blade_native_folds(&raw, &self.blade.directives.read(), &mut ranges);
-            }
+        }
+        if self.is_blade_file(uri)
+            && let Some(raw) = self.get_file_content_arc(uri)
+        {
+            collect_blade_native_folds(&raw, &self.blade.directives.read(), &mut ranges);
         }
 
         ranges.retain(|r| r.start_line < r.end_line);

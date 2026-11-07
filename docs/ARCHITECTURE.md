@@ -1479,8 +1479,10 @@ This runs on every name a `ClassInfo` extracted from a file carries: its parents
 
 ## Tempest View templates
 
-Files ending in `.view.php` are lowered by `tempest/preprocessor.rs` before
-parsing. Native PHP, echo expressions, and bound attributes become PHP in a
+In a project that requires `tempest/view` or `tempest/framework`, files
+ending in `.view.php` are lowered by `tempest/preprocessor.rs` before
+parsing. Elsewhere the suffix is left to plain PHP, since other renderers
+use it too. Native PHP, echo expressions, and bound attributes become PHP in a
 synthetic function, with element-scoped branches and loops. They use the
 same parser, symbol map, and forward walker as ordinary PHP. Template
 imports and `@var` declarations remain in that PHP; no second type resolver

@@ -225,6 +225,24 @@ pub(crate) fn is_yii_project(package: &ComposerPackage) -> bool {
         })
 }
 
+/// The packages that render Tempest views: the standalone view renderer and
+/// the framework that bundles it.
+const TEMPEST_PACKAGES: [&str; 2] = ["tempest/view", "tempest/framework"];
+
+/// Detect whether the project renders Tempest views, whose `.view.php`
+/// files are templates rather than plain PHP.
+pub(crate) fn is_tempest_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            TEMPEST_PACKAGES
+                .iter()
+                .any(|package| name.eq_ignore_ascii_case(package))
+        })
+}
+
 /// Whether the package is a Drupal project: one that requires Drupal core.
 pub(crate) fn is_drupal_project(package: &ComposerPackage) -> bool {
     const DRUPAL_PACKAGES: &[&str] = &["drupal/core", "drupal/core-recommended", "drupal/core-dev"];
@@ -519,6 +537,21 @@ mod tests {
         )));
         assert!(!is_yii_project(&pkg(
             r#"{"require": {"yiisoft/arrays": "^3.0"}}"#
+        )));
+    }
+
+    // ── is_tempest_project ──────────────────────────────────────────
+
+    #[test]
+    fn detects_tempest_through_its_view_renderer_or_framework() {
+        assert!(is_tempest_project(&pkg(
+            r#"{"require": {"tempest/view": "^3.0"}}"#
+        )));
+        assert!(is_tempest_project(&pkg(
+            r#"{"require": {"tempest/framework": "^3.0"}}"#
+        )));
+        assert!(!is_tempest_project(&pkg(
+            r#"{"require": {"laravel/framework": "^11.0"}}"#
         )));
     }
 

@@ -261,7 +261,7 @@ impl Backend {
     /// at once has deadlocked against the batch-publish locks.  The serial
     /// refresh passes own the cache; this path only reads it.
     pub(crate) fn lower_template(&self, uri: &str, content: &str) -> Option<TemplateLowering> {
-        if crate::tempest::is_view(uri) {
+        if self.is_tempest_view(uri) {
             let (virtual_php, source_map) = crate::tempest::preprocessor::preprocess(content);
             return Some(TemplateLowering {
                 virtual_php: Arc::new(virtual_php),

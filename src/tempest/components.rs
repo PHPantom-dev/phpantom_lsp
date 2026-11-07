@@ -19,7 +19,7 @@ impl Backend {
         uri: &str,
         position: Position,
     ) -> Option<Location> {
-        if !super::is_view(uri) {
+        if !self.is_tempest_view(uri) {
             return None;
         }
         let source = self.get_file_content_arc(uri)?;
@@ -51,7 +51,7 @@ impl Backend {
         uri: &str,
         position: Position,
     ) -> Option<CompletionResponse> {
-        if !super::is_view(uri) {
+        if !self.is_tempest_view(uri) {
             return None;
         }
         let source = self.get_file_content_arc(uri)?;

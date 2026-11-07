@@ -250,6 +250,7 @@ jobs:
             --bench laravel_completion --bench custom_builder \
             --bench symfony_completion --bench yii_completion \
             --bench wordpress_completion --bench drupal_completion \
+            --bench tempest \
             -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         shell: bash

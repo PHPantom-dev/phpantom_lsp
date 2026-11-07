@@ -101,7 +101,7 @@ impl Backend {
             }
         }
 
-        if self.is_blade_file(uri) {
+        if self.is_php_template(uri) {
             return self.blade_document_symbols(uri, symbols);
         }
 
@@ -140,11 +140,13 @@ impl Backend {
             .into_iter()
             .filter_map(|symbol| self.translate_symbol(uri, symbol))
             .collect();
-        symbols.extend(
-            self.blade_outline(&content)
-                .into_iter()
-                .map(|entry| entry_to_symbol(entry, &idx)),
-        );
+        if self.is_blade_file(uri) {
+            symbols.extend(
+                self.blade_outline(&content)
+                    .into_iter()
+                    .map(|entry| entry_to_symbol(entry, &idx)),
+            );
+        }
 
         if symbols.is_empty() {
             return None;

@@ -555,6 +555,11 @@ pub struct BackendState {
     /// [`crate::composer::is_yii_project`].  Starts `true` so a workspace with
     /// no `composer.json` to classify behaves as before.
     pub(crate) is_yii: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project renders Tempest views, so its `.view.php` files
+    /// are lowered as templates.  See [`crate::composer::is_tempest_project`].
+    /// Starts `true` so a workspace with no `composer.json` to classify
+    /// behaves as before.
+    pub(crate) is_tempest: Arc<std::sync::atomic::AtomicBool>,
     /// The major version of PHPUnit the project's `composer.lock` installs,
     /// `0` when it is not known.  In a workspace of several projects, the
     /// lowest of theirs.  Decides whether a data provider has to be static.

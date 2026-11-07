@@ -776,3 +776,24 @@ async fn tempest_completion_keeps_generated_loop_flags_private() {
         "{names:?}"
     );
 }
+
+#[tokio::test]
+async fn tempest_folds_point_at_the_view_not_the_generated_wrapper() {
+    let backend = create_test_backend();
+    let uri = uri("src/folds.view.php");
+    let source = "<ul>\n    <li :foreach=\"[1, 2] as $n\">{{ $n }}</li>\n</ul>\n<?php\n$items = [\n    'a',\n    'b',\n];\n?>\n";
+    open_php(&backend, &uri, source).await;
+    let php = backend.blade_virtual_php(uri.as_str()).unwrap();
+    let folds = backend
+        .handle_folding_range(uri.as_str(), &php)
+        .unwrap_or_default();
+    // Only the array literal the view wrote folds, at its own lines; the
+    // wrapper function and the loop the lowering generated do not.
+    assert_eq!(
+        folds
+            .iter()
+            .map(|fold| (fold.start_line, fold.end_line))
+            .collect::<Vec<_>>(),
+        vec![(4, 7)]
+    );
+}

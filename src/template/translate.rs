@@ -120,7 +120,7 @@ impl Backend {
     ) -> Option<tower_lsp_server::gen_lsp_types::CompletionItem> {
         use tower_lsp_server::gen_lsp_types::CompletionItemTextEdit;
 
-        if crate::tempest::is_view(uri) && item.label.starts_with("$__phpantom_tempest_empty_") {
+        if self.is_tempest_view(uri) && item.label.starts_with("$__phpantom_tempest_empty_") {
             return None;
         }
         if let Some(edit) = item.text_edit.take() {
@@ -140,7 +140,7 @@ impl Backend {
         if let Some(edits) = item.additional_text_edits.take() {
             let mut translated = Vec::with_capacity(edits.len());
             for mut e in edits {
-                if !(crate::tempest::is_view(uri)
+                if !(self.is_tempest_view(uri)
                     && e.range == Default::default()
                     && e.new_text.starts_with("<?php use "))
                 {

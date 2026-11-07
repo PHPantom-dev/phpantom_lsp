@@ -349,7 +349,7 @@ impl Backend {
 
     fn translate_item_to_blade(&self, item: &mut CallHierarchyItem) {
         let uri = item.uri.to_string();
-        if !self.is_blade_file(&uri) {
+        if !self.is_php_template(&uri) {
             return;
         }
         item.range = self.translate_template_range(&uri, item.range);
@@ -357,7 +357,7 @@ impl Backend {
     }
 
     fn translate_ranges_to_blade(&self, uri: &str, ranges: &mut [Range]) {
-        if !self.is_blade_file(uri) {
+        if !self.is_php_template(uri) {
             return;
         }
         for range in ranges {
