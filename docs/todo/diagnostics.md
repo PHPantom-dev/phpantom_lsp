@@ -465,53 +465,6 @@ The extension's fixtures are the `entity_*.fixture` fixtures in
 
 ---
 
-## D33. Private members nothing uses are not reported
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-final class Invoice
-{
-    private string $legacyNumber; // never read
-    private int $total;           // read, never written
-}
-```
-
-A private property nothing outside the class can reach is dead when the
-class never reads it, and holds only its default when the class never
-writes it. A typed one without a default is already reported by
-`uninitialized_property` when the class never writes it; its write
-bookkeeping in `src/diagnostics/uninitialized_properties.rs` is a starting
-point for the rest. Both are a bug or leftover code more often than not, and PHPStan
-reports them (`property.unused`, `property.onlyRead`, `property.onlyWritten`).
-
-Frameworks read and write properties PHP code does not: Doctrine writes an
-entity's generated identifier and every mapped field when it hydrates, and
-reads them when it flushes; Gedmo writes the fields its attributes mark;
-Symfony writes a `#[Required]` property while autowiring. Those count as
-read and written (PHPStan's Doctrine extension models Doctrine's and
-Gedmo's), or the check flags correct entities.
-
-The Doctrine extension's fixtures are `unused_private_property*.fixture`
-and `gedmo_property_assign*.fixture` in `tests/fixtures/phpstan_doctrine/`.
-
-Private methods and constants nothing in the class (or a closure bound to
-it) calls or reads are dead the same way, and are simpler: no framework
-writes them. Report all three dimmed, with the `Unnecessary` tag the way
-an unused import is, and offer "Remove unused member" (the fix H19 wires
-to PHPStan's `method.unused` and friends) on the native diagnostic too. A
-method a string names (`[$this, 'handle']`, `'handle'` in a callable
-position, a Laravel or Symfony convention that calls it by name) counts as
-used. PhpStorm reports unused private methods, properties and constants
-natively.
-
-**Where to look:** the unused-variable check (`src/diagnostics/unused_variables.rs`)
-for the read/write bookkeeping, the Doctrine mapping index in
-`src/framework.rs`, and PHPStan's `UnusedPrivatePropertyRule` with the
-Doctrine extension's `PropertiesExtension`s.
-
----
-
 ## D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties
 
 **Impact: Low · Complexity: Medium**

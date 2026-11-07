@@ -44,9 +44,9 @@ is only alphabetical.
   `Scaffolding\Pen`-qualified names), exercising the same namespace
   resolution a real multi-file project relies on.
 - **Diagnostics.** Unknown members, argument-count and type mismatches,
-  readonly-property violations, deprecation warnings, and invalid
-  class-kind usage (instantiating an abstract class or enum, `instanceof`
-  against a trait).
+  readonly-property violations, deprecation warnings, private members
+  nothing uses, and invalid class-kind usage (instantiating an abstract
+  class or enum, `instanceof` against a trait).
 - **Code actions.** Import a class, remove an unused import, sort `use`
   statements, generate a constructor/getter/setter/property hooks, extract
   a function, promote a constructor parameter, and more.

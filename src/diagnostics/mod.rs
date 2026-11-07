@@ -313,6 +313,7 @@ pub(crate) mod unknown_members;
 pub(crate) mod unreachable_code;
 pub(crate) mod unresolved_member_access;
 mod unused_imports;
+pub(crate) mod unused_private_members;
 pub(crate) mod unused_variables;
 pub(crate) mod use_statements;
 mod validation_strings;

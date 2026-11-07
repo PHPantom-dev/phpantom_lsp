@@ -2194,6 +2194,11 @@ function runDemoAssertions(): void
     assert(!is_subclass_of(Scaffolding\StorageException::class, \RuntimeException::class), 'StorageException is a checked exception');
     assert(is_subclass_of(\InvalidArgumentException::class, \LogicException::class), 'InvalidArgumentException is unchecked');
 
+    // ── Unused private members ──────────────────────────────────────────
+    $unused = new UnusedPrivateMemberDemo();
+    assert($unused->sorted([3, 1, 2]) === [1, 2, 3], 'usort() calls compare() through the callable array');
+    assert($unused->bill(7) === 'N-7', 'nothing writes $discount, so it adds nothing');
+
     echo "All assertions passed.\n";
 }
 

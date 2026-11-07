@@ -21,9 +21,7 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   reported.
 - Open `config/common/di/blog.php`. Go to the definition of
   `InMemoryPostRepository`, the class the container builds for
-  `PostRepositoryInterface`. Its constructor's `$posts`, its `setLogger()`
-  method, and its `$pageSize` property are the names the definition's keys
-  spell.
+  `PostRepositoryInterface`.
 - In `PostController::view()`, hover `$post` or complete after `$post->`. The
   repository's interface declares what `findBySlug()` returns.
 - Open `resources/views/blog/index.php`. Hover `$post` inside the loop, or

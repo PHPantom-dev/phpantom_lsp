@@ -6,7 +6,7 @@
  * The diagnostics PHPantom reports: unknown classes and members, member
  * access on a scalar, argument counts, writes to readonly properties,
  * the properties clone() writes, typed properties nothing initializes,
- * docblocks that contradict their type hint, an invalid class-like kind,
+ * private members nothing uses, docblocks that contradict their type hint, an invalid class-like kind,
  * and deprecation. These files deliberately contain a fixed set of errors,
  * so the squiggles you see here are the demo, not a mistake.
  *
@@ -579,6 +579,65 @@ final class UninitializedReadDemo
         // No diagnostic — `$label` is written now:
         return $label . $demo->label;
     }
+}
+
+
+// ── Diagnostic: Unused Private Members ──────────────────────────────────────
+// Only its own class can reach a private member, so the class alone decides
+// whether anything uses it.  A constant or method nothing reads or calls,
+// and a property nothing reads, are dimmed: dead code is tidying, not a
+// defect.  A property nothing writes and that has no default always holds
+// null, which is flagged too.  A name spelled in a string counts as a use,
+// since it may be a callable.
+// Try: put the cursor on `recalculate` and trigger code actions to see
+// "Remove unused method".
+
+final class UnusedPrivateMemberDemo
+{
+    // Dimmed — nothing reads `LEGACY_PREFIX`:
+    private const LEGACY_PREFIX = 'INV-';
+
+    // No diagnostic — `format()` reads `PREFIX`:
+    private const PREFIX = 'N-';
+
+    // Dimmed — nothing reads or writes `$legacyNumber`:
+    private string $legacyNumber = '';
+
+    // Dimmed — `bill()` writes `$billedAt`, but nothing reads it back:
+    private ?\DateTimeImmutable $billedAt = null;
+
+    // Information — nothing writes `$discount`, so it is always null:
+    private $discount;
+
+    /**
+     * @param list<int> $amounts
+     * @return list<int>
+     */
+    public function sorted(array $amounts): array
+    {
+        // No diagnostic on `compare()` — the callable names it:
+        usort($amounts, [$this, 'compare']);
+        return $amounts;
+    }
+
+    public function bill(int $number): string
+    {
+        $this->billedAt = new \DateTimeImmutable();
+        return $this->format($number) . ($this->discount ?? '');
+    }
+
+    private function format(int $number): string
+    {
+        return self::PREFIX . $number;
+    }
+
+    private function compare(int $a, int $b): int
+    {
+        return $a <=> $b;
+    }
+
+    // Dimmed — nothing calls `recalculate()`:
+    private function recalculate(): void {}
 }
 
 

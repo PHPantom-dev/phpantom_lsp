@@ -21,10 +21,13 @@ struct SlowCollector {
     runs_in: Framework,
     /// Whether a finding can depend on any function body in the file, so
     /// that an edit to one body can change a diagnostic outside it.  Such
-    /// a collector reports under its own name as the diagnostic code, and
-    /// a partial pass runs it over the whole file instead of the edited
-    /// region (see [`Backend::collect_slow_diagnostics_reading_every_body`]).
+    /// a collector reports under its own name as the diagnostic code, or
+    /// one of `codes`, and a partial pass runs it over the whole file
+    /// instead of the edited region (see
+    /// [`Backend::collect_slow_diagnostics_reading_every_body`]).
     reads_every_body: bool,
+    /// The diagnostic codes the collector reports under besides its name.
+    codes: &'static [&'static str],
 }
 
 /// The projects a collector has anything to report in.
@@ -42,6 +45,7 @@ const fn always(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
         collect,
         runs_in: Framework::Any,
         reads_every_body: false,
+        codes: &[],
     }
 }
 
@@ -51,6 +55,7 @@ const fn laravel(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
         collect,
         runs_in: Framework::Laravel,
         reads_every_body: false,
+        codes: &[],
     }
 }
 
@@ -117,6 +122,20 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         collect: Backend::collect_uninitialized_property_diagnostics_with_context,
         runs_in: Framework::Any,
         reads_every_body: true,
+        codes: &[],
+    },
+    // Whether a private member is used can be decided by any method.
+    SlowCollector {
+        name: "unused_private_member",
+        collect: Backend::collect_unused_private_member_diagnostics,
+        runs_in: Framework::Any,
+        reads_every_body: true,
+        codes: &[
+            super::unused_private_members::UNUSED_PROPERTY_CODE,
+            super::unused_private_members::UNWRITTEN_PROPERTY_CODE,
+            super::unused_private_members::UNUSED_METHOD_CODE,
+            super::unused_private_members::UNUSED_CONSTANT_CODE,
+        ],
     },
     always(
         "missing_implementation",
@@ -188,6 +207,7 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         collect: Backend::collect_invalid_laravel_string_key_diagnostics,
         runs_in: Framework::StringKeys,
         reads_every_body: false,
+        codes: &[],
     },
     laravel(
         "invalid_validation_rule",
@@ -574,7 +594,8 @@ pub(crate) fn reads_every_body(diagnostic: &Diagnostic) -> bool {
     let Some(Code::String(code)) = &diagnostic.code else {
         return false;
     };
-    SLOW_COLLECTORS
-        .iter()
-        .any(|collector| collector.reads_every_body && collector.name == code)
+    SLOW_COLLECTORS.iter().any(|collector| {
+        collector.reads_every_body
+            && (collector.name == code || collector.codes.contains(&code.as_str()))
+    })
 }

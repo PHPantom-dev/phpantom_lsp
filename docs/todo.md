@@ -32,7 +32,8 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| D33 | [Private members nothing uses are not reported](todo/diagnostics.md#d33-private-members-nothing-uses-are-not-reported) | Low-Medium  | Medium      |
+| Y5  | [Alias definitions](todo/yii.md#y5-alias-definitions) | Medium      | Low-Medium  |
+| Y4  | [DI container configuration](todo/yii.md#y4-di-container-configuration) | Medium-High | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -222,7 +223,6 @@ ships, remove every row that names it.
 | D48 | [A `catch` its `try` cannot reach is not reported](todo/diagnostics.md#d48-a-catch-its-try-cannot-reach-is-not-reported) | Low-Medium  | Medium      |
 | D19 | [`invalid_member_access` cannot tell a property read from a write](todo/diagnostics.md#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
-| D33 | [Private members nothing uses are not reported](todo/diagnostics.md#d33-private-members-nothing-uses-are-not-reported) | Low-Medium  | Medium      |
 | D20 | [`Foo::$bar` and `Foo::bar` are the same span](todo/diagnostics.md#d20-foobar-and-foobar-are-the-same-span)                                                                  | Low         | Medium      |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Medium      |
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |

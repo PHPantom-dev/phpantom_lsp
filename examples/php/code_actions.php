@@ -213,10 +213,10 @@ class GenerateConstructorDemo
 
 class GenerateGetterSetterDemo
 {
-    private string $name = '';
-    private bool $active = false;
+    protected string $name = '';
+    protected bool $active = false;
     public readonly int $id;
-    private static int $count;
+    protected static int $count;
     /** @var list<string> */
     public $tags;
 }
@@ -265,6 +265,7 @@ class ChangeVisibilityDemo
     public function getTitle(): string { return $this->title; }
     protected function increment(): void { $this->count++; }
     private function toggle(): void { $this->active = !$this->active; }
+    public function badge(): string { $this->toggle(); return self::SECRET . $this->name; }
 
     public const VERSION = 1;
     protected const LIMIT = 100;
@@ -383,6 +384,8 @@ class PromoteConstructorParamDemo
         $this->email = $email;
         $this->slug = $slug;
     }
+
+    public function contact(): string { return "{$this->name} <{$this->email}>"; }
 }
 
 // ── Simplify Null Coalescing / Null-Safe ────────────────────────────────────

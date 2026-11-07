@@ -1,10 +1,12 @@
 # PHPantom — Yii
 
-Known gaps and missing features in PHPantom's Yii support. Today Yii
-gets only the generic engine. Yii 3 is built from small, typed
-components with little magic, so the engine already types most of it;
-what is missing is the navigation between the names Yii keeps in
-configuration and the code and files they point to.
+Known gaps and missing features in PHPantom's Yii support. Yii 3 is
+built from small, typed components with little magic, so the generic
+engine already types most of it. On top of that, route names, route
+arguments, and view names complete, navigate, and are checked. What is
+still missing is the navigation between the rest of the names Yii
+keeps in configuration (DI definitions, `$params` keys, alias
+declarations) and the code and files they point to.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).

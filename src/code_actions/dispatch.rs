@@ -144,6 +144,7 @@ static COLLECTORS: &[Collector] = &[
     skip_in_template(QUICKFIX, Backend::collect_phpstan_actions),
     skip_in_template(QUICKFIX, Backend::collect_data_provider_actions),
     skip_in_template(QUICKFIX, Backend::collect_parent_call_actions),
+    skip_in_template(QUICKFIX, Backend::collect_remove_unused_member_actions),
     skip_in_template(QUICKFIX, Backend::collect_unhandled_exception_actions),
     skip_in_template(QUICKFIX, Backend::collect_mago_fix_actions),
     offer(
