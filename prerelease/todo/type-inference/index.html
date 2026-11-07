@@ -1827,7 +1827,13 @@ in <code>tests/psalm_assertions/const_values.php</code> and
 <code>tests/psalm_assertions/type_reconciliation_reconciler.php</code>.</p>
 <p>Falling back to the native hint is not harmless. A method declared
 <code>@return self::STATUS_*</code> over a native <code>int</code> reads as <code>int</code>, so passing its
-result to a parameter typed <code>1|2</code> is reported.</p>
+result to a parameter typed <code>1|2</code> is reported. Likewise a <code>switch</code> over a
+<code>@param self::*</code> value with a <code>case</code> for every constant and no <code>default</code>
+cannot be seen to cover every value, so a method that returns from every
+case is reported as <code>missing_return</code> (twice in phpstan-src:
+<code>ClassNameUsageLocation::createMessage()</code>, and the variance closure in
+<code>TypeNodeResolver::resolveGenericTypeNode()</code>, whose parameter is inferred
+from a <code>(self::VARIANCE_*)[]</code> property).</p>
 <p>The wildcard form resolves a pattern like <code>Foo::BAR_*</code> to the union of all
 matching constant types on the class. PHPStan supports this syntax in
 docblock type strings:</p>

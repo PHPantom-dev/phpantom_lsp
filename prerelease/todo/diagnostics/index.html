@@ -1123,17 +1123,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d44-a-function-that-can-end-without-returning-a-value-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D44. A function that can end without returning a value is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d45-an-object-without-__tostring-used-as-a-string-is-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1797,17 +1786,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d44-a-function-that-can-end-without-returning-a-value-is-not-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D44. A function that can end without returning a value is not reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d45-an-object-without-__tostring-used-as-a-string-is-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2332,33 +2310,13 @@ would work without PHPStan.</p>
 <p>Only a body whose every call declares what it throws can rule a catch
 out, so this stays quiet wherever an undeclared call could throw anything.</p>
 <hr />
-<h2 id="d44-a-function-that-can-end-without-returning-a-value-is-not-reported">D44. A function that can end without returning a value is not reported<a class="headerlink" href="#d44-a-function-that-can-end-without-returning-a-value-is-not-reported" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">function score(int $x): int {</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    if ($x &gt; 0) {</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">        return 1;</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">    }</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">}   // TypeError: score(): Return value must be of type int, none returned</span>
-</code></pre></div>
-<p>When the end of a function or method body is reachable and its declared
-return type does not accept the implicit <code>null</code> (anything but <code>void</code>,
-<code>never</code>, <code>mixed</code>, <code>null</code> or a nullable type), PHP throws a <code>TypeError</code>
-there, so Error severity. A generator, an abstract or interface method,
-and a body that ends in <code>throw</code>, <code>exit</code> or a <code>never</code>-returning call are not
-affected; the reachability flow <code>unreachable_code</code> already computes
-answers whether the end is reachable. PhpStorm reports this as "Missing
-'return' statement", and PHPStan as <code>return.missing</code>.</p>
-<p><strong>Where to look:</strong> <code>src/diagnostics/unreachable_code.rs</code> (the flow that
-decides whether a statement list can complete normally) and
-<code>src/diagnostics/return_type_errors.rs</code> (the declared return type).</p>
-<hr />
 <h2 id="d45-an-object-without-__tostring-used-as-a-string-is-not-reported">D45. An object without <code>__toString()</code> used as a string is not reported<a class="headerlink" href="#d45-an-object-without-__tostring-used-as-a-string-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">final class Invoice {}</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">echo $invoice;                // Error: Object of class Invoice could not be converted to string</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">$label = 'No. ' . $invoice;   // same</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">$text = "Invoice $invoice";   // same</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">final class Invoice {}</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">echo $invoice;                // Error: Object of class Invoice could not be converted to string</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">$label = 'No. ' . $invoice;   // same</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">$text = "Invoice $invoice";   // same</span>
 </code></pre></div>
 <p><code>echo</code>, <code>print</code>, concatenation, interpolation, a <code>(string)</code> cast and
 string functions all convert their operand, and an object whose class has
