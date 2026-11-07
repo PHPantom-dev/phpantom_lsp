@@ -1101,17 +1101,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D47. <code>JSON_THROW_ON_ERROR</code> does not make <code>json_decode()</code> throw <code>JsonException</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d48-a-catch-its-try-cannot-reach-is-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1753,17 +1742,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D47. <code>JSON_THROW_ON_ERROR</code> does not make <code>json_decode()</code> throw <code>JsonException</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d48-a-catch-its-try-cannot-reach-is-not-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2249,34 +2227,12 @@ same.</p>
 <p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index, which
 D31 also needs) and <code>src/diagnostics/uninitialized_properties.rs</code>.</p>
 <hr />
-<h2 id="d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception">D47. <code>JSON_THROW_ON_ERROR</code> does not make <code>json_decode()</code> throw <code>JsonException</code><a class="headerlink" href="#d47-json_throw_on_error-does-not-make-json_decode-throw-jsonexception" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** Loads the settings. */</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">function load(string $path): array</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">{</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    return json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    // JsonException is neither caught nor in a @throws tag: not reported</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>The opt-in <code>unhandled_exception</code> diagnostic reports what a callee declares
-with <code>@throws</code>. <code>json_decode()</code> and <code>json_encode()</code> only throw
-<code>JsonException</code> when their flags include <code>JSON_THROW_ON_ERROR</code>, so the stub
-cannot declare it, and nothing is reported. <code>@throws</code> completion and
-"Update docblock" miss it the same way, and so does a <code>catch (JsonException
-$e)</code> the reachability check judges.</p>
-<p>What a call throws needs to depend on its arguments, the way PHPStan's
-<code>DynamicFunctionThrowTypeExtension</code>s let the flags decide. Read the flags
-argument by position or by name, as a constant or a <code>|</code> of constants.</p>
-<p><strong>Where to look:</strong> <code>src/completion/source/throws_analysis/uncaught.rs</code>
-(<code>function_call</code>), <code>src/type_engine/variable/forward_walk/throw_points.rs</code>,
-and PHPStan's <code>JsonThrowTypeExtension</code>.</p>
-<hr />
 <h2 id="d48-a-catch-its-try-cannot-reach-is-not-reported">D48. A <code>catch</code> its <code>try</code> cannot reach is not reported<a class="headerlink" href="#d48-a-catch-its-try-cannot-reach-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">try {</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    $this-&gt;repo-&gt;save($user);        // @throws ORMException only</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">} catch (JsonException $e) {         // can never run: not reported</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">try {</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    $this-&gt;repo-&gt;save($user);        // @throws ORMException only</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">} catch (JsonException $e) {         // can never run: not reported</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>PhpStorm reports a <code>catch</code> whose class nothing in the <code>try</code> body can throw,
 and so does PHPStan (<code>catch.neverThrown</code>). The reachability check already
