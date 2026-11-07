@@ -136,3 +136,62 @@ namespace Consumer {
         assert!(!hover.contains("paths.php"), "{needle}: {hover}");
     }
 }
+
+#[tokio::test]
+async fn file_paths_keep_their_declaration_context_when_lazily_loaded() {
+    let base = "<?php namespace App; class Base { const PATH = __DIR__ . '/page.view.php'; }";
+    let caller = r"<?php namespace Consumer;
+use App\Base;
+$path = Base::PATH;
+echo $path;
+";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"App\\":"app/","Consumer\\":"consumer/"}}}"#,
+        &[("app/Base.php", base), ("consumer/caller.php", caller)],
+    );
+    let uri = workspace_uri(&backend, "consumer/caller.php");
+    open_php(&backend, &uri, caller).await;
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    let hover = hover_on(&backend, &uri, caller, "$path;").await;
+    assert!(!hover.contains("consumer"), "{hover}");
+    let value =
+        PhpType::literal_string_value(format!("{}/page.view.php", root.join("app").display()))
+            .to_string();
+    assert!(hover.contains(&value), "expected {value}, got {hover}");
+}
+
+#[tokio::test]
+async fn file_paths_in_parameter_defaults_keep_the_callee_directory() {
+    let caller = r"<?php namespace Consumer;
+$static = \Lib\Pages::page();
+$instance = (new \Lib\Pages())->open();
+echo $static;
+echo $instance;
+";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"Lib\\":"lib/","Consumer\\":"consumer/"}}}"#,
+        &[("lib/Pages.php", "<?php"), ("consumer/caller.php", caller)],
+    );
+    let lib = dunce::canonicalize(dir.path().join("lib")).unwrap();
+    let expected = lib.display();
+    let library = format!(
+        r"<?php namespace Lib;
+class Pages {{
+    /** @return ($path is '{expected}' ? int : string) */
+    public static function page(string $path = __DIR__): int|string {{ return 1; }}
+    /** @return ($path is '{expected}' ? int : string) */
+    public function open(string $path = __DIR__): int|string {{ return 1; }}
+}}
+"
+    );
+    std::fs::write(lib.join("Pages.php"), &library).unwrap();
+    let uri = workspace_uri(&backend, "consumer/caller.php");
+    open_php(&backend, &uri, caller).await;
+    for needle in ["$static;", "$instance;"] {
+        let hover = hover_on(&backend, &uri, caller, needle).await;
+        assert!(
+            hover.contains("= int") && !hover.contains("string"),
+            "{needle}: {hover}"
+        );
+    }
+}

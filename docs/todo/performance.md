@@ -122,6 +122,37 @@ in `src/php_type/shape_keys.rs`.
 
 ---
 
+## P90. A long `if`/`elseif` chain grows slightly faster than its length
+
+**Impact: Low-Medium · Complexity: Medium**
+
+The `elseif_literals` shape in `benches/scaling.py` (one function, an
+`if`/`elseif` chain of N arms each assigning a different string literal
+to the same variable) doubles its time by 2.15 to 2.4 when N doubles
+(release build, 2026-11-07), and the ratio rises with N: 2.15 to 2.39 at
+N = 4,000, 2.27 to 2.41 at N = 8,000. The same lookup written as a
+`switch` (`switch_literals`) stays near 2.1 at every size, as do the
+other enforced shapes. A debug build shows a flat 2.1 for both, so the
+extra cost is small next to the linear work and only shows once release
+optimisation shrinks that.
+
+It matters mostly because it sits close to the check's 2.5 limit: a
+slower CI runner pushes it to 2.42 to 2.52, which fails the scaling job
+on unrelated pull requests. Raising N or retrying does not help, since
+the ratio grows with N.
+
+Not profiled yet. The likely suspect is the join after each arm: the
+variable's type is a union that gains one literal per arm, so a join
+whose cost is linear in the union's size makes the chain quadratic,
+where the `switch` path may merge its arms once. Profile a single-file
+`analyze` of the shape at N = 8,000 to confirm before changing anything.
+
+**Where to look:** the `if`/`elseif` handling and `ScopeState::merge_branch`
+in `src/type_engine/variable/forward_walk/`, against how `switch` arms
+are merged.
+
+---
+
 ## Appendix: Profiling
 
 ### Commands

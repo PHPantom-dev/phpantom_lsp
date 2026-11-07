@@ -1,6 +1,7 @@
 //! PHP render sites. Expression types always come from the shared engine.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
@@ -118,6 +119,16 @@ pub(super) fn path_definition(
     backend.tempest_view_definition(uri, &name, false)
 }
 
+/// The data one caller file supplies to views.
+#[derive(Default)]
+pub(super) struct Collected {
+    pub(super) targets: Vec<(String, Scope)>,
+    /// Custom View classes this caller instantiates with its own data.
+    pub(super) instantiated: HashSet<String>,
+    /// Other files declaring the View helpers this caller's data went through.
+    pub(super) dependencies: HashSet<String>,
+}
+
 /// Collect each render chain once, including its final `data()` overrides.
 pub(super) fn collect(
     backend: &Backend,
@@ -125,28 +136,75 @@ pub(super) fn collect(
     file: &FileContext,
     content: &str,
     custom: &BTreeMap<String, super::custom_views::CustomView>,
-    instantiated: &mut HashSet<String>,
     wrappers: &super::wrappers::Names,
-) -> Vec<(String, Scope)> {
-    RenderContext {
+) -> Collected {
+    let mut context = RenderContext {
         backend,
         custom,
-        instantiated,
+        instantiated: HashSet::new(),
         wrappers,
+        dependencies: HashSet::new(),
         active: HashSet::new(),
+        memo: HashMap::new(),
+    };
+    let targets = context.collect(uri, file, content, None);
+    Collected {
+        targets,
+        instantiated: context.instantiated,
+        dependencies: context.dependencies,
     }
-    .collect(uri, file, content, None)
 }
 
 struct RenderContext<'a> {
     backend: &'a Backend,
     custom: &'a BTreeMap<String, super::custom_views::CustomView>,
-    instantiated: &'a mut HashSet<String>,
+    instantiated: HashSet<String>,
     wrappers: &'a super::wrappers::Names,
+    /// Files declaring the helpers walked, whose edits change this data.
+    dependencies: HashSet<String>,
+    /// Helpers being read, to cut recursion where a helper reaches itself.
     active: HashSet<(String, u32)>,
+    /// Data each helper produced for a given set of argument types, so a
+    /// helper reached from several call sites with the same arguments is
+    /// read once however the calls branch.
+    memo: HashMap<HelperKey, Rc<Vec<(String, Scope)>>>,
 }
 
+/// A helper declaration and the argument types it is read under.
+type HelperKey = (String, u32, Vec<PhpType>);
+
 impl RenderContext<'_> {
+    /// The data a helper's body passes to views under `invocation`'s
+    /// arguments, read once per distinct input.  A helper that reaches
+    /// itself contributes nothing on the inner call.
+    fn helper(&mut self, invocation: super::wrappers::Invocation) -> Rc<Vec<(String, Scope)>> {
+        let key = (
+            invocation.uri.clone(),
+            invocation.offset,
+            invocation.arguments.clone(),
+        );
+        if let Some(found) = self.memo.get(&key) {
+            return Rc::clone(found);
+        }
+        let active = (invocation.uri.clone(), invocation.offset);
+        if !self.active.insert(active.clone()) {
+            return Rc::default();
+        }
+        self.dependencies.insert(invocation.uri.clone());
+        let found = Rc::new(
+            self.backend
+                .analysable_content(&invocation.uri)
+                .map(|body| {
+                    let declaration_file = self.backend.file_context(&invocation.uri);
+                    self.collect(&invocation.uri, &declaration_file, &body, Some(&invocation))
+                })
+                .unwrap_or_default(),
+        );
+        self.active.remove(&active);
+        self.memo.insert(key, Rc::clone(&found));
+        found
+    }
+
     fn collect(
         &mut self,
         uri: &str,
@@ -241,28 +299,16 @@ impl RenderContext<'_> {
                     continue;
                 }
                 let Some(args) = generic.or_else(|| view_arguments(root, file)) else {
-                    if self.active.len() < 8
-                        && let Some(invocation) =
-                            super::wrappers::invocation(backend, root, content, file, self.wrappers)
+                    if let Some(invocation) =
+                        super::wrappers::invocation(backend, root, content, file, self.wrappers)
                     {
-                        let key = (invocation.uri.clone(), invocation.offset);
-                        if self.active.insert(key.clone()) {
-                            if let Some(body) = backend.analysable_content(&invocation.uri) {
-                                let declaration_file = backend.file_context(&invocation.uri);
-                                for (target, mut scope) in self.collect(
-                                    &invocation.uri,
-                                    &declaration_file,
-                                    &body,
-                                    Some(&invocation),
-                                ) {
-                                    for args in chained.iter().rev() {
-                                        arguments(args, false, content, &loaders, &mut scope.vars);
-                                    }
-                                    scope.globals = scope.vars.clone();
-                                    result.push((target, scope));
-                                }
+                        for (target, scope) in self.helper(invocation).iter() {
+                            let mut scope = scope.clone();
+                            for args in chained.iter().rev() {
+                                arguments(args, false, content, &loaders, &mut scope.vars);
                             }
-                            self.active.remove(&key);
+                            scope.globals = scope.vars.clone();
+                            result.push((target.clone(), scope));
                         }
                     }
                     continue;

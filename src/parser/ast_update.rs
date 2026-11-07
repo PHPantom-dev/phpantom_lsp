@@ -520,6 +520,10 @@ impl Backend {
             }
         }
 
+        for func in &mut functions {
+            super::initializers::expand_parameter_file_constants(&mut func.parameters, uri);
+        }
+
         Self::qualify_function_names(
             &mut functions,
             &decls.namespace_spans,
@@ -573,29 +577,22 @@ impl Backend {
         // `find_class_in_uri_classes_index` can distinguish classes with the same
         // short name in different namespace blocks.
         let from_stub_path = self.is_external_stub_uri(uri);
-        let classes: Vec<ClassInfo> =
-            decls
-                .classes_with_ns
-                .into_iter()
-                .map(|(mut cls, ns, _)| {
-                    for constant in cls.constants.make_mut() {
-                        if let Some(value) = constant.value.as_deref().and_then(|value| {
-                            super::initializers::expand_file_constants(value, uri)
-                        }) {
-                            Arc::make_mut(constant).value = Some(value);
-                        }
-                    }
-                    cls.file_namespace = ns.as_deref().map(atom);
-                    cls.cache_fqn_in_uri(uri);
-                    // Keyed by FQN, so this has to wait until the class
-                    // carries one.  A stub path says what its classes are,
-                    // so it is left as written.
-                    if !from_stub_path {
-                        crate::stub_patches::apply_third_party_class_patches(&mut cls);
-                    }
-                    cls
-                })
-                .collect();
+        let classes: Vec<ClassInfo> = decls
+            .classes_with_ns
+            .into_iter()
+            .map(|(mut cls, ns, _)| {
+                super::initializers::expand_class_file_constants(&mut cls, uri);
+                cls.file_namespace = ns.as_deref().map(atom);
+                cls.cache_fqn_in_uri(uri);
+                // Keyed by FQN, so this has to wait until the class
+                // carries one.  A stub path says what its classes are,
+                // so it is left as written.
+                if !from_stub_path {
+                    crate::stub_patches::apply_third_party_class_patches(&mut cls);
+                }
+                cls
+            })
+            .collect();
 
         // Build the precomputed symbol map while the AST is still alive.
         // This must happen before the `Program` (and its arena) are dropped.

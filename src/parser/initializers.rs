@@ -11,8 +11,8 @@ use crate::text_scan;
 /// Freeze file magic constants before an initializer is read from another
 /// file or inherited from a parent or trait. Strings and comments retain
 /// their source spelling; only the parser's magic-constant tokens change.
-pub(super) fn expand_file_constants(expression: &str, uri: &str) -> Option<String> {
-    if !expression.contains("__") {
+pub(crate) fn expand_file_constants(expression: &str, uri: &str) -> Option<String> {
+    if !mentions_file_constant(expression) {
         return None;
     }
     let path = crate::util::uri_to_path(uri)?;
@@ -53,6 +53,85 @@ pub(super) fn expand_file_constants(expression: &str, uri: &str) -> Option<Strin
         }
         Some(output)
     })
+}
+
+/// Whether `expression` spells `__DIR__` or `__FILE__` in any case, so the
+/// parse in [`expand_file_constants`] runs only where it can change anything.
+fn mentions_file_constant(expression: &str) -> bool {
+    contains_ignore_ascii_case(expression, "__DIR__")
+        || contains_ignore_ascii_case(expression, "__FILE__")
+}
+
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+/// Freeze `__DIR__` and `__FILE__` in a class's constant and parameter
+/// initializers to the declaring file, on every path that indexes
+/// a class from source.  PHP substitutes them at compile time, so the value
+/// read through inheritance or from a call site in another file is the
+/// declaring file's.
+pub(crate) fn expand_class_file_constants(class: &mut crate::types::ClassInfo, uri: &str) {
+    use std::sync::Arc;
+    if class.constants.iter().any(|constant| {
+        constant
+            .value
+            .as_deref()
+            .is_some_and(mentions_file_constant)
+    }) {
+        for constant in class.constants.make_mut() {
+            if let Some(value) = constant
+                .value
+                .as_deref()
+                .and_then(|value| expand_file_constants(value, uri))
+            {
+                Arc::make_mut(constant).value = Some(value);
+            }
+        }
+    }
+    if class
+        .methods
+        .iter()
+        .any(|method| mentions_in_parameters(&method.parameters))
+    {
+        for method in class.methods.make_mut() {
+            if mentions_in_parameters(&method.parameters) {
+                expand_parameter_file_constants(&mut Arc::make_mut(method).parameters, uri);
+            }
+        }
+    }
+}
+
+fn mentions_in_parameters(parameters: &[crate::types::ParameterInfo]) -> bool {
+    parameters.iter().any(|parameter| {
+        parameter
+            .default_value
+            .as_deref()
+            .is_some_and(mentions_file_constant)
+    })
+}
+
+/// Freeze `__DIR__` and `__FILE__` in parameter defaults to the declaring
+/// file, so a caller elsewhere that omits the argument reads the callee's.
+pub(crate) fn expand_parameter_file_constants(
+    parameters: &mut crate::types::SharedVec<crate::types::ParameterInfo>,
+    uri: &str,
+) {
+    if !mentions_in_parameters(parameters) {
+        return;
+    }
+    for parameter in parameters.make_mut() {
+        if let Some(value) = parameter
+            .default_value
+            .as_deref()
+            .and_then(|value| expand_file_constants(value, uri))
+        {
+            parameter.default_value = Some(value);
+        }
+    }
 }
 
 /// `expression` with the class of every `Class::member` access in it

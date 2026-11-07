@@ -1383,4 +1383,29 @@ mod tests {
             ))
         );
     }
+
+    #[test]
+    fn text_call_resolution_does_not_fold_an_interpolated_string() {
+        let backend = Backend::new_test();
+        let directory = tempfile::tempdir().unwrap();
+        let uri = crate::util::path_to_uri(&directory.path().join("path.php"));
+        let file = backend.file_context(&uri);
+        let loaders = backend.file_loaders(&file);
+        let ctx = loaders.resolution_ctx_at("<?php", 0);
+        let mut hint = None;
+        Backend::return_types_of_function_call("strtoupper", "\"a $name\"", &ctx, Some(&mut hint));
+        assert!(hint.as_ref().is_none_or(|ty| ty.as_literal().is_none()));
+        Backend::return_types_of_function_call("strtoupper", "\"a\"", &ctx, Some(&mut hint));
+        assert_eq!(hint, Some(PhpType::literal_string_value("A")));
+        Backend::return_types_of_function_call(
+            "strtoupper",
+            "\"a $name\" . 'b'",
+            &ctx,
+            Some(&mut hint),
+        );
+        assert!(
+            hint.as_ref().is_none_or(|ty| ty.as_literal().is_none()),
+            "{hint:?}"
+        );
+    }
 }

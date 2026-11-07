@@ -29,7 +29,7 @@ phpantom_lsp analyze --project-root . --no-colour
 
 The assertions render the templates with Tempest's own renderer, checking
 the data and scope behavior demonstrated above, and discover configured
-components with Tempest’s own discovery runner.
+components with Tempest's own discovery runner.
 
 Performance checks use this playground's declarations with a generated
 catalogue of 400 views. Completion and navigation results are checked before

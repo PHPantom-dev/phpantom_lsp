@@ -288,3 +288,93 @@ class Page implements \Tempest\View\View {
     assert!(hover.contains("'last'"), "{hover}");
     assert!(!hover.contains("'first'"), "{hover}");
 }
+
+#[tokio::test]
+async fn tempest_paths_unsaved_helper_edits_refresh_their_callers() {
+    use tower_lsp_server::{LanguageServer, gen_lsp_types::*};
+    let helper = r"<?php function renderPage(string $path = __DIR__.'/page.view.php'): \Tempest\View\View {
+    return \Tempest\View\view($path, entry: 'before');
+}";
+    let caller = "<?php renderPage();";
+    let source = "{{ $entry }}";
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        &[
+            ("app/helper.php", helper),
+            ("app/caller.php", caller),
+            ("app/page.view.php", source),
+        ],
+    );
+    let helper_uri = workspace_uri(&backend, "app/helper.php");
+    let uri = workspace_uri(&backend, "app/page.view.php");
+    open_php(&backend, &helper_uri, helper).await;
+    open_php(&backend, &workspace_uri(&backend, "app/caller.php"), caller).await;
+    open_php(&backend, &uri, source).await;
+    assert!(
+        hover_on(&backend, &uri, source, "$entry")
+            .await
+            .contains("'before'")
+    );
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                text_document_identifier: TextDocumentIdentifier { uri: helper_uri },
+                version: 2,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                    TextDocumentContentChangeWholeDocument {
+                        text: helper.replace("'before'", "'after'"),
+                    },
+                ),
+            ],
+        })
+        .await;
+    let hover = hover_on(&backend, &uri, source, "$entry").await;
+    assert!(hover.contains("'after'"), "{hover}");
+}
+
+#[tokio::test]
+async fn tempest_paths_deep_branching_helper_chains_carry_data() {
+    // Each helper calls the next one twice, so a walk without memoisation
+    // reads the innermost body 2^12 times.
+    let mut helpers = String::from(
+        "<?php namespace App;\nuse Tempest\\View\\View;\nuse function Tempest\\View\\view;\n\
+         function level0(string $path, string $entry): View { return view($path, entry: $entry); }\n",
+    );
+    for level in 1..=12 {
+        let next = level - 1;
+        helpers.push_str(&format!(
+            "function level{level}(string $path, string $entry): View {{\n    \
+             if ($entry === '') {{ return level{next}($path, $entry); }}\n    \
+             return level{next}($path, $entry);\n}}\n"
+        ));
+    }
+    let caller =
+        "<?php namespace Consumer;\n\\App\\level12(__DIR__ . '/../app/page.view.php', 'deep');\n";
+    let source = "<p>{{ $entry }}</p>";
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"App\\":"app/","Consumer\\":"consumer/"}}}"#,
+        &[
+            ("app/helpers.php", helpers.as_str()),
+            ("consumer/caller.php", caller),
+            ("app/page.view.php", source),
+        ],
+    );
+    open_php(
+        &backend,
+        &workspace_uri(&backend, "app/helpers.php"),
+        &helpers,
+    )
+    .await;
+    open_php(
+        &backend,
+        &workspace_uri(&backend, "consumer/caller.php"),
+        caller,
+    )
+    .await;
+    let uri = workspace_uri(&backend, "app/page.view.php");
+    open_php(&backend, &uri, source).await;
+    let hover = hover_on(&backend, &uri, source, "$entry").await;
+    assert!(hover.contains("'deep'"), "{hover}");
+}

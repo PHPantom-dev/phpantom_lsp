@@ -242,7 +242,13 @@ fn infer_type_from_constant_value_inner(
         // expression that merely starts and ends with a quote must be
         // folded as an expression, not mistaken for one literal.
         return if is_single_quoted_literal(v) {
-            Some(PhpType::literal_string_raw(v.to_string()))
+            // Constant initializers cannot interpolate, but expression text
+            // read from a call site can, and then its value is not the text.
+            Some(if v.starts_with('"') && interpolates(v) {
+                PhpType::string()
+            } else {
+                PhpType::literal_string_raw(v.to_string())
+            })
         } else {
             crate::type_engine::type_ops::const_fold::fold_string_concatenation(
                 v,
@@ -353,6 +359,27 @@ fn infer_type_from_constant_value_inner(
 /// Whether `v` (which starts and ends with the same quote character) is
 /// one string literal, i.e. its opening quote is closed only at the very
 /// end.  `'foo'` → true, `'a' . 'b'` → false.
+/// Whether a double-quoted literal embeds a variable (`"$name"`, `"{$x}"`).
+fn interpolates(v: &str) -> bool {
+    let bytes = v.as_bytes();
+    let mut i = 1;
+    while i + 1 < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'$' if bytes[i + 1].is_ascii_alphabetic()
+                || bytes[i + 1] == b'_'
+                || bytes[i + 1] >= 0x80
+                || bytes[i + 1] == b'{' =>
+            {
+                return true;
+            }
+            b'{' if bytes[i + 1] == b'$' => return true,
+            _ => i += 1,
+        }
+    }
+    false
+}
+
 fn is_single_quoted_literal(v: &str) -> bool {
     let quote = v.as_bytes()[0];
     let inner = &v.as_bytes()[1..v.len() - 1];
@@ -427,6 +454,17 @@ mod tests {
             infer_type_from_constant_value("'a' . 'b'"),
             Some(PhpType::literal_string_value("ab"))
         );
+        assert_eq!(
+            infer_type_from_constant_value("\"cost \\$5\""),
+            Some(PhpType::literal_string_raw("\"cost \\$5\""))
+        );
+        for interpolated in ["\"a $name\"", "\"a {$name}\"", "\"a ${name}\""] {
+            assert_eq!(
+                infer_type_from_constant_value(interpolated),
+                Some(PhpType::string()),
+                "{interpolated}"
+            );
+        }
     }
 
     #[test]

@@ -3,9 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use super::view_data::Collected;
 use crate::Backend;
-use crate::php_type::{PhpType, ShapeEntry};
 use crate::file_state::FileState;
+use crate::php_type::{PhpType, ShapeEntry};
 use crate::symbol_map::{StringKeyKind, SymbolKind};
 
 /// Inferred declarations, kept below annotations written in the template.
@@ -81,14 +82,8 @@ pub(crate) struct Memo {
     /// View helper names as of the last refresh; a change rescans callers.
     wrappers: Option<Arc<super::wrappers::Names>>,
     /// Data each render caller supplied, by caller URI.
-    callers: BTreeMap<String, Caller>,
+    callers: BTreeMap<String, Collected>,
     calls: super::component_context::CallMemo,
-}
-
-struct Caller {
-    targets: Vec<(String, Scope)>,
-    /// Custom View classes this caller instantiates with its own data.
-    instantiated: HashSet<String>,
 }
 
 /// Whether a file can supply data to a view: a literal view path, a
@@ -150,9 +145,11 @@ impl Backend {
         self.has_tempest_views()
             && (super::is_view(uri)
                 || self.tempest.sources.read().contains(uri)
-                || self.files.read().get(uri).is_some_and(|file| {
-                    renders_views(file, &self.tempest.wrappers.read())
-                }))
+                || self
+                    .files
+                    .read()
+                    .get(uri)
+                    .is_some_and(|file| renders_views(file, &self.tempest.wrappers.read())))
     }
 
     /// Recompute view inference from scratch: after a save, a watcher batch
@@ -220,9 +217,25 @@ impl Backend {
                 self.collect_caller(&uri, &custom, &wrappers, &mut memo.callers);
             }
         } else if let Some(uri) = edited {
+            // A helper body is read under each caller's arguments, so the
+            // callers that went through an edited helper are walked again.
+            let dependents: Vec<String> = memo
+                .callers
+                .iter()
+                .filter(|(caller, data)| *caller != uri && data.dependencies.contains(uri))
+                .map(|(caller, _)| caller.clone())
+                .collect();
             self.collect_caller(uri, &custom, &wrappers, &mut memo.callers);
+            for caller in dependents {
+                self.collect_caller(&caller, &custom, &wrappers, &mut memo.callers);
+            }
         }
         let mut sources: HashSet<String> = memo.callers.keys().cloned().collect();
+        sources.extend(
+            memo.callers
+                .values()
+                .flat_map(|caller| caller.dependencies.iter().cloned()),
+        );
         sources.extend(custom.values().map(|view| view.source.clone()));
         *self.tempest.sources.write() = sources;
         let mut scopes: HashMap<String, Scope> = HashMap::new();
@@ -284,7 +297,7 @@ impl Backend {
         uri: &str,
         custom: &BTreeMap<String, super::custom_views::CustomView>,
         wrappers: &super::wrappers::Names,
-        callers: &mut BTreeMap<String, Caller>,
+        callers: &mut BTreeMap<String, Collected>,
     ) {
         let map = self
             .files
@@ -296,24 +309,13 @@ impl Backend {
             callers.remove(uri);
             return;
         };
-        let mut caller = Caller {
-            targets: Vec::new(),
-            instantiated: HashSet::new(),
-        };
+        let mut caller = Collected::default();
         if let Some(content) = self.analysable_content(uri)
             && map.matches_source(&content)
             && (map.source_hash.is_none() || map.built_from(&content))
         {
             let file = self.file_context(uri);
-            caller.targets = super::view_data::collect(
-                self,
-                uri,
-                &file,
-                &content,
-                custom,
-                &mut caller.instantiated,
-                wrappers,
-            );
+            caller = super::view_data::collect(self, uri, &file, &content, custom, wrappers);
         }
         callers.insert(uri.to_owned(), caller);
     }
