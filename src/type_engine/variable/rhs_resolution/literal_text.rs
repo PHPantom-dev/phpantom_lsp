@@ -239,13 +239,16 @@ fn infer_type_from_constant_value_inner(
         && ((v.starts_with('\'') && v.ends_with('\'')) || (v.starts_with('"') && v.ends_with('"')))
     {
         // Only keep the value when the text is a single literal.  An
-        // expression that merely starts and ends with a quote (e.g. the
-        // concatenation `'a' . 'b'`) still produces a string, but not
-        // that literal.
+        // expression that merely starts and ends with a quote must be
+        // folded as an expression, not mistaken for one literal.
         return if is_single_quoted_literal(v) {
             Some(PhpType::literal_string_raw(v.to_string()))
         } else {
-            Some(PhpType::string())
+            crate::type_engine::type_ops::const_fold::fold_string_concatenation(
+                v,
+                elements.resolver().unwrap_or(&|_| None),
+            )
+            .or_else(|| Some(PhpType::string()))
         };
     }
 
@@ -420,13 +423,17 @@ mod tests {
             infer_type_from_constant_value("\"bar\""),
             Some(PhpType::literal_string_raw("\"bar\""))
         );
+        assert_eq!(
+            infer_type_from_constant_value("'a' . 'b'"),
+            Some(PhpType::literal_string_value("ab"))
+        );
     }
 
     #[test]
     fn constant_value_inference_widens_non_literals() {
-        // Concatenation that merely starts and ends with a quote.
+        // Unknown operands prevent a concatenation from retaining a value.
         assert_eq!(
-            infer_type_from_constant_value("'a' . 'b'"),
+            infer_type_from_constant_value("'a' . $unknown . 'b'"),
             Some(PhpType::string())
         );
         // A quote escaped at the end does not close the literal.

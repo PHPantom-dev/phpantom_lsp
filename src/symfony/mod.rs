@@ -149,7 +149,7 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         | KeyFramework::Twig
         | KeyFramework::Yii
         | KeyFramework::Drupal => enabled(kind),
-        KeyFramework::Laravel | KeyFramework::WordPress => false,
+        KeyFramework::Laravel | KeyFramework::WordPress | KeyFramework::Tempest => false,
     };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
@@ -200,7 +200,7 @@ impl Backend {
             // The hook functions' names are WordPress's own, and a project
             // that calls them is a WordPress one whatever its
             // `composer.json` says, or whether it has one at all.
-            KeyFramework::WordPress => true,
+            KeyFramework::WordPress | KeyFramework::Tempest => true,
         }
     }
 
@@ -314,7 +314,8 @@ impl Backend {
             | KeyFramework::Symfony
             | KeyFramework::Twig
             | KeyFramework::Yii
-            | KeyFramework::WordPress => true,
+            | KeyFramework::WordPress
+            | KeyFramework::Tempest => true,
         };
         for uri in uris {
             let Some(map) = self.symbol_map_for(&uri) else {

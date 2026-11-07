@@ -28,14 +28,17 @@ php examples/symfony/assertions.php
 php examples/yii/assertions.php
 php examples/wordpress/assertions.php
 php examples/drupal/assertions.php
+find examples/tempest/app examples/tempest/resources examples/tempest/ui -name '*.php' -print0 | xargs -0 -n1 php -l
+php examples/tempest/assertions.php
 phpantom_lsp analyze --project-root examples/laravel --no-colour
 phpantom_lsp analyze --project-root examples/symfony --no-colour
 phpantom_lsp analyze --project-root examples/yii --no-colour
 phpantom_lsp analyze --project-root examples/wordpress --no-colour
 phpantom_lsp analyze --project-root examples/drupal --no-colour
+phpantom_lsp analyze --project-root examples/tempest --no-colour
 ```
 
-Note that clippy runs twice, once for library code and once including test code. The `php -l` checks keep the PHP and framework playgrounds valid. The `php -d zend.assertions=1` run executes `assertions.php`'s `runDemoAssertions()` to verify that `scaffolding/scaffolding.php`'s stubs actually return what their docblocks claim. Each framework playground has an `assertions.php` of its own that checks the demo against the real framework: the Laravel one boots Eloquent on an in-memory database, the Symfony one loads the routes, services, translations, templates, forms, and validation mappings with Symfony's own loaders, the Yii one builds the configuration and DI container the way Yii's web runner does, the WordPress one installs WordPress into a throwaway SQLite database and loads the demo plugin and theme, and the Drupal one reads the demo's services, routes, entity type, hooks, permissions, configuration, theme hooks, render elements, and libraries with Drupal's own loaders and reflection. The framework `assertions.php` and `phpantom_lsp analyze` runs need `composer install` in each playground first; the `analyze` runs check the playgrounds for diagnostic regressions. `examples/symfony/`, `examples/yii/`, `examples/wordpress/` and `examples/drupal/` must report `[OK] No errors`. In `examples/laravel/`, `app/Demo.php` carries four deliberate mistakes: `Artisan::call('does:not-exist')` demonstrates `invalid_laravel_command`, `->withoutMiddleware('bakery.closed')` demonstrates `invalid_laravel_middleware`, and one `view('welcome', …)` call both leaves out a variable the template declares and passes a misspelled key, demonstrating `missing_view_variable` and `unused_view_variable`. So the analyze run must report exactly `[ERROR] Found 4 errors` on those three lines, not `[OK] No errors`; any other count, or an error on a different line, is a regression.
+Note that clippy runs twice, once for library code and once including test code. The `php -l` checks keep the PHP and framework playgrounds valid. The `php -d zend.assertions=1` run executes `assertions.php`'s `runDemoAssertions()` to verify that `scaffolding/scaffolding.php`'s stubs actually return what their docblocks claim. Each framework playground has an `assertions.php` of its own that checks the demo against the real framework: the Laravel one boots Eloquent on an in-memory database, the Symfony one loads the routes, services, translations, templates, forms, and validation mappings with Symfony's own loaders, the Yii one builds the configuration and DI container the way Yii's web runner does, the WordPress one installs WordPress into a throwaway SQLite database and loads the demo plugin and theme, the Tempest one renders its views and components with the framework renderer, and the Drupal one reads the demo's services, routes, entity type, hooks, permissions, configuration, theme hooks, render elements, and libraries with Drupal's own loaders and reflection. The framework `assertions.php` and `phpantom_lsp analyze` runs need `composer install` in each playground first; the `analyze` runs check the playgrounds for diagnostic regressions. `examples/symfony/`, `examples/yii/`, `examples/wordpress/`, `examples/drupal/` and `examples/tempest/` must report `[OK] No errors`. In `examples/laravel/`, `app/Demo.php` carries four deliberate mistakes: `Artisan::call('does:not-exist')` demonstrates `invalid_laravel_command`, `->withoutMiddleware('bakery.closed')` demonstrates `invalid_laravel_middleware`, and one `view('welcome', …)` call both leaves out a variable the template declares and passes a misspelled key, demonstrating `missing_view_variable` and `unused_view_variable`. So the analyze run must report exactly `[ERROR] Found 4 errors` on those three lines, not `[OK] No errors`; any other count, or an error on a different line, is a regression.
 
 ## Code Style
 
@@ -85,8 +88,8 @@ python3 benches/ci_benchmarks.py run --build-dir /tmp/phpantom-benchmarks \
 ```
 
 CI uses static musl binaries; these commands use your local Cargo target.
-Run the sharding helper's tests with
-`python3 -m unittest discover -s benches -p 'test_ci_benchmarks.py'`.
+Run the benchmark helpers' tests with
+`python3 -m unittest discover -s benches -p 'test_*.py'`.
 
 Latency and memory benchmark comparisons appear in the job summaries.
 A regression over 30% fails the comparison check. Latency compares the raw

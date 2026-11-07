@@ -66,14 +66,14 @@ impl Backend {
     /// original Blade template, dropping it when either end lands in the
     /// injected prologue (no template text to attach to).
     fn translate_folding_range(&self, uri: &str, range: FoldingRange) -> Option<FoldingRange> {
-        let start = self.try_translate_php_to_blade(
+        let start = self.try_translate_php_to_template(
             uri,
             tower_lsp_server::gen_lsp_types::Position {
                 line: range.start_line,
                 character: range.start_character.unwrap_or(0),
             },
         )?;
-        let end = self.try_translate_php_to_blade(
+        let end = self.try_translate_php_to_template(
             uri,
             tower_lsp_server::gen_lsp_types::Position {
                 line: range.end_line,

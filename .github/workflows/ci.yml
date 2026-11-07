@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Test benchmark sharding
-        run: python3 -m unittest discover -s benches -p 'test_ci_benchmarks.py'
+      - name: Test benchmark helpers
+        run: python3 -m unittest discover -s benches -p 'test_*.py'
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -202,6 +202,7 @@ jobs:
       - run: find examples/yii/src examples/yii/config examples/yii/resources -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: find examples/wordpress/wp-content -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: find examples/drupal/web/modules/custom examples/drupal/web/themes/custom -type f \( -name '*.php' -o -name '*.module' -o -name '*.theme' \) -print0 | xargs -0 -n1 php -l
+      - run: find examples/tempest/app examples/tempest/resources examples/tempest/ui -name '*.php' -print0 | xargs -0 -n1 php -l
 
   benchmark:
     name: Benchmark
@@ -478,7 +479,7 @@ jobs:
           shared-key: build
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.5"
           tools: composer
       - name: Set up musl build
         run: |
@@ -523,7 +524,7 @@ jobs:
           shared-key: build
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.5"
           tools: composer
       - name: Set up musl build
         run: |

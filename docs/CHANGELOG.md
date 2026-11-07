@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Class constants as docblock types.** A docblock type that names class constants, such as `@param Status::ACTIVE $status`, `@return self::STATUS_*`, or `@param Foo::class|Bar::class $name`, now stands for the values those constants hold. A `switch` with a case for each of them counts as covering every value, and passing anything else is reported.
+- **Dynamic Tempest components.** Components selected by statically known `is` and `:is` values infer their data and slot scope. Their declared attributes complete, and literal component names navigate to the view file. Contributed by @shuvroroy.
+
+- **Configured Tempest views.** Component completion and navigation read Tempest discovery configuration and explicit registrations. View helpers pass their callers’ data to templates through statically known paths. Contributed by @shuvroroy.
+- **Static file paths.** Paths built from `__DIR__`, `__FILE__`, and `dirname()` keep their known values across files and inherited constants. Contributed by @shuvroroy.
+- **Tempest view data inference.** Templates infer data passed by callers and components, including custom View objects and slot scope. Explicit `@var` annotations can refine inferred types. Contributed by @shuvroroy.
+- **Tempest View completion and navigation.** PHP expressions in `.view.php` templates use imports and `@var` annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to `Tempest\View\view()` also complete and navigate. Contributed by @shuvroroy.
 - **Yii aliases.** In a Yii project, an alias such as `@runtime` at the start of any string jumps to the configuration that declares it, lists the strings that name it, and completes from the declared aliases. Hovering it shows the path it stands for, and the rest of the string links to the file or directory it names.
 - **Yii DI definitions.** In a Yii project, the `'setLogger()'` and `'$pageSize'` keys of a DI definition jump to the method or property they name, complete, rename with it, and are reported when the class has no such member. The arguments a definition passes by name, like `'transport'` in `'__construct()' => [...]`, jump to the parameter, complete, and are reported when the method takes no parameter of that name. Definitions are recognised wherever they are written, in the `di` and `widgets` configuration or inline in PHP. Go-to-implementation on a class, and a CodeLens above it, lead to the definitions that bind it, the installed packages' included.
 - **Objects used as strings.** Echoing, concatenating, interpolating, or casting to `string` an object whose class has no `__toString()` is reported, since PHP throws an `Error` there. It is an error when the class is final or an enum, and a warning when a subclass could still add the method.
@@ -153,6 +159,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Generic iterator parameters check their class.** Passing an iterator to a parameter typed with a generic iterator interface, such as `RecursiveIterator<int, string>`, is now reported when the iterator does not implement that interface.
 - **Classes that share a short name in one type.** Hover, completion, and signature help now show each class by its full name when a type names two classes with the same short name, such as `class-string<\App\C>|class-string<\Other\C>`, instead of printing them as one.
 - **Class constants in docblock types name their class.** The class in a docblock type such as `@param E::class $s` or `@return Status::ACTIVE` now counts as a use of its import, so that import is no longer reported as unused or removed, and go-to-definition, hover, and references reach the class.
+- **Installed PHP stub navigation.** Go to definition uses Composer-installed stubs after a package is installed or updated, even when embedded declarations were already loaded. Contributed by @shuvroroy.
+
+- **Tempest attribute casing.** Component attributes such as `BookTitle` now expose `$bookTitle`, matching Tempest’s naming rules. Contributed by @shuvroroy.
+
+- **Registered Tempest component names.** Tag completion now offers explicitly registered components whose names do not start with `x-`. Contributed by @shuvroroy.
+- **Property types on an annotated `$this`.** Reading a property through an explicitly typed `$this` now preserves its type in assignments and loops, including Tempest views. Contributed by @shuvroroy.
 - **Closures declared to return `float`.** A closure or arrow function declared `: float` is now shown returning `float` even when its body computes an integer, since PHP converts the value on return.
 - **Docblock annotations name their class.** A Doctrine-style annotation such as `@ORM\Entity` or `@Route("/users")`, including one nested in another's arguments, now counts as a use of the import it goes through, so that import is no longer reported as unused or removed by the quick fix and `phpantom_lsp fix`. Go-to-definition, hover, references, and rename reach the annotation's class.
 - **Method bodies in files not yet opened.** A method with no return type, or one that returns a Doctrine query builder, declared in a file the editor has not opened now reads the class names in its body through that file's imports, so `return new User();` gives the imported `User` rather than a class of that name in the method's own namespace.
@@ -536,6 +548,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Memory benchmarks wait for indexing and idle workers.** RSS sampling now waits across consecutive indexing phases and allows temporary parse allocations to settle before measuring. Contributed by @shuvroroy.
+- **Tempest performance checks.** CI measures template editing, completion, navigation, and memory use against the Tempest playground. Contributed by @shuvroroy.
 - **Pull request benchmarks no longer fail on a slow runner.** Each benchmark runner measures both the PR and its base, so the 30% regression check reflects the change rather than which machine ran it. Contributed by @shuvroroy. Closes #489.
 - **Faster benchmark checks on pull requests.** Latency benchmarks now run split across four runners, and benchmark alerts on fork pull requests show up in the job summary instead of failing on a permission error. Contributed by @shuvroroy.
 - **A Drupal playground.** `examples/drupal/` is a Drupal 11 site with one custom module and one theme, for trying PHPantom on Drupal code, with runtime checks of what its comments claim. Contributed by @giuseppe-esposito-87.

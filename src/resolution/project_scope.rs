@@ -243,10 +243,16 @@ impl Backend {
     }
 
     /// The file declaring the class `fqn` as the file whose work is running
-    /// sees it: the one the index holds, unless that is another Composer
-    /// project's dependency, in which case the project's own copy if it
-    /// installed one.
+    /// sees it: a stub path's declaration first, then the one the index
+    /// holds, unless that is another Composer project's dependency, in
+    /// which case the project's own copy if it installed one.
     pub(crate) fn class_declaration_uri(&self, fqn: &str) -> Option<String> {
+        if self.has_external_stubs() {
+            let stubs = self.external_stubs();
+            if let Some(path) = stubs.classes.get(fqn) {
+                return Some(crate::util::path_to_uri(path));
+            }
+        }
         let indexed = self.symbols.fqn_uri_index.read().get(fqn).cloned()?;
         let Some(scope) = active() else {
             return Some(indexed);

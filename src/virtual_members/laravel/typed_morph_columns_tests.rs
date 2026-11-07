@@ -99,7 +99,7 @@ fn morph_column_cache_rejects_missing_changed_and_outdated_sources() {
     backend.files.write().insert(
         uri.to_string(),
         Arc::new(crate::file_state::FileState {
-            blade: Some(crate::file_state::BladeFileState {
+            template: Some(crate::file_state::TemplateFileState {
                 virtual_php: Arc::new(source.to_string()),
                 source_map: Arc::default(),
             }),

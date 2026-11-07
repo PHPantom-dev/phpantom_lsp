@@ -150,8 +150,8 @@ impl Backend {
     /// Read content in the coordinate space used by the file's symbol map.
     /// Blade maps describe generated PHP; locations are translated for the client later.
     pub(crate) fn reference_file_content_arc(&self, uri: &str) -> Option<Arc<String>> {
-        if self.is_blade_file(uri)
-            && let Some(content) = self.blade_virtual_php_arc(uri)
+        if self.is_php_template(uri)
+            && let Some(content) = self.template_virtual_php_arc(uri)
         {
             return Some(content);
         }

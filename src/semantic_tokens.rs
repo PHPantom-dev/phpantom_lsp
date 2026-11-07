@@ -150,7 +150,7 @@ impl Backend {
             });
         }
 
-        let virtual_php = self.blade_virtual_php_arc(uri);
+        let virtual_php = self.template_virtual_php_arc(uri);
         let effective_content = virtual_php.as_deref().map_or(content, String::as_str);
 
         let mut tokens = self.collect_tokens(&symbol_map, effective_content, uri, &ctx, mode);
@@ -159,7 +159,7 @@ impl Backend {
         tokens.sort_by(|a, b| a.line.cmp(&b.line).then(a.start_char.cmp(&b.start_char)));
 
         // Translate tokens to Blade coordinates if necessary.
-        if self.is_blade_file(uri) {
+        if self.is_php_template(uri) {
             let mut translated_tokens = Vec::with_capacity(tokens.len());
             for tok in tokens {
                 let start_pos = Position {
@@ -174,8 +174,8 @@ impl Backend {
                 // A token inside the injected prologue highlights nothing the
                 // template wrote.
                 let (Some(start_translated), Some(end_translated)) = (
-                    self.try_translate_php_to_blade(uri, start_pos),
-                    self.try_translate_php_to_blade(uri, end_pos),
+                    self.try_translate_php_to_template(uri, start_pos),
+                    self.try_translate_php_to_template(uri, end_pos),
                 ) else {
                     continue;
                 };
@@ -266,7 +266,7 @@ impl Backend {
         // time, which is O(n²) on large files (the demo file alone takes ~17s).
         let line_index = crate::text_position::LineIndex::new(content);
 
-        let is_blade = self.is_blade_file(uri);
+        let is_blade = self.is_php_template(uri);
 
         for span in &symbol_map.spans {
             let length = span.end.saturating_sub(span.start);
