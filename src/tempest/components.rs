@@ -136,7 +136,7 @@ impl Backend {
                 )
             })
             .collect();
-        if tag.name.starts_with("x-") {
+        {
             let components = self.tempest_components();
             if let Some(path) = components.get(tag.name)
                 && let Some(component) = self.get_file_content_arc(&crate::util::path_to_uri(path))

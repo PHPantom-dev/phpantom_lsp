@@ -500,7 +500,7 @@ async fn tempest_vendor_components_project_overrides_and_open_buffer_attributes(
             (".gitignore", "/vendor/\n"),
             (
                 "vendor/composer/installed.json",
-                r#"{"packages":[{"name":"acme/views","install-path":"../acme/views"},{"name":"acme/missing"}]}"#,
+                r#"{"packages":[{"name":"acme/views","autoload":{"psr-4":{"Acme\\":["src/","src/."]}},"extra":{"tempest":{"can-discover":true}},"install-path":"../acme/views"},{"name":"acme/missing"}]}"#,
             ),
             (
                 "vendor/acme/views/composer.json",

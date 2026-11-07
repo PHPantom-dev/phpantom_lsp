@@ -92,6 +92,15 @@ impl Backend {
     ) -> bool {
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let changes = self.spell_changes_as_indexed(&params.changes);
+        for change in changes.iter() {
+            if change.kind != FileChangeType::Changed
+                && change.uri.as_str().ends_with(".config.php")
+            {
+                self.invalidate_tempest_views();
+            } else {
+                self.note_tempest_php_change(change.uri.as_str());
+            }
+        }
         // Default configuration files are never indexed, and an open schema
         // file is skipped below, so both are followed before that.
         if self.is_drupal_project() {

@@ -426,7 +426,7 @@ async fn tempest_context_project_component_override_and_invocation_specific_slot
             (".gitignore", "/vendor/\n"),
             (
                 "vendor/composer/installed.json",
-                r#"{"packages":[{"name":"acme/views","install-path":"../acme/views"}]}"#,
+                r#"{"packages":[{"name":"acme/views","autoload":{"psr-4":{"Acme\\":"src/"}},"extra":{"tempest":{"can-discover":true}},"install-path":"../acme/views"}]}"#,
             ),
             (
                 "vendor/acme/views/composer.json",
