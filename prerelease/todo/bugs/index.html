@@ -1066,17 +1066,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b712-a-used-void-result-is-judged-by-one-member-of-a-union" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B712. A used <code>void</code> result is judged by one member of a union
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b713-hover-shows-two-class-strings-that-share-a-short-name-as-one" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1796,17 +1785,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b712-a-used-void-result-is-judged-by-one-member-of-a-union" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B712. A used <code>void</code> result is judged by one member of a union
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b713-hover-shows-two-class-strings-that-share-a-short-name-as-one" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2003,34 +1981,14 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b712-a-used-void-result-is-judged-by-one-member-of-a-union">B712. A used <code>void</code> result is judged by one member of a union<a class="headerlink" href="#b712-a-used-void-result-is-judged-by-one-member-of-a-union" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @var LoggerInterface|ObjectProphecy */</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">private $logger;</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">$this-&gt;logger-&gt;warning('x')-&gt;shouldBeCalled();</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">// Result of method LoggerInterface::warning() (void) is used</span>
-</code></pre></div>
-<p>The call's result is <code>null</code> only if every class the receiver can be
-returns nothing. <code>ObjectProphecy</code> answers the call through <code>__call</code>,
-which returns a <code>MethodProphecy</code>, so the result is used correctly. The
-check takes the first union member that declares the method and asks
-only it: <code>Logger|Mock</code> is reported and <code>Mock|Logger</code> is not, when <code>Mock</code>
-declares <code>warning()</code> with a return value. Report the call only when every
-member that answers it, through a declared method or <code>__call</code>, is natively
-<code>void</code>.</p>
-<p><strong>Where to look:</strong> <code>collect_void_result_diagnostics_with_context</code>
-(<code>src/diagnostics/void_results.rs</code>), which reads <code>native_void</code> off the
-single target <code>resolve_callable_target_at_offset</code> returns.</p>
-<p>Found by <code>analyze</code> on Drupal core's Prophecy-based tests.</p>
 <h3 id="b713-hover-shows-two-class-strings-that-share-a-short-name-as-one">B713. Hover shows two <code>class-string</code>s that share a short name as one<a class="headerlink" href="#b713-hover-shows-two-class-strings-that-share-a-short-name-as-one" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">/** @param class-string&lt;\App\C&gt;|class-string&lt;\Other\C&gt; $s */</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">function foo(string $s): void {</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">    $s; // hover: $s = class-string&lt;C&gt;</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">namespace App;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">/** @param class-string&lt;\App\C&gt;|class-string&lt;\Other\C&gt; $s */</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function foo(string $s): void {</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    $s; // hover: $s = class-string&lt;C&gt;</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>Hover shortens every class name in a type to its short name, so the two
 members print the same and the union shows one of them. A union of the
