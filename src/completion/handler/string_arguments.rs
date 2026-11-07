@@ -315,11 +315,12 @@ impl Backend {
             return Some(response);
         }
 
-        // ── Completion driven by the parameter's declared type ──
+        // ── Completion driven by the parameter's declaration ───
         // `model-property<Model>` asks for one of a model's
-        // columns and `view-string` for one of the project's
-        // templates, neither of which the call's own spelling
-        // says — only the callee's signature does. Locating the
+        // columns, `view-string` for one of the project's
+        // templates, and `#[ExpectedValues]` for one of the strings
+        // it lists, none of which the call's own spelling says —
+        // only the callee's signature does. Locating the
         // call and resolving its callee is the expensive half, so
         // it happens once here and both strategies read the
         // parameter type it produced.
@@ -327,15 +328,21 @@ impl Backend {
             string_ctx,
             StringContext::InStringLiteral | StringContext::NotInString
         ) && let Some(code) = code_ctx.as_ref()
-            && let Some((call, param_type)) =
-                self.typed_string_argument(content, position, ctx, code)
+            && let Some((call, param)) = self.typed_string_argument(content, position, ctx, code)
         {
-            if let Some(response) = self.model_property_completion(&call, &param_type, ctx) {
-                return Some(response);
+            if let Some(param_type) = &param.type_hint {
+                if let Some(response) = self.model_property_completion(&call, param_type, ctx) {
+                    return Some(response);
+                }
+                if is_laravel
+                    && let Some(response) =
+                        self.view_string_completion(&call, param_type, content, position)
+                {
+                    return Some(response);
+                }
             }
-            if is_laravel
-                && let Some(response) =
-                    self.view_string_completion(&call, &param_type, content, position)
+            if let Some(response) =
+                self.expected_string_value_completion(&call, &param, content, position)
             {
                 return Some(response);
             }

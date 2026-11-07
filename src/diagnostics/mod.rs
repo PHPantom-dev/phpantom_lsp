@@ -96,6 +96,9 @@
 //!   enclosing `try` catches and the function's own `@throws` does not
 //!   cover.  Off by default; enable via `[diagnostics]
 //!   unhandled-exceptions = true`.
+//! - **Unused parameter diagnostics** (opt-in) — dim trailing
+//!   parameters a function, closure, or method never reads.  Off by
+//!   default; enable via `[diagnostics] unused-parameters = true`.
 //! - **Argument count diagnostics** — report calls where the number of
 //!   arguments does not match the function/method signature.
 //! - **Implementation error diagnostics** — report concrete classes that
@@ -264,6 +267,7 @@ pub(crate) mod class_name_mismatch;
 mod collect;
 pub(crate) mod cross_file;
 pub(crate) mod data_providers;
+mod dead_catches;
 mod delivery;
 mod deprecated;
 mod destructuring_offsets;
@@ -313,6 +317,7 @@ pub(crate) mod unknown_members;
 pub(crate) mod unreachable_code;
 pub(crate) mod unresolved_member_access;
 mod unused_imports;
+pub(crate) mod unused_parameters;
 pub(crate) mod unused_private_members;
 pub(crate) mod unused_variables;
 pub(crate) mod use_statements;

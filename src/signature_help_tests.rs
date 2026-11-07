@@ -163,6 +163,7 @@ fn format_param_with_default_value() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     };
     assert_eq!(format_param_label(&p), "int $limit = 10");
 }
@@ -181,6 +182,7 @@ fn format_param_with_null_default() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     };
     assert_eq!(format_param_label(&p), "?string $name = null");
 }
@@ -200,6 +202,7 @@ fn format_param_optional_no_known_default() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     };
     assert_eq!(format_param_label(&p), "int $x");
 }
@@ -219,6 +222,7 @@ fn format_param_variadic_no_default_even_if_set() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     };
     assert_eq!(format_param_label(&p), "string ...$items");
 }
@@ -237,6 +241,7 @@ fn format_param_simple() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     };
     assert_eq!(format_param_label(&p), "int $x");
 }
@@ -255,6 +260,7 @@ fn format_param_variadic() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     };
     assert_eq!(format_param_label(&p), "string ...$items");
 }
@@ -273,6 +279,7 @@ fn format_param_reference() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     };
     assert_eq!(format_param_label(&p), "array &$arr");
 }
@@ -291,6 +298,7 @@ fn format_param_no_type() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     };
     assert_eq!(format_param_label(&p), "$x");
 }
@@ -312,6 +320,7 @@ fn build_signature_label() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$age"),
@@ -325,6 +334,7 @@ fn build_signature_label() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
     ];
     let ret = PhpType::parse("void");
@@ -347,6 +357,7 @@ fn build_signature_parameter_offsets() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$b"),
@@ -360,6 +371,7 @@ fn build_signature_parameter_offsets() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
     ];
     let sig = build_signature(&params, None);
@@ -399,6 +411,7 @@ fn build_signature_with_default_values() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$count"),
@@ -412,6 +425,7 @@ fn build_signature_with_default_values() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
     ];
     let ret = PhpType::parse("void");
@@ -441,6 +455,7 @@ fn build_signature_param_documentation_same_types() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$array"),
@@ -454,6 +469,7 @@ fn build_signature_param_documentation_same_types() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
     ];
     let ret = PhpType::parse("array");
@@ -487,6 +503,7 @@ fn build_signature_param_documentation_effective_differs() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     let ret = PhpType::parse("void");
     let sig = build_signature(&params, Some(&ret));
@@ -517,6 +534,7 @@ fn build_signature_param_effective_only_no_native() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     let sig = build_signature(&params, None);
     let pi = sig.parameters.unwrap();
@@ -547,6 +565,7 @@ fn build_signature_param_effective_differs_no_description() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     let ret = PhpType::parse("object");
     let sig = build_signature(&params, Some(&ret));
@@ -585,6 +604,7 @@ fn build_signature_param_effective_fqn_shortened_in_doc() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     let ret = PhpType::parse("void");
     let sig = build_signature(&params, Some(&ret));
@@ -613,6 +633,7 @@ fn build_signature_param_effective_fqn_no_desc() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     let sig = build_signature(&params, None);
     let pi = sig.parameters.unwrap();
@@ -722,6 +743,7 @@ fn clamp_within_range() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$b"),
@@ -735,6 +757,7 @@ fn clamp_within_range() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
     ];
     assert_eq!(clamp_active_param(0, &params), 0);
@@ -755,6 +778,7 @@ fn clamp_exceeds_range() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     assert_eq!(clamp_active_param(5, &params), 0);
 }

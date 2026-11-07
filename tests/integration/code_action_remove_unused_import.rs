@@ -337,6 +337,25 @@ used_fn(USED_CONST);
     );
 }
 
+/// `Foo::class` and `Foo::BAR` written as docblock types name the class.
+#[test]
+fn an_import_named_by_a_class_constant_docblock_type_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use Lib\C as E;
+use Lib\D;
+use Lib\Unused;
+
+/** @param E::class $s */
+function foo(string $s): void {}
+
+/** @return D::FIRST|D::SECOND */
+function bar(): int { return 1; }
+"#;
+    assert_eq!(unused_imports(content), ["Unused import 'Lib\\Unused'"]);
+}
+
 /// A function import is used by a call, not by a class or constant of the
 /// same name, and the other way round.
 #[test]

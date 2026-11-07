@@ -8,48 +8,6 @@ within the same impact tier.
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
-## A34. Unified code action handler architecture
-
-**Impact: Medium · Complexity: Very High**
-
-Refactor the code action system to use a unified handler architecture
-inspired by rust-analyzer's assist system. Currently each code action
-has a separate `collect_*` method called from a hand-maintained list in
-`handle_code_action`, and deferred actions have a separate `resolve_*`
-method dispatched via a string match in `resolve_code_action`. PHPStan
-quick-fixes and refactoring actions use different code paths.
-
-### Changes
-
-1. **Unified handler signature.** Each code action becomes a function
-   `fn(&mut Actions, &ActionContext) -> Option<()>`. Handlers are
-   collected in a static array. `handle_code_action` iterates the array
-   instead of calling methods one by one.
-
-2. **Closure-based lazy resolve.** Handlers call
-   `actions.add(id, label, range, |builder| { ... })`. The closure
-   only runs when the action is being resolved, eliminating separate
-   `collect_*` / `resolve_*` method pairs. The same handler function
-   serves both Phase 1 (applicability check + lightweight stub) and
-   Phase 2 (compute edit).
-
-3. **Unified type for actions and diagnostic fixes.** Use the same
-   struct for PHPStan quick-fixes and refactoring actions. The LSP
-   layer gets one conversion path. Diagnostic fixes attach the same
-   type as their quick-fix data.
-
-4. **Sort by target range size.** Sort results by `target.len()` as
-   a tiebreaker. Smaller target = more specific = higher priority.
-   No manual priority numbers needed.
-
-### When to implement
-
-Do this when the next batch of code actions is added (A25 and the like).
-The refactoring pays for itself by making each subsequent action
-cheaper to add: write one function, append it to an array.
-
----
-
 ## A16. Snippet Placeholder for Extracted Method Name
 
 **Impact: Medium · Complexity: Medium**

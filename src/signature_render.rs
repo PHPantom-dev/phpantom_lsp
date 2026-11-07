@@ -302,6 +302,7 @@ mod tests {
                     closure_this_type: None,
                     param_out_type: None,
                     callable_invocation: None,
+                    expected_values: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$age"),
@@ -315,6 +316,7 @@ mod tests {
                     closure_this_type: None,
                     param_out_type: None,
                     callable_invocation: None,
+                    expected_values: None,
                 },
             ]
             .into(),
@@ -341,6 +343,7 @@ mod tests {
                 closure_this_type: None,
                 param_out_type: None,
                 callable_invocation: None,
+                expected_values: None,
             }]
             .into(),
             ..MethodInfo::virtual_method("getAttribute", None)
@@ -366,6 +369,7 @@ mod tests {
                     closure_this_type: None,
                     param_out_type: None,
                     callable_invocation: None,
+                    expected_values: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$out"),
@@ -379,6 +383,7 @@ mod tests {
                     closure_this_type: None,
                     param_out_type: None,
                     callable_invocation: None,
+                    expected_values: None,
                 },
             ]
             .into(),

@@ -682,7 +682,13 @@ pub(crate) fn process_compound_assignment<'b>(
                 resolve_rhs_with_scope(assignment.lhs, scope, ctx),
                 resolve_rhs_with_scope(assignment.rhs, scope, ctx),
             );
-            super::array_assignment::process_array_key_write(array_access, combined, scope, ctx);
+            super::array_assignment::process_array_key_write(
+                array_access,
+                combined,
+                false,
+                scope,
+                ctx,
+            );
             return;
         }
         // `$this->regexp ??= $this->generate();` leaves the property
@@ -709,6 +715,7 @@ pub(crate) fn process_compound_assignment<'b>(
                 super::array_assignment::process_array_key_write(
                     array_access,
                     vec![ResolvedType::from_type_string(result_type)],
+                    false,
                     scope,
                     ctx,
                 );

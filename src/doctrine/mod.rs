@@ -461,6 +461,7 @@ fn parameter(name: &str, type_hint: PhpType, default_value: Option<&str>) -> Par
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }
 }
 

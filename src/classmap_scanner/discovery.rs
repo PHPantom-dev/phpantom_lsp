@@ -242,8 +242,10 @@ fn scan_files_parallel_psr4(
 /// stem matches the class's short name displaces one whose stem does not:
 /// a package with conditional loading declares the same trait in
 /// `ArraySubsetAsserts.php` and `ArraySubsetAssertsEmpty.php`, and PSR-4
-/// says the first of those is the real one. The origin tier follows
-/// whichever file the classmap ends up pointing at.
+/// says the first of those is the real one. A function likewise goes to a
+/// later file that [outranks](crate::wordpress::function_file_outranks)
+/// the first. The origin tier follows whichever file the index ends up
+/// pointing at.
 fn merge_scanned_file(
     result: &mut WorkspaceScanResult,
     scan: ScanResult,
@@ -276,11 +278,18 @@ fn merge_scanned_file(
         }
     }
     for fqn in scan.functions {
-        result
-            .function_index
-            .entry(fqn.clone())
-            .or_insert_with(|| path.to_path_buf());
-        result.function_origins.entry(fqn).or_insert(origin);
+        match result.function_index.entry(fqn) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                result.function_origins.insert(e.key().clone(), origin);
+                e.insert(path.to_path_buf());
+            }
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                if crate::wordpress::function_file_outranks(path, e.get()) {
+                    result.function_origins.insert(e.key().clone(), origin);
+                    e.insert(path.to_path_buf());
+                }
+            }
+        }
     }
     for name in scan.constants {
         result

@@ -61,6 +61,9 @@ function runDemoAssertions(): void
     assert(in_array(Scaffolding\scaffoldingAnyToolDefault(), Scaffolding\TOOL_DEFAULTS, true), "the untemplated return really is one of Scaffolding\TOOL_DEFAULTS' values");
     assert(Scaffolding\scaffoldingToolDefaultFor('ink') === 'black', "a key read inside the body really picks the table's own value");
     assert(array_key_exists(Scaffolding\ScaffoldingLimits::anyLimitName(), Scaffolding\ScaffoldingLimits::LIMITS), "the declared return really is one of LIMITS' keys");
+    assert((new ClassConstantTypeDemo())->urgent() === 'high', "self::PRIORITY_HIGH really is the string 'high'");
+    assert((new ClassConstantTypeDemo())->badge(ClassConstantTypeDemo::PRIORITY_LOW) === 'grey', "the switch really covers PRIORITY_LOW");
+    assert((new ClassConstantTypeDemo())->badge(ClassConstantTypeDemo::PRIORITY_HIGH) === 'red', "the switch really covers PRIORITY_HIGH");
 
     // ── List order ──────────────────────────────────────────────────────
     assert(array_is_list(['left', 'right']), 'a literal written without keys really is a list');

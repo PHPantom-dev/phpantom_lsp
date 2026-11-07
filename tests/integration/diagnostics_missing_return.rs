@@ -1,5 +1,7 @@
 use crate::common::message_text;
-use crate::common::{collect_diagnostics_with, create_test_backend};
+use crate::common::{
+    collect_diagnostics_with, create_test_backend, create_test_backend_with_function_stubs,
+};
 use phpantom_lsp::Backend;
 use tower_lsp_server::gen_lsp_types::*;
 
@@ -157,6 +159,32 @@ function g(): int {
     assert_eq!(lines(php), Vec::<u32>::new());
 }
 
+/// The try body always returns, so only the catch reaches the `if`, and
+/// there the flag it tests is always `true`.
+#[test]
+fn a_flag_only_the_catch_can_set_decides_the_code_after_the_try() {
+    let php = r#"<?php
+class Storage {
+    private function insert(): int { return 1; }
+    private function ensureTableExists(): bool { return true; }
+    public function getId(): int {
+        $tryAgain = false;
+        try {
+            return $this->insert();
+        } catch (\Exception $e) {
+            if (!$tryAgain = $this->ensureTableExists()) {
+                throw $e;
+            }
+        }
+        if ($tryAgain) {
+            return $this->insert();
+        }
+    }
+}
+"#;
+    assert_eq!(lines(php), Vec::<u32>::new());
+}
+
 #[test]
 fn a_generator_is_not_flagged() {
     let php = r#"<?php
@@ -300,4 +328,88 @@ function label(string $state): string {
 }
 "#;
     assert_eq!(lines(php), vec![9]);
+}
+
+#[test]
+fn a_switch_with_a_case_for_every_class_constant_a_wildcard_names_is_not_flagged() {
+    let php = r#"<?php
+class Location {
+    public const VARIANCE_IN = 1;
+    public const VARIANCE_OUT = 2;
+
+    /** @param self::VARIANCE_* $variance */
+    public function label(int $variance): string {
+        switch ($variance) {
+            case self::VARIANCE_IN:
+                return 'in';
+            case self::VARIANCE_OUT:
+                return 'out';
+        }
+    }
+}
+"#;
+    assert_eq!(lines(php), Vec::<u32>::new());
+}
+
+#[test]
+fn a_switch_missing_a_class_constant_a_wildcard_names_is_flagged() {
+    let php = r#"<?php
+class Location {
+    public const VARIANCE_IN = 1;
+    public const VARIANCE_OUT = 2;
+    public const VARIANCE_BOTH = 3;
+
+    /** @param self::VARIANCE_* $variance */
+    public function label(int $variance): string {
+        switch ($variance) {
+            case self::VARIANCE_IN:
+                return 'in';
+            case self::VARIANCE_OUT:
+                return 'out';
+        }
+    }
+}
+"#;
+    assert_eq!(lines(php), vec![14]);
+}
+
+/// A closure handed the elements of a property declared as class constants
+/// (`(self::VARIANCE_*)[]`) through `array_map` takes their values, so a
+/// switch with a case for each covers every value it can be called with.
+#[test]
+fn a_switch_over_constants_a_mapped_property_holds_is_not_flagged() {
+    let php = r#"<?php
+class Node {
+    public const VARIANCE_IN = 'in';
+    public const VARIANCE_OUT = 'out';
+
+    /** @var (self::VARIANCE_*)[] */
+    public array $variances = [];
+}
+
+/** @return list<int> */
+function weights(Node $node): array {
+    return array_map(
+        static function (string $variance): int {
+            switch ($variance) {
+                case Node::VARIANCE_IN:
+                    return 1;
+                case Node::VARIANCE_OUT:
+                    return 2;
+            }
+        },
+        $node->variances,
+    );
+}
+"#;
+    let diags = collect_diagnostics_with(
+        &create_test_backend_with_function_stubs(),
+        php,
+        Backend::collect_slow_diagnostics,
+    );
+    let missing: Vec<_> = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "missing_return"))
+        .collect();
+    assert!(missing.is_empty(), "got {missing:?}");
 }

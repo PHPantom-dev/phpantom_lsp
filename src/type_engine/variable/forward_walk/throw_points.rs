@@ -69,11 +69,44 @@ impl ThrowPoints {
             let crate::php_type::TypeKind::Named(name) = member.kind() else {
                 return true;
             };
-            let catch_name = ctx.written_names().resolve_class(name);
-            self.explicit
-                .iter()
-                .any(|thrown| may_catch(&catch_name, thrown, ctx))
+            self.reaches_class(&ctx.written_names().resolve_class(name), ctx)
         })
+    }
+
+    /// Record, for each class the catch clause names, whether an exception
+    /// the body throws can land in it.  A no-op unless the walk collects
+    /// them (see [`WalkFlow::collecting_unreachable`]).
+    pub(crate) fn record_catch_types(&self, catch: &TryCatchClause<'_>, ctx: &ForwardWalkCtx<'_>) {
+        if ctx.flow.catch_types.is_none() || super::snapshot_recording_suspended() {
+            return;
+        }
+        let mut names = Vec::new();
+        written_catch_names(&catch.hint, &mut names);
+        for ident in names {
+            let class = ctx
+                .written_names()
+                .resolve_class(bytes_to_str(ident.value()));
+            let span = ident.span();
+            let reached =
+                self.implicit || self.explicit.is_empty() || self.reaches_class(&class, ctx);
+            super::record_catch_type(
+                ctx.flow,
+                CatchTypeReach {
+                    start: span.start.offset,
+                    end: span.end.offset,
+                    class,
+                    reached,
+                },
+            );
+        }
+    }
+
+    /// Whether an exception the body declares can land in a catch of the
+    /// resolved class `catch_name`.
+    fn reaches_class(&self, catch_name: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
+        self.explicit
+            .iter()
+            .any(|thrown| may_catch(catch_name, thrown, ctx))
     }
 
     /// Whether anything was found that can throw.
@@ -116,6 +149,31 @@ impl ThrowPoints {
                 }
             }
         }
+    }
+}
+
+/// One class a `catch` clause names, and whether anything the `try` body
+/// throws can land in it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CatchTypeReach {
+    /// Where the class name is written.
+    pub start: u32,
+    pub end: u32,
+    /// The class, resolved.
+    pub class: String,
+    pub reached: bool,
+}
+
+/// The class names a `catch` hint lists, as written.
+fn written_catch_names<'a, 'arena>(hint: &'a Hint<'arena>, out: &mut Vec<&'a Identifier<'arena>>) {
+    match hint {
+        Hint::Identifier(ident) => out.push(ident),
+        Hint::Union(union) => {
+            written_catch_names(union.left, out);
+            written_catch_names(union.right, out);
+        }
+        Hint::Parenthesized(inner) => written_catch_names(inner.hint, out),
+        _ => {}
     }
 }
 
@@ -179,7 +237,31 @@ impl Collect<'_, '_> {
                     })
                     .collect()
             }
-            _ => None,
+            // Any other receiver (`$this->repo`, `$this->repo()`, a chain)
+            // goes through the shared resolver.
+            _ => {
+                let scope = self.scope?;
+                let scope_resolver = super::callable_inference::scope_variable_resolver(scope);
+                let var_ctx = self.ctx.var_ctx_for_with_scope(
+                    "$__throws",
+                    expr.span().start.offset,
+                    &scope_resolver,
+                    Some(scope.proofs()),
+                );
+                let types = crate::type_engine::variable::rhs_resolution::resolve_rhs_expression(
+                    expr, &var_ctx,
+                );
+                if types.is_empty() {
+                    return None;
+                }
+                types
+                    .iter()
+                    .map(|rt| {
+                        let cls = rt.class_info.as_ref()?;
+                        Some(cls.fqn().to_string())
+                    })
+                    .collect()
+            }
         }
     }
 

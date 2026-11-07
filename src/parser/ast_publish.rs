@@ -76,13 +76,20 @@ fn declared_function<'a>(
 
 /// Mirror the lowest-sorting declaration of `fqn` into the lookup map,
 /// dropping the name entirely once nothing declares it.
+///
+/// WordPress's script-loader no-ops only win a name nothing else declares
+/// (see [`crate::wordpress::function_file_outranks`]).
 fn publish_winning_function(
     fmap: &mut CiMap<(String, FunctionInfo)>,
     dupes: &mut CiMap<BTreeMap<String, FunctionInfo>>,
     fqn: &str,
 ) {
     let Some(decls) = dupes.get(fqn) else { return };
-    match decls.iter().next() {
+    let winner = decls
+        .iter()
+        .find(|(uri, _)| !crate::wordpress::is_script_loader_noops_uri(uri))
+        .or_else(|| decls.iter().next());
+    match winner {
         Some((uri, info)) => {
             let winner = (uri.clone(), info.clone());
             fmap.insert(fqn.to_string(), winner);

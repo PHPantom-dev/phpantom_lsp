@@ -138,6 +138,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         ],
     },
     always(
+        "unused_parameter",
+        Backend::collect_unused_parameter_diagnostics_with_context,
+    ),
+    always(
         "missing_implementation",
         Backend::collect_implementation_error_diagnostics_with_context,
     ),
@@ -149,6 +153,7 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         "unhandled_exception",
         Backend::collect_unhandled_exception_diagnostics,
     ),
+    always("dead_catch", Backend::collect_dead_catch_diagnostics),
     always(
         "deprecated_usage",
         Backend::collect_deprecated_diagnostics_with_context,

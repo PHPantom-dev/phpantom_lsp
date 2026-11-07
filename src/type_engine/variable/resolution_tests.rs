@@ -1206,7 +1206,8 @@ function test() {
 }
 
 /// Multiple push assignments inside a loop, with different types, should
-/// union into the list element type.
+/// union into the list element type. A constant writes the same value on
+/// every pass, so it keeps its literal.
 #[test]
 fn resolve_var_list_from_push_union() {
     let content = r#"<?php
@@ -1232,10 +1233,7 @@ function test() {
 
     assert!(!results.is_empty(), "Should resolve $items to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert!(
-        ts.contains("string") && ts.contains("int"),
-        "List should contain string|int union, got: {ts}"
-    );
+    assert_eq!(ts, "non-empty-list<'hello'|42>");
 }
 
 /// Repeated pushes of the same type inside a loop should not duplicate the
@@ -1266,14 +1264,14 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $items to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert_eq!(
-        ts, "non-empty-list<string>",
+        ts, "non-empty-list<'a'|'b'>",
         "Duplicate pushes of same type should not duplicate, got: {ts}"
     );
 }
 
 /// Reassignment resets push tracking inside a loop: pushing an `int` before
 /// reassigning `$x` back to `[]` and pushing a `string` should produce
-/// `list<string>`, not `list<int|string>`.
+/// `list<'hello'>`, not `list<1|'hello'>`.
 #[test]
 fn resolve_var_reassignment_resets_push_tracking() {
     let content = r#"<?php
@@ -1301,8 +1299,8 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $x to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert_eq!(
-        ts, "non-empty-list<string>",
-        "Reassignment should reset; only 'string' push should remain, got: {ts}"
+        ts, "non-empty-list<'hello'>",
+        "Reassignment should reset; only the 'hello' push should remain, got: {ts}"
     );
 }
 

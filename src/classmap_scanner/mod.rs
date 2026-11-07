@@ -238,8 +238,9 @@ impl WorkspaceScanResult {
     }
 
     /// Fold `other`'s classes, functions and constants into `self`,
-    /// keeping `self`'s entry when both define the same name, and add its
-    /// `@global` tags.
+    /// keeping `self`'s entry when both define the same name, unless
+    /// `other`'s function file [outranks](crate::wordpress::function_file_outranks)
+    /// `self`'s, and add its `@global` tags.
     ///
     /// Origins ride alongside the winning path: one is only recorded for
     /// an entry of `other` that actually wins, so a symbol's recorded
@@ -251,33 +252,50 @@ impl WorkspaceScanResult {
             into_origins: &mut HashMap<String, crate::ClassCompletionOrigin>,
             from: HashMap<String, PathBuf>,
             from_origins: &HashMap<String, crate::ClassCompletionOrigin>,
+            outranks: impl Fn(&Path, &Path) -> bool,
         ) {
+            use std::collections::hash_map::Entry;
             for (name, path) in from {
-                if let std::collections::hash_map::Entry::Vacant(e) = into.entry(name) {
-                    if let Some(&origin) = from_origins.get(e.key()) {
-                        into_origins.insert(e.key().clone(), origin);
+                match into.entry(name) {
+                    Entry::Vacant(e) => {
+                        if let Some(&origin) = from_origins.get(e.key()) {
+                            into_origins.insert(e.key().clone(), origin);
+                        }
+                        e.insert(path);
                     }
-                    e.insert(path);
+                    Entry::Occupied(mut e) => {
+                        if outranks(&path, e.get()) {
+                            match from_origins.get(e.key()) {
+                                Some(&origin) => into_origins.insert(e.key().clone(), origin),
+                                None => into_origins.remove(e.key()),
+                            };
+                            e.insert(path);
+                        }
+                    }
                 }
             }
         }
+        let never = |_: &Path, _: &Path| false;
         absorb(
             &mut self.classmap,
             &mut self.class_origins,
             other.classmap,
             &other.class_origins,
+            never,
         );
         absorb(
             &mut self.function_index,
             &mut self.function_origins,
             other.function_index,
             &other.function_origins,
+            crate::wordpress::function_file_outranks,
         );
         absorb(
             &mut self.constant_index,
             &mut self.constant_origins,
             other.constant_index,
             &other.constant_origins,
+            never,
         );
         self.globals.extend(other.globals);
     }

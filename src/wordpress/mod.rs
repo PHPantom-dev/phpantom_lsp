@@ -17,6 +17,9 @@
 //! Hook names tie a listener to the places that fire it, and navigate as
 //! string keys (see [`hooks`]), core's and the installed plugins' too (see
 //! [`hook_sources`]).
+//!
+//! Core declares some of its functions twice, and the copies its script
+//! loader uses give way to the real ones (see [`function_file_outranks`]).
 
 mod hook_sources;
 pub(crate) mod hooks;
@@ -106,6 +109,32 @@ impl Backend {
             }
         }
     }
+}
+
+/// Where WordPress core declares nineteen of its functions (`__()`,
+/// `add_filter()`, `home_url()`, …) a second time, as no-ops with no
+/// parameters for `load-scripts.php` and `load-styles.php`. PHP never loads
+/// it beside the real declarations, so any other declaration of one of its
+/// names is the one a call means. The file still stands for the names only
+/// it declares (`get_file()`).
+const SCRIPT_LOADER_NOOPS: &str = "wp-admin/includes/noop.php";
+
+/// Whether `path` is WordPress's script-loader no-ops file.
+pub(crate) fn is_script_loader_noops(path: &Path) -> bool {
+    path.ends_with(SCRIPT_LOADER_NOOPS)
+}
+
+/// [`is_script_loader_noops`] for a file URI.
+pub(crate) fn is_script_loader_noops_uri(uri: &str) -> bool {
+    uri.strip_suffix(SCRIPT_LOADER_NOOPS)
+        .is_some_and(|rest| rest.ends_with('/'))
+}
+
+/// Whether a function declared at `new` takes the name from the
+/// declaration at `existing`, where the index otherwise keeps the one it
+/// found first.
+pub(crate) fn function_file_outranks(new: &Path, existing: &Path) -> bool {
+    is_script_loader_noops(existing) && !is_script_loader_noops(new)
 }
 
 /// Forget what parsing the embedded source of the constant `name` recorded.

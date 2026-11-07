@@ -245,6 +245,47 @@ fn a_catch_that_falls_through_still_joins_its_state() {
     ));
 }
 
+#[test]
+fn a_try_body_that_always_returns_leaves_only_the_catch_state() {
+    assert_no_type_errors(&format!(
+        r#"{TRY_SCAFFOLD}
+    public function go(?Holder $h): void
+    {{
+        try {{
+            $this->takes(new Holder());
+            return;
+        }} catch (\RuntimeException) {{
+            $h = new Holder();
+        }}
+
+        $this->takes($h);
+    }}
+}}
+"#
+    ));
+}
+
+#[test]
+fn a_try_body_that_can_finish_still_joins_its_state() {
+    assert_type_error(&format!(
+        r#"{TRY_SCAFFOLD}
+    public function go(?Holder $h): void
+    {{
+        try {{
+            if (rand()) {{
+                return;
+            }}
+        }} catch (\RuntimeException) {{
+            $h = new Holder();
+        }}
+
+        $this->takes($h);
+    }}
+}}
+"#
+    ));
+}
+
 // ─── `&&` chains in a match arm ─────────────────────────────────────────────
 
 #[test]

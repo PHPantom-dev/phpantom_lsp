@@ -2,6 +2,7 @@
 //! the AST of a function, method or property declaration.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
@@ -10,7 +11,10 @@ use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::*;
 
-use super::{DocblockCtx, extract_language_level_type_for_param, is_param_available_for_version};
+use super::{
+    DocblockCtx, extract_expected_values, extract_language_level_type_for_param,
+    is_param_available_for_version,
+};
 
 /// Convert a Mago [`Hint`] AST node directly to a [`PhpType`].
 ///
@@ -173,6 +177,9 @@ pub(crate) fn extract_parameters(
                 closure_this_type: None,
                 param_out_type: None,
                 callable_invocation: None,
+                expected_values: doc_ctx
+                    .and_then(|ctx| extract_expected_values(&param.attribute_lists, ctx))
+                    .map(Arc::new),
             }
         })
         .collect()

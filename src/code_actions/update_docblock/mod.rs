@@ -7,7 +7,8 @@
 //!
 //! **Trigger:** Cursor is inside the docblock of a function/method whose
 //! `@param` tags don't match the signature's parameters (by name, count,
-//! or order), whose `@return` tag contradicts the return type hint, or
+//! or order), whose `@return` tag contradicts the return type hint, whose
+//! `@param` or `@return` tag copies a nullable hint without its `null`, or
 //! whose `@return` tag can be enriched with body-based type inference.
 //!
 //! **Code action kind:** `quickfix`.

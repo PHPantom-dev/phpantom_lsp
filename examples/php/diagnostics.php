@@ -272,6 +272,26 @@ class UnhandledExceptionDemo
 }
 
 
+// ── Diagnostic: Dead Catch ──────────────────────────────────────────────────
+// A `catch` for an exception nothing in its `try` can throw.  It only judges
+// a `try` whose every call declares what it throws with @throws: a call that
+// declares nothing could throw anything.
+
+class DeadCatchDemo
+{
+    public function load(string $path): string
+    {
+        try {
+            return Scaffolding\readStorageFile($path);  // @throws StorageException
+        } catch (\JsonException) {                     // warning: never thrown
+            return '{}';
+        } catch (Scaffolding\StorageException) {       // fine: thrown above
+            return '';
+        }
+    }
+}
+
+
 // ── Diagnostic: Argument Count ──────────────────────────────────────────────
 // PHPantom flags calls that pass too few or too many arguments.  Variadic
 // parameters accept unlimited trailing args.  Argument unpacking (`...$args`)
@@ -995,51 +1015,53 @@ class UnreachableCodeDemo
 
 // ── Diagnostic: Docblock Contradicts the Type Hint ──────────────────────────
 // A `@param` or `@return` tag refines the native declaration; it must not
-// disagree with it.  When the signature admits `null` and the tag does not,
-// the two describe different sets of values: a caller reading the signature
-// may legally pass `null`, and the callee has been promised it never receives
-// one.  A tag that keeps the `null` while narrowing the rest is the annotation
-// doing its job and is left alone, and so is a name PHPantom cannot settle,
-// since a `@template` parameter or an imported type alias may itself be
-// nullable.
+// widen it.  When the tag admits `null` and the signature does not, the two
+// describe different sets of values: the runtime rejects the `null` the
+// docblock promises callers they may pass.  The other way round is not a
+// contradiction, since a nullable hint hands its `null` to the documented
+// type.  A tag that merely copies a nullable hint and drops the `null` gets a
+// Hint, though, and the "Update docblock" action adds it back.
 
 class DocblockNativeMismatchDemo
 {
-    private ?string $path = null;
+    private string $path = '';
 
     /**
-     * @param string $name
+     * @param ?string $name
      */
-    // Warning — `string` denies the null that `?string` accepts:
-    public function greet(?string $name): void
+    // Warning — `?string` admits a null the native `string` rejects:
+    public function greet(string $name): void
     {
         echo $name;
     }
 
     /**
-     * @param list<int> $items
-     */
-    // Warning — an array type reads the same way:
-    public function takesItems(?array $items): void
-    {
-        echo count($items ?? []);
-    }
-
-    /**
-     * @return string
+     * @return string|null
      */
     // Warning — on the return type this time:
-    public function getPath(): ?string
+    public function getPath(): string
     {
         return $this->path;
     }
 
     /**
-     * @param list<int>|null $items
-     * @return non-empty-string|null
+     * @param string $label
+     * @return string
      */
-    // No diagnostic — both tags narrow the type and keep the null:
-    public function narrowedButStillNullable(?array $items): ?string
+    // Hint on both tags — each copies its `?string` hint without the null.
+    // Try: put the cursor in the docblock and run "Update docblock".
+    public function rename(?string $label): ?string
+    {
+        return $label;
+    }
+
+    /**
+     * @param list<int> $items
+     * @return non-empty-string
+     */
+    // No diagnostic — both tags refine their nullable hint, which keeps
+    // its null:
+    public function narrowed(?array $items): ?string
     {
         return $items === null ? null : 'ok';
     }

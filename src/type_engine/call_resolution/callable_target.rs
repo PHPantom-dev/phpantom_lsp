@@ -149,9 +149,20 @@ impl Backend {
             )
         };
 
-        resolved_types
+        let mut target = resolved_types
             .iter()
-            .find_map(|rt| Self::method_target_on_receiver(rt, method_name, rctx, args_text))
+            .find_map(|rt| Self::method_target_on_receiver(rt, method_name, rctx, args_text))?;
+
+        // The call returns nothing only if every receiver that answers it,
+        // through the method itself or `__call`, returns nothing.
+        if target.native_void && resolved_types.len() > 1 {
+            target.native_void = resolved_types.iter().all(|rt| {
+                Self::method_target_on_receiver(rt, method_name, rctx, None)
+                    .or_else(|| Self::method_target_on_receiver(rt, "__call", rctx, None))
+                    .is_none_or(|t| t.native_void)
+            });
+        }
+        Some(target)
     }
 
     /// The method `method_name` on one resolved receiver type as a
@@ -553,6 +564,16 @@ impl Backend {
             let split_args = crate::text_scan::split_top_level_commas(at);
             let subs = Self::build_method_template_subs(&merged, "__construct", &split_args, rctx);
             if !subs.is_empty() {
+                // A bound naming sibling templates
+                // (`T of RecursiveIterator<TKey, TValue>`) is checked for
+                // its class alone: those are read off the same argument,
+                // and left as raw names they would be looked up as classes.
+                let siblings: std::collections::HashMap<String, PhpType> = ctor
+                    .template_params()
+                    .iter()
+                    .chain(merged.template_params.iter())
+                    .map(|t| (t.to_string(), PhpType::mixed()))
+                    .collect();
                 let self_bound_params = super::template_subs::self_bound_template_params(
                     ctor.template_bindings(),
                     &ctor.parameters,
@@ -561,7 +582,7 @@ impl Backend {
                         ctor.template_param_bounds()
                             .get(tpl)
                             .or_else(|| merged.template_param_bounds.get(tpl))
-                            .cloned()
+                            .map(|bound| bound.substitute(&siblings))
                     },
                     &subs,
                     rctx.file.class_loader,
@@ -1021,9 +1042,14 @@ fn unreachable_method_target(
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         }]
         .into(),
         return_type: handler.return_type.clone(),
+        native_void: handler
+            .native_return_type
+            .as_ref()
+            .is_some_and(PhpType::is_void),
         accepts_any_args: true,
         binds_named_args: false,
         owner_class: Some(class.fqn()),
@@ -1143,6 +1169,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                     closure_this_type: None,
                     param_out_type: None,
                     callable_invocation: None,
+                    expected_values: None,
                 })
                 .collect();
             Some(ResolvedCallableTarget {

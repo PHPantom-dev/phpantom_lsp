@@ -5253,6 +5253,65 @@ function normalize(mixed $steps): void {
 }
 
 #[test]
+fn no_diagnostic_for_constant_written_into_array_in_loop() {
+    // A constant writes the same value on every pass of the loop, so the
+    // array keeps the literal instead of widening it to `int`.
+    let php = r#"<?php
+final class Graph {
+    private const int WHITE = 0;
+    private const int GRAY = 1;
+    private const int BLACK = 2;
+
+    /** @param array<int, self::WHITE|self::GRAY|self::BLACK> $labels */
+    private static function check(array $labels): void {}
+
+    /** @param list<int> $nodes */
+    public static function hasCycle(array $nodes): void {
+        $labels = [];
+        foreach ($nodes as $node) {
+            $labels[$node] = self::WHITE;
+        }
+        self::check($labels);
+        $pushed = [];
+        foreach ($nodes as $node) {
+            $pushed[] = self::GRAY;
+            array_push($pushed, self::BLACK);
+        }
+        self::check($pushed);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A constant written in a loop should keep its literal, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_counter_written_into_array_in_loop() {
+    // A value computed from the previous pass changes on every pass, so
+    // the array only knows its base type.
+    let php = r#"<?php
+/** @param array<int, 0|1|2> $labels */
+function check(array $labels): void {}
+
+/** @param list<int> $nodes */
+function build(array $nodes): void {
+    $labels = [];
+    $state = 0;
+    foreach ($nodes as $node) {
+        $labels[$node] = $state;
+        $state = $state + 1;
+    }
+    check($labels);
+}
+"#;
+    let diags = collect(php);
+    assert_eq!(type_error_count(&diags), 1, "got: {diags:?}");
+}
+
+#[test]
 fn no_diagnostic_for_foreach_var_reassigned_in_body() {
     // When $type is the foreach key (string), and then reassigned to
     // BackedEnum::from($type), the $type argument inside from() should
@@ -11006,6 +11065,141 @@ acceptsInt(firstValue());
     );
 }
 
+/// A class constant named as a type is the value it holds, so a method
+/// declared `@return self::STATUS_*` over a native `int` returns `1|2`,
+/// which fits a parameter typed `1|2` and not one typed `9`.
+#[test]
+fn class_constant_wildcard_return_is_its_constants_values() {
+    let php = r#"<?php
+namespace App;
+
+class Task {
+    public const STATUS_OPEN = 1;
+    public const STATUS_DONE = 2;
+    public const OTHER = 9;
+
+    /** @return self::STATUS_* */
+    public function status(): int { return self::STATUS_OPEN; }
+}
+
+/** @param 1|2 $status */
+function acceptsStatus(int $status): void {}
+
+/** @param 9 $other */
+function acceptsOther(int $other): void {}
+
+acceptsStatus((new Task())->status());
+acceptsOther((new Task())->status());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("got 1|2"), "{messages:?}");
+}
+
+/// A parameter declared as class constants accepts their values and
+/// nothing else, whichever spelling names them.
+#[test]
+fn class_constant_param_is_enforced_as_its_values() {
+    let php = r#"<?php
+namespace App;
+
+class Status {
+    public const ACTIVE = 'active';
+    public const INACTIVE = 'inactive';
+}
+
+/** @param Status::* $status */
+function setStatus(string $status): void {}
+
+/** @param Status::ACTIVE $status */
+function activate(string $status): void {}
+
+setStatus('active');
+setStatus('inactive');
+setStatus('deleted');
+activate(Status::ACTIVE);
+activate('inactive');
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(messages[0].contains("'deleted'"), "{messages:?}");
+    assert!(messages[1].contains("'inactive'"), "{messages:?}");
+}
+
+/// The class half of `Foo::BAR` is read where the docblock was written:
+/// through that file's imports and namespace, never the caller's, and a
+/// global class that shares the short name is not the one meant.
+#[test]
+fn class_constant_type_names_its_class_where_it_was_written() {
+    let php = r#"<?php
+namespace {
+    class Mode {
+        public const FAST = 'global';
+    }
+}
+
+namespace Lib\Config {
+    class Mode {
+        public const FAST = 'fast';
+        public const SLOW = 'slow';
+    }
+}
+
+namespace Lib {
+    use Lib\Config\Mode as M;
+
+    class Runner {
+        /** @param M::FAST|Config\Mode::SLOW $mode */
+        public static function run(string $mode): void {}
+    }
+}
+
+namespace App {
+    use Lib\Runner;
+
+    Runner::run('fast');
+    Runner::run('slow');
+    Runner::run('global');
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'global'"), "{messages:?}");
+}
+
+/// `Foo::class` named as a type is the name of that class, read through the
+/// imports of the file it was written in: `E::class` with `E` an alias is
+/// the aliased class, not a class `E` nor the local `C`.
+#[test]
+fn class_name_reference_type_is_the_name_of_the_class_it_imports() {
+    let php = r#"<?php
+namespace App {
+    use Other\C as E;
+
+    class C {}
+
+    /** @param class-string<C> $name */
+    function acceptsLocal(string $name): void {}
+
+    /**
+     * @param C::class $local
+     * @param E::class $imported
+     */
+    function check(string $local, string $imported): void {
+        acceptsLocal($local);
+        acceptsLocal($imported);
+    }
+}
+
+namespace Other {
+    class C {}
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("Other\\C"), "{messages:?}");
+}
+
 /// A constant naming an array literal is a readable operand: `CONST[T]`
 /// with `T` bound to one of its keys is that key's own value type, not the
 /// union of every value the table holds.
@@ -15938,6 +16132,48 @@ function f(\ArrayIterator $it): void {
     );
 }
 
+/// A generic iterator parameter still names a class: being `Traversable`
+/// is not enough to pass for a `RecursiveIterator<…>`.
+#[test]
+fn a_generic_iterator_parameter_checks_the_class_it_names() {
+    let wrong = r#"<?php
+/** @param RecursiveIterator<int, string> $it */
+function g($it): void {}
+g(new ArrayIterator([]));
+"#;
+    let diags = collect_with_full_stubs(wrong);
+    assert!(
+        has_type_error(&diags),
+        "an ArrayIterator is no RecursiveIterator: {diags:?}"
+    );
+    let right = r#"<?php
+/** @param RecursiveIterator<int, string> $it */
+function g($it): void {}
+g(new RecursiveArrayIterator([]));
+"#;
+    let diags = collect_with_full_stubs(right);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+/// A `RecursiveIteratorIterator` yields the leaves of the iterator it
+/// wraps, not that iterator.
+#[test]
+fn recursive_iterator_iterator_yields_the_wrapped_elements() {
+    let php = r#"<?php
+/** @param array<string, int> $data */
+function size(array $data): int {
+    $total = 0;
+    $leaves = new RecursiveIteratorIterator(new RecursiveArrayIterator($data));
+    foreach ($leaves as $datum) {
+        $total += strlen((string) $datum);
+    }
+    return $total;
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
 const BARE_GENERIC_DEFAULT_PRELUDE: &str = r#"<?php
 final class Resp {}
 final class Prom {}
@@ -17500,4 +17736,59 @@ class Magic {
         let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
         assert_eq!(lines, vec![inside_line], "got: {diags:?}");
     }
+}
+
+/// A value that passed `ctype_digit()` holds only digits, so casting it to
+/// `int` cannot give a negative number, until the value is written again.
+#[test]
+fn int_cast_of_a_ctype_digit_checked_value_is_non_negative() {
+    let php = r#"<?php
+namespace App;
+
+function guarded(string $delay): void {
+    if (!ctype_digit($delay)) {
+        return;
+    }
+    sleep((int) $delay);
+}
+
+function inBody(mixed $delay): void {
+    if (\ctype_digit($delay) && $delay !== '') {
+        sleep((int) $delay);
+    }
+}
+
+function inElse(string $delay): void {
+    if (!ctype_digit($delay)) {
+        return;
+    } else {
+        sleep(intval($delay));
+    }
+}
+
+function unchecked(string $delay): void {
+    sleep((int) $delay);
+}
+
+function wrongBranch(string $delay): void {
+    if (ctype_digit($delay)) {
+        return;
+    }
+    sleep((int) $delay);
+}
+
+function rewritten(string $delay, string $other): void {
+    if (ctype_digit($delay)) {
+        $delay = $other;
+        sleep((int) $delay);
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    let lines: Vec<u32> = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "type_mismatch_argument"))
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(lines, vec![25, 32, 38], "got: {diags:?}");
 }
