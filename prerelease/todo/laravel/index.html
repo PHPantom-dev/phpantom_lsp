@@ -1166,17 +1166,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L53. Collection key types from the column for <code>keyBy</code> / <code>groupBy</code> / <code>pluck</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l45-_count-properties-are-offered-on-every-relationship" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1884,17 +1873,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L53. Collection key types from the column for <code>keyBy</code> / <code>groupBy</code> / <code>pluck</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l45-_count-properties-are-offered-on-every-relationship" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2541,34 +2519,6 @@ today and what is still missing.</p>
 </table>
 <h3 id="gaps-ranked-by-impact-effort">Gaps (ranked by impact ÷ effort)<a class="headerlink" href="#gaps-ranked-by-impact-effort" title="Permanent link">&para;</a></h3>
 <hr />
-<h4 id="l53-collection-key-types-from-the-column-for-keyby-groupby-pluck">L53. Collection key types from the column for <code>keyBy</code> / <code>groupBy</code> / <code>pluck</code><a class="headerlink" href="#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>keyBy</code> and <code>groupBy</code> produce a collection keyed by the column they were
-given, but we type the key <code>array-key</code>
-(<code>virtual_members/laravel/higher_order_proxy.rs</code>, <code>plan_result</code>). The
-column is a literal in the overwhelming majority of calls, so the key is
-recoverable by the same model property lookup <code>model-property&lt;Model&gt;</code>
-validation uses. (On an <code>Eloquent\Collection</code> the argument forms
-currently lose the value type as well; that is filed in
-<a href="../bugs/#laravel">bugs.md</a> and should land first.)</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$users-&gt;keyBy('email');   // want Collection&lt;string, User&gt;, get Collection&lt;array-key, User&gt;</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$users-&gt;groupBy('id');    // want Collection&lt;int, Collection&lt;int, User&gt;&gt;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$posts-&gt;keyBy('user.id'); // dotted path, resolved segment by segment</span>
-</code></pre></div>
-<p><code>pluck</code> is the same lookup applied to the value rather than the key, and
-the higher-order proxy forms (<code>$users-&gt;keyBy-&gt;email</code>) must agree with the
-argument forms or the two spellings of one expression disagree.</p>
-<p>The framework's own annotations widen these to <code>array-key</code>, so there is no
-docblock to read — but <code>calebdw/phpstan-laravel</code> resolves all three, which
-means a project running it currently gets a more precise answer from its
-analyser than from its editor. Worth matching, including <code>groupBy</code>'s
-array-argument nesting (one level per grouper) and <code>preserveKeys</code> affecting
-only the innermost collection.</p>
-<p><strong>Where to change:</strong> <code>plan_result</code> in
-<code>virtual_members/laravel/higher_order_proxy.rs</code> for the proxy forms, and
-the collection return-type patches for the argument forms. The property
-lookup already exists for <code>model-property&lt;Model&gt;</code>; the work is threading
-a resolved key type through the generic substitution.</p>
 <h4 id="l45-_count-properties-are-offered-on-every-relationship">L45. <code>*_count</code> properties are offered on every relationship<a class="headerlink" href="#l45-_count-properties-are-offered-on-every-relationship" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>For each relationship method we synthesize a <code>{snake_name}_count</code>
@@ -2612,7 +2562,7 @@ already resolves to <code>View</code> because <code>View::__call</code> is docum
 calls via <code>__call()</code>, but its <code>__call</code> is documented <code>@return mixed</code>,
 so <code>redirect('/')-&gt;withFoo($x)</code> raises no diagnostic and loses the
 chain:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">redirect('/')-&gt;withFoo($x)-&gt;withErrors($errors);   // withFoo() returns mixed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">redirect('/')-&gt;withFoo($x)-&gt;withErrors($errors);   // withFoo() returns mixed</span>
 </code></pre></div>
 <p>Larastan handles this in
 <code>RedirectResponseMethodsClassReflectionExtension</code>, which treats any
