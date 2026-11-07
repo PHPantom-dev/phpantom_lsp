@@ -621,7 +621,7 @@ fn ast_index_parse_result_batch_records_failures_and_empty_noops() {
     let changed =
         backend.apply_ast_index_parse_results_batch(vec![AstIndexParseResult::ParseFailed {
             uri: uri.to_string(),
-            errors: vec![("Parse failed (internal error)".to_string(), 10, 20)],
+            errors: vec![("PHPantom could not parse this file".to_string(), 10, 20)],
         }]);
 
     assert!(!changed);
@@ -629,7 +629,11 @@ fn ast_index_parse_result_batch_records_failures_and_empty_noops() {
         backend
             .file_state(uri)
             .map(|state| state.parse_errors.clone()),
-        Some(vec![("Parse failed (internal error)".to_string(), 10, 20)])
+        Some(vec![(
+            "PHPantom could not parse this file".to_string(),
+            10,
+            20
+        )])
     );
 }
 
@@ -778,7 +782,7 @@ fn an_unclosed_call_keeps_its_braced_namespace_block_indexed() {
     assert!(
         errors
             .iter()
-            .any(|(message, _, _)| message.ends_with("unexpected end of file, expected `}`")),
+            .any(|(message, _, _)| message.ends_with("Unexpected end of file, expected '}'")),
         "the block's missing `}}` is still reported: {errors:?}"
     );
 }

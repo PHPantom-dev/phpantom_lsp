@@ -810,9 +810,9 @@ class Demo
         // WelcomeData::toArray() returns is what the template receives.
         view('welcome', new WelcomeData());
 
-        // A declared variable this call leaves out → `missing_view_variable`,
+        // A declared variable this call leaves out → `missing_blade_variable`,
         // and a key nothing in welcome.blade.php (or anything it @includes)
-        // reads → `unused_view_variable`.  Both are intentional.
+        // reads → `unused_blade_variable`.  Both are intentional.
         view('welcome', ['user' => $user, 'pots' => $posts]);
 
         // View under a custom path from config/view.php (resources/theme/views).

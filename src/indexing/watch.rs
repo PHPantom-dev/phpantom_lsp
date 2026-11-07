@@ -470,8 +470,14 @@ impl Backend {
         let was_diagnosing = self.diagnostics_enabled();
         let previous_hint_kinds = self.inlay_hint_kinds();
 
-        match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
-            Ok(cfg) => self.set_config(cfg),
+        match crate::config::load_config_with_warnings(
+            root,
+            self.workspace.global_config_path.as_deref(),
+        ) {
+            Ok(loaded) => {
+                self.warn_config(&loaded.warnings);
+                self.set_config(loaded.config);
+            }
             Err(e) => {
                 self.log_detached(
                     MessageType::Warning,
@@ -486,7 +492,7 @@ impl Backend {
         }
 
         // Resolved classes and completions may depend on config-driven
-        // behaviour (e.g. `report-magic-properties`), so both must be
+        // behaviour (e.g. `magic-properties`), so both must be
         // recomputed against the new settings rather than served stale.
         self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();

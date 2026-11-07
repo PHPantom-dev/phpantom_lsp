@@ -249,7 +249,7 @@ impl Backend {
                 None => continue,
             };
 
-            let message = format!("Class '{}' not found", fqn);
+            let message = format!("Class {} not found", fqn.trim_start_matches('\\'));
 
             out.push(make_diagnostic(
                 range,

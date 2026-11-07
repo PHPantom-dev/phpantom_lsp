@@ -30,14 +30,17 @@ use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 pub(crate) const UNHANDLED_EXCEPTION_CODE: &str = "unhandled_exception";
 
-/// The message prefix the quick fix reads the exception's name back from.
-const MESSAGE_PREFIX: &str = "Unhandled exception ";
+/// The text around the exception's name, which the quick fix reads the
+/// name back from.
+const MESSAGE_PREFIX: &str = "Exception ";
+const MESSAGE_SUFFIX: &str = " is neither caught nor declared in @throws";
 
 /// The exception class an `unhandled_exception` diagnostic's message
 /// names, fully qualified.
 pub(crate) fn unhandled_exception_name(message: &str) -> Option<&str> {
-    let rest = message.strip_prefix(MESSAGE_PREFIX)?;
-    let name = &rest[..rest.find(':')?];
+    let name = message
+        .strip_prefix(MESSAGE_PREFIX)?
+        .strip_suffix(MESSAGE_SUFFIX)?;
     (!name.is_empty()).then_some(name)
 }
 
@@ -176,8 +179,8 @@ impl Backend {
                         DiagnosticSeverity::Hint,
                         UNHANDLED_EXCEPTION_CODE,
                         format!(
-                            "{MESSAGE_PREFIX}{}: neither caught nor declared with @throws",
-                            site.exception
+                            "{MESSAGE_PREFIX}{}{MESSAGE_SUFFIX}",
+                            site.exception.trim_start_matches('\\')
                         ),
                     ));
                 }
@@ -233,7 +236,7 @@ mod tests {
     fn reads_the_exception_back_from_the_message() {
         assert_eq!(
             unhandled_exception_name(
-                "Unhandled exception App\\Error\\Failed: neither caught nor declared with @throws"
+                "Exception App\\Error\\Failed is neither caught nor declared in @throws"
             ),
             Some("App\\Error\\Failed")
         );

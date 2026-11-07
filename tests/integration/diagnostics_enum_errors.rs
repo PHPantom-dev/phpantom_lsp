@@ -89,7 +89,7 @@ enum TypeDescriptor: bool {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(message_text(&diags[0].message).contains("must be 'int' or 'string'"));
+        assert!(message_text(&diags[0].message).contains("must be int or string"));
         assert!(message_text(&diags[0].message).contains("bool"));
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
@@ -104,7 +104,7 @@ enum Weight: float {
 "#;
         let diags = collect(php);
         assert!(diags.iter().any(
-            |d| message_text(&d.message).contains("must be 'int' or 'string'")
+            |d| message_text(&d.message).contains("must be int or string")
                 && message_text(&d.message).contains("float")
         ),);
     }
@@ -119,7 +119,7 @@ enum Test: string {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(message_text(&diags[0].message).contains("Duplicate value"));
+        assert!(message_text(&diags[0].message).contains("have the same value"));
         assert!(message_text(&diags[0].message).contains("BAR"));
         assert!(message_text(&diags[0].message).contains("FOO"));
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
@@ -136,7 +136,7 @@ enum Numbers: int {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(message_text(&diags[0].message).contains("Duplicate value"));
+        assert!(message_text(&diags[0].message).contains("have the same value"));
         assert!(message_text(&diags[0].message).contains("C"));
         assert!(message_text(&diags[0].message).contains("A"));
     }

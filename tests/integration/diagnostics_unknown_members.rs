@@ -156,7 +156,7 @@ function compare(Holder $holder, string $column): void {
     let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages,
-        vec!["Method 'missing' not found on class 'Money'"],
+        vec!["Method Money::missing() not found"],
         "only the access on a known property should be checked"
     );
 }
@@ -493,8 +493,8 @@ namespace B {
     assert_eq!(
         reported,
         vec![
-            (10, "Method 'spin' not found on class 'Gadget'"),
-            (14, "Method 'press' not found on class 'Lib\\Widget'"),
+            (10, "Method Gadget::spin() not found"),
+            (14, "Method Lib\\Widget::press() not found"),
         ],
         "got: {:?}",
         diags
@@ -1159,7 +1159,7 @@ class Consumer {
     let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages,
-        vec!["Method 'nope' not found on class 'Stamp'"],
+        vec!["Method Stamp::nope() not found"],
         "only the call missing from the `@use` binding should be flagged",
     );
 }
@@ -1973,13 +1973,13 @@ class Consumer {
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'bar'")),
+            .any(|d| message_text(&d.message).contains("::bar(")),
         "bar() should not be flagged"
     );
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'name'")),
+            .any(|d| message_text(&d.message).contains("::name(")),
         "name should not be flagged"
     );
 }
@@ -2700,7 +2700,7 @@ function test(Application $app): void {
         diags
             .iter()
             .any(|d| message_text(&d.message).contains("set")
-                && message_text(&d.message).contains("is 'mixed'")),
+                && message_text(&d.message).contains("is mixed")),
         "expected unresolved-member-access diagnostic for $app['config']->set(), got: {diags:?}",
     );
 }
@@ -5331,7 +5331,7 @@ class ParserTest extends BaseAssert {
 }
 
 /// An exact-type assertion `@phpstan-assert =Type $x` must not emit a
-/// bogus `Class '=Type' not found` diagnostic on the docblock.
+/// bogus `Class =Type not found` diagnostic on the docblock.
 #[test]
 fn exact_type_assertion_prefix_does_not_emit_unknown_class() {
     let backend = create_test_backend();
@@ -6719,7 +6719,7 @@ function run(A|B $x): void {
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'a'")),
+            .any(|d| message_text(&d.message).contains("::a(")),
         "`$x` is still `A|B` after the ternary, got: {:?}",
         diags
     );
@@ -6758,27 +6758,35 @@ fn new_same_namespace_class_wins_over_global_stub() {
     );
 }
 
-/// The guard against regressing global resolution: when a namespace has no
-/// class of the given short name, `new Iterator()` must still resolve to the
-/// global SPL stub, so a member the stub does not declare is flagged.
+/// PHP never resolves an unqualified class name to a global class: with no
+/// `App\Other\Iterator`, `new Iterator()` names a class that does not exist,
+/// even though the global SPL `\Iterator` does.  The member access on it
+/// reports the missing class, not a missing member.
 #[test]
-fn new_falls_back_to_global_stub_when_no_same_namespace_class() {
+fn new_does_not_fall_back_to_a_global_class_of_the_same_short_name() {
     let composer_json = r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#;
 
-    // No project `App\Other\Iterator` exists, so the global stub is correct.
     let (backend, _dir) =
         create_psr4_workspace_with_stubs(composer_json, &[], &[("Iterator", ITERATOR_STUB)]);
 
     let uri = "file:///consumer.php";
     let text = "<?php\nnamespace App\\Other;\nclass Consumer {\n    public function run(): void {\n        $it = new Iterator();\n        $it->accept();\n    }\n}\n";
 
-    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
-    assert!(
-        diags
-            .iter()
-            .any(|d| message_text(&d.message).contains("accept")),
-        "`new Iterator()` with no same-namespace class must resolve to the \
-         global stub, which has no `accept()`, got: {diags:?}"
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    let on_accept: Vec<_> = diags
+        .iter()
+        .filter(|d| message_text(&d.message).contains("accept"))
+        .collect();
+    assert_eq!(on_accept.len(), 1, "got: {diags:?}");
+    assert_eq!(
+        on_accept[0].code,
+        Some(Code::String("unknown_class".to_string()))
+    );
+    assert_eq!(
+        message_text(&on_accept[0].message),
+        "Cannot check method accept(), because type App\\Other\\Iterator could not be resolved"
     );
 }
 
@@ -6810,7 +6818,7 @@ fn static_call_same_namespace_class_wins_over_global_class() {
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'x'")),
+            .any(|d| message_text(&d.message).contains("::x(")),
         "`B::x()` inside `namespace Src` must resolve to Src\\B where `x()` \
          exists, not the global `B`, got: {diags:?}"
     );
@@ -6855,7 +6863,7 @@ fn static_call_resolves_global_class_imported_by_use() {
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'z'")),
+            .any(|d| message_text(&d.message).contains("::$z")),
         "`B::z()` must resolve to the imported global `B`, got: {diags:?}"
     );
     assert!(
@@ -6884,7 +6892,7 @@ fn diagnostics_in_src_namespace(imports: &str, body: &str) -> Vec<Diagnostic> {
 /// Whether a diagnostic flags `missing()` against the global `C`.
 fn flags_missing_on_global_c(diags: &[Diagnostic]) -> bool {
     diags.iter().any(|d| {
-        message_text(&d.message).contains("'missing'")
+        message_text(&d.message).contains("::missing(")
             && !message_text(&d.message).contains("Src\\C")
     })
 }
@@ -6909,7 +6917,7 @@ fn instantiation_resolves_global_class_imported_by_use() {
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'z'")),
+            .any(|d| message_text(&d.message).contains("::$z")),
         "`new C()` must resolve to the imported global `C`, got: {diags:?}"
     );
     assert!(
@@ -6977,7 +6985,7 @@ fn inline_var_resolves_global_class_imported_by_use() {
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'z'")),
+            .any(|d| message_text(&d.message).contains("::$z")),
         "`@var C` must resolve to the imported global `C`, got: {diags:?}"
     );
     assert!(
@@ -7072,7 +7080,7 @@ fn static_call_leading_backslash_reaches_global_class() {
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'z'")),
+            .any(|d| message_text(&d.message).contains("::$z")),
         "`\\B::z()` must resolve to the global `B` where `z()` exists, \
          not the same-namespace Src\\B, got: {diags:?}"
     );
@@ -7900,14 +7908,14 @@ function probeEmpty(): void {
     assert!(
         !diags.iter().any(|d| {
             let msg = message_text(&d.message);
-            msg.contains("'name'") || msg.contains("'slug'")
+            msg.contains("::name(") || msg.contains("::slug(")
         }),
         "!empty($result->prop) must allow the guarded property, got: {diags:?}"
     );
     assert!(
         diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'version'")),
+            .any(|d| message_text(&d.message).contains("::$version")),
         "a bare empty() must not prove the property, got: {diags:?}"
     );
 }
@@ -8140,7 +8148,7 @@ function run(): void {
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'value'")),
+            .any(|d| message_text(&d.message).contains("::value(")),
         "backed-enum 'value' property must not be flagged, got: {diags:?}"
     );
     assert!(
@@ -11614,7 +11622,7 @@ function test(?string $s): void {
     let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages,
-        vec!["Cannot access method 'bar' on type 'null'"],
+        vec!["Cannot call method bar() on null"],
         "only the plain `->` call should be flagged, got: {:?}",
         diags
     );
@@ -11926,7 +11934,7 @@ class Svc {
         $periodStart = new Carbon();
         foreach ($periods as $period) {
             if ($lastPaidEnd !== null && $lastPaidEnd->diffInDays($periodStart) > 0) {
-                // should not report: Cannot access method 'diffInDays' on type 'null'
+                // should not report: Cannot call method diffInDays() on null
             }
             $lastPaidEnd = $period->ending->startOfDay();
         }
@@ -13011,7 +13019,7 @@ fn assert_only_unverifiable(diags: &[Diagnostic], form: &str) {
     assert!(
         !diags.is_empty()
             && diags.iter().all(|d| message_text(&d.message)
-                == "Cannot verify method 'getTypes' — subject type 'UnionType' could not be resolved"),
+                == "Cannot check method getTypes(), because type UnionType could not be resolved"),
         "expected only the unresolved-class warning ({form}), got: {diags:?}"
     );
 }
@@ -15250,7 +15258,7 @@ function probe(array $types, mixed $declared): void
     assert!(
         diags
             .iter()
-            .all(|d| message_text(&d.message).contains("is 'mixed'")),
+            .all(|d| message_text(&d.message).contains("is mixed")),
         "every subject here resolved to `mixed`: {messages:?}"
     );
     assert!(
@@ -15403,7 +15411,7 @@ function test(Certainty $c, string $name): void {
             diags
                 .iter()
                 .any(|d| message_text(&d.message).contains(subject)
-                    && message_text(&d.message).contains("is 'mixed'")),
+                    && message_text(&d.message).contains("is mixed")),
             "expected `{subject}` to be reported as 'mixed', got: {diags:?}",
         );
     }
@@ -15760,7 +15768,7 @@ class Collector {
         !diags
             .iter()
             .any(|d| message_text(&d.message).contains("getName")
-                && (message_text(&d.message).contains("'null'")
+                && (message_text(&d.message).contains("::null(")
                     || message_text(&d.message).contains("not found"))),
         "an untyped assignment must not leave the `null` seed behind, got: {diags:?}",
     );
@@ -16001,7 +16009,7 @@ class Service
     assert!(
         diags
             .iter()
-            .any(|d| d.range.start.line == 9 && message_text(&d.message).contains("'bar'")),
+            .any(|d| d.range.start.line == 9 && message_text(&d.message).contains("::bar(")),
         "`bar()` on `Good` in `two()` should be reported, got: {:?}",
         diags
             .iter()
@@ -16224,7 +16232,7 @@ function run(): void {
         .write()
         .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
     let messages = slow_diagnostic_messages(&backend, uri, text, "unknown_member");
-    assert_eq!(messages, ["Method 'nope' not found on class 'Box'"]);
+    assert_eq!(messages, ["Method Box::nope() not found"]);
 }
 
 /// `Foo::class` passed to a `class-string<T>` parameter binds `T` to the
@@ -16510,7 +16518,7 @@ namespace App {
         diags
             .iter()
             .all(|d| message_text(&d.message)
-                .contains("subject type 'App\\Bar' could not be resolved")),
+                .contains("because type App\\Bar could not be resolved")),
         "`Bar` names the missing App\\Bar, got: {diags:?}",
     );
 }
@@ -16582,13 +16590,13 @@ class Consumer
     assert!(
         diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'missing'")),
+            .any(|d| message_text(&d.message).contains("::missing(")),
         "`get(Svc::class)` must resolve to `Svc`, got: {diags:?}",
     );
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'run'")),
+            .any(|d| message_text(&d.message).contains("::run(")),
         "`run()` exists on `Svc`, got: {diags:?}",
     );
 }
@@ -16641,14 +16649,14 @@ function run(ContainerInterface $c): void {
         assert!(
             diags
                 .iter()
-                .any(|d| message_text(&d.message).contains(&format!("'{name}'"))),
+                .any(|d| message_text(&d.message).contains(&format!("::{name}"))),
             "the chained call must resolve to `Svc` and report `{name}`, got: {diags:?}",
         );
     }
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'run'")),
+            .any(|d| message_text(&d.message).contains("::run(")),
         "`run()` exists on `Svc`, got: {diags:?}",
     );
 }
@@ -16717,7 +16725,7 @@ function run(\Lib\Factory $f): void {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert_eq!(diags.len(), 1, "got: {diags:?}");
     assert!(
-        message_text(&diags[0].message).contains("'missing'")
+        message_text(&diags[0].message).contains("::missing(")
             && message_text(&diags[0].message).contains("Lib\\Svc"),
         "`make()` must resolve to `Lib\\Svc`, got: {diags:?}",
     );
@@ -16781,14 +16789,14 @@ class Consumer extends Base
     assert!(
         diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'missing'")
+            .any(|d| message_text(&d.message).contains("::missing(")
                 && message_text(&d.message).contains("Lib\\Factory")),
         "`make()` must resolve to `Lib\\Factory`, got: {diags:?}",
     );
     assert!(
         diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'missingOnParent'")
+            .any(|d| message_text(&d.message).contains("::missingOnParent(")
                 && message_text(&d.message).contains("Lib\\Base")),
         "`makeParent()` must resolve to `Lib\\Base`, got: {diags:?}",
     );
@@ -16828,10 +16836,10 @@ class Child extends \Base
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'baseOnly'")),
+            .any(|d| message_text(&d.message).contains("::baseOnly(")),
         "`parent` is the global `Base`, got: {diags:?}",
     );
-    for missing in ["'missingOnNew'", "'missingOnClassString'"] {
+    for missing in ["::missingOnNew(", "::missingOnClassString("] {
         assert!(
             diags
                 .iter()
@@ -16870,13 +16878,13 @@ class Wallet
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'amount'")),
+            .any(|d| message_text(&d.message).contains("::$amount")),
         "`$money` is `Lib\\Money`, got: {diags:?}",
     );
     assert!(
         diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'missing'")
+            .any(|d| message_text(&d.message).contains("::missing(")
                 && message_text(&d.message).contains("Lib\\Money")),
         "`missing()` must be flagged on `Lib\\Money`, got: {diags:?}",
     );
@@ -16911,13 +16919,13 @@ class Wallet
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'amount'")),
+            .any(|d| message_text(&d.message).contains("::$amount")),
         "`money` is the imported `Lib\\Money`, got: {diags:?}",
     );
     assert!(
         diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'missing'")
+            .any(|d| message_text(&d.message).contains("::missing(")
                 && message_text(&d.message).contains("Lib\\Money")),
         "`missing()` must be flagged on `Lib\\Money`, got: {diags:?}",
     );
@@ -17152,7 +17160,7 @@ class Iterator extends FilterIterator
     let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages,
-        ["Method 'missing' not found on class 'SplFileInfo'"],
+        ["Method SplFileInfo::missing() not found"],
         "the inner iterator yields SplFileInfo",
     );
 }
@@ -17326,8 +17334,8 @@ class Post extends Model {
     assert_eq!(
         messages,
         [
-            "25: Method 'title' not found on class 'App\\Post'",
-            "29: Method 'title' not found on class 'Illuminate\\Database\\Eloquent\\Model'",
+            "25: Method App\\Post::title() not found",
+            "29: Method Illuminate\\Database\\Eloquent\\Model::title() not found",
         ],
     );
 }
@@ -17352,13 +17360,13 @@ function render(): void {
     assert!(
         !diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'all'")),
+            .any(|d| message_text(&d.message).contains("::all(")),
         "`$errors` is `Bag`, got: {diags:?}",
     );
     assert!(
         diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'missing'")
+            .any(|d| message_text(&d.message).contains("::missing(")
                 && message_text(&d.message).contains("Bag")),
         "`missing()` must be flagged on `Bag`, got: {diags:?}",
     );
@@ -17386,7 +17394,7 @@ class Wallet
     assert!(
         diags
             .iter()
-            .any(|d| message_text(&d.message).contains("'missing'")
+            .any(|d| message_text(&d.message).contains("::missing(")
                 && message_text(&d.message).contains("Money")),
         "`missing()` must be flagged on `Money`, got: {diags:?}",
     );
@@ -17435,7 +17443,7 @@ function f(Repo $r): void {
             diags
                 .iter()
                 .any(|d| d.range.start.line == line
-                    && message_text(&d.message).contains("'missing'")),
+                    && message_text(&d.message).contains("::missing(")),
             "`missing()` on line {line} must be flagged on User, got: {diags:?}",
         );
     }
@@ -17469,7 +17477,7 @@ function f(Repo $r): void {
     assert!(
         !diags
             .iter()
-            .any(|d| d.range.start.line == 9 && message_text(&d.message).contains("'name'")),
+            .any(|d| d.range.start.line == 9 && message_text(&d.message).contains("::name(")),
         "`call_user_func([$r, 'find'])` should resolve to User, got: {diags:?}",
     );
     for line in [6, 7, 8] {
@@ -17477,7 +17485,7 @@ function f(Repo $r): void {
             diags
                 .iter()
                 .any(|d| d.range.start.line == line
-                    && message_text(&d.message).contains("'missing'")),
+                    && message_text(&d.message).contains("::missing(")),
             "`missing()` on line {line} must be flagged on User, got: {diags:?}",
         );
     }
@@ -17514,7 +17522,7 @@ function f(Repo $r): void {
     for line in [5, 6, 7, 9, 11] {
         assert!(
             diags.iter().any(|d| d.range.start.line == line
-                && message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("::missing(")
                 && message_text(&d.message).contains("User")),
             "`missing()` on line {line} must be flagged on User, got: {diags:?}",
         );
@@ -17600,7 +17608,7 @@ function f(Repo $r): void {
     for line in 10..=14 {
         assert!(
             diags.iter().any(|d| d.range.start.line == line
-                && message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("::missing(")
                 && message_text(&d.message).contains("User")),
             "`missing()` on line {line} must be flagged on User, got: {diags:?}",
         );
@@ -17697,7 +17705,7 @@ function f(Repo $r): void {
     for line in 26..=28 {
         assert!(
             diags.iter().any(|d| d.range.start.line == line
-                && message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("::missing(")
                 && message_text(&d.message).contains("User")),
             "`missing()` on line {line} must be flagged on User, got: {diags:?}",
         );
@@ -17763,7 +17771,7 @@ function f(Repo $r): void {
     for line in 21..=22 {
         assert!(
             diags.iter().any(|d| d.range.start.line == line
-                && message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("::missing(")
                 && message_text(&d.message).contains("User")),
             "`missing()` on line {line} must be flagged on User, got: {diags:?}",
         );
@@ -17775,8 +17783,9 @@ function f(Repo $r): void {
         );
     }
     assert!(
-        diags.iter().any(|d| d.range.start.line == 28
-            && message_text(&d.message).contains("not found on class 'User'")),
+        diags
+            .iter()
+            .any(|d| d.range.start.line == 28 && message_text(&d.message).contains("User::")),
         "`$u` holds the User the call returns, got: {diags:?}",
     );
     assert!(
@@ -17787,7 +17796,7 @@ function f(Repo $r): void {
     );
     assert!(
         diags.iter().any(|d| d.range.start.line == 32
-            && message_text(&d.message).contains("'missing'")
+            && message_text(&d.message).contains("::missing(")
             && message_text(&d.message).contains("User")),
         "a first-class callable binds the template from the call, got: {diags:?}",
     );
@@ -17825,7 +17834,7 @@ function f(): void {
     backend.collect_slow_diagnostics(uri, text, &mut diags);
     let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(messages[0].contains("'missing'"), "{messages:?}");
+    assert!(messages[0].contains("::missing("), "{messages:?}");
 }
 
 #[test]

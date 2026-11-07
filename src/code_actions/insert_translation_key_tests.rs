@@ -95,7 +95,7 @@ fn translation_insertion_ignores_stale_documents_ranges_and_deleted_files() {
         context: CodeActionContext {
             diagnostics: vec![Diagnostic {
                 range,
-                code: Some(Code::String("invalid_laravel_trans".to_string())),
+                code: Some(Code::String("invalid_laravel_translation".to_string())),
                 ..Default::default()
             }],
             only: None,

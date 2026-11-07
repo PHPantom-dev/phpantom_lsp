@@ -82,7 +82,7 @@ impl UnknownMemberPass<'_> {
             DiagnosticSeverity::Warning,
             UNKNOWN_ENTITY_FIELD_CODE,
             format!(
-                "Field '{}' is not mapped on entity '{}'",
+                "Field '{}' is not mapped on entity {}",
                 access.member_name,
                 entity.fqn()
             ),

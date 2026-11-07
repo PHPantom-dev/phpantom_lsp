@@ -44,6 +44,12 @@ pub(super) fn record_package_call(
         record_package_view_components(file, &call.argument_list, resources);
         return true;
     }
+    if matches!(method, b"hasroute" | b"hasroutes")
+        && chain_roots_at_package_var(call.object, PACKAGE_TOOLS_CHAIN_DEPTH)
+    {
+        record_package_routes(file, &call.argument_list, resources);
+        return true;
+    }
     if !PACKAGE_TOOLS_RESOURCE_METHODS.contains(&method)
         || !chain_roots_at_package_var(call.object, PACKAGE_TOOLS_CHAIN_DEPTH)
     {
@@ -90,6 +96,50 @@ fn record_package_view_components(
         .and_then(|arg| const_string(arg.value(), file.content, file.scope));
     for arg in args {
         record_component_alias(file, Some(arg.value()), None, prefix.clone(), resources);
+    }
+}
+
+/// `$package->hasRoute('web')` and `->hasRoutes('web', ['api'])`: each name
+/// is loaded by `ProcessRoutes::bootPackageRoutes()` through
+/// `loadRoutesFrom()` from `<package_base_dir>/../routes/<name>.php`.
+/// `hasRoutes()` flattens array arguments, and a name computed at runtime
+/// names a file this scan cannot find, so it is skipped.
+fn record_package_routes(
+    file: &ProviderFile<'_, '_>,
+    argument_list: &ArgumentList<'_>,
+    resources: &mut ProviderResources,
+) {
+    let routes_dir = package_tools_base_dir(file.path).join("..").join("routes");
+    let mut names = Vec::new();
+    for arg in argument_list.arguments.iter() {
+        collect_route_file_names(arg.value(), file, &mut names);
+    }
+    for name in names {
+        let resolved = routes_dir.join(format!("{name}.php"));
+        resources
+            .route_files
+            .push(dunce::canonicalize(&resolved).unwrap_or(resolved));
+    }
+}
+
+/// The constant names `expr` lists, descending into (nested) array literals
+/// the way `collect($routeFileNames)->flatten()` does.
+fn collect_route_file_names(
+    expr: &Expression<'_>,
+    file: &ProviderFile<'_, '_>,
+    out: &mut Vec<String>,
+) {
+    let mut push_elements = |elements: &mut dyn Iterator<Item = &ArrayElement<'_>>| {
+        for element in elements {
+            if let ArrayElement::Value(value) = element {
+                collect_route_file_names(value.value, file, out);
+            }
+        }
+    };
+    match expr {
+        Expression::Array(array) => push_elements(&mut array.elements.iter()),
+        Expression::LegacyArray(array) => push_elements(&mut array.elements.iter()),
+        _ => out.extend(const_string(expr, file.content, file.scope)),
     }
 }
 

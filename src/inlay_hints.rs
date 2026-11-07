@@ -9,7 +9,7 @@
 //!   explicit return type when the callable context specifies one.
 //!
 //! The first two are the `parameter-names` kind and the last two the
-//! `closure-types` kind of the `[inlay_hints]` config section, which the
+//! `closure-types` kind of the `[inlay-hints]` config section, which the
 //! editor can also switch off (see [`crate::config::ClientInlayHintOptions`]).
 //!
 //! The handler walks precomputed [`CallSite`] entries from the

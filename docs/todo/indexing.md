@@ -270,7 +270,7 @@ ready to implement.
 **Impact: Low-Medium · Complexity: Medium-High**
 
 An over-broad `[indexing] exclude` makes real classes unresolvable,
-and the resulting `Class 'App\Generated\Foo' not found` is
+and the resulting `Class App\Generated\Foo not found` is
 indistinguishable from a typo: the user's own configuration caused
 it and nothing says so, which reads as a PHPantom bug. When class
 resolution fails, the FQN maps to a PSR-4 path, and that file exists
@@ -357,3 +357,38 @@ but include a warning in the rename response when excludes are
 configured. Maintainer's call on the semantics; whichever way it
 goes, the chosen behaviour needs a test and a sentence in
 [`configuration.md`](../configuration.md).
+
+<<<<<<< HEAD
+## X21. Keep `config-schema.json` in step with the config structs
+
+**Impact: Low-Medium · Complexity: Low**
+
+`config-schema.json` is maintained by hand and only a checkbox in the
+pull request template keeps it current. It has drifted before: the
+`[inlay_hints]` section shipped without a schema entry, so editors
+offered no completion or hover for it. Add a test that walks the schema
+and the config structs and fails when a section or key exists in one
+but not the other. Either generate the schema from the structs (e.g.
+`schemars`, keeping the hand-written descriptions as doc comments), or
+deserialize a TOML document built from every schema key and assert
+that `load_config_with_warnings` reports no unknown key, and that
+every `Config` field has a schema key.
+=======
+## X20. Warn about unknown configuration keys
+
+**Impact: Medium · Complexity: Low**
+
+`.phpantom.toml` is deserialized with serde's default behaviour, so a
+key PHPantom does not know is dropped without a word: a typo such as
+`unused-parameter = true` or a key from a newer release silently does
+nothing. Collect the unknown keys while deserializing (the
+`serde_ignored` crate wraps the deserializer for exactly this) and
+report each one, with its file and dotted path, as a warning in the
+editor (`window/showMessage` once per config load, plus the log) and
+on stderr from `analyze`, `fix`, and `format`. Keep it a warning, never
+an error, so a config written for a newer release still loads.
+
+The renamed-key table in `src/config/mod.rs` already rewrites old
+spellings and warns about them on stderr; route that warning through
+the same reporting so an editor user sees it too.
+>>>>>>> cecbcdb93 (Update config schema)

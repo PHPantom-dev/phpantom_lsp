@@ -331,18 +331,18 @@ async fn only_missing_project_templates_are_reported() {
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(Code::String(code)) if code == "invalid_symfony_template"
+                Some(Code::String(code)) if code == "invalid_twig_template"
             )
         })
         .map(|diagnostic| message_text(&diagnostic.message).to_string())
         .collect();
     assert_eq!(
         reported,
-        vec!["Unknown template: 'missing/page.html.twig'".to_string()]
+        vec!["Unknown template 'missing/page.html.twig'".to_string()]
     );
 }
 
-/// The `invalid_symfony_template` messages a slow-diagnostics pass reports
+/// The `invalid_twig_template` messages a slow-diagnostics pass reports
 /// for the PHP `content`.
 fn php_template_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<String> {
     let mut diagnostics = Vec::new();
@@ -352,7 +352,7 @@ fn php_template_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<Str
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(Code::String(code)) if code == "invalid_symfony_template"
+                Some(Code::String(code)) if code == "invalid_twig_template"
             )
         })
         .map(|diagnostic| message_text(&diagnostic.message).to_string())
@@ -408,14 +408,14 @@ final class TwigTest
     let uri = uri_for(&dir, "src/Controller/GuardedController.php");
     assert_eq!(
         php_template_problems(&backend, &uri, guarded),
-        vec!["Unknown template: 'missing/fallback.html.twig'".to_string()]
+        vec!["Unknown template 'missing/fallback.html.twig'".to_string()]
     );
     // An environment the file builds has its own templates, but one handed
     // in is the application's.
     let uri = uri_for(&dir, "src/Tests/TwigTest.php");
     assert_eq!(
         php_template_problems(&backend, &uri, test),
-        vec!["Unknown template: 'missing/app.html.twig'".to_string()]
+        vec!["Unknown template 'missing/app.html.twig'".to_string()]
     );
 }
 
@@ -506,7 +506,7 @@ const BROKEN_TWIG: &str = "{% extends 'base.html.twig' %}
 {% endblock %}
 ";
 
-/// The `invalid_symfony_template` messages reported in the template at
+/// The `invalid_twig_template` messages reported in the template at
 /// `uri`, with the line each is on.
 fn template_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<(String, u32)> {
     let mut diagnostics = Vec::new();
@@ -516,7 +516,7 @@ fn template_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<(String
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(Code::String(code)) if code == "invalid_symfony_template"
+                Some(Code::String(code)) if code == "invalid_twig_template"
             )
         })
         .map(|diagnostic| {
@@ -540,7 +540,7 @@ async fn missing_templates_a_template_names_are_reported() {
 
     assert_eq!(
         template_problems(&backend, &uri, BROKEN_TWIG),
-        vec![("Unknown template: 'partials/crad.html.twig'".to_string(), 2)]
+        vec![("Unknown template 'partials/crad.html.twig'".to_string(), 2)]
     );
 
     // A template that names only what exists has nothing to report.

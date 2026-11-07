@@ -12,7 +12,7 @@ fn collect(php: &str) -> Vec<(DiagnosticSeverity, String)> {
     .map(|d| {
         assert_eq!(
             d.code,
-            Some(Code::String("invalid_data_provider".to_string()))
+            Some(Code::String("invalid_phpunit_data_provider".to_string()))
         );
         (d.severity.unwrap(), message_text(&d.message).to_string())
     })

@@ -307,11 +307,9 @@ async fn a_finder_for_an_unmapped_field_is_reported() {
     assert_eq!(
         messages,
         vec![
-            "Method 'findByPlainPassword' not found on class 'App\\Repository\\UserRepository'"
-                .to_string(),
-            "Method 'findByTotal' not found on class 'App\\Repository\\OrderRepository'"
-                .to_string(),
-            "Method 'findByTotal' not found on class 'Doctrine\\ORM\\EntityRepository'".to_string(),
+            "Method App\\Repository\\UserRepository::findByPlainPassword() not found".to_string(),
+            "Method App\\Repository\\OrderRepository::findByTotal() not found".to_string(),
+            "Method Doctrine\\ORM\\EntityRepository::findByTotal() not found".to_string(),
         ]
     );
 }
@@ -333,10 +331,10 @@ async fn an_unmapped_criteria_key_is_reported() {
     assert_eq!(
         messages,
         vec![
-            "Field 'plainPassword' is not mapped on entity 'App\\Entity\\User'".to_string(),
-            "Field 'nope' is not mapped on entity 'App\\Entity\\User'".to_string(),
-            "Field 'total' is not mapped on entity 'App\\Entity\\Order'".to_string(),
-            "Field 'size' is not mapped on entity 'App\\Entity\\Team'".to_string(),
+            "Field 'plainPassword' is not mapped on entity App\\Entity\\User".to_string(),
+            "Field 'nope' is not mapped on entity App\\Entity\\User".to_string(),
+            "Field 'total' is not mapped on entity App\\Entity\\Order".to_string(),
+            "Field 'size' is not mapped on entity App\\Entity\\Team".to_string(),
         ]
     );
 }

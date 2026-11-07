@@ -7,13 +7,16 @@ use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/// The declaration check's and the read check's messages, which tell the
+/// two apart.
 fn collect_on(backend: &Backend, php: &str) -> Vec<String> {
     collect_diagnostics_with(backend, php, Backend::collect_slow_diagnostics)
         .into_iter()
         .filter(|d| {
-            d.code
-                .as_ref()
-                .is_some_and(|c| matches!(c, Code::String(s) if s == "uninitialized_property"))
+            d.code.as_ref().is_some_and(|c| {
+                matches!(c, Code::String(s)
+                    if s == "uninitialized_property" || s == "uninitialized_property_read")
+            })
         })
         .map(|d| {
             assert_eq!(d.severity, Some(DiagnosticSeverity::Warning));
@@ -45,9 +48,7 @@ final class User
 "#;
     assert_eq!(
         collect(php),
-        vec![
-            "Property App\\User::$name is never initialized; give it a default value or assign it in the constructor"
-        ]
+        vec!["Property App\\User::$name is never initialized"]
     );
 }
 
@@ -117,12 +118,7 @@ fn a_private_property_of_an_abstract_class_is_reported() {
 #[test]
 fn an_anonymous_class_property_is_reported() {
     let php = "<?php\n$box = new class { protected int $size; };\n";
-    assert_eq!(
-        collect(php),
-        vec![
-            "Property $size is never initialized; give it a default value or assign it in the constructor"
-        ]
-    );
+    assert_eq!(collect(php), vec!["Property $size is never initialized"]);
 }
 
 #[test]
@@ -198,9 +194,7 @@ final class Service
 "#;
     assert_eq!(
         collect(php),
-        vec![
-            "Property Service::$promoted is never initialized; give it a default value or assign it in the constructor"
-        ]
+        vec!["Property Service::$promoted is never initialized"]
     );
 }
 
@@ -354,9 +348,7 @@ final class Presenter
 "#;
     assert_eq!(
         collect(php),
-        vec![
-            "Property Presenter::$plain is never initialized; give it a default value or assign it in the constructor"
-        ]
+        vec!["Property Presenter::$plain is never initialized"]
     );
 }
 
@@ -387,9 +379,7 @@ class Product
 "#;
     assert_eq!(
         collect(php),
-        vec![
-            "Property App\\Product::$name is never initialized; give it a default value or assign it in the constructor"
-        ]
+        vec!["Property App\\Product::$name is never initialized"]
     );
 }
 
@@ -431,9 +421,7 @@ class SnapshotWithConstructor
 "#;
     assert_eq!(
         collect(php),
-        vec![
-            "Property SnapshotWithConstructor::$id is never initialized; give it a default value or assign it in the constructor"
-        ]
+        vec!["Property SnapshotWithConstructor::$id is never initialized"]
     );
 }
 
@@ -477,7 +465,7 @@ fn the_read_diagnostic_covers_the_property_access() {
     );
     let diag = diags
         .iter()
-        .find(|d| matches!(&d.code, Some(Code::String(s)) if s == "uninitialized_property"))
+        .find(|d| matches!(&d.code, Some(Code::String(s)) if s == "uninitialized_property_read"))
         .expect("diagnostic");
     assert_eq!(diag.range.start, Position::new(12, 5));
     assert_eq!(diag.range.end, Position::new(12, 19));

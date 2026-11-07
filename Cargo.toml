@@ -2,10 +2,11 @@
 name = "phpantom_lsp"
 version = "0.11.1"
 edition = "2024"
+rust-version = "1.99"
 license = "MIT"
 description = "Fast PHP language server with deep type intelligence. Generics, Laravel, PHPStan annotations. Ready in an instant."
 repository = "https://github.com/PHPantom-dev/phpantom_lsp"
-documentation = "https://docs.rs/phpantom_lsp/latest/phpantom_lsp/"
+documentation = "https://phpantom-dev.github.io/phpantom_lsp/latest/"
 readme = "README.md"
 exclude = [".gitignore", ".github/*", "target/*"]
 
@@ -14,6 +15,7 @@ clap = { version = "4.5", features = ["derive", "wrap_help"] }
 tower-lsp-server = { version = "=0.24.0-rc.1", features = ["url-url"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_ignored = "0.1"
 sqlparser = "0.63"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

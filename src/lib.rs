@@ -1,5 +1,12 @@
 //! PHPantom — a fast, lightweight PHP language server.
 //!
+//! **This crate's Rust API is internal.** It is published only so that
+//! `cargo install phpantom_lsp` works. The supported interfaces are the
+//! language server protocol, the command line, and `.phpantom.toml`; the
+//! version number follows those. Any public item here, feature-gated
+//! modules such as `semantic_export` included, can change or disappear
+//! in any release, patch releases too.
+//!
 //! Diagnostics are debounced: each `did_change` bumps a per-file version
 //! counter and spawns a delayed task. The task only publishes if its
 //! version still matches (i.e. no newer edit arrived in the meantime).

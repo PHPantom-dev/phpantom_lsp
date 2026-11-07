@@ -1008,7 +1008,7 @@ function test(): void {
         let diags = collect(php);
         assert!(
             diags.iter().any(
-                |d| message_text(&d.message).contains("Missing required argument")
+                |d| message_text(&d.message).contains("Expected an argument for")
                     && message_text(&d.message).contains("$a")
             ),
             "Expected missing-required-argument diagnostic for $a, got: {diags:?}",
@@ -1056,7 +1056,7 @@ function test(): void {
         let diags = collect(php);
         assert!(
             diags.iter().any(
-                |d| message_text(&d.message).contains("Missing required arguments")
+                |d| message_text(&d.message).contains("Expected arguments for")
                     && message_text(&d.message).contains("$a")
                     && message_text(&d.message).contains("$b")
             ),

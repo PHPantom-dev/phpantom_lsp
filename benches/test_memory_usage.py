@@ -108,17 +108,6 @@ class IndexingWaitTests(unittest.TestCase):
         self.assertEqual(notifications.now, 2.0)
         self.assertEqual(len(notifications.events), 1)
 
-    def test_settling_continues_after_diagnostics_and_worker_idle_timeout(self):
-        client, notifications = self.client([
-            (0.5, {"method": "textDocument/publishDiagnostics"}),
-            (10.5, {"method": "window/logMessage"}),
-        ])
-
-        client.drain_notifications(memory.SETTLE_TIME)
-
-        self.assertFalse(notifications.events)
-        self.assertGreater(notifications.now, 10.5)
-
 
 if __name__ == "__main__":
     unittest.main()

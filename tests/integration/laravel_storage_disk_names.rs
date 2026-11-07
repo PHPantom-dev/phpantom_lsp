@@ -369,12 +369,12 @@ class DiskConsumer {}
     assert!(
         messages
             .iter()
-            .any(|message| message.contains("storage disk: 'missing-disk'"))
+            .any(|message| message.contains("storage disk 'missing-disk'"))
     );
     assert!(
         messages
             .iter()
-            .any(|message| message.contains("storage disk: 'missing-attribute'"))
+            .any(|message| message.contains("storage disk 'missing-attribute'"))
     );
     for optional_or_written in [
         "testing",

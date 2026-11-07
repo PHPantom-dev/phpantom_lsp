@@ -28,9 +28,9 @@ function greet(string $name): void {}
             Some(Code::String("docblock_native_mismatch".to_string()))
         );
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
-        assert!(message_text(&diags[0].message).contains("'?string'"));
+        assert!(message_text(&diags[0].message).contains("?string"));
         assert!(message_text(&diags[0].message).contains("$name"));
-        assert!(message_text(&diags[0].message).contains("'string'"));
+        assert!(message_text(&diags[0].message).contains("string"));
         // The range covers `string $name` on the parameter line.
         assert_eq!(diags[0].range.start.line, 4);
         assert_eq!(diags[0].range.end.line, 4);
@@ -46,8 +46,8 @@ function takesItems(array $items): void {}
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
-        assert!(message_text(&diags[0].message).contains("'list<int>|null'"));
-        assert!(message_text(&diags[0].message).contains("'array'"));
+        assert!(message_text(&diags[0].message).contains("list<int>|null"));
+        assert!(message_text(&diags[0].message).contains("array"));
     }
 
     #[test]
@@ -191,8 +191,8 @@ class Entry {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
-        assert!(message_text(&diags[0].message).contains("Documented return type 'string|null'"));
-        assert!(message_text(&diags[0].message).contains("'string'"));
+        assert!(message_text(&diags[0].message).contains("Documented return type string|null"));
+        assert!(message_text(&diags[0].message).contains("string"));
     }
 
     #[test]
@@ -227,9 +227,9 @@ function greet(?string $name): void {}
         );
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Hint));
         let message = message_text(&diags[0].message);
-        assert!(message.contains("'string'"), "{message}");
+        assert!(message.contains("string"), "{message}");
         assert!(message.contains("$name"), "{message}");
-        assert!(message.contains("'?string'"), "{message}");
+        assert!(message.contains("?string"), "{message}");
         // The range covers the `@param` tag, not the signature.
         assert_eq!(diags[0].range.start.line, 2);
         assert_eq!(diags[0].range.start.character, 3);
@@ -274,7 +274,7 @@ class Entry {
             diags[0].code,
             Some(Code::String("docblock_missing_null".to_string()))
         );
-        assert!(message_text(&diags[0].message).contains("Documented return type 'string'"));
+        assert!(message_text(&diags[0].message).contains("Documented return type string"));
         assert_eq!(diags[0].range.start.line, 3);
     }
 

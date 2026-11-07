@@ -479,7 +479,11 @@ class Probe {
             .await
             .contains(&"fictional_cake".to_string())
     );
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -522,7 +526,9 @@ async fn validation_rules_do_not_claim_a_namespaced_facade_homonym() {
             "{source}"
         );
         assert!(
-            fixture.diagnostics("invalid_validation_rule").is_empty(),
+            fixture
+                .diagnostics("invalid_laravel_validation_rule")
+                .is_empty(),
             "{source}"
         );
     }
@@ -601,7 +607,7 @@ async fn validation_rules_hover_and_navigate_to_the_framework_declaration() {
 #[tokio::test]
 async fn validation_rules_report_only_unknown_rule_names() {
     let fixture = Fixture::open(&request("$request->validate(['name' => 'required|not_a_rule§|max:12', 'other' => ['fictional_cake', 'not_another_rule']]);"), &[]).await;
-    let messages = fixture.diagnostics("invalid_validation_rule");
+    let messages = fixture.diagnostics("invalid_laravel_validation_rule");
     assert_eq!(messages.len(), 2, "{messages:?}");
     assert!(
         messages
@@ -624,14 +630,22 @@ async fn validation_rules_use_installed_parser_aliases() {
         &[],
     )
     .await;
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     assert!(fixture.labels().await.contains(&"int".to_string()));
 }
 
 #[tokio::test]
 async fn validation_rules_do_not_split_array_regex_patterns_at_pipes() {
     let fixture = Fixture::open(&request(r#"$request->validate(['name' => ['regex:/^(foo|bar)$/', 'not_regex:/^(bad|worse)$/', 'required§']]);"#), &[]).await;
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -792,7 +806,7 @@ async fn validation_message_keys_report_unknown_fields_and_rules() {
         "public function rules(): array { return ['email' => 'required|email']; } public function messages(): array { return ['emali.required' => 'Bad field', 'email.not_a_rule' => 'Bad rule', 'email.required' => 'Good']; } public function attributes(): array { return ['other§' => 'Unknown', 'email' => 'Contact']; }",
     );
     let fixture = Fixture::open(&source, &[]).await;
-    let messages = fixture.diagnostics("invalid_validation_message");
+    let messages = fixture.diagnostics("invalid_laravel_validation_message");
     assert_eq!(messages.len(), 3, "{messages:?}");
     assert!(
         messages.iter().any(|message| message.contains("emali")),
@@ -816,7 +830,11 @@ async fn validation_message_keys_leave_dynamic_rule_fields_open() {
         "public function rules(): array { $field = 'runtime'; return [$field => 'required', 'email' => 'email']; } public function messages(): array { return ['runtime§.required' => 'Required']; }",
     );
     let fixture = Fixture::open(&source, &[]).await;
-    assert!(fixture.diagnostics("invalid_validation_message").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_message")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -837,7 +855,11 @@ class Probe extends \App\Requests\ParentRequest {
 "#;
     let fixture = Fixture::open(source, &[("src/Requests/ParentRequest.php", parent)]).await;
     assert!(fixture.labels().await.contains(&"email".to_string()));
-    assert!(fixture.diagnostics("invalid_validation_message").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_message")
+            .is_empty()
+    );
     let definitions = fixture.definitions().await;
     assert_eq!(definitions.len(), 1, "{definitions:?}");
     assert!(
@@ -907,7 +929,11 @@ class RuleProvider extends \Illuminate\Support\ServiceProvider {
         &extra,
     )
     .await;
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     let definitions = fixture.definitions().await;
     assert_eq!(definitions.len(), 1, "{definitions:?}");
     assert!(
@@ -932,7 +958,11 @@ class RuleProvider extends \Illuminate\Support\ServiceProvider {
         &[("src/Providers/RuleProvider.php", provider)],
     )
     .await;
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -954,7 +984,11 @@ async fn validation_rules_without_readable_framework_declarations_are_not_diagno
         ],
     )
     .await;
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -1014,7 +1048,11 @@ async fn validation_rule_names_follow_laravel_case_normalization() {
         &[],
     )
     .await;
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     assert!(fixture.labels().await.contains(&"primary".to_string()));
     let definitions = fixture.definitions().await;
     assert_eq!(definitions.len(), 1, "{definitions:?}");
@@ -1060,7 +1098,7 @@ async fn validation_wildcard_message_keys_match_declared_fields() {
         "public function rules(): array { return ['email' => 'required', 'items.*.email' => 'required|email']; } public function messages(): array { return ['*.required' => 'Required', 'items.*.email.required' => 'Item email required', 'items.*.email.email' => 'Invalid email', 'missing.*.required§' => 'Unknown field']; }",
     );
     let fixture = Fixture::open(&source, &[]).await;
-    let messages = fixture.diagnostics("invalid_validation_message");
+    let messages = fixture.diagnostics("invalid_laravel_validation_message");
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(messages[0].contains("missing.*.required"), "{messages:?}");
 }
@@ -1747,7 +1785,7 @@ async fn validation_rule_diagnostics_decode_php_hex_escapes_only_in_double_quote
             &[],
         )
         .await;
-        let messages = fixture.diagnostics("invalid_validation_rule");
+        let messages = fixture.diagnostics("invalid_laravel_validation_rule");
         assert!(messages.is_empty(), "{rules}: {messages:?}");
     }
     let fixture = Fixture::open(
@@ -1755,7 +1793,10 @@ async fn validation_rule_diagnostics_decode_php_hex_escapes_only_in_double_quote
         &[],
     )
     .await;
-    assert_eq!(fixture.diagnostics("invalid_validation_rule").len(), 1);
+    assert_eq!(
+        fixture.diagnostics("invalid_laravel_validation_rule").len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -1790,7 +1831,11 @@ class RuleProvider extends \Illuminate\Support\ServiceProvider {{
             labels.contains(&"factory_rule".to_string()),
             "{factory}::{method}: {labels:?}"
         );
-        assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+        assert!(
+            fixture
+                .diagnostics("invalid_laravel_validation_rule")
+                .is_empty()
+        );
         let definitions = fixture.definitions().await;
         assert_eq!(definitions.len(), 1, "{factory}::{method}: {definitions:?}");
         assert!(
@@ -1829,7 +1874,11 @@ class RuleProvider extends \Illuminate\Support\ServiceProvider {
             .await
             .contains(&"local_factory_rule".to_string())
     );
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -1854,7 +1903,7 @@ class RuleProvider extends \Illuminate\Support\ServiceProvider {
             .await
             .contains(&"unrelated_factory_rule".to_string())
     );
-    let diagnostics = fixture.diagnostics("invalid_validation_rule");
+    let diagnostics = fixture.diagnostics("invalid_laravel_validation_rule");
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert!(fixture.definitions().await.is_empty());
 }
@@ -2132,7 +2181,11 @@ class RuleProvider extends \Illuminate\Support\ServiceProvider {{
             labels.contains(&"storage_code".to_string()),
             "{registration}: {labels:?}"
         );
-        assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+        assert!(
+            fixture
+                .diagnostics("invalid_laravel_validation_rule")
+                .is_empty()
+        );
         let hover = hover_text_at(
             &fixture.backend,
             &fixture.uri,
@@ -2174,7 +2227,11 @@ class RuleProvider extends \Illuminate\Support\ServiceProvider {
         &[("src/Providers/RuleProvider.php", provider)],
     )
     .await;
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     assert!(!fixture.labels().await.contains(&"runtime_rule".to_string()));
     assert!(fixture.definitions().await.is_empty());
 }
@@ -2195,7 +2252,11 @@ class Probe extends \Livewire\Component {
     .await;
     let labels = fixture.labels().await;
     assert!(labels.contains(&"fictional_cake".to_string()), "{labels:?}");
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     let definitions = fixture.definitions().await;
     assert_eq!(definitions.len(), 1, "{definitions:?}");
     assert!(
@@ -2231,7 +2292,11 @@ class Probe extends \App\Http\CheckoutController {
     let fixture = Fixture::open(source, &extra).await;
     let labels = fixture.labels().await;
     assert!(labels.contains(&"fictional_cake".to_string()), "{labels:?}");
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
 
     let source = source.replace("$this->validate($request,", "$this->validate(");
     let fixture = Fixture::open(&source, &extra).await;
@@ -2241,7 +2306,11 @@ class Probe extends \App\Http\CheckoutController {
             .await
             .contains(&"fictional_cake".to_string())
     );
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -2267,7 +2336,9 @@ class Probe {{
             "{declaration}"
         );
         assert!(
-            fixture.diagnostics("invalid_validation_rule").is_empty(),
+            fixture
+                .diagnostics("invalid_laravel_validation_rule")
+                .is_empty(),
             "{declaration}"
         );
         assert!(fixture.definitions().await.is_empty(), "{declaration}");
@@ -2298,7 +2369,11 @@ async fn validation_missing_framework_rule_classes_leave_unknown_names_unjudged(
         ],
     )
     .await;
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     assert!(!fixture.labels().await.contains(&"runtime_only".to_string()));
     assert!(fixture.definitions().await.is_empty());
 }
@@ -2341,7 +2416,11 @@ class RuleExtensions {
     .await;
     let labels = fixture.labels().await;
     assert!(labels.contains(&"warehouse_code".to_string()), "{labels:?}");
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     let definitions = fixture.definitions().await;
     assert_eq!(definitions.len(), 1, "{definitions:?}");
     assert!(
@@ -2362,7 +2441,11 @@ class RuleExtensions {
     ).await;
     let labels = fixture.labels().await;
     assert!(labels.contains(&"stock_code".to_string()), "{labels:?}");
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     let definitions = fixture.definitions().await;
     assert_eq!(definitions.len(), 1, "{definitions:?}");
     assert_eq!(definitions[0].uri, fixture.uri);
@@ -2382,7 +2465,11 @@ async fn validation_unresolved_bootstrap_provider_keeps_unknown_rules_open() {
         )],
     )
     .await;
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     assert!(!fixture.labels().await.contains(&"runtime_rule".to_string()));
 }
 
@@ -2413,7 +2500,11 @@ async fn validation_sometimes_accepts_the_concrete_validator_without_a_contract_
     ).await;
     let labels = fixture.labels().await;
     assert!(labels.contains(&"fictional_cake".to_string()), "{labels:?}");
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     let definitions = fixture.definitions().await;
     assert_eq!(definitions.len(), 1, "{definitions:?}");
     assert!(
@@ -2454,7 +2545,11 @@ class RuleProvider extends \Illuminate\Support\ServiceProvider {
     .await;
     let labels = fixture.labels().await;
     assert!(labels.contains(&"delivery_code".to_string()), "{labels:?}");
-    assert!(fixture.diagnostics("invalid_validation_rule").is_empty());
+    assert!(
+        fixture
+            .diagnostics("invalid_laravel_validation_rule")
+            .is_empty()
+    );
     let definitions = fixture.definitions().await;
     assert_eq!(definitions.len(), 1, "{definitions:?}");
     assert!(
@@ -2478,7 +2573,7 @@ async fn validation_undecodable_message_and_attribute_keys_remain_unjudged() {
                 &form(&format!("public function rules(): array {{ return ['email' => 'required']; }} public function {method}(): array {{ return [{key} => 'Label']; }}")),
                 &[],
             ).await;
-            let diagnostics = fixture.diagnostics("invalid_validation_message");
+            let diagnostics = fixture.diagnostics("invalid_laravel_validation_message");
             assert!(diagnostics.is_empty(), "{method} {key}: {diagnostics:?}");
         }
     }
@@ -2522,7 +2617,9 @@ class RuleProvider extends \Illuminate\Support\ServiceProvider {
         )
         .await;
         assert!(
-            fixture.diagnostics("invalid_validation_rule").is_empty(),
+            fixture
+                .diagnostics("invalid_laravel_validation_rule")
+                .is_empty(),
             "{bootstrap}"
         );
         assert!(
@@ -2555,7 +2652,7 @@ class ValidationRuleParser {
         )
         .await;
         assert!(!fixture.labels().await.contains(&"unavailable".to_string()));
-        let diagnostics = fixture.diagnostics("invalid_validation_rule");
+        let diagnostics = fixture.diagnostics("invalid_laravel_validation_rule");
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert!(diagnostics[0].contains("unavailable"), "{diagnostics:?}");
         assert!(fixture.definitions().await.is_empty());

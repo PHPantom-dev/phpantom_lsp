@@ -75,7 +75,7 @@ now resolves to `mixed` rather than to the surviving literal.
 
 ---
 
-## D19. `invalid_member_access` cannot tell a property read from a write
+## D19. `inaccessible_member` cannot tell a property read from a write
 
 **Impact: Medium · Complexity: Medium**
 
@@ -152,7 +152,7 @@ declared it.
 
 Every check that needs the declaring class therefore recomputes it by
 walking the raw hierarchy, and every such walk is a partial
-reimplementation of the merge's own rules. `invalid_member_access` has
+reimplementation of the merge's own rules. `inaccessible_member` has
 one, and it is already known to be incomplete: it does not apply
 `trait_aliases`, so a member a `use` clause renamed is untraceable and
 the access goes unreported.
@@ -384,3 +384,29 @@ before the diagnostic runs, or a separate workspace-wide pass.
 
 **Where to look:** `src/diagnostics/unused_parameters.rs` (`can_be_overridden`)
 and `src/definition/implementation.rs` (`find_implementors`).
+
+---
+
+## D52. `incompatible_override` only checks a `static` return type
+
+**Impact: Medium · Complexity: Medium-High**
+
+`incompatible_override` reports an override that does not return
+`static` where the parent method does, and nothing else. PHP refuses
+every override whose signature the parent's callers could not use: a
+return type that is not a subtype of the parent's, a parameter type
+narrower than the parent's, a parameter the parent has that the
+override drops, a new required parameter, a narrower visibility, a
+`static` method overriding an instance one or the reverse, and an
+override of a `final` method. All of these are fatal when the class is
+loaded, so all belong under this identifier, which was kept broad so the
+check can grow into them without a rename.
+
+Comparing types needs the subtype check `type_mismatch_*` already uses,
+with the parent's templates substituted the way inheritance merging does,
+and native types only: a docblock that disagrees with the parent is not
+an error PHP raises.
+
+**Where to look:** `src/diagnostics/incompatible_override.rs` and the
+subtype check behind `src/diagnostics/type_errors/`.
+

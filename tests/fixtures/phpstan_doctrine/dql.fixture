@@ -3,13 +3,13 @@
 // Ported from PHPStan's Doctrine extension, DqlRuleTest::testRule.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/dql.php
-// codes: unknown_class, unknown_entity_field, dql_syntax_error
+// codes: unknown_class, invalid_doctrine_field, invalid_dql_syntax
 // PHPantom reports a name on the line its string spells it, where upstream reports the line the call starts on.
-// expect_diagnostic: 36: DQL syntax error: expected an identification variable, got end of string
-// expect_diagnostic: 43: Field 'transient' is not mapped on entity 'PHPStan\Rules\Doctrine\ORM\MyEntity'
-// expect_diagnostic: 50: Class 'Foo' not found
-// expect_diagnostic: 56: DQL syntax error: expected an identification variable, got end of string
-// expect_diagnostic: 57: Class 'Foo' not found
-// expect_diagnostic: 64: DQL syntax error: expected an identification variable, got end of string
-// expect_diagnostic: 65: Class 'Foo' not found
+// expect_diagnostic: 36: DQL expects an identification variable, got end of string
+// expect_diagnostic: 43: Field 'transient' is not mapped on entity PHPStan\Rules\Doctrine\ORM\MyEntity
+// expect_diagnostic: 50: Class Foo not found
+// expect_diagnostic: 56: DQL expects an identification variable, got end of string
+// expect_diagnostic: 57: Class Foo not found
+// expect_diagnostic: 64: DQL expects an identification variable, got end of string
+// expect_diagnostic: 65: Class Foo not found
 ---

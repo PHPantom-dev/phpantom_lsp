@@ -186,11 +186,11 @@ impl Backend {
         match result {
             Some(changed) => changed,
             None => {
-                // Parser panicked — store a single "Parse failed" error
+                // Parser panicked — store a single "could not parse" error
                 // so the syntax-error diagnostic collector can report it.
                 self.publish_parse_failure(
                     uri,
-                    vec![("Parse failed (internal error)".to_string(), 0, 0)],
+                    vec![("PHPantom could not parse this file".to_string(), 0, 0)],
                 );
                 false
             }
@@ -336,7 +336,7 @@ impl Backend {
             }
             None => AstIndexParseResult::ParseFailed {
                 uri: uri_owned,
-                errors: vec![("Parse failed (internal error)".to_string(), 0, 0)],
+                errors: vec![("PHPantom could not parse this file".to_string(), 0, 0)],
             },
         }
     }

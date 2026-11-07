@@ -48,9 +48,9 @@ function f(\Stringable $s, \stdClass $o, Target $t): void {
     assert_eq!(
         collect(php),
         vec![
-            "Property name must be a string, but stdClass was given",
-            "Method name must be a string, but Stringable was given",
-            "Method name must be a string, but stdClass was given",
+            "Property name must be a string, got stdClass",
+            "Method name must be a string, got Stringable",
+            "Method name must be a string, got stdClass",
         ]
     );
 }
@@ -89,10 +89,10 @@ function f(Target $t, int $i, ?int $n, array $a, \Closure $c): void {
     assert_eq!(
         collect(php),
         vec![
-            "Method name must be a string, but int was given",
-            "Method name must be a string, but ?int was given",
-            "Method name must be a string, but array was given",
-            "Method name must be a string, but Closure was given",
+            "Method name must be a string, got int",
+            "Method name must be a string, got ?int",
+            "Method name must be a string, got array",
+            "Method name must be a string, got Closure",
         ]
     );
 }
@@ -112,9 +112,9 @@ function f(Target $t, array $a, \Closure $c, Suit $e): void {
     assert_eq!(
         collect(php),
         vec![
-            "Property name must be a string, but array was given",
-            "Property name must be a string, but Closure was given",
-            "Property name must be a string, but Suit was given",
+            "Property name must be a string, got array",
+            "Property name must be a string, got Closure",
+            "Property name must be a string, got Suit",
         ]
     );
 }
@@ -133,7 +133,7 @@ function f(Target $t, $either, int|bool $neither): void {
 "#;
     assert_eq!(
         collect(php),
-        vec!["Method name must be a string, but int|bool was given"]
+        vec!["Method name must be a string, got int|bool"]
     );
 }
 
@@ -183,7 +183,7 @@ function f(Target $t, Label $l, SubLabel $s, TraitLabel $tl, Named $n, Plain $p)
 "#;
     assert_eq!(
         collect(php),
-        vec!["Property name must be a string, but App\\Names\\Plain was given"]
+        vec!["Property name must be a string, got App\\Names\\Plain"]
     );
 }
 
@@ -220,8 +220,8 @@ class Target
     assert_eq!(
         collect(php),
         vec![
-            "Property name must be a string, but stdClass was given",
-            "Method name must be a string, but int was given",
+            "Property name must be a string, got stdClass",
+            "Method name must be a string, got int",
         ]
     );
 }

@@ -407,7 +407,7 @@ class SyncCommand extends Command
 
     let param_diags: Vec<&Diagnostic> = diags
         .iter()
-        .filter(|d| matches!(&d.code, Some(Code::String(c)) if c == "invalid_command_parameter"))
+        .filter(|d| matches!(&d.code, Some(Code::String(c)) if c == "invalid_laravel_command_parameter"))
         .collect();
     assert_eq!(
         param_diags.len(),

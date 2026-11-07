@@ -52,7 +52,7 @@ function greet(string $name, bool $loud) {
     return "Hello $name";
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$loud'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $loud"]);
 }
 
 #[test]
@@ -81,10 +81,7 @@ function f($a, $b, $c) {
 "#;
     let mut diags = collect(php);
     diags.sort();
-    assert_eq!(
-        diags,
-        vec!["Unused parameter '$b'", "Unused parameter '$c'"]
-    );
+    assert_eq!(diags, vec!["Unused parameter $b", "Unused parameter $c"]);
 }
 
 #[test]
@@ -106,7 +103,7 @@ function f($a, $b, $_c) {
     return $a;
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$b'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $b"]);
 }
 
 #[test]
@@ -140,7 +137,7 @@ function f($a) {
     $a = 1;
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$a'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $a"]);
 }
 
 #[test]
@@ -158,7 +155,7 @@ function fill(array &$out) {
 fn by_reference_parameter_never_touched_is_reported() {
     assert_eq!(
         collect("<?php\nfunction fill(array &$out) {}\n"),
-        vec!["Unused parameter '$out'"]
+        vec!["Unused parameter $out"]
     );
 }
 
@@ -166,7 +163,7 @@ fn by_reference_parameter_never_touched_is_reported() {
 fn variadic_parameter_never_read_is_reported() {
     assert_eq!(
         collect("<?php\nfunction f(...$rest) { return 1; }\n"),
-        vec!["Unused parameter '$rest'"]
+        vec!["Unused parameter $rest"]
     );
 }
 
@@ -200,7 +197,7 @@ function f($a) {
     return compact('x');
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$a'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $a"]);
 }
 
 #[test]
@@ -243,7 +240,7 @@ function f($a) {
     return function () { include 'x.php'; };
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$a'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $a"]);
 }
 
 // ─── Closures and arrow functions ───────────────────────────────────────────
@@ -255,19 +252,19 @@ function f() {
     return array_map(function ($value, $key) { return $value; }, [], []);
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$key'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $key"]);
 }
 
 #[test]
 fn arrow_function_parameter_never_read_is_reported() {
     let php = "<?php\n$f = fn($a, $b) => $a;\n";
-    assert_eq!(collect(php), vec!["Unused parameter '$b'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $b"]);
 }
 
 #[test]
 fn closure_at_top_level_is_checked() {
     let php = "<?php\nRoute::get('/', function ($request) { return 'ok'; });\n";
-    assert_eq!(collect(php), vec!["Unused parameter '$request'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $request"]);
 }
 
 #[test]
@@ -300,7 +297,7 @@ function f($a) {
     return function () { return $a; };
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$a'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $a"]);
 }
 
 #[test]
@@ -310,7 +307,7 @@ function f($a) {
     return fn($a) => $a;
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$a'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $a"]);
 }
 
 // ─── Methods ────────────────────────────────────────────────────────────────
@@ -322,7 +319,7 @@ class A {
     private function f($a, $b) { return $a; }
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$b'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $b"]);
 }
 
 #[test]
@@ -337,10 +334,7 @@ final class B {
 "#;
     let mut diags = collect(php);
     diags.sort();
-    assert_eq!(
-        diags,
-        vec!["Unused parameter '$a'", "Unused parameter '$b'"]
-    );
+    assert_eq!(diags, vec!["Unused parameter $a", "Unused parameter $b"]);
 }
 
 #[test]
@@ -359,7 +353,7 @@ enum E {
         Backend::collect_unused_parameter_diagnostics,
     );
     let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
-    assert_eq!(messages, vec!["Unused parameter '$c'"]);
+    assert_eq!(messages, vec!["Unused parameter $c"]);
 }
 
 #[test]
@@ -369,7 +363,7 @@ $x = new class {
     public function f($a) { return 1; }
 };
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$a'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $a"]);
 }
 
 #[test]
@@ -457,7 +451,7 @@ final class A {
     public function __invoke($a) { return 1; }
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$a'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $a"]);
 }
 
 // ─── Constructors ───────────────────────────────────────────────────────────
@@ -472,7 +466,7 @@ class A {
     public function __construct($a, $b) { $this->a = $a; }
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$b'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $b"]);
 }
 
 #[test]
@@ -486,10 +480,7 @@ class Child extends Base {
     // `Base::__construct` never reads its own `$a` either.
     let mut diags = collect(php);
     diags.sort();
-    assert_eq!(
-        diags,
-        vec!["Unused parameter '$a'", "Unused parameter '$b'"]
-    );
+    assert_eq!(diags, vec!["Unused parameter $a", "Unused parameter $b"]);
 }
 
 #[test]
@@ -522,7 +513,7 @@ class A {
     public function __construct($a, private int $b, $c) {}
 }
 "#;
-    assert_eq!(collect(php), vec!["Unused parameter '$c'"]);
+    assert_eq!(collect(php), vec!["Unused parameter $c"]);
 }
 
 // ─── Bodiless declarations ──────────────────────────────────────────────────

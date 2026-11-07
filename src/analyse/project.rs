@@ -14,13 +14,19 @@ use crate::{Backend, composer, config};
 
 /// Load the project's `.phpantom.toml` (merged over `global_config`), or
 /// fall back to the defaults with a note on stderr when it does not parse.
+/// Each unknown or renamed key gets a warning on stderr as well.
 ///
 /// A broken config should not stop a command-line run, but it should not
 /// go unmentioned either: the run would otherwise silently ignore every
 /// setting the project relies on.
 pub(crate) fn load_config_or_default(root: &Path, global_config: Option<&Path>) -> config::Config {
-    match config::load_config_from(root, global_config) {
-        Ok(cfg) => cfg,
+    match config::load_config_with_warnings(root, global_config) {
+        Ok(loaded) => {
+            for warning in &loaded.warnings {
+                eprintln!("Warning: {warning}");
+            }
+            loaded.config
+        }
         Err(e) => {
             eprintln!("Warning: failed to load .phpantom.toml: {e}");
             config::Config::default()

@@ -231,10 +231,13 @@ final class ReportController extends ControllerBase
 # Timeout for the LSP to finish indexing (seconds).
 INDEX_TIMEOUT = 120
 
-# Wait beyond Tokio's default 10-second blocking-thread idle timeout.
-# Until those workers exit, their allocators can retain temporary parse pages,
-# making an idle RSS measurement depend on which worker handled the parse.
-SETTLE_TIME = 12
+# How long no progress token may be active before indexing counts as
+# finished (seconds).  Covers the gap between one indexing phase ending
+# and the next beginning.
+PROGRESS_QUIET_TIME = 2
+
+# How long to wait after didOpen for the server to settle (seconds).
+SETTLE_TIME = 2
 
 # Number of RSS samples to take and average.
 RSS_SAMPLES = 5
@@ -471,38 +474,45 @@ class LspClient:
     def wait_for_indexing(self, timeout: float = INDEX_TIMEOUT) -> None:
         """Block until PHPantom finishes indexing.
 
-        Wait for every progress token to end, then for a quiet period:
-        startup indexing ends before the full-index phase begins. The
-        quiet period also handles trivial workspaces without progress.
+        PHPantom reports each indexing phase under its own progress token,
+        and the full background index begins only as the first phase
+        ends.  So an empty set of active tokens is not the end: it has to
+        stay empty for ``PROGRESS_QUIET_TIME`` before the server counts
+        as settled.  Sampling earlier catches the full index part-way,
+        which on a large workspace swings the result by hundreds of MiB
+        depending on how far the runner got.  A workspace that never
+        reports progress is done after the same quiet period.
         """
         deadline = time.monotonic() + timeout
         active_tokens: set[str] = set()
-        saw_any_progress = False
+        idle_since = time.monotonic()
 
         while time.monotonic() < deadline:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            if not active_tokens:
+                idle_for = time.monotonic() - idle_since
+                if idle_for >= PROGRESS_QUIET_TIME:
+                    return
+                wait = PROGRESS_QUIET_TIME - idle_for
+            else:
+                wait = 2.0
+            wait = min(wait, deadline - time.monotonic())
+            if wait <= 0:
                 break
             try:
-                msg = self._notifications.get(timeout=min(remaining, 2.0))
+                msg = self._notifications.get(timeout=wait)
             except queue.Empty:
-                # Silence. If we never saw progress, treat it as "done"
-                # (trivial workspace). If all tokens ended, also done.
-                if not saw_any_progress or not active_tokens:
-                    return
                 continue
 
-            method = msg.get("method", "")
-
-            if method == "$/progress":
-                saw_any_progress = True
-                token = str(msg["params"].get("token", ""))
-                value = msg["params"].get("value", {})
-                kind = value.get("kind", "")
-                if kind == "begin":
-                    active_tokens.add(token)
-                elif kind == "end":
-                    active_tokens.discard(token)
+            if msg.get("method", "") != "$/progress":
+                continue
+            token = str(msg["params"].get("token", ""))
+            kind = msg["params"].get("value", {}).get("kind", "")
+            if kind == "begin":
+                active_tokens.add(token)
+            elif kind == "end":
+                active_tokens.discard(token)
+                if not active_tokens:
+                    idle_since = time.monotonic()
 
         raise TimeoutError(f"Indexing did not finish within {timeout}s")
 

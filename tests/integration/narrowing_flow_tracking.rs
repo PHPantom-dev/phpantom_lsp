@@ -2752,7 +2752,7 @@ final class After
 "#,
     );
     assert_eq!(messages.len(), 1, "got {messages:?}");
-    assert!(messages[0].contains("on type 'null'"), "{messages:?}");
+    assert!(messages[0].ends_with(" on null"), "{messages:?}");
 }
 
 /// A closure's by-reference capture written just before a `return` inside

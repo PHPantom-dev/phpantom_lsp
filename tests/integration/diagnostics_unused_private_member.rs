@@ -54,11 +54,11 @@ final class Invoice
     assert_eq!(
         collect(php),
         vec![
-            "Constant App\\Invoice::LEGACY is unused",
-            "Property App\\Invoice::$legacyNumber is unused",
-            "Property App\\Invoice::$note is never read, only written",
-            "Property App\\Invoice::$lines is never written, only read",
-            "Method App\\Invoice::recalculate() is unused",
+            "Unused constant App\\Invoice::LEGACY",
+            "Unused property App\\Invoice::$legacyNumber",
+            "Property App\\Invoice::$note is written but never read",
+            "Property App\\Invoice::$lines is read but never written",
+            "Unused method App\\Invoice::recalculate()",
         ]
     );
 }
@@ -103,7 +103,7 @@ final class A {
 "#;
     assert_eq!(
         collect(php),
-        vec!["Property A::$id is never read, only written"]
+        vec!["Property A::$id is written but never read"]
     );
 }
 
@@ -122,7 +122,7 @@ final class A {
 "#;
     assert_eq!(
         collect(php),
-        vec!["Property A::$log is never read, only written"]
+        vec!["Property A::$log is written but never read"]
     );
 }
 
@@ -139,7 +139,7 @@ $x = new class {
 "#;
     assert_eq!(
         collect(php),
-        vec!["Constant Suit::OLD is unused", "Method helper() is unused"]
+        vec!["Unused constant Suit::OLD", "Unused method helper()"]
     );
 }
 
@@ -242,7 +242,7 @@ final class A {
 "#;
     assert_eq!(
         collect(php),
-        vec!["Property A::$read is never written, only read"]
+        vec!["Property A::$read is read but never written"]
     );
 }
 
@@ -300,10 +300,7 @@ final class Product
     private function legacy(): void {}
 }
 "#;
-    assert_eq!(
-        collect(php),
-        vec!["Method App\\Product::legacy() is unused"]
-    );
+    assert_eq!(collect(php), vec!["Unused method App\\Product::legacy()"]);
 }
 
 #[test]
@@ -317,7 +314,7 @@ final class A {
     public function setFirst(string $v): void { $this->first = $v; }
 }
 "#;
-    assert_eq!(collect(php), vec!["Property A::$unused is unused"]);
+    assert_eq!(collect(php), vec!["Unused property A::$unused"]);
 }
 
 #[test]
@@ -331,7 +328,7 @@ final class A {
 "#;
     assert_eq!(
         collect(php),
-        vec!["Property A::$count is never written, only read"]
+        vec!["Property A::$count is read but never written"]
     );
 }
 
@@ -359,7 +356,7 @@ final class A {
     private function unused(): void {}
 }
 "#;
-    assert_eq!(collect(php), vec!["Method A::unused() is unused"]);
+    assert_eq!(collect(php), vec!["Unused method A::unused()"]);
 }
 
 #[test]

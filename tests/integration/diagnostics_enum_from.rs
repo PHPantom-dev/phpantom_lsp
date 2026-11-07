@@ -46,7 +46,7 @@ fn from_with_unknown_string_is_an_error() {
         diags,
         vec![(
             DiagnosticSeverity::Error,
-            "No case of enum 'Status' is backed by 'Active', so Status::from() throws a ValueError"
+            "No case of enum Status is backed by 'Active', so Status::from() throws a ValueError"
                 .to_string()
         )]
     );
@@ -59,7 +59,7 @@ fn try_from_with_unknown_string_is_a_warning() {
         diags,
         vec![(
             DiagnosticSeverity::Warning,
-            "No case of enum 'Status' is backed by 'Active', so Status::tryFrom() always returns null"
+            "No case of enum Status is backed by 'Active', so Status::tryFrom() always returns null"
                 .to_string()
         )]
     );

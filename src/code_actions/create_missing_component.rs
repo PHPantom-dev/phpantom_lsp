@@ -1,5 +1,5 @@
 //! Quick-fixes for a component tag nothing resolves
-//! (`unknown_blade_component`, `unknown_livewire_component`): "Change to"
+//! (`invalid_blade_component`, `invalid_livewire_component`): "Change to"
 //! the closest component names, and create the component.
 //!
 //! A Blade tag is offered both shapes `make:component` produces: an

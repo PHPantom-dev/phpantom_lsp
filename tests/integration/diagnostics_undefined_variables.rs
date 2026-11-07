@@ -2596,7 +2596,7 @@ function helper() {
     ]);
     assert_eq!(
         flagged_names(&diags),
-        vec!["Undefined variable '$missing'".to_string()]
+        vec!["Undefined variable $missing".to_string()]
     );
 }
 
@@ -2661,7 +2661,7 @@ define('WPINC', 'wp-includes');
     ]);
     assert_eq!(
         flagged_names(&diags),
-        vec!["Undefined variable '$missing'".to_string()]
+        vec!["Undefined variable $missing".to_string()]
     );
 }
 
@@ -2685,7 +2685,7 @@ function test(): void {
     ]);
     assert_eq!(
         flagged_names(&diags),
-        vec!["Undefined variable '$missing'".to_string()]
+        vec!["Undefined variable $missing".to_string()]
     );
 }
 
