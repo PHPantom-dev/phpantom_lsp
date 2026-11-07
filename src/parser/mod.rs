@@ -64,6 +64,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
+use crate::backend::file_access::ImportBlock;
 use crate::types::*;
 
 /// Context for resolving PHPDoc type annotations from docblock comments.
@@ -161,6 +162,64 @@ impl Backend {
             .collect()
     }
 
+    /// A program's `namespace` blocks, each with the imports it declares,
+    /// or nothing for a program with fewer than two.
+    fn namespace_blocks(program: &Program<'_>) -> Vec<NamespaceSpan> {
+        let mut blocks: Vec<NamespaceSpan> = Vec::new();
+        for statement in program.statements.iter() {
+            if let Statement::Namespace(ns) = statement {
+                let mut block_use_map = HashMap::new();
+                let mut block_symbol_imports = crate::types::SymbolImports::default();
+                Self::extract_use_statements_from_statements(
+                    ns.statements().iter(),
+                    &mut block_use_map,
+                    Some(&mut block_symbol_imports),
+                );
+                let span = ns.span();
+                blocks.push(NamespaceSpan {
+                    namespace: ns
+                        .name
+                        .as_ref()
+                        .map(|ident| bytes_to_str(ident.value()).to_string())
+                        .filter(|n| !n.is_empty()),
+                    start: span.start.offset,
+                    end: span.end.offset,
+                    use_map: block_use_map,
+                    symbol_imports: block_symbol_imports,
+                });
+            }
+        }
+        if blocks.len() <= 1 {
+            blocks.clear();
+        }
+        blocks
+    }
+
+    /// The imports in effect at `offset` in `content`, read from the source
+    /// itself, for a file whose parse left no state behind (one loaded on
+    /// demand through PSR-4 or the class map).
+    pub(crate) fn import_block_in_source(content: &str, offset: u32) -> ImportBlock {
+        with_parsed_program(content, "import_block_in_source", |program, _content| {
+            let blocks = Self::namespace_blocks(program);
+            if let Some(span) = NamespaceSpan::containing(&blocks, offset) {
+                return ImportBlock::of_span(span);
+            }
+            let mut use_map = HashMap::new();
+            let mut symbol_imports = crate::types::SymbolImports::default();
+            Self::extract_use_statements_from_statements(
+                program.statements.iter(),
+                &mut use_map,
+                Some(&mut symbol_imports),
+            );
+            ImportBlock {
+                namespace: Self::extract_namespace_from_statements(program.statements.iter()),
+                use_map,
+                symbol_imports,
+                range: None,
+            }
+        })
+    }
+
     /// Like [`parse_php_versioned_with_namespaces`] but also returns the
     /// file's `namespace` blocks, each with its own imports, and tags every
     /// class with the index of the block that declared it (`None` outside
@@ -187,34 +246,7 @@ impl Backend {
                 None,
             );
             let namespace = Self::extract_namespace_from_statements(program.statements.iter());
-
-            let mut blocks: Vec<NamespaceSpan> = Vec::new();
-            for statement in program.statements.iter() {
-                if let Statement::Namespace(ns) = statement {
-                    let mut block_use_map = HashMap::new();
-                    let mut block_symbol_imports = crate::types::SymbolImports::default();
-                    Self::extract_use_statements_from_statements(
-                        ns.statements().iter(),
-                        &mut block_use_map,
-                        Some(&mut block_symbol_imports),
-                    );
-                    let span = ns.span();
-                    blocks.push(NamespaceSpan {
-                        namespace: ns
-                            .name
-                            .as_ref()
-                            .map(|ident| bytes_to_str(ident.value()).to_string())
-                            .filter(|n| !n.is_empty()),
-                        start: span.start.offset,
-                        end: span.end.offset,
-                        use_map: block_use_map,
-                        symbol_imports: block_symbol_imports,
-                    });
-                }
-            }
-            if blocks.len() <= 1 {
-                blocks.clear();
-            }
+            let blocks = Self::namespace_blocks(program);
 
             let doc_ctx = DocblockCtx {
                 trivias: program.trivia.as_slice(),

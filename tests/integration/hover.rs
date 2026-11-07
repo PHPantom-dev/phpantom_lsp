@@ -212,6 +212,46 @@ function run(Pen $pen, Ink $ink): void {
     assert!(text.contains("Pen"), "should resolve to Pen: {text}");
 }
 
+/// A body read from a file loaded through PSR-4, never opened, resolves the
+/// names it writes through that file's own imports.
+#[tokio::test]
+async fn hover_untyped_method_in_unopened_file_reads_body_with_its_imports() {
+    let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
+    let user = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let decoy = "<?php\nnamespace App\\Repository;\nclass User {}\n";
+    let queries = concat!(
+        "<?php\n",
+        "namespace App\\Repository;\n",
+        "use App\\Entity\\User;\n",
+        "final class Queries {\n",
+        "    public function make() { return new User(); }\n",
+        "}\n",
+    );
+    let service = concat!(
+        "<?php\n",
+        "namespace App\\Service;\n",
+        "use App\\Repository\\Queries;\n",
+        "function run(Queries $queries): void {\n",
+        "    $made = $queries->make();\n",
+        "}\n",
+    );
+    let (backend, dir) = create_psr4_workspace(
+        composer,
+        &[
+            ("src/Entity/User.php", user),
+            ("src/Repository/User.php", decoy),
+            ("src/Repository/Queries.php", queries),
+            ("src/Service/Users.php", service),
+        ],
+    );
+    let uri = Uri::from_file_path(dir.path().join("src/Service/Users.php")).unwrap();
+    open_php(&backend, &uri, service).await;
+
+    let text = markup_hover_at(&backend, &uri, 4, 6).await;
+    assert!(text.contains("namespace App\\Entity;"), "{text}");
+    assert!(text.contains("$made = User"), "{text}");
+}
+
 /// An arrow function's body writes what `return <expr>;` would, so a
 /// variable assigned there is in the arrow's scope, and reads the scope
 /// `Closure::call()` binds rather than the lexical `$this`.

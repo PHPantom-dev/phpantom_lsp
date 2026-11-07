@@ -521,3 +521,42 @@ async fn an_expression_object_added_to_a_builder_is_replayed() {
     .await;
     assert!(shows(&hover, "list<array{email: string}>"), "{hover}");
 }
+
+/// A builder a method in a file the editor has not opened returns names its
+/// entity through that file's imports.
+#[tokio::test]
+async fn a_builder_from_an_unopened_file_reads_its_imports() {
+    let queries = "<?php
+namespace App\\Repository;
+use App\\Entity\\User;
+use Doctrine\\ORM\\EntityManagerInterface;
+use Doctrine\\ORM\\QueryBuilder;
+final class Queries {
+    public function __construct(private EntityManagerInterface $em) {}
+    public function users(): QueryBuilder {
+        return $this->em->createQueryBuilder()->select('u')->from(User::class, 'u');
+    }
+}
+";
+    let (service, position) = split_cursor(
+        "<?php
+namespace App\\Service;
+use App\\Repository\\Queries;
+function run(Queries $queries): void {
+    $users = $queries->users()->getQuery()->getResult();
+    $us§ers;
+}
+",
+    );
+    let mut files: Vec<(&str, &str)> = STUBS.to_vec();
+    files.push(("src/Repository/Queries.php", queries));
+    files.push(("src/Service/Users.php", &service));
+    let (backend, dir) = create_psr4_workspace(COMPOSER, &files);
+    let uri = Uri::from_file_path(dir.path().join("src/Service/Users.php")).unwrap();
+    open_document(&backend, &uri, "php", &service).await;
+
+    let hover = hover_text_at(&backend, &uri, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(shows(&hover, "list<User>"), "{hover}");
+}

@@ -475,3 +475,37 @@ final class SanctumSession {
         ]
     );
 }
+
+/// A Doctrine-style annotation names its class through the file's imports,
+/// at the start of a docblock line or nested in another one's arguments.
+#[test]
+fn an_import_named_by_an_annotation_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Routing\Annotation\Route;
+use Drupal\Core\Annotation\Translation;
+use Drupal\Core\Block\Annotation\Block;
+use Http\Mentioned;
+use Http\Group;
+
+/**
+ * @ORM\Entity
+ * @Block(admin_label = @Translation("Users"))
+ * @group slow
+ */
+final class User
+{
+    /** @Route("/users", name="Mentioned") */
+    public function list(): void {}
+}
+"#;
+    assert_eq!(
+        unused_imports(content),
+        [
+            "Unused import 'Http\\Group'",
+            "Unused import 'Http\\Mentioned'",
+        ]
+    );
+}

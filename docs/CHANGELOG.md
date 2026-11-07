@@ -145,6 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Docblock annotations name their class.** A Doctrine-style annotation such as `@ORM\Entity` or `@Route("/users")`, including one nested in another's arguments, now counts as a use of the import it goes through, so that import is no longer reported as unused or removed by the quick fix and `phpantom_lsp fix`. Go-to-definition, hover, references, and rename reach the annotation's class.
+- **Method bodies in files not yet opened.** A method with no return type, or one that returns a Doctrine query builder, declared in a file the editor has not opened now reads the class names in its body through that file's imports, so `return new User();` gives the imported `User` rather than a class of that name in the method's own namespace.
 - **Doctrine mapping files right after startup.** An entity mapped by an XML or YAML file now has its fields, magic finders, and DQL types as soon as the editor starts, instead of only once the background index has finished.
 - **Methods `__call` takes because the caller cannot see them.** A call to a private or protected method from where it is out of reach, on a class with `__call` or `__callStatic`, is no longer checked against that method's parameters, since the magic handler takes it. A call that can see the method now has its named arguments checked.
 - **Docblock types a native type rules out.** A docblock member the native type cannot hold, such as the `resource` in `@return resource|Socket|false` on a function declared `: Socket|false`, is now dropped, so `socket_import_stream()` returns `Socket|false` instead of being rejected where a `Socket` is expected.

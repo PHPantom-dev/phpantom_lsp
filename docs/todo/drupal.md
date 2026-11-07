@@ -396,7 +396,7 @@ annotation, and many contributed modules still do. `@Block` and
 `@Translation` name annotation classes, but Drupal's annotated plugin
 discovery finds them without a `use` import: it reads a plugin type's
 annotation class and namespaces from its plugin manager, not from the
-file. Once [B707](bugs.md#b707-a-docblock-annotation-does-not-name-its-class)
-reads annotations through the imports, resolve a name the imports don't
-cover through the namespaces of the plugin type the class is discovered
-for, so that go-to-definition, hover, and references reach the class.
+file. Annotations are read through the imports already; resolve a name
+the imports don't cover through the namespaces of the plugin type the
+class is discovered for, so that go-to-definition, hover, and references
+reach the class.

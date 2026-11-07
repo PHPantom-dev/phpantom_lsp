@@ -108,6 +108,14 @@ pub(crate) enum ClassRefContext {
     /// `@see` legally carries URIs, prose, and naming suggestions in
     /// addition to FQSENs, so an unresolvable target is not an error.
     DocblockSee,
+    /// As the name of a Doctrine-style docblock annotation (`@ORM\Entity`,
+    /// `@Route("/users")`), at the start of a docblock line or nested in
+    /// another annotation's arguments.
+    ///
+    /// The name resolves through the file's imports like any class name, but
+    /// a docblock tag is not obliged to name a class (`@Given`, `@group`),
+    /// so one that resolves to nothing is not an error.
+    Annotation,
 }
 
 /// How a [`SymbolKind::MemberAccess`] span names its member.

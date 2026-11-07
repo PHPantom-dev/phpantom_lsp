@@ -78,7 +78,7 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let block = self.import_block_at(uri, offset as usize);
+        let block = self.import_block_in(uri, content, offset as usize);
         let class_loader = self.resolved_class_loader_with(&local_classes);
         let source_class_loader =
             self.class_loader_with(&local_classes, &block.use_map, &block.namespace);
