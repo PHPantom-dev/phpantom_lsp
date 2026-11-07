@@ -25,15 +25,28 @@ impl Backend {
         let source = self.get_file_content_arc(uri)?;
         let offset = position_to_offset(&source, position) as usize;
         let tag = tag_at(&source, offset)?;
+        let resolved;
         let name = if tag.name_span.start <= offset && offset <= tag.name_span.end {
             tag.name
         } else if tag.name == "x-component" {
-            let attr = tag.attributes.iter().find(|attr| attr.name == "is")?;
+            let attr = tag
+                .attributes
+                .iter()
+                .find(|attr| matches!(attr.name, "is" | ":is"))?;
             let value = attr.value.as_ref()?;
             if !value.contains(&offset) {
                 return None;
             }
-            &source[value.clone()]
+            if attr.name == ":is" {
+                resolved =
+                    super::component_context::attribute_type(self, uri, &source, value, true)?
+                        .as_literal()?
+                        .string_content()?
+                        .into_owned();
+                &resolved
+            } else {
+                &source[value.clone()]
+            }
         } else {
             return None;
         };
@@ -133,34 +146,70 @@ impl Backend {
                 )
             })
             .collect();
+        let mut complete_attribute = |name: &str| {
+            let name = crate::blade::component_tags::kebab_case(name);
+            let name = if prefix.starts_with(':') {
+                format!(":{name}")
+            } else {
+                name
+            };
+            if name.starts_with(prefix)
+                && !items.iter().any(|item| item.label == name)
+                && !tag.attributes.iter().any(|attr| {
+                    attr.name.trim_start_matches(':') == name.trim_start_matches(':')
+                        && attr.span.start != start
+                })
+            {
+                items.push(item(
+                    &name,
+                    "Tempest component attribute",
+                    range,
+                    CompletionItemKind::Property,
+                ));
+            }
+        };
+        if tag.name == "x-component" {
+            complete_attribute("is");
+        }
         {
             let components = self.tempest_components();
-            if let Some(path) = components.get(tag.name)
-                && let Some(component) = self.get_file_content_arc(&crate::util::path_to_uri(path))
-            {
+            let names = if tag.name == "x-component" {
+                tag.attributes
+                    .iter()
+                    .find(|attr| matches!(attr.name, "is" | ":is"))
+                    .and_then(|attr| {
+                        let value = attr.value.as_ref()?;
+                        if attr.name == ":is" {
+                            super::component_context::attribute_type(
+                                self, uri, &source, value, false,
+                            )
+                        } else {
+                            Some(crate::php_type::PhpType::literal_string_value(
+                                &source[value.clone()],
+                            ))
+                        }
+                    })
+                    .as_ref()
+                    .map(|ty| {
+                        super::component_context::component_names(ty)
+                            .into_iter()
+                            .map(|name| name.into_owned())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            } else {
+                vec![tag.name.to_owned()]
+            };
+            for path in names.iter().filter_map(|name| components.get(name)) {
+                let Some(component) = self.get_file_content_arc(&crate::util::path_to_uri(path))
+                else {
+                    continue;
+                };
                 for (name, _) in crate::blade::signature::declarations(&component) {
                     if matches!(name.as_str(), "this" | "attributes" | "slots") {
                         continue;
                     }
-                    let name = crate::blade::component_tags::kebab_case(&name);
-                    let name = if prefix.starts_with(':') {
-                        format!(":{name}")
-                    } else {
-                        name
-                    };
-                    if name.starts_with(prefix)
-                        && !tag.attributes.iter().any(|attr| {
-                            attr.name.trim_start_matches(':') == name.trim_start_matches(':')
-                                && attr.span.start != start
-                        })
-                    {
-                        items.push(item(
-                            &name,
-                            "Tempest component attribute",
-                            range,
-                            CompletionItemKind::Property,
-                        ));
-                    }
+                    complete_attribute(&name);
                 }
             }
         }

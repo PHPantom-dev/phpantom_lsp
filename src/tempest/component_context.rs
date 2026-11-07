@@ -10,7 +10,7 @@ use mago_syntax::walker::Walker;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::{offset_to_position, position_to_offset};
 
 use super::discovery::canonical_uri;
@@ -25,7 +25,7 @@ struct Argument {
 
 struct Call {
     start: usize,
-    target: String,
+    target: Option<String>,
     enclosing: Option<usize>,
     args: Vec<Argument>,
     foreach: Option<Range<usize>>,
@@ -66,11 +66,14 @@ impl Template {
             };
             let mut region = stack.last().and_then(|(_, region, _)| *region);
             let mut component = None;
-            if let Some(path) = components.get(tag.name) {
+            let target = components.get(tag.name);
+            if tag.name == "x-component" || target.is_some() {
                 let index = calls.len();
                 calls.push(Call {
                     start: tag.span.start,
-                    target: canonical_uri(&crate::util::path_to_uri(path)),
+                    target: target
+                        .filter(|_| tag.name != "x-component")
+                        .map(|path| canonical_uri(&crate::util::path_to_uri(path))),
                     enclosing: region,
                     args: tag
                         .attributes
@@ -81,12 +84,18 @@ impl Template {
                                 ":if" | ":elseif" | ":else" | ":foreach" | ":forelse" | ":apply"
                             ) && !attr.name.starts_with("::")
                         })
-                        .map(|attr| Argument {
-                            name: crate::blade::component_tags::camel_case_attr_name(
+                        .map(|attr| {
+                            let mut name = crate::blade::component_tags::camel_case_attr_name(
                                 attr.name.trim_start_matches(':'),
-                            ),
-                            value: attr.value.clone(),
-                            expression: attr.name.starts_with(':'),
+                            );
+                            if let Some(first) = name.get_mut(..1) {
+                                first.make_ascii_lowercase();
+                            }
+                            Argument {
+                                name,
+                                value: attr.value.clone(),
+                                expression: attr.name.starts_with(':'),
+                            }
                         })
                         .collect(),
                     foreach: tag
@@ -138,9 +147,6 @@ pub(super) fn infer(
     roots: HashMap<String, Scope>,
 ) -> HashMap<String, Scope> {
     let components = backend.tempest_components();
-    if components.is_empty() {
-        return roots;
-    }
     let aliases: HashMap<_, _> = backend
         .open_files
         .read()
@@ -148,36 +154,12 @@ pub(super) fn infer(
         .filter(|uri| super::is_view(uri))
         .map(|uri| (canonical_uri(uri), uri.clone()))
         .collect();
-    let mut pending: VecDeque<_> = templates.iter().map(|uri| canonical_uri(uri)).collect();
     let mut nodes = BTreeMap::new();
-    while let Some(key) = pending.pop_front() {
-        if nodes.contains_key(&key) {
-            continue;
-        }
-        let uri = aliases.get(&key).unwrap_or(&key);
-        let Some(source) = backend.get_file_content_arc(uri) else {
-            continue;
-        };
-        let node = Template::read(uri.clone(), source, &components);
-        pending.extend(node.calls.iter().map(|call| call.target.clone()));
-        if backend.symbol_map_for(uri).is_none() {
-            backend.update_ast(uri, &node.source);
-        }
-        nodes.insert(key, node);
-    }
-    let mut incoming: HashMap<String, Vec<(String, usize)>> = HashMap::new();
-    for (uri, node) in &nodes {
-        for (index, call) in node.calls.iter().enumerate() {
-            incoming
-                .entry(call.target.clone())
-                .or_default()
-                .push((uri.clone(), index));
-        }
-    }
-    let mut passed: HashMap<(String, usize), Scope> = HashMap::new();
+    let mut incoming: HashMap<String, BTreeMap<(String, usize), Scope>> = HashMap::new();
+    let mut outgoing: HashMap<(String, usize), BTreeSet<String>> = HashMap::new();
     let mut scopes = roots.clone();
-    let mut pending: VecDeque<_> = nodes.keys().cloned().collect();
-    let mut queued: BTreeSet<_> = nodes.keys().cloned().collect();
+    let mut queued: BTreeSet<_> = templates.iter().map(|uri| canonical_uri(uri)).collect();
+    let mut pending: VecDeque<_> = queued.iter().cloned().collect();
     let mut visits: HashMap<String, usize> = HashMap::new();
     while let Some(uri) = pending.pop_front() {
         queued.remove(&uri);
@@ -188,38 +170,75 @@ pub(super) fn infer(
             continue;
         }
         *count += 1;
-        let node = &nodes[&uri];
+        let Some(node) = load_template(backend, &uri, &aliases, &components, &mut nodes) else {
+            continue;
+        };
         let mut scope = roots.get(&uri).cloned().unwrap_or_default();
-        for caller in incoming.get(&uri).into_iter().flatten() {
-            if let Some(data) = passed.get(caller) {
-                scope.merge(data.clone());
-            }
+        for data in incoming
+            .get(&uri)
+            .into_iter()
+            .flat_map(|calls| calls.values())
+        {
+            scope.merge(data.clone());
         }
         if let Some(previous) = scopes.get(&uri) {
             scope.regions = previous.regions.clone();
         }
         backend.publish_tempest_scope(&node.uri, &node.source, &scope);
-        let mut regions = BTreeMap::new();
+        let mut regions: BTreeMap<usize, Scope> = BTreeMap::new();
         for (index, call) in node.calls.iter().enumerate() {
-            let Some(target) = nodes.get(&call.target) else {
-                continue;
+            let data = arguments(backend, &node, call, &scope);
+            let targets: BTreeSet<_> = if let Some(target) = &call.target {
+                std::iter::once(target.clone()).collect()
+            } else {
+                data.vars
+                    .get("is")
+                    .into_iter()
+                    .flat_map(component_names)
+                    .filter_map(|name| components.get(name.as_ref()))
+                    .map(|path| canonical_uri(&crate::util::path_to_uri(path)))
+                    .collect()
             };
-            let mut data = arguments(backend, node, call, &scope);
-            let slots = slot_scopes(backend, target, &data);
-            data.slot_reads = slot_reads(node, target, call, &scope, &slots);
             let key = (uri.clone(), index);
-            if passed.get(&key) != Some(&data) {
-                passed.insert(key, data.clone());
-                if queued.insert(call.target.clone()) {
-                    pending.push_back(call.target.clone());
+            // A selector may change as caller data arrives. Remove its old
+            // contribution so a previously selected component loses stale types.
+            for previous in outgoing.get(&key).into_iter().flatten() {
+                if !targets.contains(previous) {
+                    incoming.get_mut(previous).unwrap().remove(&key);
+                    if queued.insert(previous.clone()) {
+                        pending.push_back(previous.clone());
+                    }
                 }
             }
-            for (start, name) in &call.slots {
-                regions.insert(
-                    *start,
-                    slots.get(name).cloned().unwrap_or_else(|| data.clone()),
-                );
+            let mut resolved = BTreeSet::new();
+            for target_uri in targets {
+                let Some(target) =
+                    load_template(backend, &target_uri, &aliases, &components, &mut nodes)
+                else {
+                    continue;
+                };
+                let mut data = data.clone();
+                let slots = slot_scopes(backend, &target, &data);
+                data.slot_reads = slot_reads(&node, &target, call, &scope, &slots);
+                let callers = incoming.entry(target_uri.clone()).or_default();
+                if callers.get(&key) != Some(&data) {
+                    callers.insert(key.clone(), data.clone());
+                    if queued.insert(target_uri.clone()) {
+                        pending.push_back(target_uri.clone());
+                    }
+                }
+                for (start, name) in &call.slots {
+                    regions
+                        .entry(*start)
+                        .or_default()
+                        .merge(slots.get(name).cloned().unwrap_or_else(|| data.clone()));
+                }
+                resolved.insert(target_uri);
             }
+            for (start, _) in &call.slots {
+                regions.entry(*start).or_insert_with(|| data.clone());
+            }
+            outgoing.insert(key, resolved);
         }
         if scope.regions != regions {
             scope.regions = regions;
@@ -231,6 +250,75 @@ pub(super) fn infer(
         scopes.insert(uri, scope);
     }
     scopes
+}
+
+fn load_template(
+    backend: &Backend,
+    key: &str,
+    aliases: &HashMap<String, String>,
+    components: &BTreeMap<String, std::path::PathBuf>,
+    nodes: &mut BTreeMap<String, Arc<Template>>,
+) -> Option<Arc<Template>> {
+    if let Some(node) = nodes.get(key) {
+        return Some(Arc::clone(node));
+    }
+    let uri = aliases.get(key).map_or(key, String::as_str);
+    let source = backend.get_file_content_arc(uri)?;
+    let node = Arc::new(Template::read(uri.to_owned(), source, components));
+    if backend.symbol_map_for(uri).is_none() {
+        backend.update_ast(uri, &node.source);
+    }
+    nodes.insert(key.to_owned(), Arc::clone(&node));
+    Some(node)
+}
+
+/// Only literal alternatives identify a component; an arbitrary string must
+/// not send data to every registered component.
+pub(super) fn component_names(ty: &PhpType) -> Vec<std::borrow::Cow<'_, str>> {
+    fn collect<'a>(ty: &'a PhpType, names: &mut Vec<std::borrow::Cow<'a, str>>) {
+        match ty.kind() {
+            TypeKind::Nullable(inner) => collect(inner, names),
+            TypeKind::Union(members) => {
+                for member in members {
+                    collect(member, names);
+                }
+            }
+            _ => {
+                if let Some(name) = ty.as_literal().and_then(|value| value.string_content()) {
+                    names.push(name);
+                }
+            }
+        }
+    }
+    let mut names = Vec::new();
+    collect(ty, &mut names);
+    names
+}
+
+/// Read a selector through the same PHP lowering and expression engine as
+/// component arguments. Navigation only claims standalone string literals;
+/// variables and constants retain their ordinary PHP definitions.
+pub(super) fn attribute_type(
+    backend: &Backend,
+    uri: &str,
+    source: &str,
+    range: &Range<usize>,
+    literal_only: bool,
+) -> Option<PhpType> {
+    let php = backend.analysable_content(uri)?;
+    let map = backend.template_source_map(uri)?;
+    let file = backend.file_context(uri);
+    let loaders = backend.file_loaders(&file);
+    let _engine = crate::type_engine::call_resolution::activate_type_engine_caches();
+    crate::parser::with_parsed_program(&php, "tempest_component_selector", |program, content| {
+        let mut expressions = PhpExpressions::default();
+        Expressions.walk_program(program, &mut expressions);
+        let expr = expressions.at(source, range, &map, content)?;
+        if literal_only && !matches!(expr, Expression::Literal(Literal::String(_))) {
+            return None;
+        }
+        Some(super::view_data::expression_type(expr, content, &loaders))
+    })
 }
 
 fn arguments(backend: &Backend, node: &Template, call: &Call, parent: &Scope) -> Scope {
@@ -265,21 +353,20 @@ fn arguments(backend: &Backend, node: &Template, call: &Call, parent: &Scope) ->
                 .as_ref()
                 .filter(|range| !node.source[(*range).clone()].trim().is_empty())
             {
-                let start = range.start + node.source[range.clone()].len()
-                    - node.source[range.clone()].trim_start().len();
-                let position = map.blade_to_php(offset_to_position(&node.source, start));
-                let offset = position_to_offset(content, position);
                 expressions
-                    .values
-                    .get(&{ offset })
+                    .at(&node.source, range, &map, content)
                     .map(|expr| super::view_data::expression_type(expr, content, &loaders))
                     .unwrap_or_else(PhpType::mixed)
             } else {
                 PhpType::true_()
             };
-            attrs.push(ty.clone());
-            if variable_name(&arg.name) {
-                scope.vars.insert(arg.name.clone(), ty);
+            if call.target.is_none() {
+                forward_dynamic_argument(&ty, &arg.name, &mut scope, &mut attrs);
+            } else {
+                attrs.push(ty.clone());
+                if variable_name(&arg.name) {
+                    scope.vars.insert(arg.name.clone(), ty);
+                }
             }
         }
         if let Some(range) = &call.foreach {
@@ -311,6 +398,16 @@ fn arguments(backend: &Backend, node: &Template, call: &Call, parent: &Scope) ->
             }
         }
     });
+    if call.target.is_none() {
+        scope.bound_this = Some(
+            Scope {
+                vars: scope.globals.clone(),
+                ..Scope::default()
+            }
+            .this_type()
+            .unwrap_or_else(PhpType::object),
+        );
+    }
     scope.vars.insert(
         "attributes".into(),
         PhpType::generic(
@@ -329,6 +426,81 @@ fn arguments(backend: &Backend, node: &Template, call: &Call, parent: &Scope) ->
         ),
     );
     scope
+}
+
+/// Tempest's dynamic wrapper rebuilds an HTML tag: scalar attributes become
+/// strings, false/null disappear, and objects/arrays enter the new view's data.
+fn forward_dynamic_argument(ty: &PhpType, name: &str, scope: &mut Scope, attrs: &mut Vec<PhpType>) {
+    #[derive(Default)]
+    struct Forwarded {
+        attributes: Vec<PhpType>,
+        globals: Vec<PhpType>,
+        omitted: bool,
+    }
+    impl Forwarded {
+        fn push(&mut self, ty: &PhpType) {
+            match ty.kind() {
+                TypeKind::Union(members) => {
+                    for member in members {
+                        self.push(member);
+                    }
+                }
+                TypeKind::Nullable(inner) => {
+                    self.omitted = true;
+                    self.push(inner);
+                }
+                _ if ty.is_null() || ty.is_false() => self.omitted = true,
+                _ if ty.is_true() || ty.is_bool() => {
+                    self.omitted |= !ty.is_true();
+                    self.attributes.push(PhpType::literal_string_value(""));
+                }
+                _ if ty.is_string_subtype() => self.attributes.push(ty.clone()),
+                _ if ty.is_int_subtype() || ty.is_float_subtype() => {
+                    self.attributes.push(
+                        ty.as_literal()
+                            .and_then(|value| value.parse_i64())
+                            .map(|value| PhpType::literal_string_value(value.to_string()))
+                            .unwrap_or_else(PhpType::numeric_string),
+                    );
+                }
+                _ if !ty.is_mixed()
+                    && (ty.is_object_like()
+                        || ty.is_array_like()
+                        || ty.is_closure()
+                        || matches!(ty.kind(), TypeKind::Intersection(_))) =>
+                {
+                    self.globals.push(ty.clone())
+                }
+                _ => {
+                    self.attributes.push(PhpType::mixed());
+                    self.globals.push(PhpType::mixed());
+                }
+            }
+        }
+    }
+    let mut forwarded = Forwarded::default();
+    forwarded.push(ty);
+    attrs.extend(forwarded.attributes.iter().cloned());
+    if !variable_name(name) {
+        return;
+    }
+    let inherited = scope.globals.get(name);
+    let mut values = forwarded.attributes.clone();
+    values.extend(forwarded.globals.iter().cloned());
+    if forwarded.omitted {
+        values.extend(inherited.cloned());
+    }
+    if !values.is_empty() {
+        scope.vars.insert(name.to_owned(), PhpType::union(values));
+    }
+    if !forwarded.globals.is_empty() {
+        if forwarded.omitted || !forwarded.attributes.is_empty() {
+            forwarded.globals.extend(inherited.cloned());
+        }
+        scope
+            .globals
+            .insert(name.to_owned(), PhpType::union(forwarded.globals));
+    }
 }
 
 fn slot_scopes(backend: &Backend, node: &Template, data: &Scope) -> BTreeMap<String, Scope> {
@@ -456,6 +628,26 @@ fn slot_reads(
 struct PhpExpressions<'ast, 'arena> {
     values: BTreeMap<u32, &'ast Expression<'arena>>,
     loop_variables: Vec<&'ast DirectVariable<'arena>>,
+}
+
+impl<'ast, 'arena> PhpExpressions<'ast, 'arena> {
+    fn at(
+        &self,
+        source: &str,
+        range: &Range<usize>,
+        map: &crate::template::source_map::TemplateSourceMap,
+        content: &str,
+    ) -> Option<&'ast Expression<'arena>> {
+        let value = &source[range.clone()];
+        if value.trim().is_empty() {
+            return None;
+        }
+        let start = range.start + value.len() - value.trim_start().len();
+        let position = map.blade_to_php(offset_to_position(source, start));
+        self.values
+            .get(&{ position_to_offset(content, position) })
+            .copied()
+    }
 }
 
 struct Expressions;

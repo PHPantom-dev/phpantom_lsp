@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Dynamic Tempest components.** Components selected by statically known `is` and `:is` values infer their data and slot scope. Their declared attributes complete, and literal component names navigate to the view file. Contributed by @shuvroroy.
+
 - **Configured Tempest views.** Component completion and navigation read Tempest discovery configuration and explicit registrations. View helpers pass their callers’ data to templates through statically known paths. Contributed by @shuvroroy.
 - **Static file paths.** Paths built from `__DIR__`, `__FILE__`, and `dirname()` keep their known values across files and inherited constants. Contributed by @shuvroroy.
 - **Tempest view data inference.** Templates infer data passed by callers and components, including custom View objects and slot scope. Explicit `@var` annotations can refine inferred types. Contributed by @shuvroroy.
@@ -148,6 +150,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Updated embedded phpstorm-stubs.** Adds the `ps`, `proctitle`, and `yaz` extensions, updates Judy and Relay, and corrects many parameter and return types to match the PHP documentation, including `oci_fetch_object()`, `pg_loopen()`, and nullable RdKafka message payloads.
 
 ### Fixed
+
+- **Tempest attribute casing.** Component attributes such as `BookTitle` now expose `$bookTitle`, matching Tempest’s naming rules. Contributed by @shuvroroy.
 
 - **Registered Tempest component names.** Tag completion now offers explicitly registered components whose names do not start with `x-`. Contributed by @shuvroroy.
 - **Property types on an annotated `$this`.** Reading a property through an explicitly typed `$this` now preserves its type in assignments and loops, including Tempest views. Contributed by @shuvroroy.

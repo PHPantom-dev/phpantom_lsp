@@ -1520,3 +1520,9 @@ locals at the receiving component's outlet for that invocation. Component
 attributes override global view data without inheriting arbitrary caller
 locals. A work queue propagates changed scopes through component calls;
 recursive component inference is bounded.
+
+Dynamic component selectors use the same expression engine. The work queue
+loads selected targets as their names become known and removes contributions
+when a selector changes. The dynamic wrapper's scalar attributes become
+strings, while objects and arrays enter the inner view's data. Literal `:is`
+names navigate to components; variables and constants keep PHP navigation.
