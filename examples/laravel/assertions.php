@@ -68,6 +68,17 @@ $capsule->schema()->create('customers', function (\Illuminate\Database\Schema\Bl
     $table->timestamps();
 });
 $customerDraft = \App\Models\Customer::make(['name' => 'Ada', 'email' => 'ada@example.test']);
+$profile = \App\Models\CustomerProfile::make(['full_name' => 'Ada']);
+check('A modern setter writes the backing name column', $profile->getAttributes() === ['name' => 'Ada']);
+$profile->fill(['full_name' => 'Grace']);
+check('fill accepts a computed attribute with a setter', $profile->getAttributes() === ['name' => 'Grace']);
+check('A read-only accessor can override a real column', $profile->name === 'GRACE' && $capsule->schema()->hasColumn('customers', 'name'));
+check('Read-only computed attributes remain readable', $profile->display_name === 'GRACE' && $profile->initials === 'G');
+check('Read-only computed attributes have no setters', !$profile->hasSetMutator('display_name') && !$profile->hasAttributeSetMutator('initials'));
+check('Appended attributes are serialized without becoming columns', $profile->toArray() === ['name' => 'GRACE', 'display_name' => 'GRACE', 'initials' => 'G']);
+foreach (['display_name', 'initials', 'full_name'] as $computed) {
+    check("$computed has no backing database column", !$capsule->schema()->hasColumn('customers', $computed));
+}
 check(
     'Fillable combines class attributes with the model property',
     $customerDraft->getFillable() === ['email', 'name']
@@ -125,6 +136,12 @@ check(
         && \App\Models\Customer::whereColumn('name', '!=', 'email')->count() === 1
 );
 $fillableBakery = \App\Models\Bakery::make(['flour' => 'whole wheat']);
+check(
+    'Bakery appends the computed warmth accessor',
+    $fillableBakery->warmth === 'warm'
+        && in_array('warmth', $fillableBakery->getAppends(), true)
+        && $fillableBakery->makeVisible('warmth')->toArray()['warmth'] === 'warm'
+);
 check(
     'Bakery exposes flour as fillable and kitchen_id as guarded',
     $fillableBakery->isFillable('flour')

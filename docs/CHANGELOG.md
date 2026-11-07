@@ -504,6 +504,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Route files nothing visibly loads.** A route file in a subdirectory of `routes/` that no route file or service provider loads, as when `web.php` requires a whole directory through `glob()`, now has its routes completed and checked under their own names instead of reported as unknown.
 - **Routes of `laravel-package-tools` packages.** Route files a package registers with `$package->hasRoutes()`, as Filament does, are now read, so their routes complete and are no longer reported as unknown.
 - **Edits to route files outside `routes/`.** Editing a route file loaded from elsewhere, such as a module's route file that a service provider loads, now updates route completion, diagnostics and go-to-definition right away.
+- **Computed Eloquent attributes stay out of column suggestions.** Read-only accessors and appended values no longer appear as query columns or assignment keys unless another source declares a backing column. Attributes with setters still complete in `create()` and `fill()`, and computed properties remain available on models and in serialization settings. Contributed by @shuvroroy.
 
 #### Blade templates
 

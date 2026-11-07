@@ -13,7 +13,7 @@
 //! - `$casts` definitions
 //! - `$dates` definitions
 //! - `$attributes` defaults
-//! - `$fillable`/`$guarded`/`$hidden`/`$visible`/`$appends` column names
+//! - `$fillable`/`$guarded`/`$hidden`/`$visible` column names
 //! - Timestamp columns (`created_at`, `updated_at` unless disabled)
 //! - The `SoftDeletes` column (`deleted_at` unless renamed)
 //! - `@property` / `@property-read` / `@property-write` docblock tags (parsed from raw docblock)
@@ -32,7 +32,9 @@ use std::collections::HashSet;
 
 use crate::atom::atom;
 use crate::php_type::PhpType;
-use crate::types::{ClassInfo, MethodInfo, ParameterInfo, PropertySource};
+use crate::types::{
+    ClassInfo, MethodInfo, ParameterInfo, PropertyInfo, PropertySource, model_declaration,
+};
 
 use super::ELOQUENT_BUILDER_FQN;
 use super::helpers::snake_to_pascal;
@@ -42,12 +44,41 @@ use super::helpers::snake_to_pascal;
 /// This reads directly from `LaravelMetadata` fields and from the
 /// class's virtual properties, avoiding a full
 /// `resolve_class_fully` call (which would recurse through
-/// `LaravelModelProvider`).  Pass at least an inheritance-resolved class:
-/// a raw one lacks the `$fillable`/`$casts` it inherits from a parent
-/// model.
+/// `LaravelModelProvider`). Pass a resolved model so inherited column
+/// metadata and synthesized accessor sources are available.
 pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
+    collect_attribute_names(class, AttributeNameKind::Column)
+}
+
+/// The operation that consumes an Eloquent attribute name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AttributeNameKind {
+    /// A database query, which requires a backing column.
+    Column,
+    /// Model assignment, which also accepts computed attributes with setters.
+    Writable,
+    /// Serialization, which also accepts computed attributes without setters.
+    Serializable,
+}
+
+/// Collect model names appropriate for a query, assignment, or serialization.
+pub(crate) fn collect_attribute_names(class: &ClassInfo, kind: AttributeNameKind) -> Vec<String> {
+    collect_names(class, class.properties.iter().map(AsRef::as_ref), kind)
+}
+
+fn collect_names<'a>(
+    class: &ClassInfo,
+    properties: impl Iterator<Item = &'a PropertyInfo> + Clone,
+    kind: AttributeNameKind,
+) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut columns = Vec::new();
+    // Names a computed property claims that this operation cannot take.
+    let rejected: HashSet<&str> = properties
+        .clone()
+        .filter(|property| !accepts_property(property, kind))
+        .map(|property| property.name.as_str())
+        .collect();
 
     let mut push = |name: &str| {
         // `$guarded = ['*']` describes mass-assignment policy, not a column.
@@ -70,8 +101,18 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
             push(col);
         }
 
-        // $fillable, $guarded, $hidden, $appends
-        for (col, _) in laravel.column_lists() {
+        for (col, sources) in laravel.column_lists() {
+            if kind != AttributeNameKind::Serializable && sources & !model_declaration::APPENDS == 0
+            {
+                continue;
+            }
+            // Visibility lists can name computed properties. An explicit
+            // fillable/guarded entry remains independent column evidence.
+            if sources & (model_declaration::FILLABLE | model_declaration::GUARDED) == 0
+                && rejected.contains(col.as_str())
+            {
+                continue;
+            }
             push(col);
         }
 
@@ -105,17 +146,10 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
     }
 
     // ── Virtual properties already on the class ─────────────────────
-    for prop in class.properties.iter().filter(|property| {
-        property.is_virtual
-            && !matches!(
-                property.source,
-                Some(
-                    PropertySource::Relationship { .. }
-                        | PropertySource::RelationshipCount { .. }
-                        | PropertySource::Pivot
-                )
-            )
-    }) {
+    for prop in properties
+        .clone()
+        .filter(|property| property.is_virtual && accepts_property(property, kind))
+    {
         push(&prop.name);
     }
 
@@ -125,16 +159,40 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
     // after this function), so read them from the tags parsed when the
     // class was extracted.
     for (name, _type) in class.doc_properties() {
-        push(name);
+        if !rejected.contains(name.as_str()) {
+            push(name);
+        }
     }
 
     columns
 }
 
+fn accepts_property(property: &PropertyInfo, kind: AttributeNameKind) -> bool {
+    match &property.source {
+        Some(
+            PropertySource::Relationship { .. }
+            | PropertySource::RelationshipCount { .. }
+            | PropertySource::Pivot,
+        ) => false,
+        Some(
+            PropertySource::Accessor {
+                column: None,
+                mutator,
+                ..
+            }
+            | PropertySource::ComputedProperty { mutator, .. },
+        ) => {
+            kind == AttributeNameKind::Serializable
+                || (kind == AttributeNameKind::Writable && mutator.is_some())
+        }
+        _ => true,
+    }
+}
+
 /// Build `where{PropertyName}()` virtual methods for a model's columns.
 ///
-/// Reads column names directly from `class` (no recursive resolution,
-/// so pass an inheritance-resolved class) and synthesizes a `where{StudlyCase}()` method for each.
+/// Reads column names directly from a resolved `class` without recursing
+/// through the providers, and synthesizes a `where{StudlyCase}()` method for each.
 /// Each method accepts a single `$value` parameter (typed `mixed`) and
 /// returns `Builder<ConcreteModel>`.
 ///
@@ -145,7 +203,31 @@ pub fn build_where_property_methods_for_class(
     existing_method_names: &HashSet<String>,
 ) -> Vec<MethodInfo> {
     let columns = collect_column_names(class);
+    build_where_property_methods(class, columns, existing_method_names)
+}
 
+/// Build dynamic query methods using the properties the model provider has
+/// just synthesized, before they are attached to the resolved class.
+pub(super) fn build_where_property_methods_with_properties(
+    class: &ClassInfo,
+    properties: &[PropertyInfo],
+    existing_method_names: &HashSet<String>,
+) -> Vec<MethodInfo> {
+    let columns = collect_names(
+        class,
+        properties
+            .iter()
+            .chain(class.properties.iter().map(AsRef::as_ref)),
+        AttributeNameKind::Column,
+    );
+    build_where_property_methods(class, columns, existing_method_names)
+}
+
+fn build_where_property_methods(
+    class: &ClassInfo,
+    columns: Vec<String>,
+    existing_method_names: &HashSet<String>,
+) -> Vec<MethodInfo> {
     if columns.is_empty() {
         return Vec::new();
     }

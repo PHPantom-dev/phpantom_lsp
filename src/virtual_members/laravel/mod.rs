@@ -85,17 +85,19 @@
 //!   unless timestamps are disabled or the columns are already covered.
 //!
 //! - **Column name properties.** Column names from `$fillable`,
-//!   `$guarded`, `$hidden`, and `$appends` produce `mixed`-typed
+//!   `$guarded`, `$hidden`, and `$visible` produce `mixed`-typed
 //!   virtual properties as a last-resort fallback.  Columns already
-//!   covered by any of the sources above are skipped.
+//!   covered by any of the sources above are skipped. `$appends` only
+//!   controls serialization; the corresponding accessor declares the property.
 //!
 //! - **`where{PropertyName}()` dynamic methods.** Laravel's
 //!   `Builder::__call()` translates calls like `whereBrandId($value)`
 //!   into `where('brand_id', $value)`.  For each known column on the
 //!   model (from `$casts`, `$dates`, `$attributes` defaults,
-//!   `$fillable`/`$guarded`/`$hidden`/`$appends`, timestamps,
-//!   `@property` annotations, and properties declared on the class
-//!   itself), a virtual `where{StudlyCase}()` method is synthesized.
+//!   `$fillable`/`$guarded`/`$hidden`/`$visible`, timestamps,
+//!   `@property` annotations, and schema columns), a virtual
+//!   `where{StudlyCase}()` method is synthesized. Computed accessors
+//!   without a backing column are excluded.
 //!   The method accepts a `mixed` value parameter and returns
 //!   `Builder<ConcreteModel>`.  These methods appear as both instance
 //!   methods on the Builder (for chaining: `$query->whereBrandId(42)`)
@@ -164,6 +166,7 @@ mod view_data;
 mod view_names;
 pub(crate) mod where_property;
 
+pub(crate) use accessors::has_attribute_setter;
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use assets::{AssetWorld, InertiaPages, resolve_asset_definitions};
 pub(crate) use auth::{

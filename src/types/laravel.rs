@@ -178,7 +178,8 @@ pub struct LaravelMetadata {
     /// These are simple string lists (no type information), so the
     /// `LaravelModelProvider` synthesizes `mixed`-typed virtual
     /// properties as a last-resort fallback when a column is not
-    /// already covered by `$casts` or `$attributes`. Consumers use
+    /// already covered by `$casts` or `$attributes`. `$appends` only
+    /// describes serialization and does not establish a column. Consumers use
     /// [`column_lists`](Self::column_lists) to apply guarded precedence.
     pub column_names: Vec<String>,
     /// The [`model_declaration`] list flags each entry of
