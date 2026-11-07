@@ -423,6 +423,16 @@ impl Backend {
                 };
                 ("Route argument", detail)
             }
+            // An argument is shown by its name, as the parameter it fills.
+            StringKeyKind::YiiDefinitionArgument => {
+                let (class, method, name) =
+                    crate::yii::definitions::split_definition_argument_key(key);
+                shown = name;
+                (
+                    "Argument",
+                    self.yii_definition_argument_detail(class, method, name),
+                )
+            }
             // A parameter is shown by its name, under the paths of its
             // route.
             StringKeyKind::DrupalRouteParameter => {

@@ -132,6 +132,7 @@ impl Backend {
         let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let is_doctrine = self.is_doctrine_project();
         let is_symfony = self.is_symfony_project();
+        let is_yii = self.is_yii_project();
         // Discovering the routes reads every user file's symbol map, which
         // waits for the workspace index, so like the implementation lenses
         // they appear once indexing is done and the client re-pulls.
@@ -182,6 +183,10 @@ impl Backend {
             }
 
             self.push_laravel_related_lenses(uri, class, &index, &mut lenses);
+
+            if is_yii {
+                lenses.extend(self.build_yii_definition_lens(uri, class, &index));
+            }
 
             let route_actions = routes
                 .as_deref()
@@ -913,6 +918,39 @@ impl Backend {
             };
             lenses.extend(self.targets_lens(uri, position, title, targets));
         }
+    }
+
+    /// The lens on a class that Yii DI definitions bind or build, which
+    /// goes to them.  `None` when no definition names the class.
+    fn build_yii_definition_lens(
+        &self,
+        uri: &str,
+        class: &ClassInfo,
+        index: &LineIndex,
+    ) -> Option<CodeLens> {
+        if class.keyword_offset == 0 {
+            return None;
+        }
+        let targets: Vec<(String, Location)> = self
+            .yii_definition_locations(class.fqn().as_str())
+            .into_iter()
+            .map(|location| {
+                let label = self
+                    .workspace_relative_path(location.uri.as_str())
+                    .unwrap_or_else(|| location.uri.to_string());
+                (label, location)
+            })
+            .collect();
+        let title = match targets.as_slice() {
+            [(label, _)] => format!("DI definition: {label}"),
+            _ => format!("{} DI definitions", targets.len()),
+        };
+        let line = index.line_of(class.keyword_offset as usize);
+        let position = Position {
+            line: line as u32,
+            character: line_indent(index, line),
+        };
+        self.targets_lens(uri, position, title, targets)
     }
 
     /// Build the "which tests cover this class" lens for a class

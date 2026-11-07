@@ -177,6 +177,14 @@ pub(crate) enum DocblockMemberRef {
     /// [`crate::class_lookup::constructor_promotes`]), and drops the span
     /// otherwise.
     AttributeNamedArg,
+    /// A method or property a Yii DI definition names by a key,
+    /// `'setLogger()'` or `'$pageSize'`, with the class the definition
+    /// builds as the subject (see [`crate::yii::definitions`]).
+    ///
+    /// The container calls the method or sets the property on the object
+    /// it builds, and throws for one the class does not have, so it is
+    /// checked.
+    YiiDefinition,
 }
 
 impl DocblockMemberRef {

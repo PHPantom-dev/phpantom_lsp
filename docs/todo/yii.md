@@ -3,10 +3,11 @@
 Known gaps and missing features in PHPantom's Yii support. Yii 3 is
 built from small, typed components with little magic, so the generic
 engine already types most of it. On top of that, route names, route
-arguments, and view names complete, navigate, and are checked, and path
-aliases navigate to their declarations. What is still missing is the
-navigation between the rest of the names Yii keeps in configuration (DI
-definitions, `$params` keys) and the code and files they point to.
+arguments, view names, and the members and arguments DI definitions name
+complete, navigate, and are checked, and path aliases navigate to their
+declarations. What is still missing is the navigation between the rest
+of the names Yii keeps in configuration (`$params` keys) and the code
+and files they point to.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).
@@ -33,53 +34,6 @@ within the same impact tier.
 
 ---
 
-## Y4. DI container configuration
-
-**Impact: Medium-High · Complexity: Medium-High**
-
-```php
-// config/common/di/mailer.php
-return [
-    MailerInterface::class => [
-        'class' => Mailer::class,
-        '__construct()' => ['transport' => Reference::to(TransportInterface::class)],
-        'setLogger()' => [Reference::to(LoggerInterface::class)],
-    ],
-];
-```
-
-`yiisoft/di` definitions are PHP arrays keyed by the ID (usually an
-interface) with string keys that name constructor arguments
-(`'__construct()'`), methods to call (`'setLogger()'`), and properties
-to set (`'$name'`). Make those strings navigate, complete, rename with
-the member they name, and report a name the class does not have.
-Navigate from an interface to the definition that binds it, and from
-`$container->get(Foo::class)` or a `Reference::to()` to the definition.
-
-The same syntax (`yiisoft/definitions`) appears outside the `di` group,
-and `yiisoft/demo-blog` uses every one of these:
-
-- the `widgets` config group, which configures every instance of a
-  widget class (`GridView::class => ['urlCreator()' => […]]`);
-- definitions written inline in PHP, such as a service provider's
-  `getDefinitions()` or a static `definition()` helper returning
-  `['class' => self::class, '__construct()' => […]]`;
-- `'class' => …` entries nested inside another definition's arguments.
-
-Recognise a definition by its shape (a `class` key or a class-string
-key, with `'name()'` and `'$name'` keys) wherever the array is written,
-not only in files the `di` group lists.
-
-The config files are found through `yiisoft/config`: the project's
-`configuration.php` lists the groups (`di`, `di-web`, `params`, …) and
-the files in each, and packages contribute their own through
-`composer.json`. Read that statically rather than running the merge.
-
-**Where to look:** the Symfony container support (`src/symfony/container.rs`)
-for the navigation and rename side.
-
----
-
 ## Y6. `$params` keys in configuration
 
 **Impact: Medium · Complexity: Medium**
@@ -96,7 +50,11 @@ file, and the environment's override). Every app generated from
 navigate from a key to the entry that declares it (the last file in
 merge order wins), type the read as the declared value rather than
 `mixed`, and report a key no params file declares. The merge order
-comes from the same `configuration.php` reading Y4 needs.
+comes from `yiisoft/config`: the project's `configuration.php` lists the
+groups and the files in each, and packages contribute their own through
+the `config-plugin` of their `composer.json`, which `installed.json`
+repeats (`src/yii/definitions.rs` reads the `di` groups from there
+already). Read that statically rather than running the merge.
 
 ---
 

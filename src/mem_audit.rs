@@ -1457,6 +1457,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                     sym.add(placeholder.name.capacity());
                 }
             }
+            sym.add(
+                sm.yii_definitions.capacity() * size_of::<crate::symbol_map::YiiDefinitionSite>(),
+            );
         }
     }
     eprintln!(

@@ -64,6 +64,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::YiiRouteArgument
         | StringKeyKind::DrupalRouteParameter
         | StringKeyKind::DrupalThemeHookVariable => CompletionItemKind::Field,
+        StringKeyKind::YiiDefinitionArgument => CompletionItemKind::Variable,
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => CompletionItemKind::Function,
         StringKeyKind::TwigVariable => CompletionItemKind::Variable,
         StringKeyKind::Route
@@ -226,13 +227,15 @@ impl Backend {
             // only the Symfony completion knows, and a route argument from
             // the routes of the handler it is written in, and a Drupal route
             // parameter from the route its call names, and a theme hook's
-            // variable from the `#theme` of its render array.  A hook name is
+            // variable from the `#theme` of its render array, and a DI
+            // definition's argument from the method it is passed to.  A hook name is
             // completed with its patterns as snippets, which only the
             // WordPress completion builds.
             StringKeyKind::SymfonyTranslation
             | StringKeyKind::WordPressHook
             | StringKeyKind::SymfonyConfigKey
             | StringKeyKind::YiiRouteArgument
+            | StringKeyKind::YiiDefinitionArgument
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalConfigKey
             | StringKeyKind::DrupalThemeHookVariable

@@ -310,7 +310,10 @@ impl Backend {
 
 /// Whether every class `class` extends and every trait it or they use
 /// loads, so that its members are all known.
-fn ancestors_load(class: &ClassInfo, loader: &impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>>) -> bool {
+pub(crate) fn ancestors_load(
+    class: &ClassInfo,
+    loader: &impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>>,
+) -> bool {
     let mut pending: Vec<_> = class
         .parent_class
         .iter()

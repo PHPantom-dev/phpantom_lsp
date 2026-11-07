@@ -239,6 +239,8 @@ struct ExtractionCtx<'a> {
     yii_read_chains: Vec<(u32, u32)>,
     /// The routes the file declares.
     routes: Vec<crate::symbol_map::RouteSite>,
+    /// The classes the file's DI definitions bind and build.
+    yii_definitions: Vec<crate::symbol_map::YiiDefinitionSite>,
     /// Whether the project uses Doctrine, which gates reading DQL.
     doctrine: bool,
     /// The DQL variables and fields read so far (see [`doctrine_dql`]).
@@ -369,6 +371,7 @@ mod twig;
 mod twig_context;
 mod wordpress;
 mod yii;
+mod yii_definitions;
 mod yii_routes;
 
 use class_like::*;
@@ -388,6 +391,7 @@ use twig::*;
 use twig_context::*;
 use wordpress::*;
 use yii::*;
+use yii_definitions::*;
 use yii_routes::*;
 
 pub(crate) use drupal::{hook_invocation, is_entity_type_attribute};
@@ -611,6 +615,7 @@ fn extract_symbol_map_inner(
         names_yii_router: None,
         yii_read_chains: Vec::new(),
         routes: Vec::new(),
+        yii_definitions: Vec::new(),
         doctrine,
         dql: Default::default(),
         dql_aliases: Vec::new(),
@@ -795,6 +800,7 @@ fn extract_symbol_map_inner(
         drupal_hooks: ctx.drupal_hooks,
         drupal_computed_hooks: ctx.drupal_computed_hooks,
         routes: ctx.routes,
+        yii_definitions: ctx.yii_definitions,
         dql_aliases: ctx.dql_aliases,
         dql_syntax_errors: ctx.dql_syntax_errors,
         dql_builder_methods: ctx.dql_builder_methods,

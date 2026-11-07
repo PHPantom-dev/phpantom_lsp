@@ -171,6 +171,12 @@ pub(crate) enum StringKeyKind {
     /// names `@runtime`), in any string of a Yii project.  Declared under
     /// `params['yiisoft/aliases']['aliases']` (see `yii::aliases`).
     YiiAlias,
+    /// An argument a Yii DI definition passes by name, `'transport'` in
+    /// `'__construct()' => ['transport' => …]` or in the arguments of a
+    /// `'setLogger()'` key, keyed by the class and the method as well as the
+    /// name (see `yii::definitions::definition_argument_key`).  Declared by
+    /// the method's parameter of that name.
+    YiiDefinitionArgument,
     /// A WordPress hook name: declared by each place that fires it (a
     /// `do_action()`, an `apply_filters()`, and their `_ref_array` and
     /// `_deprecated` forms), and read by `add_action()`, `add_filter()`, and
@@ -289,9 +295,11 @@ impl StringKeyKind {
             | Self::TwigFilter
             | Self::TwigFunction
             | Self::TwigVariable => KeyFramework::Twig,
-            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument | Self::YiiAlias => {
-                KeyFramework::Yii
-            }
+            Self::YiiView
+            | Self::YiiRoute
+            | Self::YiiRouteArgument
+            | Self::YiiAlias
+            | Self::YiiDefinitionArgument => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
             Self::DrupalEntityType
             | Self::DrupalRoute
@@ -784,6 +792,17 @@ pub(crate) enum ContainerValue {
     Parent(Atom),
     /// The type of a parameter's value, generalized (`'en'` is a `string`).
     Type(crate::php_type::PhpType),
+}
+
+/// A class a Yii DI definition names: the ID a definition is keyed by
+/// (`MailerInterface::class => …`), or the class it builds
+/// (`'class' => Mailer::class`).  The range is that of the class's name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct YiiDefinitionSite {
+    pub start: u32,
+    pub end: u32,
+    /// The class, fully qualified, without the leading `\`.
+    pub class: Atom,
 }
 
 // ─── Routes ─────────────────────────────────────────────────────────────────

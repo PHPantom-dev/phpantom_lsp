@@ -13,7 +13,10 @@ return [
     // Try: go-to-definition on InMemoryPostRepository. The definition binds
     // the interface PostController asks for to this class, passes the
     // constructor's $posts argument by name, calls setLogger(), and sets
-    // the public $pageSize property.
+    // the public $pageSize property. Go to the definition of 'posts',
+    // 'setLogger()', or '$pageSize', rename setLogger() in
+    // InMemoryPostRepository and watch the key follow, clear a key to
+    // complete it, or misspell one to see it reported.
     PostRepositoryInterface::class => [
         'class' => InMemoryPostRepository::class,
         '__construct()' => [

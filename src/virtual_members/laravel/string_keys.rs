@@ -102,6 +102,7 @@ pub(crate) fn resolve_laravel_string_key(
             backend.twig_callable_definitions(*kind, key)
         }
         StringKeyKind::YiiRouteArgument => backend.yii_route_argument_locations(key),
+        StringKeyKind::YiiDefinitionArgument => backend.yii_definition_argument_locations(key),
         StringKeyKind::WordPressHook => backend.wordpress_hook_definitions(key),
     }
 }
@@ -355,6 +356,7 @@ pub(crate) fn find_laravel_string_key_references(
         // which `hook_theme()` arrays declare.
         StringKeyKind::TranslationDomain
         | StringKeyKind::YiiRouteArgument
+        | StringKeyKind::YiiDefinitionArgument
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::DrupalConfigName
         | StringKeyKind::DrupalConfigKey

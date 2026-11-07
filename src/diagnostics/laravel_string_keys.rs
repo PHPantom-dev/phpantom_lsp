@@ -47,6 +47,7 @@ enum CheckedStringKind {
     YiiView,
     YiiRoute,
     YiiRouteArgument,
+    YiiDefinitionArgument,
     DrupalRoute,
     DrupalRenderElement,
     DrupalLibrary,
@@ -83,6 +84,7 @@ impl CheckedStringKind {
             StringKeyKind::YiiView => Self::YiiView,
             StringKeyKind::YiiRoute => Self::YiiRoute,
             StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
+            StringKeyKind::YiiDefinitionArgument => Self::YiiDefinitionArgument,
             StringKeyKind::DrupalRoute => Self::DrupalRoute,
             StringKeyKind::DrupalRenderElement => Self::DrupalRenderElement,
             StringKeyKind::DrupalLibrary => Self::DrupalLibrary,
@@ -570,6 +572,7 @@ impl<'a> DeclaredKeys<'a> {
                 .map(|exists| (exists, "view", "invalid_yii_view")),
             CheckedStringKind::YiiRoute => self.judge_yii_route(key),
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
+            CheckedStringKind::YiiDefinitionArgument => self.judge_yii_definition_argument(key),
             CheckedStringKind::DrupalRoute => self.judge_drupal_route(key),
             CheckedStringKind::DrupalRenderElement => self.judge_drupal_render_element(key),
             CheckedStringKind::DrupalLibrary => crate::drupal::libraries::judge_library(
@@ -704,6 +707,20 @@ impl<'a> DeclaredKeys<'a> {
             declared.iter().any(|declared| declared == name),
             "route argument",
             "invalid_yii_route_argument",
+        ))
+    }
+
+    /// A DI definition passes an argument by name to the parameter of that
+    /// name, and the container throws for a name the method does not
+    /// take.  Nothing can be said of a method whose parameters are not all
+    /// known, or that collects any name.
+    fn judge_yii_definition_argument(&self, key: &str) -> Verdict {
+        let (class, method, name) = crate::yii::definitions::split_definition_argument_key(key);
+        let declared = self.backend.yii_definition_parameters(class, method)?;
+        Some((
+            declared.iter().any(|declared| declared == name),
+            "argument",
+            "invalid_yii_definition_argument",
         ))
     }
 
@@ -1079,6 +1096,20 @@ impl Backend {
                         label,
                         crate::yii::routes::split_route_argument_key(key).1
                     ),
+                    CheckedStringKind::YiiDefinitionArgument => {
+                        let (class, method, name) =
+                            crate::yii::definitions::split_definition_argument_key(key);
+                        let method = self
+                            .yii_defined_class(class)
+                            .and_then(|class| {
+                                class.get_method_ci(method).map(|m| m.name.to_string())
+                            })
+                            .unwrap_or_else(|| method.to_string());
+                        format!(
+                            "Unknown {label}: '{name}' is not a parameter of {}::{method}()",
+                            crate::util::short_name(class)
+                        )
+                    }
                     CheckedStringKind::SymfonyTranslation => {
                         let (domain, message) =
                             crate::symfony::translations::split_translation_key(key);

@@ -339,6 +339,9 @@ pub(crate) struct SymbolMap {
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,
+    /// The classes the file's Yii DI definitions bind and build, in source
+    /// order.  Empty for every file that writes none.
+    pub yii_definitions: Vec<YiiDefinitionSite>,
     /// The DQL identification variables the file's queries and query
     /// builders declare, with what each stands for.  Empty for every file
     /// that declares none.
