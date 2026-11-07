@@ -133,7 +133,7 @@ fn followed_by_access(bytes: &[u8], end: usize) -> bool {
 
 /// The offset just past the heredoc or nowdoc whose `<<<` is at `start`:
 /// past its closing label, or the end of `bytes` when it is never closed.
-fn skip_heredoc(bytes: &[u8], start: usize) -> usize {
+pub(crate) fn skip_heredoc(bytes: &[u8], start: usize) -> usize {
     let mut i = start + 3;
     while matches!(bytes.get(i), Some(b' ' | b'\t')) {
         i += 1;

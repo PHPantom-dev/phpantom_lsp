@@ -35,6 +35,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
         StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::Property,
         StringKeyKind::View
+        | StringKeyKind::TempestView { .. }
         | StringKeyKind::TwigTemplate
         | StringKeyKind::YiiView
         | StringKeyKind::Asset
@@ -244,7 +245,8 @@ impl Backend {
             | StringKeyKind::TwigBlock
             | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
-            | StringKeyKind::YiiView => Arc::new([]),
+            | StringKeyKind::YiiView
+            | StringKeyKind::TempestView { .. } => Arc::new([]),
             // Any string can start with an alias, so the names are offered
             // wherever one is typed (`crate::completion::yii_aliases`).
             StringKeyKind::YiiAlias => Arc::new([]),

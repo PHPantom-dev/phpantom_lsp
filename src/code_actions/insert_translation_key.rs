@@ -30,7 +30,7 @@ impl Backend {
             .map(|diagnostic| {
                 (
                     diagnostic,
-                    self.translate_blade_range_to_php(uri, diagnostic.range),
+                    self.translate_template_range_to_php(uri, diagnostic.range),
                 )
             })
             .filter(|(_, range)| ranges_overlap(range, &params.range))

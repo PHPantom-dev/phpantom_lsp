@@ -337,6 +337,7 @@ mod symfony_routes;
 mod symfony_serializer_groups;
 mod symfony_templates;
 mod symfony_translations;
+mod tempest;
 mod twig_blocks;
 mod twig_callables;
 mod twig_templates;

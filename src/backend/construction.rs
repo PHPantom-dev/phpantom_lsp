@@ -113,6 +113,7 @@ impl BackendState {
             resolved_class_cache,
             laravel: crate::backend::laravel::LaravelState::new(laravel_aliases),
             blade: blade::state::BladeState::default(),
+            tempest: crate::tempest::TempestState::default(),
             is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             is_doctrine,
             is_symfony: Arc::new(std::sync::atomic::AtomicBool::new(true)),

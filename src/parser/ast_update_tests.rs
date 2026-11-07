@@ -392,7 +392,7 @@ fn racing_template_parses_leave_one_consistent_lowering() {
     backend.update_ast(uri, template);
     backend.apply_ast_index_parse_results_batch(vec![stale]);
 
-    let virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+    let virtual_php = backend.template_virtual_php_arc(uri).unwrap();
     let symbol_map = backend.symbol_map_for(uri).unwrap();
     assert!(
         symbol_map.matches_source(&virtual_php),
@@ -407,7 +407,7 @@ fn racing_template_parses_leave_one_consistent_lowering() {
     let position = crate::text_position::offset_to_position(&virtual_php, item.start as usize);
     assert_eq!(
         backend
-            .try_translate_php_to_blade(uri, position)
+            .try_translate_php_to_template(uri, position)
             .map(|p| p.line),
         Some(1),
         "App\\Item is on the template's second line"
@@ -440,13 +440,13 @@ fn stale_scope_batch_does_not_clobber_a_fresher_reinference() {
         },
     );
     backend.update_ast(uri, template);
-    let fresh_virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+    let fresh_virtual_php = backend.template_virtual_php_arc(uri).unwrap();
 
     // The index worker's batch, built from the empty scope, lands last.
     backend.apply_ast_index_parse_results_batch(vec![stale]);
 
     assert_eq!(
-        backend.blade_virtual_php_arc(uri).unwrap(),
+        backend.template_virtual_php_arc(uri).unwrap(),
         fresh_virtual_php,
         "a batch built from a scope the template has moved past must not \
          overwrite the lowering built from the current scope"

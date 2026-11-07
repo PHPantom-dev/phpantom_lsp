@@ -449,13 +449,13 @@ impl Backend {
         content: &str,
         block: Option<(usize, usize)>,
     ) -> UseBlockInfo {
-        if !self.is_blade_file(uri) {
+        if !self.is_php_template(uri) {
             return analyze_use_block_in(content, block);
         }
         let Some(template) = self.get_file_content_arc(uri) else {
             return analyze_use_block_in(content, block);
         };
-        let source_map = self.blade_source_map(uri);
+        let source_map = self.template_source_map(uri);
         crate::blade::use_block::analyze_template_use_block(&template, source_map.as_deref())
     }
 }

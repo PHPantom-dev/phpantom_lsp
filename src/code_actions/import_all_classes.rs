@@ -308,7 +308,7 @@ impl Backend {
         // A template's virtual PHP also names classes in its prologue and in
         // the PHP a component tag lowers to; only the names it wrote count.
         let template = self.template_text(uri);
-        if template.is_none() && self.is_blade_file(uri) {
+        if template.is_none() && self.is_php_template(uri) {
             return Vec::new();
         }
 

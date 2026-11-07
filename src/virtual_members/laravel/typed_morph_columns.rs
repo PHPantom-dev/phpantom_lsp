@@ -38,7 +38,7 @@ impl Backend {
             return empty_spans();
         }
         let content = self
-            .blade_virtual_php_arc(uri)
+            .template_virtual_php_arc(uri)
             .or_else(|| self.get_file_content_arc(uri));
         let Some(content) = content.filter(|content| map.matches_source(content)) else {
             return empty_spans();
