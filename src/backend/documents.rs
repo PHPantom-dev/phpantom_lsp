@@ -276,6 +276,7 @@ impl Backend {
 
     pub(crate) async fn on_did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
+        self.note_tempest_php_change(&uri);
 
         self.open_files.write().remove(&uri);
         self.did_change_parse_locks.lock().remove(&uri);

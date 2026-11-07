@@ -280,6 +280,7 @@ impl Backend {
 
         let mut connections_changed = false;
         for update in &updates {
+            self.note_tempest_php_change(&update.uri);
             connections_changed |= crate::doctrine::connection::record(
                 &self.doctrine_connections,
                 &update.uri,
