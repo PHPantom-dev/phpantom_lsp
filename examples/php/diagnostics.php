@@ -272,6 +272,26 @@ class UnhandledExceptionDemo
 }
 
 
+// ── Diagnostic: Dead Catch ──────────────────────────────────────────────────
+// A `catch` for an exception nothing in its `try` can throw.  It only judges
+// a `try` whose every call declares what it throws with @throws: a call that
+// declares nothing could throw anything.
+
+class DeadCatchDemo
+{
+    public function load(string $path): string
+    {
+        try {
+            return Scaffolding\readStorageFile($path);  // @throws StorageException
+        } catch (\JsonException) {                     // warning: never thrown
+            return '{}';
+        } catch (Scaffolding\StorageException) {       // fine: thrown above
+            return '';
+        }
+    }
+}
+
+
 // ── Diagnostic: Argument Count ──────────────────────────────────────────────
 // PHPantom flags calls that pass too few or too many arguments.  Variadic
 // parameters accept unlimited trailing args.  Argument unpacking (`...$args`)

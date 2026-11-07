@@ -264,6 +264,7 @@ and `--exclude-code` take. The most common ones are:
 | `invalid_member_access`   | Error    | `private` or `protected` member reached from outside |
 | `unused_import`           | Hint     | `use` statement with no references in the file       |
 | `unreachable_code`        | Hint     | Statements after a `return`, `throw`, `exit`, or `break` |
+| `dead_catch`              | Warning  | `catch` for an exception its `try` cannot throw       |
 | `deprecated_usage`        | Hint     | Reference to a `@deprecated` symbol                  |
 
 ---

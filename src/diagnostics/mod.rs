@@ -264,6 +264,7 @@ pub(crate) mod class_name_mismatch;
 mod collect;
 pub(crate) mod cross_file;
 pub(crate) mod data_providers;
+mod dead_catches;
 mod delivery;
 mod deprecated;
 mod destructuring_offsets;

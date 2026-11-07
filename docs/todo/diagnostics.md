@@ -387,27 +387,3 @@ same.
 
 **Where to look:** `src/framework.rs` (the Doctrine mapping index, which
 D31 also needs) and `src/diagnostics/uninitialized_properties.rs`.
-
----
-
-## D48. A `catch` its `try` cannot reach is not reported
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-try {
-    $this->repo->save($user);        // @throws ORMException only
-} catch (JsonException $e) {         // can never run: not reported
-}
-```
-
-PhpStorm reports a `catch` whose class nothing in the `try` body can throw,
-and so does PHPStan (`catch.neverThrown`). The reachability check already
-works out what a `try` body can throw (`ThrowPoints` in
-`src/type_engine/variable/forward_walk/throw_points.rs`), and treats a
-catch no exception can reach as dead code for variable flow, but nothing
-reports the clause itself. With a diagnostic for it, PHPStan's fix (H24)
-would work without PHPStan.
-
-Only a body whose every call declares what it throws can rule a catch
-out, so this stays quiet wherever an undeclared call could throw anything.

@@ -149,6 +149,7 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         "unhandled_exception",
         Backend::collect_unhandled_exception_diagnostics,
     ),
+    always("dead_catch", Backend::collect_dead_catch_diagnostics),
     always(
         "deprecated_usage",
         Backend::collect_deprecated_diagnostics_with_context,

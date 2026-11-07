@@ -62,6 +62,10 @@ thread_local! {
     /// finds them.
     static SCOPE_UNREACHABLE: RefCell<Vec<(u32, u32)>> = const { RefCell::new(Vec::new()) };
 
+    /// The classes `catch` clauses name, as the same walks found them,
+    /// kept beside [`SCOPE_UNREACHABLE`] for the same reason.
+    static SCOPE_CATCH_TYPES: RefCell<Vec<CatchTypeReach>> = const { RefCell::new(Vec::new()) };
+
     /// Set to `true` while `build_diagnostic_scopes` is populating the
     /// scope cache.  Code that would normally read from the cache should
     /// skip the lookup when this flag is set, because the cache is
@@ -127,6 +131,7 @@ impl Drop for DiagnosticScopeGuard {
             });
             set_whole_scope_coverage();
             SCOPE_UNREACHABLE.with(|cell| cell.borrow_mut().clear());
+            SCOPE_CATCH_TYPES.with(|cell| cell.borrow_mut().clear());
         }
     }
 }
@@ -165,6 +170,7 @@ pub(crate) fn with_diagnostic_scope_cache() -> DiagnosticScopeGuard {
     });
     set_whole_scope_coverage();
     SCOPE_UNREACHABLE.with(|cell| cell.borrow_mut().clear());
+    SCOPE_CATCH_TYPES.with(|cell| cell.borrow_mut().clear());
     DiagnosticScopeGuard { owns: true }
 }
 
@@ -181,6 +187,31 @@ pub(crate) fn record_scope_unreachable(ranges: Vec<(u32, u32)>) {
             }
         }
     });
+}
+
+/// Add the classes a scope-building walk found `catch` clauses naming.
+pub(crate) fn record_scope_catch_types(entries: Vec<CatchTypeReach>) {
+    if entries.is_empty() {
+        return;
+    }
+    SCOPE_CATCH_TYPES.with(|cell| {
+        let mut recorded = cell.borrow_mut();
+        for entry in entries {
+            merge_catch_type(&mut recorded, entry);
+        }
+    });
+}
+
+/// The classes `catch` clauses name that nothing their `try` body throws
+/// can reach, as the walks behind the active scope cache found them.
+pub(crate) fn scope_dead_catch_types() -> Vec<CatchTypeReach> {
+    SCOPE_CATCH_TYPES.with(|cell| {
+        cell.borrow()
+            .iter()
+            .filter(|entry| !entry.reached)
+            .cloned()
+            .collect()
+    })
 }
 
 /// The branches the walks behind the active scope cache proved cannot

@@ -243,6 +243,7 @@ pub(crate) fn process_try<'b>(
     // `finally` block without reaching the statement after the `try`.
     let mut exited: Option<ScopeState> = None;
     for catch in try_stmt.catch_clauses.iter() {
+        throws.record_catch_types(catch, ctx);
         if !throws.reach(catch, ctx) {
             continue;
         }

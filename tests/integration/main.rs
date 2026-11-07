@@ -165,6 +165,7 @@ mod diagnostics_blade_signature;
 mod diagnostics_clone_with;
 mod diagnostics_compound_narrowing;
 mod diagnostics_data_providers;
+mod diagnostics_dead_catches;
 mod diagnostics_deprecated;
 mod diagnostics_destructuring_offsets;
 mod diagnostics_discarded_results;
