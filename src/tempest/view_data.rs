@@ -164,6 +164,7 @@ pub(super) fn collect(
                         arguments(args, false, content, &loaders, &mut scope.vars);
                     }
                     super::custom_views::bind_this(backend, &class, &mut scope);
+                    scope.globals = scope.vars.clone();
                     instantiated.insert(name.trim_start_matches('\\').to_owned());
                     result.push((view.target.clone(), scope));
                 }
@@ -231,6 +232,7 @@ pub(super) fn collect(
             for args in chained.into_iter().rev() {
                 arguments(args, false, content, &loaders, &mut scope.vars);
             }
+            scope.globals = scope.vars.clone();
             result.push((target.uri.to_string(), scope));
         }
         result

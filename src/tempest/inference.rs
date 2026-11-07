@@ -1,6 +1,6 @@
 //! Data passed to Tempest views, resolved in each caller's PHP scope.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use crate::Backend;
@@ -14,6 +14,12 @@ pub(crate) struct Scope {
     pub(super) vars: BTreeMap<String, PhpType>,
     /// The renderer proxy's object, independent of component attributes.
     pub(super) bound_this: Option<PhpType>,
+    /// Isolated slot scopes, keyed by the opening tag's source offset.
+    pub(super) regions: BTreeMap<usize, Scope>,
+    /// View data and direct component loop bindings forwarded to children.
+    pub(super) globals: BTreeMap<String, PhpType>,
+    /// Variables read by supplied slot bodies at each component outlet.
+    pub(super) slot_reads: BTreeMap<usize, BTreeSet<String>>,
 }
 
 impl Scope {
@@ -25,16 +31,23 @@ impl Scope {
             ),
             (left, right) => left.or(right),
         };
-        for (name, ty) in other.vars {
-            self.vars
-                .entry(name)
-                .and_modify(|old| {
-                    *old = crate::blade::call_site_inference::join_call_site_types(vec![
-                        old.clone(),
-                        ty.clone(),
-                    ]);
-                })
-                .or_insert(ty);
+        for (outlet, names) in other.slot_reads {
+            self.slot_reads.entry(outlet).or_default().extend(names);
+        }
+        for (dest, source) in [
+            (&mut self.vars, other.vars),
+            (&mut self.globals, other.globals),
+        ] {
+            for (name, ty) in source {
+                dest.entry(name)
+                    .and_modify(|old| {
+                        *old = crate::blade::call_site_inference::join_call_site_types(vec![
+                            old.clone(),
+                            ty.clone(),
+                        ]);
+                    })
+                    .or_insert(ty);
+            }
         }
     }
 
@@ -126,6 +139,7 @@ impl Backend {
                     .merge(view.scope.clone());
             }
         }
+        let scopes = super::component_context::infer(self, &templates, scopes);
         for uri in templates {
             let canonical = super::discovery::canonical_uri(&uri);
             let fresh = scopes.get(&canonical).cloned().unwrap_or_default();

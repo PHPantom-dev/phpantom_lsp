@@ -103,6 +103,7 @@ pub(super) fn collect(backend: &Backend) -> BTreeMap<String, CustomView> {
                 }
                 let fqn = class.fqn().to_string();
                 if let Some(path) = path {
+                    scope.globals = scope.vars.clone();
                     bind_this(backend, &class, &mut scope);
                     result.insert(
                         fqn,

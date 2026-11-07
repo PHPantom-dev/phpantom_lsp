@@ -1,5 +1,6 @@
 //! Tempest View templates, lowered to PHP for the shared type engine.
 
+mod component_context;
 mod components;
 mod custom_views;
 mod discovery;
