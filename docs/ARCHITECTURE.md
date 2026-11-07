@@ -1115,18 +1115,19 @@ PHP files are parsed in parallel using `std::thread::scope`. The work is split i
 
 Parsed files stay cached in `uri_classes_index`, `symbol_maps`, `file_imports`, and `file_namespaces` after the scan completes. There is no post-scan eviction; keeping the entries means subsequent operations (a second find-references call, go-to-definition on a cross-file symbol) benefit from the work already done.
 
-The workspace reference index keeps its primary map deliberately coarse: it stores candidate URIs and occurrence counts, not a second copy of every source position. CodeLens can therefore answer a conclusive zero without a semantic scan. The first nonzero member query resolves every member receiver in each candidate file while one forward-walked variable scope is active, packs the target class atoms by symbol-span index, and retains that compact per-file semantic layer for later member names. Candidate files are filled in parallel; edits evict their own layer, and signature changes clear layers whose receiver types may have changed. Exact locations remain bounded behind the 50,000-location annotation cache. Refresh-capable clients receive the lens after the background result is ready; other clients retain lazy `codeLens/resolve` as a compatibility path.
+The workspace reference index keeps its primary map deliberately coarse: it stores candidate URIs and occurrence counts, not a second copy of every source position. CodeLens can therefore answer a conclusive zero without a semantic scan. A named-argument label registers under the member key of the name it spells, and counts as a reference rather than registering with a zero: which parameter a label names is the callee's, so only the exact search can say, and a promoted property whose only other spelling is a label at a constructor call has to reach that search instead of being answered as having nothing to find. The first nonzero member query resolves every member receiver in each candidate file while one forward-walked variable scope is active, packs the target class atoms by symbol-span index, and retains that compact per-file semantic layer for later member names. Candidate files are filled in parallel; edits evict their own layer, and signature changes clear layers whose receiver types may have changed. Exact locations remain bounded behind the 50,000-location annotation cache. Refresh-capable clients receive the lens after the background result is ready; other clients retain lazy `codeLens/resolve` as a compatibility path.
 
 ### Cross-file scanning
 
-The `user_file_symbol_maps()` helper snapshots all symbol maps whose URI does not fall under the vendor directory or the internal stub scheme. With `Arc<SymbolMap>`, the snapshot is a vector of cheap reference-count increments rather than deep clones. Four scanners use this snapshot:
+The `user_file_symbol_maps()` helper snapshots all symbol maps whose URI does not fall under the vendor directory or the internal stub scheme. With `Arc<SymbolMap>`, the snapshot is a vector of cheap reference-count increments rather than deep clones. Five scanners use this snapshot:
 
 - `find_class_references` — matches `ClassReference` spans by resolved FQN
-- `find_member_references` — matches `MemberAccess` and `MemberDeclaration` spans by member name, filtered by class hierarchy
+- `find_member_references` — matches `MemberAccess` and `MemberDeclaration` spans by member name, filtered by class hierarchy, together with the `NamedArgument` labels that fill one of its promoted properties — the property spelled at the call that builds the object, which no receiver walk sees
 - `find_function_references` — matches `FunctionCall` spans by resolved FQN
 - `find_constant_references` — matches `ConstantReference` spans by name
+- `find_parameter_label_references` — matches `NamedArgument` spans whose label binds the searched parameter, resolving each label through its own call so that a same-named label of another callee is left out
 
-Variable references (`$this`, local variables) are scoped to the enclosing function/class in the current file only, and do not use the cross-file scan.
+Variable references (`$this`, local variables) are scoped to the enclosing function/class in the current file only, and do not use the cross-file scan. A parameter is the exception: every call that hands it a value by name writes its name outside the declaring file, so a search for a parameter runs the label scan across the workspace beside the file-local uses.
 
 ### Class-aware member filtering
 

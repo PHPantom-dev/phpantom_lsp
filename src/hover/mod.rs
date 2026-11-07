@@ -252,7 +252,7 @@ impl Backend {
         let bare = declaration
             .parameter
             .as_ref()
-            .map(|parameter| parameter.name.strip_prefix('$').unwrap_or(&parameter.name));
+            .map(|parameter| parameter.bare_name());
         // The promoted property is declared at its parameter's own token; a
         // property of the same name elsewhere is a different member.
         let property = owner.properties.iter().find(|property| {

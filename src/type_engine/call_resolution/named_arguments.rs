@@ -207,7 +207,7 @@ impl Backend {
         if !target
             .parameters
             .iter()
-            .any(|parameter| bare_parameter_name(parameter) == name.as_str())
+            .any(|parameter| parameter.bare_name() == name.as_str())
         {
             return None;
         }
@@ -363,13 +363,8 @@ fn find_parameter(target: &ResolvedCallableTarget, name: &Atom) -> Option<Parame
     target
         .parameters
         .iter()
-        .find(|parameter| bare_parameter_name(parameter) == name.as_str())
+        .find(|parameter| parameter.bare_name() == name.as_str())
         .cloned()
-}
-
-/// A parameter's name without the `$` its declaration carries.
-fn bare_parameter_name(parameter: &ParameterInfo) -> &str {
-    parameter.name.strip_prefix('$').unwrap_or(&parameter.name)
 }
 
 /// The method a call expression invokes: the segment after the last `->` or

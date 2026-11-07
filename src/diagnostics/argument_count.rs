@@ -619,7 +619,7 @@ impl Backend {
                 .iter()
                 .chain(resolved.overloads.iter().flatten())
                 .any(|p| {
-                    let declared = bare_parameter_name(p);
+                    let declared = p.bare_name();
                     declared == name
                         || (spelling_is_a_guess && same_name_spelled_differently(declared, name))
                 });
@@ -678,14 +678,6 @@ impl Backend {
         .find_map(|fqn| functions.get(fqn.as_str()))
         .is_some_and(|(uri, _)| crate::stubs::is_stub_uri(uri))
     }
-}
-
-/// A parameter's name without the `$` its declaration carries.
-fn bare_parameter_name(parameter: &crate::types::ParameterInfo) -> &str {
-    parameter
-        .name
-        .strip_prefix('$')
-        .unwrap_or(parameter.name.as_str())
 }
 
 /// Whether two parameter names are one name written differently — `xRounding`
