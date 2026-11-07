@@ -1206,15 +1206,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#s3-multiple-overloaded-signatures" class="md-nav__link">
+  <a href="#s4-named-argument-awareness-in-active-parameter" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        S3. Multiple overloaded signatures
+        S4. Named argument awareness in active parameter
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="S3. Multiple overloaded signatures">
+    <nav class="md-nav" aria-label="S4. Named argument awareness in active parameter">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1230,45 +1230,6 @@
         
           <li class="md-nav__item">
   <a href="#implementation_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Implementation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#s4-named-argument-awareness-in-active-parameter" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        S4. Named argument awareness in active parameter
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="S4. Named argument awareness in active parameter">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#current-state_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Current state
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#implementation_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Implementation
@@ -1490,15 +1451,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#s3-multiple-overloaded-signatures" class="md-nav__link">
+  <a href="#s4-named-argument-awareness-in-active-parameter" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        S3. Multiple overloaded signatures
+        S4. Named argument awareness in active parameter
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="S3. Multiple overloaded signatures">
+    <nav class="md-nav" aria-label="S4. Named argument awareness in active parameter">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1514,45 +1475,6 @@
         
           <li class="md-nav__item">
   <a href="#implementation_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Implementation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#s4-named-argument-awareness-in-active-parameter" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        S4. Named argument awareness in active parameter
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="S4. Named argument awareness in active parameter">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#current-state_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Current state
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#implementation_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Implementation
@@ -1678,45 +1600,17 @@ to variables are not collected there, so they get no signature help.</p>
   callable path) → continues to work unchanged.</li>
 </ul>
 <hr />
-<h2 id="s3-multiple-overloaded-signatures">S3. Multiple overloaded signatures<a class="headerlink" href="#s3-multiple-overloaded-signatures" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<p>Some PHP functions have multiple signatures depending on argument count
-or types.  For example, <code>array_map</code> can be called as:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">array_map(callable $callback, array $array): array</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">array_map(null, array ...$arrays): array</span>
-</code></pre></div>
-<p>The LSP protocol supports returning multiple <code>SignatureInformation</code>
-entries with an <code>activeSignature</code> index.  Today we return a single
-signature.</p>
-<h4 id="current-state_1">Current state<a class="headerlink" href="#current-state_1" title="Permanent link">&para;</a></h4>
-<p>phpstorm-stubs define multiple function entries (or parameter variants
-annotated with <code>#[PhpStormStubsElementAvailable]</code>) for overloaded
-functions.  Our PHP-version filtering selects one variant.  We don't
-model true overloads.</p>
-<h4 id="implementation_1">Implementation<a class="headerlink" href="#implementation_1" title="Permanent link">&para;</a></h4>
-<p>This is a deeper change:</p>
-<ol>
-<li>When a function has multiple stub entries (or when a class has
-   multiple <code>__construct</code> signatures for different PHP versions),
-   collect all applicable signatures.</li>
-<li>Return them all in the <code>signatures</code> array.</li>
-<li>Set <code>activeSignature</code> based on argument-count matching: pick the
-   first signature whose parameter count accommodates the current
-   argument count.</li>
-</ol>
-<p><strong>Deferred</strong> — the single-signature approach covers 99% of real usage.</p>
-<hr />
 <h2 id="s4-named-argument-awareness-in-active-parameter">S4. Named argument awareness in active parameter<a class="headerlink" href="#s4-named-argument-awareness-in-active-parameter" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>When the user types a named argument (<code>callback:</code> in <code>array_map(callback:</code>),
 the active parameter should highlight the <code>$callback</code> parameter regardless
 of its positional index.</p>
-<h4 id="current-state_2">Current state<a class="headerlink" href="#current-state_2" title="Permanent link">&para;</a></h4>
+<h4 id="current-state_1">Current state<a class="headerlink" href="#current-state_1" title="Permanent link">&para;</a></h4>
 <p>Active parameter is computed purely by counting commas before the cursor.
 Named arguments are handled by the named-argument completion system
 (<code>completion/named_args.rs</code>) but the signature help active-parameter
 tracking doesn't consult argument names.</p>
-<h4 id="implementation_2">Implementation<a class="headerlink" href="#implementation_2" title="Permanent link">&para;</a></h4>
+<h4 id="implementation_1">Implementation<a class="headerlink" href="#implementation_1" title="Permanent link">&para;</a></h4>
 <ol>
 <li>In <code>detect_call_site_from_map</code>, after computing the comma-based
    <code>active</code> index, extract the text of the current argument segment.</li>

@@ -881,28 +881,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#c4-non-array-functions-with-dynamic-return-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        C4. Non-array functions with dynamic return types
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#c5-returntypecontract-parameter-dependent-return-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        C5. <code>#[ReturnTypeContract]</code> parameter-dependent return types
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#c6-expectedvalues-parameter-value-suggestions" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1444,28 +1422,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#c4-non-array-functions-with-dynamic-return-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        C4. Non-array functions with dynamic return types
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#c5-returntypecontract-parameter-dependent-return-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        C5. <code>#[ReturnTypeContract]</code> parameter-dependent return types
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#c6-expectedvalues-parameter-value-suggestions" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1690,136 +1646,6 @@ array shapes would require detecting the array key context in the
 GTD path (similar to array shape completion) and searching for the
 key inside the matching <code>array{…}</code> annotation.</p>
 <hr />
-<h2 id="c4-non-array-functions-with-dynamic-return-types">C4. Non-array functions with dynamic return types<a class="headerlink" href="#c4-non-array-functions-with-dynamic-return-types" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: High</strong></p>
-<p>PHPStan also provides dynamic return type extensions for many non-array
-functions. These are lower priority because they mostly refine scalar
-return types (less impactful for class-based completion). <code>abs</code>,
-<code>explode</code>, <code>get_class</code>, <code>date_create</code> and <code>class_implements</code> already
-resolve precisely; the rest still return their declared stub type.</p>
-<table>
-<thead>
-<tr>
-<th>Function</th>
-<th>Return type logic</th>
-<th>PHPStan extension</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>base64_decode</code></td>
-<td><code>string</code> when strict is false</td>
-<td><code>Base64DecodeDynamicFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>filter_var</code></td>
-<td>Return type depends on filter constant</td>
-<td><code>FilterVarDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>filter_input</code></td>
-<td>Same as <code>filter_var</code></td>
-<td><code>FilterInputDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>filter_var_array</code> / <code>filter_input_array</code></td>
-<td>Typed array based on filter definitions</td>
-<td><code>FilterVarArrayDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>get_called_class</code></td>
-<td>Returns <code>class-string&lt;static&gt;</code></td>
-<td><code>GetCalledClassDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>get_parent_class</code></td>
-<td>Returns parent class-string</td>
-<td><code>GetParentClassDynamicFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>gettype</code></td>
-<td>Returns specific string literal for known types</td>
-<td><code>GettypeFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>get_debug_type</code></td>
-<td>Returns specific string literal</td>
-<td><code>GetDebugTypeFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>constant</code></td>
-<td>Resolves named constant to its type</td>
-<td><code>ConstantFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>date</code> / <code>date_format</code></td>
-<td>Precise string return types</td>
-<td><code>DateFunctionReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>hash</code> / <code>hash_file</code> / etc.</td>
-<td>Precise return types</td>
-<td><code>HashFunctionsReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>sprintf</code> / <code>vsprintf</code></td>
-<td>Non-empty-string preservation</td>
-<td><code>SprintfFunctionDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>preg_split</code></td>
-<td><code>list&lt;string&gt;\|false</code> based on flags</td>
-<td><code>PregSplitDynamicReturnTypeExtension</code></td>
-</tr>
-<tr>
-<td><code>str_split</code> / <code>mb_str_split</code></td>
-<td>Non-empty-list</td>
-<td><code>StrSplitFunctionReturnTypeExtension</code></td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h2 id="c5-returntypecontract-parameter-dependent-return-types">C5. <code>#[ReturnTypeContract]</code> parameter-dependent return types<a class="headerlink" href="#c5-returntypecontract-parameter-dependent-return-types" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>phpstorm-stubs use <code>#[ReturnTypeContract]</code> on 4 functions to express
-return type narrowing based on a parameter's value or presence. These
-functions have no <code>@phpstan-return</code> conditional type in their docblocks,
-so the narrowing information is only available through the attribute.</p>
-<p><strong>Attribute FQN:</strong> <code>JetBrains\PhpStorm\Internal\ReturnTypeContract</code>.
-Stub files import it as <code>TypeContract</code> via
-<code>use JetBrains\PhpStorm\Internal\ReturnTypeContract as TypeContract;</code>.
-Match by resolving through the <code>DocblockCtx</code> use-map and comparing the
-last segment of the resolved FQN (<code>ReturnTypeContract</code>).</p>
-<p>The attribute has four named arguments:</p>
-<ul>
-<li><code>true</code> / <code>false</code> — narrows the return type when the annotated boolean
-  parameter is <code>true</code> or <code>false</code>.</li>
-<li><code>exists</code> / <code>notExists</code> — narrows the return type when an optional
-  variadic parameter is passed or omitted.</li>
-</ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// microtime(true) → float, microtime(false) → string</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function microtime(</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    #[TypeContract(true: "float", false: "string")] bool $as_float = false</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">): string|float {}</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">// sscanf with extra args → int|null, without → array|null</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">function sscanf(</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    string $string, string $format,</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    #[TypeContract(exists: "int|null", notExists: "array|null")] mixed &amp;...$vars</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">): array|int|null {}</span>
-</code></pre></div>
-<p>Affected functions: <code>microtime</code>, <code>gettimeofday</code>, <code>sscanf</code>, <code>fscanf</code>.
-Three of the four already carry a hand-written conditional return type in
-<code>stub_patches</code>, which is what makes them resolve today; <code>gettimeofday</code> is
-the one still on its declared union. Reading the attribute would replace
-all four hand-written patches with one rule, and cover any function
-phpstorm-stubs annotates next.</p>
-<p><strong>Implementation:</strong> When resolving a call to one of these functions,
-check whether the annotated parameter was passed (for <code>exists</code>/
-<code>notExists</code>) or matches a literal boolean (for <code>true</code>/<code>false</code>). Use the
-narrowed type from the attribute instead of the declared union return
-type. This integrates into the call return type resolution path.</p>
-<hr />
 <h2 id="c6-expectedvalues-parameter-value-suggestions">C6. <code>#[ExpectedValues]</code> parameter value suggestions<a class="headerlink" href="#c6-expectedvalues-parameter-value-suggestions" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>phpstorm-stubs annotate ~62 parameters and return values with
@@ -1838,19 +1664,19 @@ resolved FQN (<code>ExpectedValues</code>).</p>
 <li><code>valuesFromClass: MyClass::class</code> — one of the class's constants.</li>
 <li><code>flagsFromClass: MyClass::class</code> — bitmask of the class's constants.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function phpinfo(</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    #[ExpectedValues(flags: [INFO_GENERAL, INFO_CREDITS, INFO_CONFIGURATION,</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">                             INFO_MODULES, INFO_ENVIRONMENT, INFO_VARIABLES,</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">                             INFO_LICENSE, INFO_ALL])]</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    int $flags = INFO_ALL</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">): bool {}</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">function pathinfo(</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">    string $path,</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">    #[ExpectedValues(flags: [PATHINFO_DIRNAME, PATHINFO_BASENAME,</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">                             PATHINFO_EXTENSION, PATHINFO_FILENAME])]</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">    int $flags = PATHINFO_ALL</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">): string|array {}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function phpinfo(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    #[ExpectedValues(flags: [INFO_GENERAL, INFO_CREDITS, INFO_CONFIGURATION,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">                             INFO_MODULES, INFO_ENVIRONMENT, INFO_VARIABLES,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">                             INFO_LICENSE, INFO_ALL])]</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    int $flags = INFO_ALL</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">): bool {}</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">function pathinfo(</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    string $path,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    #[ExpectedValues(flags: [PATHINFO_DIRNAME, PATHINFO_BASENAME,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">                             PATHINFO_EXTENSION, PATHINFO_FILENAME])]</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">    int $flags = PATHINFO_ALL</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">): string|array {}</span>
 </code></pre></div>
 <p><strong>Implementation:</strong> During parameter extraction, store the expected
 values metadata. When providing completions inside a function call
@@ -1987,13 +1813,13 @@ is first indexed.</p>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>A <code>set</code> hook that declares no parameter list still receives the assigned
 value as <code>$value</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Item {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    public Price $label {</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">        set {</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">            $this-&gt;stored = $value-&gt;format();  // `$value` resolves</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        }</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    }</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Item {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    public Price $label {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">        set {</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">            $this-&gt;stored = $value-&gt;format();  // `$value` resolves</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">        }</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    }</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
 </code></pre></div>
 <p>The type engine seeds <code>$value</code> from the property's declared type, so
 hover, go-to-definition, and diagnostics all read it correctly. Typing
@@ -2018,16 +1844,16 @@ methods and properties (<code>test_completion_require_extends_this_members_*</co
 in <code>completion_traits.rs</code>), via <code>trait_this_bounds</code>/
 <code>extend_this_with_trait_bounds</code> in <code>type_engine/trait_context.rs</code>. Static
 access does not get the same treatment:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    const int FOO = 42;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">}</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">/** @psalm-require-extends Foo */</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">trait Bar {</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    public function foo(): int {</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">        return static::   // completion offers nothing from Foo</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    }</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    const int FOO = 42;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">}</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">/** @psalm-require-extends Foo */</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">trait Bar {</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    public function foo(): int {</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">        return static::   // completion offers nothing from Foo</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    }</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">}</span>
 </code></pre></div>
 <p>Every caller of <code>trait_this_bounds</code>/<code>extend_this_with_trait_bounds</code> is on
 a <code>$this</code>-context resolution path (<code>forward_walk/param_seeding.rs</code>,

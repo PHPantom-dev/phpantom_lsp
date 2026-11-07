@@ -958,28 +958,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d17-docblock_native_mismatch-only-judges-nullability" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D17. <code>docblock_native_mismatch</code> only judges nullability
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D18. <code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -995,17 +973,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         D20. <code>Foo::$bar</code> and <code>Foo::bar</code> are the same span
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D21. A union of an unreachable and a missing member is reported by neither check
       </span>
     </span>
   </a>
@@ -1599,28 +1566,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d17-docblock_native_mismatch-only-judges-nullability" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D17. <code>docblock_native_mismatch</code> only judges nullability
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D18. <code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1636,17 +1581,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         D20. <code>Foo::$bar</code> and <code>Foo::bar</code> are the same span
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D21. A union of an unreachable and a missing member is reported by neither check
       </span>
     </span>
   </a>
@@ -1897,60 +1831,6 @@ old comment was guarding against with a test: a subject whose other
 branch cannot be typed must still produce no diagnostic, because it
 now resolves to <code>mixed</code> rather than to the surviving literal.</p>
 <hr />
-<h2 id="d17-docblock_native_mismatch-only-judges-nullability">D17. <code>docblock_native_mismatch</code> only judges nullability<a class="headerlink" href="#d17-docblock_native_mismatch-only-judges-nullability" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param int $name */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function greet(string $name): void {}    // not flagged: int is not string at all</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">/** @param Foo $value */</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">function take(Bar $value): void {}       // not flagged: `Foo` may alias `Bar`</span>
-</code></pre></div>
-<p><code>src/diagnostics/docblock_native_mismatch.rs</code> compares a documented type
-against its native hint on one axis only: whether the annotation admits a
-<code>null</code> the signature rules out. A documented type that is not a subtype of
-the native hint on any <em>other</em> axis (<code>@param int</code> on a <code>string</code>, <code>@return
-array</code> on a <code>: string</code>) stays silent. That is the check PHPStan's
-<code>IncompatiblePhpDocTypeRule</code> performs, and the one the existing
-<code>is_type_compatible</code> in <code>src/class_lookup/compatibility.rs</code>
-already has the machinery for.</p>
-<p>Covering it means resolving the documented type's bare names first, since a
-<code>Foo</code> that a <code>@template</code> list or an imported <code>@psalm-type</code> alias stands
-behind may well be the native <code>Bar</code> after resolution. The nullability axis
-sidesteps that today: a name that resolves to something nullable never
-spells <code>null</code> itself, so the check simply does not fire on it.</p>
-<p><strong>Fix:</strong> Resolve the documented type's names against the declaration's own
-<code>@template</code> list, the enclosing class's, and the file's
-<code>@psalm-type</code>/<code>@psalm-import-type</code> tags, then run the comparison through
-<code>is_type_compatible</code> rather than the nullability test alone.</p>
-<hr />
-<h2 id="d18-arrayint-t-is-accepted-wherever-a-listt-is-declared">D18. <code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared<a class="headerlink" href="#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @param list&lt;int&gt; $values</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> * @return list&lt;int&gt;</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x"> */</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">function keep(array $values): array {</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    return array_filter($values, fn ($v) =&gt; $v &gt; 3);  // array&lt;int, int&gt;, not flagged</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>is_type_compatible</code> in <code>src/class_lookup/compatibility.rs</code>
-carries an explicit MAYBE hatch for <code>array&lt;int, X&gt;</code> reaching a <code>list&lt;X&gt;</code>
-parameter or return type, on the grounds that PHP codebases spell the two
-interchangeably. The core <code>is_subtype_of</code> already rejects the direction
-(only <code>list&lt;X&gt;</code> satisfies <code>array&lt;int, X&gt;</code>, not the reverse), so the hatch
-is the only thing standing between us and PHPStan's report here.</p>
-<p>Now that <code>array_filter()</code> reports the <code>array&lt;int, T&gt;</code> it actually
-produces, the hatch is what keeps the second half of the over-claim
-alive: a function that hands back an unwrapped filter result still
-passes a declared <code>list&lt;T&gt;</code>.</p>
-<p><strong>Fix:</strong> Drop the <code>array&lt;int, X&gt; → list&lt;X&gt;</code> arm and audit the corpus
-under <code>projects/</code> for what it starts reporting. The arm exists because
-plain <code>array&lt;int, X&gt;</code> is what an unannotated array resolves to in many
-places, so retiring it wants the resolver to answer <code>list&lt;X&gt;</code> for the
-shapes that genuinely are lists (literal arrays, <code>array_values()</code>,
-appended-to locals) first. Pay for it with resolver precision, the same
-way the supertype-where-subtype hatch was retired.</p>
-<hr />
 <h2 id="d19-invalid_member_access-cannot-tell-a-property-read-from-a-write">D19. <code>invalid_member_access</code> cannot tell a property read from a write<a class="headerlink" href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>PHP dispatches an unreachable property to a different magic method
@@ -1987,35 +1867,18 @@ indistinguishable downstream. Every consumer has to guess a precedence;
 the visibility check tries the constant first.</p>
 <p>Two classes of mistake follow, both needing a class that declares a
 constant and a static property under one name:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Collision {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    private const token = 'constant';</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    public static string $token = 'property';</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">echo Collision::$token;   // reported as a private constant</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Collision {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    private const token = 'constant';</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    public static string $token = 'property';</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">echo Collision::$token;   // reported as a private constant</span>
 </code></pre></div>
 <p>and the reverse pairing, where a genuinely unreachable static property
 is passed off as a public constant and nothing is reported.</p>
 <p><strong>Fix:</strong> Record the member kind the syntax actually names — instance
 property, static property, constant, or method — rather than a name and
 a static flag.</p>
-<hr />
-<h2 id="d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check">D21. A union of an unreachable and a missing member is reported by neither check<a class="headerlink" href="#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<p><code>Known|Other</code> where <code>Known::$x</code> is private and <code>Other</code> has no <code>$x</code> at all
-fails on every runtime branch, and nothing reports it. Both checks are
-conservative in the same direction and each assumes the other covers what
-it declines to judge: the unknown-member check stays silent because the
-member exists on one branch, and the visibility check stays silent
-because it does not exist on the other.</p>
-<p>A related gap sits one layer earlier: the resolver hands the diagnostics
-only the branches it could load and drops the rest, so neither check can
-see that a union had a branch it failed to resolve. Any verdict that
-wants to distinguish "no branch permits this" from "we could not read
-one of the branches" needs that information preserved.</p>
-<p><strong>Fix:</strong> Give the branches of a resolved union a verdict of their own —
-accessible, inaccessible, missing, unresolved — instead of collapsing
-them to a list of loaded classes, and decide the union once from those.</p>
 <hr />
 <h2 id="d22-member-provenance-is-recomputed-instead-of-recorded">D22. Member provenance is recomputed instead of recorded<a class="headerlink" href="#d22-member-provenance-is-recomputed-instead-of-recorded" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
@@ -2030,16 +1893,16 @@ reimplementation of the merge's own rules. <code>invalid_member_access</code> ha
 one, and it is already known to be incomplete: it does not apply
 <code>trait_aliases</code>, so a member a <code>use</code> clause renamed is untraceable and
 the access goes unreported.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">trait Opens { public function open(): void {} }</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">class Vault { use Opens { open as private hidden; } }</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">class Intruder {</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    public function probe(Vault $vault): void</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    {</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">        $vault-&gt;hidden();   // fatal at runtime, reported by nothing</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    }</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">trait Opens { public function open(): void {} }</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">class Vault { use Opens { open as private hidden; } }</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">class Intruder {</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    public function probe(Vault $vault): void</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    {</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">        $vault-&gt;hidden();   // fatal at runtime, reported by nothing</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">    }</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">}</span>
 </code></pre></div>
 <p>The access has to be written inside a class to show the gap. From
 outside every class the check reports anyway, because no scope can reach
@@ -2061,21 +1924,21 @@ the receiver as an <em>additional</em> scope, keeping the enclosing class as
 well.</p>
 <p>Adding rather than replacing is safe in the direction that matters — it
 cannot invent a report — but it hides one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Owner {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    private function hidden(): void {}</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    public function boot(Owner $o): void</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    {</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">        Target::macro('x', function () use ($o): void {</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">            $o-&gt;hidden();        // fatal: the closure's scope is Target</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">        });</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">    }</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">}</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="x">class Target extends Owner {</span>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="x">    /** @param-closure-this static $macro */</span>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="x">    public static function macro(string $name, callable $macro): void {}</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Owner {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    private function hidden(): void {}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    public function boot(Owner $o): void</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    {</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">        Target::macro('x', function () use ($o): void {</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">            $o-&gt;hidden();        // fatal: the closure's scope is Target</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">        });</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    }</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">}</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">class Target extends Owner {</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">    /** @param-closure-this static $macro */</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">    public static function macro(string $name, callable $macro): void {}</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">}</span>
 </code></pre></div>
 <p>The closure is written inside <code>Owner</code>, so the enclosing class permits the
 call, while at runtime the scope is <code>Target</code> and a parent's private
@@ -2109,21 +1972,21 @@ smallest part of it.</p>
 <p><code>unreachable_code</code> treats a braced <code>namespace</code> and a <code>declare</code> body as
 fresh statement lists rather than as the transparent wrappers they are,
 so reachability neither flows into them nor out of them:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">namespace</span> <span class="nx">First</span> <span class="p">{</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="k">return</span><span class="p">;</span>          <span class="c1">// ends the whole file</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="p">}</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="k">namespace</span> <span class="nx">Second</span> <span class="p">{</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="k">echo</span> <span class="s1">'never'</span><span class="p">;</span>    <span class="c1">// not reported</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">namespace</span> <span class="nx">First</span> <span class="p">{</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="k">return</span><span class="p">;</span>          <span class="c1">// ends the whole file</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="k">namespace</span> <span class="nx">Second</span> <span class="p">{</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="k">echo</span> <span class="s1">'never'</span><span class="p">;</span>    <span class="c1">// not reported</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>and, inside a function:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">return;</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">declare(ticks=1) {</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    echo 'never';    // not reported</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">return;</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">declare(ticks=1) {</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    echo 'never';    // not reported</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>Neither wrapper is itself a runtime statement, so neither should be
 dimmed, but the state on either side of it has to carry through.</p>
@@ -2132,7 +1995,7 @@ instead of restarting the scan inside them.</p>
 <hr />
 <h2 id="d30-getting-a-private-symfony-service-from-the-container-is-not-reported">D30. Getting a private Symfony service from the container is not reported<a class="headerlink" href="#d30-getting-a-private-symfony-service-from-the-container-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$container-&gt;get('app.mailer'); // throws: the service is private</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$container-&gt;get('app.mailer'); // throws: the service is private</span>
 </code></pre></div>
 <p>Services are private by default since Symfony 3.4: a service is public only
 when its declaration says <code>public: true</code> (or <code>-&gt;public()</code>, or
@@ -2152,8 +2015,8 @@ guards the test container.</p>
 <hr />
 <h2 id="d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported">D31. Doctrine mappings that disagree with the entity are not reported<a class="headerlink" href="#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">#[ORM\Column(type: 'string', nullable: true)]</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">private string $name; // the column can be null, the property cannot</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">#[ORM\Column(type: 'string', nullable: true)]</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">private string $name; // the column can be null, the property cannot</span>
 </code></pre></div>
 <p>PHPStan's Doctrine extension checks an entity's mapping against its PHP:</p>
 <ul>
@@ -2192,10 +2055,10 @@ D31 also needs) and <code>src/diagnostics/uninitialized_properties.rs</code>.</p
 <hr />
 <h2 id="d48-a-catch-its-try-cannot-reach-is-not-reported">D48. A <code>catch</code> its <code>try</code> cannot reach is not reported<a class="headerlink" href="#d48-a-catch-its-try-cannot-reach-is-not-reported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">try {</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    $this-&gt;repo-&gt;save($user);        // @throws ORMException only</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">} catch (JsonException $e) {         // can never run: not reported</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">try {</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    $this-&gt;repo-&gt;save($user);        // @throws ORMException only</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">} catch (JsonException $e) {         // can never run: not reported</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>PhpStorm reports a <code>catch</code> whose class nothing in the <code>try</code> body can throw,
 and so does PHPStan (<code>catch.neverThrown</code>). The reachability check already
@@ -2209,10 +2072,10 @@ out, so this stays quiet wherever an undeclared call could throw anything.</p>
 <hr />
 <h2 id="d49-a-param-that-leaves-out-the-null-its-nullable-hint-allows-is-not-hinted">D49. A <code>@param</code> that leaves out the <code>null</code> its nullable hint allows is not hinted<a class="headerlink" href="#d49-a-param-that-leaves-out-the-null-its-nullable-hint-allows-is-not-hinted" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/**</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x"> * @param string $name</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x"> */</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">function greet(?string $name): void {}   // PhpStorm: PhpDocSignatureInspection</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/**</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x"> * @param string $name</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x"> */</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">function greet(?string $name): void {}   // PhpStorm: PhpDocSignatureInspection</span>
 </code></pre></div>
 <p>PhpStorm marks a <code>@param</code> (or <code>@return</code>) whose type is narrower than a
 nullable native hint only by the <code>null</code>: the docblock says <code>string</code>, the

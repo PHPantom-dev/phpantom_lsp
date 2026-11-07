@@ -778,45 +778,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#a34-unified-code-action-handler-architecture" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        A34. Unified code action handler architecture
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="A34. Unified code action handler architecture">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#changes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Changes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#when-to-implement" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        When to implement
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#a16-snippet-placeholder-for-extracted-method-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1584,45 +1545,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#a34-unified-code-action-handler-architecture" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        A34. Unified code action handler architecture
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="A34. Unified code action handler architecture">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#changes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Changes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#when-to-implement" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        When to implement
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#a16-snippet-placeholder-for-extracted-method-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1912,47 +1834,6 @@ within the same impact tier.</p>
 </tr>
 </tbody>
 </table>
-<h2 id="a34-unified-code-action-handler-architecture">A34. Unified code action handler architecture<a class="headerlink" href="#a34-unified-code-action-handler-architecture" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Very High</strong></p>
-<p>Refactor the code action system to use a unified handler architecture
-inspired by rust-analyzer's assist system. Currently each code action
-has a separate <code>collect_*</code> method called from a hand-maintained list in
-<code>handle_code_action</code>, and deferred actions have a separate <code>resolve_*</code>
-method dispatched via a string match in <code>resolve_code_action</code>. PHPStan
-quick-fixes and refactoring actions use different code paths.</p>
-<h3 id="changes">Changes<a class="headerlink" href="#changes" title="Permanent link">&para;</a></h3>
-<ol>
-<li>
-<p><strong>Unified handler signature.</strong> Each code action becomes a function
-   <code>fn(&amp;mut Actions, &amp;ActionContext) -&gt; Option&lt;()&gt;</code>. Handlers are
-   collected in a static array. <code>handle_code_action</code> iterates the array
-   instead of calling methods one by one.</p>
-</li>
-<li>
-<p><strong>Closure-based lazy resolve.</strong> Handlers call
-   <code>actions.add(id, label, range, |builder| { ... })</code>. The closure
-   only runs when the action is being resolved, eliminating separate
-   <code>collect_*</code> / <code>resolve_*</code> method pairs. The same handler function
-   serves both Phase 1 (applicability check + lightweight stub) and
-   Phase 2 (compute edit).</p>
-</li>
-<li>
-<p><strong>Unified type for actions and diagnostic fixes.</strong> Use the same
-   struct for PHPStan quick-fixes and refactoring actions. The LSP
-   layer gets one conversion path. Diagnostic fixes attach the same
-   type as their quick-fix data.</p>
-</li>
-<li>
-<p><strong>Sort by target range size.</strong> Sort results by <code>target.len()</code> as
-   a tiebreaker. Smaller target = more specific = higher priority.
-   No manual priority numbers needed.</p>
-</li>
-</ol>
-<h3 id="when-to-implement">When to implement<a class="headerlink" href="#when-to-implement" title="Permanent link">&para;</a></h3>
-<p>Do this when the next batch of code actions is added (A25 and the like).
-The refactoring pays for itself by making each subsequent action
-cheaper to add: write one function, append it to an array.</p>
-<hr />
 <h2 id="a16-snippet-placeholder-for-extracted-method-name">A16. Snippet Placeholder for Extracted Method Name<a class="headerlink" href="#a16-snippet-placeholder-for-extracted-method-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>After an Extract Function/Method code action is applied, let the user

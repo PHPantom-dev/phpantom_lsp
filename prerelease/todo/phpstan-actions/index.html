@@ -1249,23 +1249,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Tier 4 — Unique to PHPantom">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#h20-genericscallsitevarianceredundant-remove-redundant-variance-annotation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        H20. <code>generics.callSiteVarianceRedundant</code> — Remove redundant variance annotation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1709,23 +1692,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Tier 4 — Unique to PHPantom">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#h20-genericscallsitevarianceredundant-remove-redundant-variance-annotation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        H20. <code>generics.callSiteVarianceRedundant</code> — Remove redundant variance annotation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1955,20 +1921,7 @@ never thrown.</p>
 message.</p>
 <hr />
 <h2 id="tier-4-unique-to-phpantom">Tier 4 — Unique to PHPantom<a class="headerlink" href="#tier-4-unique-to-phpantom" title="Permanent link">&para;</a></h2>
-<h3 id="h20-genericscallsitevarianceredundant-remove-redundant-variance-annotation">H20. <code>generics.callSiteVarianceRedundant</code> — Remove redundant variance annotation<a class="headerlink" href="#h20-genericscallsitevarianceredundant-remove-redundant-variance-annotation" title="Permanent link">&para;</a></h3>
-<p><strong>Identifier:</strong> <code>generics.callSiteVarianceRedundant</code>
-<strong>Tip (in message):</strong> <code>You can safely remove the call-site variance annotation.</code></p>
-<p>Strip <code>covariant</code> or <code>contravariant</code> keywords from generic type arguments
-in the docblock. Requires parsing PHPDoc generic syntax
-(e.g. <code>Collection&lt;covariant Foo&gt;</code> becomes <code>Collection&lt;Foo&gt;</code>).
-Also expose it through <code>phpantom_lsp fix --with-phpstan</code> as the
-<code>phpstan.generics.callSiteVarianceRedundant</code> rule (see
-<a href="../fix-cli/#phpstan-integration">fix-cli.md</a>).</p>
-<p>No other tool (PHPStorm, Rector, PHP-CS-Fixer) offers a quickfix for this
-PHPStan-specific diagnostic. Users currently have to edit the PHPDoc manually
-or suppress with <code>@phpstan-ignore</code>.</p>
-<p><strong>Stale detection:</strong> no <code>covariant</code>/<code>contravariant</code> in the PHPDoc on the
-diagnostic line.</p>
+<p>No outstanding items.</p>
 <hr />
 <h2 id="suggested-implementation-order">Suggested implementation order<a class="headerlink" href="#suggested-implementation-order" title="Permanent link">&para;</a></h2>
 <p>Based on effort-to-value ratio and shared infrastructure:</p>
@@ -1988,7 +1941,7 @@ diagnostic line.</p>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nb">None</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">diag</span><span class="p">.</span><span class="n">message</span><span class="p">.</span><span class="n">as_str</span><span class="p">(),</span><span class="w"> </span><span class="nb">None</span><span class="p">),</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">};</span>
 </code></pre></div>
-<p>Actions that depend on tip text (H4, H15, H20) should use this
+<p>Actions that depend on tip text (H4, H15) should use this
 pattern. The tip text has ANSI/HTML tags already stripped by <code>strip_ansi_tags</code>.</p>
 <h3 id="stale-diagnostic-detection">Stale diagnostic detection<a class="headerlink" href="#stale-diagnostic-detection" title="Permanent link">&para;</a></h3>
 <p>Each new action should have a corresponding check in
