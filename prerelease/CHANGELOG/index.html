@@ -6150,6 +6150,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h4 id="tempest">Tempest<a class="headerlink" href="#tempest" title="Permanent link">&para;</a></h4>
 <ul>
 <li><strong>Tempest View completion and navigation.</strong> In a Tempest project, PHP expressions in <code>.view.php</code> templates use imports and <code>@var</code> annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to <code>Tempest\View\view()</code> also complete and navigate. Contributed by @shuvroroy.</li>
+<li><strong>Tempest view data inference.</strong> Templates infer data passed by callers and components, including custom View objects and slot scope. Explicit <code>@var</code> annotations can refine inferred types. Contributed by @shuvroroy.</li>
 </ul>
 <h4 id="configuration-and-indexing">Configuration and indexing<a class="headerlink" href="#configuration-and-indexing" title="Permanent link">&para;</a></h4>
 <ul>
