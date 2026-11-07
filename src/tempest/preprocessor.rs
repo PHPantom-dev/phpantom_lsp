@@ -18,7 +18,18 @@ struct OpenTag<'a> {
 /// Attributes are evaluated inside the element's control flow, regardless
 /// of where they are written in the opening tag.
 pub(crate) fn preprocess(source: &str) -> (String, TemplateSourceMap) {
+    preprocess_with_scope(source, None)
+}
+
+/// Lower inferred declarations beneath the template's explicit annotations.
+pub(crate) fn preprocess_with_scope(
+    source: &str,
+    scope: Option<&super::inference::Scope>,
+) -> (String, TemplateSourceMap) {
     let mut out = Output::new(source);
+    if let Some(scope) = scope {
+        out.scope(scope);
+    }
     let mut stack: Vec<OpenTag<'_>> = Vec::new();
     let parsed = tokens(source);
     let forelse = forelse_pairs(&parsed);
@@ -218,7 +229,66 @@ struct Output<'a> {
     spans: crate::template::source_spans::SourceSpans,
 }
 
+fn annotation_type(ty: &crate::php_type::PhpType) -> String {
+    let rendered = ty.to_reparseable_string();
+    if !rendered.contains("*/") && !rendered.contains(['\r', '\n']) {
+        return rendered;
+    }
+    // Both literal values and shape keys can contain a comment terminator.
+    // Re-encode only those PHP strings, retaining their exact runtime value.
+    let bytes = rendered.as_bytes();
+    let mut out = String::with_capacity(rendered.len());
+    let mut copied = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        if !matches!(bytes[at], b'\'' | b'"') {
+            at += 1;
+            continue;
+        }
+        let end = crate::text_scan::skip_string_forward(bytes, at);
+        let raw = &rendered[at..end];
+        if raw.contains("*/") || raw.contains(['\r', '\n']) {
+            let literal = crate::php_type::LiteralValue::string_raw(raw);
+            let value = literal.string_content().unwrap();
+            let escaped = value
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('$', "\\$")
+                .replace('/', "\\x2f")
+                .replace('\r', "\\r")
+                .replace('\n', "\\n");
+            out.push_str(&rendered[copied..at]);
+            out.push('"');
+            out.push_str(&escaped);
+            out.push('"');
+            copied = end;
+        }
+        at = end;
+    }
+    out.push_str(&rendered[copied..]);
+    out
+}
+
 impl<'a> Output<'a> {
+    fn scope(&mut self, scope: &super::inference::Scope) {
+        for (name, ty) in &scope.vars {
+            self.declare(name, ty, true);
+        }
+        if let Some(ty) = scope.this_type() {
+            self.declare("this", &ty, false);
+        }
+    }
+
+    fn declare(&mut self, name: &str, ty: &crate::php_type::PhpType, assign: bool) {
+        // A literal string type can itself contain a comment terminator.
+        // It must not terminate an injected annotation.
+        let ty = annotation_type(ty);
+        self.insert(&format!("/** @var {ty} ${name} */\n"));
+        if assign {
+            self.insert(&format!("${name} = null;\n"));
+        }
+    }
+
     fn new(source: &'a str) -> Self {
         let mut out = Self {
             source,

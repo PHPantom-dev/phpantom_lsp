@@ -159,6 +159,34 @@ fn bench_tempest(c: &mut Criterion) {
             })
         });
     }
+    let changed_controller = CONTROLLER.replace("books: [new Book('The PHP Book')]", "books: []");
+    assert_ne!(changed_controller, CONTROLLER);
+    let mut alternate = false;
+    group.bench_function("caller_edit_context", |b| {
+        b.iter(|| {
+            alternate = !alternate;
+            runtime.block_on(backend.did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    text_document_identifier: TextDocumentIdentifier {
+                        uri: controller_uri.clone(),
+                    },
+                    version: 2,
+                },
+                content_changes: vec![
+                    TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                        TextDocumentContentChangeWholeDocument {
+                            text: if alternate {
+                                changed_controller.clone()
+                            } else {
+                                CONTROLLER.to_owned()
+                            },
+                        },
+                    ),
+                ],
+            }));
+            black_box(backend.blade_virtual_php(view_uri.as_str()));
+        })
+    });
     group.finish();
 }
 

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Tempest view data inference.** Templates infer data supplied by render calls and custom View objects. Explicit `@var` annotations can refine inferred types. Contributed by @shuvroroy.
 - **Tempest View completion and navigation.** PHP expressions in `.view.php` templates use imports and `@var` annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to `Tempest\View\view()` also complete and navigate. Contributed by @shuvroroy.
 - **Yii aliases.** In a Yii project, an alias such as `@runtime` at the start of any string jumps to the configuration that declares it, lists the strings that name it, and completes from the declared aliases. Hovering it shows the path it stands for, and the rest of the string links to the file or directory it names.
 - **Yii DI definitions.** In a Yii project, the `'setLogger()'` and `'$pageSize'` keys of a DI definition jump to the method or property they name, complete, rename with it, and are reported when the class has no such member. The arguments a definition passes by name, like `'transport'` in `'__construct()' => [...]`, jump to the parameter, complete, and are reported when the method takes no parameter of that name. Definitions are recognised wherever they are written, in the `di` and `widgets` configuration or inline in PHP. Go-to-implementation on a class, and a CodeLens above it, lead to the definitions that bind it, the installed packages' included.
