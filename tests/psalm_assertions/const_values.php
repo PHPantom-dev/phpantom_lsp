@@ -71,7 +71,7 @@ namespace PsalmTest_const_values_6 {
     class D {};
     /** @psalm-param C::class|D::class|E::class $s */
     function foo(string $s) : void {
-        assertType('class-string<PsalmTest_const_values_6\\C>|class-string<PsalmTest_const_values_6\\D>|class-string<PsalmTest_const_values_6_other\\C>', $s); // SKIP: hover shows two classes that share a short name as one
+        assertType('class-string<PsalmTest_const_values_6\\C>|class-string<PsalmTest_const_values_6\\D>|class-string<PsalmTest_const_values_6_other\\C>', $s);
     }
 }
 

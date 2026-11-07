@@ -1180,10 +1180,15 @@ impl Compat<'_> {
         // we can't verify the generic type arguments covariantly at this
         // phase.  Stay silent (MAYBE) when the base types are compatible.
         if let TypeKind::Generic(g) = param_type.kind()
-            && (g.name.eq_ignore_ascii_case("iterable")
-                || class_loader(Fqn::new(&g.name)).is_some_and(|cls| {
-                    crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader)
-                }))
+            && let Some(required) = if g.name.eq_ignore_ascii_case("iterable") {
+                Some(crate::atom::atom("Traversable"))
+            } else {
+                class_loader(Fqn::new(&g.name))
+                    .filter(|cls| {
+                        crate::class_lookup::is_subtype_of(cls, "Traversable", class_loader)
+                    })
+                    .map(|cls| cls.fqn())
+            }
         {
             // Array-like args always satisfy iterable/Traversable generics.
             if arg_type.is_array_like()
@@ -1195,12 +1200,14 @@ impl Compat<'_> {
             {
                 return Some(true);
             }
-            // Object-like args: check hierarchy for Traversable.
+            // Object-like args: check the hierarchy for the parameter's own
+            // class (`Traversable` for `iterable`), so an `ArrayIterator`
+            // is still no `RecursiveIterator<K, V>`.
             // Can't load → stay permissive; bare `object` → stay permissive.
             if let Some(class_name) = arg_type.base_name() {
                 match class_loader(Fqn::new(class_name)) {
                     Some(cls) => {
-                        if crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader) {
+                        if crate::class_lookup::is_subtype_of(&cls, &required, class_loader) {
                             return Some(true);
                         }
                     }

@@ -67,12 +67,16 @@ pub(crate) struct FlowFacts<'a> {
     /// Whether a `switch` without a `default` still has a case for every
     /// value its subject can hold.
     pub switch_is_exhaustive: &'a dyn Fn(&Switch<'_>) -> bool,
+    /// Whether an `if` or `elseif` condition holds whenever control
+    /// reaches it, so the chain cannot skip every branch.
+    pub condition_always_holds: &'a dyn Fn(&Expression<'_>) -> bool,
 }
 
 impl FlowFacts<'static> {
     pub(crate) const STRUCTURAL: FlowFacts<'static> = FlowFacts {
         never_call: &|_| false,
         switch_is_exhaustive: &|_| false,
+        condition_always_holds: &|_| false,
     };
 }
 
@@ -205,8 +209,24 @@ fn if_flow(r#if: &If<'_>, facts: &FlowFacts<'_>) -> Flow {
             (flow, body.else_clause.is_some())
         }
     };
-    // Without an `else`, a condition that fails skips every branch.
-    flow.normal |= !has_else;
+    // Without an `else`, a chain whose conditions all fail skips every
+    // branch, which cannot happen when one of the conditions always holds.
+    // That only matters when no branch runs off its end, so the conditions
+    // are not looked at otherwise.
+    if !has_else && !flow.normal {
+        let holds = |condition: &Expression<'_>| (facts.condition_always_holds)(condition);
+        flow.normal = !(holds(r#if.condition)
+            || match &r#if.body {
+                IfBody::Statement(body) => body
+                    .else_if_clauses
+                    .iter()
+                    .any(|clause| holds(clause.condition)),
+                IfBody::ColonDelimited(body) => body
+                    .else_if_clauses
+                    .iter()
+                    .any(|clause| holds(clause.condition)),
+            });
+    }
     flow
 }
 

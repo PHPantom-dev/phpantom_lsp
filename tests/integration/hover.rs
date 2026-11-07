@@ -9250,6 +9250,26 @@ function formatUtfDate(string $tz): void {
 }
 
 #[test]
+fn hover_variable_keeps_class_strings_sharing_a_short_name_apart() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+namespace App;
+
+/** @param class-string<\App\C>|class-string<\Other\C> $s */
+function foo(string $s): void {
+    $s;
+}
+"#;
+
+    let text = crate::common::hover_last(&backend, content, "$s;");
+    assert!(
+        text.contains("$s = class-string<\\App\\C>|class-string<\\Other\\C>"),
+        "both classes should be shown, got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_function_shows_class_string_param_type() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
@@ -17426,4 +17446,24 @@ async fn test_hover_attribute_named_argument() {
         hover.is_none_or(|text| !text.contains("The label of the thing")),
         "a label naming a plain parameter is not the property of its name"
     );
+}
+
+/// `foreach` over a `RecursiveIteratorIterator` binds the key and value the
+/// wrapped iterator iterates as, not the iterator itself.
+#[test]
+fn recursive_iterator_iterator_binds_the_wrapped_key_and_value() {
+    let backend = create_test_backend_with_full_stubs();
+    let php = r#"<?php
+/** @param array<string, int> $data */
+function size(array $data): void {
+    $leaves = new RecursiveIteratorIterator(new RecursiveArrayIterator($data));
+    foreach ($leaves as $key => $datum) {
+        echo $datum, $key;
+    }
+}
+"#;
+    let value = crate::common::hover_last(&backend, php, "$datum, $key");
+    assert!(value.contains("$datum = int"), "{value}");
+    let key = crate::common::hover_last(&backend, php, "$key;");
+    assert!(key.contains("$key = string"), "{key}");
 }

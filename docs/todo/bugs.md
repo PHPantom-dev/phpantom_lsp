@@ -33,76 +33,13 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B711. `foreach` over a `RecursiveIteratorIterator` gives the wrapped iterator
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @param array<string, int> $data */
-function size(array $data): int {
-    $leaves = new RecursiveIteratorIterator(new RecursiveArrayIterator($data));
-    foreach ($leaves as $datum) {
-        strlen((string) $datum);
-        // Object of class RecursiveArrayIterator cannot be converted to string
-    }
-}
-```
-
-A `RecursiveIteratorIterator` yields the elements of the iterator it
-wraps (the leaves, in the default mode), not the iterator. Our stub patch
-makes the class generic over the wrapped iterator,
-`RecursiveIteratorIterator<RecursiveArrayIterator<string, int>>`, and
-declares no traversal binding. `foreach` then reads the lone template
-argument as the element type, so `$datum` is the iterator. A directory
-walk only looks right because `RecursiveDirectoryIterator` extends
-`SplFileInfo`.
-
-The element type is the wrapped iterator's own element type (`int` here,
-`SplFileInfo` for a directory walk with the default flags), and the key
-its key type.
-
-**Where to look:** `patch_recursive_iterator_iterator`
-(`src/stub_patches/classes.rs`) and the single-argument reading in
-`iteration_value_type` (`src/type_engine/variable/iterable_elements.rs`).
-
-Found by `analyze` on WordPress (`WpOrg\Requests\Transport\Curl`).
+No outstanding items.
 
 ## Reachability
 
 No outstanding items.
 
 ## Narrowing
-
-### B710. A `try` body that always returns still flows past its `catch`
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-public function getId(): int {
-    $tryAgain = false;
-    try {
-        return $this->insert();
-    } catch (\Exception $e) {
-        if (!$tryAgain = $this->ensureTableExists()) {
-            throw $e;
-        }
-    }
-    if ($tryAgain) {             // always true here
-        return $this->insert();
-    }
-}   // Method getId() should return int but can reach its end without returning
-```
-
-Code after a `try`/`catch` can only be reached from the end of a block
-that does not exit. Here the `try` body always returns, so only the
-`catch` reaches the `if`, and there `$tryAgain` is `true`. The state at
-the end of the `try` body is merged in anyway, so `$tryAgain` is `bool`,
-the `if` may be skipped, and the missing-return check reports the end of
-the method. The same shape with a plain assignment
-(`try { return; } catch (\Exception $e) { $y = true; }`) leaves `$y` as
-`bool` instead of `true`.
-
-Found by `analyze` on Drupal core (`Drupal\Core\Batch\BatchStorage::getId()`).
 
 ### B692. `(int)` of a `ctype_digit()`-checked string is not non-negative
 
@@ -130,37 +67,7 @@ seconds a rate-limit message names.
 
 ## Array types
 
-### B714. A constant written into an array in a loop loses its literal
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-private const int WHITE = 0;
-
-/** @param array<int, self::WHITE|self::GRAY|self::BLACK> $labels */
-private static function check(array $labels): void {}
-
-$labels = [];
-foreach ($nodes as $node) {
-    $labels[$node] = self::WHITE;
-}
-self::check($labels);
-// Argument 1 ($labels) expects array<int, 0|1|2>, got array<int, int>
-```
-
-The same write outside a loop keeps `array<int, 0>`, and PHPStan keeps
-the literal in the loop too. A keyed or appended write inside a loop body
-widens the value's scalar literals before storing it, so a fixed-point
-re-walk cannot grow a literal union (or a concatenated string) once per
-pass. That is only needed when the value changes from one pass to the
-next; a constant, or any value whose type the re-walk leaves unchanged,
-should keep its literal.
-
-**Where to look:** the `in_loop` widening in
-`merge_nested_array_write_inner` and `pushed_value`
-(`src/type_engine/variable/array_shape_writes.rs`).
-
-Found by `analyze` on Vytrvalec Server (`App\Algorithm\Graph::hasCycle()`).
+No outstanding items.
 
 ## Laravel
 
@@ -214,25 +121,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B713. Hover shows two `class-string`s that share a short name as one
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-namespace App;
-
-/** @param class-string<\App\C>|class-string<\Other\C> $s */
-function foo(string $s): void {
-    $s; // hover: $s = class-string<C>
-}
-```
-
-Hover shortens every class name in a type to its short name, so the two
-members print the same and the union shows one of them. A union of the
-classes themselves does not have this problem: each gets its own block
-under its namespace. The same collapse hides `C::class|E::class` with `E`
-an import of another namespace's `C`, which is why that assertion in
-`tests/psalm_assertions/const_values.php` is skipped.
-
-**Where to look:** `shorten_php_type` (`src/hover/formatting.rs`), which
-shortens before the union is printed.
+No outstanding items.

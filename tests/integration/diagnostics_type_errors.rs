@@ -5253,6 +5253,65 @@ function normalize(mixed $steps): void {
 }
 
 #[test]
+fn no_diagnostic_for_constant_written_into_array_in_loop() {
+    // A constant writes the same value on every pass of the loop, so the
+    // array keeps the literal instead of widening it to `int`.
+    let php = r#"<?php
+final class Graph {
+    private const int WHITE = 0;
+    private const int GRAY = 1;
+    private const int BLACK = 2;
+
+    /** @param array<int, self::WHITE|self::GRAY|self::BLACK> $labels */
+    private static function check(array $labels): void {}
+
+    /** @param list<int> $nodes */
+    public static function hasCycle(array $nodes): void {
+        $labels = [];
+        foreach ($nodes as $node) {
+            $labels[$node] = self::WHITE;
+        }
+        self::check($labels);
+        $pushed = [];
+        foreach ($nodes as $node) {
+            $pushed[] = self::GRAY;
+            array_push($pushed, self::BLACK);
+        }
+        self::check($pushed);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A constant written in a loop should keep its literal, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_counter_written_into_array_in_loop() {
+    // A value computed from the previous pass changes on every pass, so
+    // the array only knows its base type.
+    let php = r#"<?php
+/** @param array<int, 0|1|2> $labels */
+function check(array $labels): void {}
+
+/** @param list<int> $nodes */
+function build(array $nodes): void {
+    $labels = [];
+    $state = 0;
+    foreach ($nodes as $node) {
+        $labels[$node] = $state;
+        $state = $state + 1;
+    }
+    check($labels);
+}
+"#;
+    let diags = collect(php);
+    assert_eq!(type_error_count(&diags), 1, "got: {diags:?}");
+}
+
+#[test]
 fn no_diagnostic_for_foreach_var_reassigned_in_body() {
     // When $type is the foreach key (string), and then reassigned to
     // BackedEnum::from($type), the $type argument inside from() should
@@ -16071,6 +16130,48 @@ function f(\ArrayIterator $it): void {
         has_type_error(&diags),
         "an ArrayIterator is neither a RecursiveIterator nor an IteratorAggregate: {diags:?}"
     );
+}
+
+/// A generic iterator parameter still names a class: being `Traversable`
+/// is not enough to pass for a `RecursiveIterator<…>`.
+#[test]
+fn a_generic_iterator_parameter_checks_the_class_it_names() {
+    let wrong = r#"<?php
+/** @param RecursiveIterator<int, string> $it */
+function g($it): void {}
+g(new ArrayIterator([]));
+"#;
+    let diags = collect_with_full_stubs(wrong);
+    assert!(
+        has_type_error(&diags),
+        "an ArrayIterator is no RecursiveIterator: {diags:?}"
+    );
+    let right = r#"<?php
+/** @param RecursiveIterator<int, string> $it */
+function g($it): void {}
+g(new RecursiveArrayIterator([]));
+"#;
+    let diags = collect_with_full_stubs(right);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+/// A `RecursiveIteratorIterator` yields the leaves of the iterator it
+/// wraps, not that iterator.
+#[test]
+fn recursive_iterator_iterator_yields_the_wrapped_elements() {
+    let php = r#"<?php
+/** @param array<string, int> $data */
+function size(array $data): int {
+    $total = 0;
+    $leaves = new RecursiveIteratorIterator(new RecursiveArrayIterator($data));
+    foreach ($leaves as $datum) {
+        $total += strlen((string) $datum);
+    }
+    return $total;
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(diags.is_empty(), "{diags:?}");
 }
 
 const BARE_GENERIC_DEFAULT_PRELUDE: &str = r#"<?php
