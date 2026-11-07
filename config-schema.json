@@ -35,7 +35,7 @@
           "description": "Report calls that pass more arguments than the function accepts. PHP silently ignores extra arguments to user-defined functions, and many libraries exploit this for flexible APIs.",
           "default": false
         },
-        "report-magic-properties": {
+        "magic-properties": {
           "type": "boolean",
           "description": "Report unknown property access on classes with __get when virtual properties are defined (via @property docblock tags, Laravel Eloquent column inference, or other providers). Matches PHPStan's reportMagicProperties behaviour.",
           "default": false
@@ -165,7 +165,7 @@
         }
       }
     },
-    "semantic_tokens": {
+    "semantic-tokens": {
       "type": "object",
       "description": "Controls LSP semantic token highlighting.",
       "properties": {
@@ -181,7 +181,7 @@
         }
       }
     },
-    "inlay_hints": {
+    "inlay-hints": {
       "type": "object",
       "description": "Controls which kinds of inlay hint are shown. The editor can switch a kind off too, but cannot switch one back on over this section.",
       "properties": {

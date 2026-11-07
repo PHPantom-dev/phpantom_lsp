@@ -142,7 +142,7 @@ struct UnknownMemberPass<'a> {
     content: &'a str,
     loaders: FileLoaders<'a>,
     /// Whether a magic method stands in for undeclared members
-    /// (`report_magic_properties`).  Read once for the whole file:
+    /// (`magic-properties`).  Read once for the whole file:
     /// `config()` clones the config behind a lock, and the flags cannot
     /// change mid-pass.
     report_magic: bool,
@@ -192,7 +192,7 @@ impl Backend {
             uri,
             content,
             loaders: self.file_loaders(&ctx.file),
-            report_magic: config.diagnostics.report_magic_properties_enabled(),
+            report_magic: config.diagnostics.magic_properties_enabled(),
             report_unresolved: config.diagnostics.unresolved_member_access_enabled(),
             report_partial_union: config.diagnostics.partial_union_members_enabled(),
             strict_attributes: self

@@ -358,34 +358,6 @@ configured. Maintainer's call on the semantics; whichever way it
 goes, the chosen behaviour needs a test and a sentence in
 [`configuration.md`](../configuration.md).
 
-## X19. Make the configuration format consistent before 1.0
-
-**Impact: Medium · Complexity: Low-Medium**
-
-From 1.0 a working `.phpantom.toml` key has to keep working (see
-"Compatibility" in [`configuration.md`](../configuration.md)), so this
-is the last release where a key can be renamed for free. The format
-mixes two spellings today: section names are snake_case
-(`[semantic_tokens]`, `[inlay_hints]`) while every key inside a section
-is kebab-case (`parameter-names`, `php-cs-fixer`, `memory-limit`).
-Review every section and key in `src/config/` together:
-
-- One spelling for sections and keys. Kebab-case sections
-  (`[semantic-tokens]`, `[inlay-hints]`) match the keys; keep the old
-  spelling readable through `#[serde(alias = …)]` so existing configs
-  do not break.
-- Names that say what they do and read the same way across sections:
-  the `[diagnostics]` toggles mix noun phrases (`extra-arguments`)
-  with a verb phrase (`report-magic-properties`), and the tool sections each spell their timeouts differently
-  (`timeout`, `lint-timeout`, `analyze-timeout`).
-- Values with the same shape typed the same way: check that every
-  command is a string where `""` disables, and that every timeout
-  uses the same unit.
-
-Update `config-schema.json`, `configuration.md`, the `init` wizard, and
-the config tests in the same change, and write the renamed keys in the
-changelog with their old spelling.
-
 ## X20. Warn about unknown configuration keys
 
 **Impact: Medium · Complexity: Low**
@@ -400,9 +372,9 @@ editor (`window/showMessage` once per config load, plus the log) and
 on stderr from `analyze`, `fix`, and `format`. Keep it a warning, never
 an error, so a config written for a newer release still loads.
 
-The same hook is what lets X19 and any later rename stay gentle: an
-old spelling read through an alias can be reported as deprecated, with
-the new name, instead of either breaking or passing silently.
+The renamed-key table in `src/config/mod.rs` already rewrites old
+spellings and warns about them on stderr; route that warning through
+the same reporting so an editor user sees it too.
 
 ## X21. Keep `config-schema.json` in step with the config structs
 

@@ -622,7 +622,7 @@ fn is_accessible(
 /// unknown-member module, which answers a different question — whether a
 /// member that exists *nowhere* is still handled — and gates `__get`
 /// behind the
-/// `report-magic-properties` setting.  That setting is about which
+/// `magic-properties` setting.  That setting is about which
 /// virtual property surface to trust; it has no bearing on whether PHP
 /// dispatches to `__get` for a property that demonstrably exists.
 ///

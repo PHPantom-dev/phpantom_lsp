@@ -476,7 +476,7 @@ impl Backend {
         }
 
         // Resolved classes and completions may depend on config-driven
-        // behaviour (e.g. `report-magic-properties`), so both must be
+        // behaviour (e.g. `magic-properties`), so both must be
         // recomputed against the new settings rather than served stale.
         self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();

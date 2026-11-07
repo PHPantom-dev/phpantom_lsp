@@ -34,7 +34,6 @@ contributor even though it's short.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | X20 | [Warn about unknown configuration keys](todo/indexing.md#x20-warn-about-unknown-configuration-keys) | Medium      | Low         |
 | X21 | [Keep `config-schema.json` in step with the config structs](todo/indexing.md#x21-keep-config-schemajson-in-step-with-the-config-structs) (builds on X20) | Low-Medium  | Low         |
-| X19 | [Make the configuration format consistent before 1.0](todo/indexing.md#x19-make-the-configuration-format-consistent-before-10) (builds on X20) | Medium      | Low-Medium  |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets

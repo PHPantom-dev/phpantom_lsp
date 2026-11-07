@@ -67,6 +67,10 @@ wording of a diagnostic's message is not covered and can be improved in
 any release, so prefer `identifier` over `message` in an ignore rule
 that has to keep working.
 
+Every section and key is spelled in kebab-case. A name that was spelled
+differently before 1.0 is still read under its old spelling, with a
+warning in the log, so an older config keeps working.
+
 The schema a generated `.phpantom.toml` points at is served from the
 `main` branch, so it always describes the newest release. An editor may
 therefore offer a key your installed version does not know yet; check
@@ -91,7 +95,7 @@ actions apply.
 | `enabled`                  | bool   | `true`  | Show diagnostics in the editor at all. Set to `false` to report nothing: no native diagnostics (syntax errors included), no external tool runs, and no workspace pass. Every other key in this section is then moot. `analyze` ignores it. |
 | `unresolved-member-access` | bool   | `false` | Report `->`, `?->`, `::` where the subject is `mixed` or its type could not be worked out. Useful for type coverage, noisy on untyped codebases. |
 | `extra-arguments`          | bool   | `false` | Report calls that pass more arguments than the function accepts. |
-| `report-magic-properties`  | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |
+| `magic-properties`         | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |
 | `partial-union-members`    | bool   | `false` | Report a member access on a union when only some of its classes declare the member. Matches PHPStan's `checkUnionTypes`. |
 | `possibly-empty-mismatches` | bool | `false` | Report a type mismatch on an argument, return value or property assignment when the only members that fail are `null` or `false`, such as a `string\|false` passed to a `string` parameter. Matches PHPStan's `checkUnionTypes` and `checkNullables`. |
 | `partial-union-mismatches` | bool | `true` | Report a type mismatch on an argument, return value or property assignment when some members of the value's union fit, such as an `array\|string` passed to a `string` parameter. Set to `false` to only report values no member of which fits, which also leaves out what `possibly-empty-mismatches` covers. |
@@ -267,7 +271,7 @@ which also keeps `analyze` from reporting on it. Listing the
 deliberately make its stand-in classes win, where `include` only lets
 them fill gaps.
 
-### `[semantic_tokens]`
+### `[semantic-tokens]`
 
 PHPantom defaults to `contextual` semantic tokens so editor syntax
 highlighting remains in charge of ordinary PHP syntax.
@@ -282,7 +286,7 @@ highlighting remains in charge of ordinary PHP syntax.
 | `"full"` | Emit the complete semantic token stream, including ordinary classes, variables, functions, methods, properties, comments, keywords, attributes, and Blade tokens. |
 | `"off"` | Return no semantic tokens. |
 
-### `[inlay_hints]`
+### `[inlay-hints]`
 
 | Key               | Type | Default | Description |
 | ----------------- | ---- | ------- | ----------- |
@@ -401,7 +405,7 @@ It is read from `initializationOptions` and `workspace/didChangeConfiguration`, 
 
 ## Editor-supplied inlay hint toggles
 
-An editor extension can offer its own switches for the `[inlay_hints]` kinds and pass them the same way:
+An editor extension can offer its own switches for the `[inlay-hints]` kinds and pass them the same way:
 
 ```json
 { "inlayHints": { "parameterNames": false, "closureTypes": true } }

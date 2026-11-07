@@ -41,7 +41,7 @@ fn default_content_parses_successfully() {
     assert!(config.php.version.is_none());
     assert!(!config.diagnostics.unresolved_member_access_enabled());
     assert!(!config.diagnostics.extra_arguments_enabled());
-    assert!(!config.diagnostics.report_magic_properties_enabled());
+    assert!(!config.diagnostics.magic_properties_enabled());
     assert!(config.diagnostics.ignore.is_empty());
     assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
     assert_eq!(
@@ -82,7 +82,7 @@ fn missing_file_returns_defaults() {
     assert!(config.php.version.is_none());
     assert!(!config.diagnostics.unresolved_member_access_enabled());
     assert!(!config.diagnostics.extra_arguments_enabled());
-    assert!(!config.diagnostics.report_magic_properties_enabled());
+    assert!(!config.diagnostics.magic_properties_enabled());
     assert!(config.diagnostics.ignore.is_empty());
     assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
     assert_eq!(
@@ -105,7 +105,7 @@ fn empty_file_returns_defaults() {
     assert!(config.php.version.is_none());
     assert!(!config.diagnostics.unresolved_member_access_enabled());
     assert!(!config.diagnostics.extra_arguments_enabled());
-    assert!(!config.diagnostics.report_magic_properties_enabled());
+    assert!(!config.diagnostics.magic_properties_enabled());
     assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
     assert_eq!(
         config.semantic_tokens.mode(),
@@ -146,21 +146,21 @@ fn unresolved_member_access_defaults_to_false() {
 }
 
 #[test]
-fn parses_report_magic_properties() {
+fn parses_magic_properties() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(CONFIG_FILE_NAME);
-    std::fs::write(&path, "[diagnostics]\nreport-magic-properties = true\n").unwrap();
+    std::fs::write(&path, "[diagnostics]\nmagic-properties = true\n").unwrap();
     let config = load_config(dir.path()).unwrap();
-    assert!(config.diagnostics.report_magic_properties_enabled());
+    assert!(config.diagnostics.magic_properties_enabled());
 }
 
 #[test]
-fn report_magic_properties_defaults_to_false() {
+fn magic_properties_defaults_to_false() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(CONFIG_FILE_NAME);
     std::fs::write(&path, "[diagnostics]\n").unwrap();
     let config = load_config(dir.path()).unwrap();
-    assert!(!config.diagnostics.report_magic_properties_enabled());
+    assert!(!config.diagnostics.magic_properties_enabled());
 }
 
 #[test]
@@ -415,7 +415,7 @@ version = "8.2"
 [diagnostics]
 unresolved-member-access = true
 extra-arguments = true
-report-magic-properties = true
+magic-properties = true
 
 [[diagnostics.ignore]]
 path = "tests/**"
@@ -429,7 +429,7 @@ strategy = "self"
 exclude = ["generated", "web/sites/default/files"]
 extensions = ["module", "inc"]
 
-[semantic_tokens]
+[semantic-tokens]
 mode = "full"
 
 [formatting]
@@ -465,7 +465,7 @@ analyze-timeout = 45000
     assert_eq!(config.php.version.as_deref(), Some("8.2"));
     assert!(config.diagnostics.unresolved_member_access_enabled());
     assert!(config.diagnostics.extra_arguments_enabled());
-    assert!(config.diagnostics.report_magic_properties_enabled());
+    assert!(config.diagnostics.magic_properties_enabled());
     assert_eq!(config.diagnostics.ignore.len(), 2);
     assert_eq!(
         config.diagnostics.ignore[0].path.as_deref(),
@@ -530,7 +530,7 @@ fn parses_indexing_strategy_composer() {
 fn parses_semantic_tokens_mode_contextual() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(CONFIG_FILE_NAME);
-    std::fs::write(&path, "[semantic_tokens]\nmode = \"contextual\"\n").unwrap();
+    std::fs::write(&path, "[semantic-tokens]\nmode = \"contextual\"\n").unwrap();
     let config = load_config(dir.path()).unwrap();
     assert_eq!(
         config.semantic_tokens.mode(),
@@ -542,7 +542,7 @@ fn parses_semantic_tokens_mode_contextual() {
 fn parses_semantic_tokens_mode_full() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(CONFIG_FILE_NAME);
-    std::fs::write(&path, "[semantic_tokens]\nmode = \"full\"\n").unwrap();
+    std::fs::write(&path, "[semantic-tokens]\nmode = \"full\"\n").unwrap();
     let config = load_config(dir.path()).unwrap();
     assert_eq!(config.semantic_tokens.mode(), SemanticTokensMode::Full);
 }
@@ -551,7 +551,7 @@ fn parses_semantic_tokens_mode_full() {
 fn parses_semantic_tokens_mode_off() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(CONFIG_FILE_NAME);
-    std::fs::write(&path, "[semantic_tokens]\nmode = \"off\"\n").unwrap();
+    std::fs::write(&path, "[semantic-tokens]\nmode = \"off\"\n").unwrap();
     let config = load_config(dir.path()).unwrap();
     assert_eq!(config.semantic_tokens.mode(), SemanticTokensMode::Off);
 }
@@ -560,7 +560,7 @@ fn parses_semantic_tokens_mode_off() {
 fn invalid_semantic_tokens_mode_returns_parse_error() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(CONFIG_FILE_NAME);
-    std::fs::write(&path, "[semantic_tokens]\nmode = \"bogus\"\n").unwrap();
+    std::fs::write(&path, "[semantic-tokens]\nmode = \"bogus\"\n").unwrap();
     let result = load_config(dir.path());
     assert!(result.is_err());
 }
@@ -883,7 +883,7 @@ fn global_config_applies_when_project_has_none() {
     std::fs::create_dir_all(global.parent().unwrap()).unwrap();
     std::fs::write(
         &global,
-        "[diagnostics]\nworkspace = true\n\n[semantic_tokens]\nmode = \"full\"\n",
+        "[diagnostics]\nworkspace = true\n\n[semantic-tokens]\nmode = \"full\"\n",
     )
     .unwrap();
 
@@ -1106,7 +1106,7 @@ fn parse_inlay_hints_section() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join(CONFIG_FILE_NAME),
-        "[inlay_hints]\nparameter-names = false\n",
+        "[inlay-hints]\nparameter-names = false\n",
     )
     .unwrap();
     let config = load_config(dir.path()).unwrap();
@@ -1154,4 +1154,60 @@ fn inlay_hint_kinds_need_both_layers_on() {
         &ClientInlayHintOptions::default(),
     );
     assert!(kinds.parameter_names && kinds.closure_types);
+}
+
+/// The spellings older releases used keep working.
+#[test]
+fn renamed_keys_still_read_under_their_old_names() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(CONFIG_FILE_NAME),
+        "[diagnostics]\nreport-magic-properties = true\n\n\
+         [semantic_tokens]\nmode = \"full\"\n\n\
+         [inlay_hints]\nclosure-types = false\n",
+    )
+    .unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(config.diagnostics.magic_properties_enabled());
+    assert_eq!(config.semantic_tokens.mode(), SemanticTokensMode::Full);
+    assert_eq!(config.inlay_hints.closure_types, Some(false));
+}
+
+/// A global config in the old spelling and a project config in the new
+/// one merge key by key instead of clashing as duplicate fields.
+#[test]
+fn renamed_section_merges_across_spellings() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global").join(CONFIG_FILE_NAME);
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(
+        &global,
+        "[inlay_hints]\nparameter-names = false\nclosure-types = false\n",
+    )
+    .unwrap();
+
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join(CONFIG_FILE_NAME),
+        "[inlay-hints]\nclosure-types = true\n",
+    )
+    .unwrap();
+
+    let config = load_config_from(&project, Some(&global)).unwrap();
+    assert_eq!(config.inlay_hints.parameter_names, Some(false));
+    assert_eq!(config.inlay_hints.closure_types, Some(true));
+}
+
+/// When one file spells a key both ways, the current spelling wins.
+#[test]
+fn current_spelling_wins_over_old_in_one_file() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(CONFIG_FILE_NAME),
+        "[diagnostics]\nreport-magic-properties = true\nmagic-properties = false\n",
+    )
+    .unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(!config.diagnostics.magic_properties_enabled());
 }

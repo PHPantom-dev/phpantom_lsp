@@ -47,8 +47,10 @@ pub struct Config {
     /// Stub files whose declarations win.
     pub stubs: StubsConfig,
     /// Semantic token highlighting settings.
+    #[serde(rename = "semantic-tokens")]
     pub semantic_tokens: SemanticTokensConfig,
     /// Inlay hint toggles.
+    #[serde(rename = "inlay-hints")]
     pub inlay_hints: InlayHintsConfig,
     /// Formatting proxy settings.
     pub formatting: FormattingConfig,
@@ -64,7 +66,7 @@ pub struct Config {
     pub laravel: LaravelConfig,
 }
 
-/// `[semantic_tokens]` section — controls LSP semantic highlighting.
+/// `[semantic-tokens]` section — controls LSP semantic highlighting.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct SemanticTokensConfig {
@@ -130,6 +132,49 @@ pub struct PhpConfig {
     /// Override the detected PHP version (e.g. `"8.3"`).
     /// When `None`, PHPantom infers from `composer.json`.
     pub version: Option<String>,
+}
+
+/// Sections and keys an earlier release spelled differently, as
+/// `(parent table path, old name, current name)`.
+///
+/// From 1.0 a key that once worked has to keep working, so a rename
+/// lands here rather than breaking the configs that use the old name.
+const RENAMED_KEYS: &[(&[&str], &str, &str)] = &[
+    (&[], "semantic_tokens", "semantic-tokens"),
+    (&[], "inlay_hints", "inlay-hints"),
+    (
+        &["diagnostics"],
+        "report-magic-properties",
+        "magic-properties",
+    ),
+];
+
+/// Rewrite the old spellings in [`RENAMED_KEYS`] to the current ones,
+/// warning on stderr about each one `path` uses.
+///
+/// This runs on each file before the layers are merged, rather than
+/// through a serde alias, so a global config written with the old name
+/// and a project config written with the new one still merge key by
+/// key instead of colliding as duplicate fields.  When one file spells
+/// a key both ways, the current spelling wins.
+fn upgrade_renamed_keys(table: &mut toml::Table, path: &Path) {
+    for &(parent_path, old, new) in RENAMED_KEYS {
+        let mut parent = Some(&mut *table);
+        for segment in parent_path {
+            parent = parent.and_then(|t| t.get_mut(*segment)?.as_table_mut());
+        }
+        let Some(parent) = parent else {
+            continue;
+        };
+        if let Some(value) = parent.remove(old) {
+            parent.entry(new).or_insert(value);
+            let prefix: String = parent_path.iter().map(|s| format!("{s}.")).collect();
+            eprintln!(
+                "warning: {}: `{prefix}{old}` has been renamed to `{prefix}{new}`",
+                path.display()
+            );
+        }
+    }
 }
 
 /// Recursively merge `overlay` into `base`.  Keys in `overlay` take
@@ -267,10 +312,11 @@ fn load_toml_table(path: &Path) -> Result<Option<toml::Table>, ConfigError> {
         source: e,
     })?;
 
-    let table: toml::Table = content.parse().map_err(|e| ConfigError::Parse {
+    let mut table: toml::Table = content.parse().map_err(|e| ConfigError::Parse {
         path: path.display().to_string(),
         source: e,
     })?;
+    upgrade_renamed_keys(&mut table, path);
 
     Ok(Some(table))
 }

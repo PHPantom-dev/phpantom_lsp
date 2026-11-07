@@ -1,8 +1,8 @@
-//! `[inlay_hints]` section and the matching editor-supplied toggles.
+//! `[inlay-hints]` section and the matching editor-supplied toggles.
 
 use serde::Deserialize;
 
-/// `[inlay_hints]` section: which kinds of inlay hint are shown.
+/// `[inlay-hints]` section: which kinds of inlay hint are shown.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct InlayHintsConfig {

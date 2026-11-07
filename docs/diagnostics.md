@@ -28,7 +28,7 @@ expects to be declared somewhere, but is not, is always `invalid_`.
 | `syntax_error` | Error | Code that does not parse. |
 | `unknown_class` | Warning | A class, interface, trait, or enum that cannot be found, including one named by the type of a value whose member is used. |
 | `unknown_function` | Error | A function call that cannot be resolved. |
-| `unknown_member` | Warning | A method, property, or constant the resolved class does not have. `report-magic-properties` widens it to classes with `__get`. |
+| `unknown_member` | Warning | A method, property, or constant the resolved class does not have. `magic-properties` widens it to classes with `__get`. |
 | `partial_union_member` | Warning | A member only some classes of a union declare. Off unless `partial-union-members` is on. |
 | `unresolved_member_access` | Hint | `->`, `?->`, or `::` on a value whose type is `mixed` or could not be worked out. Off unless `unresolved-member-access` is on. |
 | `scalar_member_access` | Error | `->` or `::` on a scalar, `null`, or an array. |

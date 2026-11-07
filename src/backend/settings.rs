@@ -163,7 +163,7 @@ impl Backend {
         true
     }
 
-    /// The inlay hint kinds in force, from `[inlay_hints]` and the
+    /// The inlay hint kinds in force, from `[inlay-hints]` and the
     /// editor's toggles together. Reads the one section without cloning
     /// the whole config.
     pub(crate) fn inlay_hint_kinds(&self) -> config::InlayHintKinds {
