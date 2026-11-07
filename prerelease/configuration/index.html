@@ -660,10 +660,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#semantic_tokens" class="md-nav__link">
+  <a href="#semantic-tokens" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        <code>[semantic_tokens]</code>
+        <code>[semantic-tokens]</code>
       </span>
     </span>
   </a>
@@ -671,10 +671,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#inlay_hints" class="md-nav__link">
+  <a href="#inlay-hints" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        <code>[inlay_hints]</code>
+        <code>[inlay-hints]</code>
       </span>
     </span>
   </a>
@@ -1822,10 +1822,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#semantic_tokens" class="md-nav__link">
+  <a href="#semantic-tokens" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        <code>[semantic_tokens]</code>
+        <code>[semantic-tokens]</code>
       </span>
     </span>
   </a>
@@ -1833,10 +1833,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#inlay_hints" class="md-nav__link">
+  <a href="#inlay-hints" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        <code>[inlay_hints]</code>
+        <code>[inlay-hints]</code>
       </span>
     </span>
   </a>
@@ -2102,6 +2102,9 @@ that <code>[[diagnostics.ignore]]</code> and <code>@phpantom-ignore</code> match
 wording of a diagnostic's message is not covered and can be improved in
 any release, so prefer <code>identifier</code> over <code>message</code> in an ignore rule
 that has to keep working.</p>
+<p>Every section and key is spelled in kebab-case. A name that was spelled
+differently before 1.0 is still read under its old spelling, with a
+warning in the log, so an older config keeps working.</p>
 <p>The schema a generated <code>.phpantom.toml</code> points at is served from the
 <code>main</code> branch, so it always describes the newest release. An editor may
 therefore offer a key your installed version does not know yet; check
@@ -2160,7 +2163,7 @@ actions apply.</p>
 <td>Report calls that pass more arguments than the function accepts.</td>
 </tr>
 <tr>
-<td><code>report-magic-properties</code></td>
+<td><code>magic-properties</code></td>
 <td>bool</td>
 <td><code>false</code></td>
 <td>Report unknown property access on classes with <code>__get</code> when virtual properties are defined. Matches PHPStan's <code>reportMagicProperties</code>.</td>
@@ -2415,7 +2418,7 @@ which also keeps <code>analyze</code> from reporting on it. Listing the
 <code>_ide_helper.php</code> laravel-ide-helper generates under <code>[stubs]</code> is how you
 deliberately make its stand-in classes win, where <code>include</code> only lets
 them fill gaps.</p>
-<h3 id="semantic_tokens"><code>[semantic_tokens]</code><a class="headerlink" href="#semantic_tokens" title="Permanent link">&para;</a></h3>
+<h3 id="semantic-tokens"><code>[semantic-tokens]</code><a class="headerlink" href="#semantic-tokens" title="Permanent link">&para;</a></h3>
 <p>PHPantom defaults to <code>contextual</code> semantic tokens so editor syntax
 highlighting remains in charge of ordinary PHP syntax.</p>
 <table>
@@ -2458,7 +2461,7 @@ highlighting remains in charge of ordinary PHP syntax.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="inlay_hints"><code>[inlay_hints]</code><a class="headerlink" href="#inlay_hints" title="Permanent link">&para;</a></h3>
+<h3 id="inlay-hints"><code>[inlay-hints]</code><a class="headerlink" href="#inlay-hints" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -2753,7 +2756,7 @@ highlighting remains in charge of ordinary PHP syntax.</p>
 </code></pre></div>
 <p>It is read from <code>initializationOptions</code> and <code>workspace/didChangeConfiguration</code>, also under a <code>phpantom</code> key, and a notification without a <code>stubs</code> block leaves it as it is. The directory is treated exactly like a <a href="#stubs"><code>[stubs]</code></a> path listed after the project's own, so the project's choices win where both declare a name. This is meant for extensions, not users: to add stubs yourself, use <code>[stubs] paths</code>.</p>
 <h2 id="editor-supplied-inlay-hint-toggles">Editor-supplied inlay hint toggles<a class="headerlink" href="#editor-supplied-inlay-hint-toggles" title="Permanent link">&para;</a></h2>
-<p>An editor extension can offer its own switches for the <code>[inlay_hints]</code> kinds and pass them the same way:</p>
+<p>An editor extension can offer its own switches for the <code>[inlay-hints]</code> kinds and pass them the same way:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"inlayHints"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"parameterNames"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"closureTypes"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
 <p>It is read from <code>initializationOptions</code> and <code>workspace/didChangeConfiguration</code>, also under a <code>phpantom</code> key, and a notification without an <code>inlayHints</code> block leaves the toggles as they are. A key left out has no opinion. When a toggle changes, PHPantom asks the editor to re-request the hints of open files, so the change shows at once.</p>

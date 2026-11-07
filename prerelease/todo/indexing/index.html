@@ -1182,17 +1182,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x19-make-the-configuration-format-consistent-before-10" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X19. Make the configuration format consistent before 1.0
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x20-warn-about-unknown-configuration-keys" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1737,17 +1726,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x19-make-the-configuration-format-consistent-before-10" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X19. Make the configuration format consistent before 1.0
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x20-warn-about-unknown-configuration-keys" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2139,31 +2117,6 @@ but include a warning in the rename response when excludes are
 configured. Maintainer's call on the semantics; whichever way it
 goes, the chosen behaviour needs a test and a sentence in
 <a href="../../configuration/"><code>configuration.md</code></a>.</p>
-<h2 id="x19-make-the-configuration-format-consistent-before-10">X19. Make the configuration format consistent before 1.0<a class="headerlink" href="#x19-make-the-configuration-format-consistent-before-10" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<p>From 1.0 a working <code>.phpantom.toml</code> key has to keep working (see
-"Compatibility" in <a href="../../configuration/"><code>configuration.md</code></a>), so this
-is the last release where a key can be renamed for free. The format
-mixes two spellings today: section names are snake_case
-(<code>[semantic_tokens]</code>, <code>[inlay_hints]</code>) while every key inside a section
-is kebab-case (<code>parameter-names</code>, <code>php-cs-fixer</code>, <code>memory-limit</code>).
-Review every section and key in <code>src/config/</code> together:</p>
-<ul>
-<li>One spelling for sections and keys. Kebab-case sections
-  (<code>[semantic-tokens]</code>, <code>[inlay-hints]</code>) match the keys; keep the old
-  spelling readable through <code>#[serde(alias = …)]</code> so existing configs
-  do not break.</li>
-<li>Names that say what they do and read the same way across sections:
-  the <code>[diagnostics]</code> toggles mix noun phrases (<code>extra-arguments</code>)
-  with a verb phrase (<code>report-magic-properties</code>), and the tool sections each spell their timeouts differently
-  (<code>timeout</code>, <code>lint-timeout</code>, <code>analyze-timeout</code>).</li>
-<li>Values with the same shape typed the same way: check that every
-  command is a string where <code>""</code> disables, and that every timeout
-  uses the same unit.</li>
-</ul>
-<p>Update <code>config-schema.json</code>, <code>configuration.md</code>, the <code>init</code> wizard, and
-the config tests in the same change, and write the renamed keys in the
-changelog with their old spelling.</p>
 <h2 id="x20-warn-about-unknown-configuration-keys">X20. Warn about unknown configuration keys<a class="headerlink" href="#x20-warn-about-unknown-configuration-keys" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low</strong></p>
 <p><code>.phpantom.toml</code> is deserialized with serde's default behaviour, so a
@@ -2175,9 +2128,9 @@ report each one, with its file and dotted path, as a warning in the
 editor (<code>window/showMessage</code> once per config load, plus the log) and
 on stderr from <code>analyze</code>, <code>fix</code>, and <code>format</code>. Keep it a warning, never
 an error, so a config written for a newer release still loads.</p>
-<p>The same hook is what lets X19 and any later rename stay gentle: an
-old spelling read through an alias can be reported as deprecated, with
-the new name, instead of either breaking or passing silently.</p>
+<p>The renamed-key table in <code>src/config/mod.rs</code> already rewrites old
+spellings and warns about them on stderr; route that warning through
+the same reporting so an editor user sees it too.</p>
 <h2 id="x21-keep-config-schemajson-in-step-with-the-config-structs">X21. Keep <code>config-schema.json</code> in step with the config structs<a class="headerlink" href="#x21-keep-config-schemajson-in-step-with-the-config-structs" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
 <p><code>config-schema.json</code> is maintained by hand and only a checkbox in the
