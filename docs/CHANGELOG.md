@@ -147,6 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Constants written into an array in a loop.** An array built in a loop from a constant, such as `$labels[$node] = self::WHITE`, now keeps the constant's value as its element type instead of widening it to `int`, so passing it to a parameter that accepts only those values is no longer reported.
 - **`foreach` over a `RecursiveIteratorIterator`.** Looping over a `RecursiveIteratorIterator` now gives the keys and values of the iterator it wraps, rather than the wrapped iterator itself, so `new RecursiveIteratorIterator(new RecursiveArrayIterator($data))` yields `$data`'s elements.
 - **Generic iterator parameters check their class.** Passing an iterator to a parameter typed with a generic iterator interface, such as `RecursiveIterator<int, string>`, is now reported when the iterator does not implement that interface.
 - **Classes that share a short name in one type.** Hover, completion, and signature help now show each class by its full name when a type names two classes with the same short name, such as `class-string<\App\C>|class-string<\Other\C>`, instead of printing them as one.

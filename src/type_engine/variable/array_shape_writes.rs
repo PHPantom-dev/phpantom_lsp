@@ -100,6 +100,9 @@ pub(super) enum ArrayWriteKey {
 /// growing a tracked shape (or a pile of different-length shape variants)
 /// by one entry per re-walk. Outside a loop the write runs exactly once,
 /// so it keeps the shape's arity — see [`append_to_shape`].
+///
+/// `value_type` is stored as given. A loop write whose value can change from
+/// one pass to the next comes in already widened by [`loop_written_value`].
 pub(super) fn merge_nested_array_write(
     base: &PhpType,
     keys: &[ArrayWriteKey],
@@ -176,19 +179,10 @@ fn merge_nested_array_write_inner(
     in_loop: bool,
 ) -> PhpType {
     debug_assert!(!keys.is_empty());
-    // A keyed write that runs once stores the exact value, the way an
-    // assignment to a variable does. One in a loop body may run any number
-    // of times with a different value each time, so only its base type is
-    // known.
-    let written = if in_loop {
-        value_type.widen_scalar_literals()
-    } else {
-        value_type.clone()
-    };
     match &keys[0] {
         ArrayWriteKey::Shape(key) => {
             if keys.len() == 1 {
-                merge_shape_key(base, key, &written)
+                merge_shape_key(base, key, value_type)
             } else {
                 let inner_base = shape_slot_base(base, key);
                 let inner_merged =
@@ -202,7 +196,10 @@ fn merge_nested_array_write_inner(
             // as they were.
             if writes_existing_entry(base, keys) {
                 let element = if keys.len() == 1 {
-                    PhpType::join_runtime_value_types(vec![keyed_slot_base(base), written.clone()])
+                    PhpType::join_runtime_value_types(vec![
+                        keyed_slot_base(base),
+                        value_type.clone(),
+                    ])
                 } else {
                     merge_nested_array_write(
                         &keyed_slot_base(base),
@@ -227,7 +224,7 @@ fn merge_nested_array_write_inner(
                     .or_else(|| positional_entry_index(entries, *slot))
             {
                 let inner_merged = if keys.len() == 1 {
-                    written
+                    value_type.clone()
                 } else {
                     merge_nested_array_write(
                         &entries[index].value_type,
@@ -251,7 +248,7 @@ fn merge_nested_array_write_inner(
                 let slot_key = slot.to_string();
                 if !runtime_keys.contains(&slot_key) {
                     let inner_merged = if keys.len() == 1 {
-                        written
+                        value_type.clone()
                     } else {
                         merge_nested_array_write(
                             &PhpType::array_shape(Vec::new()),
@@ -275,12 +272,12 @@ fn merge_nested_array_write_inner(
             if keys.len() == 1
                 && let Some(entries) = base.shape_entries()
                 && let Some(updated) =
-                    write_literal_keys_into_shape(entries, key_type, &written, in_loop)
+                    write_literal_keys_into_shape(entries, key_type, value_type, in_loop)
             {
                 return updated;
             }
             if keys.len() == 1 {
-                return merge_keyed_type_inner(base, key_type, &written, true);
+                return merge_keyed_type_inner(base, key_type, value_type, true);
             }
             // The inner write started from the element type the array
             // already holds, so what it produced is that element after the
@@ -314,7 +311,7 @@ fn merge_nested_array_write_inner(
             {
                 return append_to_shape(base, entries, value_type);
             }
-            merge_push_type(base, &written)
+            merge_push_type(base, value_type)
         }
     }
 }
@@ -856,23 +853,31 @@ pub(super) enum PushedValues {
 ///
 /// Each value is the `$base[] = $value` append it stands for, so the result
 /// is whatever that run of appends builds. `in_loop` is the flag
-/// [`merge_nested_array_write`] takes.
+/// [`merge_nested_array_write`] takes, and the values come in already
+/// passed through [`loop_written_value`].
 pub(super) fn apply_array_push(base: &PhpType, values: &[PushedValues], in_loop: bool) -> PhpType {
     values.iter().fold(base.clone(), |acc, value| match value {
         PushedValues::One(value) => {
             merge_nested_array_write(&acc, &[ArrayWriteKey::Append], value, in_loop)
         }
-        PushedValues::Any(value) => push_any_number(&acc, &pushed_value(value, in_loop)),
+        PushedValues::Any(value) => push_any_number(&acc, value),
     })
 }
 
-/// A value `array_push()`/`array_unshift()` adds, widened the way
-/// [`merge_nested_array_write`] widens a write.
-fn pushed_value(value: &PhpType, in_loop: bool) -> PhpType {
-    if in_loop {
+/// The value an array write of `value` stores.
+///
+/// A write that runs once stores the exact value, the way an assignment to
+/// a variable does. One in a loop body runs any number of times, and the
+/// walker re-walks the body until its types settle, so a value that can
+/// differ from one pass to the next is known only by its base type: kept
+/// exact, a literal union (or a concatenated string) would grow on every
+/// pass. A `constant` expression writes the same value on every pass, so it
+/// keeps its literal.
+pub(super) fn loop_written_value(value: PhpType, in_loop: bool, constant: bool) -> PhpType {
+    if in_loop && !constant {
         value.widen_scalar_literals()
     } else {
-        value.clone()
+        value
     }
 }
 
@@ -910,9 +915,7 @@ pub(super) fn apply_array_unshift(
         };
     }
     let widened = values.iter().fold(base.clone(), |acc, value| match value {
-        PushedValues::One(value) | PushedValues::Any(value) => {
-            push_any_number(&acc, &pushed_value(value, in_loop))
-        }
+        PushedValues::One(value) | PushedValues::Any(value) => push_any_number(&acc, value),
     });
     if values
         .iter()
