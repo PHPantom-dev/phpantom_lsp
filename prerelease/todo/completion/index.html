@@ -881,17 +881,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#c6-expectedvalues-parameter-value-suggestions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        C6. <code>#[ExpectedValues]</code> parameter value suggestions
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#c7-class_alias-support" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1422,17 +1411,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#c6-expectedvalues-parameter-value-suggestions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        C6. <code>#[ExpectedValues]</code> parameter value suggestions
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#c7-class_alias-support" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1646,45 +1624,6 @@ array shapes would require detecting the array key context in the
 GTD path (similar to array shape completion) and searching for the
 key inside the matching <code>array{…}</code> annotation.</p>
 <hr />
-<h2 id="c6-expectedvalues-parameter-value-suggestions">C6. <code>#[ExpectedValues]</code> parameter value suggestions<a class="headerlink" href="#c6-expectedvalues-parameter-value-suggestions" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>phpstorm-stubs annotate ~62 parameters and return values with
-<code>#[ExpectedValues]</code> to declare the set of valid constant values or
-flags. This could power smarter completions inside function call
-arguments by suggesting the valid constants.</p>
-<p><strong>Attribute FQN:</strong> <code>JetBrains\PhpStorm\ExpectedValues</code>. Stub files
-import it via <code>use JetBrains\PhpStorm\ExpectedValues;</code>. Two files alias
-it as <code>EV</code> (<code>intl/intl.php</code> and <code>ftp/ftp.php</code>). Match by resolving
-through the <code>DocblockCtx</code> use-map and comparing the last segment of the
-resolved FQN (<code>ExpectedValues</code>).</p>
-<p>The attribute supports several forms:</p>
-<ul>
-<li><code>values: [CONST_A, CONST_B]</code> — one of the listed values is expected.</li>
-<li><code>flags: [FLAG_A, FLAG_B]</code> — a bitmask combination is expected.</li>
-<li><code>valuesFromClass: MyClass::class</code> — one of the class's constants.</li>
-<li><code>flagsFromClass: MyClass::class</code> — bitmask of the class's constants.</li>
-</ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function phpinfo(</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    #[ExpectedValues(flags: [INFO_GENERAL, INFO_CREDITS, INFO_CONFIGURATION,</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">                             INFO_MODULES, INFO_ENVIRONMENT, INFO_VARIABLES,</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">                             INFO_LICENSE, INFO_ALL])]</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    int $flags = INFO_ALL</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">): bool {}</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">function pathinfo(</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    string $path,</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    #[ExpectedValues(flags: [PATHINFO_DIRNAME, PATHINFO_BASENAME,</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">                             PATHINFO_EXTENSION, PATHINFO_FILENAME])]</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">    int $flags = PATHINFO_ALL</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">): string|array {}</span>
-</code></pre></div>
-<p><strong>Implementation:</strong> During parameter extraction, store the expected
-values metadata. When providing completions inside a function call
-argument position, check whether the target parameter has expected
-values and offer the listed constants at the top of the suggestions
-list. Flag-style parameters should also suggest bitwise-OR
-combinations.</p>
-<hr />
 <h2 id="c7-class_alias-support">C7. <code>class_alias()</code> support<a class="headerlink" href="#c7-class_alias-support" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>Resolve <code>class_alias('OriginalClass', 'AliasName')</code> so that the alias
@@ -1813,13 +1752,13 @@ is first indexed.</p>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>A <code>set</code> hook that declares no parameter list still receives the assigned
 value as <code>$value</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Item {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    public Price $label {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">        set {</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">            $this-&gt;stored = $value-&gt;format();  // `$value` resolves</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">        }</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    }</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Item {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public Price $label {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        set {</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">            $this-&gt;stored = $value-&gt;format();  // `$value` resolves</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        }</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    }</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">}</span>
 </code></pre></div>
 <p>The type engine seeds <code>$value</code> from the property's declared type, so
 hover, go-to-definition, and diagnostics all read it correctly. Typing
@@ -1844,16 +1783,16 @@ methods and properties (<code>test_completion_require_extends_this_members_*</co
 in <code>completion_traits.rs</code>), via <code>trait_this_bounds</code>/
 <code>extend_this_with_trait_bounds</code> in <code>type_engine/trait_context.rs</code>. Static
 access does not get the same treatment:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    const int FOO = 42;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">}</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">/** @psalm-require-extends Foo */</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">trait Bar {</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    public function foo(): int {</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">        return static::   // completion offers nothing from Foo</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    }</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    const int FOO = 42;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">}</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">/** @psalm-require-extends Foo */</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">trait Bar {</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    public function foo(): int {</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">        return static::   // completion offers nothing from Foo</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">    }</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">}</span>
 </code></pre></div>
 <p>Every caller of <code>trait_this_bounds</code>/<code>extend_this_with_trait_bounds</code> is on
 a <code>$this</code>-context resolution path (<code>forward_walk/param_seeding.rs</code>,
