@@ -113,6 +113,7 @@ async fn tempest_discovery_edits_closes_and_watched_changes_refresh_the_catalogu
         r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
         &[
             ("app/views.config.php", original),
+            ("app/controller.php", "<?php"),
             ("app/page.view.php", source),
             ("one/x-card.view.php", "One"),
             ("two/x-card.view.php", "Two"),
@@ -157,6 +158,15 @@ async fn tempest_discovery_edits_closes_and_watched_changes_refresh_the_catalogu
         expected("two/x-card.view.php")
     );
     std::fs::remove_file(dir.path().join("app/views.config.php")).unwrap();
+    // Another edit can refresh inference before the deletion event arrives.
+    // The cached catalogue still names the now-missing configuration file.
+    open_php(
+        &backend,
+        &workspace_uri(&backend, "app/controller.php"),
+        "<?php // Configuration was removed on disk.",
+    )
+    .await;
+    assert!(definition_locations(goto_definition_at(&backend, &uri, 0, 3).await).is_empty());
     backend
         .did_change_watched_files(DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
