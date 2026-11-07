@@ -150,6 +150,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Yii views.** In a Yii project, a view rendered by name, by a path built from `__DIR__`, or from inside another template jumps to its template, completes from the template's directory, and lists its references, and a view no template matches is reported. A name is resolved against the view path the class gives its renderer, through the aliases the configuration declares. A CodeLens at the top of a template lists the calls that render it.
 - **Yii route names.** In a Yii project, a route name declared by a `Route` definition, under the name and path prefixes of the groups around it, completes, jumps to its declaration, and lists its references wherever a URL generator builds a URL to it, including through a class of the project's own that passes the name on. The arguments array of `generate()` completes from the placeholders of the route's path, a handler's `#[RouteArgument]` jumps to the placeholder it reads and completes from it, and a route name or argument that nothing declares is reported.
 
+#### Tempest
+
+- **Tempest View completion and navigation.** In a Tempest project, PHP expressions in `.view.php` templates use imports and `@var` annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to `Tempest\View\view()` also complete and navigate. Contributed by @shuvroroy.
+
 #### Configuration and indexing
 
 - **Unknown configuration keys are reported.** A key in `.phpantom.toml` or the global config that PHPantom does not know, such as a typo, is reported with its file instead of silently doing nothing. The editor shows a warning when the config loads, and `analyze`, `fix`, `format`, and `move` print one per key. The rest of the config still applies.
@@ -203,6 +207,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Type inference
 
+- **Property types on an annotated `$this`.** Reading a property through an explicitly typed `$this` now preserves its type in assignments and loops, including Tempest views. Contributed by @shuvroroy.
 - **`(int)` casts keep what the value says.** Casting an integer range with `(int)` now keeps the range, and casting `null`, a `bool`, or an array gives `0` or `1`, instead of a plain `int`.
 - **Untyped methods that return `new static()`.** Calling such a method through a subclass, or on a class that uses the trait declaring it, now gives that class instead of the one the method is declared in.
 - **Variables passed to typed by-reference parameters.** After a call to your own function or method that takes `array &$message`, the variable now has the parameter's type instead of the shape it had before the call, so reads of keys the callee added are no longer reported.
@@ -652,6 +657,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Tempest performance checks.** CI measures template editing, completion, navigation, and memory use against the Tempest playground. Contributed by @shuvroroy.
 - **Pull request benchmarks no longer fail on a slow runner.** Each benchmark runner measures both the PR and its base, so the 30% regression check reflects the change rather than which machine ran it. Contributed by @shuvroroy. Closes #489.
 - **Faster benchmark checks on pull requests.** Latency benchmarks now run split across four runners, and benchmark alerts on fork pull requests show up in the job summary instead of failing on a permission error. Contributed by @shuvroroy.
 - **A Drupal playground.** `examples/drupal/` is a Drupal 11 site with one custom module and one theme, for trying PHPantom on Drupal code, with runtime checks of what its comments claim. Contributed by @giuseppe-esposito-87.

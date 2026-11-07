@@ -204,7 +204,7 @@ impl Backend {
         };
 
         let template = self.template_text(uri);
-        if template.is_none() && self.is_blade_file(uri) {
+        if template.is_none() && self.is_php_template(uri) {
             return;
         }
         let symbols = self.qualified_symbols(

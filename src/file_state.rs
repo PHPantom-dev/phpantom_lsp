@@ -11,9 +11,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::ParseErrorEntry;
-use crate::blade::source_map::BladeSourceMap;
 use crate::names::OwnedResolvedNames;
 use crate::symbol_map::SymbolMap;
+use crate::template::source_map::TemplateSourceMap;
 use crate::types::{NamespaceSpan, SymbolImports};
 
 /// Everything the last parse of one file left behind.
@@ -44,18 +44,18 @@ pub(crate) struct FileState {
     /// or `pest()->extends(…)` that has no `->in(…)`.
     pub(crate) pest_uses: Option<Arc<[String]>>,
     /// What a Blade template lowers to.
-    pub(crate) blade: Option<BladeFileState>,
+    pub(crate) template: Option<TemplateFileState>,
 }
 
 /// A template's lowering.
 #[derive(Clone)]
-pub(crate) struct BladeFileState {
+pub(crate) struct TemplateFileState {
     /// The virtual PHP the template lowers to.  Shared rather than owned:
     /// every request against a template reads this text, and a template's
     /// virtual PHP is several times the size of the template itself.
     pub(crate) virtual_php: Arc<String>,
     /// Maps virtual PHP positions back to the template's.
-    pub(crate) source_map: Arc<BladeSourceMap>,
+    pub(crate) source_map: Arc<TemplateSourceMap>,
 }
 
 /// Every file's state, keyed by URI.

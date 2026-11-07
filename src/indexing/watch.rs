@@ -97,6 +97,16 @@ impl Backend {
         if self.is_drupal_project() {
             self.note_drupal_config_changes(&changes);
         }
+        if self.is_tempest_project()
+            && changes.iter().any(|change| {
+                let uri = change.uri.as_str();
+                (crate::tempest::is_view(uri) && change.kind != FileChangeType::Changed)
+                    || uri.ends_with("/composer.json")
+                    || uri.ends_with("/composer.lock")
+            })
+        {
+            self.invalidate_tempest_views();
+        }
         if self.is_symfony_project()
             && changes.iter().any(|change| {
                 crate::symfony::translations::is_translation_setup_uri(change.uri.as_str())

@@ -356,6 +356,7 @@ fn extract_function_call<'a>(
                 );
             }
             emit_clone_with_spans(func_call, ctx);
+            super::super::tempest::emit_view_path(func_call, ident, ctx);
             ctx.spans.push(SymbolSpan {
                 start: ident.span().start.offset,
                 end: ident.span().end.offset,

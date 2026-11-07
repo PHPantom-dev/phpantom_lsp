@@ -79,22 +79,22 @@ pub(crate) struct AstIndexUpdate {
     pub(super) symbol_map: Arc<SymbolMap>,
     /// The lowering a template was parsed as, published together with
     /// `symbol_map` because the map's offsets index its virtual PHP.
-    pub(super) blade: Option<BladeLowering>,
+    pub(super) template: Option<TemplateLowering>,
     /// The database connections the file configures through
     /// `DriverManager::getConnection()`.
     pub(super) doctrine_connections: Vec<crate::doctrine::connection::Connection>,
 }
 
-/// A Blade template lowered to the virtual PHP everything else reads it as,
+/// A template lowered to the virtual PHP everything else reads it as,
 /// with the source map that carries positions back to the template.
-pub(crate) struct BladeLowering {
+pub(crate) struct TemplateLowering {
     pub(super) virtual_php: Arc<String>,
-    pub(super) source_map: crate::blade::source_map::BladeSourceMap,
+    pub(super) source_map: crate::template::source_map::TemplateSourceMap,
     /// The scope this lowering was seeded from, so a batch that outlives a
     /// newer scope written by call-site re-inference can be told apart from
     /// one still describing the current scope (see
     /// [`Backend::apply_ast_index_parse_results_batch`]).
-    scope: BladeScope,
+    scope: Option<BladeScope>,
 }
 
 impl Backend {
@@ -105,8 +105,8 @@ impl Backend {
     /// changed (or a class was added/removed), meaning other open files
     /// that reference those classes may have stale diagnostics.
     pub fn update_ast(&self, uri: &str, content: &str) -> bool {
-        let blade = self.lower_blade_template(uri, content);
-        let content_to_parse = blade.as_ref().map_or_else(
+        let template = self.lower_template(uri, content);
+        let content_to_parse = template.as_ref().map_or_else(
             || Arc::new(content.to_string()),
             |lowering| Arc::clone(&lowering.virtual_php),
         );
@@ -131,7 +131,7 @@ impl Backend {
         let uri_owned = uri.to_string();
 
         let result = crate::util::catch_panic_unwind_safe("parse", uri, None, || {
-            self.update_ast_inner(&uri_owned, content_owned, blade)
+            self.update_ast_inner(&uri_owned, content_owned, template)
         });
 
         // The refreshes below that rebuild from the registered provider list
@@ -207,7 +207,7 @@ impl Backend {
         &self,
         uri: &str,
         content: Arc<String>,
-        blade: Option<BladeLowering>,
+        template: Option<TemplateLowering>,
     ) -> bool {
         let (mut update, parsed) = if self.open_files.read().contains_key(uri) {
             let mut parse_errors = Vec::new();
@@ -229,7 +229,7 @@ impl Backend {
         } else {
             (self.build_ast_index_update(uri, &content), None)
         };
-        update.blade = blade;
+        update.template = template;
         let changed = self.apply_ast_index_updates_batch(vec![update]);
         if let Some(parsed) = parsed {
             self.keep_parse(uri, parsed);
@@ -260,7 +260,15 @@ impl Backend {
     /// parsed yet) and resolving their expression types from many threads
     /// at once has deadlocked against the batch-publish locks.  The serial
     /// refresh passes own the cache; this path only reads it.
-    pub(crate) fn lower_blade_template(&self, uri: &str, content: &str) -> Option<BladeLowering> {
+    pub(crate) fn lower_template(&self, uri: &str, content: &str) -> Option<TemplateLowering> {
+        if self.is_tempest_view(uri) {
+            let (virtual_php, source_map) = crate::tempest::preprocessor::preprocess(content);
+            return Some(TemplateLowering {
+                virtual_php: Arc::new(virtual_php),
+                source_map,
+                scope: None,
+            });
+        }
         if !self.is_blade_file(uri) {
             return None;
         }
@@ -285,10 +293,10 @@ impl Backend {
             Some(&components),
             &directives,
         );
-        Some(BladeLowering {
+        Some(TemplateLowering {
             virtual_php: Arc::new(virtual_php),
             source_map,
-            scope: injected,
+            scope: Some(injected),
         })
     }
 
@@ -310,12 +318,12 @@ impl Backend {
         // would leave it describing different text than the symbol map
         // `did_change` published, which is exactly what the rename's
         // `matches_source` check refuses to plan against.
-        let blade = if self.is_blade_file(uri) && !self.open_files.read().contains_key(uri) {
-            self.lower_blade_template(uri, content)
+        let template = if self.is_php_template(uri) && !self.open_files.read().contains_key(uri) {
+            self.lower_template(uri, content)
         } else {
             None
         };
-        let content = blade
+        let content = template
             .as_ref()
             .map_or(content, |lowering| lowering.virtual_php.as_str());
 
@@ -323,7 +331,7 @@ impl Backend {
             self.build_ast_index_update(uri, content)
         }) {
             Some(mut update) => {
-                update.blade = blade;
+                update.template = template;
                 AstIndexParseResult::Update(Box::new(update))
             }
             None => AstIndexParseResult::ParseFailed {
@@ -371,11 +379,11 @@ impl Backend {
                     if open_uris.contains_key(&update.uri) {
                         continue;
                     }
-                    if let Some(blade) = &update.blade {
+                    if let Some(scope) = update.template.as_ref().and_then(|t| t.scope.as_ref()) {
                         let current = injected_vars.get(&update.uri);
                         let stale = match current {
-                            Some(current) => *current != blade.scope,
-                            None => blade.scope != BladeScope::default(),
+                            Some(current) => current != scope,
+                            None => *scope != BladeScope::default(),
                         };
                         if stale {
                             continue;
@@ -460,7 +468,7 @@ impl Backend {
         // workspace-symbol results.  They stay in the virtual PHP, so
         // the calls the lowering emits still resolve against them
         // within the template.
-        if self.is_blade_file(uri) {
+        if self.is_php_template(uri) {
             functions.retain(|func| !crate::blade::is_synthetic_function(&func.name));
         }
 
@@ -646,7 +654,7 @@ impl Backend {
             functions,
             defines,
             symbol_map,
-            blade: None,
+            template: None,
             doctrine_connections,
         }
     }

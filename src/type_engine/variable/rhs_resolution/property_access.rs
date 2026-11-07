@@ -591,10 +591,22 @@ fn held_enum_cases(resolved: &[ResolvedType]) -> Option<Vec<(Arc<ClassInfo>, Ato
     Some(cases)
 }
 
-/// The classes whose `prop_name` a `$this->prop_name` read reaches: the
-/// current class and, inside a trait, the classes its users are
-/// guaranteed to be that declare it.
+/// The classes whose `prop_name` a `$this->prop_name` read reaches: what
+/// `$this` is where it is read (the current class, or what a closure
+/// binding, a narrowing or an inline `@var` makes it) and, inside a trait,
+/// the classes its users are guaranteed to be that declare it.
 fn this_property_owners(prop_name: &str, ctx: &VarResolutionCtx<'_>) -> Vec<Arc<ClassInfo>> {
+    // Read `$this` the way a member access on it is resolved, so a read
+    // in an assignment or a loop sees the same owner as completion does.
+    if ctx.current_class.kind != crate::types::ClassLikeKind::Trait {
+        return ResolvedType::into_arced_classes(
+            crate::type_engine::resolver::resolve_target_classes(
+                "$this",
+                crate::types::AccessKind::Arrow,
+                &ctx.as_resolution_ctx(),
+            ),
+        );
+    }
     let mut owners: Vec<Arc<ClassInfo>> =
         crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &ctx.current_class.fqn())
             .map(Arc::clone)
@@ -606,9 +618,7 @@ fn this_property_owners(prop_name: &str, ctx: &VarResolutionCtx<'_>) -> Vec<Arc<
     // class that only inherits it.  The walker seeds `$this` with those
     // bounds once per body, so read them from its scope rather than
     // searching the trait's users again for every property read.
-    let bounds = if ctx.current_class.kind != crate::types::ClassLikeKind::Trait {
-        Vec::new()
-    } else if let Some(resolver) = ctx.scope_var_resolver {
+    let bounds = if let Some(resolver) = ctx.scope_var_resolver {
         let trait_fqn = ctx.current_class.fqn();
         ResolvedType::into_arced_classes(resolver("$this"))
             .into_iter()

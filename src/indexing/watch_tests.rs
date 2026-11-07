@@ -71,8 +71,8 @@ fn deleting_a_template_drops_its_lowered_php_and_source_map() {
 
     let backend = Backend::new_test();
     backend.update_ast(&uri, "<div>{{ $name }}</div>\n");
-    assert!(backend.blade_virtual_php_arc(&uri).is_some());
-    assert!(backend.blade_source_map(&uri).is_some());
+    assert!(backend.template_virtual_php_arc(&uri).is_some());
+    assert!(backend.template_source_map(&uri).is_some());
 
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
@@ -82,8 +82,8 @@ fn deleting_a_template_drops_its_lowered_php_and_source_map() {
     };
     backend.apply_watched_file_changes(&params, dir.path());
 
-    assert!(backend.blade_virtual_php_arc(&uri).is_none());
-    assert!(backend.blade_source_map(&uri).is_none());
+    assert!(backend.template_virtual_php_arc(&uri).is_none());
+    assert!(backend.template_source_map(&uri).is_none());
 }
 
 /// The registrations a provider contributes are replaced when the file

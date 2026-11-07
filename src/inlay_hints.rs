@@ -80,12 +80,23 @@ impl Backend {
 
         let ctx = self.file_context(uri);
 
-        // A template's request range arrives in Blade coordinates; the
-        // symbol map's offsets are in the virtual PHP.
-        let virtual_range = self.translate_blade_range_to_php(uri, range);
-
-        let range_start = position_to_offset(content, virtual_range.start);
-        let range_end = position_to_offset(content, virtual_range.end);
+        // A template's request range arrives in the template's coordinates;
+        // the symbol map's offsets are in the virtual PHP.  A Tempest view's
+        // virtual PHP reorders the template's expressions, so its viewport
+        // has no single virtual range: the whole view is hinted and the
+        // hints outside the viewport are dropped once translated back.
+        let reordered = self
+            .template_source_map(uri)
+            .is_some_and(|map| map.copied.is_some());
+        let (range_start, range_end) = if reordered {
+            (0, content.len() as u32)
+        } else {
+            let virtual_range = self.translate_template_range_to_php(uri, range);
+            (
+                position_to_offset(content, virtual_range.start),
+                position_to_offset(content, virtual_range.end),
+            )
+        };
 
         // One line table for the whole request: every hint converts an
         // offset from this content, and `offset_to_position` is O(offset)
@@ -127,16 +138,18 @@ impl Backend {
             );
         }
 
-        // Translate hints back to Blade if needed.  A hint anchored in the
-        // injected prologue has no template text to attach to.
-        if self.is_blade_file(uri) {
+        // Translate hints back to the template if needed.  A hint anchored
+        // in the injected prologue has no template text to attach to.
+        if self.is_php_template(uri) {
             hints.retain_mut(
-                |hint| match self.try_translate_php_to_blade(uri, hint.position) {
-                    Some(position) => {
+                |hint| match self.try_translate_php_to_template(uri, hint.position) {
+                    Some(position)
+                        if !reordered || (range.start..=range.end).contains(&position) =>
+                    {
                         hint.position = position;
                         true
                     }
-                    None => false,
+                    _ => false,
                 },
             );
         }

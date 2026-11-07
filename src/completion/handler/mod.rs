@@ -223,6 +223,10 @@ impl Backend {
     ) -> Option<CompletionResponse> {
         let position = params.text_document_position_params.position;
 
+        if let Some(response) = self.tempest_source_completion(uri, position) {
+            return Some(response);
+        }
+
         if self.is_blade_file(uri)
             && let Some(response) = self.blade_source_completion(uri, position)
         {
@@ -270,7 +274,7 @@ impl Backend {
         // the injected prologue rather than clamping them to the
         // template's start.
         match response {
-            Some(response) if self.is_blade_file(uri) => {
+            Some(response) if self.is_php_template(uri) => {
                 Some(self.translate_completion_response(uri, response))
             }
             other => other,

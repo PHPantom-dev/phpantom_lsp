@@ -18,7 +18,9 @@ use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
 use crate::backend::file_access::namespace_in_spans;
 use crate::names::resolve_to_fqn;
-use crate::symbol_map::{KeyFramework, SelfStaticParentKind, StringKeyKind, SymbolKind, SymbolMap};
+use crate::symbol_map::{
+    ReceiverFrameworks, SelfStaticParentKind, StringKeyKind, SymbolKind, SymbolMap,
+};
 use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, short_name, strip_fqn_prefix};
 
@@ -57,6 +59,13 @@ pub(crate) enum ReferenceIndexKey {
 /// changing the exact source range consumers return.
 pub(crate) fn string_key_reference_key(kind: StringKeyKind, key: &str) -> ReferenceIndexKey {
     match kind {
+        // The same view has different spellings relative to its callers.
+        // Index Tempest callers together; the path resolver compares the
+        // actual targets after this inexpensive candidate selection.
+        StringKeyKind::TempestView { .. } => ReferenceIndexKey::StringKey {
+            kind: StringKeyKind::TempestView { relative: false },
+            key: String::new(),
+        },
         StringKeyKind::ConfigResource(resource)
             if !crate::symbol_map::laravel_resources::is_implicit_resource_name(resource, key) =>
         {
@@ -773,20 +782,15 @@ impl Backend {
         // never be confirmed, and morph sites are recorded for every plain
         // `$x->prop === 'literal'`, so skip them there.
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
-        let is_symfony = self.is_symfony_project();
-        let reads_container = self.reads_service_container();
-        let is_twig = self.is_twig_project();
-        let is_yii = self.is_yii_project();
-        let is_drupal = self.is_drupal_project();
-        let enabled = |kind: StringKeyKind| match kind.framework() {
-            KeyFramework::Laravel => is_laravel,
-            KeyFramework::ServiceContainer => reads_container,
-            KeyFramework::Symfony => is_symfony,
-            KeyFramework::Twig => is_twig,
-            KeyFramework::Yii => is_yii,
-            KeyFramework::WordPress => false,
-            KeyFramework::Drupal => is_drupal,
+        let frameworks = ReceiverFrameworks {
+            laravel: is_laravel,
+            symfony: self.is_symfony_project(),
+            service_container: self.reads_service_container(),
+            twig: self.is_twig_project(),
+            yii: self.is_yii_project(),
+            drupal: self.is_drupal_project(),
         };
+        let enabled = |kind| frameworks.enables(kind);
         for site in &symbol_map.typed_receiver_sites {
             if !site.receiver.names_any(enabled) {
                 continue;

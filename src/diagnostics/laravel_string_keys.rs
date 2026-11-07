@@ -64,6 +64,9 @@ impl CheckedStringKind {
         use crate::symbol_map::StringKeyKind;
 
         Some(match kind {
+            // Tempest path navigation is available without a complete
+            // catalogue of the renderer's configured discovery locations.
+            StringKeyKind::TempestView { .. } => return None,
             StringKeyKind::Route => Self::Route,
             StringKeyKind::Config => Self::Config,
             StringKeyKind::ConfigResource(resource) => Self::ConfigResource(*resource),
@@ -1189,7 +1192,7 @@ impl Backend {
         // A Blade file's symbol map is built from the preprocessed virtual
         // PHP, so every offset in it — including the subject's — indexes that
         // text rather than the template the caller handed us.
-        let virtual_php = self.blade_virtual_php_arc(uri);
+        let virtual_php = self.template_virtual_php_arc(uri);
         let content = virtual_php.as_ref().map_or(content, |php| php.as_str());
 
         let (subject_text, is_static) = {

@@ -2,6 +2,27 @@ use super::docblock::is_navigable_type;
 use super::extraction::{extract_symbol_map, extract_symbol_map_with_resolved_names};
 use super::*;
 
+#[test]
+fn typed_receivers_do_not_record_function_only_keys_in_mixed_framework_projects() {
+    let frameworks = ReceiverFrameworks {
+        laravel: true,
+        service_container: true,
+        symfony: true,
+        twig: true,
+        yii: true,
+        drupal: true,
+    };
+    for kind in [
+        StringKeyKind::WordPressHook,
+        StringKeyKind::TempestView { relative: false },
+        StringKeyKind::TempestView { relative: true },
+    ] {
+        assert!(!frameworks.enables(kind), "{kind:?}");
+    }
+    assert!(ReceiverClass::ViewFactory.names_any(|kind| frameworks.enables(kind)));
+    assert!(ReceiverClass::ContainerLookup.names_any(|kind| frameworks.enables(kind)));
+}
+
 /// Pair a map with the source it was extracted from, for the subject-text
 /// assertions below.
 fn mapped<'a>(map: &SymbolMap, php: &'a str) -> MappedSource<'a> {

@@ -201,10 +201,13 @@ impl Backend {
         old_fqn: &str,
         edits: &mut Vec<TextEdit>,
     ) {
-        if !self.is_blade_file(uri) {
+        if !self.is_php_template(uri) {
             return;
         }
         self.translate_template_edits(uri, edits);
+        if !self.is_blade_file(uri) {
+            return;
+        }
         let Some(template) = self.get_file_content(uri) else {
             return;
         };

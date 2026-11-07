@@ -96,7 +96,7 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let config = self.config();
-        if !config.diagnostics.unhandled_exceptions_enabled() || self.is_blade_file(uri) {
+        if !config.diagnostics.unhandled_exceptions_enabled() || self.is_php_template(uri) {
             return;
         }
         let unchecked = config.diagnostics.unchecked_exceptions();
