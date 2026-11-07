@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure PHPantom LSP resident memory (RSS) on six workloads.
+"""Measure PHPantom LSP resident memory (RSS) on seven workloads.
 
 Scenarios
 ---------
@@ -15,10 +15,13 @@ Scenarios
    Composer.
 6. **drupal_module** – open a controller in a custom module of a Drupal
    site whose core Composer installs into the web root.
+7. **tempest_view** – complete members and components in the Tempest
+   playground, with its locked dependencies and a catalogue of 400 views.
 
 The script communicates with the LSP binary over JSON-RPC / stdio,
 waits for indexing to finish, sends a ``textDocument/didOpen``, lets the
-server settle, then samples ``VmRSS`` from ``/proc/<pid>/status``.
+server settle, then samples ``VmRSS`` from ``/proc/<pid>/status`` (or
+``ps`` on macOS).
 
 Output is printed as ``customSmallerIsBetter`` JSON so
 ``github-action-benchmark`` can ingest it with proper units::
@@ -29,7 +32,8 @@ Output is printed as ``customSmallerIsBetter`` JSON so
       {"name": "memory_symfony_controller", "unit": "MiB", "value": 45.2},
       {"name": "memory_yii_action", "unit": "MiB", "value": 40.1},
       {"name": "memory_wordpress_plugin", "unit": "MiB", "value": 60.3},
-      {"name": "memory_drupal_module", "unit": "MiB", "value": 80.0}
+      {"name": "memory_drupal_module", "unit": "MiB", "value": 80.0},
+      {"name": "memory_tempest_view", "unit": "MiB", "value": 35.0}
     ]
 
 Usage (CI)::
@@ -227,8 +231,10 @@ final class ReportController extends ControllerBase
 # Timeout for the LSP to finish indexing (seconds).
 INDEX_TIMEOUT = 120
 
-# How long to wait after didOpen for the server to settle (seconds).
-SETTLE_TIME = 2
+# Wait beyond Tokio's default 10-second blocking-thread idle timeout.
+# Until those workers exit, their allocators can retain temporary parse pages,
+# making an idle RSS measurement depend on which worker handled the parse.
+SETTLE_TIME = 12
 
 # Number of RSS samples to take and average.
 RSS_SAMPLES = 5
@@ -465,10 +471,9 @@ class LspClient:
     def wait_for_indexing(self, timeout: float = INDEX_TIMEOUT) -> None:
         """Block until PHPantom finishes indexing.
 
-        PHPantom sends ``$/progress`` with ``kind: "end"`` when indexing
-        finishes.  We also accept a quiet period as a fallback for
-        workspaces where indexing is trivial and no progress tokens are
-        emitted.
+        Wait for every progress token to end, then for a quiet period:
+        startup indexing ends before the full-index phase begins. The
+        quiet period also handles trivial workspaces without progress.
         """
         deadline = time.monotonic() + timeout
         active_tokens: set[str] = set()
@@ -498,8 +503,6 @@ class LspClient:
                     active_tokens.add(token)
                 elif kind == "end":
                     active_tokens.discard(token)
-                    if not active_tokens:
-                        return
 
         raise TimeoutError(f"Indexing did not finish within {timeout}s")
 
@@ -546,8 +549,14 @@ class LspClient:
 
 
 def get_rss_kib(pid: int) -> int | None:
-    """Read VmRSS from /proc/<pid>/status. Returns KiB or None."""
+    """Read resident memory in KiB, or None when the process has exited."""
     try:
+        if sys.platform == "darwin":
+            result = subprocess.run(
+                ["ps", "-o", "rss=", "-p", str(pid)],
+                capture_output=True, text=True, check=False,
+            )
+            return int(result.stdout.strip()) if result.returncode == 0 else None
         status = Path(f"/proc/{pid}/status").read_text()
         for line in status.splitlines():
             if line.startswith("VmRSS:"):
@@ -578,6 +587,50 @@ def sample_rss(
 
 
 # ── Scenario runners ─────────────────────────────────────────────────────────
+
+
+def run_tempest_view(binary: str, work_dir: str) -> int:
+    """Measure a template's PHP scope and component discovery catalogue."""
+    fixture = Path(__file__).resolve().parent.parent / "examples" / "tempest"
+    project = Path(work_dir) / "tempest_project"
+    shutil.copytree(
+        fixture, project, dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("vendor", ".phpantom", ".tempest"),
+    )
+    subprocess.run(
+        ["composer", "install", "--no-interaction", "--no-progress",
+         "--prefer-dist", "--no-scripts", "--no-plugins", "--quiet"],
+        check=True, cwd=project, timeout=300,
+    )
+    source = (project / "app" / "books.view.php").read_text()
+    component = (project / "app" / "components" / "x-card.view.php").read_text()
+    for n in range(200):
+        (project / "app" / f"page{n}.view.php").write_text(source)
+        (project / "app" / "components" / f"x-panel-{n}.view.php").write_text(component)
+
+    client = LspClient(binary, str(project))
+    try:
+        client.initialize()
+        client.wait_for_indexing(timeout=INDEX_TIMEOUT)
+        uri = (project / "app" / "books.view.php").as_uri()
+        client.did_open(uri, source)
+        for needle, expected in [("$book->", "summary"), ("<x-", "x-card")]:
+            before = source[:source.rindex(needle) + len(needle)]
+            rid = client.send_request("textDocument/completion", {
+                "textDocument": {"uri": uri},
+                "position": {
+                    "line": before.count("\n"),
+                    "character": len(before.rsplit("\n", 1)[-1].encode("utf-16-le")) // 2,
+                },
+            })
+            result = client.wait_for_response(rid).get("result")
+            items = result.get("items", []) if isinstance(result, dict) else result or []
+            if not any(item["label"].split("(")[0] == expected for item in items):
+                raise RuntimeError(f"Tempest completion did not offer {expected}: {result}")
+        client.drain_notifications(SETTLE_TIME)
+        return sample_rss(client.pid)
+    finally:
+        client.shutdown()
 
 
 def run_hello_world(binary: str, work_dir: str) -> int:
@@ -1038,7 +1091,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--scenario",
-        choices=["hello_world", "laravel_model", "symfony_controller", "yii_action", "wordpress_plugin", "drupal_module", "all"],
+        choices=["hello_world", "laravel_model", "symfony_controller", "yii_action", "wordpress_plugin", "drupal_module", "tempest_view", "all"],
         default="all",
         help="Which scenario to run (default: all).",
     )
@@ -1130,6 +1183,14 @@ def main() -> None:
             print("Running drupal_module scenario...", file=sys.stderr)
             rss = run_drupal_module(binary, work_dir)
             results["memory_drupal_module"] = rss
+            print(
+                f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
+            )
+
+        if args.scenario in ("tempest_view", "all"):
+            print("Running tempest_view scenario...", file=sys.stderr)
+            rss = run_tempest_view(binary, work_dir)
+            results["memory_tempest_view"] = rss
             print(
                 f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
             )

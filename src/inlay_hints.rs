@@ -82,7 +82,7 @@ impl Backend {
 
         // A template's request range arrives in Blade coordinates; the
         // symbol map's offsets are in the virtual PHP.
-        let virtual_range = self.translate_blade_range_to_php(uri, range);
+        let virtual_range = self.translate_template_range_to_php(uri, range);
 
         let range_start = position_to_offset(content, virtual_range.start);
         let range_end = position_to_offset(content, virtual_range.end);
@@ -131,7 +131,7 @@ impl Backend {
         // injected prologue has no template text to attach to.
         if self.is_blade_file(uri) {
             hints.retain_mut(
-                |hint| match self.try_translate_php_to_blade(uri, hint.position) {
+                |hint| match self.try_translate_php_to_template(uri, hint.position) {
                     Some(position) => {
                         hint.position = position;
                         true

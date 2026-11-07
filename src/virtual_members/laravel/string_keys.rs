@@ -34,6 +34,10 @@ pub(crate) fn resolve_laravel_string_key(
 ) -> Vec<Location> {
     use crate::symbol_map::StringKeyKind;
     match kind {
+        StringKeyKind::TempestView { relative } => backend
+            .tempest_view_definition(uri, key, *relative)
+            .into_iter()
+            .collect(),
         StringKeyKind::Section => {
             backend.blade_block_definitions(uri, crate::blade::blocks::BlockKind::Section, key)
         }
@@ -310,6 +314,15 @@ pub(crate) fn find_laravel_string_key_references(
                 key,
             );
         }
+        StringKeyKind::TempestView { relative } => {
+            return backend.tempest_view_references(
+                uri,
+                key,
+                *relative,
+                snapshot,
+                include_declaration,
+            );
+        }
         StringKeyKind::View
         | StringKeyKind::Route
         | StringKeyKind::Trans
@@ -408,7 +421,7 @@ pub(crate) fn find_laravel_string_key_references(
             // translates the whole list back as though it all did.
             let decl_uri = decl.uri.as_str();
             let range = if backend.is_blade_file(decl_uri) {
-                backend.translate_blade_range_to_php(decl_uri, decl.range)
+                backend.translate_template_range_to_php(decl_uri, decl.range)
             } else {
                 decl.range
             };

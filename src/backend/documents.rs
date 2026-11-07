@@ -74,6 +74,21 @@ impl Backend {
             }
         }
 
+        if self
+            .tempest
+            .has_views
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            if self.sync_ast_updates {
+                self.refresh_tempest_inference();
+            } else {
+                let backend = self.clone_for_blocking();
+                spawn_blocking_detached("did_open Tempest inference", move || {
+                    backend.refresh_tempest_inference();
+                });
+            }
+        }
+
         // Baseline for the first save: without it, that save would have to
         // re-diagnose every open file to be safe.
         self.capture_declaration_baseline(&uri);
@@ -200,6 +215,7 @@ impl Backend {
         // incomplete code cannot be parsed.
         if self.sync_ast_updates {
             self.update_ast(&uri, &text);
+            self.refresh_tempest_inference();
             self.schedule_diagnostics(uri.clone());
         } else {
             let backend = self.clone_for_blocking();
@@ -227,6 +243,7 @@ impl Backend {
 
                     let started = std::time::Instant::now();
                     backend.update_ast(&uri, &text);
+                    backend.refresh_tempest_inference();
                     let elapsed = started.elapsed();
                     if elapsed >= std::time::Duration::from_millis(100) {
                         tracing::debug!(
@@ -284,9 +301,13 @@ impl Backend {
                 move |backend: &Backend, uri: &str| match crate::util::read_php_source(&path) {
                     Some(content) => {
                         backend.update_ast(uri, &content);
+                        backend.refresh_tempest_inference();
                         backend.put_to_sleep([uri]);
                     }
-                    None => backend.forget_closed_file(uri),
+                    None => {
+                        backend.forget_closed_file(uri);
+                        backend.refresh_tempest_inference();
+                    }
                 };
             if self.sync_ast_updates {
                 reparse(self, &uri);
@@ -307,6 +328,7 @@ impl Backend {
             }
         } else {
             self.forget_closed_file(&uri);
+            self.refresh_tempest_inference();
         }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
@@ -373,6 +395,7 @@ impl Backend {
             let caller_uri = uri.clone();
             spawn_blocking_detached("did_save blade inference", move || {
                 backend.refresh_blade_inference_for_caller(&caller_uri);
+                backend.refresh_tempest_inference();
             });
         }
 

@@ -595,6 +595,18 @@ fn held_enum_cases(resolved: &[ResolvedType]) -> Option<Vec<(Arc<ClassInfo>, Ato
 /// current class and, inside a trait, the classes its users are
 /// guaranteed to be that declare it.
 fn this_property_owners(prop_name: &str, ctx: &VarResolutionCtx<'_>) -> Vec<Arc<ClassInfo>> {
+    // A closure binding or an inline @var can give $this a different
+    // owner than the lexical class. Read the same scope as member
+    // completion before applying the trait-specific visibility rule.
+    if ctx.current_class.kind != crate::types::ClassLikeKind::Trait {
+        return ResolvedType::into_arced_classes(
+            crate::type_engine::resolver::resolve_target_classes(
+                "$this",
+                crate::types::AccessKind::Arrow,
+                &ctx.as_resolution_ctx(),
+            ),
+        );
+    }
     let mut owners: Vec<Arc<ClassInfo>> =
         crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &ctx.current_class.fqn())
             .map(Arc::clone)

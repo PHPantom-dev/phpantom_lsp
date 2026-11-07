@@ -1071,3 +1071,20 @@ When the domain has no catalogue yet, offer to create
 **Where to look:** `src/code_actions/insert_translation_key.rs`,
 `src/symfony/translations.rs` (`catalogue_spans`, `scan_yaml`,
 `scan_xliff`).
+
+
+---
+
+## F74. Configured Tempest view discovery
+
+**Impact: Medium · Complexity: Medium-High**
+
+Read additional discovery locations and component registrations from
+Tempest configuration, including `ViewConfig::addViewComponent()` and
+`addViewComponents()`. Resolve statically knowable paths through variables,
+constants, and view wrappers, keeping declaration-file path context.
+Refresh the catalogue when configuration changes and verify the resulting
+names with Tempest's own discovery and renderer.
+
+**Where to look:** `src/tempest/discovery.rs`, `src/tempest/paths.rs`, and
+`src/symbol_map/extraction/tempest.rs`.

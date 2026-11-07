@@ -114,7 +114,7 @@ impl Backend {
     /// The source every offset in a file's symbol map indexes: a Blade
     /// template's virtual PHP, and any other file's own text.
     fn effective_content(&self, uri: &str) -> Option<Arc<String>> {
-        self.blade_virtual_php_arc(uri)
+        self.template_virtual_php_arc(uri)
             .or_else(|| self.get_file_content_arc(uri))
     }
 
