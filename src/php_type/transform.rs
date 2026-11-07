@@ -220,10 +220,11 @@ impl PhpType {
                 atom(&resolver(name))
             }
         };
-        // A `Foo::BAR` operand (`key-of<Foo::BAR>`) names its class the way
-        // the docblock was written, so only the class half is resolved.
+        // A `Foo::BAR` reference (`key-of<Foo::BAR>`, `Foo::BAR_*`) names its
+        // class the way the docblock was written, so only the class half is
+        // resolved.
         let resolve_constant = |s: &str| -> Option<String> {
-            let (class, constant) = class_constant_key(s)?;
+            let (class, constant) = class_member_reference(s)?;
             Some(format!("{}::{constant}", resolve(&atom(class))))
         };
         match self.raw_kind() {
@@ -575,6 +576,9 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::KeyOf(_) => PhpType::named(atom("array-key")),
             TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => PhpType::mixed(),
+            TypeKind::Raw(_) | TypeKind::Named(_) if self.is_class_member_reference() => {
+                PhpType::mixed()
+            }
             _ => self.map_children(&recurse),
         }
     }

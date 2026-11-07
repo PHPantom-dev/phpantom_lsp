@@ -32,6 +32,7 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| D49 | [A `@param` that leaves out the `null` its nullable hint allows is not hinted](todo/diagnostics.md#d49-a-param-that-leaves-out-the-null-its-nullable-hint-allows-is-not-hinted) | Low         | Low-Medium  |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -194,7 +195,6 @@ ships, remove every row that names it.
 | T60 | [A float literal is typed `float`, not its value](todo/type-inference.md#t60-a-float-literal-is-typed-float-not-its-value) | Low         | Low         |
 | T58 | [`new<T>` is not supported](todo/type-inference.md#t58-newt-is-not-supported) | Low-Medium  | Low-Medium  |
 | T62 | [A sealed hierarchy is not narrowed by ruling out its other members](todo/type-inference.md#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members) | Medium      | Medium      |
-| T26 | [Class constants named as docblock types (`Foo::BAR`, `Foo::BAR_*`)](todo/type-inference.md#t26-class-constants-named-as-docblock-types-foobar-foobar_) | Medium      | Medium      |
 | T49 | [A closure passed to a constructor gets no parameter types from it](todo/type-inference.md#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it) | Medium      | Medium      |
 | T59 | [`T[K]` on a class template is not resolved](todo/type-inference.md#t59-tk-on-a-class-template-is-not-resolved) | Medium      | Medium      |
 | T61 | [A regression that changes where a call resolves goes unnoticed](todo/type-inference.md#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed) | Medium      | Medium      |

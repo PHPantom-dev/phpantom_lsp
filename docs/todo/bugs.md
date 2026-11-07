@@ -130,7 +130,37 @@ seconds a rate-limit message names.
 
 ## Array types
 
-No outstanding items.
+### B714. A constant written into an array in a loop loses its literal
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+private const int WHITE = 0;
+
+/** @param array<int, self::WHITE|self::GRAY|self::BLACK> $labels */
+private static function check(array $labels): void {}
+
+$labels = [];
+foreach ($nodes as $node) {
+    $labels[$node] = self::WHITE;
+}
+self::check($labels);
+// Argument 1 ($labels) expects array<int, 0|1|2>, got array<int, int>
+```
+
+The same write outside a loop keeps `array<int, 0>`, and PHPStan keeps
+the literal in the loop too. A keyed or appended write inside a loop body
+widens the value's scalar literals before storing it, so a fixed-point
+re-walk cannot grow a literal union (or a concatenated string) once per
+pass. That is only needed when the value changes from one pass to the
+next; a constant, or any value whose type the re-walk leaves unchanged,
+should keep its literal.
+
+**Where to look:** the `in_loop` widening in
+`merge_nested_array_write_inner` and `pushed_value`
+(`src/type_engine/variable/array_shape_writes.rs`).
+
+Found by `analyze` on Vytrvalec Server (`App\Algorithm\Graph::hasCycle()`).
 
 ## Laravel
 
@@ -211,4 +241,25 @@ single target `resolve_callable_target_at_offset` returns.
 
 Found by `analyze` on Drupal core's Prophecy-based tests.
 
-No outstanding items.
+### B713. Hover shows two `class-string`s that share a short name as one
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+namespace App;
+
+/** @param class-string<\App\C>|class-string<\Other\C> $s */
+function foo(string $s): void {
+    $s; // hover: $s = class-string<C>
+}
+```
+
+Hover shortens every class name in a type to its short name, so the two
+members print the same and the union shows one of them. A union of the
+classes themselves does not have this problem: each gets its own block
+under its namespace. The same collapse hides `C::class|E::class` with `E`
+an import of another namespace's `C`, which is why that assertion in
+`tests/psalm_assertions/const_values.php` is skipped.
+
+**Where to look:** `shorten_php_type` (`src/hover/formatting.rs`), which
+shortens before the union is printed.

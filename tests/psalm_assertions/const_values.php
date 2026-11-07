@@ -45,7 +45,7 @@ namespace PsalmTest_const_values_4 {
     }
     /** @psalm-param "foo"|"bar"|C::A1|C::B $s */
     function foo($s) : void {
-        assertType("'bar'|'bat'|'baz'|'foo'", $s); // SKIP: a class constant named as a docblock type is not read
+        assertType("'bar'|'bat'|'baz'|'foo'", $s);
     }
 }
 
@@ -59,7 +59,7 @@ namespace PsalmTest_const_values_5 {
          * @param (self::FOO | self::BAR) $s
          */
         public static function foo(string $s) : void {
-            assertType("'bar'|'foo'", $s); // SKIP: a class constant named as a docblock type is not read
+            assertType("'bar'|'foo'", $s);
         }
     }
 }
@@ -71,7 +71,7 @@ namespace PsalmTest_const_values_6 {
     class D {};
     /** @psalm-param C::class|D::class|E::class $s */
     function foo(string $s) : void {
-        assertType("'PsalmTest_const_values_6\\\\C'|'PsalmTest_const_values_6\\\\D'|'PsalmTest_const_values_6_other\\\\C'", $s); // SKIP: a class constant named as a docblock type is not read
+        assertType('class-string<PsalmTest_const_values_6\\C>|class-string<PsalmTest_const_values_6\\D>|class-string<PsalmTest_const_values_6_other\\C>', $s); // SKIP: hover shows two classes that share a short name as one
     }
 }
 

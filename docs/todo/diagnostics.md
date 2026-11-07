@@ -504,3 +504,37 @@ would work without PHPStan.
 
 Only a body whose every call declares what it throws can rule a catch
 out, so this stays quiet wherever an undeclared call could throw anything.
+
+---
+
+## D49. A `@param` that leaves out the `null` its nullable hint allows is not hinted
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+/**
+ * @param string $name
+ */
+function greet(?string $name): void {}   // PhpStorm: PhpDocSignatureInspection
+```
+
+PhpStorm marks a `@param` (or `@return`) whose type is narrower than a
+nullable native hint only by the `null`: the docblock says `string`, the
+signature accepts `null` too. It is a weak warning there, so PhpStorm users
+expect it out of the box. The conformance suite's
+`phpdoc_advanced_param_typehint_nullable_mismatch` test measures it, and it
+is the one test there that a competing IDE passes and PHPantom does not.
+
+This is a documentation-completeness hint, not a type error, and it must not
+change what the type engine reads. `src/diagnostics/docblock_native_mismatch.rs`
+deliberately stays silent on this pairing, since the native `null` carries
+over to the documented type the way PHPStan's `TypehintHelper::decideType`
+does, so `$name` keeps reading as `string|null`. Psalm and PHPStan maintainers
+both declined the check as cosmetic (psalm#3785, phpstan#6016).
+
+**Fix:** Report it at `Hint` severity next to the existing check (same walk,
+opposite direction), only when the documented type differs from the hint by
+nothing but the missing `null`. A docblock that refines the hint
+(`@param non-empty-string` on `?string`) says something the hint does not
+and stays quiet (check what PhpStorm does there before deciding). Offer the "Update docblock" action
+as the quick fix to add the `|null`.

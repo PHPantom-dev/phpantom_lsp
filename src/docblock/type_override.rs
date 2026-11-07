@@ -65,7 +65,8 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
     // template, which no native hint can express: the declaration can only
     // spell the widest type the operator might produce (`int|string` for a
     // table holding both). It refines that hint however it evaluates, so the
-    // docblock wins.
+    // docblock wins.  A class constant named as a type (`self::STATUS_*` on a
+    // native `int`) is a set of values picked out the same way.
     if doc_inner.contains_unevaluated_operator() {
         return true;
     }
@@ -514,10 +515,7 @@ pub fn resolve_effective_type_typed(
                 // (`Data[value-of<T>]`) has not said yet whether its result
                 // takes the `null`; joining one now would outlive the
                 // evaluation that decides it.
-                if native.accepts_null()
-                    && !native.is_mixed()
-                    && !doc.contains_unevaluated_operator()
-                {
+                if native.accepts_null() && !native.is_mixed() && !doc.contains_type_operator() {
                     Some(doc.or_null())
                 } else {
                     Some(doc)

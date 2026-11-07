@@ -157,38 +157,60 @@ impl PhpType {
         }
     }
 
-    /// Whether a type operator that never got evaluated — `key-of<T>`,
-    /// `value-of<T>`, `T[K]` — appears anywhere in this type tree.
+    /// Whether something only the index can finish appears anywhere in this
+    /// type tree: a type operator that never got evaluated (`key-of<T>`,
+    /// `value-of<T>`, `T[K]`), or a class constant named as a type
+    /// (`Foo::BAR`, `Foo::BAR_*`, `Foo::class`), which the docblock parser
+    /// keeps as text since it cannot read the constant behind it.
     ///
     /// Companion guard to [`PhpType::unevaluated_operators_as_bounds`], in the
     /// same spirit as [`PhpType::contains_conditional`]: cheap enough to run on
     /// every type, so the (cloning) rewrite only runs on the few that need it.
     pub fn contains_unevaluated_operator(&self) -> bool {
+        self.contains_unevaluated(true)
+    }
+
+    /// Whether a type operator that never got evaluated — `key-of<T>`,
+    /// `value-of<T>`, `T[K]` — appears anywhere in this type tree.  Unlike
+    /// [`PhpType::contains_unevaluated_operator`], a class constant named as
+    /// a type does not count: what it reads is one fixed value, where an
+    /// operator may yet evaluate to something that takes `null`.
+    pub fn contains_type_operator(&self) -> bool {
+        self.contains_unevaluated(false)
+    }
+
+    /// Whether this type is a class constant named as a type (`Foo::BAR`,
+    /// `Foo::BAR_*`, `Foo::class`), still as the text the parser kept.
+    pub fn is_class_member_reference(&self) -> bool {
+        match self.kind() {
+            TypeKind::Raw(text) => class_member_reference(text).is_some(),
+            TypeKind::Named(name) => class_member_reference(name).is_some(),
+            _ => false,
+        }
+    }
+
+    fn contains_unevaluated(&self, references: bool) -> bool {
+        let recurse = |inner: &PhpType| inner.contains_unevaluated(references);
         match self.kind() {
             TypeKind::KeyOf(_) | TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => true,
+            TypeKind::Raw(_) | TypeKind::Named(_) => references && self.is_class_member_reference(),
             TypeKind::Nullable(inner)
             | TypeKind::Array(inner)
             | TypeKind::ClassString(Some(inner))
-            | TypeKind::InterfaceString(Some(inner)) => inner.contains_unevaluated_operator(),
+            | TypeKind::InterfaceString(Some(inner)) => recurse(inner),
             TypeKind::Union(members) | TypeKind::Intersection(members) => {
-                members.iter().any(|m| m.contains_unevaluated_operator())
+                members.iter().any(recurse)
             }
-            TypeKind::Generic(g) => g.args.iter().any(|m| m.contains_unevaluated_operator()),
-            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
-                .iter()
-                .any(|e| e.value_type.contains_unevaluated_operator()),
+            TypeKind::Generic(g) => g.args.iter().any(recurse),
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
+                entries.iter().any(|e| recurse(&e.value_type))
+            }
             TypeKind::Callable(c) => {
-                c.params
-                    .iter()
-                    .any(|p| p.type_hint.contains_unevaluated_operator())
-                    || c.return_type
-                        .as_ref()
-                        .is_some_and(|r| r.contains_unevaluated_operator())
+                c.params.iter().any(|p| recurse(&p.type_hint))
+                    || c.return_type.as_ref().is_some_and(recurse)
             }
             TypeKind::Conditional(c) => {
-                c.condition.contains_unevaluated_operator()
-                    || c.then_type.contains_unevaluated_operator()
-                    || c.else_type.contains_unevaluated_operator()
+                recurse(&c.condition) || recurse(&c.then_type) || recurse(&c.else_type)
             }
             _ => false,
         }

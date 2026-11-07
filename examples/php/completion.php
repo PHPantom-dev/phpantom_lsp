@@ -1553,6 +1553,45 @@ class ConstantTableLookupDemo
 }
 
 
+// ── Class Constants Named as Types ──────────────────────────────────────────
+
+class ClassConstantTypeDemo
+{
+    public const PRIORITY_LOW = 'low';
+    public const PRIORITY_HIGH = 'high';
+
+    /**
+     * A docblock type that names class constants stands for the values
+     * they hold, and `PRIORITY_*` for every constant the pattern matches.
+     *
+     * @param self::PRIORITY_* $priority
+     */
+    public function badge(string $priority): string
+    {
+        // Try: hover `$priority` → 'low'|'high'
+        // A case for each constant covers every value, so the method is
+        // not reported for reaching its end without returning.
+        switch ($priority) {
+            case self::PRIORITY_LOW:
+                return 'grey';
+            case self::PRIORITY_HIGH:
+                return 'red';
+        }
+    }
+
+    /** @return self::PRIORITY_HIGH */
+    public function urgent(): string
+    {
+        return self::PRIORITY_HIGH;
+    }
+
+    public function demo(): void
+    {
+        $priority = $this->urgent();               // self::PRIORITY_HIGH → 'high'
+        var_dump($this->badge($priority));
+    }
+}
+
 // ── @implements Generic Resolution ─────────────────────────────────────────
 
 class ImplementsGenericDemo
