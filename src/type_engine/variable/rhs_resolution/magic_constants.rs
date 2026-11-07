@@ -164,6 +164,9 @@ pub(super) fn magic_constant_type(
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
     match magic {
+        MagicConstant::Directory(_) | MagicConstant::File(_) => {
+            file_magic_constant_type(ctx.file.uri, matches!(magic, MagicConstant::Directory(_)))
+        }
         MagicConstant::Line(_) => {
             let offset = magic.span().start.offset as usize;
             let line = crate::text_position::offset_to_position(ctx.file.content, offset).line + 1;
@@ -202,8 +205,22 @@ pub(super) fn magic_constant_type(
                     .unwrap_or_default(),
             )
         }
-        _ => PhpType::string(),
     }
+}
+
+/// File magic constants have the same value through AST and text-based
+/// expression resolution, including array elements and call arguments.
+pub(crate) fn file_magic_constant_type(uri: Option<&str>, directory: bool) -> PhpType {
+    let Some(path) = uri.and_then(crate::util::uri_to_path) else {
+        return PhpType::string();
+    };
+    let path = dunce::canonicalize(&path).unwrap_or(path);
+    let value = if directory {
+        path.parent().unwrap_or(&path)
+    } else {
+        &path
+    };
+    PhpType::literal_string_value(value.to_string_lossy())
 }
 
 /// The bare name `__FUNCTION__`/`__METHOD__` substitute for the function,
@@ -219,5 +236,19 @@ fn enclosing_function_display_name(
         Some(EnclosingFunction::Named(name)) => name,
         Some(EnclosingFunction::Closure) => "{closure}".to_string(),
         None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_magic_constant_type;
+    use crate::php_type::PhpType;
+
+    #[test]
+    fn file_constants_without_a_filesystem_uri_remain_strings() {
+        for uri in [None, Some("untitled:template")] {
+            assert_eq!(file_magic_constant_type(uri, false), PhpType::string());
+            assert_eq!(file_magic_constant_type(uri, true), PhpType::string());
+        }
     }
 }

@@ -81,7 +81,7 @@ impl Backend {
                 move || {
                     let _project_guard = backend.enter_project_scope(&uri);
                     let effective = backend
-                        .blade_virtual_php_arc(&uri)
+                        .template_virtual_php_arc(&uri)
                         .unwrap_or_else(|| Arc::clone(&content));
                     let _parse_guard = backend.enter_parse_cache(&uri, Arc::clone(&effective));
 

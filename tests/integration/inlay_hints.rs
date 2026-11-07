@@ -47,6 +47,37 @@ fn hints_at_line(hints: &[InlayHint], line: u32) -> Vec<&InlayHint> {
 // ─── Basic function call hints ──────────────────────────────────────────────
 
 #[tokio::test]
+async fn blade_php_parameter_hints_follow_the_template_viewport_and_utf16_columns() {
+    let backend = create_test_backend();
+    let function_uri =
+        Uri::from_file_path(std::env::temp_dir().join("template-functions.php")).unwrap();
+    open_php(
+        &backend,
+        &function_uri,
+        "<?php function greeting(string $name): string { return $name; }",
+    )
+    .await;
+    let uri = Uri::from_file_path(std::env::temp_dir().join("hints.blade.php")).unwrap();
+    let source = "<p>📚 {{ greeting('Alice') }}</p>\r\n<p>{{ greeting('Bob') }}</p>\r\n";
+    open_php(&backend, &uri, source).await;
+    let hints = backend
+        .inlay_hint_request(InlayHintParams {
+            text_document: TextDocumentIdentifier { uri },
+            range: Range::new(Position::default(), Position::new(1, 0)),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(hints.len(), 1);
+    assert_eq!(hint_label(&hints[0]), "name:");
+    assert_eq!(
+        hints[0].position,
+        crate::common::position_of(source, "'Alice'")
+    );
+}
+
+#[tokio::test]
 async fn standalone_function_two_params() {
     let backend = create_test_backend();
     let uri = Uri::parse("file:///test/inlay.php").unwrap();

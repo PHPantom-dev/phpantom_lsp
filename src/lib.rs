@@ -323,6 +323,8 @@ pub mod stubs;
 mod symbol_index;
 pub(crate) mod symbol_map;
 mod symfony;
+mod tempest;
+pub mod template;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
@@ -521,6 +523,7 @@ pub struct BackendState {
     pub(crate) laravel: backend::laravel::LaravelState,
     /// The project's Blade templates, beyond each one's own lowering.
     pub(crate) blade: blade::state::BladeState,
+    pub(crate) tempest: tempest::TempestState,
     /// Whether the workspace is an application rather than a library.
     ///
     /// A library's configuration is supplied by whatever application

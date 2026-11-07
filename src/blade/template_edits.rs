@@ -36,11 +36,11 @@ impl Backend {
     /// lowering is refreshed in the background, and an edit moved through a
     /// lowering of older text lands on the wrong template text.
     pub(crate) fn template_text(&self, uri: &str) -> Option<TemplateText> {
-        if !self.is_blade_file(uri) {
+        if !self.is_php_template(uri) {
             return None;
         }
-        let virtual_php = self.blade_virtual_php_arc(uri)?;
-        let map = self.blade_source_map(uri)?;
+        let virtual_php = self.template_virtual_php_arc(uri)?;
+        let map = self.template_source_map(uri)?;
         let template = self.get_file_content_arc(uri)?;
         if !map.lowered_from(&template) {
             return None;
@@ -52,11 +52,11 @@ impl Backend {
     /// the caller holds, which the `fix` command's rewrites leave ahead of
     /// both the disk and the open-file table.
     pub(crate) fn template_text_of(&self, uri: &str, template: &str) -> Option<TemplateText> {
-        if !self.is_blade_file(uri) {
+        if !self.is_php_template(uri) {
             return None;
         }
-        let virtual_php = self.blade_virtual_php_arc(uri)?;
-        let map = self.blade_source_map(uri)?;
+        let virtual_php = self.template_virtual_php_arc(uri)?;
+        let map = self.template_source_map(uri)?;
         if !map.lowered_from(template) {
             return None;
         }
@@ -179,6 +179,12 @@ impl TemplateText {
     /// lie between template text: a template's first line is often a
     /// directive.
     pub(crate) fn translate_edit(&self, range: Range, new_text: &str) -> Option<Range> {
+        if self.map.copied.is_some()
+            && range == Range::default()
+            && new_text.starts_with("<?php use ")
+        {
+            return Some(range);
+        }
         if range.start != range.end {
             return self.wrote(range);
         }

@@ -82,11 +82,22 @@ impl<'a, 'ctx> TextArrayFuncArgs<'a, 'ctx> {
 impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
     fn arg_raw_type(&self, index: usize) -> Option<PhpType> {
         let text = self.arg_text(index)?;
+        // Keep quoted scalar values for rules that can fold literal inputs.
+        // Arrays still go through the inline resolver, which resolves their
+        // element expressions in the caller's context.
+        let literal = text
+            .starts_with(['\'', '"'])
+            .then(|| {
+                crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(text)
+            })
+            .flatten()
+            .filter(|ty| ty.as_literal().is_some());
         // The inline resolver only answers for array-like arguments, but
         // some rules read a scalar one too: `range()`'s bounds and step,
         // `explode()`'s limit. Like the AST counterpart, anything it
         // leaves open falls back to the general expression resolver.
-        Backend::resolve_inline_arg_raw_type(text, self.ctx)
+        literal
+            .or_else(|| Backend::resolve_inline_arg_raw_type(text, self.ctx))
             .or_else(|| Backend::resolve_arg_text_to_type(text, self.ctx))
     }
 
@@ -149,6 +160,9 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
 
     fn arg_atom_text(&self, index: usize) -> Option<String> {
         let text = self.arg_text(index)?.trim();
+        if text.eq_ignore_ascii_case("__DIR__") || text.eq_ignore_ascii_case("__FILE__") {
+            return None;
+        }
         let atom = crate::util::strip_fqn_prefix(text);
         let is_atom =
             !atom.is_empty() && atom.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
