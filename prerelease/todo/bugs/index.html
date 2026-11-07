@@ -934,23 +934,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b714-a-constant-written-into-an-array-in-a-loop-loses-its-literal" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B714. A constant written into an array in a loop loses its literal
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1619,23 +1602,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b714-a-constant-written-into-an-array-in-a-loop-loses-its-literal" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B714. A constant written into an array in a loop loses its literal
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1829,31 +1795,7 @@ matches PHP 8 throwing a <code>ValueError</code> on a negative.</p>
 <p>Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b714-a-constant-written-into-an-array-in-a-loop-loses-its-literal">B714. A constant written into an array in a loop loses its literal<a class="headerlink" href="#b714-a-constant-written-into-an-array-in-a-loop-loses-its-literal" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">private const int WHITE = 0;</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">/** @param array&lt;int, self::WHITE|self::GRAY|self::BLACK&gt; $labels */</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">private static function check(array $labels): void {}</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">$labels = [];</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">foreach ($nodes as $node) {</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    $labels[$node] = self::WHITE;</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">}</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">self::check($labels);</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">// Argument 1 ($labels) expects array&lt;int, 0|1|2&gt;, got array&lt;int, int&gt;</span>
-</code></pre></div>
-<p>The same write outside a loop keeps <code>array&lt;int, 0&gt;</code>, and PHPStan keeps
-the literal in the loop too. A keyed or appended write inside a loop body
-widens the value's scalar literals before storing it, so a fixed-point
-re-walk cannot grow a literal union (or a concatenated string) once per
-pass. That is only needed when the value changes from one pass to the
-next; a constant, or any value whose type the re-walk leaves unchanged,
-should keep its literal.</p>
-<p><strong>Where to look:</strong> the <code>in_loop</code> widening in
-<code>merge_nested_array_write_inner</code> and <code>pushed_value</code>
-(<code>src/type_engine/variable/array_shape_writes.rs</code>).</p>
-<p>Found by <code>analyze</code> on Vytrvalec Server (<code>App\Algorithm\Graph::hasCycle()</code>).</p>
+<p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
@@ -1865,13 +1807,13 @@ should keep its literal.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first">B704. A function declared in two files resolves to whichever is found first<a class="headerlink" href="#b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function __() {}</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function __() {}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
 </code></pre></div>
 <p>WordPress core declares nineteen of its functions a second time as
 no-ops for its script loader. Calls across the project resolve to the

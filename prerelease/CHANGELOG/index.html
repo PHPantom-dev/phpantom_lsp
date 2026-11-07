@@ -5268,6 +5268,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Constants written into an array in a loop.</strong> An array built in a loop from a constant, such as <code>$labels[$node] = self::WHITE</code>, now keeps the constant's value as its element type instead of widening it to <code>int</code>, so passing it to a parameter that accepts only those values is no longer reported.</li>
 <li><strong><code>foreach</code> over a <code>RecursiveIteratorIterator</code>.</strong> Looping over a <code>RecursiveIteratorIterator</code> now gives the keys and values of the iterator it wraps, rather than the wrapped iterator itself, so <code>new RecursiveIteratorIterator(new RecursiveArrayIterator($data))</code> yields <code>$data</code>'s elements.</li>
 <li><strong>Generic iterator parameters check their class.</strong> Passing an iterator to a parameter typed with a generic iterator interface, such as <code>RecursiveIterator&lt;int, string&gt;</code>, is now reported when the iterator does not implement that interface.</li>
 <li><strong>Classes that share a short name in one type.</strong> Hover, completion, and signature help now show each class by its full name when a type names two classes with the same short name, such as <code>class-string&lt;\App\C&gt;|class-string&lt;\Other\C&gt;</code>, instead of printing them as one.</li>
