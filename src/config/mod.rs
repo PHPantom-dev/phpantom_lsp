@@ -22,6 +22,8 @@ mod diagnostics;
 mod indexing;
 mod inlay_hints;
 mod laravel;
+#[cfg(test)]
+mod schema_tests;
 mod stubs;
 #[cfg(test)]
 mod tests;
