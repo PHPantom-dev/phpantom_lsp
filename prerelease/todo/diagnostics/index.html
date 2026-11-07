@@ -908,45 +908,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d15-unused-parameter-diagnostic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D15. Unused parameter diagnostic
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="D15. Unused parameter diagnostic">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Scope
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#exclusions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Exclusions
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d16-unreachable_match_arm-ignores-literal-subject-types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1050,6 +1011,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d50-unused-parameters-skips-methods-a-subclass-can-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D50. <code>unused-parameters</code> skips methods a subclass can override
       </span>
     </span>
   </a>
@@ -1494,45 +1466,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d15-unused-parameter-diagnostic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D15. Unused parameter diagnostic
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="D15. Unused parameter diagnostic">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Scope
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#exclusions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Exclusions
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d16-unreachable_match_arm-ignores-literal-subject-types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1642,6 +1575,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d50-unused-parameters-skips-methods-a-subclass-can-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D50. <code>unused-parameters</code> skips methods a subclass can override
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1743,29 +1687,6 @@ proxies:</p>
   the diagnostic code; only the suppression action is missing. The
   rule's class is not in the report, so the action has to map the rule
   name to its <code>PHPMD\Rule\…</code> class.</li>
-</ul>
-<hr />
-<h2 id="d15-unused-parameter-diagnostic">D15. Unused parameter diagnostic<a class="headerlink" href="#d15-unused-parameter-diagnostic" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>Flag function and method parameters that are never read inside the
-body. The <code>unused_variable</code> diagnostic deliberately skips parameters
-because false positives are common for callbacks, interface
-implementations, and framework conventions (e.g. Laravel event
-listeners) that require specific parameter signatures even when not
-all parameters are used. Users can now silence false positives with
-<code>// @phpantom-ignore unused_parameter</code>.</p>
-<h3 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h3>
-<ol>
-<li>Function and method parameters (including closures and arrow
-   functions) that are never read inside their body.</li>
-<li>Constructor parameters that are not promoted and never read.</li>
-</ol>
-<h3 id="exclusions">Exclusions<a class="headerlink" href="#exclusions" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Parameters named <code>$_</code> or starting with <code>$_</code> (intentional discard).</li>
-<li>Promoted constructor parameters (they are property assignments).</li>
-<li>Parameters in abstract methods and interface method signatures
-  (no body to check).</li>
 </ul>
 <hr />
 <h2 id="d16-unreachable_match_arm-ignores-literal-subject-types">D16. <code>unreachable_match_arm</code> ignores literal subject types<a class="headerlink" href="#d16-unreachable_match_arm-ignores-literal-subject-types" title="Permanent link">&para;</a></h2>
@@ -2008,6 +1929,24 @@ generated fields into the index would let the check treat both kinds the
 same.</p>
 <p><strong>Where to look:</strong> <code>src/framework.rs</code> (the Doctrine mapping index, which
 D31 also needs) and <code>src/diagnostics/uninitialized_properties.rs</code>.</p>
+<hr />
+<h2 id="d50-unused-parameters-skips-methods-a-subclass-can-override">D50. <code>unused-parameters</code> skips methods a subclass can override<a class="headerlink" href="#d50-unused-parameters-skips-methods-a-subclass-can-override" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<p>The opt-in <code>unused_parameter</code> diagnostic only judges a public or protected
+method when nothing can override it: a final method, or one in a final
+class, an enum, or an anonymous class. A method in an open class is part
+of a contract, and an override may read the parameter its base ignores
+(a no-op hook such as <code>protected function boot($app) {}</code> is the common
+case), so flagging it from the method alone would be wrong.</p>
+<p>Psalm's <code>PossiblyUnusedParam</code> settles this with the whole program: a
+parameter is unused only when no override of the method reads it either.
+Doing that here needs the project's subclasses of the class, which
+<code>find_implementors()</code> can list but only once the workspace index is
+complete, so the answer would change as indexing progresses. A
+deterministic version needs the reverse inheritance index to be complete
+before the diagnostic runs, or a separate workspace-wide pass.</p>
+<p><strong>Where to look:</strong> <code>src/diagnostics/unused_parameters.rs</code> (<code>can_be_overridden</code>)
+and <code>src/definition/implementation.rs</code> (<code>find_implementors</code>).</p>
 
 
 

@@ -2100,6 +2100,12 @@ those still need a restart to fully apply.</p>
 <td>Exception classes, fully qualified, that <code>unhandled-exceptions</code> does not report, along with every class that extends them. The default is the list PhpStorm treats as unchecked.</td>
 </tr>
 <tr>
+<td><code>unused-parameters</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Dim a parameter a function, closure, or method never reads, when it comes after the last one the body does read. Methods whose signature an interface, a parent class, or a possible override dictates are left alone, and so is a parameter whose name starts with <code>$_</code>.</td>
+</tr>
+<tr>
 <td><code>workspace</code></td>
 <td>bool</td>
 <td><code>false</code></td>
