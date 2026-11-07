@@ -895,23 +895,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b692-int-of-a-ctype_digit-checked-string-is-not-non-negative" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B692. <code>(int)</code> of a <code>ctype_digit()</code>-checked string is not non-negative
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1535,23 +1518,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b692-int-of-a-ctype_digit-checked-string-is-not-non-negative" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B692. <code>(int)</code> of a <code>ctype_digit()</code>-checked string is not non-negative
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1695,32 +1661,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b692-int-of-a-ctype_digit-checked-string-is-not-non-negative">B692. <code>(int)</code> of a <code>ctype_digit()</code>-checked string is not non-negative<a class="headerlink" href="#b692-int-of-a-ctype_digit-checked-string-is-not-non-negative" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function wait(string $delay): void {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    if (!ctype_digit($delay)) {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        return;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    }</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    sleep((int) $delay);   // expects int&lt;0, max&gt;, got int</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>A string that passes <code>ctype_digit()</code> holds only the digits 0-9 (and is
-never empty), so casting it to <code>int</code> cannot give a negative number: an
-oversized one saturates at <code>PHP_INT_MAX</code>. <code>sleep()</code>'s <code>int&lt;0, max&gt;</code>
-parameter should accept it. The check narrows <code>$delay</code> to
-<code>numeric-string</code>, as PHPStan, Psalm and Mago all do, but a
-<code>numeric-string</code> can hold <code>"-1"</code>, so the cast gives <code>int</code>. None of those
-tools proves this call safe either. PHPStan reports nothing here only
-because its function map declares <code>sleep()</code> and <code>usleep()</code> as taking a
-plain <code>int</code>. phpstorm-stubs and Mago both declare <code>int&lt;0, max&gt;</code>, which
-matches PHP 8 throwing a <code>ValueError</code> on a negative.</p>
-<p>Fixing it needs a string refinement below <code>numeric-string</code> for digit-only
-strings (PHPStan's <code>decimal-int-string</code> does not fit: it admits <code>"-1"</code> and
-rejects <code>"007"</code>), which the <code>ctype_digit()</code> guard produces and <code>(int)</code>
-maps to <code>int&lt;0, max&gt;</code>. Every place that handles the <code>string</code> refinements
-(subtyping, display, joins) would have to learn it.</p>
-<p>Found in a Laravel project's API client, which sleeps for the number of
-seconds a rate-limit message names.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
