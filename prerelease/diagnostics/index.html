@@ -1,0 +1,2286 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/prerelease/diagnostics/">
+      
+      
+      
+        <link rel="prev" href="../cli/">
+      
+      
+        <link rel="next" href="../BUILDING/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.70">
+    
+    
+      
+        <title>Diagnostics - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.e442bf79.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.b60ce83d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="./.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Diagnostics
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="./.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Getting Started
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#php-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        PHP code
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unused-and-unreachable-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Unused and unreachable code
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docblocks-and-project-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Docblocks and project layout
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phpunit-and-doctrine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        PHPUnit and Doctrine
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#laravel-and-blade" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Laravel and Blade
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#symfony-and-twig" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Symfony and Twig
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#yii" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Yii
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#drupal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Drupal
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#external-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        External tools
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Development
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Roadmap
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#php-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        PHP code
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unused-and-unreachable-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Unused and unreachable code
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docblocks-and-project-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Docblocks and project layout
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phpunit-and-doctrine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        PHPUnit and Doctrine
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#laravel-and-blade" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Laravel and Blade
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#symfony-and-twig" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Symfony and Twig
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#yii" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Yii
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#drupal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Drupal
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#external-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        External tools
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/diagnostics.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="diagnostics-reference">Diagnostics Reference<a class="headerlink" href="#diagnostics-reference" title="Permanent link">&para;</a></h1>
+<p>Every diagnostic PHPantom reports carries an identifier. It is shown
+with the message in your editor and under the message in <code>analyze</code>
+output, and it is what these take:</p>
+<ul>
+<li><code>[[diagnostics.ignore]] identifier = "…"</code> in <code>.phpantom.toml</code> (see
+  <a href="../configuration/#diagnosticsignore">Configuration</a>),</li>
+<li>an <code>// @phpantom-ignore …</code> comment (see
+  <a href="../configuration/#inline-suppression">Inline suppression</a>),</li>
+<li><code>analyze --code</code> and <code>--exclude-code</code> (see <a href="../cli/#analyze">CLI</a>).</li>
+</ul>
+<p>The severity is the default one. A few checks are off until you turn
+them on in <a href="../configuration/#diagnostics"><code>[diagnostics]</code></a>; their rows
+name the key. Framework checks run only in a project PHPantom detects as
+using that framework, and need no setting.</p>
+<h2 id="php-code">PHP code<a class="headerlink" href="#php-code" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Severity</th>
+<th>Reports</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>syntax_error</code></td>
+<td>Error</td>
+<td>Code that does not parse.</td>
+</tr>
+<tr>
+<td><code>unknown_class</code></td>
+<td>Warning</td>
+<td>A class, interface, trait, or enum that cannot be found.</td>
+</tr>
+<tr>
+<td><code>unknown_function</code></td>
+<td>Error</td>
+<td>A function call that cannot be resolved.</td>
+</tr>
+<tr>
+<td><code>unknown_member</code></td>
+<td>Warning</td>
+<td>A method, property, or constant the resolved class does not have. <code>report-magic-properties</code> widens it to classes with <code>__get</code>.</td>
+</tr>
+<tr>
+<td><code>partial_union_member</code></td>
+<td>Warning</td>
+<td>A member only some classes of a union declare. Off unless <code>partial-union-members</code> is on.</td>
+</tr>
+<tr>
+<td><code>unresolved_member_access</code></td>
+<td>Hint</td>
+<td><code>-&gt;</code>, <code>?-&gt;</code>, or <code>::</code> on a value whose type is <code>mixed</code> or could not be worked out. Off unless <code>unresolved-member-access</code> is on.</td>
+</tr>
+<tr>
+<td><code>scalar_member_access</code></td>
+<td>Error</td>
+<td><code>-&gt;</code> or <code>::</code> on a scalar, <code>null</code>, or an array.</td>
+</tr>
+<tr>
+<td><code>invalid_member_access</code></td>
+<td>Error</td>
+<td>A <code>private</code> or <code>protected</code> member reached from where it is not visible.</td>
+</tr>
+<tr>
+<td><code>invalid_member_name</code></td>
+<td>Error</td>
+<td>A dynamic member name (<code>$object-&gt;{$name}</code>) whose value has the wrong type.</td>
+</tr>
+<tr>
+<td><code>unknown_variable</code></td>
+<td>Error</td>
+<td>A variable read before anything defines it.</td>
+</tr>
+<tr>
+<td><code>unknown_offset</code></td>
+<td>Warning</td>
+<td>A destructuring offset the array's type rules out.</td>
+</tr>
+<tr>
+<td><code>argument_count_mismatch</code></td>
+<td>Error</td>
+<td>Too few arguments for the signature, or too many with <code>extra-arguments</code> on.</td>
+</tr>
+<tr>
+<td><code>unknown_named_argument</code></td>
+<td>Error</td>
+<td>A named argument that matches no parameter.</td>
+</tr>
+<tr>
+<td><code>type_mismatch_argument</code></td>
+<td>Error</td>
+<td>An argument whose type the parameter does not accept.</td>
+</tr>
+<tr>
+<td><code>type_mismatch_return</code></td>
+<td>Error</td>
+<td>A returned value whose type the return type does not accept.</td>
+</tr>
+<tr>
+<td><code>type_mismatch_property</code></td>
+<td>Error</td>
+<td>A value assigned to a property whose type does not accept it.</td>
+</tr>
+<tr>
+<td><code>invalid_string_conversion</code></td>
+<td>Error or Warning</td>
+<td>An object without <code>__toString()</code> used as a string. Warning when it only might be one.</td>
+</tr>
+<tr>
+<td><code>invalid_readonly_write</code></td>
+<td>Error</td>
+<td>A write to a <code>readonly</code> property from outside its class, or a second write.</td>
+</tr>
+<tr>
+<td><code>uninitialized_property</code></td>
+<td>Warning</td>
+<td>A typed property with no default that nothing writes, or one read on a new object before anything writes it.</td>
+</tr>
+<tr>
+<td><code>missing_return</code></td>
+<td>Error</td>
+<td>A function that can end without returning the value it promises.</td>
+</tr>
+<tr>
+<td><code>void_result_used</code></td>
+<td>Warning</td>
+<td>The result of a <code>void</code> call used as a value.</td>
+</tr>
+<tr>
+<td><code>discarded_return_value</code></td>
+<td>Warning</td>
+<td>A <code>#[\NoDiscard]</code> call whose result is thrown away.</td>
+</tr>
+<tr>
+<td><code>unhandled_match</code></td>
+<td>Error</td>
+<td>A <code>match</code> without <code>default</code> that leaves some values of its subject unhandled.</td>
+</tr>
+<tr>
+<td><code>unreachable_match_arm</code></td>
+<td>Warning</td>
+<td>A <code>match</code> arm that can never be identical to the subject.</td>
+</tr>
+<tr>
+<td><code>unknown_enum_value</code></td>
+<td>Error or Warning</td>
+<td>A literal passed to an enum's <code>from()</code> (Error) or <code>tryFrom()</code> (Warning) that no case backs.</td>
+</tr>
+<tr>
+<td><code>invalid_enum_case</code></td>
+<td>Error</td>
+<td>A backed case without a value, a pure case with one, or two cases with the same value.</td>
+</tr>
+<tr>
+<td><code>invalid_enum_backing_type</code></td>
+<td>Error</td>
+<td>An enum backed by something other than <code>int</code> or <code>string</code>.</td>
+</tr>
+<tr>
+<td><code>invalid_class_kind</code></td>
+<td>Error or Warning</td>
+<td>A class-like used where its kind is not allowed, such as <code>new</code> on an interface or <code>implements</code> a trait.</td>
+</tr>
+<tr>
+<td><code>missing_implementation</code></td>
+<td>Error</td>
+<td>A concrete class that does not implement every interface or abstract method.</td>
+</tr>
+<tr>
+<td><code>incompatible_override</code></td>
+<td>Error</td>
+<td>An override that does not return <code>static</code> where the parent method does.</td>
+</tr>
+<tr>
+<td><code>incompatible_trait_property</code></td>
+<td>Error</td>
+<td>The same property from two traits, or a trait and the class, declared incompatibly.</td>
+</tr>
+<tr>
+<td><code>invalid_override_attribute</code></td>
+<td>Error</td>
+<td><code>#[\Override]</code> on a method or property that overrides nothing.</td>
+</tr>
+<tr>
+<td><code>unhandled_exception</code></td>
+<td>Hint</td>
+<td>An exception thrown or passed on that is neither caught nor declared in <code>@throws</code>. Off unless <code>unhandled-exceptions</code> is on.</td>
+</tr>
+<tr>
+<td><code>dead_catch</code></td>
+<td>Warning</td>
+<td>A <code>catch</code> for an exception nothing in its <code>try</code> can throw. Shown dimmed.</td>
+</tr>
+<tr>
+<td><code>deprecated_usage</code></td>
+<td>Hint</td>
+<td>A reference to a symbol marked <code>@deprecated</code>. Shown struck through.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="unused-and-unreachable-code">Unused and unreachable code<a class="headerlink" href="#unused-and-unreachable-code" title="Permanent link">&para;</a></h2>
+<p>These are shown dimmed rather than underlined, except <code>unwritten_property</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Severity</th>
+<th>Reports</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>unused_import</code></td>
+<td>Hint</td>
+<td>A <code>use</code> import nothing in the file refers to.</td>
+</tr>
+<tr>
+<td><code>unused_variable</code></td>
+<td>Hint</td>
+<td>A variable that is assigned or bound but never read.</td>
+</tr>
+<tr>
+<td><code>unused_parameter</code></td>
+<td>Hint</td>
+<td>A trailing parameter the body never reads. Off unless <code>unused-parameters</code> is on.</td>
+</tr>
+<tr>
+<td><code>unused_method</code></td>
+<td>Hint</td>
+<td>A private method nothing calls.</td>
+</tr>
+<tr>
+<td><code>unused_property</code></td>
+<td>Hint</td>
+<td>A private property that is never read.</td>
+</tr>
+<tr>
+<td><code>unused_constant</code></td>
+<td>Hint</td>
+<td>A private constant nothing reads.</td>
+</tr>
+<tr>
+<td><code>unwritten_property</code></td>
+<td>Information</td>
+<td>A private property that is read but never written.</td>
+</tr>
+<tr>
+<td><code>unreachable_code</code></td>
+<td>Hint</td>
+<td>Statements after a <code>return</code>, <code>throw</code>, <code>exit</code>, <code>break</code>, or similar.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="docblocks-and-project-layout">Docblocks and project layout<a class="headerlink" href="#docblocks-and-project-layout" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Severity</th>
+<th>Reports</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docblock_native_mismatch</code></td>
+<td>Warning</td>
+<td>A docblock type that contradicts the native type.</td>
+</tr>
+<tr>
+<td><code>docblock_missing_null</code></td>
+<td>Hint</td>
+<td>A docblock type that leaves out the <code>null</code> its nullable native type allows.</td>
+</tr>
+<tr>
+<td><code>class_case_mismatch</code></td>
+<td>Warning</td>
+<td>A class name spelled with different case than its declaration.</td>
+</tr>
+<tr>
+<td><code>class_name_mismatch</code></td>
+<td>Warning</td>
+<td>A class whose name does not match its PSR-4 file name.</td>
+</tr>
+<tr>
+<td><code>namespace_mismatch</code></td>
+<td>Warning</td>
+<td>A class whose namespace does not match its PSR-4 path.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="phpunit-and-doctrine">PHPUnit and Doctrine<a class="headerlink" href="#phpunit-and-doctrine" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Severity</th>
+<th>Reports</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invalid_data_provider</code></td>
+<td>Error or Warning</td>
+<td>A data provider that is not <code>public</code>, or not <code>static</code> where the PHPUnit version requires it.</td>
+</tr>
+<tr>
+<td><code>missing_parent_call</code></td>
+<td>Warning</td>
+<td>A <code>setUp()</code> or <code>tearDown()</code> override that skips a parent that does work.</td>
+</tr>
+<tr>
+<td><code>unknown_entity_field</code></td>
+<td>Warning</td>
+<td>A field in a repository call that the entity does not map.</td>
+</tr>
+<tr>
+<td><code>dql_syntax_error</code></td>
+<td>Error</td>
+<td>A DQL string that does not parse.</td>
+</tr>
+<tr>
+<td><code>unknown_dql_variable</code></td>
+<td>Error</td>
+<td>A DQL alias nothing in the query declares.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="laravel-and-blade">Laravel and Blade<a class="headerlink" href="#laravel-and-blade" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Severity</th>
+<th>Reports</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invalid_laravel_route</code></td>
+<td>Warning</td>
+<td>A route name no route declares.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_view</code></td>
+<td>Warning</td>
+<td>A view name with no template.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_config</code></td>
+<td>Warning</td>
+<td>A <code>config()</code> key no config file declares.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_trans</code></td>
+<td>Warning</td>
+<td>A translation key no language file declares.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_middleware</code></td>
+<td>Warning</td>
+<td>A middleware alias or group that is not registered.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_ability</code></td>
+<td>Warning</td>
+<td>A gate or policy ability that is not defined, or not for the given model.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_command</code></td>
+<td>Warning</td>
+<td>An Artisan command name that is not registered.</td>
+</tr>
+<tr>
+<td><code>invalid_command_parameter</code></td>
+<td>Warning</td>
+<td>An <code>argument()</code> or <code>option()</code> name the command's signature does not declare.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_morph_alias</code></td>
+<td>Warning</td>
+<td>A morph type alias not in the enforced morph map.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_asset</code></td>
+<td>Warning</td>
+<td>An <code>asset()</code> path that does not exist.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_mix_asset</code></td>
+<td>Warning</td>
+<td>A <code>mix()</code> asset not in the Mix manifest.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_vite_asset</code></td>
+<td>Warning</td>
+<td>A Vite asset that does not exist.</td>
+</tr>
+<tr>
+<td><code>invalid_inertia_page</code></td>
+<td>Warning</td>
+<td>An Inertia page with no page file.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_auth_guard</code></td>
+<td>Warning</td>
+<td>An auth guard not in the config.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_broadcast_connection</code></td>
+<td>Warning</td>
+<td>A broadcast connection not in the config.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_cache_store</code></td>
+<td>Warning</td>
+<td>A cache store not in the config.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_database_connection</code></td>
+<td>Warning</td>
+<td>A database connection not in the config.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_log_channel</code></td>
+<td>Warning</td>
+<td>A log channel not in the config.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_mailer</code></td>
+<td>Warning</td>
+<td>A mailer not in the config.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_queue_connection</code></td>
+<td>Warning</td>
+<td>A queue connection not in the config.</td>
+</tr>
+<tr>
+<td><code>invalid_laravel_storage_disk</code></td>
+<td>Warning</td>
+<td>A storage disk not in the config.</td>
+</tr>
+<tr>
+<td><code>invalid_validation_rule</code></td>
+<td>Warning</td>
+<td>A validation rule name Laravel does not have.</td>
+</tr>
+<tr>
+<td><code>invalid_validation_message</code></td>
+<td>Warning</td>
+<td>A form request <code>messages()</code> or <code>attributes()</code> key naming an unknown field or rule.</td>
+</tr>
+<tr>
+<td><code>missing_view_variable</code></td>
+<td>Error</td>
+<td>A variable a Blade template declares that the call site does not pass.</td>
+</tr>
+<tr>
+<td><code>unused_view_variable</code></td>
+<td>Warning</td>
+<td>A variable passed to a view that the template does not use.</td>
+</tr>
+<tr>
+<td><code>type_mismatch_view_variable</code></td>
+<td>Error</td>
+<td>A variable passed to a view whose type the template's declaration does not accept.</td>
+</tr>
+<tr>
+<td><code>unknown_blade_component</code></td>
+<td>Warning</td>
+<td>An <code>&lt;x-…&gt;</code> tag with no component class or template.</td>
+</tr>
+<tr>
+<td><code>unknown_livewire_component</code></td>
+<td>Warning</td>
+<td>A <code>&lt;livewire:…&gt;</code> tag with no component.</td>
+</tr>
+<tr>
+<td><code>unclosed_blade_component_tag</code></td>
+<td>Error</td>
+<td>An <code>&lt;x-…&gt;</code> tag that is never closed.</td>
+</tr>
+<tr>
+<td><code>unexpected_blade_component_tag</code></td>
+<td>Error</td>
+<td>A closing component tag with nothing open.</td>
+</tr>
+<tr>
+<td><code>mismatched_blade_component_tag</code></td>
+<td>Error</td>
+<td>A closing component tag that closes a different tag.</td>
+</tr>
+<tr>
+<td><code>unclosed_blade_directive</code></td>
+<td>Error</td>
+<td>A block directive that is never closed.</td>
+</tr>
+<tr>
+<td><code>unexpected_blade_directive</code></td>
+<td>Error</td>
+<td>A closing directive with nothing open.</td>
+</tr>
+<tr>
+<td><code>mismatched_blade_directive</code></td>
+<td>Error</td>
+<td>A closing directive that closes a different block.</td>
+</tr>
+<tr>
+<td><code>unrendered_blade_section</code></td>
+<td>Warning</td>
+<td>A <code>@section</code> no layout yields.</td>
+</tr>
+<tr>
+<td><code>unrendered_blade_stack</code></td>
+<td>Warning</td>
+<td>A <code>@push</code> to a stack no layout renders.</td>
+</tr>
+<tr>
+<td><code>duplicate_blade_signature</code></td>
+<td>Error</td>
+<td>A second <code>@bladestan-signature</code> block in one template.</td>
+</tr>
+<tr>
+<td><code>blade_signature_widens_layout</code></td>
+<td>Error</td>
+<td>A <code>@bladestan-signature</code> the parent layout does not accept.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="symfony-and-twig">Symfony and Twig<a class="headerlink" href="#symfony-and-twig" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Severity</th>
+<th>Reports</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invalid_symfony_route</code></td>
+<td>Warning</td>
+<td>A route name no route declares.</td>
+</tr>
+<tr>
+<td><code>invalid_symfony_service</code></td>
+<td>Warning</td>
+<td>A service ID that is not declared.</td>
+</tr>
+<tr>
+<td><code>invalid_symfony_parameter</code></td>
+<td>Warning</td>
+<td>A container parameter that is not declared.</td>
+</tr>
+<tr>
+<td><code>invalid_symfony_translation</code></td>
+<td>Warning</td>
+<td>A translation key missing from its domain.</td>
+</tr>
+<tr>
+<td><code>invalid_symfony_messenger_bus</code></td>
+<td>Warning</td>
+<td>A Messenger bus that is not configured.</td>
+</tr>
+<tr>
+<td><code>invalid_symfony_template</code></td>
+<td>Warning</td>
+<td>A Twig template name with no template.</td>
+</tr>
+<tr>
+<td><code>invalid_twig_filter</code></td>
+<td>Warning</td>
+<td>A Twig filter that is not declared.</td>
+</tr>
+<tr>
+<td><code>invalid_twig_function</code></td>
+<td>Warning</td>
+<td>A Twig function that is not declared.</td>
+</tr>
+<tr>
+<td><code>unknown_form_option</code></td>
+<td>Error</td>
+<td>An option the form type does not accept.</td>
+</tr>
+<tr>
+<td><code>unknown_constraint_option</code></td>
+<td>Error</td>
+<td>An option the validation constraint does not take.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="yii">Yii<a class="headerlink" href="#yii" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Severity</th>
+<th>Reports</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invalid_yii_route</code></td>
+<td>Warning</td>
+<td>A route name no route declares.</td>
+</tr>
+<tr>
+<td><code>invalid_yii_route_argument</code></td>
+<td>Warning</td>
+<td>A route argument the route's path does not have.</td>
+</tr>
+<tr>
+<td><code>invalid_yii_view</code></td>
+<td>Warning</td>
+<td>A view path with no view file.</td>
+</tr>
+<tr>
+<td><code>invalid_yii_definition_argument</code></td>
+<td>Warning</td>
+<td>A DI definition argument that names no parameter of the method.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="drupal">Drupal<a class="headerlink" href="#drupal" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Severity</th>
+<th>Reports</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invalid_drupal_route</code></td>
+<td>Warning</td>
+<td>A route name nothing declares.</td>
+</tr>
+<tr>
+<td><code>invalid_drupal_route_parameter</code></td>
+<td>Warning</td>
+<td>A controller parameter named after an entity type but typed with an unrelated class, so it receives the raw ID.</td>
+</tr>
+<tr>
+<td><code>invalid_drupal_library</code></td>
+<td>Warning</td>
+<td>A library name nothing declares.</td>
+</tr>
+<tr>
+<td><code>invalid_drupal_render_element</code></td>
+<td>Warning</td>
+<td>A render element <code>#type</code> no element class declares.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="external-tools">External tools<a class="headerlink" href="#external-tools" title="Permanent link">&para;</a></h2>
+<p>Diagnostics from <a href="../configuration/#phpstan">PHPStan, PHPCS, PHPMD, and Mago</a>
+keep the tool's own identifier: PHPStan's error identifier (such as
+<code>argument.type</code>), the PHPCS sniff (such as
+<code>Generic.Files.LineLength.TooLong</code>), the PHPMD rule (such as
+<code>UnusedLocalVariable</code>), and the Mago issue code (such as
+<code>invalid-return-statement</code>). Both <code>[[diagnostics.ignore]]</code> and
+<code>@phpantom-ignore</code> match them the same way.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"redirect":null,"search":"../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a2388154.min.js"></script>
+      
+    
+  </body>
+</html>

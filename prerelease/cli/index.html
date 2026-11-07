@@ -15,7 +15,7 @@
         <link rel="prev" href="../configuration/">
       
       
-        <link rel="next" href="../BUILDING/">
+        <link rel="next" href="../diagnostics/">
       
       
         
@@ -932,6 +932,33 @@
   
 </nav>
       
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2426,83 +2453,8 @@ fewer with each release. If you hit one, please
 <h3 id="reported-diagnostics">Reported diagnostics<a class="headerlink" href="#reported-diagnostics" title="Permanent link">&para;</a></h3>
 <p>The analyze command reports the same diagnostics you see in your editor.
 Each has a rule identifier shown below the message, which is what <code>--code</code>
-and <code>--exclude-code</code> take. The most common ones are:</p>
-<table>
-<thead>
-<tr>
-<th>Identifier</th>
-<th>Severity</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>syntax_error</code></td>
-<td>Error</td>
-<td>PHP parse errors</td>
-</tr>
-<tr>
-<td><code>unknown_class</code></td>
-<td>Warning</td>
-<td>Class, interface, trait, or enum not resolvable</td>
-</tr>
-<tr>
-<td><code>unknown_member</code></td>
-<td>Warning</td>
-<td>Property or method not found on the resolved class</td>
-</tr>
-<tr>
-<td><code>partial_union_member</code></td>
-<td>Warning</td>
-<td>Member only some classes of a union declare (opt-in)</td>
-</tr>
-<tr>
-<td><code>unknown_function</code></td>
-<td>Error</td>
-<td>Function call not resolvable</td>
-</tr>
-<tr>
-<td><code>argument_count_mismatch</code></td>
-<td>Error</td>
-<td>Wrong number of arguments to a function or method</td>
-</tr>
-<tr>
-<td><code>missing_implementation</code></td>
-<td>Error</td>
-<td>Missing required interface or abstract methods</td>
-</tr>
-<tr>
-<td><code>scalar_member_access</code></td>
-<td>Error</td>
-<td>Member access on a scalar type (int, string, etc.)</td>
-</tr>
-<tr>
-<td><code>invalid_member_access</code></td>
-<td>Error</td>
-<td><code>private</code> or <code>protected</code> member reached from outside</td>
-</tr>
-<tr>
-<td><code>unused_import</code></td>
-<td>Hint</td>
-<td><code>use</code> statement with no references in the file</td>
-</tr>
-<tr>
-<td><code>unreachable_code</code></td>
-<td>Hint</td>
-<td>Statements after a <code>return</code>, <code>throw</code>, <code>exit</code>, or <code>break</code></td>
-</tr>
-<tr>
-<td><code>dead_catch</code></td>
-<td>Warning</td>
-<td><code>catch</code> for an exception its <code>try</code> cannot throw</td>
-</tr>
-<tr>
-<td><code>deprecated_usage</code></td>
-<td>Hint</td>
-<td>Reference to a <code>@deprecated</code> symbol</td>
-</tr>
-</tbody>
-</table>
+and <code>--exclude-code</code> take. The <a href="../diagnostics/">Diagnostics Reference</a>
+lists every identifier with its severity and what it reports.</p>
 <hr />
 <h2 id="fix"><code>fix</code><a class="headerlink" href="#fix" title="Permanent link">&para;</a></h2>
 <p>Applies code fixes across the project. Specify which rules to run, or
@@ -2601,9 +2553,9 @@ unused is removed in the same run.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a> ------ -------------------------------------------
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>   Line   src/Service/UserService.php
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a> ------ -------------------------------------------
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    5     Unused import 'App\Models\LegacyUser'
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    5     Unused import App\Models\LegacyUser
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>          🔧  unused_import
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    6     Unused import 'App\Support\OldHelper'
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    6     Unused import App\Support\OldHelper
 <a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>          🔧  unused_import
 <a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a> ------ -------------------------------------------
 <a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
@@ -2615,7 +2567,7 @@ unused is removed in the same run.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a> ------ -------------------------------------------
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>   Line   src/Service/UserService.php
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a> ------ -------------------------------------------
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    5     Unused import 'App\Models\LegacyUser'
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    5     Unused import App\Models\LegacyUser
 <a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>          🔧  unused_import
 <a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a> ------ -------------------------------------------
 <a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>

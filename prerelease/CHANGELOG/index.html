@@ -498,6 +498,33 @@
 
                 
               
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
             </ul>
           </nav>
         
@@ -6114,6 +6141,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>A type mismatch that only a possible <code>null</code> or <code>false</code> causes is no longer reported by default.</strong> Passing a <code>string|false</code> to a <code>string</code> parameter, returning it from a <code>string</code> function or assigning it to a <code>string</code> property only fails if the value turns out empty. Set <code>possibly-empty-mismatches = true</code> under <code>[diagnostics]</code> to report these as errors. It replaces <code>downgrade-nullable-argument-mismatch</code>, which is gone. A mismatch where some other member fails is still reported. Contributed by @stubbedev.</li>
 <li><strong>Pull diagnostics are advertised to every client.</strong> Editors and tools that check the server's capabilities now see pull diagnostic support even when they don't declare it themselves, and a pull returns the diagnostics last published. Editors without pull support still receive pushed diagnostics as before.</li>
 <li><strong>laravel-ide-helper files come back through <code>include</code>.</strong> To index <code>_ide_helper.php</code> or <code>_ide_helper_models.php</code>, list them under <code>[indexing] include</code>. A leading <code>!</code> in <code>[indexing] exclude</code> no longer does it, since <code>!</code> now only undoes your own exclude patterns.</li>
+<li><strong>Diagnostic messages read the same way across every check.</strong> Names are written the way PHP spells them, without quotes (<code>Class App\Models\User not found</code>, <code>Unused variable $total</code>), members carry their class (<code>Method App\Models\User::save() not found</code>), string values stay quoted, and type mismatches read <code>expects X, got Y</code>. An <code>[[diagnostics.ignore]]</code> rule that matches on <code>message</code> may need updating; one that matches on <code>identifier</code> keeps working.</li>
 <li><strong>Updated embedded phpstorm-stubs.</strong> Adds the <code>ps</code>, <code>proctitle</code>, and <code>yaz</code> extensions, updates Judy and Relay, and corrects many parameter and return types to match the PHP documentation, including <code>oci_fetch_object()</code>, <code>pg_loopen()</code>, and nullable RdKafka message payloads.</li>
 </ul>
 <h4 id="performance-and-memory">Performance and memory<a class="headerlink" href="#performance-and-memory" title="Permanent link">&para;</a></h4>
@@ -6563,6 +6591,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h4 id="indexing-and-configuration">Indexing and configuration<a class="headerlink" href="#indexing-and-configuration" title="Permanent link">&para;</a></h4>
 <ul>
+<li><strong>Editor help for <code>[inlay_hints]</code>.</strong> The configuration schema now describes the <code>[inlay_hints]</code> section, so editors with TOML schema support complete and explain its keys like the rest of <code>.phpantom.toml</code>.</li>
 <li><strong>Tools installed with the Composer bin plugin.</strong> In a project using <code>bamarni/composer-bin-plugin</code>, classes from the tools under <code>vendor-bin/</code> (PHPUnit's <code>TestCase</code>, say) resolve again without un-ignoring their vendor directories, and stay out of analysis like any other vendor code. PHPUnit's version is read from there too.</li>
 <li><strong><code>[indexing] exclude</code> covers Composer's class lists.</strong> A class Composer's classmap or PSR-0 map names no longer resolves from a path you excluded, so excluding a path mid-session and restarting give the same result.</li>
 <li><strong>Each Composer project of a workspace sees only its own dependencies.</strong> In a monorepo, or a workspace with Composer projects nested below its root, a class that only another project installed or declares is now reported as unknown and no longer completes, and when two projects install different versions of a package, each file resolves the version its own project installed.</li>

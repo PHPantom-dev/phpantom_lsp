@@ -28,6 +28,9 @@
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/configuration/</loc>
       </url>
       <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/diagnostics/</loc>
+      </url>
+      <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/editor-setup/</loc>
       </url>
       <url>

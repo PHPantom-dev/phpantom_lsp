@@ -12,7 +12,7 @@
       
       
       
-        <link rel="prev" href="../cli/">
+        <link rel="prev" href="../diagnostics/">
       
       
         <link rel="next" href="../ARCHITECTURE/">
@@ -488,6 +488,33 @@
     
   
   CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
 
     
   </span>
@@ -1595,7 +1622,7 @@
 </code></pre></div>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="https://rustup.rs/">Rust</a> (stable toolchain)</li>
+<li><a href="https://rustup.rs/">Rust</a> 1.99 or newer (the <code>rust-version</code> in <code>Cargo.toml</code>, set by the newest Rust the Mago crates require)</li>
 </ul>
 <h2 id="build">Build<a class="headerlink" href="#build" title="Permanent link">&para;</a></h2>
 <p>The <code>build.rs</code> script automatically fetches the latest <a href="https://github.com/JetBrains/phpstorm-stubs">JetBrains phpstorm-stubs</a> from GitHub and embeds them directly into the binary. This gives the LSP full knowledge of built-in PHP classes, functions, and constants with no runtime dependencies.</p>
@@ -1626,6 +1653,9 @@ over LSP. The caller supplies PHP documents as strings, and gets back
 declarations, occurrences, calls, byte ranges, and diagnostics as owned
 values that outlive the backend they came from. Nothing is read from
 disk and no server is started.</p>
+<p>Like the rest of the crate's Rust API, it is internal: it is not
+covered by PHPantom's version number and can change in any release.
+Pin an exact version if you depend on it.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>--features<span class="w"> </span>semantic-export,offline-stubs
 </code></pre></div>
 <h3 id="matching-the-released-binary">Matching the released binary<a class="headerlink" href="#matching-the-released-binary" title="Permanent link">&para;</a></h3>

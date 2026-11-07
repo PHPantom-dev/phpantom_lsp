@@ -500,6 +500,33 @@
 
                 
               
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
             </ul>
           </nav>
         
@@ -724,6 +751,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Changelog
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostic-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Diagnostic messages
       </span>
     </span>
   </a>
@@ -1431,6 +1469,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#diagnostic-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Diagnostic messages
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#documentation" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1579,6 +1628,20 @@ fork and Dependabot PRs use the summaries.</p>
 <p>Example:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">-</span><span class="w"> </span><span class="gs">**`analyze` takes more than one path.**</span> <span class="sb">`phpantom_lsp analyze app/ lib/Helper.php tests/`</span> checks everything named, so a pre-commit hook or CI step can pass only the changed files.
 </code></pre></div>
+<h2 id="diagnostic-messages">Diagnostic messages<a class="headerlink" href="#diagnostic-messages" title="Permanent link">&para;</a></h2>
+<p>A diagnostic's message is the text users read most, in the editor and in CI logs, so every check writes it the same way. Where PHP itself reports the same mistake at runtime, use PHP's wording (<code>Cannot instantiate interface App\Shape</code>, <code>Undefined variable $total</code>).</p>
+<ul>
+<li>Write one sentence that starts with a capital letter and has no final period. PHP's short form also counts: an adjective, the kind, and the name (<code>Unused import App\Models\User</code>, <code>Unknown middleware 'auth.admin'</code>). Don't write a label and a colon (<code>Dead catch: …</code>), and don't start with a name, a <code>$</code>, or an <code>@</code>; lead with its kind instead (<code>Method …</code>, <code>Directive @if …</code>).</li>
+<li>Write a name the way PHP code spells it, without quotes: classes fully qualified and without a leading backslash (<code>App\Models\User</code>), functions with <code>()</code> (<code>App\helper()</code>), and members on their class whenever it is known: <code>User::save()</code>, <code>User::$name</code>, <code>User::MAX</code>. Variables and parameters keep their <code>$</code>.</li>
+<li>Call each kind of thing by its name: a constant is a constant, not a member. When two checks report the same fact, they use the same words.</li>
+<li>Put a value written in the code as a string in single quotes, the way PHP writes the literal: route, view, config, and translation keys, array keys, option names (<code>Unknown view 'emails.welcome'</code>). A token from a parser goes in single quotes too (<code>Unexpected token '}'</code>).</li>
+<li>Write types the way a docblock does, without quotes (<code>int</code>, <code>array&lt;string, User&gt;</code>, <code>?string</code>).</li>
+<li>Report a type mismatch as <code>… expects X, got Y</code>, with what was expected first: <code>Argument 1 ($id) expects int, got string</code>, <code>Property App\User::$name expects string, got null</code>, <code>Return expects int, got string</code>. Extra detail goes in parentheses at the end.</li>
+<li>Add a clause that says what to do only when there is one obvious fix, after a semicolon: <code>Readonly property App\Point::$x is never initialized; assign it in the constructor</code>.</li>
+<li>Say what is wrong in plain words rather than the vocabulary of the PHP RFCs (<code>Nothing in the try block throws App\NotFound</code>, not <code>Dead catch</code>). No em-dashes.</li>
+<li>Text quoted from the user's code, such as the reason in an <code>@deprecated</code> tag, follows a colon as written, without its final period. Messages from PHPStan, PHPCS, PHPMD, and Mago are passed on as the tool wrote them.</li>
+</ul>
+<p>The <a href="../diagnostics/">Diagnostics Reference</a> lists every identifier; a new check adds its row there.</p>
 <h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
 <p>The documentation site is built with <a href="https://zensical.org/">Zensical</a>.
 The only dependency you need is <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a>.</p>
