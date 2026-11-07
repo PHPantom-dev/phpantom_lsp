@@ -1,6 +1,7 @@
 //! Static view paths keep the context of the file that declared them.
 
 use crate::common::{create_psr4_workspace, hover_on, open_php, workspace_uri};
+use phpantom_lsp::php_type::PhpType;
 
 #[tokio::test]
 async fn file_paths_keep_their_declaration_context() {
@@ -50,17 +51,41 @@ echo $current;
     open_php(&backend, &uri, caller).await;
     let root = dunce::canonicalize(dir.path()).unwrap();
     for (needle, expected) in [
-        ("$directory;", root.join("app")),
-        ("$file;", root.join("app/definitions.php")),
-        ("$path;", root.join("app/page.view.php")),
-        ("$trait;", root.join("app/traits/part.view.php")),
-        ("$local;", root.join("consumer")),
-        ("$current;", root.join("consumer/caller.php")),
+        (
+            "$directory;",
+            root.join("app").to_string_lossy().into_owned(),
+        ),
+        (
+            "$file;",
+            dunce::canonicalize(root.join("app/definitions.php"))
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        (
+            "$path;",
+            format!("{}/page.view.php", root.join("app").display()),
+        ),
+        (
+            "$trait;",
+            format!(
+                "{}/part.view.php",
+                root.join("app").join("traits").display()
+            ),
+        ),
+        (
+            "$local;",
+            root.join("consumer").to_string_lossy().into_owned(),
+        ),
+        (
+            "$current;",
+            dunce::canonicalize(root.join("consumer/caller.php"))
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        ),
     ] {
-        let value = expected
-            .to_string_lossy()
-            .replace('\\', "\\\\")
-            .replace('\'', "\\'");
+        let value = PhpType::literal_string_value(expected).to_string();
         let hover = hover_on(&backend, &uri, caller, needle).await;
         assert!(
             hover.contains(&value),
@@ -95,13 +120,13 @@ namespace Consumer {
     open_php(&backend, &uri, source).await;
     let root = dunce::canonicalize(dir.path()).unwrap();
     for (needle, expected) in [
-        ("$directory;", root.join("app")),
-        ("$nested;", root.join("views")),
+        (
+            "$directory;",
+            root.join("app").to_string_lossy().into_owned(),
+        ),
+        ("$nested;", format!("{}/views", root.display())),
     ] {
-        let expected = expected
-            .to_string_lossy()
-            .replace('\\', "\\\\")
-            .replace('\'', "\\'");
+        let expected = PhpType::literal_string_value(expected).to_string();
         let hover = hover_on(&backend, &uri, source, needle).await;
         assert!(hover.contains(&expected), "{needle}: {hover}");
     }

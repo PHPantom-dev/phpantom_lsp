@@ -85,16 +85,20 @@ fn literal_type(name: &str, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
             if !(1..=64).contains(&levels) {
                 return None;
             }
-            map_subject(args, |subject| {
-                let mut path = std::path::Path::new(subject);
-                for _ in 0..levels {
-                    path = path.parent().unwrap_or(path);
-                    if path.as_os_str().is_empty() {
-                        path = std::path::Path::new(".");
+            literal_alternatives_any(args, 0)?
+                .iter()
+                .map(|subject| {
+                    let mut path = subject.clone();
+                    for _ in 0..levels {
+                        let parent = dirname(&path, cfg!(windows));
+                        if parent == path {
+                            break;
+                        }
+                        path = parent;
                     }
-                }
-                path.to_string_lossy().into_owned()
-            })?
+                    path
+                })
+                .collect()
         }
         // `mb_*` agrees with the ASCII mapping on ASCII input, which is
         // the only input that gets this far.
@@ -503,6 +507,49 @@ fn implode_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
             PhpType::literal_string(),
             emptiness,
         ])),
+    }
+}
+
+/// PHP removes path segments lexically: `a/./b` keeps `a/.` and
+/// `a/../b` keeps `a/..`. `Path::parent` would normalize the dot away.
+fn dirname(path: &str, windows: bool) -> String {
+    if path.is_empty() {
+        return String::new();
+    }
+    let drive_len = if windows
+        && path.as_bytes().get(1) == Some(&b':')
+        && path.as_bytes()[0].is_ascii_alphabetic()
+    {
+        2
+    } else {
+        0
+    };
+    let (drive, tail) = path.split_at(drive_len);
+    if tail.is_empty() {
+        return drive.to_string();
+    }
+    let separator = |ch| ch == '/' || (windows && ch == '\\');
+    let tail = tail.trim_end_matches(separator);
+    let parent = tail
+        .rfind(separator)
+        .map(|end| tail[..end].trim_end_matches(separator));
+    let value = match parent {
+        None if !tail.is_empty() => ".",
+        None | Some("") => {
+            if windows {
+                "\\"
+            } else {
+                "/"
+            }
+        }
+        Some(value) => value,
+    };
+    let result = format!("{drive}{value}");
+    // PHP's Windows dirname drops the extended path prefix as well.
+    if windows && let Some(short) = result.strip_prefix(r"\\?\") {
+        short.to_string()
+    } else {
+        result
     }
 }
 

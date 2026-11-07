@@ -16587,7 +16587,8 @@ fn hover_namespaced_constant_through_every_spelling() {
 #[test]
 fn hover_magic_constants_carry_their_own_types() {
     let backend = create_test_backend();
-    let uri = "file:///test.php";
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("magic.php");
     let content = r#"<?php
 namespace App;
 
@@ -16614,12 +16615,21 @@ class Widget {
 
 $outsideAnyClass = __CLASS__;
 "#;
+    std::fs::write(&path, content).unwrap();
+    let path = dunce::canonicalize(path).unwrap();
+    let uri = Uri::from_file_path(&path).unwrap().to_string();
+    let file_type =
+        phpantom_lsp::php_type::PhpType::literal_string_value(path.to_string_lossy()).to_string();
+    let directory_type = phpantom_lsp::php_type::PhpType::literal_string_value(
+        path.parent().unwrap().to_string_lossy(),
+    )
+    .to_string();
     for (var, want) in [
         ("$traitClass", "class-string"),
         ("$traitTrait", "'App\\\\Probe'"),
         ("$line", "13"),
-        ("$file", "string"),
-        ("$dir", "string"),
+        ("$file", file_type.as_str()),
+        ("$dir", directory_type.as_str()),
         ("$class", "class-string<Widget>"),
         ("$trait", "''"),
         ("$namespace", "'App'"),
@@ -16634,7 +16644,7 @@ $outsideAnyClass = __CLASS__;
             .position(|l| l.trim_start().starts_with(&needle))
             .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"))
             as u32;
-        let hover = hover_at(&backend, uri, content, line, 9)
+        let hover = hover_at(&backend, &uri, content, line, 9)
             .unwrap_or_else(|| panic!("no hover for {var}"));
         assert!(
             hover_text(&hover).contains(&format!("{var} = {want}")),

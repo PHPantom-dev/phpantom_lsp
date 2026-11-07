@@ -10,6 +10,7 @@ mod paths;
 pub(crate) mod preprocessor;
 mod syntax;
 mod view_data;
+mod wrappers;
 
 pub(crate) use discovery::TempestState;
 
@@ -43,5 +44,3 @@ impl crate::Backend {
 
 #[cfg(test)]
 mod tests;
-
-mod wrappers;

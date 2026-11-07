@@ -455,6 +455,16 @@ fn is_decimal_point(bytes: &[u8], i: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn concatenation_does_not_fold_nonfinite_numbers() {
+        assert_eq!(
+            super::fold_string_concatenation("'value=' . HUGE", &|name| {
+                (name == "HUGE").then(|| crate::php_type::PhpType::literal_float("1e999"))
+            }),
+            None
+        );
+    }
+
     use super::*;
 
     /// Stands in for the shared resolver: the flags a `json_encode()` call

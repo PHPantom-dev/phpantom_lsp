@@ -238,3 +238,17 @@ fn enclosing_function_display_name(
         None => String::new(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::file_magic_constant_type;
+    use crate::php_type::PhpType;
+
+    #[test]
+    fn file_constants_without_a_filesystem_uri_remain_strings() {
+        for uri in [None, Some("untitled:template")] {
+            assert_eq!(file_magic_constant_type(uri, false), PhpType::string());
+            assert_eq!(file_magic_constant_type(uri, true), PhpType::string());
+        }
+    }
+}

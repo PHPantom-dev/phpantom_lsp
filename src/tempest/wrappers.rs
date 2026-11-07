@@ -114,22 +114,38 @@ pub(super) fn invocation(
                 &call.argument_list,
             )
         }
-        Expression::Call(Call::Method(call)) if matches!(&call.method, ClassLikeMemberSelector::Identifier(name) if names.methods.contains(&bytes_to_str(name.value).to_ascii_lowercase())) => {
+        Expression::Call(Call::Method(
+            call @ MethodCall {
+                method: ClassLikeMemberSelector::Identifier(name),
+                ..
+            },
+        )) if names
+            .methods
+            .contains(&bytes_to_str(name.value).to_ascii_lowercase()) =>
+        {
             method(
                 backend,
                 expr,
-                &call.method,
+                bytes_to_str(name.value),
                 &call.argument_list,
                 content,
                 file,
                 &loaders,
             )?
         }
-        Expression::Call(Call::StaticMethod(call)) if matches!(&call.method, ClassLikeMemberSelector::Identifier(name) if names.methods.contains(&bytes_to_str(name.value).to_ascii_lowercase())) => {
+        Expression::Call(Call::StaticMethod(
+            call @ StaticMethodCall {
+                method: ClassLikeMemberSelector::Identifier(name),
+                ..
+            },
+        )) if names
+            .methods
+            .contains(&bytes_to_str(name.value).to_ascii_lowercase()) =>
+        {
             method(
                 backend,
                 expr,
-                &call.method,
+                bytes_to_str(name.value),
                 &call.argument_list,
                 content,
                 file,
@@ -168,8 +184,9 @@ pub(super) fn invocation(
                 if value.is_none()
                     && let Some(default) = &param.default_value
                 {
-                    arguments[index] = Backend::resolve_arg_text_to_type(default, &ctx)
-                        .unwrap_or_else(PhpType::mixed);
+                    let resolve = |value: &str| Backend::resolve_arg_text_to_type(value, &ctx);
+                    arguments[index] = crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value_resolved(default, &resolve)
+                        .or_else(|| resolve(default)).unwrap_or_else(PhpType::mixed);
                 }
             }
         }
@@ -184,15 +201,12 @@ pub(super) fn invocation(
 fn method<'a>(
     backend: &Backend,
     expr: &Expression<'_>,
-    selector: &ClassLikeMemberSelector<'_>,
+    name: &str,
     args: &'a ArgumentList<'a>,
     content: &str,
     file: &FileContext,
     loaders: &crate::resolution::FileLoaders<'_>,
 ) -> Option<(String, u32, SharedVec<ParameterInfo>, &'a ArgumentList<'a>)> {
-    let ClassLikeMemberSelector::Identifier(name) = selector else {
-        return None;
-    };
     let target = backend.resolve_callable_target_at_offset(
         content.get(expr.span().start.offset as usize..args.span().start.offset as usize)?,
         content,
@@ -206,14 +220,14 @@ fn method<'a>(
     let owner = loader(crate::class_lookup::Fqn::new(&target.owner_class?))?;
     let declaring = crate::hover::find_declaring_class(
         &owner,
-        bytes_to_str(name.value),
+        name,
         &crate::hover::MemberKindForOrigin::Method,
         loader,
     );
     let method = declaring
         .methods
         .iter()
-        .find(|method| method.name.eq_ignore_ascii_case(bytes_to_str(name.value)))?;
+        .find(|method| method.name.eq_ignore_ascii_case(name))?;
     Some((
         backend.class_declaration_uri(&declaring.fqn())?,
         method.name_offset,

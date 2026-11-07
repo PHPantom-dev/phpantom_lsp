@@ -240,7 +240,7 @@ impl RenderContext<'_> {
                 if !seen.insert(root.span().start.offset) {
                     continue;
                 }
-                if generic.is_none() && !is_view_call(root, file) {
+                let Some(args) = generic.or_else(|| view_arguments(root, file)) else {
                     if self.active.len() < 8
                         && let Some(invocation) =
                             super::wrappers::invocation(backend, root, content, file, self.wrappers)
@@ -266,30 +266,6 @@ impl RenderContext<'_> {
                         }
                     }
                     continue;
-                }
-                let args = if let Some(args) = generic {
-                    args
-                } else {
-                    let Expression::Call(Call::Function(call)) = root else {
-                        continue;
-                    };
-                    let Expression::Identifier(name) = call.function else {
-                        continue;
-                    };
-                    let offset = name.span().start.offset;
-                    let (resolved, _) = crate::names::function_lookup_names(
-                        bytes_to_str(name.value()),
-                        file.use_map_at(offset),
-                        &file.symbol_imports_at(offset).functions,
-                        file.namespace_at(offset),
-                    );
-                    if !resolved
-                        .trim_start_matches('\\')
-                        .eq_ignore_ascii_case("Tempest\\View\\view")
-                    {
-                        continue;
-                    }
-                    &call.argument_list
                 };
                 let path = args
                     .arguments
@@ -333,12 +309,15 @@ impl RenderContext<'_> {
     }
 }
 
-fn is_view_call(expr: &Expression<'_>, file: &FileContext) -> bool {
+fn view_arguments<'a>(
+    expr: &'a Expression<'a>,
+    file: &FileContext,
+) -> Option<&'a ArgumentList<'a>> {
     let Expression::Call(Call::Function(call)) = expr else {
-        return false;
+        return None;
     };
     let Expression::Identifier(name) = call.function else {
-        return false;
+        return None;
     };
     let offset = name.span().start.offset;
     let (resolved, _) = crate::names::function_lookup_names(
@@ -350,6 +329,7 @@ fn is_view_call(expr: &Expression<'_>, file: &FileContext) -> bool {
     resolved
         .trim_start_matches('\\')
         .eq_ignore_ascii_case("Tempest\\View\\view")
+        .then_some(&call.argument_list)
 }
 
 struct Calls;
