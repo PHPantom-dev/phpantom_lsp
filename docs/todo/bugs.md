@@ -190,33 +190,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B710. A method the call site cannot see is checked although `__call` takes the call
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-class Magic {
-    public function __call(string $name, array $args): mixed { return null; }
-    protected function hidden(int $value): void {}
-}
-$magic->hidden(); // Error: Expected 1 argument, got 0
-```
-
-A call from outside the class to a method it cannot reach goes to
-`__call` (or `__callStatic`), which takes any arguments, but the
-argument-count and argument-type diagnostics check it against the
-inaccessible method's own signature. The unknown-named-argument check
-already skips a non-public method on a class with a magic handler, but
-only by its visibility, without asking whether the call site can see it,
-so it also stays quiet for `$this->hidden(valeu: 1)` inside the class,
-which PHP does reject.
-
-**Where to look:** `binds_named_args` in
-`type_engine/call_resolution/callable_target.rs` and the target
-resolution it sits in, which would need the calling class to decide
-reachability; `diagnostics/member_visibility.rs` already decides it for
-the visibility diagnostic.
-
 ### B706. A Doctrine mapping file is not read until the workspace index ends
 
 **Impact: Low-Medium · Complexity: Low-Medium**

@@ -1470,6 +1470,82 @@ function test(Magic $magic, Closure $callback): void {
         assert!(unknown_named(&diags).is_empty(), "got: {diags:?}");
     }
 
+    /// A call that cannot see a method goes to `__call` / `__callStatic`,
+    /// which takes any arguments, so only the calls that can see it are
+    /// checked against its signature.  Without a handler PHP rejects the
+    /// call outright and the signature still applies.
+    #[test]
+    fn unreachable_method_with_magic_handler_takes_any_arguments() {
+        let php = r#"<?php
+class Magic {
+    public function __call(string $name, array $args): mixed { return null; }
+    public static function __callStatic(string $name, array $args): mixed { return null; }
+    protected function hidden(int $value): void {}
+    private static function secret(int $value): void {}
+    public function inside(): void {
+        $this->hidden();
+        self::secret();
+    }
+}
+class Plain {
+    protected function hidden(int $value): void {}
+}
+function test(Magic $magic, Plain $plain): void {
+    $magic->hidden();
+    Magic::secret();
+    $plain->hidden();
+}
+class Child extends Magic {
+    public function test(Magic $other): void {
+        $this->hidden();
+        $other->hidden();
+    }
+}
+"#;
+        let diags = collect(php);
+        let lines: Vec<u32> = diags
+            .iter()
+            .filter(|d| message_text(&d.message).contains("Expected 1 argument"))
+            .map(|d| d.range.start.line)
+            .collect();
+        assert_eq!(lines, vec![7, 8, 17, 21, 22], "got: {diags:?}");
+    }
+
+    /// A call that can see a non-public method binds to its parameters
+    /// even when the class has a magic handler, so an unknown name is an
+    /// error there.
+    #[test]
+    fn flags_unknown_named_argument_to_visible_method_with_magic_handler() {
+        let php = r#"<?php
+class Magic {
+    public function __call(string $name, array $args): mixed { return null; }
+    public static function __callStatic(string $name, array $args): mixed { return null; }
+    protected function hidden(int $value): void {}
+    private static function secret(int $value): void {}
+    public function test(): void {
+        $this->hidden(valeu: 1);
+        self::secret(valeu: 1);
+    }
+}
+class Child extends Magic {
+    public function test(): void {
+        $this->hidden(valeu: 1);
+        $this->secret(valeu: 1);
+    }
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            unknown_named(&diags),
+            vec![
+                (7, "Unknown named parameter $valeu"),
+                (8, "Unknown named parameter $valeu"),
+                (13, "Unknown named parameter $valeu"),
+            ],
+            "got: {diags:?}",
+        );
+    }
+
     /// A separately released extension names its parameters differently
     /// from one release to the next, so its stub cannot say which names
     /// the installed one takes, including through a subclass.

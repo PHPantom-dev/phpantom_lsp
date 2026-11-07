@@ -17473,3 +17473,31 @@ class Holder {
 "#;
     assert_eq!(partial_union_mismatches(php, Some(false)).len(), 3);
 }
+
+/// A call that cannot see a method goes to `__call`, which takes any
+/// arguments, while a call from inside the class is checked against the
+/// method's own signature.  Both orders are checked so a target resolved
+/// for one call site is never reused for the other.
+#[test]
+fn unreachable_method_with_magic_handler_is_not_type_checked() {
+    let class = r#"
+class Magic {
+    public function __call(string $name, array $args): mixed { return null; }
+    protected function hidden(int $value): void {}
+    public function inside(): void { $this->hidden('x'); }
+}
+"#;
+    let outside = "function test(Magic $magic): void { $magic->hidden('x'); }\n";
+    for php in [
+        format!("<?php\n{class}{outside}"),
+        format!("<?php\n{outside}{class}"),
+    ] {
+        let diags = collect_slow(&php);
+        let inside_line = php
+            .lines()
+            .position(|l| l.contains("function inside"))
+            .unwrap() as u32;
+        let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+        assert_eq!(lines, vec![inside_line], "got: {diags:?}");
+    }
+}

@@ -253,6 +253,17 @@ impl Backend {
         );
 
         if let Some(m) = effective.get_method_ci(&method_lower) {
+            // Whether this call site can see the method is not part of the
+            // cache key, so a target whose answer depends on it is not
+            // cached.
+            let site_dependent = reachability_depends_on_call_site(m, &effective);
+            if site_dependent
+                && let Some(target) =
+                    unreachable_method_target(m, &effective, method_name, false, rctx)
+            {
+                return Some(target);
+            }
+
             let (result_method, self_bound_params) =
                 Self::bind_method_to_call_site(m, &effective, method_name, args_text, rctx);
 
@@ -260,7 +271,7 @@ impl Backend {
                 parameters: result_method.parameters.clone(),
                 return_type: result_method.return_type.clone(),
                 reads_func_args: result_method.reads_func_args,
-                binds_named_args: binds_named_args(m, &effective),
+                binds_named_args: !m.is_virtual,
                 no_discard: result_method.is_no_discard,
                 native_void: result_method
                     .native_return_type
@@ -272,7 +283,7 @@ impl Backend {
             };
 
             // Store positive result in the callable target cache.
-            if let Some(ref key) = callable_cache_key {
+            if !site_dependent && let Some(ref key) = callable_cache_key {
                 CALLABLE_TARGET_CACHE.with(|cell| {
                     let mut borrow = cell.borrow_mut();
                     if let Some(ref mut map) = *borrow {
@@ -289,11 +300,18 @@ impl Backend {
         // injected onto Builder<Model>) that the FQN-keyed
         // cache does not have.
         if let Some(m) = owner.get_method_ci(method_name) {
+            let site_dependent = reachability_depends_on_call_site(m, &owner);
+            if site_dependent
+                && let Some(target) = unreachable_method_target(m, &owner, method_name, false, rctx)
+            {
+                return Some(target);
+            }
+
             let target = ResolvedCallableTarget {
                 parameters: m.parameters.clone(),
                 return_type: m.return_type.clone(),
                 reads_func_args: m.reads_func_args,
-                binds_named_args: binds_named_args(m, &effective),
+                binds_named_args: !m.is_virtual,
                 no_discard: m.is_no_discard,
                 native_void: m.native_return_type.as_ref().is_some_and(PhpType::is_void),
                 owner_class: Some(owner.fqn()),
@@ -301,7 +319,7 @@ impl Backend {
             };
 
             // Store the owner-candidate fallback in the callable target cache.
-            if let Some(ref key) = callable_cache_key {
+            if !site_dependent && let Some(ref key) = callable_cache_key {
                 CALLABLE_TARGET_CACHE.with(|cell| {
                     let mut borrow = cell.borrow_mut();
                     if let Some(ref mut map) = *borrow {
@@ -382,6 +400,12 @@ impl Backend {
 
         let m = merged.get_method_ci(method_name)?;
 
+        if reachability_depends_on_call_site(m, &merged)
+            && let Some(target) = unreachable_method_target(m, &merged, method_name, true, rctx)
+        {
+            return Some(target);
+        }
+
         let (result_method, self_bound_params) =
             Self::bind_method_to_call_site(m, &merged, method_name, args_text, rctx);
 
@@ -389,7 +413,7 @@ impl Backend {
             parameters: result_method.parameters.clone(),
             return_type: result_method.return_type.clone(),
             reads_func_args: result_method.reads_func_args,
-            binds_named_args: binds_named_args(m, &merged),
+            binds_named_args: !m.is_virtual,
             no_discard: result_method.is_no_discard,
             native_void: result_method
                 .native_return_type
@@ -928,21 +952,83 @@ impl Backend {
     }
 }
 
-/// Whether a call to `method` on `class` binds named arguments to the
-/// method's declared parameter names.
+/// Whether a call to `method` on `class` reaches the method or a magic
+/// call handler depending on whether the call site can see it.
 ///
 /// A virtual member (`@method`, a mixin, a macro, a Laravel scope) is
-/// reached through `__call` / `__callStatic`, which takes unknown names
-/// into its argument array, and its declared names need not match those of
-/// whatever finally runs.  A non-public method on a class with a magic
-/// call handler is routed there from any call site that cannot see it.
-fn binds_named_args(method: &MethodInfo, class: &ClassInfo) -> bool {
-    if method.is_virtual {
-        return false;
+/// always reached through `__call` / `__callStatic` and never depends on
+/// the call site; neither does a public method.
+fn reachability_depends_on_call_site(method: &MethodInfo, class: &ClassInfo) -> bool {
+    method.visibility != Visibility::Public
+        && !method.is_virtual
+        && (class.get_method_ci("__call").is_some()
+            || class.get_method_ci("__callStatic").is_some())
+}
+
+/// The target a call to `method` really runs when the call site cannot
+/// see it and `class` routes it to `__call` / `__callStatic`, which takes
+/// any arguments under any names.
+///
+/// `None` when the call site can see the method, or when no handler
+/// takes the call (PHP rejects it, which the visibility diagnostic
+/// reports), so the call is checked against the method's own signature.
+fn unreachable_method_target(
+    method: &MethodInfo,
+    class: &Arc<ClassInfo>,
+    method_name: &str,
+    is_static: bool,
+    rctx: &ResolutionCtx<'_>,
+) -> Option<ResolvedCallableTarget> {
+    let handler = if is_static {
+        // A `::` call PHP cannot route to the method goes to `__call` when
+        // made from an instance of the class (`parent::hidden()`), which is
+        // only possible from inside its hierarchy, else to `__callStatic`.
+        let in_hierarchy = rctx.current_class.is_some_and(|current| {
+            current.fqn() == class.fqn()
+                || crate::class_lookup::is_subtype_of(
+                    current,
+                    class.fqn().as_str(),
+                    rctx.file.class_loader,
+                )
+        });
+        in_hierarchy
+            .then(|| class.get_method_ci("__call"))
+            .flatten()
+            .or_else(|| class.get_method_ci("__callStatic"))
+    } else {
+        class.get_method_ci("__call")
+    }?;
+    if crate::diagnostics::member_visibility::call_site_reaches_method(
+        class,
+        method_name,
+        method.visibility,
+        is_static,
+        rctx.current_class,
+        rctx.file.class_loader,
+    ) {
+        return None;
     }
-    method.visibility == Visibility::Public
-        || (class.get_method_ci("__call").is_none()
-            && class.get_method_ci("__callStatic").is_none())
+    Some(ResolvedCallableTarget {
+        parameters: vec![ParameterInfo {
+            name: atom("$arguments"),
+            is_required: false,
+            type_hint: Some(PhpType::mixed()),
+            native_type_hint: None,
+            description: None,
+            default_value: None,
+            is_variadic: true,
+            is_reference: false,
+            closure_this_type: None,
+            param_out_type: None,
+            callable_invocation: None,
+        }]
+        .into(),
+        return_type: handler.return_type.clone(),
+        accepts_any_args: true,
+        binds_named_args: false,
+        owner_class: Some(class.fqn()),
+        ..Default::default()
+    })
 }
 
 /// The types a value invoked as a callable can hold, from its resolved
