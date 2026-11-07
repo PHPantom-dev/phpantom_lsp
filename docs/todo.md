@@ -266,7 +266,7 @@ ships, remove every row that names it.
 | C3  | Go-to-definition for array shape keys via bracket access                                                                                                                    | Low-Medium  | Medium      |
 | C10 | [Deprecation markers on class-name completions from all sources](todo/completion.md#c10-deprecation-markers-on-class-name-completions-from-all-sources)                     | Low         | Medium      |
 | C12 | [The implicit `$value` of a `set` hook is not offered by variable completion](todo/completion.md#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion) | Low         | Medium      |
-| F70 | [A label at a call with no signature to bind](todo/lsp-features.md#f70-a-label-at-a-call-with-no-signature-to-bind) | Low-Medium  | Medium      |
+| F70 | [A label at a call of a closure value binds nothing](todo/lsp-features.md#f70-a-label-at-a-call-of-a-closure-value-binds-nothing) | Low         | Medium      |
 | F71 | [Hover on a parameter at its declaration](todo/lsp-features.md#f71-hover-on-a-parameter-at-its-declaration) | Low         | Low         |
 | S4  | Named argument awareness in active parameter                                                                                                                                | Low         | Medium      |
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Medium      |

@@ -65,7 +65,31 @@ No outstanding items.
 
 ## Name resolution
 
-No outstanding items.
+### B735. `find_class_file_uri` finds a global class in any file with a class of its short name
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+// Tag.php
+class Tag {}
+
+// app.php
+namespace App;
+class Tag {}
+// find_class_file_uri("Tag", "app.php") answers app.php
+```
+
+Asked for an unqualified (global) name, the lookup matches any class whose
+short name is the same, namespace ignored, and checks the calling file
+first. So a navigation that hands it a global FQN lands in the calling
+file whenever that file declares a namespaced class of the same short name.
+The namespaced case compares the namespace already; the global case should
+require the class to be in no namespace the same way. Some callers may
+pass a short name for a namespaced class and rely on the loose match, so
+those need finding before the check tightens.
+
+**Where to look:** `src/definition/member/file_lookup.rs`
+(`find_class_file_uri`, the `None` arm of `class_in_file`).
 
 ## Code actions
 

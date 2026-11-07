@@ -33,49 +33,9 @@ impl Backend {
             return locations;
         };
 
-        // Determine the effective scope for this variable.
-        //
-        // `find_variable_scope` handles the tricky cases where the
-        // cursor is on a parameter (physically before the `{`) or on
-        // a docblock `@param $var` mention, returning the body scope
-        // those tokens logically belong to.
-        //
-        // We then walk upward from the initial scope to the nearest
-        // declaring scope for the variable (stopping at Parameter,
-        // Assignment, Foreach, etc. but skipping ClosureCapture so
-        // that uses inside explicit-capturing closures still see their
-        // outer declaration). This makes rename and find-references
-        // work correctly when invoked from deep inside nested arrows
-        // or closures.
-        let mut scope_start = symbol_map.find_variable_scope(var_name, cursor_offset);
-        {
-            let mut decl = scope_start;
-            let mut cur = scope_start;
-            while cur != 0 {
-                let has_def = symbol_map.var_defs.iter().any(|d| {
-                    d.name == var_name
-                        && d.scope_start == cur
-                        && !matches!(
-                            d.kind,
-                            VarDefKind::ClosureCapture
-                                | VarDefKind::Unset
-                                | VarDefKind::CompoundAssignment
-                                | VarDefKind::DocblockVar
-                                | VarDefKind::Property
-                        )
-                });
-                if has_def {
-                    decl = cur;
-                    break;
-                }
-                let parent = symbol_map.find_enclosing_scope(cur.saturating_sub(1));
-                if parent == cur {
-                    break;
-                }
-                cur = parent;
-            }
-            scope_start = decl;
-        }
+        // The scope that declares the variable, reached from deep inside
+        // nested arrow functions or capturing closures as well.
+        let scope_start = symbol_map.declaring_variable_scope(var_name, cursor_offset);
         let Some(parsed_uri) = crate::util::parse_url(uri) else {
             tracing::warn!("find-references: could not parse URI {uri:?}");
             return locations;

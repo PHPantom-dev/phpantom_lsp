@@ -4622,6 +4622,67 @@ async fn goto_definition_from_a_label_reaches_a_global_function_a_namespace_fall
     );
 }
 
+/// An attribute names its class the way `new` does: `#[Tag(...)]` in a
+/// namespace is that namespace's `Tag`, and `#[\Tag(...)]` is the global one,
+/// so each label lands on the parameter of the class it constructs.
+#[tokio::test]
+async fn an_attribute_label_follows_the_class_the_attribute_names() {
+    let backend = create_test_backend();
+    let global_uri = Uri::parse("file:///GlobalTag.php").unwrap();
+    let global = concat!(
+        "<?php\n",
+        "#[\\Attribute]\n",
+        "class Tag { public function __construct(public string $label = '') {} }\n",
+    );
+    open_php(&backend, &global_uri, global).await;
+
+    let usage_uri = Uri::parse("file:///app_tag.php").unwrap();
+    let usage = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "#[\\Attribute]\n",
+        "class Tag {\n",
+        "    public function __construct(public string $label = '') {}\n",
+        "}\n",
+        "\n",
+        "#[Tag(label: 'local')]\n",
+        "class First {}\n",
+        "\n",
+        "#[\\Tag(label: 'global')]\n",
+        "class Second {}\n",
+    );
+    open_php(&backend, &usage_uri, usage).await;
+
+    let (line, character) = point_of(usage, "#[Tag(label:", "label");
+    let result = goto_definition_at(&backend, &usage_uri, line, character).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(
+        location.uri, usage_uri,
+        "App\\Tag's parameter, got {location:?}"
+    );
+    assert_eq!(
+        (location.range.start.line, location.range.start.character),
+        point_of(usage, "string $label", "$label"),
+    );
+
+    let (line, character) = point_of(usage, "#[\\Tag(label:", "label");
+    let result = goto_definition_at(&backend, &usage_uri, line, character).await;
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(
+        location.uri, global_uri,
+        "the global Tag's parameter, got {location:?}"
+    );
+    assert_eq!(
+        (location.range.start.line, location.range.start.character),
+        point_of(global, "string $label", "$label"),
+    );
+}
+
 /// The fallback is PHP's rule, not a preference: when the namespace does
 /// declare the function, its parameter is the one the label fills, and the
 /// global function of the same name keeps its own.

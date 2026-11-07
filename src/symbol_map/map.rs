@@ -659,31 +659,81 @@ impl SymbolMap {
         self.arrow_fn_scopes.binary_search(&scope_start).is_ok()
     }
 
-    /// The parameter of an enclosing function-like that a variable use at
-    /// `cursor_offset` reads, as the `VarDefSite` that declares it.
+    /// The scope that declares the variable `var_name` used at `offset`.
     ///
-    /// A parameter is declared before the body its uses live in, so the
-    /// search walks outward through the enclosing scopes.  Only a parameter
-    /// answers: its name is the one a caller can write as a named argument,
-    /// which is what the caller of this asks for.
+    /// Starts from [`Self::find_variable_scope`] and walks outward until a
+    /// scope defines the name, skipping the records that do not bind a new
+    /// variable (a closure's `use` capture, an `unset`, a compound
+    /// assignment, an inline `@var`), so a use inside an arrow function or
+    /// a capturing closure reaches the outer declaration.  A use no scope
+    /// defines stays in the scope it was found in.
+    pub(crate) fn declaring_variable_scope(&self, var_name: &str, offset: u32) -> u32 {
+        let scope_start = self.find_variable_scope(var_name, offset);
+        let mut cur = scope_start;
+        while cur != 0 {
+            let has_def = self.var_def_run(cur, var_name).iter().any(|&index| {
+                !matches!(
+                    self.var_defs[index as usize].kind,
+                    VarDefKind::ClosureCapture
+                        | VarDefKind::Unset
+                        | VarDefKind::CompoundAssignment
+                        | VarDefKind::DocblockVar
+                        | VarDefKind::Property
+                )
+            });
+            if has_def {
+                return cur;
+            }
+            let parent = self.find_enclosing_scope(cur.saturating_sub(1));
+            if parent == cur {
+                break;
+            }
+            cur = parent;
+        }
+        scope_start
+    }
+
+    /// The name token offset of the named function-like that declares the
+    /// parameter `def`, `None` when it is a closure's or an arrow function's.
+    ///
+    /// A parameter list holds no named declaration, so the function-like
+    /// whose name most closely precedes the parameter is the only candidate,
+    /// and it owns the parameter when its body is the parameter's scope.
+    pub(crate) fn named_function_of_parameter(&self, def: &VarDefSite) -> Option<u32> {
+        let index = self
+            .named_function_bodies
+            .partition_point(|(name_offset, _)| *name_offset < def.offset)
+            .checked_sub(1)?;
+        let (name_offset, body_start) = self.named_function_bodies[index];
+        (body_start == def.scope_start).then_some(name_offset)
+    }
+
+    /// The parameter a variable use at `cursor_offset` reads, as the
+    /// `VarDefSite` that declares it, `None` when the variable it reads is
+    /// not a function-like's parameter.
+    ///
+    /// The variable is the one [`Self::declaring_variable_scope`] finds, so
+    /// a closure that assigns a variable of the same name without capturing
+    /// it holds a variable of its own.  A use in the top-level scope reads no
+    /// parameter, even though a body-less declaration's parameters are
+    /// recorded there; those are reached from their own token.
     pub(crate) fn enclosing_parameter_for_use(
         &self,
         var_name: &str,
         cursor_offset: u32,
     ) -> Option<&VarDefSite> {
-        let mut scope = self.find_variable_scope(var_name, cursor_offset);
-        loop {
-            if let Some(def) = self.parameter_in_scope(scope, var_name) {
-                return Some(def);
-            }
-            if scope == 0 {
-                return None;
-            }
-            let parent = self.find_enclosing_scope(scope.saturating_sub(1));
-            if parent == scope {
-                return None;
-            }
-            scope = parent;
+        // The cursor on a parameter's own token, which is the only way to
+        // reach the parameter of a body-less declaration.
+        if let Some(def) = self.var_defs.iter().find(|def| {
+            def.kind == VarDefKind::Parameter
+                && def.name == var_name
+                && (def.offset..def.token_range().1).contains(&cursor_offset)
+        }) {
+            return Some(def);
+        }
+        match self.declaring_variable_scope(var_name, cursor_offset) {
+            0 => None,
+            scope => self.parameter_in_scope(scope, var_name),
         }
     }
 

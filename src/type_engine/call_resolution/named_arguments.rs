@@ -300,8 +300,12 @@ impl Backend {
         );
         let name_offset = declaring.get_method(function)?.name_offset;
         let declaring_fqn = declaring.fqn();
+        // Looked up by the exact FQN first: the file lookup by name prefers
+        // the calling file when it declares a class of the same short name,
+        // which a global `\Tag` and an `App\Tag` beside the call share.
         let uri: Arc<str> = self
-            .find_class_file_uri(&declaring_fqn, call_uri)?
+            .class_declaration_uri(&declaring_fqn)
+            .or_else(|| self.find_class_file_uri(&declaring_fqn, call_uri))?
             .as_str()
             .into();
         Some(self.parameter_declaration(uri, name_offset, name, Some(declaring_fqn)))

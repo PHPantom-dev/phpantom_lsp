@@ -405,10 +405,14 @@ new Field(old: 'x');               // …nor the label
 
 A property a constructor parameter promotes carries no deprecation at all:
 the parser writes `deprecation_message: None` for it, so no use of one is
-ever reported whichever spelling it is written in. PHP itself cannot help —
-`#[\Deprecated]` does not target a parameter — so the docblock the parameter
+ever reported whichever spelling it is written in. PHP itself cannot help
+(`#[\Deprecated]` does not target a parameter), so the docblock the parameter
 carries is the only place an author can say it. Note that the engine already
 reads that same docblock for the property's type.
+
+Once the property carries the message, the deprecated-usage pass also needs
+an arm for a named-argument label, reporting one whose
+`named_argument_location` promotes a deprecated property.
 
 **Where to look:** `src/parser/classes/methods.rs`
 (`push_promoted_properties`), `src/diagnostics/deprecated.rs`.

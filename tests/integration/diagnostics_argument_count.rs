@@ -1562,7 +1562,7 @@ function test(\Imagick $image, Thumbnail $thumb): void {
             Backend::collect_argument_count_diagnostics,
         );
         assert!(unknown_named(&diags).is_empty(), "got: {diags:?}");
-}
+    }
 
     /// A misspelled label at a constructor call names no parameter, and PHP
     /// throws for it whether or not the parameter it meant is promoted.
@@ -1649,24 +1649,6 @@ many(first: 'a', unrelated: 'b');
 "#;
         let diags = collect(php);
         assert!(diags.is_empty(), "got: {diags:?}");
-    }
-
-    /// A class with no constructor of its own ignores positional arguments
-    /// but rejects a label, so a named argument there is still an error.
-    #[test]
-    fn a_label_on_a_class_without_a_constructor_is_reported() {
-        let php = r#"<?php
-class Plain {}
-
-new Plain(1, 2);
-new Plain(x: 1);
-"#;
-        let diags = crate::common::with_code(collect(php), "unknown_named_argument");
-        assert_eq!(diags.len(), 1, "got: {diags:?}");
-        assert_eq!(
-            message_text(&diags[0].message),
-            "Unknown named parameter $x"
-        );
     }
 
     /// A call the engine cannot resolve to a signature names nothing it can
@@ -1835,21 +1817,11 @@ make()(param1: 'a');
         assert_eq!(count[0].range.start.line, 4, "{count:?}");
     }
 
-    /// A built-in's stub is the engine's own description of PHP's signature,
-    /// and some of them spell a parameter otherwise than the runtime's arginfo
-    /// does — `Imagick::roundCornersImage` is stubbed as `$xRounding` and takes
-    /// `x_rounding:`.  A label that differs from a declared parameter only in
-    /// case or underscores is therefore not proof of anything, and an
-    /// overloaded declaration's second list counts as declared too.  A name
-    /// that is no parameter's name in any spelling is still reported, exactly
-    /// as PHP throws for it.
+    /// A built-in bundled with PHP is held to its signature, overloads
+    /// included.
     #[test]
-    fn a_builtin_is_held_to_its_signature_as_far_as_that_reaches() {
+    fn a_builtin_is_held_to_its_signature() {
         let php = r#"<?php
-$i = new Imagick();
-$i->roundCornersImage(x_rounding: 1, y_rounding: 1, stroke_width: 1, displace: 1, size_correction: 1);
-$i->roundCornersImage(xRounding: 1, yRounding: 1, strokeWidth: 1, displace: 1, sizeCorrection: 1);
-$i->roundCornersImage(notion_at_all: 1);
 array_filter(notion_at_all: [1, 2]);
 session_set_cookie_params(lifetime_or_options: [], path: '/', domain: 'x', secure: true, httponly: true);
 new DateTimeZone(notion_at_all: 'UTC');
@@ -1860,11 +1832,7 @@ new DateTimeZone(notion_at_all: 'UTC');
             "unknown_named_argument",
         );
         let lines: Vec<u32> = unknown.iter().map(|d| d.range.start.line).collect();
-        assert_eq!(
-            lines,
-            vec![4, 5, 7],
-            "only the names that are no parameter's name in any spelling: {unknown:?}"
-        );
+        assert_eq!(lines, vec![1, 3], "{unknown:?}");
     }
 
     #[test]

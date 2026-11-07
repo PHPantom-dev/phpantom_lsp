@@ -69,8 +69,8 @@ class NamedArgumentGtdDemo
 {
     public function demo(): void
     {
-        // Rename `title` from any of the three spellings below — this label,
-        // the `->title` read, and the declaration in `GtdTicket` — and all of
+        // Rename `title` from any of the three spellings below (this label,
+        // the `->title` read, or the declaration in `GtdTicket`) and all of
         // them move together.
         $ticket = new GtdTicket(title: 'Re: hello', author: 'Ada');
         // Ctrl+Click on `title` → GtdTicket's promoted property, the same

@@ -240,12 +240,15 @@ impl Backend {
                 // declaration itself — resolves back to the token the label
                 // binds, so the search starts from there.
                 let parameter_declaration = self.symbol_map_for(uri).and_then(|map| {
-                    map.enclosing_parameter_for_use(name.as_str(), span_start)
-                        .map(|def| def.token_range())
+                    let def = map.enclosing_parameter_for_use(name.as_str(), span_start)?;
+                    let source = map.source(content)?.text();
+                    let function = identifier_at(source, map.named_function_of_parameter(def)?)?;
+                    Some((def.token_range(), function.to_owned()))
                 });
-                if let Some(declaration_token) = parameter_declaration {
+                if let Some((declaration_token, function)) = parameter_declaration {
                     locations.extend(self.find_parameter_label_references(
                         name.as_str(),
+                        &function,
                         uri,
                         declaration_token,
                     ));
@@ -537,4 +540,14 @@ impl Backend {
             | SymbolKind::Comment => Vec::new(),
         }
     }
+}
+
+/// The identifier that starts at `offset` in `content`.
+fn identifier_at(content: &str, offset: u32) -> Option<&str> {
+    let rest = content.get(offset as usize..)?;
+    let len = rest
+        .bytes()
+        .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b >= 0x80)
+        .count();
+    (len > 0).then(|| &rest[..len])
 }
