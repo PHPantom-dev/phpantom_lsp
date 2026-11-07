@@ -32,6 +32,7 @@ use crate::text_scan::collapse_continuation_lines;
 use crate::type_engine::resolver::resolve_target_classes;
 use crate::type_engine::subject_extraction::detect_access_operator;
 use crate::types::{AccessKind, ClassInfo, FileContext, ParameterInfo};
+use crate::virtual_members::laravel::where_property::{AttributeNameKind, collect_attribute_names};
 use crate::virtual_members::laravel::{
     classify_relationship_typed, extends_eloquent_model, resolve_relation_chain,
 };
@@ -222,6 +223,8 @@ pub(crate) struct EloquentStringContext {
     pub string_content_start: usize,
     /// Parsed argument details for column and attribute completion.
     argument: Option<StringArgument>,
+    /// Which model names the argument accepts.
+    names: AttributeNameKind,
 }
 
 /// Try to detect an Eloquent string context at the given cursor position.
@@ -253,6 +256,7 @@ pub(crate) fn detect_eloquent_string_context(
             is_static: ctx.is_static,
             string_content_start: ctx.string_content_start,
             argument: None,
+            names: AttributeNameKind::Column,
         });
     }
 
@@ -274,6 +278,12 @@ pub(crate) fn detect_eloquent_string_context(
     if !accepts_column_argument(method, kind, &argument) {
         return None;
     }
+    let names =
+        if kind == EloquentStringKind::AttributeKey && !is_lookup_attributes(method, &argument) {
+            AttributeNameKind::Writable
+        } else {
+            AttributeNameKind::Column
+        };
     Some(EloquentStringContext {
         kind,
         partial: content[quote + 1..cursor_offset].to_string(),
@@ -282,7 +292,25 @@ pub(crate) fn detect_eloquent_string_context(
         is_static: operator.is_static,
         string_content_start: quote + 1,
         argument: Some(argument),
+        names,
     })
+}
+
+/// Whether `arg` is the `$attributes` of `firstOrCreate()` and its
+/// siblings, which is queried before it is assigned, so it needs columns.
+fn is_lookup_attributes(method: &str, arg: &StringArgument) -> bool {
+    [
+        "updateOrCreate",
+        "firstOrCreate",
+        "firstOrNew",
+        "createOrFirst",
+    ]
+    .iter()
+    .any(|name| name.eq_ignore_ascii_case(method))
+        && match arg.name.as_deref() {
+            Some(name) => name == "attributes",
+            None => arg.index == 0,
+        }
 }
 
 /// Match the argument's role, keeping values and operators out of column lists.
@@ -566,7 +594,7 @@ impl Backend {
         content: &str,
     ) -> Vec<CompletionItem> {
         let partial = es_ctx.partial.to_lowercase();
-        let columns = crate::virtual_members::laravel::where_property::collect_column_names(model);
+        let columns = collect_attribute_names(model, es_ctx.names);
         let argument = es_ctx.argument.as_ref();
         let range = argument.map(|argument| {
             Range::new(

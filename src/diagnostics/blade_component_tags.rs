@@ -31,9 +31,9 @@ const UNEXPECTED_CODE: &str = "unexpected_blade_component_tag";
 /// A tag the template never closes.
 const UNCLOSED_CODE: &str = "unclosed_blade_component_tag";
 /// An `<x-…>` tag no class or template answers to.
-pub(crate) const UNKNOWN_BLADE_CODE: &str = "unknown_blade_component";
+pub(crate) const UNKNOWN_BLADE_CODE: &str = "invalid_blade_component";
 /// A `<livewire:…>` tag no component answers to.
-pub(crate) const UNKNOWN_LIVEWIRE_CODE: &str = "unknown_livewire_component";
+pub(crate) const UNKNOWN_LIVEWIRE_CODE: &str = "invalid_livewire_component";
 
 /// The code and message reported for a `kind` tag named `name` that names
 /// nothing.
@@ -41,11 +41,11 @@ pub(crate) fn unknown_component_report(kind: TagKind, name: &str) -> (&'static s
     match kind {
         TagKind::Blade => (
             UNKNOWN_BLADE_CODE,
-            format!("Unknown Blade component: '{name}'"),
+            format!("Unknown Blade component '{name}'"),
         ),
         TagKind::Livewire => (
             UNKNOWN_LIVEWIRE_CODE,
-            format!("Unknown Livewire component: '{name}'"),
+            format!("Unknown Livewire component '{name}'"),
         ),
     }
 }
@@ -96,7 +96,7 @@ impl BlockImbalance for TagImbalance {
                 let found_open = tag_text(*found_kind, found, false);
                 (
                     UNEXPECTED_CODE,
-                    format!("{found_close} closes nothing: no {found_open} is open here"),
+                    format!("Closing tag {found_close} has no open {found_open} to close"),
                 )
             }
             TagImbalance::Unclosed {
@@ -108,7 +108,7 @@ impl BlockImbalance for TagImbalance {
                 let opener_close = tag_text(*opener_kind, opener, true);
                 (
                     UNCLOSED_CODE,
-                    format!("{opener_open} is never closed: this needs a matching {opener_close}"),
+                    format!("Tag {opener_open} is never closed; close it with {opener_close}"),
                 )
             }
         }

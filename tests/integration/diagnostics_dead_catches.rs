@@ -18,7 +18,7 @@ fn messages(text: &str) -> Vec<String> {
 }
 
 fn dead(class: &str) -> String {
-    format!("Dead catch: {class} is never thrown in the try block")
+    format!("Nothing in the try block throws {class}")
 }
 
 const REPO: &str = r#"<?php

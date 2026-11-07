@@ -16,6 +16,62 @@ mod tests {
     const ITEM_CLASS: &str =
         "<?php\nnamespace App;\nclass Item { public string $name; public int $price; }\n";
 
+    #[tokio::test]
+    async fn saving_a_php_caller_refreshes_an_open_templates_inferred_variables() {
+        use crate::common::{LARAVEL_APP_COMPOSER, response_labels};
+        let before = "<?php namespace App; view('shop', ['item' => new Item()]); view('unopened');";
+        let after =
+            "<?php namespace App; view('shop', ['item' => new Product()]); view('unopened');";
+        let source = "{{ $item->name }}\n";
+        let (backend, _dir) = create_psr4_workspace(
+            LARAVEL_APP_COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "app/Product.php",
+                    "<?php namespace App; class Product { public string $sku; }",
+                ),
+                ("app/Controller.php", before),
+                ("resources/views/shop.blade.php", source),
+                ("resources/views/unopened.blade.php", "<p>Unopened</p>"),
+            ],
+        );
+        let caller = workspace_uri(&backend, "app/Controller.php");
+        let template = workspace_uri(&backend, "resources/views/shop.blade.php");
+        open_document(&backend, &caller, "php", before).await;
+        open_document(&backend, &template, "blade", source).await;
+        assert!(
+            backend
+                .blade_virtual_php(template.as_str())
+                .unwrap()
+                .contains("\\App\\Item $item")
+        );
+
+        backend
+            .did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: caller },
+                text: Some(after.to_string()),
+            })
+            .await;
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if backend
+                    .blade_virtual_php(template.as_str())
+                    .unwrap()
+                    .contains("\\App\\Product $item")
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("saving the caller should refresh the open template");
+        let labels = response_labels(completion_response(&backend, &template, 0, 10, None).await);
+        assert!(labels.iter().any(|label| label == "sku"), "{labels:?}");
+        assert!(!labels.iter().any(|label| label == "name"), "{labels:?}");
+    }
+
     async fn hover_type(
         backend: &phpantom_lsp::Backend,
         uri: &Uri,

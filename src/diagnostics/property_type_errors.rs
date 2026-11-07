@@ -54,7 +54,8 @@ struct ResolvedPropertyAssignment {
     start: usize,
     /// Byte offset of the RHS expression end (exclusive).
     end: usize,
-    /// The property name (for diagnostic messages).
+    /// The property as the message names it: `Foo::$bar`, or `$bar` when
+    /// the write can land on more than one class.
     property_name: String,
 }
 
@@ -283,7 +284,12 @@ fn check_property_write(member_offset: u32, rhs: &Expression<'_>, ctx: &mut Prop
         declared_type,
         start: rhs_start,
         end: rhs_end,
-        property_name: prop_name.to_string(),
+        property_name: match &receivers[..] {
+            [receiver] if !receiver.name.starts_with("__anonymous@") => {
+                format!("{}::${prop_name}", receiver.fqn())
+            }
+            _ => format!("${prop_name}"),
+        },
     });
 }
 
@@ -425,7 +431,7 @@ impl Backend {
                 Some((
                     (assignment.start, assignment.end),
                     format!(
-                        "Property ${} expects {}, got {}",
+                        "Property {} expects {}, got {}",
                         assignment.property_name, assignment.declared_type, assignment.rhs_type,
                     ),
                 ))

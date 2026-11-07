@@ -317,7 +317,7 @@ async fn unknown_route_names_and_arguments_are_reported() {
             CONTROLLER_PHP,
             "invalid_yii_route"
         ),
-        vec!["Unknown route: 'blog/missing'".to_string()]
+        vec!["Unknown route 'blog/missing'".to_string()]
     );
     assert_eq!(
         reported(
@@ -327,7 +327,7 @@ async fn unknown_route_names_and_arguments_are_reported() {
             CONTROLLER_PHP,
             "invalid_yii_route_argument"
         ),
-        vec!["Unknown route argument: 'id'".to_string()]
+        vec!["Unknown route argument 'id'".to_string()]
     );
 }
 

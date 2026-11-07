@@ -196,9 +196,9 @@ class Consumer {
     let members: Vec<&str> = diagnostics
         .iter()
         .filter(|d| {
-            d.code
-                .as_ref()
-                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class"),
+            )
         })
         .map(|d| message_text(&d.message))
         .collect();
@@ -240,9 +240,9 @@ class Consumer {
     let members: Vec<&str> = diagnostics
         .iter()
         .filter(|d| {
-            d.code
-                .as_ref()
-                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class"),
+            )
         })
         .map(|d| message_text(&d.message))
         .collect();
@@ -343,9 +343,9 @@ class ViewServiceProvider
     let members: Vec<&str> = diagnostics
         .iter()
         .filter(|d| {
-            d.code
-                .as_ref()
-                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class"),
+            )
         })
         .map(|d| message_text(&d.message))
         .collect();

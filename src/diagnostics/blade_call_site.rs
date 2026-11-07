@@ -36,11 +36,11 @@ use super::helpers::make_diagnostic;
 use super::type_errors::is_type_compatible;
 
 /// A declared variable the call site does not pass.
-const MISSING_CODE: &str = "missing_view_variable";
+const MISSING_CODE: &str = "missing_blade_variable";
 /// A passed variable the template has no use for.
-const UNUSED_CODE: &str = "unused_view_variable";
+const UNUSED_CODE: &str = "unused_blade_variable";
 /// A passed variable whose type the declaration does not accept.
-const TYPE_MISMATCH_CODE: &str = "type_mismatch_view_variable";
+const TYPE_MISMATCH_CODE: &str = "type_mismatch_blade_variable";
 
 impl Backend {
     /// Check every view render in `uri` against the contract the template
@@ -149,8 +149,8 @@ impl Backend {
                         "View '{}' expects ${} of type {}, got {}",
                         view_name,
                         var.name,
-                        declared.conditionals_as_branch_unions(),
-                        var.ty,
+                        super::helpers::shown_type(&declared.conditionals_as_branch_unions()),
+                        super::helpers::shown_type(&var.ty),
                     ),
                 ));
             }
@@ -220,7 +220,9 @@ impl Backend {
                         MISSING_CODE,
                         format!(
                             "View '{}' expects ${} of type {}, which is not passed",
-                            view_name, name, ty,
+                            view_name,
+                            name,
+                            super::helpers::shown_type(ty),
                         ),
                     ));
                 }
@@ -302,11 +304,11 @@ impl Backend {
             DiagnosticSeverity::Error,
             TYPE_MISMATCH_CODE,
             format!(
-                "View '{}' expects ${} of type {}, but {} given by the surrounding scope",
+                "View '{}' expects ${} of type {}, got {} from the surrounding scope",
                 view_name,
                 name,
-                declared.conditionals_as_branch_unions(),
-                actual,
+                super::helpers::shown_type(&declared.conditionals_as_branch_unions()),
+                super::helpers::shown_type(&actual),
             ),
         ));
     }

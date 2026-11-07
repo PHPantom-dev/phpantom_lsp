@@ -469,9 +469,9 @@ function send(ContainerInterface $container): void {
     assert_eq!(
         reported,
         vec![
-            "Unknown container parameter: 'app.missing_parameter'".to_string(),
-            "Unknown service: 'App\\Service\\Missing'".to_string(),
-            "Unknown service: 'app.missing'".to_string(),
+            "Unknown container parameter 'app.missing_parameter'".to_string(),
+            "Unknown service 'App\\Service\\Missing'".to_string(),
+            "Unknown service 'app.missing'".to_string(),
         ]
     );
 }
@@ -538,7 +538,7 @@ function read(ContainerInterface $container): void {
     let consumer_uri = uri_for(&dir, "src/consumer.php");
     assert_eq!(
         parameter_problems(&backend, &consumer_uri, consumer),
-        vec!["Unknown container parameter: 'app.missing_parameter'".to_string()]
+        vec!["Unknown container parameter 'app.missing_parameter'".to_string()]
     );
 }
 
@@ -601,7 +601,7 @@ function read(ContainerInterface $container): void {
     let consumer_uri = uri_for(&dir, "src/consumer.php");
     assert_eq!(
         parameter_problems(&backend, &consumer_uri, consumer),
-        vec!["Unknown container parameter: 'app.from_config'".to_string()]
+        vec!["Unknown container parameter 'app.from_config'".to_string()]
     );
 
     // The pattern is no name to offer.
@@ -712,7 +712,7 @@ function send(ContainerInterface $container): void {
         .collect();
     assert_eq!(
         reported,
-        vec!["Unknown service: 'app.unregistered'".to_string()]
+        vec!["Unknown service 'app.unregistered'".to_string()]
     );
 }
 

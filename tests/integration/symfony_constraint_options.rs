@@ -109,7 +109,12 @@ fn unknown_options(
     let lines: Vec<&str> = content.lines().collect();
     diagnostics
         .into_iter()
-        .filter(|d| d.code == Some(Code::String("unknown_constraint_option".to_string())))
+        .filter(|d| {
+            d.code
+                == Some(Code::String(
+                    "invalid_symfony_constraint_option".to_string(),
+                ))
+        })
         .map(|d| {
             let line = lines[d.range.start.line as usize];
             let covered =
@@ -138,11 +143,11 @@ async fn options_a_constraint_does_not_take_are_reported() {
         ),
         vec![
             (
-                "Unknown option 'mesage' for constraint NotBlank".to_string(),
+                "Unknown option 'mesage' for constraint Symfony\\Component\\Validator\\Constraints\\NotBlank".to_string(),
                 "mesage".to_string()
             ),
             (
-                "Unknown option 'mni' for constraint Length".to_string(),
+                "Unknown option 'mni' for constraint Symfony\\Component\\Validator\\Constraints\\Length".to_string(),
                 "mni".to_string()
             ),
         ],
@@ -150,7 +155,7 @@ async fn options_a_constraint_does_not_take_are_reported() {
     assert_eq!(
         unknown_options(&backend, &dir, "config/validator/User.xml", VALIDATION_XML),
         vec![(
-            "Unknown option 'mxa' for constraint Length".to_string(),
+            "Unknown option 'mxa' for constraint Symfony\\Component\\Validator\\Constraints\\Length".to_string(),
             "mxa".to_string()
         )],
     );

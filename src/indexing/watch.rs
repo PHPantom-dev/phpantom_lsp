@@ -97,6 +97,16 @@ impl Backend {
         if self.is_drupal_project() {
             self.note_drupal_config_changes(&changes);
         }
+        if self.is_tempest_project()
+            && changes.iter().any(|change| {
+                let uri = change.uri.as_str();
+                (crate::tempest::is_view(uri) && change.kind != FileChangeType::Changed)
+                    || uri.ends_with("/composer.json")
+                    || uri.ends_with("/composer.lock")
+            })
+        {
+            self.invalidate_tempest_views();
+        }
         if self.is_symfony_project()
             && changes.iter().any(|change| {
                 crate::symfony::translations::is_translation_setup_uri(change.uri.as_str())
@@ -177,6 +187,10 @@ impl Backend {
             self.update_laravel_migrations(&batch.migration_changes);
         }
 
+        // Only PHP sources and the autoload roots can change view data.
+        if !batch.php_changes.is_empty() || !batch.composer_changes.is_empty() {
+            self.refresh_tempest_inference();
+        }
         true
     }
 
@@ -460,8 +474,14 @@ impl Backend {
         let was_diagnosing = self.diagnostics_enabled();
         let previous_hint_kinds = self.inlay_hint_kinds();
 
-        match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
-            Ok(cfg) => self.set_config(cfg),
+        match crate::config::load_config_with_warnings(
+            root,
+            self.workspace.global_config_path.as_deref(),
+        ) {
+            Ok(loaded) => {
+                self.warn_config(&loaded.warnings);
+                self.set_config(loaded.config);
+            }
             Err(e) => {
                 self.log_detached(
                     MessageType::Warning,
@@ -476,7 +496,7 @@ impl Backend {
         }
 
         // Resolved classes and completions may depend on config-driven
-        // behaviour (e.g. `report-magic-properties`), so both must be
+        // behaviour (e.g. `magic-properties`), so both must be
         // recomputed against the new settings rather than served stale.
         self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();

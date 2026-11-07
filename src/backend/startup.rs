@@ -248,12 +248,13 @@ impl Backend {
             // Read `.phpantom.toml` before anything else so that settings
             // (e.g. PHP version override, diagnostic toggles) are active
             // from the very first file load.
-            match crate::config::load_config_from(
+            match crate::config::load_config_with_warnings(
                 &root,
                 self.workspace.global_config_path.as_deref(),
             ) {
-                Ok(cfg) => {
-                    self.set_config(cfg);
+                Ok(loaded) => {
+                    self.warn_config(&loaded.warnings);
+                    self.set_config(loaded.config);
                 }
                 Err(e) => {
                     self.log(

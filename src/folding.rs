@@ -42,14 +42,16 @@ impl Backend {
                 ranges
             });
 
-        if self.is_blade_file(uri) {
+        if self.is_php_template(uri) {
             ranges = ranges
                 .into_iter()
                 .filter_map(|r| self.translate_folding_range(uri, r))
                 .collect();
-            if let Some(raw) = self.get_file_content_arc(uri) {
-                collect_blade_native_folds(&raw, &self.blade.directives.read(), &mut ranges);
-            }
+        }
+        if self.is_blade_file(uri)
+            && let Some(raw) = self.get_file_content_arc(uri)
+        {
+            collect_blade_native_folds(&raw, &self.blade.directives.read(), &mut ranges);
         }
 
         ranges.retain(|r| r.start_line < r.end_line);
@@ -66,14 +68,14 @@ impl Backend {
     /// original Blade template, dropping it when either end lands in the
     /// injected prologue (no template text to attach to).
     fn translate_folding_range(&self, uri: &str, range: FoldingRange) -> Option<FoldingRange> {
-        let start = self.try_translate_php_to_blade(
+        let start = self.try_translate_php_to_template(
             uri,
             tower_lsp_server::gen_lsp_types::Position {
                 line: range.start_line,
                 character: range.start_character.unwrap_or(0),
             },
         )?;
-        let end = self.try_translate_php_to_blade(
+        let end = self.try_translate_php_to_template(
             uri,
             tower_lsp_server::gen_lsp_types::Position {
                 line: range.end_line,

@@ -67,7 +67,7 @@ impl Backend {
                 DiagnosticSeverity::Warning,
                 code,
                 format!(
-                    "Nothing renders the {} '{}': no {renders}('{}') in the layouts this template extends",
+                    "No layout this template extends renders the {} '{}' with {renders}('{}')",
                     block.kind.label(),
                     block.name,
                     block.name

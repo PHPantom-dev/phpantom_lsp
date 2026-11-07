@@ -25,6 +25,9 @@ pub(crate) enum StringKeyKind {
     ConfigResource(LaravelConfigResource),
     /// A `view('name')` or `View::make('name')` call.
     View,
+    /// A path passed to `Tempest\View\view`; `relative` marks a literal
+    /// concatenated to `__DIR__`, which is resolved only beside its caller.
+    TempestView { relative: bool },
     /// A `route('name')` call.
     Route,
     /// A `__('key')`, `trans('key')`, or `Lang::get('key')` call.
@@ -265,6 +268,7 @@ impl StringKeyKind {
     /// it on.
     pub(crate) const fn framework(self) -> KeyFramework {
         match self {
+            Self::TempestView { .. } => KeyFramework::Tempest,
             Self::Config
             | Self::ConfigResource(_)
             | Self::View
@@ -410,6 +414,8 @@ pub(crate) fn declares_another_name(kept: &SymbolSpan, next: &SymbolSpan) -> boo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KeyFramework {
     Laravel,
+    /// Tempest's explicitly qualified view helper, including standalone use.
+    Tempest,
     /// Symfony's service IDs and container parameters, which any project
     /// that builds a Symfony service container declares.
     ServiceContainer,
@@ -424,6 +430,39 @@ pub(crate) enum KeyFramework {
     WordPress,
     /// Drupal's own declarations, read in a Drupal project.
     Drupal,
+}
+
+/// Frameworks whose method receivers may contribute string-key candidates.
+/// Function-only keys do not participate, even in a mixed-framework project.
+pub(crate) struct ReceiverFrameworks {
+    /// Laravel's typed helpers are available.
+    pub laravel: bool,
+    /// Service-container keys are available for this operation.
+    pub service_container: bool,
+    /// Symfony's application keys are available.
+    pub symfony: bool,
+    /// Twig's template keys are available.
+    pub twig: bool,
+    /// Yii's application keys are available.
+    pub yii: bool,
+    /// Drupal's application keys are available.
+    pub drupal: bool,
+}
+
+impl ReceiverFrameworks {
+    /// Whether a receiver may record a key of this kind in this project.
+    #[inline]
+    pub(crate) fn enables(&self, kind: StringKeyKind) -> bool {
+        match kind.framework() {
+            KeyFramework::Laravel => self.laravel,
+            KeyFramework::ServiceContainer => self.service_container,
+            KeyFramework::Symfony => self.symfony,
+            KeyFramework::Twig => self.twig,
+            KeyFramework::Yii => self.yii,
+            KeyFramework::Drupal => self.drupal,
+            KeyFramework::WordPress | KeyFramework::Tempest => false,
+        }
+    }
 }
 
 /// A workspace symbol whose presence suppresses an otherwise-valid framework

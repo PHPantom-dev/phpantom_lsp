@@ -7,6 +7,7 @@ features against a real Laravel installation.
 
 - **Collection property types.** Literal property paths determine collection keys and plucked values, including grouped collections and higher-order proxies. See `Demo::collectionPropertyTypes()`.
 - **Eloquent models.** Virtual properties from model column attributes, `$fillable`, `$casts`, `$attributes`, relationships, scopes, accessors, custom collections, and query builder forwarding. A method a model or its builder does not answer is reported, since Eloquent throws for it (see the "Try:" in `Demo::eloquentQuery()`).
+- **Computed attributes.** Column suggestions distinguish stored values from accessors, while assignment suggestions include attributes with setters. See `Demo::computedAttributes()`.
 - **Model factories.** Convention-based factories (no `@extends Factory<Model>` needed) get `create()`/`make()` returning the model, plus the dynamic `has{Relationship}()` / `for{Relationship}()` methods synthesized from the model's relationships, and `trashed()` when the model uses `SoftDeletes` — all chaining fluently (e.g. `BlogAuthor::factory()->hasPosts(3)->create()`). See `Demo::factories()`.
 - **Config and env navigation.** Go-to-definition and find-references for `config('app.name')` keys (resolves to `config/app.php`) and `env('APP_KEY')` vars (resolves to `.env`).
 - **View navigation.** Go-to-definition for `view('welcome')` and `View::make('admin.users.index')` (resolves to Blade templates in `resources/views/`).

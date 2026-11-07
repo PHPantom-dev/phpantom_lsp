@@ -190,10 +190,13 @@ configuration, Twig templates, and translation catalogues), Yii 3
 demos in `examples/yii/` (an application generated from `yiisoft/app`),
 WordPress demos in `examples/wordpress/` (a plugin and a theme under
 `wp-content/`, with core's declarations from `php-stubs/wordpress-stubs`),
-and Drupal demos in `examples/drupal/` (a `drupal/recommended-project`
-site with one custom module and one theme). `vendor/` is git-ignored in
-all five, and so is Drupal core under `web/`, so run `composer install`
-there before verifying framework demos on a fresh clone. Put new
+Drupal demos in `examples/drupal/` (a `drupal/recommended-project`
+site with one custom module and one theme), and Tempest demos in
+`examples/tempest/` (a controller, `.view.php` templates and a view
+component under `app/`). `vendor/` is git-ignored in all six, and so is
+Drupal core under `web/`, so run `composer install` there before
+verifying framework demos on a fresh clone. The Tempest playground's
+locked packages need PHP 8.5. Put new
 framework-specific features in the matching `examples/<framework>/`
 project, not in `examples/php/`. If a feature affects Laravel-specific
 resolution (Eloquent, config, views, routes, translations), also update
@@ -256,6 +259,17 @@ every name the demo declares and every claim its "Try:" comments make.
 Add a check there for each new one, run
 `php examples/drupal/assertions.php`, then
 `phpantom_lsp analyze --project-root examples/drupal --no-colour`, which
+must report `[OK] No errors`.
+
+Tempest View support (component tags, view paths, template PHP) follows
+the same pattern in `examples/tempest/`: a line in its `README.md` for
+each demo. Lint with
+`find examples/tempest/app -name '*.php' -print0 | xargs -0 -n1 php -l`.
+`examples/tempest/assertions.php` renders the views and components with
+Tempest's own renderer and checks the behaviour the README describes.
+Add a check there for each new claim, run
+`php examples/tempest/assertions.php`, then
+`phpantom_lsp analyze --project-root examples/tempest --no-colour`, which
 must report `[OK] No errors`.
 
 ## Updating docs/todo.md

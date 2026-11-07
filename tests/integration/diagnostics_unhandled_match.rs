@@ -56,7 +56,7 @@ function name(Suit $s): string {
     assert_eq!(diags.len(), 1, "{diags:?}");
     assert_eq!(
         message_text(&diags[0].message),
-        "Match expression does not handle remaining values: Suit::Hearts|Suit::Clubs"
+        "Match expression does not handle Suit::Hearts, Suit::Clubs"
     );
     assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     // The range covers `match ($s)`, not the arms.
@@ -159,7 +159,7 @@ function name(Suit $s): string {
     );
     assert_eq!(
         messages(&php),
-        ["Match expression does not handle remaining value: Suit::Hearts"]
+        ["Match expression does not handle Suit::Hearts"]
     );
 }
 
@@ -196,7 +196,7 @@ enum Light {
 "#;
     assert_eq!(
         messages(php),
-        ["Match expression does not handle remaining value: Light::Green"]
+        ["Match expression does not handle Light::Green"]
     );
 }
 
@@ -211,10 +211,7 @@ function name(?Suit $s): string {
 }
 "#,
     );
-    assert_eq!(
-        messages(&php),
-        ["Match expression does not handle remaining value: null"]
-    );
+    assert_eq!(messages(&php), ["Match expression does not handle null"]);
 }
 
 #[test]
@@ -232,10 +229,7 @@ function full(bool $on): string {
     };
 }
 "#;
-    assert_eq!(
-        messages(php),
-        ["Match expression does not handle remaining value: false"]
-    );
+    assert_eq!(messages(php), ["Match expression does not handle false"]);
 }
 
 #[test]
@@ -249,10 +243,7 @@ function sql($order): string {
     };
 }
 "#;
-    assert_eq!(
-        messages(php),
-        ["Match expression does not handle remaining value: 1"]
-    );
+    assert_eq!(messages(php), ["Match expression does not handle 1"]);
 }
 
 #[test]
@@ -331,10 +322,7 @@ namespace Table {
         .iter()
         .map(|d| message_text(&d.message).to_string())
         .collect();
-    assert_eq!(
-        msgs,
-        ["Match expression does not handle remaining value: App\\Suit::Hearts"]
-    );
+    assert_eq!(msgs, ["Match expression does not handle App\\Suit::Hearts"]);
 }
 
 #[test]
@@ -370,7 +358,7 @@ function name(Suit $s): string {
     );
     assert_eq!(
         messages(&php),
-        ["Match expression does not handle remaining value: Suit::Clubs"]
+        ["Match expression does not handle Suit::Clubs"]
     );
 }
 
@@ -461,6 +449,6 @@ function uncaught(Suit $s): string {
 "#;
     assert_eq!(
         messages(php),
-        ["Match expression does not handle remaining value: App\\Suit::Hearts"]
+        ["Match expression does not handle App\\Suit::Hearts"]
     );
 }

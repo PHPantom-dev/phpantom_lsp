@@ -52,7 +52,7 @@ mod tests {
             .into_iter()
             .filter_map(|d| match &d.code {
                 Some(Code::String(code))
-                    if code == "blade_signature_widens_layout"
+                    if code == "incompatible_blade_signature"
                         || code == "duplicate_blade_signature"
                         || code == "invalid_laravel_view" =>
                 {
@@ -92,7 +92,7 @@ mod tests {
             1,
             "the widened declaration is the one report: {reported:?}"
         );
-        assert_eq!(reported[0].0, "blade_signature_widens_layout");
+        assert_eq!(reported[0].0, "incompatible_blade_signature");
         assert!(
             reported[0].1.contains("$title")
                 && reported[0].1.contains("layouts.app")
@@ -160,7 +160,7 @@ mod tests {
             1,
             "an incompatible declaration is reported: {reported:?}"
         );
-        assert_eq!(reported[0].0, "blade_signature_widens_layout");
+        assert_eq!(reported[0].0, "incompatible_blade_signature");
     }
 
     /// The whole chain is checked, so a grandparent's declaration binds

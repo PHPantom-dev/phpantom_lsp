@@ -293,10 +293,7 @@ impl Backend {
                 let kind = if site.is_method { "Method" } else { "Property" };
                 Some((
                     (site.start, site.end),
-                    format!(
-                        "{kind} name must be a string, but {} was given",
-                        site.name_type
-                    ),
+                    format!("{kind} name must be a string, got {}", site.name_type),
                 ))
             },
         ));

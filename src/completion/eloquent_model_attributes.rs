@@ -9,7 +9,7 @@ use crate::completion::source::string_argument::{StringArgumentPosition, string_
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, FileContext, model_declaration};
 use crate::virtual_members::laravel::extends_eloquent_model;
-use crate::virtual_members::laravel::where_property::collect_column_names;
+use crate::virtual_members::laravel::where_property::{AttributeNameKind, collect_attribute_names};
 
 /// Attributes whose positional arguments are column names or an array of them.
 const COLUMN_LIST_ATTRIBUTES: &[&str] = &[
@@ -120,11 +120,18 @@ impl Backend {
             start: offset_to_position(content, quote + 1),
             end: offset_to_position(content, argument.string_end),
         };
+        let kind = match column_list_flag(&name) {
+            Some(model_declaration::FILLABLE_ATTRIBUTE | model_declaration::GUARDED_ATTRIBUTE) => {
+                AttributeNameKind::Writable
+            }
+            Some(_) => AttributeNameKind::Serializable,
+            None => AttributeNameKind::Column,
+        };
         let columns = match column_list_flag(&name)
             .and_then(|flag| without_edited_entry(&model, current, flag))
         {
-            Some(model) => collect_column_names(&model),
-            None => collect_column_names(&model),
+            Some(model) => collect_attribute_names(&model, kind),
+            None => collect_attribute_names(&model, kind),
         };
         let items: Vec<_> = columns
             .into_iter()

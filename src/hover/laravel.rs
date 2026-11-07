@@ -179,7 +179,7 @@ impl Backend {
                     );
                 (descriptor.hover_label, detail)
             }
-            StringKeyKind::View => {
+            StringKeyKind::View | StringKeyKind::TempestView { .. } => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,
                 );

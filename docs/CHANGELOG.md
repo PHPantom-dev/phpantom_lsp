@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Command line
 
 - **Filter `analyze` by diagnostic code.** `--code unused_import` reports only that code and `--exclude-code unused_import` leaves it out. Both are repeatable and work with `--severity` and every output format. Contributed by @stubbedev.
-- **`fix` replaces deprecated calls.** The new `deprecated` rule rewrites every call to a function or method whose `#[Deprecated(replacement: "...")]` names a replacement, across the whole project. An import the rewrite leaves unused is removed in the same run.
+- **`fix` replaces deprecated calls.** The new `deprecated_usage` rule rewrites every call to a function or method whose `#[Deprecated(replacement: "...")]` names a replacement, across the whole project. An import the rewrite leaves unused is removed in the same run.
 
 #### Editing and navigation
 
@@ -150,8 +150,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Yii views.** In a Yii project, a view rendered by name, by a path built from `__DIR__`, or from inside another template jumps to its template, completes from the template's directory, and lists its references, and a view no template matches is reported. A name is resolved against the view path the class gives its renderer, through the aliases the configuration declares. A CodeLens at the top of a template lists the calls that render it.
 - **Yii route names.** In a Yii project, a route name declared by a `Route` definition, under the name and path prefixes of the groups around it, completes, jumps to its declaration, and lists its references wherever a URL generator builds a URL to it, including through a class of the project's own that passes the name on. The arguments array of `generate()` completes from the placeholders of the route's path, a handler's `#[RouteArgument]` jumps to the placeholder it reads and completes from it, and a route name or argument that nothing declares is reported.
 
+#### Tempest
+
+- **Tempest View completion and navigation.** In a Tempest project, PHP expressions in `.view.php` templates use imports and `@var` annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to `Tempest\View\view()` also complete and navigate. Contributed by @shuvroroy.
+- **Tempest view data inference.** Templates infer data passed by callers and components, including custom View objects and slot scope. Explicit `@var` annotations can refine inferred types. Contributed by @shuvroroy.
+
 #### Configuration and indexing
 
+- **Unknown configuration keys are reported.** A key in `.phpantom.toml` or the global config that PHPantom does not know, such as a typo, is reported with its file instead of silently doing nothing. The editor shows a warning when the config loads, and `analyze`, `fix`, `format`, and `move` print one per key. The rest of the config still applies.
 - **Switch inlay hints off by kind.** `parameter-names = false` or `closure-types = false` under `[inlay_hints]` hides parameter name hints at call sites or inferred types on closures, without touching other extensions' hints. Editor extensions can pass the same toggles, and changes apply to open files right away.
 - **Index files the workspace scan skips.** List files and directories under `[indexing] include` in `.phpantom.toml` to index them even though they are hidden or gitignored, such as Castor's `.castor/` tasks and its generated `.castor.stub.php`. Their symbols then complete, resolve, and stop being reported as unknown. A path inside the workspace is treated as project code, and one outside it as a library, like `vendor/`. See [configuration.md](configuration.md#extra-include-paths). Contributed by @joelwurtz.
 - **Stubs that override.** List stub files and directories under `[stubs] paths` in `.phpantom.toml`, and what they declare wins over every other declaration of the same name, PHP's own built-in stubs included. Use it for hand-written stubs of a PHP extension or to correct a signature you disagree with. Stub files are never analysed or edited, and an editor extension can pass a bundled stubs directory the same way. See [configuration.md](configuration.md#stubs).
@@ -167,6 +173,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A type mismatch that only a possible `null` or `false` causes is no longer reported by default.** Passing a `string|false` to a `string` parameter, returning it from a `string` function or assigning it to a `string` property only fails if the value turns out empty. Set `possibly-empty-mismatches = true` under `[diagnostics]` to report these as errors. It replaces `downgrade-nullable-argument-mismatch`, which is gone. A mismatch where some other member fails is still reported. Contributed by @stubbedev.
 - **Pull diagnostics are advertised to every client.** Editors and tools that check the server's capabilities now see pull diagnostic support even when they don't declare it themselves, and a pull returns the diagnostics last published. Editors without pull support still receive pushed diagnostics as before.
 - **laravel-ide-helper files come back through `include`.** To index `_ide_helper.php` or `_ide_helper_models.php`, list them under `[indexing] include`. A leading `!` in `[indexing] exclude` no longer does it, since `!` now only undoes your own exclude patterns.
+- **Diagnostic messages read the same way across every check.** Names are written the way PHP spells them, without quotes (`Class App\Models\User not found`, `Unused variable $total`), members carry their class (`Method App\Models\User::save() not found`), string values stay quoted, and type mismatches read `expects X, got Y`. An `[[diagnostics.ignore]]` rule that matches on `message` may need updating; one that matches on `identifier` keeps working.
+- **Diagnostic identifiers follow one naming scheme.** Ahead of 1.0, these were renamed: `invalid_member_access` is now `inaccessible_member`, `invalid_laravel_trans` is `invalid_laravel_translation`, `invalid_command_parameter` is `invalid_laravel_command_parameter`, `missing_view_variable`, `unused_view_variable` and `type_mismatch_view_variable` are `missing_blade_variable`, `unused_blade_variable` and `type_mismatch_blade_variable`, and `blade_signature_widens_layout` is `incompatible_blade_signature`. The old names keep working in `[[diagnostics.ignore]]`, `@phpantom-ignore` and `analyze --code`, and the config and command line warn when they meet one. The [Diagnostics Reference](diagnostics.md) lists every identifier.
+- **Configuration names follow one spelling.** Ahead of 1.0, every section and key in `.phpantom.toml` is kebab-case: `[semantic_tokens]` is now `[semantic-tokens]`, `[inlay_hints]` is `[inlay-hints]`, and `report-magic-properties` under `[diagnostics]` is `magic-properties`, to match the other diagnostic toggles. The old names keep working, with a warning that names the new one.
+- **A member used on a class that cannot be found is reported as `unknown_class`.** "Cannot check method save(), because type App\Models\User could not be resolved" used to carry `unknown_member`. It now carries `unknown_class`, so ignoring missing classes covers it too, and `unknown_member` is left for members a class really lacks.
 - **Updated embedded phpstorm-stubs.** Adds the `ps`, `proctitle`, and `yaz` extensions, updates Judy and Relay, and corrects many parameter and return types to match the PHP documentation, including `oci_fetch_object()`, `pg_loopen()`, and nullable RdKafka message payloads.
 
 #### Performance and memory
@@ -198,6 +208,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Type inference
 
+- **Property types on an annotated `$this`.** Reading a property through an explicitly typed `$this` now preserves its type in assignments and loops, including Tempest views. Contributed by @shuvroroy.
 - **`(int)` casts keep what the value says.** Casting an integer range with `(int)` now keeps the range, and casting `null`, a `bool`, or an array gives `0` or `1`, instead of a plain `int`.
 - **Untyped methods that return `new static()`.** Calling such a method through a subclass, or on a class that uses the trait declaring it, now gives that class instead of the one the method is declared in.
 - **Variables passed to typed by-reference parameters.** After a call to your own function or method that takes `array &$message`, the variable now has the parameter's type instead of the shape it had before the call, so reads of keys the callee added are no longer reported.
@@ -491,8 +502,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Laravel name completion beyond the first argument.** Completion now offers a name wherever the finished call names one: the view in `View::renderWhen($ok, '…')` or `Route::view('/about', '…')`, the ability in `$this->authorizeForUser($user, '…')`, the morph types in `whereHasMorph('commentable', ['…'])`, and every entry of a list such as `Gate::any([…])`. View names are also offered in `view()->make('…')` and a mailable's `$this->view('…')`, and route names are no longer offered in `$request->route('…')`, which reads a route parameter.
 - **Service providers in a `config/app.php` written with `array()`.** Only the classes listed under `providers` are now read as service providers, as they already were for the `[…]` spelling.
 - **Route files nothing visibly loads.** A route file in a subdirectory of `routes/` that no route file or service provider loads, as when `web.php` requires a whole directory through `glob()`, now has its routes completed and checked under their own names instead of reported as unknown.
+- **Routes of `laravel-package-tools` packages.** Route files a package registers with `$package->hasRoutes()`, as Filament does, are now read, so their routes complete and are no longer reported as unknown.
 - **Edits to route files outside `routes/`.** Editing a route file loaded from elsewhere, such as a module's route file that a service provider loads, now updates route completion, diagnostics and go-to-definition right away.
 - **Collection keys and values follow literal property paths.** `keyBy()`, `groupBy()`, and `pluck()` infer their result from the selected properties, including dotted paths and higher-order calls. Nested grouping respects `preserveKeys`. Contributed by @shuvroroy.
+- **Computed Eloquent attributes stay out of column suggestions.** Read-only accessors and appended values no longer appear as query columns or assignment keys unless another source declares a backing column. Attributes with setters still complete in `create()` and `fill()`, and computed properties remain available on models and in serialization settings. Contributed by @shuvroroy.
 
 #### Blade templates
 
@@ -618,6 +631,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Indexing and configuration
 
+- **Editor help for `[inlay_hints]`.** The configuration schema now describes the `[inlay_hints]` section, so editors with TOML schema support complete and explain its keys like the rest of `.phpantom.toml`.
 - **Tools installed with the Composer bin plugin.** In a project using `bamarni/composer-bin-plugin`, classes from the tools under `vendor-bin/` (PHPUnit's `TestCase`, say) resolve again without un-ignoring their vendor directories, and stay out of analysis like any other vendor code. PHPUnit's version is read from there too.
 - **`[indexing] exclude` covers Composer's class lists.** A class Composer's classmap or PSR-0 map names no longer resolves from a path you excluded, so excluding a path mid-session and restarting give the same result.
 - **Each Composer project of a workspace sees only its own dependencies.** In a monorepo, or a workspace with Composer projects nested below its root, a class that only another project installed or declares is now reported as unknown and no longer completes, and when two projects install different versions of a package, each file resolves the version its own project installed.
@@ -646,6 +660,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Tempest performance checks.** CI measures template editing, completion, navigation, and memory use against the Tempest playground. Contributed by @shuvroroy.
 - **Pull request benchmarks no longer fail on a slow runner.** Each benchmark runner measures both the PR and its base, so the 30% regression check reflects the change rather than which machine ran it. Contributed by @shuvroroy. Closes #489.
 - **Faster benchmark checks on pull requests.** Latency benchmarks now run split across four runners, and benchmark alerts on fork pull requests show up in the job summary instead of failing on a permission error. Contributed by @shuvroroy.
 - **A Drupal playground.** `examples/drupal/` is a Drupal 11 site with one custom module and one theme, for trying PHPantom on Drupal code, with runtime checks of what its comments claim. Contributed by @giuseppe-esposito-87.

@@ -63,8 +63,7 @@ class Baz implements Foo {
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
         assert!(message_text(&diags[0].message).contains("Baz"));
-        assert!(message_text(&diags[0].message).contains("bar()"));
-        assert!(message_text(&diags[0].message).contains("interface"));
+        assert!(message_text(&diags[0].message).contains("Foo::bar()"));
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
@@ -80,8 +79,7 @@ class Child extends Base {
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
         assert!(message_text(&diags[0].message).contains("Child"));
-        assert!(message_text(&diags[0].message).contains("doSomething()"));
-        assert!(message_text(&diags[0].message).contains("class"));
+        assert!(message_text(&diags[0].message).contains("Base::doSomething()"));
     }
 
     #[test]
@@ -173,8 +171,7 @@ enum Color implements HasLabel {
         assert_eq!(diags.len(), 1);
         assert!(message_text(&diags[0].message).contains("Enum"));
         assert!(message_text(&diags[0].message).contains("Color"));
-        assert!(message_text(&diags[0].message).contains("label()"));
-        assert!(message_text(&diags[0].message).contains("interface"));
+        assert!(message_text(&diags[0].message).contains("HasLabel::label()"));
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
@@ -333,7 +330,7 @@ class AliasOfAbstract extends Needs {
             .collect();
         assert_eq!(
             messages,
-            ["Class 'AliasOfAbstract' must implement method 'run()' from class 'Needs'"],
+            ["Class AliasOfAbstract must implement method Needs::run()"],
             "an alias of a concrete trait method implements the abstract method it names"
         );
     }
@@ -552,8 +549,7 @@ class Bar {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
-        assert!(message_text(&diags[0].message).contains("foo()"));
-        assert!(message_text(&diags[0].message).contains("trait"));
+        assert!(message_text(&diags[0].message).contains("Foo::foo()"));
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
@@ -676,7 +672,7 @@ class Child extends Base {
         assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
         assert!(message_text(&diags[0].message).contains("name()"));
         assert!(
-            message_text(&diags[0].message).contains("from class 'Base'"),
+            message_text(&diags[0].message).contains("Base::name()"),
             "the requirement should be traced to the parent: {}",
             message_text(&diags[0].message)
         );
@@ -698,7 +694,7 @@ namespace App {
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
         assert!(
-            message_text(&diags[0].message).contains("from interface 'App\\Repository'"),
+            message_text(&diags[0].message).contains("App\\Repository::find()"),
             "got: {}",
             message_text(&diags[0].message)
         );

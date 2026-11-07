@@ -124,8 +124,10 @@ src/
 ├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
 ├── self_update.rs          # Binary self-update
 │
-│   # Blade & shared utilities
-├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
+│   # Templates & shared utilities
+├── blade/                  # Laravel Blade template support (directives, preprocessor)
+├── tempest/                # Tempest View expressions, components, and view paths
+├── template/               # Shared virtual PHP source maps and LSP coordinate translation
 └── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
 
 build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
@@ -1474,3 +1476,50 @@ PHP class names go through resolution at parse time (`resolve_parent_class_names
 5. **No namespace** → keep as-is.
 
 This runs on every name a `ClassInfo` extracted from a file carries: its parents, interfaces, traits and mixins, its members' native and docblock types, its `@property` and `@method` tags, and the classes its constants' initializers name. A function's types get the same treatment. Names read later, in a method body or by whoever consumes a resolved name, follow [Source Names and Resolved Names](#source-names-and-resolved-names).
+
+## Tempest View templates
+
+In a project that requires `tempest/view` or `tempest/framework`, files
+ending in `.view.php` are lowered by `tempest/preprocessor.rs` before
+parsing. Elsewhere the suffix is left to plain PHP, since other renderers
+use it too. Native PHP, echo expressions, and bound attributes become PHP in a
+synthetic function, with element-scoped branches and loops. They use the
+same parser, symbol map, and forward walker as ordinary PHP. Template
+imports and `@var` declarations remain in that PHP; no second type resolver
+is involved.
+
+`template/` owns coordinate translation shared with Blade. Tempest records
+exact copied regions because an attribute written before `:foreach` still
+runs inside the loop. Both directions use sorted indexes, and generated
+syntax has no source position. Blade retains its existing column anchors.
+
+Component discovery is lazy and cached, under the project's Composer
+PSR-4 roots and installed packages' roots, with project components taking
+precedence. File creation/deletion and Composer changes invalidate the
+catalogue. Open buffers supply current component declarations. View-path
+spans identify the fully qualified `Tempest\View\view` helper; navigation
+resolves paths from the project, caller, and discovery roots. References
+compare the resolved file, since identical relative paths in two callers
+can name different views.
+
+`tempest/view_data.rs` resolves render arguments through the shared type
+engine in the caller's namespace. Custom View declarations supply the
+renderer proxy's `$this` type; only explicit view data becomes local
+variables. `tempest/inference.rs` caches these declarations before parsing,
+and refreshes them after indexing, saves, and changes to a view or to a file
+that renders one; edits to any other file skip the refresh. Indexing, saves
+and watcher batches recompute everything. An unsaved edit reuses the data
+of every other render caller, and the results of every component call whose
+two templates and incoming scope are unchanged, so typing in one view
+re-evaluates only the calls that edit reaches. A stale indexing batch cannot
+overwrite a lowering built with newer inferred data.
+
+Component arguments are evaluated in the caller, while slot contents are
+lowered into isolated closures. `tempest/component_context.rs` resolves slot
+locals at the receiving component's outlet for that invocation. Component
+attributes override global view data without inheriting arbitrary caller
+locals. A work queue propagates changed scopes through component calls;
+recursive component inference is bounded.
+
+Configured discovery remains in
+[the feature backlog](todo/lsp-features.md#f74-configured-tempest-view-discovery).

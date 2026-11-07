@@ -96,6 +96,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blade_php_constants_keep_their_outline_ranges_inside_a_section() {
+        let source = "<p>📚</p>\r\n@section('content')\r\n@php\r\ndefine('TEMPLATE_LABEL', 'Books');\r\n@endphp\r\n@endsection\r\n";
+        let symbols = outline(source).await;
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "content");
+        let children = symbols[0].children.as_ref().unwrap();
+        assert_eq!(children.len(), 1);
+        let constant = &children[0];
+        assert_eq!(constant.name, "TEMPLATE_LABEL");
+        assert_eq!(constant.kind, SymbolKind::Constant);
+        assert_eq!(constant.range.start.line, 3);
+        assert_eq!(constant.range.end.line, 3);
+        assert_eq!(
+            constant.selection_range.start,
+            crate::common::position_of(source, "TEMPLATE_LABEL")
+        );
+        assert_eq!(
+            constant.selection_range.end,
+            crate::common::position_after(source, "TEMPLATE_LABEL")
+        );
+    }
+
+    #[tokio::test]
     async fn a_yield_and_a_stack_are_listed_where_they_stand() {
         let symbols = outline("@yield('content')\n@stack('scripts')\n").await;
         assert_eq!(

@@ -715,7 +715,7 @@ function at_index(NodeInterface $node): mixed {
     if ($node instanceof LeafNode) {
         return null;
     }
-    $node->getChildren();   // Method 'getChildren' not found on class 'NodeInterface'
+    $node->getChildren();   // Method NodeInterface::getChildren() not found
 }
 ```
 

@@ -104,7 +104,7 @@ pub(crate) const UNKNOWN_MEMBER_CODE: &str = "unknown_member";
 
 /// Diagnostic code for a field a Doctrine repository call names that the
 /// entity does not map.
-pub(crate) const UNKNOWN_ENTITY_FIELD_CODE: &str = "unknown_entity_field";
+pub(crate) const UNKNOWN_ENTITY_FIELD_CODE: &str = "invalid_doctrine_field";
 
 /// Diagnostic code for a member that some classes of a union declare and
 /// others do not.  Opt-in through `partial-union-members`.
@@ -142,7 +142,7 @@ struct UnknownMemberPass<'a> {
     content: &'a str,
     loaders: FileLoaders<'a>,
     /// Whether a magic method stands in for undeclared members
-    /// (`report_magic_properties`).  Read once for the whole file:
+    /// (`magic-properties`).  Read once for the whole file:
     /// `config()` clones the config behind a lock, and the flags cannot
     /// change mid-pass.
     report_magic: bool,
@@ -192,7 +192,7 @@ impl Backend {
             uri,
             content,
             loaders: self.file_loaders(&ctx.file),
-            report_magic: config.diagnostics.report_magic_properties_enabled(),
+            report_magic: config.diagnostics.magic_properties_enabled(),
             report_unresolved: config.diagnostics.unresolved_member_access_enabled(),
             report_partial_union: config.diagnostics.partial_union_members_enabled(),
             strict_attributes: self
@@ -322,9 +322,14 @@ impl UnknownMemberPass<'_> {
                 DiagnosticSeverity::Error,
                 SCALAR_MEMBER_ACCESS_CODE,
                 format!(
-                    "Cannot access {} '{}' on type '{}'",
+                    "Cannot {} {} {} on {}",
+                    if access.is_method_call {
+                        "call"
+                    } else {
+                        "access"
+                    },
                     access.kind_label(),
-                    access.member_name,
+                    access.spelled(None),
                     scalar,
                 ),
                 out,
@@ -337,15 +342,17 @@ impl UnknownMemberPass<'_> {
                 if type_str == "SoapClient" || type_str == "\\SoapClient" {
                     return MemberCheckResult::Ok;
                 }
+                // The class the subject's type names cannot be found, so
+                // what is missing is the class, not the member.
                 self.push_chain_break(
                     access,
                     DiagnosticSeverity::Warning,
-                    UNKNOWN_MEMBER_CODE,
+                    super::unknown_classes::UNKNOWN_CLASS_CODE,
                     format!(
-                        "Cannot verify {} '{}' — subject type '{}' could not be resolved",
+                        "Cannot check {} {}, because type {} could not be resolved",
                         access.kind_label(),
-                        access.member_name,
-                        unresolved,
+                        access.spelled(None),
+                        super::helpers::shown_type(unresolved),
                     ),
                     out,
                 )
@@ -370,22 +377,22 @@ impl UnknownMemberPass<'_> {
                     // engine can resolve (a dynamic property name, an
                     // arithmetic result), so there is nothing to quote.
                     format!(
-                        "Cannot verify {} '{}' — the type of its subject could not be resolved",
+                        "Cannot check {} {}, because the type of its subject could not be resolved",
                         access.kind_label(),
-                        access.member_name,
+                        access.spelled(None),
                     )
                 } else if matches!(outcome, SubjectOutcome::Mixed) {
                     format!(
-                        "Cannot verify {} '{}' — type of '{}' is 'mixed'",
+                        "Cannot check {} {}, because {} is mixed",
                         access.kind_label(),
-                        access.member_name,
+                        access.spelled(None),
                         subject_display,
                     )
                 } else {
                     format!(
-                        "Cannot verify {} '{}' — type of '{}' could not be resolved",
+                        "Cannot check {} {}, because the type of {} could not be resolved",
                         access.kind_label(),
-                        access.member_name,
+                        access.spelled(None),
                         subject_display,
                     )
                 };

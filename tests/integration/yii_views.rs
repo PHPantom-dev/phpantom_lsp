@@ -352,8 +352,8 @@ async fn a_view_no_template_matches_is_reported() {
     assert_eq!(
         reported,
         vec![
-            "Unknown view: 'resources/views/blog/missing'".to_string(),
-            "Unknown view: 'src/Web/HomePage/nope'".to_string(),
+            "Unknown view 'resources/views/blog/missing'".to_string(),
+            "Unknown view 'src/Web/HomePage/nope'".to_string(),
         ]
     );
 }

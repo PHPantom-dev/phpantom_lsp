@@ -32,12 +32,12 @@ class DeprecationDemo
     {
         $src = new Scaffolding\ScaffoldingDeprecation();
 
-        // Diagnostic: "'sendLegacy' is deprecated: Use sendAsync() instead.
-        //   (see: Scaffolding\ScaffoldingDeprecation::sendAsync())"
+        // Diagnostic: "Method Demo\Scaffolding\ScaffoldingDeprecation::sendLegacy()
+        //   is deprecated: Use sendAsync() instead; see ScaffoldingDeprecation::sendAsync()"
         $src->sendLegacy();
 
-        // Diagnostic: "'oldProcess' is deprecated: See: Scaffolding\ScaffoldingDeprecation::sendAsync()"
-        // (bare @deprecated + @see → "See:" becomes the main text)
+        // Diagnostic: "Method Demo\Scaffolding\ScaffoldingDeprecation::oldProcess()
+        //   is deprecated; see ScaffoldingDeprecation::sendAsync()"
         $src->oldProcess();
 
         // Diagnostic includes @see reference for the property too
@@ -96,7 +96,7 @@ class DeprecationDemo
 
 // ── Diagnostic: Unknown Class ───────────────────────────────────────────────
 // `MutateArrayInsertSpec` and `Cluster` below are not imported and cannot be
-// resolved — they get a yellow "Class 'X' not found" warning underline.
+// resolved — they get a yellow "Class X not found" warning underline.
 // This diagnostic fires for any ClassReference that PHPantom cannot resolve
 // through use-map, local classes, same-namespace, class_index, classmap,
 // PSR-4, or stubs.  It pairs with the "Import Class" code action: press
@@ -105,7 +105,7 @@ class DeprecationDemo
 // ── Diagnostic: Unknown Member Access ───────────────────────────────────────
 // When PHPantom resolves the subject type but the member does not exist after
 // full resolution (inheritance, traits, virtual members), a yellow "Method
-// 'X' not found on class 'Y'" warning appears.  Suppressed when __call,
+// Y::x() not found" warning appears.  Suppressed when __call,
 // __callStatic, or __get magic methods are present on the resolved class.
 
 class UnknownMemberDemo
@@ -223,7 +223,7 @@ class PartialUnionMembersDemo
     {
         $tool->label();     // fine: both Pen and Pencil declare it
         // With the diagnostic enabled, a warning appears on the next line:
-        $tool->write();     // Method 'write' exists on Pen but not on Pencil
+        $tool->write();     // Method write() exists on Pen but not on Pencil
 
         if ($tool instanceof Scaffolding\Pen) {
             $tool->write(); // fine: narrowed to Pen

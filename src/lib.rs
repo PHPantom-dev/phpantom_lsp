@@ -1,5 +1,12 @@
 //! PHPantom — a fast, lightweight PHP language server.
 //!
+//! **This crate's Rust API is internal.** It is published only so that
+//! `cargo install phpantom_lsp` works. The supported interfaces are the
+//! language server protocol, the command line, and `.phpantom.toml`; the
+//! version number follows those. Any public item here, feature-gated
+//! modules such as `semantic_export` included, can change or disappear
+//! in any release, patch releases too.
+//!
 //! Diagnostics are debounced: each `did_change` bumps a per-file version
 //! counter and spawns a delayed task. The task only publishes if its
 //! version still matches (i.e. no newer edit arrived in the meantime).
@@ -323,6 +330,8 @@ pub mod stubs;
 mod symbol_index;
 pub(crate) mod symbol_map;
 mod symfony;
+mod tempest;
+pub mod template;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
@@ -521,6 +530,7 @@ pub struct BackendState {
     pub(crate) laravel: backend::laravel::LaravelState,
     /// The project's Blade templates, beyond each one's own lowering.
     pub(crate) blade: blade::state::BladeState,
+    pub(crate) tempest: tempest::TempestState,
     /// Whether the workspace is an application rather than a library.
     ///
     /// A library's configuration is supplied by whatever application
@@ -552,6 +562,11 @@ pub struct BackendState {
     /// [`crate::composer::is_yii_project`].  Starts `true` so a workspace with
     /// no `composer.json` to classify behaves as before.
     pub(crate) is_yii: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project renders Tempest views, so its `.view.php` files
+    /// are lowered as templates.  See [`crate::composer::is_tempest_project`].
+    /// Starts `true` so a workspace with no `composer.json` to classify
+    /// behaves as before.
+    pub(crate) is_tempest: Arc<std::sync::atomic::AtomicBool>,
     /// The major version of PHPUnit the project's `composer.lock` installs,
     /// `0` when it is not known.  In a workspace of several projects, the
     /// lowest of theirs.  Decides whether a data provider has to be static.

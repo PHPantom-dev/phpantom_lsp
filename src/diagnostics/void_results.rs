@@ -27,7 +27,7 @@ use super::helpers::{
 };
 
 /// Diagnostic code used for a used `void` result.
-pub(crate) const VOID_RESULT_USED_CODE: &str = "void_result_used";
+pub(crate) const VOID_RESULT_USED_CODE: &str = "used_void_result";
 
 impl Backend {
     /// Collect used `void` result diagnostics for a single file.
@@ -115,7 +115,7 @@ impl Backend {
                 range,
                 DiagnosticSeverity::Warning,
                 VOID_RESULT_USED_CODE,
-                format!("Result of {callee} (void) is used"),
+                format!("Result of {callee} is used, but it returns void"),
             ));
         }
     }

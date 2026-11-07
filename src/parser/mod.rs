@@ -43,6 +43,7 @@ pub(crate) mod error_format;
 mod file_declarations;
 mod functions;
 mod initializers;
+pub(crate) use initializers::skip_heredoc;
 mod name_resolution;
 mod namespace_recovery;
 mod params;

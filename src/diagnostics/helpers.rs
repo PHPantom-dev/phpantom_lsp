@@ -400,6 +400,12 @@ pub(crate) fn classes_instantiated_by_variable(
     (!classes.is_empty()).then_some(classes)
 }
 
+/// `ty` with its class names written the way diagnostic messages write
+/// them, without a leading backslash.
+pub(crate) fn shown_type(ty: &crate::php_type::PhpType) -> crate::php_type::PhpType {
+    ty.resolve_names(&|name| name.trim_start_matches('\\').to_string())
+}
+
 /// Build a standard diagnostic with the common fields pre-filled.
 ///
 /// Most diagnostic collectors build `Diagnostic` values with `source`

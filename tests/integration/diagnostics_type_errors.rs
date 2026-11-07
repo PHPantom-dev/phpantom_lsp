@@ -2447,7 +2447,7 @@ function test(): void {
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
-        messages[0].contains("void") && messages[0].contains("returns no value"),
+        messages[0].contains("void") && messages[0].contains("returns nothing"),
         "the message should say the expression yields nothing, got {messages:?}"
     );
 }

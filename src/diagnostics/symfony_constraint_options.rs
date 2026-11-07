@@ -16,7 +16,7 @@ use crate::symfony::validation::{ConstraintOptions, constraint_option_keys};
 use super::helpers::make_diagnostic;
 
 /// Diagnostic code used for an option a constraint does not take.
-pub(crate) const UNKNOWN_CONSTRAINT_OPTION_CODE: &str = "unknown_constraint_option";
+pub(crate) const UNKNOWN_CONSTRAINT_OPTION_CODE: &str = "invalid_symfony_constraint_option";
 
 impl Backend {
     /// Report each option key of a constraint in the validation mapping at
@@ -50,16 +50,12 @@ impl Backend {
                 let Some(range) = self.offset_range_to_lsp_range(uri, content, start, end) else {
                     continue;
                 };
-                let short = constraint
-                    .constraint
-                    .rsplit('\\')
-                    .next()
-                    .unwrap_or(&constraint.constraint);
+                let class = constraint.constraint.trim_start_matches('\\');
                 out.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::Error,
                     UNKNOWN_CONSTRAINT_OPTION_CODE,
-                    format!("Unknown option '{name}' for constraint {short}"),
+                    format!("Unknown option '{name}' for constraint {class}"),
                 ));
             }
         }

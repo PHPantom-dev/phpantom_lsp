@@ -562,8 +562,8 @@ async fn an_undeclared_route_name_is_reported() {
     assert_eq!(
         reported,
         [
-            "Unknown route: 'acme.greting'",
-            "Unknown route: 'Drupal\\acme\\Routing\\Routes::routes'",
+            "Unknown route 'acme.greting'",
+            "Unknown route 'Drupal\\acme\\Routing\\Routes::routes'",
         ]
     );
 }
@@ -667,10 +667,10 @@ async fn entity_and_views_routes_are_judged_by_their_shape() {
     assert_eq!(
         reported,
         [
-            "Unknown route: 'entity'",
-            "Unknown route: 'entity.nod'",
-            "Unknown route: 'view'",
-            "Unknown route: 'view.content'",
+            "Unknown route 'entity'",
+            "Unknown route 'entity.nod'",
+            "Unknown route 'view'",
+            "Unknown route 'view.content'",
         ]
     );
 }

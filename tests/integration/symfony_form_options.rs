@@ -179,7 +179,7 @@ fn unknown_options(
     backend.collect_slow_diagnostics(uri_for(dir, rel).as_str(), content, &mut diagnostics);
     diagnostics
         .into_iter()
-        .filter(|d| d.code == Some(Code::String("unknown_form_option".to_string())))
+        .filter(|d| d.code == Some(Code::String("invalid_symfony_form_option".to_string())))
         .map(|d| crate::common::message_text(&d.message).to_string())
         .collect()
 }
@@ -189,7 +189,7 @@ async fn options_no_type_declares_are_reported() {
     let (backend, dir) = workspace(&files()).await;
     assert_eq!(
         unknown_options(&backend, &dir, "src/Form/RegistrationType.php", FORM_PHP),
-        vec!["Unknown form option 'requird' for EmailType".to_string()],
+        vec!["Unknown form option 'requird' for Symfony\\Component\\Form\\Extension\\Core\\Type\\EmailType".to_string()],
     );
     assert_eq!(
         unknown_options(
@@ -198,7 +198,7 @@ async fn options_no_type_declares_are_reported() {
             "src/Controller/SignupController.php",
             CONTROLLER_PHP
         ),
-        vec!["Unknown form option 'newsleter' for RegistrationType".to_string()],
+        vec!["Unknown form option 'newsleter' for App\\Form\\RegistrationType".to_string()],
     );
 }
 

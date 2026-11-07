@@ -33,7 +33,7 @@ fn messages(text: &str) -> Vec<String> {
 }
 
 fn unhandled(exception: &str) -> String {
-    format!("Unhandled exception {exception}: neither caught nor declared with @throws")
+    format!("Exception {exception} is neither caught nor declared in @throws")
 }
 
 const THROWS_CHECKED: &str = r#"<?php

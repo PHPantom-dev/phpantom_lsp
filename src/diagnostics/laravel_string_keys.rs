@@ -64,6 +64,9 @@ impl CheckedStringKind {
         use crate::symbol_map::StringKeyKind;
 
         Some(match kind {
+            // Tempest path navigation is available without a complete
+            // catalogue of the renderer's configured discovery locations.
+            StringKeyKind::TempestView { .. } => return None,
             StringKeyKind::Route => Self::Route,
             StringKeyKind::Config => Self::Config,
             StringKeyKind::ConfigResource(resource) => Self::ConfigResource(*resource),
@@ -518,7 +521,7 @@ impl<'a> DeclaredKeys<'a> {
                 Some((
                     names_key_or_group(&self.trans_keys, key),
                     "translation key",
-                    "invalid_laravel_trans",
+                    "invalid_laravel_translation",
                 ))
             }
             CheckedStringKind::Command => self.commands_indexed.then(|| {
@@ -757,7 +760,7 @@ impl<'a> DeclaredKeys<'a> {
             .twig_templates
             .binary_search_by(|name| name.as_str().cmp(key))
             .is_ok();
-        Some((valid, "template", "invalid_symfony_template"))
+        Some((valid, "template", "invalid_twig_template"))
     }
 
     /// A service ID spelled as a class name is that class, which an
@@ -965,8 +968,8 @@ impl Backend {
                 out.push(helpers::make_diagnostic(
                     range,
                     DiagnosticSeverity::Warning,
-                    "invalid_command_parameter",
-                    format!("Unknown command {}: '{}'", label, name),
+                    "invalid_laravel_command_parameter",
+                    format!("Unknown command {label} '{name}'"),
                 ));
             }
         }
@@ -1058,7 +1061,7 @@ impl Backend {
         for &(kind, key, start, end) in &key_spans {
             // An ability is judged against the model the check names, so
             // it reports which model rather than the shared
-            // "Unknown <kind>: '<key>'" message the others share.
+            // "Unknown <kind> '<key>'" message the others share.
             if kind == CheckedStringKind::GateAbility {
                 if !declared.gate_abilities.is_empty()
                     && let Some(message) = self.gate_ability_problem(
@@ -1089,10 +1092,10 @@ impl Backend {
                 // domain.
                 let message = match kind {
                     CheckedStringKind::YiiView => {
-                        format!("Unknown {}: '{}'", label, self.yii_view_display(key))
+                        format!("Unknown {} '{}'", label, self.yii_view_display(key))
                     }
                     CheckedStringKind::YiiRouteArgument => format!(
-                        "Unknown {}: '{}'",
+                        "Unknown {} '{}'",
                         label,
                         crate::yii::routes::split_route_argument_key(key).1
                     ),
@@ -1106,16 +1109,16 @@ impl Backend {
                             })
                             .unwrap_or_else(|| method.to_string());
                         format!(
-                            "Unknown {label}: '{name}' is not a parameter of {}::{method}()",
-                            crate::util::short_name(class)
+                            "Method {}::{method}() has no parameter ${name}",
+                            class.trim_start_matches('\\')
                         )
                     }
                     CheckedStringKind::SymfonyTranslation => {
                         let (domain, message) =
                             crate::symfony::translations::split_translation_key(key);
-                        format!("Unknown {label}: '{message}' in domain '{domain}'")
+                        format!("Unknown {label} '{message}' in domain '{domain}'")
                     }
-                    _ => format!("Unknown {}: '{}'", label, key),
+                    _ => format!("Unknown {label} '{key}'"),
                 };
                 out.push(helpers::make_diagnostic(
                     range,
@@ -1161,9 +1164,9 @@ impl Backend {
                 return None;
             }
             return Some(format!(
-                "Ability '{}' is not defined for '{}' (policy {})",
+                "Ability '{}' is not defined for {} by policy {}",
                 ability,
-                model_fqn,
+                model_fqn.trim_start_matches('\\'),
                 policy.fqn()
             ));
         }
@@ -1174,7 +1177,7 @@ impl Backend {
         {
             return None;
         }
-        Some(format!("Unknown ability: '{}'", ability))
+        Some(format!("Unknown ability '{ability}'"))
     }
 
     /// The FQN of the model a gate check named, when the symbol map recorded
@@ -1189,7 +1192,7 @@ impl Backend {
         // A Blade file's symbol map is built from the preprocessed virtual
         // PHP, so every offset in it — including the subject's — indexes that
         // text rather than the template the caller handed us.
-        let virtual_php = self.blade_virtual_php_arc(uri);
+        let virtual_php = self.template_virtual_php_arc(uri);
         let content = virtual_php.as_ref().map_or(content, |php| php.as_str());
 
         let (subject_text, is_static) = {

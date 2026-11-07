@@ -41,6 +41,11 @@ impl Backend {
             content,
             *cursor_offset as usize,
         );
+        if let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.tempest_path_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
         // ── Array shape key completion ───────────────────────────
         // Runs before `InStringLiteral` suppression because in
         // normal code `$arr['` puts the scanner inside a
