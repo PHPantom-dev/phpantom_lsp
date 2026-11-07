@@ -1257,17 +1257,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#y5-alias-definitions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y5. Alias definitions
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#y6-params-keys-in-configuration" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1351,10 +1340,10 @@
 <p>Known gaps and missing features in PHPantom's Yii support. Yii 3 is
 built from small, typed components with little magic, so the generic
 engine already types most of it. On top of that, route names, route
-arguments, and view names complete, navigate, and are checked. What is
-still missing is the navigation between the rest of the names Yii
-keeps in configuration (DI definitions, <code>$params</code> keys, alias
-declarations) and the code and files they point to.</p>
+arguments, and view names complete, navigate, and are checked, and path
+aliases navigate to their declarations. What is still missing is the
+navigation between the rest of the names Yii keeps in configuration (DI
+definitions, <code>$params</code> keys) and the code and files they point to.</p>
 <p>The items below are what the Yii team asked for in
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/discussions/505">discussion #505</a>.
 <code>examples/yii/</code> (generated from <code>yiisoft/app</code>) is the playground, with a
@@ -1427,31 +1416,10 @@ the files in each, and packages contribute their own through
 <p><strong>Where to look:</strong> the Symfony container support (<code>src/symfony/container.rs</code>)
 for the navigation and rename side.</p>
 <hr />
-<h2 id="y5-alias-definitions">Y5. Alias definitions<a class="headerlink" href="#y5-alias-definitions" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// config/common/aliases.php, required as params['yiisoft/aliases']['aliases']</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">return [</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    '@root' =&gt; dirname(__DIR__, 2),</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    '@views' =&gt; '@root/resources/views',</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">];</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">$aliases-&gt;get('@runtime/logs');</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">public ?string $sourcePath = '@assetsSource/main';   // an asset bundle</span>
-</code></pre></div>
-<p>An alias (<code>yiisoft/aliases</code>) names a path in a string starting with
-<code>@</code>, and aliases are defined in terms of each other. Navigate from an
-alias in any string to its definition, complete alias names, and,
-where the definition resolves to a path in the project, navigate from
-the whole string to the file or directory it names.</p>
-<p>View names already resolve their <code>@views/...</code> paths through
-<code>src/yii/aliases.rs</code>, which reads the aliases from every params file
-under <code>config/</code> that names <code>yiisoft/aliases</code>. It records only the path
-each alias resolves to, so this item adds where each one is declared.</p>
-<hr />
 <h2 id="y6-params-keys-in-configuration">Y6. <code>$params</code> keys in configuration<a class="headerlink" href="#y6-params-keys-in-configuration" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// config/common/di/application.php</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">'name' =&gt; $params['application']['name'],</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// config/common/di/application.php</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">'name' =&gt; $params['application']['name'],</span>
 </code></pre></div>
 <p><code>yiisoft/config</code> hands every config file a <code>$params</code> array merged from
 the <code>params</code> group (<code>config/common/params.php</code>, the web or console
@@ -1464,11 +1432,11 @@ comes from the same <code>configuration.php</code> reading Y4 needs.</p>
 <hr />
 <h2 id="y9-views-a-template-renders-by-name">Y9. Views a template renders by name<a class="headerlink" href="#y9-views-a-template-renders-by-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// PostController, with withViewPath('@views')</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">return $this-&gt;viewRenderer-&gt;render('blog/index');</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">// resources/views/blog/index.php</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="cp">&lt;?</span><span class="o">=</span> <span class="nv">$this</span><span class="o">-&gt;</span><span class="na">render</span><span class="p">(</span><span class="s1">'_card'</span><span class="p">)</span> <span class="cp">?&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// PostController, with withViewPath('@views')</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">return $this-&gt;viewRenderer-&gt;render('blog/index');</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">// resources/views/blog/index.php</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="cp">&lt;?</span><span class="o">=</span> <span class="nv">$this</span><span class="o">-&gt;</span><span class="na">render</span><span class="p">(</span><span class="s1">'_card'</span><span class="p">)</span> <span class="cp">?&gt;</span>
 </code></pre></div>
 <p>A view a template renders by name (<code>$this-&gt;render('_card')</code>) is relative
 to the view path of the renderer that rendered the template, not to the
@@ -1482,10 +1450,10 @@ template makes, and fall back to its directory when nothing renders it.</p>
 <hr />
 <h2 id="y10-the-renderers-configured-view-path">Y10. The renderer's configured view path<a class="headerlink" href="#y10-the-renderers-configured-view-path" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong> (builds on Y6)</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// config/common/params.php</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">'yiisoft/yii-view-renderer' =&gt; [</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    'viewPath' =&gt; '@views',</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">],</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// config/common/params.php</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">'yiisoft/yii-view-renderer' =&gt; [</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    'viewPath' =&gt; '@views',</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">],</span>
 </code></pre></div>
 <p>A class that never calls <code>withViewPath()</code> renders against the view path
 the DI configuration gives the renderer, from
@@ -1496,15 +1464,15 @@ it as the base wherever the class gives none.</p>
 <hr />
 <h2 id="y7-render-parameters-against-the-templates-var-list">Y7. Render parameters against the template's <code>@var</code> list<a class="headerlink" href="#y7-render-parameters-against-the-templates-var-list" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// Action.php</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">return $this-&gt;viewRenderer-&gt;render(__DIR__ . '/template', ['form' =&gt; $form]);</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">// template.php</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">/**</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x"> * @var WebView $this</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x"> * @var UrlGenerator $urlGenerator</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x"> * @var Form $form</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x"> */</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// Action.php</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">return $this-&gt;viewRenderer-&gt;render(__DIR__ . '/template', ['form' =&gt; $form]);</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">// template.php</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">/**</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x"> * @var WebView $this</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x"> * @var UrlGenerator $urlGenerator</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x"> * @var Form $form</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x"> */</span>
 </code></pre></div>
 <p>Yii templates declare the variables they expect in a <code>@var</code> block at the
 top, and <code>yiisoft/demo-blog</code> does this in every template. That block is
@@ -1521,9 +1489,9 @@ missing one.</p>
 <hr />
 <h2 id="y8-column-names-in-query-arrays">Y8. Column names in query arrays<a class="headerlink" href="#y8-column-names-in-query-arrays" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$query-&gt;from(Table::POST . ' p')</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    -&gt;where(['p.status' =&gt; PostStatus::Published])</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    -&gt;orderBy(['p.publication_date' =&gt; SORT_DESC]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$query-&gt;from(Table::POST . ' p')</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    -&gt;where(['p.status' =&gt; PostStatus::Published])</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    -&gt;orderBy(['p.publication_date' =&gt; SORT_DESC]);</span>
 </code></pre></div>
 <p><code>yiisoft/db</code> queries name columns as array keys and strings, often
 qualified by a table alias the same query declares, and the table
