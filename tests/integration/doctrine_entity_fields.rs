@@ -263,6 +263,41 @@ async fn an_xml_mapping_maps_the_fields() {
     );
 }
 
+/// A mapping file nobody opened is read at startup, before the background
+/// workspace index reaches the resource files.
+#[tokio::test]
+async fn a_mapping_file_is_read_at_startup() {
+    use tower_lsp_server::LanguageServer;
+
+    let source = "<?php
+namespace App\\Service;
+
+use App\\Repository\\OrderRepository;
+
+final class Orders
+{
+    public function run(OrderRepository $orders): void
+    {
+        $orders->§
+    }
+}
+";
+    let (stripped, position) = split_cursor(source);
+    let path = "src/Service/Orders.php";
+    let mut files: Vec<(&str, &str)> = STUBS.to_vec();
+    files.push((ORDER_MAPPING_PATH, ORDER_MAPPING));
+    files.push((path, stripped.as_str()));
+    let (backend, dir) = create_psr4_workspace(COMPOSER, &files);
+    backend.initialized(InitializedParams {}).await;
+    let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
+    open_document(&backend, &uri, "php", &stripped).await;
+    let labels = complete_labels_at_opened(&backend, &uri, position.line, position.character).await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("findByReference")),
+        "{labels:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_finder_for_an_unmapped_field_is_reported() {
     let messages = diagnostics(

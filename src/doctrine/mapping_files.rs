@@ -6,6 +6,7 @@
 //! for the class to be looked up by name.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -91,17 +92,74 @@ pub(crate) fn mapped_association(
     found
 }
 
+const XML_SUFFIXES: &[&str] = &[".orm.xml", ".dcm.xml"];
+const YAML_SUFFIXES: &[&str] = &[".orm.yml", ".orm.yaml", ".dcm.yml", ".dcm.yaml"];
+
+fn has_suffix(path: &str, suffixes: &[&str]) -> bool {
+    suffixes.iter().any(|suffix| {
+        path.len() >= suffix.len()
+            && path.as_bytes()[path.len() - suffix.len()..].eq_ignore_ascii_case(suffix.as_bytes())
+    })
+}
+
+/// Whether the file at `path` is named like a Doctrine XML or YAML mapping.
+pub(crate) fn is_mapping_file_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| has_suffix(name, XML_SUFFIXES) || has_suffix(name, YAML_SUFFIXES))
+}
+
 fn scan_mapping_file(uri: &str, content: &str) -> Vec<MappedClass> {
-    let path = uri.to_ascii_lowercase();
-    if path.ends_with(".orm.xml") || path.ends_with(".dcm.xml") {
+    if has_suffix(uri, XML_SUFFIXES) {
         scan_xml(content)
-    } else if [".orm.yml", ".orm.yaml", ".dcm.yml", ".dcm.yaml"]
-        .iter()
-        .any(|suffix| path.ends_with(suffix))
-    {
+    } else if has_suffix(uri, YAML_SUFFIXES) {
         scan_yaml(content)
     } else {
         Vec::new()
+    }
+}
+
+impl crate::Backend {
+    /// Read the workspace's Doctrine mapping files, ahead of the
+    /// background workspace index.
+    ///
+    /// That index reads them with the other resource files, after every
+    /// PHP file is parsed, and until then an entity mapped only by a file
+    /// has no fields: its repository no finders, a DQL query on it no
+    /// result type.  Run during startup, before the open files are first
+    /// diagnosed, so nothing is ever resolved without them.
+    pub(crate) fn index_doctrine_mapping_files(&self) {
+        if !self.is_doctrine_project() {
+            return;
+        }
+        let Some(root) = self.workspace.workspace_root.read().clone() else {
+            return;
+        };
+        let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
+        let mut paths = Vec::new();
+        crate::classmap_scanner::visit_workspace_files_gitignore(
+            &root,
+            &vendor_dir_paths,
+            &self.index_filters(),
+            Some(self.followed_links()),
+            |path| {
+                if is_mapping_file_path(path) {
+                    paths.push(path.to_path_buf());
+                }
+            },
+        );
+        for path in paths {
+            let uri = crate::util::path_to_uri(&path);
+            let open = self.open_files.read().get(&uri).cloned();
+            let content = match open {
+                Some(content) => content,
+                None => match std::fs::read_to_string(&path) {
+                    Ok(content) => Arc::new(content),
+                    Err(_) => continue,
+                },
+            };
+            self.index_framework_uri_content(&uri, &content);
+        }
     }
 }
 

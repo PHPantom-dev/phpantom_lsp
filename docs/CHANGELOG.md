@@ -145,6 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Doctrine mapping files right after startup.** An entity mapped by an XML or YAML file now has its fields, magic finders, and DQL types as soon as the editor starts, instead of only once the background index has finished.
 - **Methods `__call` takes because the caller cannot see them.** A call to a private or protected method from where it is out of reach, on a class with `__call` or `__callStatic`, is no longer checked against that method's parameters, since the magic handler takes it. A call that can see the method now has its named arguments checked.
 - **Docblock types a native type rules out.** A docblock member the native type cannot hold, such as the `resource` in `@return resource|Socket|false` on a function declared `: Socket|false`, is now dropped, so `socket_import_stream()` returns `Socket|false` instead of being rejected where a `Socket` is expected.
 - **`JSON_THROW_ON_ERROR` throws `JsonException`.** A `json_decode()` or `json_encode()` call whose flags include `JSON_THROW_ON_ERROR` now counts as throwing `JsonException`, so `@throws` completion and "Update docblock" suggest it, and what a `catch (JsonException $e)` block assigns is no longer lost after the `try`.
