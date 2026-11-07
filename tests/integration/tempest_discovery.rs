@@ -420,6 +420,10 @@ $other->addViewComponent(__DIR__.'/../ui/x-unrelated.view.php');
         r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
         &[
             ("tempest", bootstrap),
+            (
+                "vendor/acme/no-autoload/README.md",
+                "Package without an autoloader",
+            ),
             ("app/setup.php", setup),
             ("app/page.view.php", source),
             ("ui/x-card.view.php", "Card"),
@@ -452,5 +456,66 @@ $other->addViewComponent(__DIR__.'/../ui/x-unrelated.view.php');
             expected,
             "{name}"
         );
+    }
+}
+
+#[tokio::test]
+async fn tempest_discovery_bootstrap_lifecycle_updates_warm_catalogues() {
+    let source = "<x-card />";
+    for entry in ["tempest", "public/index.php"] {
+        let (backend, dir) = create_psr4_workspace(
+            r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+            &[
+                ("app/page.view.php", source),
+                ("one/x-card.view.php", "One"),
+                ("two/x-card.view.php", "Two"),
+            ],
+        );
+        let uri = workspace_uri(&backend, "app/page.view.php");
+        open_php(&backend, &uri, source).await;
+        assert!(definition_locations(goto_definition_at(&backend, &uri, 0, 3).await).is_empty());
+        let path = dir.path().join(entry);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let bootstrap_uri = Uri::from_file_path(&path).unwrap();
+        for (kind, component) in [
+            (FileChangeType::Created, Some("one/x-card.view.php")),
+            (FileChangeType::Changed, Some("two/x-card.view.php")),
+            (FileChangeType::Deleted, None),
+        ] {
+            let expected = component.map(|component| {
+                let component_path = dunce::canonicalize(dir.path().join(component)).unwrap();
+                let literal = phpantom_lsp::php_type::PhpType::literal_string_value(
+                    component_path.to_string_lossy(),
+                );
+                std::fs::write(
+                    &path,
+                    format!(
+                        "<?php (new \\Tempest\\View\\ViewConfig())->addViewComponent({literal});"
+                    ),
+                )
+                .unwrap();
+                Uri::from_file_path(component_path).unwrap()
+            });
+            if component.is_none() {
+                std::fs::remove_file(&path).unwrap();
+            }
+            backend
+                .did_change_watched_files(DidChangeWatchedFilesParams {
+                    changes: vec![FileEvent {
+                        uri: bootstrap_uri.clone(),
+                        kind,
+                    }],
+                })
+                .await;
+            let locations = definition_locations(goto_definition_at(&backend, &uri, 0, 3).await);
+            assert_eq!(
+                locations
+                    .into_iter()
+                    .map(|location| location.uri)
+                    .collect::<Vec<_>>(),
+                expected.into_iter().collect::<Vec<_>>(),
+                "{entry}: {kind:?}"
+            );
+        }
     }
 }

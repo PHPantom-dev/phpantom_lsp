@@ -72,8 +72,8 @@ async fn tempest_paths_default_arguments_and_instance_helpers_use_the_declaratio
     let functions = r"<?php namespace App;
 use Tempest\View\View;
 use function Tempest\View\view;
-function defaults(string $path = __DIR__.'/default.view.php'): View {
-    return view($path, entry: 'default');
+function defaults(string $path = __DIR__.'/default.view.php', string $entry = 'fallback'): View {
+    return view($path, entry: $entry);
 }
 function literalDefault(string $path = 'literal.view.php'): View { return view($path, entry: 'literal'); }
 function loop(string $path): View { return loop($path); }
@@ -87,7 +87,7 @@ class Pages {
 use function App\defaults;
 use function App\loop;
 use App\Pages;
-defaults();
+defaults(entry: 'default');
 \App\literalDefault();
 $pages = new Pages();
 $pages->render('app/method.view.php')->data(entry: 'override');

@@ -581,6 +581,20 @@ fn the_startup_watcher_registration_is_recorded_for_a_client_that_opted_in() {
         .expect("a client that opted in should be asked to register its watchers");
 
     assert_eq!(registration.method, "workspace/didChangeWatchedFiles");
+    let options = registration.register_options.as_ref().unwrap();
+    assert!(
+        options["watchers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|watcher| {
+                watcher["globPattern"] == "**/tempest"
+                    && watcher["kind"]
+                        == serde_json::json!(
+                            WatchKind::Create | WatchKind::Change | WatchKind::Delete
+                        )
+            })
+    );
     assert_eq!(
         backend.registered_watcher_state.read().clone(),
         Some(crate::WatchedFileInputs {
