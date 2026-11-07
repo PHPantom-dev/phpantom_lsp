@@ -6,6 +6,8 @@ The `.view.php` files use the editor's PHP language-server connection.
 - In `app/BookController.php`, complete or follow the view path.
 - In `app/books.view.php`, complete directives and component tags, follow
   `<x-card>` to its file, and complete or navigate `$book`'s members.
+- In `app/dynamic.view.php`, follow a dynamic component name, complete its
+  attributes, and inspect the inferred data in the selected component and slot.
 - In `app/branches.view.php`, inspect the loop variable across sibling branches.
 - In `app/components/x-card.view.php`, hover `$title` for its declared type.
 - In `app/book.view.php`, inspect the custom View through `$this` and the
