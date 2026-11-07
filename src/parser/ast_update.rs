@@ -391,7 +391,7 @@ impl Backend {
                     if open_uris.contains_key(&update.uri) {
                         continue;
                     }
-                    if crate::tempest::is_view(&update.uri)
+                    if self.is_tempest_view(&update.uri)
                         && update
                             .template
                             .as_ref()

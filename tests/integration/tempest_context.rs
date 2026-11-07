@@ -256,7 +256,7 @@ async fn tempest_context_slots_do_not_capture_the_callers_locals() {
     assert!(
         diagnostics
             .iter()
-            .any(|message| message.contains("Undefined variable '$outside'")),
+            .any(|message| message.contains("Undefined variable $outside")),
         "{diagnostics:?}"
     );
 }

@@ -1,6 +1,6 @@
 //! Lazy discovery of `.view.php` files under Composer's autoload roots.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -12,8 +12,11 @@ use crate::{Backend, composer};
 pub(crate) struct TempestState {
     catalog: Mutex<Option<Arc<Catalog>>>,
     pub(crate) has_views: std::sync::atomic::AtomicBool,
-    pub(super) refresh: Mutex<()>,
+    pub(super) refresh: Mutex<super::inference::Memo>,
     pub(crate) scopes: RwLock<HashMap<String, Arc<super::inference::Scope>>>,
+    /// Files the last refresh read view data from: render callers and
+    /// custom View declarations.
+    pub(super) sources: RwLock<HashSet<String>>,
 }
 
 #[derive(Default)]

@@ -153,7 +153,7 @@ async fn tempest_context_slot_reads_keep_other_component_locals_unused() {
         .iter()
         .map(|diagnostic| message_text(&diagnostic.message).to_owned())
         .collect();
-    assert_eq!(messages, vec!["Unused variable '$unused'"]);
+    assert_eq!(messages, vec!["Unused variable $unused"]);
 }
 
 #[tokio::test]

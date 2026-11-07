@@ -1506,8 +1506,13 @@ can name different views.
 engine in the caller's namespace. Custom View declarations supply the
 renderer proxy's `$this` type; only explicit view data becomes local
 variables. `tempest/inference.rs` caches these declarations before parsing,
-and refreshes them after indexing and document changes. A stale indexing
-batch cannot overwrite a lowering built with newer inferred data.
+and refreshes them after indexing, saves, and changes to a view or to a file
+that renders one; edits to any other file skip the refresh. Indexing, saves
+and watcher batches recompute everything. An unsaved edit reuses the data
+of every other render caller, and the results of every component call whose
+two templates and incoming scope are unchanged, so typing in one view
+re-evaluates only the calls that edit reaches. A stale indexing batch cannot
+overwrite a lowering built with newer inferred data.
 
 Component arguments are evaluated in the caller, while slot contents are
 lowered into isolated closures. `tempest/component_context.rs` resolves slot

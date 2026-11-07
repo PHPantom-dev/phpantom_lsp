@@ -74,17 +74,14 @@ impl Backend {
             }
         }
 
-        if self
-            .tempest
-            .has_views
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if self.affects_tempest_inference(&uri) {
             if self.sync_ast_updates {
-                self.refresh_tempest_inference();
+                self.refresh_tempest_inference_after_edit(&uri);
             } else {
                 let backend = self.clone_for_blocking();
+                let uri = uri.clone();
                 spawn_blocking_detached("did_open Tempest inference", move || {
-                    backend.refresh_tempest_inference();
+                    backend.refresh_tempest_inference_after_edit(&uri);
                 });
             }
         }
@@ -215,7 +212,9 @@ impl Backend {
         // incomplete code cannot be parsed.
         if self.sync_ast_updates {
             self.update_ast(&uri, &text);
-            self.refresh_tempest_inference();
+            if self.affects_tempest_inference(&uri) {
+                self.refresh_tempest_inference_after_edit(&uri);
+            }
             self.schedule_diagnostics(uri.clone());
         } else {
             let backend = self.clone_for_blocking();
@@ -243,7 +242,6 @@ impl Backend {
 
                     let started = std::time::Instant::now();
                     backend.update_ast(&uri, &text);
-                    backend.refresh_tempest_inference();
                     let elapsed = started.elapsed();
                     if elapsed >= std::time::Duration::from_millis(100) {
                         tracing::debug!(
@@ -251,6 +249,12 @@ impl Backend {
                             "PHPantom: didChange parse took {:?}",
                             elapsed
                         );
+                    }
+                    // Republishing a view takes its parse lock, this one
+                    // included, to parse the buffer as it is by then.
+                    drop(_parse_guard);
+                    if backend.affects_tempest_inference(&uri) {
+                        backend.refresh_tempest_inference_after_edit(&uri);
                     }
                     backend.schedule_diagnostics(uri_for_diagnostics);
                     true
@@ -301,12 +305,17 @@ impl Backend {
                 move |backend: &Backend, uri: &str| match crate::util::read_php_source(&path) {
                     Some(content) => {
                         backend.update_ast(uri, &content);
-                        backend.refresh_tempest_inference();
+                        if backend.affects_tempest_inference(uri) {
+                            backend.refresh_tempest_inference_after_edit(uri);
+                        }
                         backend.put_to_sleep([uri]);
                     }
                     None => {
+                        let tempest = backend.affects_tempest_inference(uri);
                         backend.forget_closed_file(uri);
-                        backend.refresh_tempest_inference();
+                        if tempest {
+                            backend.refresh_tempest_inference_after_edit(uri);
+                        }
                     }
                 };
             if self.sync_ast_updates {
@@ -327,8 +336,11 @@ impl Backend {
                 });
             }
         } else {
+            let tempest = self.affects_tempest_inference(&uri);
             self.forget_closed_file(&uri);
-            self.refresh_tempest_inference();
+            if tempest {
+                self.refresh_tempest_inference_after_edit(&uri);
+            }
         }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed

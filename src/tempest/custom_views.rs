@@ -13,12 +13,14 @@ use crate::php_type::PhpType;
 use super::inference::Scope;
 use super::view_data::{arguments, expression_type, literal_path, shape_vars};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct CustomView {
     /// Canonical URI of the declared view path.
     pub(super) target: String,
     /// Explicit data and the custom object exposed through `$this`.
     pub(super) scope: Scope,
+    /// The file declaring the View class.
+    pub(super) source: String,
 }
 
 /// Find indexed View implementations without resolving unrelated classes.
@@ -110,10 +112,11 @@ pub(super) fn collect(backend: &Backend) -> BTreeMap<String, CustomView> {
                         CustomView {
                             target: path.uri.to_string(),
                             scope,
+                            source: uri.clone(),
                         },
                     );
                 } else if let Some(parent) = class.parent_class {
-                    inherited.push((class.clone(), parent.to_string()));
+                    inherited.push((uri.clone(), class.clone(), parent.to_string()));
                 }
             }
         });
@@ -122,11 +125,12 @@ pub(super) fn collect(backend: &Backend) -> BTreeMap<String, CustomView> {
     // resolves a class or stops; malformed inheritance cycles cannot spin.
     loop {
         let before = inherited.len();
-        inherited.retain(|(class, parent)| {
+        inherited.retain(|(uri, class, parent)| {
             let Some(mut view) = result.get(parent).cloned() else {
                 return true;
             };
             bind_this(backend, class, &mut view.scope);
+            view.source = uri.clone();
             result.insert(class.fqn().to_string(), view);
             false
         });

@@ -187,7 +187,10 @@ impl Backend {
             self.update_laravel_migrations(&batch.migration_changes);
         }
 
-        self.refresh_tempest_inference();
+        // Only PHP sources and the autoload roots can change view data.
+        if !batch.php_changes.is_empty() || !batch.composer_changes.is_empty() {
+            self.refresh_tempest_inference();
+        }
         true
     }
 

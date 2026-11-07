@@ -1,6 +1,6 @@
 //! Component arguments and slot bodies use different PHP scopes.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -44,6 +44,7 @@ impl Template {
         uri: String,
         source: Arc<String>,
         components: &BTreeMap<String, std::path::PathBuf>,
+        canonical: &mut Canonical,
     ) -> Self {
         let mut calls: Vec<Call> = Vec::new();
         let mut outlets: BTreeMap<String, Vec<usize>> = BTreeMap::new();
@@ -70,7 +71,7 @@ impl Template {
                 let index = calls.len();
                 calls.push(Call {
                     start: tag.span.start,
-                    target: canonical_uri(&crate::util::path_to_uri(path)),
+                    target: canonical.get(&crate::util::path_to_uri(path)),
                     enclosing: region,
                     args: tag
                         .attributes
@@ -131,34 +132,134 @@ impl Template {
     }
 }
 
+/// What one component call passes and binds, kept across refreshes so an
+/// edit recomputes only the calls whose inputs changed.  Type resolution
+/// also reads the declarations around both templates; those changes are
+/// picked up on save, when the memo is dropped.
+struct CallResult {
+    caller: Arc<String>,
+    target_uri: String,
+    target: Arc<String>,
+    parent: Scope,
+    data: Scope,
+    slots: BTreeMap<String, Scope>,
+}
+
+impl CallResult {
+    fn matches(&self, caller: &Template, target: &Template, parent: &Scope) -> bool {
+        self.target_uri == target.uri
+            && same_text(&self.caller, &caller.source)
+            && same_text(&self.target, &target.source)
+            && self.parent == *parent
+    }
+}
+
+fn same_text(a: &Arc<String>, b: &Arc<String>) -> bool {
+    Arc::ptr_eq(a, b) || a == b
+}
+
+/// Canonical template URIs.  Files are only created, moved or deleted
+/// through a watcher batch, which starts inference over.
+#[derive(Default)]
+pub(super) struct Canonical(HashMap<String, String>);
+
+impl Canonical {
+    pub(super) fn get(&mut self, uri: &str) -> String {
+        if let Some(canonical) = self.0.get(uri) {
+            return canonical.clone();
+        }
+        let canonical = canonical_uri(uri);
+        self.0.insert(uri.to_owned(), canonical.clone());
+        canonical
+    }
+}
+
+/// Inference state kept between refreshes: each template as last read with
+/// its settled slot regions, and component call results by caller template
+/// and call index.
+#[derive(Default)]
+pub(super) struct CallMemo {
+    pub(super) canonical: Canonical,
+    components: BTreeMap<String, std::path::PathBuf>,
+    templates: HashMap<String, (Template, BTreeMap<usize, Scope>)>,
+    calls: HashMap<(String, usize), CallResult>,
+}
+
 /// Propagate view data, component arguments, and invocation-specific slots.
+///
+/// `edited` is the one file that changed since the last call with this
+/// memo, or `None` when anything may have.
 pub(super) fn infer(
     backend: &Backend,
     templates: &[String],
     roots: HashMap<String, Scope>,
+    memo: &mut CallMemo,
+    edited: Option<&str>,
 ) -> HashMap<String, Scope> {
     let components = backend.tempest_components();
     if components.is_empty() {
+        memo.templates.clear();
+        memo.calls.clear();
         return roots;
     }
-    let aliases: HashMap<_, _> = backend
+    if components != memo.components {
+        memo.templates.clear();
+        memo.components = components.clone();
+    }
+    let edited = edited.map(|uri| memo.canonical.get(uri));
+    let open: Vec<_> = backend
         .open_files
         .read()
         .keys()
         .filter(|uri| super::is_view(uri))
-        .map(|uri| (canonical_uri(uri), uri.clone()))
+        .cloned()
         .collect();
-    let mut pending: VecDeque<_> = templates.iter().map(|uri| canonical_uri(uri)).collect();
+    let aliases: HashMap<_, _> = open
+        .into_iter()
+        .map(|uri| (memo.canonical.get(&uri), uri))
+        .collect();
+    let mut pending: VecDeque<_> = templates
+        .iter()
+        .map(|uri| memo.canonical.get(uri))
+        .collect();
     let mut nodes = BTreeMap::new();
+    let mut settled = HashMap::new();
     while let Some(key) = pending.pop_front() {
         if nodes.contains_key(&key) {
             continue;
         }
         let uri = aliases.get(&key).unwrap_or(&key);
-        let Some(source) = backend.get_file_content_arc(uri) else {
-            continue;
+        let cached = memo.templates.remove(&key);
+        // A closed template other than the edited one still has the text
+        // it was last read with; skip reading it from disk again.
+        let (node, regions) = match cached {
+            Some((node, regions))
+                if node.uri == *uri
+                    && !aliases.contains_key(&key)
+                    && edited.as_ref() != Some(&key) =>
+            {
+                (node, Some(regions))
+            }
+            cached => {
+                let Some(source) = backend.get_file_content_arc(uri) else {
+                    continue;
+                };
+                match cached {
+                    Some((node, regions))
+                        if node.uri == *uri && same_text(&node.source, &source) =>
+                    {
+                        (node, Some(regions))
+                    }
+                    _ => (
+                        Template::read(uri.clone(), source, &components, &mut memo.canonical),
+                        None,
+                    ),
+                }
+            }
         };
-        let node = Template::read(uri.clone(), source, &components);
+        if let Some(regions) = regions {
+            settled.insert(key.clone(), regions);
+        }
         pending.extend(node.calls.iter().map(|call| call.target.clone()));
         if backend.symbol_map_for(uri).is_none() {
             backend.update_ast(uri, &node.source);
@@ -179,6 +280,7 @@ pub(super) fn infer(
     let mut pending: VecDeque<_> = nodes.keys().cloned().collect();
     let mut queued: BTreeSet<_> = nodes.keys().cloned().collect();
     let mut visits: HashMap<String, usize> = HashMap::new();
+    let mut used = HashSet::new();
     while let Some(uri) = pending.pop_front() {
         queued.remove(&uri);
         let count = visits.entry(uri.clone()).or_default();
@@ -195,19 +297,46 @@ pub(super) fn infer(
                 scope.merge(data.clone());
             }
         }
-        if let Some(previous) = scopes.get(&uri) {
+        // Regions nest strictly inside their component tags, so they settle
+        // on the same result from any start.  Starting an unchanged template
+        // from the last refresh's regions lets its calls match the memo.
+        if *count == 1
+            && let Some(regions) = settled.remove(&uri)
+        {
+            scope.regions = regions;
+        } else if let Some(previous) = scopes.get(&uri) {
             scope.regions = previous.regions.clone();
         }
-        backend.publish_tempest_scope(&node.uri, &node.source, &scope);
+        backend.publish_tempest_scope(&node.uri, &scope);
         let mut regions = BTreeMap::new();
         for (index, call) in node.calls.iter().enumerate() {
             let Some(target) = nodes.get(&call.target) else {
                 continue;
             };
-            let mut data = arguments(backend, node, call, &scope);
-            let slots = slot_scopes(backend, target, &data);
-            data.slot_reads = slot_reads(node, target, call, &scope, &slots);
             let key = (uri.clone(), index);
+            let (data, slots) = match memo.calls.get(&key) {
+                Some(hit) if hit.matches(node, target, &scope) => {
+                    (hit.data.clone(), hit.slots.clone())
+                }
+                _ => {
+                    let mut data = arguments(backend, node, call, &scope);
+                    let slots = slot_scopes(backend, target, &data);
+                    data.slot_reads = slot_reads(node, target, call, &scope, &slots);
+                    memo.calls.insert(
+                        key.clone(),
+                        CallResult {
+                            caller: Arc::clone(&node.source),
+                            target_uri: target.uri.clone(),
+                            target: Arc::clone(&target.source),
+                            parent: scope.clone(),
+                            data: data.clone(),
+                            slots: slots.clone(),
+                        },
+                    );
+                    (data, slots)
+                }
+            };
+            used.insert(key.clone());
             if passed.get(&key) != Some(&data) {
                 passed.insert(key, data.clone());
                 if queued.insert(call.target.clone()) {
@@ -227,9 +356,20 @@ pub(super) fn infer(
                 pending.push_back(uri.clone());
             }
         }
-        backend.publish_tempest_scope(&node.uri, &node.source, &scope);
+        backend.publish_tempest_scope(&node.uri, &scope);
         scopes.insert(uri, scope);
     }
+    memo.calls.retain(|key, _| used.contains(key));
+    memo.templates = nodes
+        .into_iter()
+        .map(|(uri, node)| {
+            let regions = scopes
+                .get(&uri)
+                .map(|scope| scope.regions.clone())
+                .unwrap_or_default();
+            (uri, (node, regions))
+        })
+        .collect();
     scopes
 }
 
