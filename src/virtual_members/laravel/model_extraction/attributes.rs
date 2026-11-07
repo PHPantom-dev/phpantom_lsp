@@ -16,6 +16,52 @@ pub(super) fn extract_use_policy_attribute(
     extract_class_constant_attribute(attribute_lists, content, b"UsePolicy")
 }
 
+/// The observers a model's `#[ObservedBy]` attributes register and the
+/// resources its `#[UseResource]` and `#[UseResourceCollection]` name, as
+/// written.  `None` when it names none of them.
+pub(super) fn extract_related_class_attributes(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    content: &str,
+) -> Option<Box<crate::types::ModelRelatedClasses>> {
+    let mut related = crate::types::ModelRelatedClasses::default();
+    for attr in attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+    {
+        if last_segment(attr.name.value()) != b"ObservedBy" {
+            continue;
+        }
+        let Some(argument) = attr
+            .argument_list
+            .as_ref()
+            .and_then(|list| list.arguments.first())
+        else {
+            continue;
+        };
+        let span = argument.span();
+        let Some(text) = content.get(span.start.offset as usize..span.end.offset as usize) else {
+            continue;
+        };
+        // `#[ObservedBy(A::class)]` or `#[ObservedBy([A::class, B::class])]`.
+        let list = text
+            .trim()
+            .strip_prefix('[')
+            .and_then(|inner| inner.strip_suffix(']'))
+            .unwrap_or(text);
+        related.observers.extend(
+            list.split(',')
+                .filter_map(|item| item.trim().strip_suffix("::class"))
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string),
+        );
+    }
+    related.resource = extract_class_constant_attribute(attribute_lists, content, b"UseResource");
+    related.resource_collection =
+        extract_class_constant_attribute(attribute_lists, content, b"UseResourceCollection");
+    (related != crate::types::ModelRelatedClasses::default()).then(|| Box::new(related))
+}
+
 /// The `X` of the first `#[Name(X::class)]` attribute whose short name is
 /// `attr_name`.
 pub(super) fn extract_class_constant_attribute(

@@ -401,6 +401,12 @@ pub struct ClassInfo {
     /// not declare is no unknown member.  Like [`Self::is_readonly`], the
     /// inheritance merge propagates the flag down the parent chain.
     pub allows_dynamic_properties: bool,
+    /// Whether the class comes from the stub of an extension php-src does not
+    /// ship, whose parameter names follow the installed release of the
+    /// extension rather than the stub (see
+    /// [`crate::stubs::is_unbundled_extension_stub`]).  A named argument is
+    /// not checked against them.
+    pub from_unbundled_extension: bool,
     /// Deprecation message from the `@deprecated` PHPDoc tag.
     ///
     /// `None` means not deprecated. `Some("")` means deprecated without a

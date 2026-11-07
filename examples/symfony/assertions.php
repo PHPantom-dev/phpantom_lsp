@@ -354,10 +354,14 @@ check('The XML mapping maps team as an association to Team', $userMetadata->hasA
 check('The DQL in UserRepository::inTeam() joins Team and names its fields', $dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE t.name = :team'));
 check('A field the joined Team does not map fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE t.email = :team'));
 check('A variable nothing declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE x.name = :team'));
-check('UserRepository::searchInTeam() without a team builds DQL without t', $dqlParses('SELECT u FROM App\Entity\User u'));
+check('UserRepository::search() without a team builds DQL without t', $dqlParses('SELECT u FROM App\Entity\User u'));
 check('A variable used on a path that does not join it fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.name = :team'));
 check('UserRepository::inTeamByEmail() builds DQL that joins t through joinTeam()', $dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE t.name = :team ORDER BY u.email ASC'));
 check('A variable neither byEmail() nor joinTeam() declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.displayName = :name ORDER BY u.email ASC'));
+check('UserRepository::teamMembers() builds DQL that joins t through byEmailInTeam()', $dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE t.name = :team ORDER BY u.email ASC'));
+check('A variable no method along the chain declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE x.name = :team ORDER BY u.email ASC'));
+check('UserRepository::namedTeamMembers() builds DQL that joins the t onlyNamedTeams() uses', $dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE t.name IS NOT NULL ORDER BY u.email ASC'));
+check('A variable a method the builder is passed to uses, and nothing declares, fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.name IS NOT NULL ORDER BY u.email ASC'));
 (new SchemaTool($entityManager))->createSchema([
     $entityManager->getClassMetadata(User::class),
     $entityManager->getClassMetadata(Team::class),
@@ -384,6 +388,12 @@ $rows = $entityManager->createQueryBuilder()
     ->getQuery()
     ->getResult();
 check('displayNamesByEmail() gets a shape of the fields keyed by email', $rows === ['ada@example.com' => ['email' => 'ada@example.com', 'displayName' => 'Ada']]);
+$rows = $entityManager
+    ->createQuery('SELECT t.name, COUNT(u.email) AS members, UPPER(t.name) AS label, AVG(LENGTH(u.displayName)) AS nameLength FROM App\Entity\User u JOIN u.team t GROUP BY t.name')
+    ->getResult();
+check('teamSizes() gets the COUNT() as an int, UPPER() as a string, and AVG() on SQLite as a float', $rows === [['name' => 'Core', 'members' => 1, 'label' => 'CORE', 'nameLength' => 3.0]]);
+$dbal = Yaml::parseFile("$config/packages/doctrine.yaml")['doctrine']['dbal'];
+check('config/packages/doctrine.yaml connects with SQLite, which the assertions run on', str_starts_with($dbal['url'], 'sqlite:'));
 $users = $entityManager->createQuery('SELECT u FROM App\Entity\User u WHERE u.displayName = :name')
     ->setParameter('name', 'Ada')
     ->getResult();

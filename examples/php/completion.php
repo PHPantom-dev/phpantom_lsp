@@ -4519,7 +4519,7 @@ class ClassFilteringDemo extends Scaffolding\Model implements Scaffolding\Render
 
 function typeHintDemo(Scaffolding\User $user, string $name): string { return $user->displayName . $name; }
 
-function unionDemo(string|int $value, ?Scaffolding\User $maybe): string { return $maybe . $maybe->displayName; }
+function unionDemo(string|int $value, ?Scaffolding\User $maybe): string { return $value . $maybe?->displayName; }
 
 
 // ── $_SERVER Superglobal ────────────────────────────────────────────────────

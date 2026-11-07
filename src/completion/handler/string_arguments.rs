@@ -1,10 +1,10 @@
 //! Completion inside a string argument: array shape keys, the Laravel
 //! string keys (routes, config, views, translations, morph aliases, paths,
 //! route and command parameters, request input), Symfony service IDs and
-//! container parameters, Yii views, WordPress hook names, Eloquent relation and
-//! column names, the strings a parameter's declared type asks for, and
-//! method names in mock expectations, route-controller groups and array
-//! callables.
+//! container parameters, Yii views and DI definition keys, WordPress hook
+//! names, Eloquent relation and column names, the strings a parameter's
+//! declared type asks for, and method names in mock expectations,
+//! route-controller groups and array callables.
 
 use tower_lsp_server::gen_lsp_types::CompletionResponse;
 
@@ -143,6 +143,41 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Drupal render elements ──────────────────────────────
+        // `'#type' => '|'` and `$form['name']['#type'] = '|'`.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_drupal_render_element_completion(uri, content, position, code)
+        {
+            return Some(response);
+        }
+
+        // ── Drupal theme hooks ──────────────────────────────────
+        // `'#theme' => '|'`, a `#theme` or `#theme_wrappers` list, and the
+        // `#` keys of a render array whose `#theme` names a hook.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_drupal_theme_hook_completion(content, position, code)
+        {
+            return Some(response);
+        }
+
+        // ── Drupal libraries ────────────────────────────────────
+        // `'#attached' => ['library' => ['|']]` and
+        // `$build['#attached']['library'][] = '|'`.  Asked before the
+        // Symfony names, which would read an item after a comma as an
+        // argument of a call around the array.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_drupal_library_completion(uri, content, position, code)
+        {
+            return Some(response);
+        }
+
         // ── Symfony form options ────────────────────────────────
         // `$builder->add('email', EmailType::class, ['|' => …])`, wherever
         // the form component is used.
@@ -150,6 +185,17 @@ impl Backend {
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_symfony_form_option_completion(content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── Yii aliases ─────────────────────────────────────────
+        // `'@|'` in any string, before the names a call's string could
+        // otherwise be read as.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_alias_completion(content, position, code)
         {
             return Some(response);
         }
@@ -185,6 +231,17 @@ impl Backend {
             && self.is_yii_project()
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) = self.try_yii_view_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── Yii DI definitions ──────────────────────────────────
+        // The keys of a definition, `MailerInterface::class => ['|' …`,
+        // and of the arguments its method keys pass by name.
+        if self.is_yii_project()
+            && matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_definition_completion(content, position, code, ctx)
         {
             return Some(response);
         }

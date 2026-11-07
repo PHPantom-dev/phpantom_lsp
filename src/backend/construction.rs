@@ -92,6 +92,7 @@ impl BackendState {
             framework_references: framework::new_framework_reference_index(),
             framework_doctrine_repositories: framework::new_doctrine_repository_index(),
             doctrine_mapping_files,
+            doctrine_connections: crate::doctrine::connection::new_connection_index(),
             reference_index: reference_index::new_reference_index(),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),

@@ -518,7 +518,7 @@ impl Backend {
 
     /// The completion response offering those of `names` that start with
     /// what is typed between `prefix_start` and `cursor`.
-    fn symfony_names_response(
+    pub(crate) fn symfony_names_response(
         &self,
         kind: StringKeyKind,
         names: Vec<String>,
@@ -564,6 +564,18 @@ impl Backend {
                 if !self.is_drupal_project() {
                     return None;
                 }
+                if let Some(start) =
+                    crate::drupal::libraries::twig_library_name_start(content, cursor)
+                {
+                    return self.symfony_key_response(
+                        uri,
+                        StringKeyKind::DrupalLibrary,
+                        content,
+                        start,
+                        cursor,
+                        position,
+                    );
+                }
                 let start = crate::symfony::routes::drupal_twig_route_name_start(content, cursor)?;
                 return self.symfony_key_response(
                     uri,
@@ -604,6 +616,12 @@ impl Backend {
             }
             if let Some(start) = crate::twig::templates::twig_template_name_start(content, cursor) {
                 (StringKeyKind::TwigTemplate, start)
+            } else if let Some(start) = self
+                .is_drupal_project()
+                .then(|| crate::drupal::libraries::twig_library_name_start(content, cursor))
+                .flatten()
+            {
+                (StringKeyKind::DrupalLibrary, start)
             } else if let Some(start) = self
                 .is_in_drupal_web_root(uri)
                 .then(|| crate::symfony::routes::drupal_twig_route_name_start(content, cursor))
@@ -672,6 +690,14 @@ impl Backend {
                     crate::drupal::permissions::routing_permission_start(content, cursor)?,
                 ),
                 crate::drupal::DeclarationFile::Permissions => return None,
+                crate::drupal::DeclarationFile::Libraries => (
+                    StringKeyKind::DrupalLibrary,
+                    crate::drupal::libraries::libraries_file_name_start(content, cursor)?,
+                ),
+                crate::drupal::DeclarationFile::Info => (
+                    StringKeyKind::DrupalLibrary,
+                    crate::drupal::libraries::info_file_name_start(content, cursor)?,
+                ),
             }
         } else if !is_symfony {
             return None;

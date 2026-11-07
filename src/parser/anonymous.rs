@@ -101,6 +101,7 @@ impl Backend {
                 &anon.attribute_lists,
                 doc_ctx,
             ),
+            from_unbundled_extension: false,
             deprecation_message: None,
             deprecated_replacement: None,
             template_params: vec![],

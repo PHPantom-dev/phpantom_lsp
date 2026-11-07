@@ -411,6 +411,20 @@ fn extract_function_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                // `@vite(['resources/css/app.css', 'resources/js/app.js'])`
+                // names every entry point it loads.
+                Some(kind @ crate::symbol_map::StringKeyKind::ViteAsset) => {
+                    try_emit_laravel_string_spans_listed(
+                        kind,
+                        &func_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // A second argument points `mix()` at the manifest of
+                // another build directory, which is not the one read.
+                Some(crate::symbol_map::StringKeyKind::MixAsset)
+                    if func_call.argument_list.arguments.len() > 1 => {}
                 Some(kind) => {
                     try_emit_laravel_string_span(
                         kind,
@@ -457,6 +471,10 @@ fn extract_function_call<'a>(
             extract_from_expression(func_call.function, ctx, scope_start);
         }
     }
+    ctx.value_calls.push((
+        func_call.span().start.offset,
+        func_call.argument_list.left_parenthesis.end.offset,
+    ));
     let func_text = invoked_callee_text(func_call.function);
     if !func_text.is_empty() {
         emit_call_site(
@@ -511,6 +529,10 @@ fn extract_method_call<'a>(
         );
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
+        ctx.value_calls.push((
+            object.span().start.offset,
+            argument_list.left_parenthesis.end.offset,
+        ));
         emit_call_site(
             format!("{}->{}", subject_text, member_name),
             argument_list,
@@ -569,6 +591,12 @@ fn extract_static_method_call<'a>(
 
     if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
         let member_name = crate::atom::atom_bytes(ident.value);
+        record_dql_passes(
+            ident.span.start.offset,
+            &static_call.argument_list,
+            ctx,
+            scope_start,
+        );
         if member_name.eq_ignore_ascii_case("macro") {
             try_emit_laravel_macro_string_span(
                 &static_call.argument_list,
@@ -582,6 +610,10 @@ fn extract_static_method_call<'a>(
             &static_call.argument_list,
             ctx,
         );
+        ctx.value_calls.push((
+            static_call.span().start.offset,
+            static_call.argument_list.left_parenthesis.end.offset,
+        ));
         emit_call_site(
             format!("{}::{}", subject_text, member_name),
             &static_call.argument_list,

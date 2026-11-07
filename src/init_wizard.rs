@@ -101,6 +101,12 @@ fn prompt_diagnostic_toggles() -> Vec<&'static str> {
         diagnostics.push("partial-union-members = true");
     }
     if prompt_bool(
+        "Report exceptions a function throws without catching them or listing them in @throws?",
+        false,
+    ) {
+        diagnostics.push("unhandled-exceptions = true");
+    }
+    if prompt_bool(
         "Report a type mismatch when the only problem is a possible null or false?",
         false,
     ) {

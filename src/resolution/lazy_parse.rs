@@ -291,8 +291,10 @@ impl Backend {
         // Only patch classes loaded from phpstorm-stubs to avoid touching
         // user code.
         if self.is_phpstorm_stubs_uri(uri) {
+            let unbundled = crate::stubs::is_unbundled_extension_stub(uri, content);
             for class in &mut classes {
                 crate::stub_patches::apply_class_stub_patches(class);
+                class.from_unbundled_extension = unbundled;
             }
         } else if !self.is_external_stub_uri(uri) {
             // A stub path says what its classes are, so it is left as

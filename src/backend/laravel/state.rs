@@ -94,6 +94,13 @@ pub(crate) struct LaravelState {
     /// `$user->can()`, `$this->authorize()`, and `@can` check.  Empty for
     /// non-Laravel projects.  See [`virtual_members::laravel::gates`].
     pub(crate) gates: RwLock<laravel::LaravelGateIndex>,
+    /// Event listeners and model observers registered in service-provider
+    /// source (`Event::listen()`, `$listen`, `$observers`,
+    /// `Model::observe()`).  Built during `initialized` for Laravel projects
+    /// and refreshed when a registering file changes.  Powers the code
+    /// lenses that link a model to its observers and an event to its
+    /// listeners.  See [`virtual_members::laravel::events`].
+    pub(crate) events: RwLock<laravel::events::LaravelEventIndex>,
     /// Middleware aliases and groups: the framework's defaults, an HTTP
     /// kernel's, the ones `bootstrap/app.php` configures, and the ones a
     /// service provider registers on the router.  Built during
@@ -184,6 +191,7 @@ impl LaravelState {
             commands: GatedIndex::default(),
             morph_map: RwLock::default(),
             gates: RwLock::default(),
+            events: RwLock::default(),
             middleware: RwLock::default(),
             runtime_config_keys: RwLock::default(),
             macro_seeds: RwLock::default(),

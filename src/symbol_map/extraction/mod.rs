@@ -60,6 +60,11 @@ struct ExtractionCtx<'a> {
     call_sites: CallSites,
     /// `(start, args_start)` of each call written as a statement of its own.
     discarded_calls: Vec<(u32, u32)>,
+    /// `(start, args_start)` of each function, method, and static method
+    /// call.
+    value_calls: Vec<(u32, u32)>,
+    /// `args_start` of each call whose value nothing reads.
+    unused_result_calls: Vec<u32>,
     /// Ranges where `break` is valid (loops and `switch`).
     breakable_scopes: Vec<(u32, u32)>,
     /// Ranges where `continue` is valid (loops only).
@@ -104,6 +109,15 @@ struct ExtractionCtx<'a> {
     container_values: Vec<crate::symbol_map::ContainerValueSite>,
     /// The entity types the file's entity classes declare.
     entity_types: Vec<crate::symbol_map::EntityTypeSite>,
+    /// The classes the file's Drupal plugin declarations are written on.
+    drupal_plugin_classes: Vec<crate::symbol_map::PluginClassSite>,
+    /// Whether the file is a Drupal site's and says `#type`, the key a
+    /// render array names its element under.  Spares every other file's
+    /// arrays and assignments the look.
+    drupal_type_keys: bool,
+    /// Likewise for `#theme`, the key a render array names its theme hook
+    /// under, which `#theme_wrappers` starts with.
+    drupal_theme_keys: bool,
     drupal_route_patterns: Vec<String>,
     drupal_route_aliases: Vec<String>,
     /// The Drupal routes the file's `#[Route]` attributes declare.
@@ -162,6 +176,10 @@ struct ExtractionCtx<'a> {
     /// Drupal makes, such as `\Drupal::service()`, the entity types an
     /// entity class declares, and the entity type IDs its manager reads.
     drupal: bool,
+    /// Whether the file is a Drupal site's and says `#attached`, the only
+    /// key of a render array its libraries are attached under.  Spares
+    /// every other file's arrays and assignments the look.
+    drupal_attached: bool,
     /// Whether the project uses Twig, outside Symfony too.  Gates the
     /// `render()` calls recorded for the type engine to confirm as naming
     /// a template.
@@ -221,6 +239,8 @@ struct ExtractionCtx<'a> {
     yii_read_chains: Vec<(u32, u32)>,
     /// The routes the file declares.
     routes: Vec<crate::symbol_map::RouteSite>,
+    /// The classes the file's DI definitions bind and build.
+    yii_definitions: Vec<crate::symbol_map::YiiDefinitionSite>,
     /// Whether the project uses Doctrine, which gates reading DQL.
     doctrine: bool,
     /// The DQL variables and fields read so far (see [`doctrine_dql`]).
@@ -231,6 +251,11 @@ struct ExtractionCtx<'a> {
     dql_syntax_errors: Vec<crate::symbol_map::DqlSyntaxSite>,
     /// What each method declares on the builders it hands on.
     dql_builder_methods: Vec<crate::symbol_map::DqlBuilderMethod>,
+    /// The DQL variables declared in each body whose undeclared variables
+    /// wait on other methods.
+    dql_bodies: Vec<crate::symbol_map::DqlBody>,
+    /// The `getQuery()` calls made on builders other methods hand on.
+    dql_runs: Vec<crate::symbol_map::DqlRun>,
 }
 
 /// A variable token's name without its `$`.
@@ -347,10 +372,12 @@ mod twig;
 mod twig_context;
 mod wordpress;
 mod yii;
+mod yii_definitions;
 mod yii_routes;
 
 use class_like::*;
 use doctrine_dql::*;
+pub(crate) use doctrine_dql::{PathEvent, undeclared_on_some_path};
 use doctrine_fields::*;
 use drupal::*;
 use expressions::*;
@@ -365,6 +392,7 @@ use twig::*;
 use twig_context::*;
 use wordpress::*;
 use yii::*;
+use yii_definitions::*;
 use yii_routes::*;
 
 pub(crate) use drupal::{hook_invocation, is_entity_type_attribute};
@@ -527,6 +555,8 @@ fn extract_symbol_map_inner(
         template_defs: Vec::new(),
         call_sites: CallSites::default(),
         discarded_calls: Vec::new(),
+        value_calls: Vec::new(),
+        unused_result_calls: Vec::new(),
         breakable_scopes: Vec::new(),
         loop_scopes: Vec::new(),
         switch_scopes: Vec::new(),
@@ -545,6 +575,9 @@ fn extract_symbol_map_inner(
         twig_contexts: Vec::new(),
         container_values: Vec::new(),
         entity_types: Vec::new(),
+        drupal_plugin_classes: Vec::new(),
+        drupal_type_keys: drupal && memchr::memmem::find(content.as_bytes(), b"#type").is_some(),
+        drupal_theme_keys: drupal && memchr::memmem::find(content.as_bytes(), b"#theme").is_some(),
         drupal_route_patterns: Vec::new(),
         drupal_route_aliases: Vec::new(),
         drupal_routes: Vec::new(),
@@ -564,6 +597,7 @@ fn extract_symbol_map_inner(
         symfony,
         service_container,
         drupal,
+        drupal_attached: drupal && memchr::memmem::find(content.as_bytes(), b"#attached").is_some(),
         twig,
         uses_symfony_configurators: None,
         uses_symfony_routing_configurators: None,
@@ -582,11 +616,14 @@ fn extract_symbol_map_inner(
         names_yii_router: None,
         yii_read_chains: Vec::new(),
         routes: Vec::new(),
+        yii_definitions: Vec::new(),
         doctrine,
         dql: Default::default(),
         dql_aliases: Vec::new(),
         dql_syntax_errors: Vec::new(),
         dql_builder_methods: Vec::new(),
+        dql_bodies: Vec::new(),
+        dql_runs: Vec::new(),
     };
 
     note_dql_body(0, program.statements.as_slice(), &mut ctx);
@@ -703,6 +740,7 @@ fn extract_symbol_map_inner(
     ctx.discarded_calls
         .sort_unstable_by_key(|&(_, args_start)| args_start);
     ctx.discarded_calls.shrink_to_fit();
+    let used_result_calls = used_result_calls(ctx.value_calls, ctx.unused_result_calls);
     ctx.breakable_scopes.sort_by_key(|s| s.0);
     ctx.loop_scopes.sort_by_key(|s| s.0);
     ctx.switch_scopes.sort_by_key(|s| s.0);
@@ -711,6 +749,7 @@ fn extract_symbol_map_inner(
     ctx.morph_column_sites.sort_by_key(|s| s.start);
     ctx.container_values.sort_by_key(|s| s.start);
     ctx.entity_types.sort_by_key(|s| s.start);
+    ctx.drupal_plugin_classes.sort_by_key(|s| s.start);
     ctx.drupal_hooks.sort_by_key(|s| s.start);
     ctx.drupal_hooks.dedup_by_key(|s| s.start);
     ctx.routes.shrink_to_fit();
@@ -740,6 +779,7 @@ fn extract_symbol_map_inner(
         template_defs: ctx.template_defs,
         call_sites: ctx.call_sites,
         discarded_calls: ctx.discarded_calls,
+        used_result_calls,
         breakable_scopes: ctx.breakable_scopes,
         loop_scopes: ctx.loop_scopes,
         switch_scopes: ctx.switch_scopes,
@@ -754,15 +794,19 @@ fn extract_symbol_map_inner(
         twig_contexts: ctx.twig_contexts,
         container_values: ctx.container_values,
         entity_types: ctx.entity_types,
+        drupal_plugin_classes: ctx.drupal_plugin_classes,
         drupal_route_patterns: ctx.drupal_route_patterns,
         drupal_route_aliases: ctx.drupal_route_aliases,
         drupal_routes: ctx.drupal_routes,
         drupal_hooks: ctx.drupal_hooks,
         drupal_computed_hooks: ctx.drupal_computed_hooks,
         routes: ctx.routes,
+        yii_definitions: ctx.yii_definitions,
         dql_aliases: ctx.dql_aliases,
         dql_syntax_errors: ctx.dql_syntax_errors,
         dql_builder_methods: ctx.dql_builder_methods,
+        dql_bodies: ctx.dql_bodies,
+        dql_runs: ctx.dql_runs,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx
             .route_imports
@@ -772,4 +816,18 @@ fn extract_symbol_map_inner(
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
         source_hash: None,
     }
+}
+
+/// The calls of `value_calls` that are not in `unused`: those whose value
+/// something reads, sorted.
+fn used_result_calls(mut value_calls: Vec<(u32, u32)>, mut unused: Vec<u32>) -> Vec<(u32, u32)> {
+    value_calls.sort_unstable_by_key(|&(_, args_start)| args_start);
+    unused.sort_unstable();
+    let mut unused = unused.into_iter().peekable();
+    value_calls.retain(|&(_, call)| {
+        while unused.next_if(|&u| u < call).is_some() {}
+        unused.peek() != Some(&call)
+    });
+    value_calls.shrink_to_fit();
+    value_calls
 }

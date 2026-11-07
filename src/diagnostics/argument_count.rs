@@ -2,8 +2,8 @@
 //!
 //! Walk the precomputed [`CallSite`] entries in the symbol map and flag
 //! every call that passes too few or too many arguments relative to the
-//! resolved callable's parameter list, and every named argument a
-//! constructor (or an attribute, which calls one) has no parameter for.
+//! resolved callable's parameter list, and every named argument the
+//! callable has no parameter for.
 //!
 //! Diagnostics use `Severity::Error` because passing the wrong number
 //! of arguments crashes at runtime with a `TypeError`.
@@ -320,15 +320,25 @@ impl Backend {
             let actual_args = call_site.arg_count;
 
             // ── Unknown named arguments ─────────────────────────────
-            // A constructor is never routed through `__call`, so a name its
-            // parameters do not declare throws, unless a variadic parameter
-            // collects it.  Attributes are recorded as `new` call sites, so
-            // `#[Length(mni: 3)]` is checked here too.
-            if expr.starts_with("new ")
+            // A name no parameter declares throws, unless a variadic
+            // parameter collects it.  Attributes are recorded as `new` call
+            // sites, so `#[Length(mni: 3)]` is checked here too.
+            if resolved.binds_named_args
+                && !call_site.named_arg_indices.is_empty()
                 && !resolved.reads_func_args
                 && !params.iter().any(|p| p.is_variadic)
+                && !resolved.owner_class.is_some_and(|owner| {
+                    self.method_declared_by_unbundled_extension(&owner, expr, file_ctx)
+                })
             {
-                self.report_unknown_named_arguments(uri, content, &call_site, params, out);
+                self.report_unknown_named_arguments(
+                    uri,
+                    content,
+                    &call_site,
+                    params,
+                    &resolved.overloads,
+                    out,
+                );
             }
 
             let mut required_count = params.iter().filter(|p| p.is_required).count() as u32;
@@ -475,6 +485,40 @@ impl Backend {
         }
     }
 
+    /// Whether the method `expr` calls on `owner` is declared by the stub
+    /// of an extension php-src does not ship, whose parameter names follow
+    /// the installed release rather than the stub.
+    ///
+    /// Only asked of a call that passes a named argument, so the ancestor
+    /// walk stays off the path every other call takes.
+    fn method_declared_by_unbundled_extension(
+        &self,
+        owner: &str,
+        expr: &str,
+        file_ctx: &crate::types::FileContext,
+    ) -> bool {
+        let method = if expr.starts_with("new ") {
+            "__construct"
+        } else if expr.starts_with('(') {
+            "__invoke"
+        } else {
+            let after_arrow = expr.rsplit("->").next().unwrap_or(expr);
+            after_arrow.rsplit("::").next().unwrap_or(after_arrow)
+        };
+        let loader = self.resolved_class_loader(file_ctx);
+        let Some(class) = loader(crate::class_lookup::Fqn::new(owner)) else {
+            return false;
+        };
+        if class.get_method_ci(method).is_some() {
+            return class.from_unbundled_extension;
+        }
+        let declares = |c: &crate::types::ClassInfo| c.get_method_ci(method).is_some();
+        crate::inheritance::find_declaring_ancestor(&class, &loader, &declares)
+            .map_or(class.from_unbundled_extension, |(_, declaring)| {
+                declaring.from_unbundled_extension
+            })
+    }
+
     /// Report each named argument of `call_site` that none of `params` is
     /// named after.
     fn report_unknown_named_arguments(
@@ -483,17 +527,22 @@ impl Backend {
         content: &str,
         call_site: &crate::symbol_map::CallSite<'_>,
         params: &[crate::types::ParameterInfo],
+        overloads: &[Vec<crate::types::ParameterInfo>],
         out: &mut Vec<Diagnostic>,
     ) {
+        let declares = |params: &[crate::types::ParameterInfo], name: &str| {
+            params
+                .iter()
+                .any(|p| p.is_variadic || p.name.strip_prefix('$').unwrap_or(&p.name) == name)
+        };
         for (name, &index) in call_site
             .named_arg_names
             .iter()
             .zip(call_site.named_arg_indices)
         {
-            if params
-                .iter()
-                .any(|p| p.name.strip_prefix('$').unwrap_or(&p.name) == name)
-            {
+            // An overloaded built-in accepts the name when any of its
+            // signatures does.
+            if declares(params, name) || overloads.iter().any(|o| declares(o, name)) {
                 continue;
             }
             let Some(&start) = call_site.arg_offsets.get(index as usize) else {

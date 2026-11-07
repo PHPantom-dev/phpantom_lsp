@@ -75,6 +75,7 @@ use Yiisoft\Yii\View\Renderer\WebViewRenderer;
 final class ConsumerController
 {
     private WebViewRenderer $viewRenderer;
+    private string $logs = '@';
 
     public function __construct(WebViewRenderer $viewRenderer)
     {
@@ -130,6 +131,21 @@ final class ConsumerAction
 }
 "#;
 
+/// A DI configuration file binding the URL generator to the wrapper, the
+/// way `yiisoft/demo-blog` binds its own.
+const DI_CONSUMER_PHP: &str = r#"<?php
+use App\Shared\UrlGenerator;
+use Yiisoft\Router\UrlGeneratorInterface;
+
+return [
+    UrlGeneratorInterface::class => [
+        'class' => UrlGenerator::class,
+        '__construct()' => ['g' => 1],
+        'gen' => [],
+    ],
+];
+"#;
+
 fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -140,7 +156,8 @@ fn rt() -> tokio::runtime::Runtime {
 /// The files of a mid-sized Yii application: controllers that render the
 /// views of a directory each, the views, and a partial each view renders,
 /// and grouped routes, an action class per route that reads its route's
-/// arguments, and a wrapper around the URL generator.
+/// arguments, a wrapper around the URL generator, and a DI definition
+/// that binds it.
 fn generate_application() -> Vec<(String, String)> {
     let mut files = Vec::new();
 
@@ -213,6 +230,10 @@ fn generate_application() -> Vec<(String, String)> {
     files.push((
         "src/Web/ConsumerAction.php".to_string(),
         ROUTE_CONSUMER_PHP.to_string(),
+    ));
+    files.push((
+        "config/di/consumer.php".to_string(),
+        DI_CONSUMER_PHP.to_string(),
     ));
     files
 }
@@ -288,6 +309,7 @@ fn bench_yii_name_completion(c: &mut Criterion) {
     let template_uri =
         Uri::from_file_path(dir.path().join("resources/views/section1/consumer.php")).unwrap();
     let route_uri = Uri::from_file_path(dir.path().join("src/Web/ConsumerAction.php")).unwrap();
+    let di_uri = Uri::from_file_path(dir.path().join("config/di/consumer.php")).unwrap();
 
     // (benchmark, document, its text, the literal to complete inside, a
     // name the completion must offer)
@@ -313,6 +335,7 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             "render(''",
             "_partial",
         ),
+        ("alias_name", &view_uri, VIEW_CONSUMER_PHP, "'@'", "@views"),
         (
             "route_name",
             &route_uri,
@@ -340,6 +363,20 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             ROUTE_CONSUMER_PHP,
             "RouteArgument(''",
             "slug",
+        ),
+        (
+            "definition_key",
+            &di_uri,
+            DI_CONSUMER_PHP,
+            "'gen'",
+            "generate()",
+        ),
+        (
+            "definition_argument",
+            &di_uri,
+            DI_CONSUMER_PHP,
+            "['g'",
+            "generator",
         ),
     ];
 

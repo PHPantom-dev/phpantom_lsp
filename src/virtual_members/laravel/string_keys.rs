@@ -72,6 +72,10 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::Middleware => resolve_middleware_definitions(backend, key),
         StringKeyKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
         StringKeyKind::Env => super::env_vars::resolve_env_definitions(backend, key),
+        StringKeyKind::Asset
+        | StringKeyKind::MixAsset
+        | StringKeyKind::ViteAsset
+        | StringKeyKind::InertiaPage => super::resolve_asset_definitions(backend, *kind, key),
         StringKeyKind::ServiceId
         | StringKeyKind::ContainerParameter
         | StringKeyKind::SymfonyRoute
@@ -86,17 +90,23 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::DrupalEntityType
         | StringKeyKind::DrupalRoute
         | StringKeyKind::DrupalRouteParameter
-        | StringKeyKind::DrupalPermission => backend.symfony_declaration_locations(*kind, key),
+        | StringKeyKind::DrupalPermission
+        | StringKeyKind::DrupalLibrary => backend.symfony_declaration_locations(*kind, key),
         StringKeyKind::DrupalHook => backend.drupal_hook_documentation(key),
         StringKeyKind::DrupalConfigName => backend.drupal_config_locations(key),
         StringKeyKind::DrupalConfigKey => backend.drupal_config_key_locations(key),
+        StringKeyKind::DrupalRenderElement => backend.drupal_render_element_definitions(key),
+        StringKeyKind::DrupalThemeHook => backend.drupal_theme_hook_definitions(key),
+        StringKeyKind::DrupalThemeHookVariable => backend.drupal_theme_variable_definitions(key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
+        StringKeyKind::YiiAlias => backend.yii_alias_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
         StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
             backend.twig_callable_definitions(*kind, key)
         }
         StringKeyKind::YiiRouteArgument => backend.yii_route_argument_locations(key),
+        StringKeyKind::YiiDefinitionArgument => backend.yii_definition_argument_locations(key),
         StringKeyKind::WordPressHook => backend.wordpress_hook_definitions(key),
     }
 }
@@ -321,7 +331,11 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::GateAbility
         | StringKeyKind::Middleware
         | StringKeyKind::ContainerBinding
-        | StringKeyKind::Env => find_string_key_usages(kind, key, backend, snapshot, true),
+        | StringKeyKind::Env
+        | StringKeyKind::Asset
+        | StringKeyKind::MixAsset
+        | StringKeyKind::ViteAsset
+        | StringKeyKind::InertiaPage => find_string_key_usages(kind, key, backend, snapshot, true),
         // A Symfony declaration is a span in a configuration file's (or a
         // template's) map like any use, so the usages already hold it.
         StringKeyKind::ServiceId
@@ -338,7 +352,9 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::DrupalEntityType
         | StringKeyKind::DrupalRoute
         | StringKeyKind::DrupalRouteParameter
-        | StringKeyKind::DrupalPermission => {
+        | StringKeyKind::DrupalPermission
+        | StringKeyKind::DrupalRenderElement
+        | StringKeyKind::DrupalLibrary => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // A documented pattern stands for every hook that fills it in.
@@ -349,13 +365,28 @@ pub(crate) fn find_laravel_string_key_references(
         // its handler's routes a route argument, and are added below.  A
         // route's name may be put together by the imports that load it, or
         // declared by a bundle's routing file outside the workspace, so its
-        // declarations are too.
+        // declarations are too, as are a theme hook's and its variables',
+        // which `hook_theme()` arrays declare.
         StringKeyKind::TranslationDomain
         | StringKeyKind::YiiRouteArgument
+        | StringKeyKind::YiiDefinitionArgument
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::DrupalConfigName
-        | StringKeyKind::DrupalConfigKey => {
+        | StringKeyKind::DrupalConfigKey
+        | StringKeyKind::DrupalThemeHook
+        | StringKeyKind::DrupalThemeHookVariable => {
             find_string_key_usages(kind, key, backend, snapshot, false)
+        }
+        // The string that declares an alias is a span like any use, but
+        // only the configuration says it declares one.
+        StringKeyKind::YiiAlias => {
+            let declared = backend.yii_alias_definitions(key);
+            let mut locations = find_string_key_usages(kind, key, backend, snapshot, true);
+            locations.retain(|location| !declared.contains(location));
+            if include_declaration {
+                locations.extend(declared);
+            }
+            return locations;
         }
         // Two spellings of one view share no key, so the renders are found
         // by the file they name rather than in the key's snapshot.

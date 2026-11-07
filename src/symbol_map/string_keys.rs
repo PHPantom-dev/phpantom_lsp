@@ -69,6 +69,21 @@ pub(crate) enum StringKeyKind {
     /// `Env::get('APP_NAME')` reads, resolving to the line that declares it
     /// in the project's `.env`.
     Env,
+    /// A public asset: the path under `public/` that `asset('css/app.css')`,
+    /// `secure_asset()`, `URL::asset()`, and `url()->asset()` link to.
+    Asset,
+    /// A Laravel Mix asset: the key of `public/mix-manifest.json` that
+    /// `mix('js/app.js')` looks up.
+    MixAsset,
+    /// A Vite entry point or asset: the source file, relative to the project
+    /// root, that `@vite('resources/js/app.js')`, `Vite::asset()`, and
+    /// `Vite::content()` name.
+    ViteAsset,
+    /// An Inertia page: the component under the page directories
+    /// `config/inertia.php` configures (`resources/js/Pages` by default)
+    /// that `Inertia::render('Users/Index')`, `inertia()`, and
+    /// `Route::inertia()` render, named without its extension.
+    InertiaPage,
     /// A Symfony service ID: the key a service is declared under in
     /// `services.yaml`, `services.xml`, or a PHP configurator's `->set()`,
     /// and the string `$container->get()`, `service()`, or
@@ -155,6 +170,16 @@ pub(crate) enum StringKeyKind {
     /// under the routes that dispatch to that handler, whose paths declare
     /// it.
     YiiRouteArgument,
+    /// A Yii path alias: the `@name` a string starts with (`'@runtime/logs'`
+    /// names `@runtime`), in any string of a Yii project.  Declared under
+    /// `params['yiisoft/aliases']['aliases']` (see `yii::aliases`).
+    YiiAlias,
+    /// An argument a Yii DI definition passes by name, `'transport'` in
+    /// `'__construct()' => ['transport' => …]` or in the arguments of a
+    /// `'setLogger()'` key, keyed by the class and the method as well as the
+    /// name (see `yii::definitions::definition_argument_key`).  Declared by
+    /// the method's parameter of that name.
+    YiiDefinitionArgument,
     /// A WordPress hook name: declared by each place that fires it (a
     /// `do_action()`, an `apply_filters()`, and their `_ref_array` and
     /// `_deprecated` forms), and read by `add_action()`, `add_filter()`, and
@@ -203,6 +228,27 @@ pub(crate) enum StringKeyKind {
     /// object's `get()`, `set()`, and `clear()`, the part after the `:` of
     /// a `#config_target`, and a `ConfigTarget`'s property path.
     DrupalConfigKey,
+    /// A Drupal render element name: declared by the ID of a class's
+    /// `#[RenderElement]` or `#[FormElement]` attribute, or of the
+    /// annotation older code uses, and read by the `#type` of a render
+    /// array.
+    DrupalRenderElement,
+    /// A Drupal theme hook name: declared by a key of the array a
+    /// `hook_theme()` implementation returns (see `drupal::theme_hooks`),
+    /// and read by a render array's `#theme` and `#theme_wrappers`.  A
+    /// suggestion (`node__article`) reads as the hook it falls back to.
+    DrupalThemeHook,
+    /// A variable of a Drupal theme hook, keyed by the hook as written as
+    /// well as the name (see `drupal::theme_hooks::theme_variable_key`):
+    /// declared by a key of the hook's `variables`, and read by the `#`
+    /// keys of a render array whose `#theme` names the hook.
+    DrupalThemeHookVariable,
+    /// A Drupal library, `<extension>/<name>`: declared by a top-level key
+    /// of an extension's libraries file, and read by the `library` list of
+    /// a render array's `#attached`, a template's `attach_library()`, the
+    /// `dependencies` of a library, and the `libraries` of a theme's info
+    /// file (see `drupal::libraries`).
+    DrupalLibrary,
 }
 
 impl StringKeyKind {
@@ -235,7 +281,11 @@ impl StringKeyKind {
             | Self::GateAbility
             | Self::ContainerBinding
             | Self::Middleware
-            | Self::Env => KeyFramework::Laravel,
+            | Self::Env
+            | Self::Asset
+            | Self::MixAsset
+            | Self::ViteAsset
+            | Self::InertiaPage => KeyFramework::Laravel,
             Self::ServiceId | Self::ContainerParameter => KeyFramework::ServiceContainer,
             Self::SymfonyRoute
             | Self::SymfonyTranslation
@@ -249,7 +299,11 @@ impl StringKeyKind {
             | Self::TwigFilter
             | Self::TwigFunction
             | Self::TwigVariable => KeyFramework::Twig,
-            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument => KeyFramework::Yii,
+            Self::YiiView
+            | Self::YiiRoute
+            | Self::YiiRouteArgument
+            | Self::YiiAlias
+            | Self::YiiDefinitionArgument => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
             Self::DrupalEntityType
             | Self::DrupalRoute
@@ -257,7 +311,11 @@ impl StringKeyKind {
             | Self::DrupalHook
             | Self::DrupalPermission
             | Self::DrupalConfigName
-            | Self::DrupalConfigKey => KeyFramework::Drupal,
+            | Self::DrupalConfigKey
+            | Self::DrupalRenderElement
+            | Self::DrupalThemeHook
+            | Self::DrupalThemeHookVariable
+            | Self::DrupalLibrary => KeyFramework::Drupal,
         }
     }
 
@@ -441,11 +499,12 @@ impl StringKeyDependency {
             .iter()
             .any(|alias| name.eq_ignore_ascii_case(alias))
             || match name.len() {
-                3 => name.eq_ignore_ascii_case("App"),
+                3 => name.eq_ignore_ascii_case("App") || name.eq_ignore_ascii_case("URL"),
                 4 => {
                     name.eq_ignore_ascii_case("Gate")
                         || name.eq_ignore_ascii_case("Lang")
                         || name.eq_ignore_ascii_case("View")
+                        || name.eq_ignore_ascii_case("Vite")
                 }
                 5 => name.eq_ignore_ascii_case("Route"),
                 6 => name.eq_ignore_ascii_case("Config"),
@@ -629,12 +688,14 @@ pub(crate) enum TwigCallableTarget {
 }
 
 /// The variables one render of a Twig template hands it: the keys of a
-/// `render()`'s context array, of a templated email's `context()`, or of
-/// what a `#[Template]` action returns.
+/// `render()`'s context array, of a templated email's `context()`, of
+/// what a `#[Template]` action returns, or the `#` keys of a Drupal render
+/// array, without the `#`.
 ///
 /// Keyed by the template name it renders, whose span (or typed receiver
 /// site, for a `render()` only its receiver's type confirms) starts at
-/// [`Self::template_start`].
+/// [`Self::template_start`]; a render array's by the theme hook its
+/// `#theme` names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TwigContextSite {
     pub template_start: u32,
@@ -743,6 +804,17 @@ pub(crate) struct EntityTypeSite {
     pub storage: Option<crate::atom::Atom>,
 }
 
+/// The class a Drupal plugin declaration is written on, such as a render
+/// element's.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PluginClassSite {
+    /// Byte offset of the plugin ID's first character, matching the
+    /// declaration's [`SymbolKind::StringKey`] span.
+    pub start: u32,
+    /// The class the attribute or annotation is written on.
+    pub class: crate::atom::Atom,
+}
+
 /// The value a container declaration gives, read by the kind of name it
 /// turns out to declare.
 #[derive(Debug, Clone, PartialEq)]
@@ -759,6 +831,17 @@ pub(crate) enum ContainerValue {
     Parent(Atom),
     /// The type of a parameter's value, generalized (`'en'` is a `string`).
     Type(crate::php_type::PhpType),
+}
+
+/// A class a Yii DI definition names: the ID a definition is keyed by
+/// (`MailerInterface::class => …`), or the class it builds
+/// (`'class' => Mailer::class`).  The range is that of the class's name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct YiiDefinitionSite {
+    pub start: u32,
+    pub end: u32,
+    /// The class, fully qualified, without the leading `\`.
+    pub class: Atom,
 }
 
 // ─── Routes ─────────────────────────────────────────────────────────────────

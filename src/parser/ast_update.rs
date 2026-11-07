@@ -80,6 +80,9 @@ pub(crate) struct AstIndexUpdate {
     /// The lowering a template was parsed as, published together with
     /// `symbol_map` because the map's offsets index its virtual PHP.
     pub(super) template: Option<TemplateLowering>,
+    /// The database connections the file configures through
+    /// `DriverManager::getConnection()`.
+    pub(super) doctrine_connections: Vec<crate::doctrine::connection::Connection>,
 }
 
 /// A template lowered to the virtual PHP everything else reads it as,
@@ -163,6 +166,11 @@ impl Backend {
         // provider that registers abilities and policies.  Cheap no-op for
         // files that mention neither `Gate` nor `$policies`.
         self.refresh_laravel_gates(uri, content);
+
+        // Keep the listener and observer registrations coherent with edits
+        // to the providers that register them.  Cheap no-op for files that
+        // mention neither `listen` nor `observe`.
+        self.refresh_laravel_events(uri, content);
 
         // Keep the middleware aliases and groups coherent with edits to the
         // files that register them.  Cheap no-op for files that spell none
@@ -476,11 +484,14 @@ impl Backend {
         // session.  A phpstorm-stubs checkout under a stub path has the
         // same gaps, so it is corrected the same way.
         if self.is_phpstorm_stubs_uri(uri) {
+            let unbundled = crate::stubs::is_unbundled_extension_stub(uri, content);
             for func in &mut functions {
                 crate::stub_patches::apply_function_stub_patches(func);
+                func.from_unbundled_extension = unbundled;
             }
             for (cls, _, _) in &mut decls.classes_with_ns {
                 crate::stub_patches::apply_class_stub_patches(cls);
+                cls.from_unbundled_extension = unbundled;
             }
         } else if !self.is_external_stub_uri(uri) {
             for func in &mut functions {
@@ -611,6 +622,11 @@ impl Backend {
         }
         let symbol_map = Arc::new(symbol_map);
         let pest_uses = crate::pest::file_uses(program.statements.iter(), &owned_resolved);
+        let doctrine_connections = if self.configures_project_connection(uri, content) {
+            crate::doctrine::connection::php_connections(program, &owned_resolved)
+        } else {
+            Vec::new()
+        };
 
         // For files without any explicit namespace blocks, synthesize a
         // single span covering the entire file with the detected namespace
@@ -639,7 +655,25 @@ impl Backend {
             defines,
             symbol_map,
             template: None,
+            doctrine_connections,
         }
+    }
+
+    /// Whether `content`, the text of `uri`, may configure the database
+    /// connection of a Doctrine project: a file of the project's own that
+    /// calls `getConnection()`.  An installed package's connections are
+    /// those its users configure.
+    fn configures_project_connection(&self, uri: &str, content: &str) -> bool {
+        self.is_doctrine_project()
+            && uri.starts_with("file:")
+            && !self.is_external_stub_uri(uri)
+            && crate::doctrine::connection::may_configure_connection(content)
+            && !self
+                .workspace
+                .vendor_uri_prefixes
+                .lock()
+                .iter()
+                .any(|prefix| uri.starts_with(prefix.as_str()))
     }
 }
 

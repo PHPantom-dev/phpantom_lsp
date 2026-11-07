@@ -4,7 +4,8 @@
 //! annotations, the links between a Doctrine entity and its repository,
 //! the links between a Messenger message and its handlers, the links
 //! between a class and its tests, the routes that dispatch to a Laravel
-//! controller method, and the renders of a Yii template.
+//! controller method, the classes and files a Laravel model, event or
+//! listener is paired with, and the renders of a Yii template.
 
 use std::sync::Arc;
 
@@ -112,7 +113,9 @@ impl Backend {
     /// entity and its repository, in a Symfony project the ones that
     /// link a Messenger message and its handlers, the ones that link a
     /// class and its tests, and in a Laravel project the routes that
-    /// dispatch to each controller method.
+    /// dispatch to each controller method and the links between a model
+    /// and its factory, policy, observers, migrations and resources, and
+    /// between an event and its listeners.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
             let map = self.symbols.uri_classes_index.read();
@@ -129,6 +132,7 @@ impl Backend {
         let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let is_doctrine = self.is_doctrine_project();
         let is_symfony = self.is_symfony_project();
+        let is_yii = self.is_yii_project();
         // Discovering the routes reads every user file's symbol map, which
         // waits for the workspace index, so like the implementation lenses
         // they appear once indexing is done and the client re-pulls.
@@ -176,6 +180,12 @@ impl Backend {
 
             if is_symfony {
                 self.push_messenger_lenses(uri, class, &index, &mut lenses);
+            }
+
+            self.push_laravel_related_lenses(uri, class, &index, &mut lenses);
+
+            if is_yii {
+                lenses.extend(self.build_yii_definition_lens(uri, class, &index));
             }
 
             let route_actions = routes
@@ -859,6 +869,88 @@ impl Backend {
                 push(class.keyword_offset, title, location);
             }
         }
+    }
+
+    /// The lenses linking a Laravel class to the classes and files it is
+    /// paired with (a model's factory, policy, observers, migrations and
+    /// resources, an event's listeners, and the way back), one per kind of
+    /// link.  A link that belongs to a method sits on the method's line.
+    fn push_laravel_related_lenses(
+        &self,
+        uri: &str,
+        class: &ClassInfo,
+        index: &LineIndex,
+        lenses: &mut Vec<CodeLens>,
+    ) {
+        let links = self.laravel_related_links(class);
+        if links.is_empty() {
+            return;
+        }
+        // Group by line and kind, keeping the order the links came in.
+        type Targets = Vec<(String, Location)>;
+        let mut groups: Vec<(u32, (&str, &str), Targets)> = Vec::new();
+        for link in links {
+            let offset = link
+                .anchor
+                .and_then(|anchor| class.methods.iter().find(|method| method.name == anchor))
+                .map_or(class.keyword_offset, |method| method.name_offset);
+            match groups
+                .iter_mut()
+                .find(|(known, kind, _)| *known == offset && *kind == link.kind)
+            {
+                Some((_, _, targets)) => {
+                    if !targets.iter().any(|(_, known)| *known == link.location) {
+                        targets.push((link.label, link.location));
+                    }
+                }
+                None => groups.push((offset, link.kind, vec![(link.label, link.location)])),
+            }
+        }
+        for (offset, (singular, plural), targets) in groups {
+            let line = index.line_of(offset as usize);
+            let position = Position {
+                line: line as u32,
+                character: line_indent(index, line),
+            };
+            let title = match targets.as_slice() {
+                [(label, _)] => format!("{singular}: {label}"),
+                _ => format!("{} {plural}", targets.len()),
+            };
+            lenses.extend(self.targets_lens(uri, position, title, targets));
+        }
+    }
+
+    /// The lens on a class that Yii DI definitions bind or build, which
+    /// goes to them.  `None` when no definition names the class.
+    fn build_yii_definition_lens(
+        &self,
+        uri: &str,
+        class: &ClassInfo,
+        index: &LineIndex,
+    ) -> Option<CodeLens> {
+        if class.keyword_offset == 0 {
+            return None;
+        }
+        let targets: Vec<(String, Location)> = self
+            .yii_definition_locations(class.fqn().as_str())
+            .into_iter()
+            .map(|location| {
+                let label = self
+                    .workspace_relative_path(location.uri.as_str())
+                    .unwrap_or_else(|| location.uri.to_string());
+                (label, location)
+            })
+            .collect();
+        let title = match targets.as_slice() {
+            [(label, _)] => format!("DI definition: {label}"),
+            _ => format!("{} DI definitions", targets.len()),
+        };
+        let line = index.line_of(class.keyword_offset as usize);
+        let position = Position {
+            line: line as u32,
+            character: line_indent(index, line),
+        };
+        self.targets_lens(uri, position, title, targets)
     }
 
     /// Build the "which tests cover this class" lens for a class

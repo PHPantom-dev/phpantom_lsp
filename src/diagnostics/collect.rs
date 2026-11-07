@@ -21,10 +21,13 @@ struct SlowCollector {
     runs_in: Framework,
     /// Whether a finding can depend on any function body in the file, so
     /// that an edit to one body can change a diagnostic outside it.  Such
-    /// a collector reports under its own name as the diagnostic code, and
-    /// a partial pass runs it over the whole file instead of the edited
-    /// region (see [`Backend::collect_slow_diagnostics_reading_every_body`]).
+    /// a collector reports under its own name as the diagnostic code, or
+    /// one of `codes`, and a partial pass runs it over the whole file
+    /// instead of the edited region (see
+    /// [`Backend::collect_slow_diagnostics_reading_every_body`]).
     reads_every_body: bool,
+    /// The diagnostic codes the collector reports under besides its name.
+    codes: &'static [&'static str],
 }
 
 /// The projects a collector has anything to report in.
@@ -42,6 +45,7 @@ const fn always(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
         collect,
         runs_in: Framework::Any,
         reads_every_body: false,
+        codes: &[],
     }
 }
 
@@ -51,6 +55,7 @@ const fn laravel(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
         collect,
         runs_in: Framework::Laravel,
         reads_every_body: false,
+        codes: &[],
     }
 }
 
@@ -84,12 +89,24 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_discarded_result_diagnostics_with_context,
     ),
     always(
+        "void_result_used",
+        Backend::collect_void_result_diagnostics_with_context,
+    ),
+    always(
         "type_mismatch_argument",
         Backend::collect_argument_type_diagnostics_with_context,
     ),
     always(
+        "invalid_string_conversion",
+        Backend::collect_string_conversion_diagnostics_with_context,
+    ),
+    always(
         "type_mismatch_return",
         Backend::collect_return_type_diagnostics_with_context,
+    ),
+    always(
+        "missing_return",
+        Backend::collect_missing_return_diagnostics,
     ),
     always(
         "type_mismatch_property",
@@ -105,6 +122,20 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         collect: Backend::collect_uninitialized_property_diagnostics_with_context,
         runs_in: Framework::Any,
         reads_every_body: true,
+        codes: &[],
+    },
+    // Whether a private member is used can be decided by any method.
+    SlowCollector {
+        name: "unused_private_member",
+        collect: Backend::collect_unused_private_member_diagnostics,
+        runs_in: Framework::Any,
+        reads_every_body: true,
+        codes: &[
+            super::unused_private_members::UNUSED_PROPERTY_CODE,
+            super::unused_private_members::UNWRITTEN_PROPERTY_CODE,
+            super::unused_private_members::UNUSED_METHOD_CODE,
+            super::unused_private_members::UNUSED_CONSTANT_CODE,
+        ],
     },
     always(
         "missing_implementation",
@@ -113,6 +144,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
     always(
         "incompatible_trait_property",
         Backend::collect_trait_property_conflict_diagnostics_with_context,
+    ),
+    always(
+        "unhandled_exception",
+        Backend::collect_unhandled_exception_diagnostics,
     ),
     always(
         "deprecated_usage",
@@ -172,6 +207,7 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         collect: Backend::collect_invalid_laravel_string_key_diagnostics,
         runs_in: Framework::StringKeys,
         reads_every_body: false,
+        codes: &[],
     },
     laravel(
         "invalid_validation_rule",
@@ -212,9 +248,10 @@ pub(crate) type SlowDiagnosticObserver<'a> =
 impl Backend {
     /// Returns `true` if the URI should be skipped for diagnostics: stub
     /// files (embedded or under a stub path), and resource documents (YAML,
-    /// XML, and XLIFF files), which are not PHP.  A Twig template and a
-    /// Symfony validation mapping are resource documents too, but what they
-    /// hold is judged (see [`Self::collect_resource_diagnostics`]).  Vendor
+    /// XML, and XLIFF files), which are not PHP.  A Twig template, a Symfony
+    /// validation mapping, and a Drupal file that reads library names are
+    /// resource documents too, but what they hold is judged (see
+    /// [`Self::collect_resource_diagnostics`]).  Vendor
     /// files are
     /// not skipped here: users
     /// working in monorepos or with `--prefer-source` packages
@@ -229,11 +266,22 @@ impl Backend {
     }
 
     /// Whether the resource document at `uri` is one whose contents are
-    /// judged: a Twig template, or a Symfony validation mapping.
+    /// judged: a Twig template, a Symfony validation mapping, or a Drupal
+    /// libraries or info file.
     pub(crate) fn has_resource_diagnostics(&self, uri: &str) -> bool {
         self.is_twig_template_uri(uri)
             || (crate::symfony::validation::is_validation_mapping_uri(uri)
                 && self.is_symfony_project())
+            || self.reads_drupal_libraries(uri)
+    }
+
+    /// Whether `uri` is a Drupal libraries file or info file, whose library
+    /// names are judged.
+    fn reads_drupal_libraries(&self, uri: &str) -> bool {
+        matches!(
+            self.drupal_declaration_file(uri),
+            Some(crate::drupal::DeclarationFile::Libraries | crate::drupal::DeclarationFile::Info)
+        )
     }
 
     /// Collect the diagnostics of a resource document that has them (see
@@ -246,13 +294,18 @@ impl Backend {
     ) {
         if self.is_twig_template_uri(uri_str) {
             self.collect_template_diagnostics(uri_str, content, out);
+        } else if self.reads_drupal_libraries(uri_str) {
+            let ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
+            if ctx.symbol_map.matches_source(content) {
+                self.collect_invalid_laravel_string_key_diagnostics(&ctx, uri_str, content, out);
+            }
         } else {
             self.collect_constraint_option_diagnostics(uri_str, content, out);
         }
     }
 
     /// Collect the diagnostics of a Twig template: the template, route,
-    /// and translation names it holds that nothing declares.  A template
+    /// translation, and library names it holds that nothing declares.  A template
     /// is not PHP, so this is all that is judged there.
     pub fn collect_template_diagnostics(
         &self,
@@ -541,7 +594,8 @@ pub(crate) fn reads_every_body(diagnostic: &Diagnostic) -> bool {
     let Some(Code::String(code)) = &diagnostic.code else {
         return false;
     };
-    SLOW_COLLECTORS
-        .iter()
-        .any(|collector| collector.reads_every_body && collector.name == code)
+    SLOW_COLLECTORS.iter().any(|collector| {
+        collector.reads_every_body
+            && (collector.name == code || collector.codes.contains(&code.as_str()))
+    })
 }

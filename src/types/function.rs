@@ -33,9 +33,22 @@ pub(crate) struct ResolvedCallableTarget {
     /// Whether the body calls `func_get_args()` (or a sibling), so the
     /// callable accepts arguments beyond its declared parameters.
     pub reads_func_args: bool,
+    /// Whether a named argument binds to `parameters` by name, so a name
+    /// none of them declares is an error.
+    ///
+    /// True for a declared function, constructor or method.  False for a
+    /// method reached through `__call` / `__callStatic` (a virtual member,
+    /// or one the call site cannot see), which collects unknown names into
+    /// its arguments instead, and for a signature read from a callable
+    /// type, whose parameter names are invented.
+    pub binds_named_args: bool,
     /// Whether discarding the callable's result is reported, because it
     /// carries `#[\NoDiscard]`.
     pub no_discard: bool,
+    /// Whether the callable's native return type is `void`, so a call to
+    /// it has no value to use.  A docblock `@return void` does not count,
+    /// as nothing stops an untyped body returning a value.
+    pub native_void: bool,
     /// Alternate parameter lists from overloaded function declarations.
     ///
     /// Populated from `FunctionInfo::overloads` when resolving standalone
@@ -212,6 +225,12 @@ pub struct FunctionInfo {
     /// not shadow the stub's signature, deprecation status, or other
     /// metadata.
     pub is_polyfill: bool,
+    /// Whether this comes from the stub of an extension php-src does not
+    /// ship, whose parameter names follow the installed release of the
+    /// extension rather than the stub (see
+    /// [`crate::stubs::is_unbundled_extension_stub`]).  A named argument is
+    /// not checked against them.
+    pub from_unbundled_extension: bool,
     /// Alternate parameter lists from overloaded function declarations.
     ///
     /// Some PHP functions (e.g. `strtr`, `implode`, `array_keys`) have

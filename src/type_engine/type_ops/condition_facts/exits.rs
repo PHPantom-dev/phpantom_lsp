@@ -14,7 +14,7 @@ use mago_syntax::cst::*;
 use crate::atom::bytes_to_str;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::resolver::{FunctionLoaderFn, ScopeVarResolverFn};
+use crate::type_engine::resolver::{FunctionLoaderFn, ScopeVarResolverFn, VarResolutionCtx};
 use crate::types::{ClassInfo, ResolvedType};
 
 /// Whether every path through `stmts` leaves the block they sit in (see
@@ -44,16 +44,7 @@ pub(crate) fn statement_leaves_block(
 ) -> bool {
     match stmt {
         Statement::Return(_) | Statement::Continue(_) | Statement::Break(_) => true,
-        // `throw`, `exit` and `die` are expressions in PHP, so they
-        // reach here wrapped in an expression statement.
-        Statement::Expression(es) => {
-            matches!(
-                es.expression,
-                Expression::Throw(_)
-                    | Expression::Construct(Construct::Exit(_))
-                    | Expression::Construct(Construct::Die(_))
-            ) || never_call(es.expression)
-        }
+        Statement::Expression(es) => expression_leaves(es.expression, never_call),
         Statement::Block(block) => statements_leave_block(block.statements.iter(), never_call),
         // An if/else exits if ALL branches exist and ALL exit.
         Statement::If(if_stmt) => match &if_stmt.body {
@@ -81,6 +72,29 @@ pub(crate) fn statement_leaves_block(
             }
         },
         _ => false,
+    }
+}
+
+/// Whether evaluating an expression statement never completes.
+///
+/// `throw`, `exit` and `die` are expressions in PHP, so they reach a
+/// statement list wrapped in an expression statement.  A `match` whose
+/// every arm leaves leaves too: when no arm matches it throws an
+/// `UnhandledMatchError` instead.
+pub(crate) fn expression_leaves(
+    expr: &Expression<'_>,
+    never_call: &dyn Fn(&Expression<'_>) -> bool,
+) -> bool {
+    match expr {
+        Expression::Throw(_)
+        | Expression::Construct(Construct::Exit(_))
+        | Expression::Construct(Construct::Die(_)) => true,
+        Expression::Parenthesized(inner) => expression_leaves(inner.expression, never_call),
+        Expression::Match(r#match) => r#match
+            .arms
+            .iter()
+            .all(|arm| expression_leaves(arm.expression(), never_call)),
+        _ => never_call(expr),
     }
 }
 
@@ -261,6 +275,91 @@ fn try_acquire_receiver_guard(span: Span) -> Option<ReceiverGuard> {
     // the insert failed, and dropping it would release the entry the
     // frame above owns, letting the cycle right back through.
     inserted.then(|| ReceiverGuard { span })
+}
+
+/// Whether `expr` calls a `never`-returning function or method, for a
+/// consumer outside the forward walker.
+///
+/// The variables and receivers involved resolve at the call, through the
+/// shared expression pipeline, the way any other expression there does; in
+/// a diagnostic pass that reads the scopes the walker recorded.
+pub(crate) fn is_never_call_at(expr: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> bool {
+    if !matches!(expr, Expression::Call(_)) {
+        return false;
+    }
+    let ctx = ctx.with_cursor_offset(expr.span().start.offset);
+    let var_types = |var_name: &str| {
+        crate::type_engine::variable::resolution::resolve_variable_types(
+            ctx.var_query(var_name, ctx.cursor_offset),
+        )
+    };
+    let receiver_resolver = |receiver: &Expression<'_>| {
+        class_names_of(
+            &crate::type_engine::variable::rhs_resolution::resolve_rhs_expression(receiver, &ctx),
+        )
+    };
+    let call_resolver = |call: &Expression<'_>| {
+        crate::type_engine::variable::rhs_resolution::resolve_rhs_expression(call, &ctx)
+    };
+    let exit_ctx = ExitCtx {
+        current_class: ctx.current_class,
+        all_classes: ctx.file.all_classes,
+        class_loader: ctx.file.class_loader,
+        source_class_loader: ctx.file.source_class_loader,
+        source_imports: ctx.file.source_imports,
+        function_loader: ctx.loaders.function_loader,
+        resolved_class_cache: ctx.resolved_class_cache,
+        var_types: Some(&var_types),
+        receiver_resolver: Some(&receiver_resolver),
+        static_receiver_resolver: None,
+        call_resolver: Some(&call_resolver),
+    };
+    expression_is_never_call(expr, &exit_ctx)
+}
+
+/// Whether some `case` of a `switch` matches every value its subject can
+/// hold, so that control always enters one of them even without a
+/// `default`.
+///
+/// Only a subject whose type is a union of literals can be covered: a
+/// `@param self::STATUS_* $status`, or a closure parameter inferred from a
+/// list of those.  Each literal has to equal a case label loosely, the way
+/// `switch` compares, and both sides resolve through the shared expression
+/// pipeline at the `switch`.
+pub(crate) fn switch_covers_every_value_at(
+    switch: &Switch<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> bool {
+    use crate::type_engine::variable::rhs_resolution::resolve_rhs_expression;
+
+    if switch.body.has_default_case() {
+        return true;
+    }
+    let ctx = ctx.with_cursor_offset(switch.span().start.offset);
+    let joined = |expr: &Expression<'_>| {
+        let resolved = resolve_rhs_expression(expr, &ctx);
+        (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
+    };
+    let Some(subject) = joined(switch.expression) else {
+        return false;
+    };
+    let labels: Vec<PhpType> = switch
+        .body
+        .cases()
+        .iter()
+        .filter_map(|case| match case {
+            SwitchCase::Expression(case) => joined(case.expression),
+            SwitchCase::Default(_) => None,
+        })
+        .collect();
+    subject.union_members().iter().all(|member| {
+        member.as_literal().is_some_and(|value| {
+            labels
+                .iter()
+                .filter_map(PhpType::as_literal)
+                .any(|label| value.loosely_equals(label) == Some(true))
+        })
+    })
 }
 
 /// Check whether an expression is a call to a `never`-returning

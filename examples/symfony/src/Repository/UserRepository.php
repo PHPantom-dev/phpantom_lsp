@@ -65,7 +65,7 @@ final class UserRepository extends ServiceEntityRepository
     /**
      * @return list<User>
      */
-    public function searchInTeam(?string $team): array
+    public function search(?string $team): array
     {
         // Try: move the `andWhere()` below the `if`. The builder only joins
         // `t` when a team is given, so the query built without one uses a
@@ -97,6 +97,23 @@ final class UserRepository extends ServiceEntityRepository
     }
 
     /**
+     * @return list<array{name: string, members: int<0, max>, label: string, nameLength: float}>
+     */
+    public function teamSizes(): array
+    {
+        // Try: hover $rows. An aggregate or a function is typed where every
+        // database driver agrees: COUNT() gives an int<0, max> and UPPER() a
+        // string. What AVG() gives depends on the driver: SQLite, which the
+        // URL in config/packages/doctrine.yaml names, gives a float. Change
+        // the URL to start with mysql:// and it is a numeric-string.
+        $rows = $this->getEntityManager()
+            ->createQuery('SELECT t.name, COUNT(u.email) AS members, UPPER(t.name) AS label, AVG(LENGTH(u.displayName)) AS nameLength FROM App\Entity\User u JOIN u.team t GROUP BY t.name')
+            ->getResult();
+
+        return $rows;
+    }
+
+    /**
      * @return list<User>
      */
     public function searchByName(?string $name): array
@@ -122,7 +139,9 @@ final class UserRepository extends ServiceEntityRepository
     public function inTeamByEmail(string $team): array
     {
         // Try: delete the `joinTeam()` call. The `t` it joins onto the
-        // builder is then declared nowhere, and that is reported.
+        // builder is then declared nowhere, and that is reported. Or wrap
+        // the call in an `if ($team !== '') { ... }`: the query built
+        // without it uses `t` undeclared, and that is reported too.
         $builder = $this->byEmail();
         $this->joinTeam($builder);
 
@@ -130,6 +149,37 @@ final class UserRepository extends ServiceEntityRepository
             ->setParameter('team', $team)
             ->getQuery()
             ->getResult();
+    }
+
+    /**
+     * @return list<User>
+     */
+    public function teamMembers(string $team): array
+    {
+        // Try: change `t.name` to `x.name`. The builder comes from
+        // byEmailInTeam(), which gets it from byEmail() and passes it on to
+        // joinTeam(), so `u` and `t` are declared along that chain and `x`
+        // is reported.
+        return $this->byEmailInTeam()
+            ->andWhere('t.name = :team')
+            ->setParameter('team', $team)
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * @return list<User>
+     */
+    public function namedTeamMembers(): array
+    {
+        // Try: delete the `joinTeam()` call. onlyNamedTeams() uses `t` and
+        // leaves it to its callers to declare, so the query run here
+        // without it is reported at getQuery().
+        $builder = $this->byEmail();
+        $this->joinTeam($builder);
+        $this->onlyNamedTeams($builder);
+
+        return $builder->getQuery()->getResult();
     }
 
     /**
@@ -149,6 +199,19 @@ final class UserRepository extends ServiceEntityRepository
     private function byEmail(): QueryBuilder
     {
         return $this->createQueryBuilder('u')->orderBy('u.email', 'ASC');
+    }
+
+    private function byEmailInTeam(): QueryBuilder
+    {
+        $builder = $this->byEmail();
+        $this->joinTeam($builder);
+
+        return $builder;
+    }
+
+    private function onlyNamedTeams(QueryBuilder $builder): void
+    {
+        $builder->andWhere('t.name IS NOT NULL');
     }
 
     private function joinTeam(QueryBuilder $builder): void

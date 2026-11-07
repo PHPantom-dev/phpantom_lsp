@@ -17,4 +17,9 @@ class BakeryService
 
         return $this;
     }
+
+    public function temperature(): string
+    {
+        return $this->temperature;
+    }
 }

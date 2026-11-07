@@ -533,6 +533,24 @@ fn closure_generator_type(expr: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> 
     ))
 }
 
+/// Whether returning `body` through the declared return type `declared`
+/// turns an integer into a float.
+///
+/// An `int` is accepted where `float` is declared, so it passes the subtype
+/// check, but PHP converts it on the way out: `fn (int $x): float => $x / 2`
+/// returns a `float`, never the `int` the body can produce. Only a declared
+/// type with no member that holds an integer as itself does this.
+fn int_becomes_float(body: &PhpType, declared: &PhpType, ctx: &VarResolutionCtx<'_>) -> bool {
+    let loader = ctx.file.class_loader;
+    let int = PhpType::named(atom("int"));
+    body.union_members()
+        .iter()
+        .any(|member| crate::class_lookup::is_subtype_of_typed(member, &int, loader))
+        && !declared.union_members().iter().any(|member| {
+            !member.is_float() && crate::class_lookup::is_subtype_of_typed(&int, member, loader)
+        })
+}
+
 pub(crate) fn infer_closure_literal_type(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
@@ -616,6 +634,7 @@ pub(crate) fn infer_closure_literal_type(
         Some(declared) => {
             let narrowed = body_return().filter(|body| {
                 crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.file.class_loader)
+                    && !int_becomes_float(body, &declared, ctx)
             });
             Some(narrowed.unwrap_or(declared))
         }

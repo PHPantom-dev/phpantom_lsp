@@ -165,30 +165,42 @@ fn class_names_spelled_alike(a: &PhpType, b: &PhpType) -> bool {
         .all(|(x, y)| x.eq_ignore_ascii_case(y))
 }
 
-/// A declaration docblock with the members removed that its native class
-/// type can never hold, or `None` when no member survives.
+/// A declaration docblock with the members removed that its native type can
+/// never hold, or `None` when no member survives.
 ///
 /// A native `DateTimeImmutable` return is what PHP enforces, so the `false`
 /// in a `@return static|false` written for an older runtime cannot come
 /// back, and neither can the `TValue[]` in `IteratorAggregate::getIterator()`'s
-/// `@return Traversable<TKey, TValue>|TValue[]` on a native `Traversable`.
-/// PHPStan discards such a docblock outright; keeping the members the
-/// native type does allow preserves the generics it carries.  A `null` the
-/// native type does not accept goes the same way, as PHPStan also drops it.
+/// `@return Traversable<TKey, TValue>|TValue[]` on a native `Traversable`,
+/// or the `resource` in phpstorm-stubs' `@return resource|Socket|false` on a
+/// native `Socket|false`.  PHPStan discards such a docblock outright;
+/// keeping the members the native type does allow preserves the generics it
+/// carries.  A `null` the native type does not accept goes the same way, as
+/// PHPStan also drops it.
+///
+/// Only members whose kind is known structurally (keywords, arrays,
+/// literals) are judged.  A class or template name is kept: whether a
+/// native member holds it takes the class hierarchy or the template's
+/// bound.
 fn doc_members_native_can_hold<'a>(doc: &'a PhpType, native: &PhpType) -> Option<Cow<'a, PhpType>> {
     let native_owned = native.non_null_type();
     let native_inner = native_owned.as_ref().unwrap_or(native);
+    if native_inner.is_mixed() {
+        return Some(Cow::Borrowed(doc));
+    }
     let native_members: &[PhpType] = match native_inner.kind() {
         TypeKind::Union(members) | TypeKind::Intersection(members) => members,
         _ => std::slice::from_ref(native_inner),
     };
-    if !native_members.iter().all(names_a_class) {
-        return Some(Cow::Borrowed(doc));
-    }
     // A native type that does not accept `null` rules the docblock's `null`
     // out as well: `@return static|null` on `: self` is a `static`.
     let drops_null = !native.accepts_null();
-    let can_hold = |m: &PhpType| !is_never_an_object(m) && !(drops_null && m.is_null());
+    let can_hold = |m: &PhpType| {
+        if m.is_null() {
+            return !drops_null;
+        }
+        !is_never_an_object(m) || native_members.iter().any(|n| native_member_holds(n, m))
+    };
     match doc.kind() {
         TypeKind::Union(members) => {
             let kept: Vec<PhpType> = members.iter().filter(|m| can_hold(m)).cloned().collect();
@@ -200,12 +212,28 @@ fn doc_members_native_can_hold<'a>(doc: &'a PhpType, native: &PhpType) -> Option
                 Some(Cow::Owned(PhpType::union(kept)))
             }
         }
-        TypeKind::Nullable(inner) if drops_null && !is_never_an_object(inner) => {
-            Some(Cow::Owned(PhpType::clone(inner)))
-        }
+        TypeKind::Nullable(inner) => match (can_hold(inner), drops_null) {
+            (false, _) => None,
+            (true, true) => Some(Cow::Owned(PhpType::clone(inner))),
+            (true, false) => Some(Cow::Borrowed(doc)),
+        },
         _ if !can_hold(doc) => None,
         _ => Some(Cow::Borrowed(doc)),
     }
+}
+
+/// Whether the native member `native` can hold some value of the docblock
+/// member `doc`, which [`is_never_an_object`] has said is not an object.
+///
+/// The two overlap when either is a subtype of the other (`false` in
+/// `bool`, `bool` over `false`, `int` in `array-key`) or the docblock
+/// refines the native member (`list<Foo>` on `iterable`).
+fn native_member_holds(native: &PhpType, doc: &PhpType) -> bool {
+    !names_a_class(native)
+        && (doc.equivalent(native)
+            || doc.is_subtype_of(native)
+            || native.is_subtype_of(doc)
+            || is_compatible_refinement_typed(doc, native))
 }
 
 /// Whether `ty` names one class, interface, or enum: a class name, or the

@@ -30,11 +30,15 @@
 //!
 //! A variable a builder uses is reported when nothing declares it, or when
 //! some path through the function body to its query never does.  A builder
-//! another method creates and returns, or that is passed to another method,
-//! counts the variables that method's body declares on it, which the
-//! diagnostic pass looks up once the type engine finds the method; each
-//! method's are recorded for its callers.  A builder a function body
-//! returns is left to its callers, which may declare more.
+//! another method returns, or that is passed to another method, counts the
+//! variables that method's body declares on it, and the ones the methods it
+//! gets the builder from or passes it on to declare, which the diagnostic
+//! pass looks up once the type engine finds each method; each method's are
+//! recorded for its callers, with the calls it hands the builder on with.
+//! A variable a method uses on a builder it returns, or is passed, is left
+//! to its callers, which may declare more: each method's are recorded too,
+//! and so is each `getQuery()` call made on a builder other methods hand
+//! to its function body, for the diagnostic pass to check there.
 //!
 //! Each query, and each fragment whose place in the query is known, is also
 //! checked against DQL's grammar.  Where one stops following it is recorded
@@ -157,7 +161,10 @@ enum Origin {
 
 /// A variable passed as an argument to a method call.
 #[derive(Debug)]
-struct Pass {
+struct Pass<'a> {
+    /// The function body it is passed in, and its name.
+    scope: u32,
+    name: &'a str,
     /// Where the variable is written.
     at: u32,
     /// Where the method name of the call starts.
@@ -165,13 +172,23 @@ struct Pass {
     index: u32,
 }
 
-/// A method's body and what its parameters are named, `None` for one that
-/// is variadic or promoted.
+/// A method's body, what its parameters are named (`None` for one that is
+/// variadic or promoted) and whether each is typed a query builder, and
+/// whether its return type is one.
 #[derive(Debug)]
 struct MethodNote<'a> {
     scope_start: u32,
     name_offset: u32,
-    parameters: Vec<Option<&'a str>>,
+    parameters: Vec<Option<(&'a str, bool)>>,
+    returns_builder: bool,
+}
+
+/// Whether the type hint `hint` names a query builder.
+fn names_query_builder(hint: &Hint<'_>, content: &str) -> bool {
+    let span = hint.span();
+    content
+        .get(span.start.offset as usize..span.end.offset as usize)
+        .is_some_and(|text| text.contains("QueryBuilder"))
 }
 
 /// The variables and fields read so far, settled once the whole file is.
@@ -198,12 +215,24 @@ pub(super) struct DqlPending<'a> {
     /// builder comes from.
     created: Vec<(u32, Origin)>,
     /// The variables passed to method calls.
-    passes: Vec<Pass>,
+    passes: Vec<Pass<'a>>,
     /// The statements of each function body, by where its table starts,
     /// for following its query builders' calls along each path.
     bodies: Vec<(u32, &'a [Statement<'a>])>,
     /// The methods, for what they declare on the builders they hand on.
     methods: Vec<MethodNote<'a>>,
+    /// The `getQuery()` calls, and the builder each is made on.
+    runs: Vec<PendingRun<'a>>,
+}
+
+/// A `getQuery()` call: the function body it is made in, where its method
+/// name starts and ends, and the builder it is made on.
+#[derive(Debug)]
+struct PendingRun<'a> {
+    scope: u32,
+    start: u32,
+    end: u32,
+    builder: &'a Expression<'a>,
 }
 
 /// Record the statements of the function body whose DQL table starts at
@@ -228,61 +257,76 @@ pub(super) fn note_dql_method<'a>(
     if !ctx.doctrine {
         return;
     }
+    let content = ctx.content;
     let parameters = method
         .parameter_list
         .parameters
         .iter()
         .map(|parameter| {
-            (parameter.ellipsis.is_none() && parameter.modifiers.is_empty())
-                .then(|| crate::atom::bytes_to_str(parameter.variable.name))
+            (parameter.ellipsis.is_none() && parameter.modifiers.is_empty()).then(|| {
+                (
+                    crate::atom::bytes_to_str(parameter.variable.name),
+                    parameter
+                        .hint
+                        .as_ref()
+                        .is_some_and(|hint| names_query_builder(hint, content)),
+                )
+            })
         })
         .collect();
+    let returns_builder = method
+        .return_type_hint
+        .as_ref()
+        .is_some_and(|ret| names_query_builder(&ret.hint, content));
     ctx.dql.methods.push(MethodNote {
         scope_start,
         name_offset: method.name.span.start.offset,
         parameters,
+        returns_builder,
     });
 }
 
-/// Where the builder `expr` is comes from: the `createQueryBuilder()` call
-/// its chain starts with, the variable it starts with, the call of another
-/// method on something other than a variable that it starts with, or
-/// something else.  A call made on an expression builder is made on the
-/// builder whose `expr()` it is.
+/// Where the builder `expr` is comes from, for an `expr` that is one: the
+/// `createQueryBuilder()` call its chain starts with, the variable it
+/// starts with, the call of another method it starts with, or something
+/// else.  A builder method returns the builder it is called on, and a call
+/// made on an expression builder is made on the builder whose `expr()` it
+/// is, so the chain is followed through both; any other method is another
+/// method that returns a builder, on `$this`, a variable, or a class.
 fn builder_of(mut expr: &Expression<'_>) -> Builder {
     loop {
-        expr = match expr {
-            Expression::Parenthesized(inner) => inner.expression,
-            Expression::Call(Call::Method(call)) => match &call.method {
-                ClassLikeMemberSelector::Identifier(ident)
-                    if ident.value.eq_ignore_ascii_case(b"createQueryBuilder") =>
-                {
-                    return Builder::Created;
-                }
-                ClassLikeMemberSelector::Identifier(ident)
-                    if !matches!(
-                        call.object,
-                        Expression::Call(_)
-                            | Expression::Parenthesized(_)
-                            | Expression::Variable(Variable::Direct(_))
-                    ) || is_this(call.object) =>
-                {
-                    let name = crate::atom::bytes_to_str(ident.value);
-                    if name.eq_ignore_ascii_case("expr")
-                        || crate::doctrine::query::is_replayed(name)
-                    {
-                        return Builder::Elsewhere;
+        let (object, method) = match expr {
+            Expression::Parenthesized(inner) => {
+                expr = inner.expression;
+                continue;
+            }
+            Expression::Call(Call::Method(call)) => (call.object, &call.method),
+            Expression::Call(Call::NullSafeMethod(call)) => (call.object, &call.method),
+            Expression::Call(Call::StaticMethod(call)) => {
+                return match &call.method {
+                    ClassLikeMemberSelector::Identifier(ident) => {
+                        Builder::Method(ident.span.start.offset)
                     }
-                    return Builder::Method(ident.span.start.offset);
-                }
-                _ => call.object,
-            },
-            Expression::Call(Call::NullSafeMethod(call)) => call.object,
+                    _ => Builder::Elsewhere,
+                };
+            }
             Expression::Variable(Variable::Direct(variable)) if variable.name != b"$this" => {
                 return Builder::Variable(crate::atom::bytes_to_str(variable.name).to_string());
             }
             _ => return Builder::Elsewhere,
         };
+        let ClassLikeMemberSelector::Identifier(ident) = method else {
+            return Builder::Elsewhere;
+        };
+        let name = crate::atom::bytes_to_str(ident.value);
+        if name.eq_ignore_ascii_case("createQueryBuilder") {
+            return Builder::Created;
+        }
+        if name.eq_ignore_ascii_case("expr") || crate::doctrine::query::is_replayed(name) {
+            expr = object;
+            continue;
+        }
+        return Builder::Method(ident.span.start.offset);
     }
 }
 
@@ -641,6 +685,7 @@ fn check_syntax(
             call: call.method_start,
             receiver: call.receiver,
             requires: Box::default(),
+            body: None,
         });
 }
 
@@ -702,7 +747,7 @@ pub(super) fn record_dql_call<'a>(
     object: &'a Expression<'a>,
     method: &str,
     method_start: u32,
-    arguments: &ArgumentList<'_>,
+    arguments: &'a ArgumentList<'a>,
     ctx: &mut ExtractionCtx<'a>,
     scope_start: u32,
 ) {
@@ -712,20 +757,15 @@ pub(super) fn record_dql_call<'a>(
     if let Expression::Variable(Variable::Direct(variable)) = object {
         ctx.dql.receivers.push(variable.span.start.offset);
     }
-    for (index, argument) in arguments.arguments.iter().enumerate() {
-        let Argument::Positional(positional) = argument else {
-            break;
-        };
-        if positional.ellipsis.is_some() {
-            break;
-        }
-        if let Expression::Variable(Variable::Direct(variable)) = positional.value {
-            ctx.dql.passes.push(Pass {
-                at: variable.span.start.offset,
-                call: method_start,
-                index: index as u32,
-            });
-        }
+    record_dql_passes(method_start, arguments, ctx, scope_start);
+    if method.eq_ignore_ascii_case("getQuery") && arguments.arguments.is_empty() {
+        ctx.dql.runs.push(PendingRun {
+            scope: scope_start,
+            start: method_start,
+            end: method_start + method.len() as u32,
+            builder: object,
+        });
+        return;
     }
     let call = DqlCall {
         method_start,
@@ -998,6 +1038,36 @@ pub(super) fn record_dql_instantiation(
     );
 }
 
+/// Record the variables the arguments of the method call whose name starts
+/// at `method_start` pass, for a builder handed to another method.
+pub(super) fn record_dql_passes<'a>(
+    method_start: u32,
+    arguments: &'a ArgumentList<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    if !ctx.doctrine {
+        return;
+    }
+    for (index, argument) in arguments.arguments.iter().enumerate() {
+        let Argument::Positional(positional) = argument else {
+            break;
+        };
+        if positional.ellipsis.is_some() {
+            break;
+        }
+        if let Expression::Variable(Variable::Direct(variable)) = positional.value {
+            ctx.dql.passes.push(Pass {
+                scope: scope_start,
+                name: crate::atom::bytes_to_str(variable.name),
+                at: variable.span.start.offset,
+                call: method_start,
+                index: index as u32,
+            });
+        }
+    }
+}
+
 /// The argument at `index`, or the one named `name`.
 fn argument_at<'a>(
     arguments: &'a ArgumentList<'a>,
@@ -1157,6 +1227,7 @@ impl Subject<'_> {
 pub(super) fn finish_dql(ctx: &mut ExtractionCtx<'_>) {
     let pending = std::mem::take(&mut ctx.dql);
     summarize_methods(&pending, ctx);
+    record_runs(&pending, ctx);
     if pending.decls.is_empty() && pending.call_builders.is_empty() {
         report_undeclared(&pending, ctx);
         return;
@@ -1290,109 +1361,172 @@ pub(super) fn finish_dql(ctx: &mut ExtractionCtx<'_>) {
 
 /// Record each variable a path starts from that nothing declares, or that
 /// some path through its function body never declares, at its first use
-/// left undeclared in the query or function body, where
-/// everything that could declare it is in sight: a whole query that spells
-/// all its declarations out, or a function body whose query builders it
-/// creates itself and keeps to itself.  A builder from anywhere else may
-/// have had any variable declared before it got here.
+/// left undeclared in the query or function body, where everything that
+/// could declare it is in sight: a whole query that spells all its
+/// declarations out, or a function body whose query builders it creates
+/// itself and keeps to itself.  A builder from anywhere else may have had
+/// any variable declared before it got here.
 ///
 /// A builder another method returns, or that is passed to one, is in sight
-/// when that method's own body is: the variable is reported only once the
-/// diagnostic pass finds each such method declares no variable but the
-/// ones its body is known to (see [`summarize_methods`]), and none of them
-/// is this one.
+/// when that method's own body is (see [`summarize_methods`]).  What such a
+/// method declares is only known once the diagnostic pass finds it, so
+/// every use some path leaves undeclared by the body's own calls is
+/// recorded, with the calls, and the body's declarations, for the pass to
+/// follow the paths again with what the methods declare.
 fn report_undeclared(pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
-    let mut tables: Vec<(DqlTable, Option<Vec<DqlProvider>>)> = Vec::new();
-    let mut reported: Vec<(DqlTable, &str)> = Vec::new();
-    let mut uses: Vec<&PendingUse> = pending.uses.iter().collect();
-    uses.sort_by_key(|site| site.start);
-    for site in uses {
-        if reported.contains(&(site.table, site.alias.as_str()))
-            || pending
-                .decls
-                .iter()
-                .any(|d| d.table == site.table && d.alias == site.alias)
-        {
-            continue;
+    let mut tables: Vec<DqlTable> = Vec::new();
+    for site in &pending.uses {
+        if !tables.contains(&site.table) {
+            tables.push(site.table);
         }
-        let index = match tables.iter().position(|(table, _)| *table == site.table) {
-            Some(index) => index,
-            None => {
-                tables.push((site.table, is_closed(site.table, pending, ctx)));
-                tables.len() - 1
-            }
-        };
-        let Some(providers) = &tables[index].1 else {
-            continue;
-        };
-        reported.push((site.table, &site.alias));
-        push_undeclared(site, providers, ctx);
     }
-
-    // A variable declared somewhere in a function body may still be
-    // undeclared on some path through it to its query.
-    for &(scope_start, statements) in &pending.bodies {
-        let table = DqlTable::Scope(scope_start);
-        let providers = match tables.iter().find(|(t, _)| *t == table) {
-            Some((_, providers)) => providers.clone(),
-            None => is_closed(table, pending, ctx),
-        };
-        let Some(providers) = providers else {
+    for table in tables {
+        let Some(providers) = is_closed(table, pending, ctx) else {
             continue;
         };
-        let sites: Vec<&PendingUse> = pending
-            .uses
-            .iter()
-            .filter(|site| {
-                site.table == table
-                    && !reported.contains(&(table, site.alias.as_str()))
-                    && pending
-                        .decls
-                        .iter()
-                        .any(|d| d.table == table && d.alias == site.alias)
-            })
-            .collect();
-        if sites.is_empty() {
-            continue;
-        }
-        let mut events: Vec<(u32, Event<'_>)> = sites
-            .iter()
-            .enumerate()
-            .map(|(index, site)| (site.start, Event::Use(index)))
-            .chain(
-                pending
-                    .decls
-                    .iter()
-                    .filter(|d| d.table == table)
-                    .map(|d| (d.at, Event::Declare(d.alias.as_str()))),
-            )
-            .collect();
-        events.sort_by_key(|(at, _)| *at);
-        let paths = Paths {
-            events: &events,
-            sites: &sites,
+        let body = match table {
+            DqlTable::Scope(start) => pending
+                .bodies
+                .iter()
+                .find(|(s, _)| *s == start)
+                .map(|&(_, statements)| (start, statements)),
+            DqlTable::Query(_) => None,
         };
-        let flow = paths.statements(statements, vec![NOTHING_YET; sites.len()]);
-        let mut exits = flow.next;
-        merge(&mut exits, &flow.exits);
-        let mut bad: Vec<&PendingUse> = sites
-            .iter()
-            .zip(&exits)
-            .filter(|(_, state)| *state & UNDECLARED != 0)
-            .map(|(site, _)| *site)
-            .collect();
-        bad.sort_by_key(|site| site.start);
-        for site in bad {
-            if reported.contains(&(table, site.alias.as_str())) {
+        let (sites, undeclared) = undeclared_uses(table, pending);
+        // What the other methods declare may cover an earlier use and leave
+        // a later one bare, so each use is kept for the diagnostic pass.
+        let deferred = match body {
+            Some((start, _)) if !providers.is_empty() => Some(start),
+            _ => None,
+        };
+        let mut reported: Vec<&str> = Vec::new();
+        let mut any = false;
+        for (site, undeclared) in sites.iter().zip(undeclared) {
+            if !undeclared || reported.contains(&site.alias.as_str()) {
                 continue;
             }
-            reported.push((table, &site.alias));
-            push_undeclared(site, &providers, ctx);
+            if deferred.is_none() {
+                reported.push(&site.alias);
+            }
+            any = true;
+            push_undeclared(site, &providers, deferred, ctx);
+        }
+        if let Some(start) = deferred
+            && any
+        {
+            note_body(start, pending, ctx);
         }
     }
 }
 
-fn push_undeclared(site: &PendingUse, providers: &[DqlProvider], ctx: &mut ExtractionCtx<'_>) {
+/// Record the declarations of the function body starting at `start`, for
+/// the diagnostic pass to follow its paths again.
+fn note_body(start: u32, pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
+    if ctx.dql_bodies.iter().any(|body| body.start == start) {
+        return;
+    }
+    let table = DqlTable::Scope(start);
+    ctx.dql_bodies.push(crate::symbol_map::DqlBody {
+        start,
+        decls: pending
+            .decls
+            .iter()
+            .filter(|d| d.table == table)
+            .map(|d| (d.at, crate::atom::atom(&d.alias)))
+            .collect(),
+    });
+}
+
+/// Record each `getQuery()` call made on a builder that other methods
+/// create or are passed and that the call's function body otherwise keeps
+/// to itself, for the diagnostic pass to check the variables those methods
+/// leave undeclared.  A builder the body creates itself has its variables
+/// checked where they are used.
+fn record_runs(pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
+    for run in &pending.runs {
+        let table = DqlTable::Scope(run.scope);
+        if pending.opaque.contains(&table) {
+            continue;
+        }
+        let mut providers: Vec<DqlProvider> = Vec::new();
+        match builder_of(run.builder) {
+            Builder::Method(call) => providers.push(DqlProvider {
+                call,
+                slot: DqlSlot::Returned,
+            }),
+            Builder::Variable(name) => {
+                if !keeps_builder(&name, run.scope, pending, ctx, Keep::Report, &mut providers) {
+                    continue;
+                }
+            }
+            Builder::Created | Builder::Elsewhere => continue,
+        }
+        if providers.is_empty() {
+            continue;
+        }
+        providers.sort_by_key(|p| p.call);
+        providers.dedup();
+        note_body(run.scope, pending, ctx);
+        ctx.dql_runs.push(crate::symbol_map::DqlRun {
+            start: run.start,
+            end: run.end,
+            body: run.scope,
+            requires: providers.into_boxed_slice(),
+        });
+    }
+}
+
+/// The uses of variables in `table`, in source order, and whether each is
+/// undeclared by the table's own declarations on some path to it.
+fn undeclared_uses<'p>(
+    table: DqlTable,
+    pending: &'p DqlPending,
+) -> (Vec<&'p PendingUse>, Vec<bool>) {
+    let mut sites: Vec<&PendingUse> = pending.uses.iter().filter(|s| s.table == table).collect();
+    sites.sort_by_key(|site| site.start);
+    let decls: Vec<&PendingDecl> = pending.decls.iter().filter(|d| d.table == table).collect();
+    let statements = match table {
+        DqlTable::Scope(start) => pending
+            .bodies
+            .iter()
+            .find(|(s, _)| *s == start)
+            .map(|&(_, statements)| statements),
+        DqlTable::Query(_) => None,
+    };
+    let declared = |alias: &str| decls.iter().any(|d| d.alias == alias);
+    let undeclared: Vec<bool> = match statements {
+        // A variable declared somewhere in a function body may still be
+        // undeclared on some path through it to its query.
+        Some(statements) if sites.iter().any(|site| declared(&site.alias)) => {
+            let aliases: Vec<&str> = sites.iter().map(|site| site.alias.as_str()).collect();
+            let mut events: Vec<(u32, PathEvent<'_>)> = sites
+                .iter()
+                .enumerate()
+                .map(|(index, site)| (site.start, PathEvent::Use(index)))
+                .chain(
+                    decls
+                        .iter()
+                        .map(|d| (d.at, PathEvent::Declare(d.alias.as_str()))),
+                )
+                .collect();
+            let on_paths = undeclared_on_some_path(statements, &mut events, &aliases);
+            sites
+                .iter()
+                .zip(on_paths)
+                .map(|(site, bad)| !declared(&site.alias) || bad)
+                .collect()
+        }
+        _ => sites.iter().map(|site| !declared(&site.alias)).collect(),
+    };
+    (sites, undeclared)
+}
+
+fn push_undeclared(
+    site: &PendingUse,
+    providers: &[DqlProvider],
+    body: Option<u32>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
     ctx.dql_syntax_errors
         .push(crate::symbol_map::DqlSyntaxSite {
             start: site.start,
@@ -1402,15 +1536,33 @@ fn push_undeclared(site: &PendingUse, providers: &[DqlProvider], ctx: &mut Extra
             call: site.call.method_start,
             receiver: site.call.receiver,
             requires: providers.into(),
+            body,
         });
 }
 
 /// A query builder call along a path: one declaring a variable, or one
 /// using the variable of the tracked use at the index.
 #[derive(Debug, Clone, Copy)]
-enum Event<'a> {
+pub(crate) enum PathEvent<'a> {
     Declare(&'a str),
     Use(usize),
+}
+
+/// For each use the events `Use` mark, of the variable `aliases` gives at
+/// its index, whether some path through `statements` makes the use and
+/// never declares its variable.  `events` are the calls made along the
+/// paths, by where each is made.
+pub(crate) fn undeclared_on_some_path(
+    statements: &[Statement<'_>],
+    events: &mut [(u32, PathEvent<'_>)],
+    aliases: &[&str],
+) -> Vec<bool> {
+    events.sort_by_key(|(at, _)| *at);
+    let paths = Paths { events, aliases };
+    let flow = paths.statements(statements, vec![NOTHING_YET; aliases.len()]);
+    let mut exits = flow.next;
+    merge(&mut exits, &flow.exits);
+    exits.iter().map(|state| state & UNDECLARED != 0).collect()
 }
 
 /// For each use a function body's paths are followed for, the states the
@@ -1481,8 +1633,8 @@ impl Flow {
 /// `match`) is read as though every part of it runs, which can only make
 /// a path declare more.
 struct Paths<'p, 'a> {
-    events: &'p [(u32, Event<'a>)],
-    sites: &'p [&'p PendingUse],
+    events: &'p [(u32, PathEvent<'a>)],
+    aliases: &'p [&'p str],
 }
 
 impl Paths<'_, '_> {
@@ -1494,14 +1646,14 @@ impl Paths<'_, '_> {
                 break;
             }
             match event {
-                Event::Use(index) => {
+                PathEvent::Use(index) => {
                     let s = &mut states[*index];
                     *s = ((*s & (NOTHING_YET | DECLARED)) << 2)
                         | (*s & (UNDECLARED | USED_DECLARED));
                 }
-                Event::Declare(alias) => {
-                    for (site, s) in self.sites.iter().zip(states.iter_mut()) {
-                        if site.alias != *alias {
+                PathEvent::Declare(alias) => {
+                    for (site_alias, s) in self.aliases.iter().zip(states.iter_mut()) {
+                        if site_alias != alias {
                             continue;
                         }
                         let mut next = 0;
@@ -1729,6 +1881,7 @@ fn is_closed(
         return Some(Vec::new());
     };
     let mut providers: Vec<DqlProvider> = Vec::new();
+    let mut checked: Vec<&str> = Vec::new();
     let mut any = false;
     for (_, builder) in pending.builders.iter().filter(|(t, _)| *t == table) {
         any = true;
@@ -1739,6 +1892,10 @@ fn is_closed(
                 slot: DqlSlot::Returned,
             }),
             Builder::Variable(name) => {
+                if checked.contains(&name.as_str()) {
+                    continue;
+                }
+                checked.push(name);
                 if !keeps_builder(
                     name,
                     scope_start,
@@ -1767,10 +1924,11 @@ enum Keep {
     /// The function body's own queries: the builder may come from another
     /// method, or be passed to one, whose body is read in turn.
     Report,
-    /// What a method returns: a builder it creates, which it may return.
+    /// What a method returns: a builder it creates or gets from another
+    /// method, which it may return.
     Returned,
     /// What a method is passed: a parameter, only ever used to call its
-    /// methods.
+    /// methods, to pass on to other methods, or to return.
     Parameter,
 }
 
@@ -1798,11 +1956,18 @@ fn keeps_builder(
     for def in defs {
         def_offsets.push(def.offset);
         match def.kind {
-            VarDefKind::Assignment if keep != Keep::Parameter => {
-                match pending.created.iter().find(|(o, _)| *o == def.offset) {
-                    Some((_, Origin::New)) => assigned = true,
-                    Some((_, Origin::Same)) => {}
-                    Some(&(_, Origin::Method(call))) if keep == Keep::Report => {
+            VarDefKind::Assignment => {
+                let origin = pending
+                    .created
+                    .iter()
+                    .find(|(o, _)| *o == def.offset)
+                    .map(|&(_, origin)| origin);
+                match origin {
+                    Some(Origin::Same) => {}
+                    // A parameter assigned a builder of its own no longer
+                    // holds the one it was passed.
+                    Some(Origin::New) if keep != Keep::Parameter => assigned = true,
+                    Some(Origin::Method(call)) if keep != Keep::Parameter => {
                         assigned = true;
                         providers.push(DqlProvider {
                             call,
@@ -1824,7 +1989,7 @@ fn keeps_builder(
         return false;
     };
     let returned: Vec<u32> = match keep {
-        Keep::Returned => returned_values(scope_start, pending)
+        Keep::Returned | Keep::Parameter => returned_values(scope_start, pending)
             .filter_map(|value| match value {
                 Some(Expression::Variable(Variable::Direct(variable))) => {
                     Some(variable.span.start.offset)
@@ -1848,11 +2013,11 @@ fn keeps_builder(
             continue;
         }
         match pending.passes.iter().find(|pass| pass.at == span.start) {
-            Some(pass) if keep == Keep::Report => providers.push(DqlProvider {
+            Some(pass) => providers.push(DqlProvider {
                 call: pass.call,
                 slot: DqlSlot::Parameter(pass.index),
             }),
-            _ => return false,
+            None => return false,
         }
     }
     true
@@ -1954,6 +2119,12 @@ fn returned_builder(mut expr: &Expression<'_>) -> Option<Builder> {
                     return None;
                 }
             }
+            Expression::Call(Call::StaticMethod(call)) => {
+                let ClassLikeMemberSelector::Identifier(ident) = &call.method else {
+                    return None;
+                };
+                return Some(Builder::Method(ident.span.start.offset));
+            }
             Expression::Variable(Variable::Direct(variable)) if !is_this(expr) => {
                 return Some(Builder::Variable(
                     crate::atom::bytes_to_str(variable.name).to_string(),
@@ -1981,9 +2152,11 @@ fn returns_builder(scope_start: u32, pending: &DqlPending) -> bool {
 }
 
 /// Record the variables each method declares on a query builder it
-/// creates and returns, or is passed and only calls the methods of, for
-/// the callers that build a query on the builder.  A method that may
-/// declare a variable its text does not spell declares nothing known.
+/// creates or gets from another method and returns, or is passed and only
+/// calls the methods of or passes on, for the callers that build a query on
+/// the builder.  The calls of the other methods are recorded with them, for
+/// the diagnostic pass to follow.  A method that may declare a variable its
+/// text does not spell declares nothing known.
 fn summarize_methods(pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
     let mut summaries: Vec<crate::symbol_map::DqlBuilderMethod> = Vec::new();
     for method in &pending.methods {
@@ -1998,46 +2171,137 @@ fn summarize_methods(pending: &DqlPending, ctx: &mut ExtractionCtx<'_>) {
                 aliases.push(alias);
             }
         }
-        let mut slots: Vec<DqlSlot> = Vec::new();
-        if returns_own_builder(method.scope_start, pending, ctx) {
-            slots.push(DqlSlot::Returned);
+        // Only a method that is typed to hand a builder on, or that gives
+        // one DQL, is worth reading: plenty of methods return another
+        // method's result or pass their parameters on.
+        let gives_dql = pending.builders.iter().any(|(t, _)| *t == table);
+        let mut slots: Vec<(DqlSlot, Vec<DqlProvider>)> = Vec::new();
+        let mut providers = Vec::new();
+        if (gives_dql || method.returns_builder)
+            && returns_own_builder(method.scope_start, pending, ctx, &mut providers)
+        {
+            slots.push((DqlSlot::Returned, providers));
         }
         for (index, parameter) in method.parameters.iter().enumerate() {
-            let Some(name) = parameter else {
+            let Some((name, typed)) = *parameter else {
                 continue;
             };
-            let used = pending
-                .builders
-                .iter()
-                .any(|(t, b)| *t == table && matches!(b, Builder::Variable(v) if v == name));
-            if used
+            let mut providers = Vec::new();
+            if handles_builder(name, method.scope_start, pending, typed)
                 && keeps_builder(
                     name,
                     method.scope_start,
                     pending,
                     ctx,
                     Keep::Parameter,
-                    &mut Vec::new(),
+                    &mut providers,
                 )
             {
-                slots.push(DqlSlot::Parameter(index as u32));
+                slots.push((DqlSlot::Parameter(index as u32), providers));
             }
         }
-        for slot in slots {
+        let mut undeclared: Option<Vec<crate::atom::Atom>> = None;
+        for (slot, mut providers) in slots {
+            providers.sort_by_key(|p| p.call);
+            providers.dedup();
+            let uses = if only_slot_builders(method, slot, table, pending) {
+                undeclared
+                    .get_or_insert_with(|| {
+                        let (sites, flags) = undeclared_uses(table, pending);
+                        let mut uses: Vec<crate::atom::Atom> = Vec::new();
+                        for (site, bad) in sites.iter().zip(flags) {
+                            let alias = crate::atom::atom(&site.alias);
+                            if bad && !uses.contains(&alias) {
+                                uses.push(alias);
+                            }
+                        }
+                        uses
+                    })
+                    .clone()
+                    .into_boxed_slice()
+            } else {
+                Box::default()
+            };
             summaries.push(crate::symbol_map::DqlBuilderMethod {
                 name_offset: method.name_offset,
                 slot,
                 aliases: aliases.clone().into_boxed_slice(),
+                uses,
+                requires: providers.into_boxed_slice(),
             });
         }
     }
     ctx.dql_builder_methods = summaries;
 }
 
+/// Whether every builder the DQL of the method's body `table` is given to
+/// is the one in `slot`, so the variables that DQL uses are used on it: for
+/// the builder it returns, one it creates, gets from another method, or
+/// returns from a variable; for a parameter, that parameter.
+fn only_slot_builders(
+    method: &MethodNote,
+    slot: DqlSlot,
+    table: DqlTable,
+    pending: &DqlPending,
+) -> bool {
+    let returned: Vec<String> = match slot {
+        DqlSlot::Returned => returned_values(method.scope_start, pending)
+            .filter_map(
+                |value| match value.and_then(|value| returned_builder(value)) {
+                    Some(Builder::Variable(name)) => Some(name),
+                    _ => None,
+                },
+            )
+            .collect(),
+        DqlSlot::Parameter(_) => Vec::new(),
+    };
+    let parameter = match slot {
+        DqlSlot::Parameter(index) => match method.parameters.get(index as usize) {
+            Some(Some((name, _))) => Some(*name),
+            _ => return false,
+        },
+        DqlSlot::Returned => None,
+    };
+    pending
+        .builders
+        .iter()
+        .filter(|(t, _)| *t == table)
+        .all(|(_, builder)| match (builder, parameter) {
+            (Builder::Variable(name), Some(parameter)) => name == parameter,
+            (_, Some(_)) => false,
+            (Builder::Created | Builder::Method(_), None) => true,
+            (Builder::Variable(name), None) => returned.contains(name),
+            (Builder::Elsewhere, None) => false,
+        })
+}
+
+/// Whether the variable `name` of the function body starting at
+/// `scope_start` is given DQL, or is `typed` a query builder and passed to
+/// another method, which makes it worth following through the body as a
+/// builder.
+fn handles_builder(name: &str, scope_start: u32, pending: &DqlPending, typed: bool) -> bool {
+    let table = DqlTable::Scope(scope_start);
+    pending
+        .builders
+        .iter()
+        .any(|(t, b)| *t == table && matches!(b, Builder::Variable(v) if v == name))
+        || (typed
+            && pending
+                .passes
+                .iter()
+                .any(|pass| pass.scope == scope_start && pass.name == name))
+}
+
 /// Whether every value the function body starting at `scope_start` returns
-/// is `null` or a builder the body creates and keeps to itself, and one is
-/// a builder.
-fn returns_own_builder(scope_start: u32, pending: &DqlPending, ctx: &ExtractionCtx<'_>) -> bool {
+/// is `null` or a builder the body creates or gets from another method and
+/// keeps to itself, and one is a builder.  The calls of the other methods
+/// are added to `providers`.
+fn returns_own_builder(
+    scope_start: u32,
+    pending: &DqlPending,
+    ctx: &ExtractionCtx<'_>,
+    providers: &mut Vec<DqlProvider>,
+) -> bool {
     let mut any = false;
     for value in returned_values(scope_start, pending) {
         let Some(value) = value else {
@@ -2048,22 +2312,15 @@ fn returns_own_builder(scope_start: u32, pending: &DqlPending, ctx: &ExtractionC
         }
         let kept = match returned_builder(value) {
             Some(Builder::Created) => true,
-            // Only a variable the body's DQL is given to is worth following
-            // through the body.
-            Some(Builder::Variable(name))
-                if pending.builders.iter().any(|(t, b)| {
-                    *t == DqlTable::Scope(scope_start)
-                        && matches!(b, Builder::Variable(v) if *v == name)
-                }) =>
-            {
-                keeps_builder(
-                    &name,
-                    scope_start,
-                    pending,
-                    ctx,
-                    Keep::Returned,
-                    &mut Vec::new(),
-                )
+            Some(Builder::Method(call)) => {
+                providers.push(DqlProvider {
+                    call,
+                    slot: DqlSlot::Returned,
+                });
+                true
+            }
+            Some(Builder::Variable(name)) if handles_builder(&name, scope_start, pending, true) => {
+                keeps_builder(&name, scope_start, pending, ctx, Keep::Returned, providers)
             }
             _ => false,
         };

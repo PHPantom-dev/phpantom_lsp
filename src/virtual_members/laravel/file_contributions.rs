@@ -1,10 +1,10 @@
 //! The per-file half of a project-wide Laravel registry.
 //!
-//! The macro, command, morph-map, gate, middleware, and storage-driver indexes are all
-//! built the same way: every contributing file is scanned on its own, the
-//! scan is kept under the file's URI so an edit replaces just that file's
-//! registrations, and the merged lookups the features read are rebuilt
-//! from the whole set afterwards.  This type holds the per-file scans;
+//! The macro, command, morph-map, gate, event, middleware, and
+//! storage-driver indexes are all built the same way: every contributing
+//! file is scanned on its own, the scan is kept under the file's URI so an
+//! edit replaces just that file's registrations, and the merged lookups
+//! the features read are rebuilt from the whole set afterwards.  This type holds the per-file scans;
 //! each registry keeps its own derived lookups and its own `rebuild`.
 
 use std::collections::HashMap;
@@ -53,6 +53,7 @@ macro_rules! impl_registry {
 }
 
 impl_registry!(super::LaravelGateIndex, super::gates::GateScan);
+impl_registry!(super::events::LaravelEventIndex, super::events::EventScan);
 impl_registry!(super::LaravelMorphMapIndex, super::MorphMapScan);
 impl_registry!(
     super::LaravelMiddlewareIndex,

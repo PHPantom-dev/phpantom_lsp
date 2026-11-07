@@ -58,6 +58,23 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_string_spans_all(
     }
 }
 
+/// The [`try_emit_laravel_string_span`] variant for a first argument that
+/// names one key or lists several: `@vite(['resources/css/app.css',
+/// 'resources/js/app.js'])` loads every entry point it lists.
+pub(in crate::symbol_map::extraction) fn try_emit_laravel_string_spans_listed(
+    kind: crate::symbol_map::StringKeyKind,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(argument) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    for_each_value(argument.value(), |value| {
+        push_laravel_string_span(kind, false, false, value, content, spans);
+    });
+}
+
 /// Emit a config-backed resource name from a parameter selected by name or
 /// positional slot.
 pub(in crate::symbol_map::extraction) fn try_emit_laravel_config_resource_span_for_parameter(
@@ -239,13 +256,21 @@ fn command_name_length(key: &str) -> Option<usize> {
 }
 
 /// A view name is stored in its canonical dotted spelling so that the
-/// slash-separated form Laravel also accepts compares equal to it; every
-/// other kind is stored as written.
+/// slash-separated form Laravel also accepts compares equal to it.  A path
+/// is stored without the leading slash the helpers add when it is missing,
+/// so `asset('/css/app.css')` and `asset('css/app.css')` are one asset.
+/// Every other kind is stored as written.
 fn normalised_key(kind: crate::symbol_map::StringKeyKind, key: &str) -> String {
-    if kind == crate::symbol_map::StringKeyKind::View {
-        crate::virtual_members::laravel::canonical_view_name(key).into_owned()
-    } else {
-        key.to_string()
+    use crate::symbol_map::StringKeyKind;
+    match kind {
+        StringKeyKind::View => {
+            crate::virtual_members::laravel::canonical_view_name(key).into_owned()
+        }
+        StringKeyKind::Asset | StringKeyKind::MixAsset | StringKeyKind::ViteAsset => {
+            key.trim_start_matches('/').to_string()
+        }
+        StringKeyKind::InertiaPage => key.trim_matches('/').to_string(),
+        _ => key.to_string(),
     }
 }
 

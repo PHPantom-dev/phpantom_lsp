@@ -32,7 +32,13 @@ in `tests/psalm_assertions/const_values.php` and
 
 Falling back to the native hint is not harmless. A method declared
 `@return self::STATUS_*` over a native `int` reads as `int`, so passing its
-result to a parameter typed `1|2` is reported.
+result to a parameter typed `1|2` is reported. Likewise a `switch` over a
+`@param self::*` value with a `case` for every constant and no `default`
+cannot be seen to cover every value, so a method that returns from every
+case is reported as `missing_return` (twice in phpstan-src:
+`ClassNameUsageLocation::createMessage()`, and the variance closure in
+`TypeNodeResolver::resolveGenericTypeNode()`, whose parameter is inferred
+from a `(self::VARIANCE_*)[]` property).
 
 The wildcard form resolves a pattern like `Foo::BAR_*` to the union of all
 matching constant types on the class. PHPStan supports this syntax in
@@ -616,33 +622,61 @@ The fixtures are the SKIP lines of `expressionBuilderGetQuery.php` and
 
 ---
 
-## T66. A DQL aggregate or function is typed `mixed`
+## T68. A DQL field is typed by its property, not its column's type
 
-**Impact: Low-Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
 ```php
-$em->createQuery('SELECT COUNT(u.id) AS total FROM App\Entity\User u')
-    ->getResult(); // list<array{total: mixed}>
+#[ORM\Column(type: 'bigint')]
+public int $views;
+
+$em->createQuery('SELECT u.views FROM App\Entity\User u')
+    ->getResult(); // list<array{views: int}>, though DBAL 4 gives int|string
 ```
 
-A query's selected entities and fields are typed, but any other `SELECT`
-expression (an aggregate, a function, arithmetic, a literal, a `CASE`) is
-`mixed`, and without a result variable it leaves the whole query
-`Query<mixed, mixed>`. So does `NEW Dto(...)`. A field is typed by the
-type its entity declares for the property, not by its column's Doctrine
-type, which can differ (`bigint` is `int|string` on DBAL 4). PHPStan's
-Doctrine extension types each expression by the function and the
-connection's driver.
+A selected field is typed by the type its entity declares for the
+property, but a scalar result is converted by the column's Doctrine type,
+which can differ: `bigint` is `int|string` on DBAL 4, and `decimal` is a
+`numeric-string` whatever the property says. Inside a DQL expression, where
+the database's own value counts, a field is read by its property too: a
+`string`, `int`, or `bool` property is taken for a column of that type, and
+any other (a `float` one, which may map a `float` or a `decimal` column) is
+`mixed`, so `SUM()` of it is too. PHPStan's Doctrine extension maps each
+Doctrine type to the PHP type it converts to, and to the value each driver
+fetches for it.
 
-**Where to look:** `src/doctrine/query.rs` (`result_types`), and PHPStan's
-Doctrine extension (`Type/Doctrine/Query/QueryResultTypeWalker.php`,
-`Type/Doctrine/Descriptors/`).
+**Where to look:** `ResolverModel::field` in `src/doctrine/query.rs`, the
+column type the mapping attributes and files record, and PHPStan's
+Doctrine extension (`Type/Doctrine/Descriptors/`).
+
+---
+
+## T69. `IDENTITY()` in a DQL `SELECT` is `mixed`
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$em->createQuery('SELECT IDENTITY(p.author) AS author FROM App\Entity\Post p')
+    ->getResult(); // list<array{author: mixed}>
+```
+
+`IDENTITY()` gives the foreign key a to-one association holds: the
+identifier column of the entity it targets, `null` when the join column is
+nullable (as it is unless `#[JoinColumn(nullable: false)]` says otherwise).
+Typing it needs the target's identifier field and the join column's
+nullability, which the parsed mapping does not record. PHPStan's Doctrine
+extension types it like any other column of the target, by the connection's
+driver.
+
+**Where to look:** `Scope::call` in `src/doctrine/query.rs`, the identifier
+and join-column attributes the parser reads into `DoctrineMapping`, and
+PHPStan's Doctrine extension (`QueryResultTypeWalker::walkFunction()`).
 
 ---
 
 ## T56. A DBAL result's row count ignores the connection's driver
 
-**Impact: Low · Complexity: Low-Medium**
+**Impact: Low · Complexity: Low**
 
 ```php
 $rows = $result->rowCount(); // int|numeric-string, though only mysqli returns a string
@@ -652,17 +686,16 @@ DBAL 4 declares `Result::rowCount()` as `int|numeric-string`, because the
 `mysqli` driver can return a row count too large for an `int` as a string.
 Every other driver returns an `int`, and PHPStan's Doctrine extension
 narrows the return type by the driver the project's connection uses. The
-driver is in the connection's configuration: the `driver` or `url` of
-`DriverManager::getConnection()`, or the `dbal` section of a Symfony
-project's `doctrine.yaml`.
+driver is read already, for typing DQL expressions:
+`doctrine::connection::project_connection()` gives the one the project's
+`DriverManager::getConnection()` calls and Symfony configuration agree on.
 
 The fixtures are `tests/phpstan_doctrine/data/DBAL/pdo/` and
 `tests/phpstan_doctrine/data/DBAL/mysqli/`, each a project whose
 `entity-manager.php` builds the connection.
 
-**Where to look:** PHPStan's Doctrine extension
-(`Type/Doctrine/DBAL/*RowCountReturnTypeExtension`,
-`Doctrine/Driver/DriverDetector`).
+**Where to look:** `src/doctrine/connection.rs`, and PHPStan's Doctrine
+extension (`Type/Doctrine/DBAL/*RowCountReturnTypeExtension`).
 
 ---
 

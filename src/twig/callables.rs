@@ -323,7 +323,7 @@ pub(super) fn word_at(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
 
 /// The tag a `{% … %}` block whose body spans `body..end` opens with, and
 /// where its name ends.
-pub(super) fn tag_at(content: &str, body: usize, end: usize) -> Option<(&str, usize)> {
+pub(crate) fn tag_at(content: &str, body: usize, end: usize) -> Option<(&str, usize)> {
     let bytes = content.as_bytes();
     let mut start = body;
     // `{%-` and `{%~` trim the whitespace around the tag.
@@ -336,7 +336,7 @@ pub(super) fn tag_at(content: &str, body: usize, end: usize) -> Option<(&str, us
 }
 
 /// The tags whose body is written out as it stands rather than read.
-pub(super) fn opens_raw_text(tag: &str) -> Option<&'static str> {
+pub(crate) fn opens_raw_text(tag: &str) -> Option<&'static str> {
     match tag {
         "verbatim" => Some("endverbatim"),
         "raw" => Some("endraw"),

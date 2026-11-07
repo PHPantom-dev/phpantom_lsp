@@ -576,6 +576,16 @@ impl Backend {
         if let Some(policy) = class.laravel().and_then(|l| l.policy_class.clone()) {
             class.laravel_mut().policy_class = Some(resolve_to_fqn(&policy, use_map, namespace));
         }
+        if let Some(related) = class
+            .laravel
+            .as_deref_mut()
+            .and_then(|l| l.related_classes.as_deref_mut())
+        {
+            let resolve = |name: &mut String| *name = resolve_to_fqn(name, use_map, namespace);
+            related.observers.iter_mut().for_each(resolve);
+            related.resource.iter_mut().for_each(resolve);
+            related.resource_collection.iter_mut().for_each(resolve);
+        }
 
         // Resolve custom pivot class names (`->using(X::class)`) to FQNs so
         // that hover shows the fully-qualified pivot class and it is

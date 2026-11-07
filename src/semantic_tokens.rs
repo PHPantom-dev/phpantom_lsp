@@ -286,7 +286,10 @@ impl Backend {
                     // already highlights the import prolog per name segment;
                     // a single token spanning the whole path (backslashes
                     // included) would visibly override that coloring.
-                    if *context == ClassRefContext::Attribute {
+                    if matches!(
+                        context,
+                        ClassRefContext::Attribute | ClassRefContext::Annotation
+                    ) {
                         if mode == SemanticTokensMode::Contextual {
                             continue;
                         }

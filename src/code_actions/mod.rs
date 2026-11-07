@@ -91,6 +91,8 @@
 //! - **Parent call fixes** — when a PHPUnit `setUp()`, `tearDown()`,
 //!   `setUpBeforeClass()`, or `tearDownAfterClass()` never calls the
 //!   parent's, offer to insert the call.
+//! - **Remove unused member** — when a private method, constant, or
+//!   property is never used, offer to remove its declaration.
 //!
 //! ## Deferred edit computation (`codeAction/resolve`)
 //!
@@ -141,6 +143,7 @@ mod parent_call_fixes;
 pub(crate) mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;
+mod remove_unused_member;
 mod replace_deprecated;
 mod replace_fqcn;
 mod simplify_null;

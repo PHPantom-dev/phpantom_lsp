@@ -21,9 +21,15 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   reported.
 - Open `config/common/di/blog.php`. Go to the definition of
   `InMemoryPostRepository`, the class the container builds for
-  `PostRepositoryInterface`. Its constructor's `$posts`, its `setLogger()`
-  method, and its `$pageSize` property are the names the definition's keys
-  spell.
+  `PostRepositoryInterface`. The definition's keys name what they configure:
+  `'posts'` goes to the constructor's `$posts`, `'setLogger()'` to the method,
+  and `'$pageSize'` to the property. Rename `setLogger()` in
+  `src/Blog/InMemoryPostRepository.php` and the key follows. Clear a key to
+  complete it, or misspell one to see it reported.
+- Open `src/Blog/PostRepositoryInterface.php`. The lens above the interface,
+  and go-to-implementation on its name, lead to the definition that binds it.
+  Go-to-implementation on `LoggerInterface` in `Reference::to()` does the same
+  for the logger.
 - In `PostController::view()`, hover `$post` or complete after `$post->`. The
   repository's interface declares what `findBySlug()` returns.
 - Open `resources/views/blog/index.php`. Hover `$post` inside the loop, or
@@ -37,6 +43,11 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `__DIR__ . '/template'` instead, and `index.php` renders `'_card'` from
   beside itself. Open `resources/views/blog/_card.php` for the lens listing
   the calls that render it.
+- Open `src/Web/Shared/Layout/Main/MainAsset.php`. Go to the definition of
+  `'@assetsSource'` in `$sourcePath`, which lands on its declaration in
+  `config/common/aliases.php`, or hover it for the path it stands for. The
+  rest of the string, `/main`, links to the `assets/main` directory, and an
+  `@` typed in any string completes the declared aliases.
 
 ## Getting started
 

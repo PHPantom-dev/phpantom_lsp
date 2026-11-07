@@ -418,6 +418,10 @@ pub struct BackendState {
     /// source URI.  Shared with the resolved-class cache, which gives a
     /// repository its entity's magic finders from it.
     pub(crate) doctrine_mapping_files: doctrine::MappingFileIndex,
+    /// The database connections the project's files configure, keyed by
+    /// source URI: what a DQL expression's value is fetched as depends on
+    /// the driver they agree on.
+    pub(crate) doctrine_connections: doctrine::connection::ConnectionIndex,
     /// Cross-file candidate index for find-references.
     ///
     /// Maintained from each file's symbol map (see [`files`](Self::files)) during parsing.

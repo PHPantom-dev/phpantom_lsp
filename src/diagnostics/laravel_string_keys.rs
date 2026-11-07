@@ -5,8 +5,8 @@
 //! against what the project actually registers (routes, config keys,
 //! views, translation keys, console commands, morph aliases, middleware, gate
 //! abilities, Symfony service IDs, container parameters, routes, translation
-//! keys and Twig templates, Yii views, routes, and the route arguments a handler reads),
-//! and report the ones nothing declares.
+//! keys and Twig templates, Yii views, routes, and the route arguments a handler reads,
+//! asset paths, and Inertia pages), and report the ones nothing declares.
 
 use std::sync::Arc;
 
@@ -47,7 +47,14 @@ enum CheckedStringKind {
     YiiView,
     YiiRoute,
     YiiRouteArgument,
+    YiiDefinitionArgument,
     DrupalRoute,
+    DrupalRenderElement,
+    DrupalLibrary,
+    Asset,
+    MixAsset,
+    ViteAsset,
+    InertiaPage,
 }
 
 impl CheckedStringKind {
@@ -80,7 +87,14 @@ impl CheckedStringKind {
             StringKeyKind::YiiView => Self::YiiView,
             StringKeyKind::YiiRoute => Self::YiiRoute,
             StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
+            StringKeyKind::YiiDefinitionArgument => Self::YiiDefinitionArgument,
             StringKeyKind::DrupalRoute => Self::DrupalRoute,
+            StringKeyKind::DrupalRenderElement => Self::DrupalRenderElement,
+            StringKeyKind::DrupalLibrary => Self::DrupalLibrary,
+            StringKeyKind::Asset => Self::Asset,
+            StringKeyKind::MixAsset => Self::MixAsset,
+            StringKeyKind::ViteAsset => Self::ViteAsset,
+            StringKeyKind::InertiaPage => Self::InertiaPage,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -103,14 +117,22 @@ impl CheckedStringKind {
             // nothing, which is no error either.  A module can declare
             // permissions in PHP, through a permissions file's
             // `permission_callbacks`.  Configuration is created at runtime
-            // too, by the configuration a site exports and by code.
-            StringKeyKind::WordPressHook
+            // too, by the configuration a site exports and by code.  Views
+            // and other modules declare theme hooks in loops, which are not
+            // read, and a render array may pass anything besides a hook's
+            // variables.  A Yii alias can be set at runtime with
+            // `Aliases::set()`, and an `@` starts plenty of strings that
+            // name no path.
+            StringKeyKind::YiiAlias
+            | StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalHook
             | StringKeyKind::DrupalPermission
             | StringKeyKind::DrupalConfigName
             | StringKeyKind::DrupalConfigKey
+            | StringKeyKind::DrupalThemeHook
+            | StringKeyKind::DrupalThemeHookVariable
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack
@@ -127,6 +149,11 @@ impl CheckedStringKind {
 
 /// A key the pass judges: its kind, the key, and its byte range.
 type CheckedKeySpan<'a> = (CheckedStringKind, &'a str, u32, u32);
+
+/// Whether any of `spans` is a key of `kind`.
+fn names_checked(spans: &[CheckedKeySpan], kind: CheckedStringKind) -> bool {
+    spans.iter().any(|span| span.0 == kind)
+}
 
 /// What a key check concluded: `None` when the key cannot be judged, else
 /// whether the project declares it, with the label and diagnostic code an
@@ -191,6 +218,16 @@ struct DeclaredKeys<'a> {
     /// The `Class::method` and `Class` names Drupal gives attribute routes,
     /// sorted.
     drupal_route_aliases: Vec<String>,
+    /// The Drupal render element names the project declares, sorted.
+    drupal_render_elements: Vec<String>,
+    /// The Drupal library names the project's libraries files declare,
+    /// sorted.
+    drupal_libraries: Vec<String>,
+    /// The extensions that build libraries in code, sorted.
+    drupal_library_builders: Vec<String>,
+    /// What the filesystem holds for the asset paths and Inertia pages the
+    /// file names.
+    assets: crate::virtual_members::laravel::AssetWorld,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -226,6 +263,12 @@ impl<'a> DeclaredKeys<'a> {
         let has_messenger_bus = names(|kind| kind == CheckedStringKind::MessengerBus);
         let has_yii_route = names(|kind| kind == CheckedStringKind::YiiRoute);
         let has_drupal_route = names(|kind| kind == CheckedStringKind::DrupalRoute);
+        let has_drupal_render_element =
+            names(|kind| kind == CheckedStringKind::DrupalRenderElement);
+        let has_drupal_library = names(|kind| kind == CheckedStringKind::DrupalLibrary);
+        let assets = backend.asset_world(|kind| {
+            CheckedStringKind::of(&kind).is_some_and(|checked| names_checked(spans, checked))
+        });
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -398,6 +441,28 @@ impl<'a> DeclaredKeys<'a> {
             (Vec::new(), Vec::new(), Vec::new())
         };
 
+        // Core's and contributed modules' elements are only known once
+        // the workspace index has read the folders `.gitignore` leaves out.
+        let drupal_render_elements = if has_drupal_render_element {
+            backend.ensure_workspace_index_ready_for_request();
+            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::DrupalRenderElement)
+        } else {
+            Vec::new()
+        };
+
+        // Core's and contributed modules' libraries files are only read
+        // once the workspace index has walked the folders `.gitignore`
+        // leaves out.
+        let (drupal_libraries, drupal_library_builders) = if has_drupal_library {
+            backend.ensure_workspace_index_ready_for_request();
+            (
+                backend.symfony_declared_names(crate::symbol_map::StringKeyKind::DrupalLibrary),
+                backend.drupal_library_builders(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
         Self {
             backend,
             routes,
@@ -424,6 +489,10 @@ impl<'a> DeclaredKeys<'a> {
             drupal_routes,
             drupal_route_patterns,
             drupal_route_aliases,
+            drupal_render_elements,
+            drupal_libraries,
+            drupal_library_builders,
+            assets,
         }
     }
 
@@ -506,7 +575,31 @@ impl<'a> DeclaredKeys<'a> {
                 .map(|exists| (exists, "view", "invalid_yii_view")),
             CheckedStringKind::YiiRoute => self.judge_yii_route(key),
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
+            CheckedStringKind::YiiDefinitionArgument => self.judge_yii_definition_argument(key),
             CheckedStringKind::DrupalRoute => self.judge_drupal_route(key),
+            CheckedStringKind::DrupalRenderElement => self.judge_drupal_render_element(key),
+            CheckedStringKind::DrupalLibrary => crate::drupal::libraries::judge_library(
+                &self.drupal_libraries,
+                &self.drupal_library_builders,
+                key,
+            )
+            .map(|valid| (valid, "library", "invalid_drupal_library")),
+            CheckedStringKind::Asset => self
+                .assets
+                .judge(crate::symbol_map::StringKeyKind::Asset, key)
+                .map(|valid| (valid, "asset", "invalid_laravel_asset")),
+            CheckedStringKind::MixAsset => self
+                .assets
+                .judge(crate::symbol_map::StringKeyKind::MixAsset, key)
+                .map(|valid| (valid, "Mix asset", "invalid_laravel_mix_asset")),
+            CheckedStringKind::ViteAsset => self
+                .assets
+                .judge(crate::symbol_map::StringKeyKind::ViteAsset, key)
+                .map(|valid| (valid, "Vite asset", "invalid_laravel_vite_asset")),
+            CheckedStringKind::InertiaPage => self
+                .assets
+                .judge(crate::symbol_map::StringKeyKind::InertiaPage, key)
+                .map(|valid| (valid, "Inertia page", "invalid_inertia_page")),
         }
     }
 
@@ -579,6 +672,20 @@ impl<'a> DeclaredKeys<'a> {
         Some((false, VERDICT.0, VERDICT.1))
     }
 
+    /// Every render element is a class with an element attribute or
+    /// annotation, so the names they declare are all of them.  A project
+    /// that declares none was not read at all.
+    fn judge_drupal_render_element(&self, key: &str) -> Verdict {
+        if self.drupal_render_elements.is_empty() {
+            return None;
+        }
+        let valid = self
+            .drupal_render_elements
+            .binary_search_by(|name| name.as_str().cmp(key))
+            .is_ok();
+        Some((valid, "render element", "invalid_drupal_render_element"))
+    }
+
     /// No package Yii installs declares routes of its own, so the
     /// project's routes are all of them.  A project that declares none was
     /// not read at all.
@@ -603,6 +710,20 @@ impl<'a> DeclaredKeys<'a> {
             declared.iter().any(|declared| declared == name),
             "route argument",
             "invalid_yii_route_argument",
+        ))
+    }
+
+    /// A DI definition passes an argument by name to the parameter of that
+    /// name, and the container throws for a name the method does not
+    /// take.  Nothing can be said of a method whose parameters are not all
+    /// known, or that collects any name.
+    fn judge_yii_definition_argument(&self, key: &str) -> Verdict {
+        let (class, method, name) = crate::yii::definitions::split_definition_argument_key(key);
+        let declared = self.backend.yii_definition_parameters(class, method)?;
+        Some((
+            declared.iter().any(|declared| declared == name),
+            "argument",
+            "invalid_yii_definition_argument",
         ))
     }
 
@@ -909,9 +1030,16 @@ impl Backend {
                 {
                     return None;
                 }
-                // Test code passes invented route names to mocks, and an
-                // `*.api.php` file's examples name invented routes too.
-                if *kind == crate::symbol_map::StringKeyKind::DrupalRoute && is_drupal_test_code {
+                // Test code passes invented route names to mocks and uses
+                // its test modules' elements and libraries, and an
+                // `*.api.php` file's examples name invented ones too.
+                if matches!(
+                    kind,
+                    crate::symbol_map::StringKeyKind::DrupalRoute
+                        | crate::symbol_map::StringKeyKind::DrupalRenderElement
+                        | crate::symbol_map::StringKeyKind::DrupalLibrary
+                ) && is_drupal_test_code
+                {
                     return None;
                 }
                 Some((
@@ -971,6 +1099,20 @@ impl Backend {
                         label,
                         crate::yii::routes::split_route_argument_key(key).1
                     ),
+                    CheckedStringKind::YiiDefinitionArgument => {
+                        let (class, method, name) =
+                            crate::yii::definitions::split_definition_argument_key(key);
+                        let method = self
+                            .yii_defined_class(class)
+                            .and_then(|class| {
+                                class.get_method_ci(method).map(|m| m.name.to_string())
+                            })
+                            .unwrap_or_else(|| method.to_string());
+                        format!(
+                            "Unknown {label}: '{name}' is not a parameter of {}::{method}()",
+                            crate::util::short_name(class)
+                        )
+                    }
                     CheckedStringKind::SymfonyTranslation => {
                         let (domain, message) =
                             crate::symfony::translations::split_translation_key(key);

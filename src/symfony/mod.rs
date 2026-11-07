@@ -112,7 +112,7 @@ pub(crate) fn slot_spans(content: &str, slots: Vec<NameSlot>) -> Vec<SymbolSpan>
 /// parameter, route, translation key, Twig template, Twig filter or
 /// function, configuration key,
 /// event listener, or Messenger bus, or register a Messenger handler, or
-/// define a Yii route.
+/// define a Yii route or a Yii DI definition.
 #[derive(Default)]
 pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
@@ -140,7 +140,8 @@ pub(crate) struct SymfonyState {
 /// uses Twig declares its templates, filters, and functions and nothing
 /// else.  A Yii route is
 /// counted whether it has a name or not, for the arguments its handler
-/// reads from its path.
+/// reads from its path, and so is a Yii DI definition, for the class it
+/// binds.
 fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> bool) -> bool {
     let counts = |kind: StringKeyKind| match kind.framework() {
         KeyFramework::ServiceContainer
@@ -152,6 +153,7 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
     };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
+        || (!map.yii_definitions.is_empty() && enabled(StringKeyKind::YiiDefinitionArgument))
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
         || (map.declares_twig_loader && enabled(StringKeyKind::TwigTemplate))
         || ((!map.drupal_route_patterns.is_empty() || !map.drupal_route_aliases.is_empty())
@@ -220,6 +222,9 @@ impl Backend {
                 .any(|prefix| uri.starts_with(prefix.as_str()));
         self.note_drupal_routes(uri, Some(map));
         self.note_drupal_hook_declarations(uri, Some(map));
+        self.note_drupal_theme_hook_sources(uri, Some(map));
+        self.note_drupal_library_builder_sources(uri, Some(map));
+        self.note_drupal_theme_suggestions(map);
         let was_declaring = self.symfony.declaring_uris.read().contains(uri);
         // Only take the write lock when the answer changes.
         if was_declaring == declares {
@@ -237,6 +242,8 @@ impl Backend {
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
         self.note_drupal_routes(uri, None);
         self.note_drupal_hook_declarations(uri, None);
+        self.note_drupal_theme_hook_sources(uri, None);
+        self.note_drupal_library_builder_sources(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
         }

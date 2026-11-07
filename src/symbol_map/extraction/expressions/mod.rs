@@ -243,11 +243,19 @@ pub(super) fn extract_from_expression<'a>(
         Expression::Array(array) => {
             try_emit_array_callable_span(&array.elements, ctx.content, &mut ctx.spans);
             emit_drupal_config_target_entry_spans(&array.elements, ctx);
+            emit_drupal_render_element_reads(&array.elements, ctx);
+            emit_drupal_render_array_spans(&array.elements, ctx);
+            emit_drupal_attached_array_spans(&array.elements, ctx);
+            emit_yii_definition_spans(&array.elements, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::LegacyArray(array) => {
             try_emit_array_callable_span(&array.elements, ctx.content, &mut ctx.spans);
             emit_drupal_config_target_entry_spans(&array.elements, ctx);
+            emit_drupal_render_element_reads(&array.elements, ctx);
+            emit_drupal_render_array_spans(&array.elements, ctx);
+            emit_drupal_attached_array_spans(&array.elements, ctx);
+            emit_yii_definition_spans(&array.elements, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::List(list) => {
@@ -386,6 +394,11 @@ pub(super) fn extract_from_expression<'a>(
         // `strlen(...)`, `$obj->method(...)`, `Class::method(...)`
         Expression::PartialApplication(partial) => {
             extract_partial_application_expr(partial, ctx, scope_start)
+        }
+
+        // ── A Yii path alias a string starts with: `'@runtime/logs'` ──
+        Expression::Literal(Literal::String(literal)) if ctx.yii => {
+            record_yii_alias(literal, ctx);
         }
 
         // Any expression variant without an explicit arm: descend generically

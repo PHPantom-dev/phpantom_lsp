@@ -126,13 +126,18 @@ catalogues together, the way a real Symfony project does.
 - In `UserRepository::inTeam()`, complete after `t.`. A variable a join
   declares stands for the entity its association targets, here the
   `Team` that `team` maps to, and a variable nothing declares is reported.
-- In `UserRepository::searchInTeam()`, move the `andWhere()` out of the `if`.
+- In `UserRepository::search()`, move the `andWhere()` out of the `if`.
   A variable is reported when some path through the method builds the
   query without declaring it, here the path that skips the join.
 - In `UserRepository::named()`, hover `$byBuilder` or `$byQuery`: a query
   is typed by what its DQL selects, so both are a `list<User>`. In
   `displayNamesByEmail()`, hover `$rows`, a shape of the selected fields
-  keyed by the `INDEX BY` field. In `searchByName()`, hover `$users`: the
+  keyed by the `INDEX BY` field. In `teamSizes()`, hover `$rows`: an
+  aggregate or a function is typed where every database driver agrees,
+  so `COUNT()` is an `int<0, max>` and `UPPER()` a `string`, and `AVG()`
+  is typed for the SQLite driver `config/packages/doctrine.yaml` names, a
+  `float`. In
+  `searchByName()`, hover `$users`: the
   builder `byEmail()` returns carries its DQL into a variable and through
   a branch, so the result is still a `list<User>`, and the `u` that
   `byEmail()` declared stands for `User` in the `andWhere()`.
@@ -141,6 +146,15 @@ catalogues together, the way a real Symfony project does.
   The variables a builder uses are checked against the ones declared by
   the method that creates it and the methods it is passed to, so the `t`
   nothing joins is reported.
+- In `UserRepository::teamMembers()`, change `t.name` to `x.name`. The
+  builder comes from a method that gets it from another and passes it on
+  to a third, and the variables each declares are followed along the
+  chain, so only `x` is reported. In `inTeamByEmail()`, wrap the
+  `joinTeam()` call in an `if`: what another method declares counts only
+  on the paths that call it.
+- In `UserRepository::namedTeamMembers()`, delete the `joinTeam()` call.
+  `onlyNamedTeams()` uses `t` and leaves it to its callers to declare, so
+  the query run without it is reported at `getQuery()`.
 - In `UserRepository::sortedByName()`, go-to-definition on `displayName`
   in the `Expr\OrderBy`. The DQL an expression object is built from reads
   like any other fragment.

@@ -405,7 +405,9 @@ Go-to-definition is implemented for **route names** (`route()`), **config
 keys**, **env vars**, **translation keys**, and **view names** via the
 declaration scanners in `virtual_members/laravel/{route_names, config_keys,
 env_vars, trans_keys, view_names}.rs`. These walk the relevant source files
-and resolve a string key to its declaration site. `StringKey` also
+and resolve a string key to its declaration site. **Asset paths** (`asset()`,
+`mix()`, `@vite`) and **Inertia pages** resolve against the filesystem at
+request time (`virtual_members/laravel/assets.rs`). `StringKey` also
 flows through find-references (rename, highlight, and semantic tokens
 are L31). **Eloquent
 relation and column name strings** have completion (`completion/eloquent_string.rs`).
@@ -414,34 +416,22 @@ The scanners already enumerate every valid key for go-to-definition. The
 items below mostly wire that existing enumeration into three more LSP
 endpoints rather than building new analysis.
 
-#### L17. Additional string contexts without booting
+#### L71. Inertia page props and asset helpers on a typed URL generator
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Low-Medium**
 
-Constructs the extension and the Laravel LSP cover that we don't, and
-that are statically recoverable (no booting):
+Inertia page names complete, navigate, and are checked, but the props a
+render passes in its second argument (`Inertia::render('Users/Show',
+['user' => …])`) are not completed from the page's `defineProps` (Vue) or
+its component's props type. Reading them means parsing the page's
+`<script setup>` block or TypeScript props, which the Laravel extension
+does with a regex and only for Vue.
 
-- **Asset paths** — `asset('...')` (and `UrlGenerator::asset()`) against
-  a filesystem walk of `public/`. Two cheap extensions the Laravel LSP
-  has or lacks: `mix('...')` against `public/mix-manifest.json` (static
-  JSON, legacy projects), and — which they do *not* support — Vite
-  entry-point strings (`Vite::asset('resources/js/app.js')`, `@vite`
-  arguments) checked against source-file existence.
-- **Inertia page paths** — `Inertia::render('...')` and
-  `Inertia::modal()` arg 0, `Route::inertia()` arg 1, and the
-  `inertia()` helper, against a filesystem walk of `resources/js/Pages`
-  (page paths/extensions from `config/inertia.php`, read statically;
-  default `resources/js/Pages` + `.vue`). Only relevant to Inertia
-  projects. Pair the unknown-page diagnostic with a "create page" quick
-  fix (the Laravel LSP scaffolds a `<script setup>/<template>` stub).
-  Its second-argument prop-key completion (regex-parsing `defineProps`
-  out of the `.vue` page) is shallow and optional — defer unless asked.
-
-**Explicitly still out of scope** (see the table at the top): container
-binding names (`app('...')`), facade string aliases, and anything else that
-requires the live container. These genuinely cannot be resolved without
-booting, and a snapshot of them is the "true for one boot" half-truth we are
-choosing not to ship.
+Separately, `asset()` paths are recognised through the helper, the `URL`
+facade, and `url()->asset()`, but not on a receiver only its type says is
+a URL generator (`$this->url->asset('css/app.css')` on an injected
+`UrlGenerator`). That needs a typed receiver site like the one view names
+use (`view_receiver_method`).
 
 #### L27. Legacy `Controller@method` action strings
 
@@ -669,21 +659,6 @@ including grouped imports, without treating unrelated classes named
 ## Navigation and code actions
 
 Editor features Laravel Idea has that do not live inside a string.
-
-#### L66. Related-file navigation for models, events, and listeners
-
-**Impact: Medium · Complexity: Medium**
-
-Laravel Idea links an Eloquent model to its factory, policy, observer,
-migrations, JSON resource, and custom collection, and an event
-to its listeners and back. We navigate none of these. The links are
-conventions or static registrations: `HasFactory` and the factory's
-model, `Gate::policy()`/`#[UsePolicy]`/the `Policies\{Model}Policy`
-guess, `#[ObservedBy]`/`::observe()`, `Event::listen()` and listener
-`handle(Event $e)` signatures (Laravel's event discovery reads exactly
-that type hint). Expose them as a code lens on the class or through
-go-to-implementation, whichever reads better in practice. The migrations
-link reuses the table map `database_schema/` already builds.
 
 #### L67. Laravel refactoring intentions
 

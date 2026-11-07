@@ -73,6 +73,33 @@ pub(crate) fn class_view_base(
     calls.base(class_fqn)
 }
 
+/// Record the alias a string starts with, `@runtime` in `'@runtime/logs'`,
+/// as a span over the alias alone.  Any string can name a path, so every
+/// string of a Yii project is read.
+pub(in crate::symbol_map::extraction) fn record_yii_alias(
+    literal: &LiteralString<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let start = literal.span.start.offset as usize + 1;
+    let end = (literal.span.end.offset as usize).saturating_sub(1);
+    let Some(text) = ctx.content.get(start..end) else {
+        return;
+    };
+    let Some(alias) = crate::yii::aliases::alias_prefix(text) else {
+        return;
+    };
+    ctx.spans.push(SymbolSpan {
+        start: start as u32,
+        end: (start + alias.len()) as u32,
+        kind: SymbolKind::StringKey {
+            key: alias.to_string(),
+            kind: StringKeyKind::YiiAlias,
+            is_write: false,
+            is_optional: false,
+        },
+    });
+}
+
 /// Record the view the first argument of a render call names.
 pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
     object: &Expression<'_>,

@@ -94,7 +94,9 @@ pub(super) fn export_span(
             if resolved.is_none()
                 && !matches!(
                     class_context,
-                    ClassRefContext::TypeOperatorOperand | ClassRefContext::DocblockSee
+                    ClassRefContext::TypeOperatorOperand
+                        | ClassRefContext::DocblockSee
+                        | ClassRefContext::Annotation
                 )
             {
                 output.diagnostics.push(ExportDiagnostic {

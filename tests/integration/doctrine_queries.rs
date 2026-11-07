@@ -115,6 +115,10 @@ class Address {
 ",
     ),
     (
+        "src/Dto/UserSummary.php",
+        "<?php\nnamespace App\\Dto;\nfinal class UserSummary {\n    public function __construct(public int $id, public string $email) {}\n}\n",
+    ),
+    (
         "src/Repository/UserRepository.php",
         "<?php
 namespace App\\Repository;
@@ -139,6 +143,15 @@ class UserRepository extends \\Doctrine\\ORM\\EntityRepository {
 /// whose method body is `body`.  The `§` marker is in `body`, or, when
 /// `body` is `None`, in the repository stub.
 async fn open_service(body: Option<&str>) -> (Backend, tempfile::TempDir, Uri, Position) {
+    open_service_with(body, &[]).await
+}
+
+/// [`open_service`] in a workspace that also holds the files `extra`,
+/// indexed the way the workspace index reads them.
+async fn open_service_with(
+    body: Option<&str>,
+    extra: &[(&str, &str)],
+) -> (Backend, tempfile::TempDir, Uri, Position) {
     let source = format!(
         "<?php
 namespace App\\Service;
@@ -178,8 +191,12 @@ final class Users
             (repository, position)
         }
     };
+    files.extend(extra.iter().map(|(path, text)| (*path, text.to_string())));
     let refs: Vec<(&str, &str)> = files.iter().map(|(p, t)| (*p, t.as_str())).collect();
     let (backend, dir) = create_psr4_workspace(COMPOSER, &refs);
+    if !extra.is_empty() {
+        backend.ensure_workspace_indexed();
+    }
     let text = files
         .iter()
         .find(|(p, _)| *p == open_path)
@@ -235,6 +252,100 @@ async fn selected_fields_give_a_shape_typed_by_their_properties() {
         ),
         "{hover}"
     );
+}
+
+#[tokio::test]
+async fn aggregates_and_functions_are_typed_where_every_driver_agrees() {
+    let rows = hover(
+        "        $rows = $em->createQuery(\"SELECT u.email, COUNT(a.city) AS total, LOWER(u.name), CASE WHEN u.id > 1 THEN 'old' ELSE 'new' END age, SUM(u.id) AS ids FROM App\\Entity\\User u LEFT JOIN u.address a GROUP BY u.email\")->getResult();\n        $ro§ws;",
+    )
+    .await;
+    assert!(
+        shows(
+            &rows,
+            "list<array{email: string, total: int<0, max>, 1: string|null, age: 'old'|'new', ids: mixed}>"
+        ),
+        "{rows}"
+    );
+
+    // Without a `GROUP BY`, the one row may come from no row at all.
+    let row = hover(
+        "        $row = $em->createQuery('SELECT COUNT(u.id) AS total, u.email FROM App\\Entity\\User u')->getSingleResult(AbstractQuery::HYDRATE_OBJECT);\n        $r§ow;",
+    )
+    .await;
+    assert!(
+        shows(&row, "array{total: int<0, max>, email: string|null}"),
+        "{row}"
+    );
+}
+
+/// The hover at the `§` marker in a service method whose body is `body`, in
+/// a workspace that also holds the files `extra`.
+async fn hover_with(body: &str, extra: &[(&str, &str)]) -> String {
+    let (backend, _dir, uri, position) = open_service_with(Some(body), extra).await;
+    hover_text_at(&backend, &uri, position.line, position.character)
+        .await
+        .unwrap_or_default()
+}
+
+const DRIVER_DEPENDENT_ROWS: &str = "        $rows = $em->createQuery('SELECT SUM(u.id) AS total, u.id * 2 AS doubled, 1.5 AS rate FROM App\\Entity\\User u GROUP BY u.email')->getResult();\n        $ro§ws;";
+
+#[tokio::test]
+async fn the_connections_driver_types_what_differs_between_drivers() {
+    let bootstrap = "<?php
+use Doctrine\\DBAL\\DriverManager;
+$connection = DriverManager::getConnection(['driver' => 'pdo_mysql', 'host' => 'localhost']);
+";
+    let rows = hover_with(DRIVER_DEPENDENT_ROWS, &[("bootstrap.php", bootstrap)]).await;
+    assert!(
+        shows(
+            &rows,
+            "list<array{total: numeric-string, doubled: int, rate: '1.5'}>"
+        ),
+        "{rows}"
+    );
+
+    let doctrine_yaml = "doctrine:\n    dbal:\n        url: '%env(resolve:DATABASE_URL)%'\n";
+    let env = "DATABASE_URL=\"sqlite:///%kernel.project_dir%/var/data.db\"\n";
+    let rows = hover_with(
+        DRIVER_DEPENDENT_ROWS,
+        &[
+            ("config/packages/doctrine.yaml", doctrine_yaml),
+            (".env", env),
+        ],
+    )
+    .await;
+    assert!(
+        shows(&rows, "list<array{total: int, doubled: int, rate: 1.5}>"),
+        "{rows}"
+    );
+}
+
+#[tokio::test]
+async fn connections_that_disagree_leave_the_driver_unknown() {
+    let mysql = "<?php\nDoctrine\\DBAL\\DriverManager::getConnection(['driver' => 'pdo_mysql']);\n";
+    let pgsql = "<?php\nDoctrine\\DBAL\\DriverManager::getConnection(['driver' => 'pdo_pgsql']);\n";
+    let rows = hover_with(
+        DRIVER_DEPENDENT_ROWS,
+        &[("bin/mysql.php", mysql), ("bin/pgsql.php", pgsql)],
+    )
+    .await;
+    assert!(
+        shows(
+            &rows,
+            "list<array{total: mixed, doubled: mixed, rate: mixed}>"
+        ),
+        "{rows}"
+    );
+}
+
+#[tokio::test]
+async fn a_new_object_is_the_row() {
+    let hover = hover(
+        "        $rows = $em->createQuery('SELECT NEW App\\Dto\\UserSummary(u.id, u.email) FROM App\\Entity\\User u')->getResult();\n        $ro§ws;",
+    )
+    .await;
+    assert!(shows(&hover, "list<UserSummary>"), "{hover}");
 }
 
 #[tokio::test]
@@ -409,4 +520,43 @@ async fn an_expression_object_added_to_a_builder_is_replayed() {
     )
     .await;
     assert!(shows(&hover, "list<array{email: string}>"), "{hover}");
+}
+
+/// A builder a method in a file the editor has not opened returns names its
+/// entity through that file's imports.
+#[tokio::test]
+async fn a_builder_from_an_unopened_file_reads_its_imports() {
+    let queries = "<?php
+namespace App\\Repository;
+use App\\Entity\\User;
+use Doctrine\\ORM\\EntityManagerInterface;
+use Doctrine\\ORM\\QueryBuilder;
+final class Queries {
+    public function __construct(private EntityManagerInterface $em) {}
+    public function users(): QueryBuilder {
+        return $this->em->createQueryBuilder()->select('u')->from(User::class, 'u');
+    }
+}
+";
+    let (service, position) = split_cursor(
+        "<?php
+namespace App\\Service;
+use App\\Repository\\Queries;
+function run(Queries $queries): void {
+    $users = $queries->users()->getQuery()->getResult();
+    $us§ers;
+}
+",
+    );
+    let mut files: Vec<(&str, &str)> = STUBS.to_vec();
+    files.push(("src/Repository/Queries.php", queries));
+    files.push(("src/Service/Users.php", &service));
+    let (backend, dir) = create_psr4_workspace(COMPOSER, &files);
+    let uri = Uri::from_file_path(dir.path().join("src/Service/Users.php")).unwrap();
+    open_document(&backend, &uri, "php", &service).await;
+
+    let hover = hover_text_at(&backend, &uri, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(shows(&hover, "list<User>"), "{hover}");
 }

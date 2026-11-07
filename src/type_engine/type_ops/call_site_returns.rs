@@ -23,7 +23,8 @@
 //! return type extension for each of these for the same reason.
 //!
 //! `json_decode()` needs nothing here. It is declared `mixed`, so it carries
-//! no failure branch for the flag to remove.
+//! no failure branch for the flag to remove. What both of them throw under
+//! the flag is decided here too ([`call_site_throws`]).
 //!
 //! WordPress functions whose arguments decide their result the same way are
 //! in [`wordpress`].
@@ -244,6 +245,52 @@ fn json_encode_return(args: &CallArgs<'_>, declared: &PhpType) -> Option<PhpType
         return None;
     }
     without_false(declared)
+}
+
+/// Whether the arguments of a call to `function` can decide what it throws
+/// (see [`call_site_throws`]), so a caller only sets up an argument resolver
+/// for the functions that need one.
+pub(crate) fn has_call_site_throws(function: &FunctionInfo) -> bool {
+    function.namespace.is_none()
+        && (function.name.eq_ignore_ascii_case("json_decode")
+            || function.name.eq_ignore_ascii_case("json_encode"))
+}
+
+/// The exceptions a call's arguments make it throw on top of what the
+/// function declares, or `None` when they add nothing.
+///
+/// `json_decode()` and `json_encode()` throw `JsonException` only when their
+/// flags set `JSON_THROW_ON_ERROR`, which no `@throws` tag on the stub can
+/// say. Like PHPStan's `JsonThrowTypeExtension`, a flags argument that
+/// cannot be pinned down adds nothing. The resolver is only consulted for a
+/// flags term that is neither the constant's name nor an integer literal.
+pub(crate) fn call_site_throws(
+    function: &FunctionInfo,
+    argument_list: &mago_syntax::cst::ArgumentList<'_>,
+    content: &str,
+    arg_type_resolver: ArgTypeResolver<'_>,
+) -> Option<PhpType> {
+    if !has_call_site_throws(function) {
+        return None;
+    }
+    let texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+        argument_list,
+        content,
+    );
+    let args: Vec<&str> = texts.iter().map(String::as_str).collect();
+    let args = CallArgs {
+        params: &function.parameters,
+        args,
+        resolver: arg_type_resolver,
+    };
+    let flags = args.text("$flags")?;
+    bitmask_sets_flag(
+        &flags,
+        "JSON_THROW_ON_ERROR",
+        JSON_THROW_ON_ERROR,
+        arg_type_resolver,
+    )
+    .then(|| PhpType::named(atom("JsonException")))
 }
 
 /// `class_implements()` and its siblings, keyed on what the first argument

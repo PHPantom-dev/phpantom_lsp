@@ -19,11 +19,15 @@ use parking_lot::RwLock;
 pub(crate) mod computed_hooks;
 pub(crate) mod config;
 pub(crate) mod config_keys;
+pub(crate) mod elements;
 pub(crate) mod hooks;
+pub(crate) mod libraries;
 pub(crate) mod links;
 pub(crate) mod permissions;
 pub(crate) mod routing;
 pub(crate) mod service_providers;
+pub(crate) mod template_variables;
+pub(crate) mod theme_hooks;
 pub(crate) mod types;
 pub(crate) mod upcasting;
 
@@ -49,17 +53,26 @@ pub(crate) struct DrupalState {
     extensions: RwLock<hooks::ExtensionIndex>,
     /// What the hook documentation says, until a declaring file changes.
     hook_index: RwLock<Option<std::sync::Arc<hooks::HookIndex>>>,
+    /// The paths of the Twig templates of every web root, outside test
+    /// modules, which the workspace walk does not reach in core and
+    /// contributed extensions, by the hook name their file name spells
+    /// (see [`theme_hooks::template_key`]).
+    templates: RwLock<std::collections::HashMap<String, Vec<PathBuf>>>,
+    /// The theme hooks the site declares, until a file they come from
+    /// changes.
+    theme_hook_index: RwLock<Option<std::sync::Arc<theme_hooks::ThemeHookIndex>>>,
+    /// The extensions that build libraries in code, until a file that
+    /// implements the hook changes.
+    library_builders: RwLock<Option<std::sync::Arc<libraries::LibraryBuilders>>>,
+    /// The theme hook suggestions (`<hook>__<detail>`) render arrays name,
+    /// sorted; see [`template_variables`].
+    theme_suggestions: RwLock<Option<std::sync::Arc<std::collections::BTreeSet<String>>>>,
     /// The services each service provider's `alter()` gives another class,
     /// keyed by the provider's URI; see [`service_providers`].
     service_replacements: RwLock<BTreeMap<String, Vec<(Atom, Atom)>>>,
-    /// The default configuration files of every extension, which are
-    /// never parsed: their names are configuration names.
-    default_config_files: RwLock<Vec<PathBuf>>,
-    /// The configuration schema files, read when a configuration name is
-    /// first asked for.
-    config_schema_files: RwLock<Vec<PathBuf>>,
-    /// The configuration names read from both, until one of them changes.
-    config_index: RwLock<Option<std::sync::Arc<config::ConfigIndex>>>,
+    /// The default configuration files and configuration schema files of
+    /// every extension, and the configuration names read from them.
+    config: config::ConfigSources,
 }
 
 /// A kind of file Drupal reads declarations from.
@@ -75,6 +88,10 @@ pub(crate) enum DeclarationFile {
     Links,
     /// `<extension>.permissions.yml`.
     Permissions,
+    /// `<extension>.libraries.yml`.
+    Libraries,
+    /// An extension's `<extension>.info.yml`.
+    Info,
 }
 
 /// The kind of declaration file the file name at the end of `path` is, if
@@ -98,6 +115,10 @@ fn declaration_file_kind(path: &str) -> Option<DeclarationFile> {
     .any(|suffix| name.ends_with(suffix))
     {
         Some(DeclarationFile::Links)
+    } else if libraries::libraries_file_extension(name).is_some() {
+        Some(DeclarationFile::Libraries)
+    } else if hooks::is_info_file_name(name) {
+        Some(DeclarationFile::Info)
     } else {
         None
     }
@@ -248,11 +269,22 @@ pub(crate) fn matches_route_pattern(pattern: &str, name: &str) -> bool {
 }
 
 /// Whether `path` is a file Drupal reads declarations from: a services,
-/// routing, links, or permissions file, or an extension's `*.info.yml`.
+/// routing, links, permissions, or libraries file, or an extension's
+/// `*.info.yml`.
 pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| declaration_file_kind(name).is_some() || hooks::is_info_file_name(name))
+        .is_some_and(|name| declaration_file_kind(name).is_some())
+        && !is_test_fixture(path, web_root)
+        && !is_unloaded(path, web_root)
+}
+
+/// Whether `path` is a Twig template a theme hook may be drawn with: an
+/// `*.html.twig` outside test modules.
+pub(crate) fn is_template_file(path: &Path, web_root: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(theme_hooks::TEMPLATE_SUFFIX))
         && !is_test_fixture(path, web_root)
         && !is_unloaded(path, web_root)
 }
@@ -320,11 +352,13 @@ impl Backend {
         self.drupal.web_roots.write().clear();
         self.drupal.declaration_files.write().clear();
         self.drupal.hook_php_files.write().clear();
+        self.drupal.templates.write().clear();
+        *self.drupal.theme_hook_index.write() = None;
+        *self.drupal.library_builders.write() = None;
+        *self.drupal.theme_suggestions.write() = None;
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
-        self.drupal.default_config_files.write().clear();
-        self.drupal.config_schema_files.write().clear();
-        *self.drupal.config_index.write() = None;
+        self.drupal.config.clear();
     }
 
     /// Remember the declaration files the Drupal walk found: the YAML for
@@ -340,7 +374,13 @@ impl Backend {
                 .and_then(|name| name.to_str())
                 .unwrap_or_default();
             if hooks::is_info_file_name(name) {
-                extensions.extend(hooks::read_extension(&file));
+                if let Some(extension) = hooks::read_extension(&file) {
+                    // A theme's info file attaches libraries.
+                    if extension.is_theme {
+                        yaml.push(file);
+                    }
+                    extensions.push(extension);
+                }
             } else if name.ends_with(".yml") {
                 yaml.push(file);
             } else {

@@ -25,6 +25,12 @@ pub struct SchemaIndex {
     base_tables: HashMap<(String, String), SchemaTable>,
     cached_plan: MigrationPlan,
     dump_paths: Vec<PathBuf>,
+    /// For each table, the migrations whose `up()` creates or alters it:
+    /// the index of the file in `cached_plan` and the offset of the
+    /// `Schema::create()`/`Schema::table()` argument that names the table.
+    table_migrations: HashMap<(String, String), Vec<(u32, u32)>>,
+    /// The `cached_plan` index of the migration being applied.
+    applying_migration: u32,
 }
 
 impl PartialEq for SchemaIndex {
@@ -77,6 +83,8 @@ impl SchemaIndex {
             base_tables: HashMap::new(),
             cached_plan: MigrationPlan::default(),
             dump_paths: Vec::new(),
+            table_migrations: HashMap::new(),
+            applying_migration: 0,
         };
         for table in tables {
             index.insert_table(table);
@@ -141,6 +149,38 @@ impl SchemaIndex {
             .map(|file| (file.path.as_path(), file.content.as_str()))
     }
 
+    /// The migrations that create or alter `table` on `connection`, in
+    /// migration order, each with its source and the offset of the call's
+    /// table name.
+    pub(crate) fn table_migrations(
+        &self,
+        connection: &str,
+        table: &str,
+    ) -> impl Iterator<Item = (&Path, &str, u32)> {
+        self.table_migrations
+            .get(&(connection.to_ascii_lowercase(), table.to_ascii_lowercase()))
+            .into_iter()
+            .flatten()
+            .filter_map(|&(file, offset)| {
+                let file = self.cached_plan.files.get(file as usize)?;
+                Some((file.path.as_path(), file.content.as_str(), offset))
+            })
+    }
+
+    /// Record that the migration being applied creates or alters `table`
+    /// at `offset`.
+    fn record_table_migration(&mut self, connection: &str, table: &str, offset: u32) {
+        let sites = self
+            .table_migrations
+            .entry((connection.to_ascii_lowercase(), table.to_ascii_lowercase()))
+            .or_default();
+        let site = (self.applying_migration, offset);
+        // One site per migration: the first call that names the table.
+        if sites.last().is_none_or(|(file, _)| *file != site.0) {
+            sites.push(site);
+        }
+    }
+
     /// Schema dump files already read for one connection.
     pub(crate) fn dump_paths_for<'a>(
         &'a self,
@@ -189,6 +229,22 @@ impl SchemaIndex {
     }
 
     fn rename_table(&mut self, connection: &str, old_name: &str, new_name: &str) {
+        // The migrations that shaped the table under its old name shaped it
+        // under the new one too.
+        if let Some(mut sites) = self.table_migrations.remove(&(
+            connection.to_ascii_lowercase(),
+            old_name.to_ascii_lowercase(),
+        )) {
+            let renamed = self
+                .table_migrations
+                .entry((
+                    connection.to_ascii_lowercase(),
+                    new_name.to_ascii_lowercase(),
+                ))
+                .or_default();
+            sites.append(renamed);
+            *renamed = sites;
+        }
         let Some(mut table) = self.tables.remove(&(
             connection.to_ascii_lowercase(),
             old_name.to_ascii_lowercase(),
@@ -234,9 +290,7 @@ impl SchemaIndex {
     fn rebuild_from_plan(&mut self) {
         self.tables = self.base_tables.clone();
         let plan = std::mem::take(&mut self.cached_plan);
-        for file in &plan.files {
-            apply_migration_file(self, &file.content);
-        }
+        apply_migration_plan(self, &plan);
         self.cached_plan = plan;
     }
 }
@@ -339,6 +393,8 @@ pub fn load_schema_index(
         base_tables: HashMap::new(),
         cached_plan: MigrationPlan::default(),
         dump_paths: Vec::new(),
+        table_migrations: HashMap::new(),
+        applying_migration: 0,
     };
 
     if config.schema.enabled() {

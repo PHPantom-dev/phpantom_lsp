@@ -211,11 +211,13 @@ impl Backend {
 
         // Apply stub patches for phpstorm-stubs deficiencies (e.g.
         // array_reduce returning `mixed` instead of a template-based type).
+        let stub_uri = format!("{}{}", crate::stubs::STUB_FUNCTION_URI_PREFIX, name);
+        let unbundled = crate::stubs::is_unbundled_extension_stub(&stub_uri, stub_content);
         for func in &mut functions {
             crate::stub_patches::apply_function_stub_patches(func);
+            func.from_unbundled_extension = unbundled;
         }
 
-        let stub_uri = format!("{}{}", crate::stubs::STUB_FUNCTION_URI_PREFIX, name);
         let mut result: Option<FunctionInfo> = None;
         {
             let mut fmap = self.symbols.global_functions.write();
@@ -241,6 +243,9 @@ impl Backend {
 
         let mut classes = Self::parse_php_versioned(stub_content, ver);
         if !classes.is_empty() {
+            for class in &mut classes {
+                class.from_unbundled_extension = unbundled;
+            }
             let empty_use_map = HashMap::new();
             let stub_namespace = self.parse_namespace(stub_content);
             Self::resolve_parent_class_names(

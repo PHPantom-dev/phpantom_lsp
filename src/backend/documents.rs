@@ -268,6 +268,8 @@ impl Backend {
             if let Some(content) = self.get_file_content(&uri) {
                 self.update_resource_symbol_index(&uri, &content);
             } else {
+                // A buffer never saved leaves no file behind.
+                self.note_drupal_config_document(&uri, None);
                 self.clear_file_maps(&uri);
             }
         } else if let Some(path) = self.workspace_index_path(&uri) {

@@ -434,6 +434,12 @@ impl DocTags {
     }
 }
 
+/// Whether a docblock marks its declaration for a framework to fill or
+/// call by reflection (see [`DocTags::injected`]).
+pub(super) fn marks_injected(docblock: &str) -> bool {
+    DocTags::read(docblock).injected
+}
+
 // ── AST walk ────────────────────────────────────────────────────────────────
 
 struct BodyWalker;

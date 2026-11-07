@@ -273,12 +273,34 @@ impl<'ast, 'arena> ThrowSiteSink<'ast, 'arena> for Collect<'_, '_> {
             self.points.implicit = true;
             return;
         };
-        match fl(
+        let Some(func) = fl(
             bytes_to_str(ident.value()),
             call.function.span().start.offset,
+        ) else {
+            self.points.implicit = true;
+            return;
+        };
+        if !crate::type_engine::type_ops::call_site_returns::has_call_site_throws(&func) {
+            self.points.add_declared(&func.throws);
+            return;
+        }
+        let rctx = self.ctx.as_resolution_ctx();
+        let resolve = |text: &str| crate::Backend::resolve_arg_text_to_type(text, &rctx);
+        match crate::type_engine::type_ops::call_site_returns::call_site_throws(
+            &func,
+            &call.argument_list,
+            self.ctx.file.content,
+            Some(&resolve),
         ) {
-            Some(func) => self.points.add_declared(&func.throws),
-            None => self.points.implicit = true,
+            // What the arguments make it throw is all it throws beyond its
+            // declaration, so a call that declares nothing else throws
+            // only that.
+            Some(thrown) => {
+                let mut throws = func.throws.clone();
+                throws.push(thrown);
+                self.points.add_declared(&throws);
+            }
+            None => self.points.add_declared(&func.throws),
         }
     }
 

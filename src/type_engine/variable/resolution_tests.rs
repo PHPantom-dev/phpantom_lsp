@@ -2439,6 +2439,7 @@ fn stub_function_info(name: &str, return_type: Option<PhpType>) -> crate::types:
         template_param_bounds: Default::default(),
         throws: Vec::new(),
         is_polyfill: false,
+        from_unbundled_extension: false,
         overloads: vec![],
         is_pure: false,
         is_impure: false,

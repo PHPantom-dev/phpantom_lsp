@@ -795,44 +795,6 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ---
 
-## F72. DQL variables of a query builder a chain of methods handles
-
-**Impact: Low · Complexity: Medium**
-
-```php
-private function base(): QueryBuilder
-{
-    return $this->createQb()->join('e.team', 't');  // builder from another method
-}
-
-private function joinTeams(QueryBuilder $qb): void
-{
-    $this->joinOwner($qb);                          // passed on again
-}
-
-$qb = self::createQb();                             // static call
-$qb->andWhere('x.id = 1')->getQuery();              // `x` not reported
-```
-
-A builder another method returns, or that is passed to one, counts the
-variables that method's body declares, but only when that body creates the
-builder itself or only calls the methods of the one it is passed. One the
-method gets from a third method, or passes on to one, is not followed, so
-a variable used on it is not reported. Nor is one a static call or a call
-on a variable (`$repo->createQb()`) hands over. A variable such a method
-declares also counts on every path through the caller, not only the paths
-that make the call.
-
-The other direction is not reported either: a variable a method's returned
-builder uses, which none of its callers declare. PHPStan reports it in the
-caller, where the query is run.
-
-**Where to look:** `src/symbol_map/extraction/doctrine_dql.rs`
-(`summarize_methods`, `keeps_builder`, `builder_of`) and
-`src/diagnostics/dql_syntax.rs` (`providing_methods`).
-
----
-
 ## F45. Symfony events named by their class or a constant
 
 **Impact: Medium · Complexity: Medium**
