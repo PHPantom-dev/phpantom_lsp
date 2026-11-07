@@ -130,7 +130,37 @@ seconds a rate-limit message names.
 
 ## Array types
 
-No outstanding items.
+### B714. A constant written into an array in a loop loses its literal
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+private const int WHITE = 0;
+
+/** @param array<int, self::WHITE|self::GRAY|self::BLACK> $labels */
+private static function check(array $labels): void {}
+
+$labels = [];
+foreach ($nodes as $node) {
+    $labels[$node] = self::WHITE;
+}
+self::check($labels);
+// Argument 1 ($labels) expects array<int, 0|1|2>, got array<int, int>
+```
+
+The same write outside a loop keeps `array<int, 0>`, and PHPStan keeps
+the literal in the loop too. A keyed or appended write inside a loop body
+widens the value's scalar literals before storing it, so a fixed-point
+re-walk cannot grow a literal union (or a concatenated string) once per
+pass. That is only needed when the value changes from one pass to the
+next; a constant, or any value whose type the re-walk leaves unchanged,
+should keep its literal.
+
+**Where to look:** the `in_loop` widening in
+`merge_nested_array_write_inner` and `pushed_value`
+(`src/type_engine/variable/array_shape_writes.rs`).
+
+Found by `analyze` on Vytrvalec Server (`App\Algorithm\Graph::hasCycle()`).
 
 ## Laravel
 
@@ -184,31 +214,25 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B712. A used `void` result is judged by one member of a union
+### B713. Hover shows two `class-string`s that share a short name as one
 
-**Impact: Low-Medium · Complexity: Low-Medium**
+**Impact: Low · Complexity: Low-Medium**
 
 ```php
-/** @var LoggerInterface|ObjectProphecy */
-private $logger;
+namespace App;
 
-$this->logger->warning('x')->shouldBeCalled();
-// Result of method LoggerInterface::warning() (void) is used
+/** @param class-string<\App\C>|class-string<\Other\C> $s */
+function foo(string $s): void {
+    $s; // hover: $s = class-string<C>
+}
 ```
 
-The call's result is `null` only if every class the receiver can be
-returns nothing. `ObjectProphecy` answers the call through `__call`,
-which returns a `MethodProphecy`, so the result is used correctly. The
-check takes the first union member that declares the method and asks
-only it: `Logger|Mock` is reported and `Mock|Logger` is not, when `Mock`
-declares `warning()` with a return value. Report the call only when every
-member that answers it, through a declared method or `__call`, is natively
-`void`.
+Hover shortens every class name in a type to its short name, so the two
+members print the same and the union shows one of them. A union of the
+classes themselves does not have this problem: each gets its own block
+under its namespace. The same collapse hides `C::class|E::class` with `E`
+an import of another namespace's `C`, which is why that assertion in
+`tests/psalm_assertions/const_values.php` is skipped.
 
-**Where to look:** `collect_void_result_diagnostics_with_context`
-(`src/diagnostics/void_results.rs`), which reads `native_void` off the
-single target `resolve_callable_target_at_offset` returns.
-
-Found by `analyze` on Drupal core's Prophecy-based tests.
-
-No outstanding items.
+**Where to look:** `shorten_php_type` (`src/hover/formatting.rs`), which
+shortens before the union is printed.

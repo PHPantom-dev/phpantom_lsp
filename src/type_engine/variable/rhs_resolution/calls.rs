@@ -150,7 +150,19 @@ pub(crate) fn resolve_arg_variable_raw_type(
                     prop,
                     rctx.file.class_loader,
                 ) {
-                    return Some(hint);
+                    // `(self::VARIANCE_*)[]` names its values only once the
+                    // constants are read, against the class that declares
+                    // them rather than the caller's.
+                    let owner_ctx = crate::type_engine::resolver::ResolutionCtx {
+                        current_class: Some(cls),
+                        ..*rctx
+                    };
+                    return Some(
+                        crate::type_engine::call_resolution::evaluate_constant_operands(
+                            &hint, &owner_ctx,
+                        )
+                        .unwrap_or(hint),
+                    );
                 }
             }
         }

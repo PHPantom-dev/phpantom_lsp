@@ -102,76 +102,6 @@ now resolves to `mixed` rather than to the surviving literal.
 
 ---
 
-## D17. `docblock_native_mismatch` only judges nullability
-
-**Impact: Low · Complexity: Medium-High**
-
-```php
-/** @param int $name */
-function greet(string $name): void {}    // not flagged: int is not string at all
-
-/** @param Foo $value */
-function take(Bar $value): void {}       // not flagged: `Foo` may alias `Bar`
-```
-
-`src/diagnostics/docblock_native_mismatch.rs` compares a documented type
-against its native hint on one axis only: whether the annotation admits a
-`null` the signature rules out. A documented type that is not a subtype of
-the native hint on any *other* axis (`@param int` on a `string`, `@return
-array` on a `: string`) stays silent. That is the check PHPStan's
-`IncompatiblePhpDocTypeRule` performs, and the one the existing
-`is_type_compatible` in `src/class_lookup/compatibility.rs`
-already has the machinery for.
-
-Covering it means resolving the documented type's bare names first, since a
-`Foo` that a `@template` list or an imported `@psalm-type` alias stands
-behind may well be the native `Bar` after resolution. The nullability axis
-sidesteps that today: a name that resolves to something nullable never
-spells `null` itself, so the check simply does not fire on it.
-
-**Fix:** Resolve the documented type's names against the declaration's own
-`@template` list, the enclosing class's, and the file's
-`@psalm-type`/`@psalm-import-type` tags, then run the comparison through
-`is_type_compatible` rather than the nullability test alone.
-
----
-
-## D18. `array<int, T>` is accepted wherever a `list<T>` is declared
-
-**Impact: Low · Complexity: Medium-High**
-
-```php
-/**
- * @param list<int> $values
- * @return list<int>
- */
-function keep(array $values): array {
-    return array_filter($values, fn ($v) => $v > 3);  // array<int, int>, not flagged
-}
-```
-
-`is_type_compatible` in `src/class_lookup/compatibility.rs`
-carries an explicit MAYBE hatch for `array<int, X>` reaching a `list<X>`
-parameter or return type, on the grounds that PHP codebases spell the two
-interchangeably. The core `is_subtype_of` already rejects the direction
-(only `list<X>` satisfies `array<int, X>`, not the reverse), so the hatch
-is the only thing standing between us and PHPStan's report here.
-
-Now that `array_filter()` reports the `array<int, T>` it actually
-produces, the hatch is what keeps the second half of the over-claim
-alive: a function that hands back an unwrapped filter result still
-passes a declared `list<T>`.
-
-**Fix:** Drop the `array<int, X> → list<X>` arm and audit the corpus
-under `projects/` for what it starts reporting. The arm exists because
-plain `array<int, X>` is what an unannotated array resolves to in many
-places, so retiring it wants the resolver to answer `list<X>` for the
-shapes that genuinely are lists (literal arrays, `array_values()`,
-appended-to locals) first. Pay for it with resolver precision, the same
-way the supertype-where-subtype hatch was retired.
-
----
-
 ## D19. `invalid_member_access` cannot tell a property read from a write
 
 **Impact: Medium · Complexity: Medium**
@@ -234,29 +164,6 @@ is passed off as a public constant and nothing is reported.
 **Fix:** Record the member kind the syntax actually names — instance
 property, static property, constant, or method — rather than a name and
 a static flag.
-
----
-
-## D21. A union of an unreachable and a missing member is reported by neither check
-
-**Impact: Low · Complexity: Medium-High**
-
-`Known|Other` where `Known::$x` is private and `Other` has no `$x` at all
-fails on every runtime branch, and nothing reports it. Both checks are
-conservative in the same direction and each assumes the other covers what
-it declines to judge: the unknown-member check stays silent because the
-member exists on one branch, and the visibility check stays silent
-because it does not exist on the other.
-
-A related gap sits one layer earlier: the resolver hands the diagnostics
-only the branches it could load and drops the rest, so neither check can
-see that a union had a branch it failed to resolve. Any verdict that
-wants to distinguish "no branch permits this" from "we could not read
-one of the branches" needs that information preserved.
-
-**Fix:** Give the branches of a resolved union a verdict of their own —
-accessible, inaccessible, missing, unresolved — instead of collapsing
-them to a list of loaded classes, and decide the union once from those.
 
 ---
 

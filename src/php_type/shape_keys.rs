@@ -68,6 +68,19 @@ pub(crate) fn class_constant_key(key: &str) -> Option<(&str, &str)> {
         .then_some((class, constant))
 }
 
+/// The class and the member a type spelled `Foo::BAR`, `Foo::BAR_*` or
+/// `Foo::class` names.  The member may carry `*` wildcards, which a shape
+/// key never does.
+pub(crate) fn class_member_reference(text: &str) -> Option<(&str, &str)> {
+    let (class, member) = text.rsplit_once("::")?;
+    let is_member_spelling = !member.is_empty()
+        && member
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '*' || !c.is_ascii())
+        && !member.starts_with(|c: char| c.is_ascii_digit());
+    (is_class_name_spelling(class) && is_member_spelling).then_some((class, member))
+}
+
 /// The runtime array key each shape entry occupies, in order.
 ///
 /// A positional entry takes the next free integer index, mirroring the

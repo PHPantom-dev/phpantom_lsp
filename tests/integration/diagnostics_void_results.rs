@@ -238,3 +238,43 @@ $f = function (): void {
 "#;
     assert_eq!(lines(php), vec![4]);
 }
+
+#[test]
+fn a_union_receiver_is_flagged_only_when_every_member_returns_nothing() {
+    let php = r#"<?php
+interface Logger {
+    public function warning(string $message): void;
+}
+
+class Mock {
+    public function warning(string $message): Expectation { return new Expectation(); }
+}
+
+class Prophecy {
+    public function __call(string $name, array $args): Expectation { return new Expectation(); }
+}
+
+class Quiet {
+    public function warning(string $message): void {}
+}
+
+class Expectation {
+    public function shouldBeCalled(): static { return $this; }
+}
+
+function relay(
+    Logger|Mock $a,
+    Mock|Logger $b,
+    Logger|Prophecy $c,
+    Prophecy|Logger $d,
+    Logger|Quiet $e,
+): void {
+    $a->warning('x')->shouldBeCalled();
+    $b->warning('x')->shouldBeCalled();
+    $c->warning('x')->shouldBeCalled();
+    $d->warning('x')->shouldBeCalled();
+    $f = $e->warning('x');
+}
+"#;
+    assert_eq!(lines(php), vec![32]);
+}
