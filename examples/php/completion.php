@@ -42,6 +42,12 @@ use Exception;
 // Try: type `use function parse_file` and accept to get
 // `use function ast\parse_file;`
 
+// ── Expected Argument Values ────────────────────────────────────────────────
+// Try: type `pathinfo('report.pdf', ` and trigger completion. The
+// `PATHINFO_*` flags the function expects are listed first. Accept one, type
+// ` | `, and the flags not combined yet are offered again.
+// Try: type `settype($value, '` to pick one of the type names it accepts.
+
 
 // ── Instance Completion ─────────────────────────────────────────────────────
 

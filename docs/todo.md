@@ -33,7 +33,6 @@ contributor even though it's short.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Medium      |
-| C6  | [`#[ExpectedValues]` parameter value suggestions](todo/completion.md#c6-expectedvalues-parameter-value-suggestions)                                                                                                                             | Low         | Medium      |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets

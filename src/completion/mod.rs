@@ -87,6 +87,7 @@ pub(crate) mod drupal_route_params;
 mod drupal_theme_hooks;
 pub(crate) mod eloquent_model_attributes;
 pub(crate) mod eloquent_string;
+pub(crate) mod expected_values;
 pub(crate) mod handler;
 pub(crate) mod laravel_paths;
 pub(crate) mod laravel_request_keys;

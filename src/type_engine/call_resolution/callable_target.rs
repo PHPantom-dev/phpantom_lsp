@@ -1042,6 +1042,7 @@ fn unreachable_method_target(
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         }]
         .into(),
         return_type: handler.return_type.clone(),
@@ -1168,6 +1169,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                     closure_this_type: None,
                     param_out_type: None,
                     callable_invocation: None,
+                    expected_values: None,
                 })
                 .collect();
             Some(ResolvedCallableTarget {

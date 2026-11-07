@@ -102,6 +102,7 @@ pub fn make_param(name: &str, type_hint: Option<&str>, is_required: bool) -> Par
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }
 }
 

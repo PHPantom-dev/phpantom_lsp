@@ -439,6 +439,7 @@ fn make_param(name: &str, type_hint: Option<&str>, required: bool) -> ParameterI
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }
 }
 
@@ -453,6 +454,7 @@ fn completions_all_params() {
         existing_named_args: vec![],
         positional_count: 0,
         prefix: String::new(),
+        args_text: String::new(),
     };
 
     let items = build_named_arg_completions(&ctx, &params);
@@ -476,6 +478,7 @@ fn completions_skip_positional() {
         existing_named_args: vec![],
         positional_count: 1, // first param covered by positional
         prefix: String::new(),
+        args_text: String::new(),
     };
 
     let items = build_named_arg_completions(&ctx, &params);
@@ -495,6 +498,7 @@ fn completions_skip_named() {
         existing_named_args: vec!["name".to_string()],
         positional_count: 0,
         prefix: String::new(),
+        args_text: String::new(),
     };
 
     let items = build_named_arg_completions(&ctx, &params);
@@ -514,6 +518,7 @@ fn completions_filter_by_prefix() {
         existing_named_args: vec![],
         positional_count: 0,
         prefix: "na".to_string(),
+        args_text: String::new(),
     };
 
     let items = build_named_arg_completions(&ctx, &params);
@@ -529,6 +534,7 @@ fn completions_untyped_param() {
         existing_named_args: vec![],
         positional_count: 0,
         prefix: String::new(),
+        args_text: String::new(),
     };
 
     let items = build_named_arg_completions(&ctx, &params);
@@ -547,6 +553,7 @@ fn completions_optional_detail() {
         existing_named_args: vec![],
         positional_count: 0,
         prefix: String::new(),
+        args_text: String::new(),
     };
 
     let items = build_named_arg_completions(&ctx, &params);
@@ -571,12 +578,14 @@ fn completions_variadic_detail() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     let ctx = NamedArgContext {
         call_expression: "foo".to_string(),
         existing_named_args: vec![],
         positional_count: 0,
         prefix: String::new(),
+        args_text: String::new(),
     };
 
     let items = build_named_arg_completions(&ctx, &params);
@@ -595,6 +604,7 @@ fn completions_have_variable_kind() {
         existing_named_args: vec![],
         positional_count: 0,
         prefix: String::new(),
+        args_text: String::new(),
     };
 
     let items = build_named_arg_completions(&ctx, &params);
@@ -612,6 +622,7 @@ fn completions_empty_when_all_used() {
         existing_named_args: vec!["x".to_string(), "y".to_string()],
         positional_count: 0,
         prefix: String::new(),
+        args_text: String::new(),
     };
 
     let items = build_named_arg_completions(&ctx, &params);
@@ -629,6 +640,7 @@ fn completions_prefix_case_insensitive() {
         existing_named_args: vec![],
         positional_count: 0,
         prefix: "na".to_string(),
+        args_text: String::new(),
     };
 
     let items = build_named_arg_completions(&ctx, &params);

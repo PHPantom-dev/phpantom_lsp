@@ -90,6 +90,7 @@ mod completion_dnf_return_type;
 mod completion_eloquent_attributes;
 mod completion_eloquent_model_attributes;
 mod completion_enums;
+mod completion_expected_values;
 mod completion_first_class_callable;
 mod completion_foreach_collections;
 mod completion_generators;

@@ -358,6 +358,7 @@ fn parameter_eq(a: &ParameterInfo, b: &ParameterInfo) -> bool {
         closure_this_type,
         param_out_type,
         callable_invocation,
+        expected_values,
     } = a;
     *name == b.name
         && *is_required == b.is_required
@@ -368,6 +369,7 @@ fn parameter_eq(a: &ParameterInfo, b: &ParameterInfo) -> bool {
         && *closure_this_type == b.closure_this_type
         && *param_out_type == b.param_out_type
         && *callable_invocation == b.callable_invocation
+        && *expected_values == b.expected_values
         && *default_value == b.default_value
         && *description == b.description
 }

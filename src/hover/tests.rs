@@ -67,6 +67,7 @@ fn format_params_with_types() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$age"),
@@ -80,6 +81,7 @@ fn format_params_with_types() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
     ];
     assert_eq!(
@@ -102,6 +104,7 @@ fn format_params_variadic() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     assert_eq!(format_native_params(&params), "string ...$items");
 }
@@ -120,6 +123,7 @@ fn format_params_reference() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     assert_eq!(format_native_params(&params), "array &$arr");
 }

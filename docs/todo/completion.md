@@ -65,53 +65,6 @@ key inside the matching `array{…}` annotation.
 
 ---
 
-## C6. `#[ExpectedValues]` parameter value suggestions
-
-**Impact: Low · Complexity: Medium**
-
-phpstorm-stubs annotate ~62 parameters and return values with
-`#[ExpectedValues]` to declare the set of valid constant values or
-flags. This could power smarter completions inside function call
-arguments by suggesting the valid constants.
-
-**Attribute FQN:** `JetBrains\PhpStorm\ExpectedValues`. Stub files
-import it via `use JetBrains\PhpStorm\ExpectedValues;`. Two files alias
-it as `EV` (`intl/intl.php` and `ftp/ftp.php`). Match by resolving
-through the `DocblockCtx` use-map and comparing the last segment of the
-resolved FQN (`ExpectedValues`).
-
-The attribute supports several forms:
-
-- `values: [CONST_A, CONST_B]` — one of the listed values is expected.
-- `flags: [FLAG_A, FLAG_B]` — a bitmask combination is expected.
-- `valuesFromClass: MyClass::class` — one of the class's constants.
-- `flagsFromClass: MyClass::class` — bitmask of the class's constants.
-
-```php
-function phpinfo(
-    #[ExpectedValues(flags: [INFO_GENERAL, INFO_CREDITS, INFO_CONFIGURATION,
-                             INFO_MODULES, INFO_ENVIRONMENT, INFO_VARIABLES,
-                             INFO_LICENSE, INFO_ALL])]
-    int $flags = INFO_ALL
-): bool {}
-
-function pathinfo(
-    string $path,
-    #[ExpectedValues(flags: [PATHINFO_DIRNAME, PATHINFO_BASENAME,
-                             PATHINFO_EXTENSION, PATHINFO_FILENAME])]
-    int $flags = PATHINFO_ALL
-): string|array {}
-```
-
-**Implementation:** During parameter extraction, store the expected
-values metadata. When providing completions inside a function call
-argument position, check whether the target parameter has expected
-values and offer the listed constants at the top of the suggestions
-list. Flag-style parameters should also suggest bitwise-OR
-combinations.
-
----
-
 ## C7. `class_alias()` support
 
 **Impact: Low-Medium · Complexity: Medium-High**
