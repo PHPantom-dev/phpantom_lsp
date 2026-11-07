@@ -1441,6 +1441,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#tempest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tempest
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#configuration-and-indexing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3805,6 +3816,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#tempest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tempest
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#configuration-and-indexing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -6125,6 +6147,10 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Yii views.</strong> In a Yii project, a view rendered by name, by a path built from <code>__DIR__</code>, or from inside another template jumps to its template, completes from the template's directory, and lists its references, and a view no template matches is reported. A name is resolved against the view path the class gives its renderer, through the aliases the configuration declares. A CodeLens at the top of a template lists the calls that render it.</li>
 <li><strong>Yii route names.</strong> In a Yii project, a route name declared by a <code>Route</code> definition, under the name and path prefixes of the groups around it, completes, jumps to its declaration, and lists its references wherever a URL generator builds a URL to it, including through a class of the project's own that passes the name on. The arguments array of <code>generate()</code> completes from the placeholders of the route's path, a handler's <code>#[RouteArgument]</code> jumps to the placeholder it reads and completes from it, and a route name or argument that nothing declares is reported.</li>
 </ul>
+<h4 id="tempest">Tempest<a class="headerlink" href="#tempest" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Tempest View completion and navigation.</strong> In a Tempest project, PHP expressions in <code>.view.php</code> templates use imports and <code>@var</code> annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to <code>Tempest\View\view()</code> also complete and navigate. Contributed by @shuvroroy.</li>
+</ul>
 <h4 id="configuration-and-indexing">Configuration and indexing<a class="headerlink" href="#configuration-and-indexing" title="Permanent link">&para;</a></h4>
 <ul>
 <li><strong>Unknown configuration keys are reported.</strong> A key in <code>.phpantom.toml</code> or the global config that PHPantom does not know, such as a typo, is reported with its file instead of silently doing nothing. The editor shows a warning when the config loads, and <code>analyze</code>, <code>fix</code>, <code>format</code>, and <code>move</code> print one per key. The rest of the config still applies.</li>
@@ -6176,6 +6202,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <h4 id="type-inference_1">Type inference<a class="headerlink" href="#type-inference_1" title="Permanent link">&para;</a></h4>
 <ul>
+<li><strong>Property types on an annotated <code>$this</code>.</strong> Reading a property through an explicitly typed <code>$this</code> now preserves its type in assignments and loops, including Tempest views. Contributed by @shuvroroy.</li>
 <li><strong><code>(int)</code> casts keep what the value says.</strong> Casting an integer range with <code>(int)</code> now keeps the range, and casting <code>null</code>, a <code>bool</code>, or an array gives <code>0</code> or <code>1</code>, instead of a plain <code>int</code>.</li>
 <li><strong>Untyped methods that return <code>new static()</code>.</strong> Calling such a method through a subclass, or on a class that uses the trait declaring it, now gives that class instead of the one the method is declared in.</li>
 <li><strong>Variables passed to typed by-reference parameters.</strong> After a call to your own function or method that takes <code>array &amp;$message</code>, the variable now has the parameter's type instead of the shape it had before the call, so reads of keys the callee added are no longer reported.</li>
@@ -6625,6 +6652,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Tempest performance checks.</strong> CI measures template editing, completion, navigation, and memory use against the Tempest playground. Contributed by @shuvroroy.</li>
 <li><strong>Pull request benchmarks no longer fail on a slow runner.</strong> Each benchmark runner measures both the PR and its base, so the 30% regression check reflects the change rather than which machine ran it. Contributed by @shuvroroy. Closes #489.</li>
 <li><strong>Faster benchmark checks on pull requests.</strong> Latency benchmarks now run split across four runners, and benchmark alerts on fork pull requests show up in the job summary instead of failing on a permission error. Contributed by @shuvroroy.</li>
 <li><strong>A Drupal playground.</strong> <code>examples/drupal/</code> is a Drupal 11 site with one custom module and one theme, for trying PHPantom on Drupal code, with runtime checks of what its comments claim. Contributed by @giuseppe-esposito-87.</li>

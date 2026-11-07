@@ -1689,6 +1689,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#tempest-view-templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tempest View templates
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3353,6 +3364,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#tempest-view-templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tempest View templates
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3493,20 +3515,22 @@ sit next to.</p>
 <a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
 <a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>├── self_update.rs          # Binary self-update
 <a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>│
-<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>│   # Blade &amp; shared utilities
-<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
-<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
-<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>
-<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
-<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
-<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>tests/
-<a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
-<a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
-<a id="__codelineno-0-91" name="__codelineno-0-91" href="#__codelineno-0-91"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
-<a id="__codelineno-0-92" name="__codelineno-0-92" href="#__codelineno-0-92"></a>├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var =&gt; 'ExpectedType'` assertion suites ported from Psalm / PHPStan
-<a id="__codelineno-0-93" name="__codelineno-0-93" href="#__codelineno-0-93"></a>├── phpstan_symfony/, phpstan_doctrine/   # Projects the PHPStan Symfony and Doctrine extensions' type and rule tests run in
-<a id="__codelineno-0-94" name="__codelineno-0-94" href="#__codelineno-0-94"></a>├── support/                # Code both runners share (the fixture projects' backend)
-<a id="__codelineno-0-95" name="__codelineno-0-95" href="#__codelineno-0-95"></a>└── assert_type_runner.rs, fixture_runner.rs
+<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>│   # Templates &amp; shared utilities
+<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor)
+<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>├── tempest/                # Tempest View expressions, components, and view paths
+<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>├── template/               # Shared virtual PHP source maps and LSP coordinate translation
+<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
+<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>
+<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
+<a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
+<a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a>tests/
+<a id="__codelineno-0-91" name="__codelineno-0-91" href="#__codelineno-0-91"></a>├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
+<a id="__codelineno-0-92" name="__codelineno-0-92" href="#__codelineno-0-92"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
+<a id="__codelineno-0-93" name="__codelineno-0-93" href="#__codelineno-0-93"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
+<a id="__codelineno-0-94" name="__codelineno-0-94" href="#__codelineno-0-94"></a>├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var =&gt; 'ExpectedType'` assertion suites ported from Psalm / PHPStan
+<a id="__codelineno-0-95" name="__codelineno-0-95" href="#__codelineno-0-95"></a>├── phpstan_symfony/, phpstan_doctrine/   # Projects the PHPStan Symfony and Doctrine extensions' type and rule tests run in
+<a id="__codelineno-0-96" name="__codelineno-0-96" href="#__codelineno-0-96"></a>├── support/                # Code both runners share (the fixture projects' backend)
+<a id="__codelineno-0-97" name="__codelineno-0-97" href="#__codelineno-0-97"></a>└── assert_type_runner.rs, fixture_runner.rs
 </code></pre></div>
 <p><strong>The shared type engine lives under <code>type_engine/</code>.</strong> <code>type_engine/resolver/</code>,
 <code>type_engine/variable/</code> (including the <code>forward_walk/</code> forward walker),
@@ -4853,6 +4877,29 @@ span it is looking at can be reached.</p>
 <li><strong>No namespace</strong> → keep as-is.</li>
 </ol>
 <p>This runs on every name a <code>ClassInfo</code> extracted from a file carries: its parents, interfaces, traits and mixins, its members' native and docblock types, its <code>@property</code> and <code>@method</code> tags, and the classes its constants' initializers name. A function's types get the same treatment. Names read later, in a method body or by whoever consumes a resolved name, follow <a href="#source-names-and-resolved-names">Source Names and Resolved Names</a>.</p>
+<h2 id="tempest-view-templates">Tempest View templates<a class="headerlink" href="#tempest-view-templates" title="Permanent link">&para;</a></h2>
+<p>In a project that requires <code>tempest/view</code> or <code>tempest/framework</code>, files
+ending in <code>.view.php</code> are lowered by <code>tempest/preprocessor.rs</code> before
+parsing. Elsewhere the suffix is left to plain PHP, since other renderers
+use it too. Native PHP, echo expressions, and bound attributes become PHP in a
+synthetic function, with element-scoped branches and loops. They use the
+same parser, symbol map, and forward walker as ordinary PHP. Template
+imports and <code>@var</code> declarations remain in that PHP; no second type resolver
+is involved.</p>
+<p><code>template/</code> owns coordinate translation shared with Blade. Tempest records
+exact copied regions because an attribute written before <code>:foreach</code> still
+runs inside the loop. Both directions use sorted indexes, and generated
+syntax has no source position. Blade retains its existing column anchors.</p>
+<p>Component discovery is lazy and cached, under the project's Composer
+PSR-4 roots and installed packages' roots, with project components taking
+precedence. File creation/deletion and Composer changes invalidate the
+catalogue. Open buffers supply current component declarations. View-path
+spans identify the fully qualified <code>Tempest\View\view</code> helper; navigation
+resolves paths from the project, caller, and discovery roots. References
+compare the resolved file, since identical relative paths in two callers
+can name different views.</p>
+<p>Render-call data inference and configured discovery are tracked in
+<a href="../todo/lsp-features/#f73-tempest-view-context-inference">the feature backlog</a>.</p>
 
 
 
