@@ -946,10 +946,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" class="md-nav__link">
+  <a href="#d19-inaccessible_member-cannot-tell-a-property-read-from-a-write" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        D19. <code>invalid_member_access</code> cannot tell a property read from a write
+        D19. <code>inaccessible_member</code> cannot tell a property read from a write
       </span>
     </span>
   </a>
@@ -1056,10 +1056,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d51-settle-the-diagnostic-identifiers-before-10" class="md-nav__link">
+  <a href="#d52-incompatible_override-only-checks-a-static-return-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        D51. Settle the diagnostic identifiers before 1.0
+        D52. <code>incompatible_override</code> only checks a <code>static</code> return type
       </span>
     </span>
   </a>
@@ -1515,10 +1515,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" class="md-nav__link">
+  <a href="#d19-inaccessible_member-cannot-tell-a-property-read-from-a-write" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        D19. <code>invalid_member_access</code> cannot tell a property read from a write
+        D19. <code>inaccessible_member</code> cannot tell a property read from a write
       </span>
     </span>
   </a>
@@ -1625,10 +1625,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d51-settle-the-diagnostic-identifiers-before-10" class="md-nav__link">
+  <a href="#d52-incompatible_override-only-checks-a-static-return-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        D51. Settle the diagnostic identifiers before 1.0
+        D52. <code>incompatible_override</code> only checks a <code>static</code> return type
       </span>
     </span>
   </a>
@@ -1757,7 +1757,7 @@ old comment was guarding against with a test: a subject whose other
 branch cannot be typed must still produce no diagnostic, because it
 now resolves to <code>mixed</code> rather than to the surviving literal.</p>
 <hr />
-<h2 id="d19-invalid_member_access-cannot-tell-a-property-read-from-a-write">D19. <code>invalid_member_access</code> cannot tell a property read from a write<a class="headerlink" href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" title="Permanent link">&para;</a></h2>
+<h2 id="d19-inaccessible_member-cannot-tell-a-property-read-from-a-write">D19. <code>inaccessible_member</code> cannot tell a property read from a write<a class="headerlink" href="#d19-inaccessible_member-cannot-tell-a-property-read-from-a-write" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>PHP dispatches an unreachable property to a different magic method
 depending on what is being done to it: <code>__get</code> for a read, <code>__set</code> for a
@@ -1815,7 +1815,7 @@ for it, so the assembled class says what a class <em>has</em> and never who
 declared it.</p>
 <p>Every check that needs the declaring class therefore recomputes it by
 walking the raw hierarchy, and every such walk is a partial
-reimplementation of the merge's own rules. <code>invalid_member_access</code> has
+reimplementation of the merge's own rules. <code>inaccessible_member</code> has
 one, and it is already known to be incomplete: it does not apply
 <code>trait_aliases</code>, so a member a <code>use</code> clause renamed is untraceable and
 the access goes unreported.</p>
@@ -1997,64 +1997,24 @@ before the diagnostic runs, or a separate workspace-wide pass.</p>
 <p><strong>Where to look:</strong> <code>src/diagnostics/unused_parameters.rs</code> (<code>can_be_overridden</code>)
 and <code>src/definition/implementation.rs</code> (<code>find_implementors</code>).</p>
 <hr />
-<h2 id="d51-settle-the-diagnostic-identifiers-before-10">D51. Settle the diagnostic identifiers before 1.0<a class="headerlink" href="#d51-settle-the-diagnostic-identifiers-before-10" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<p>From 1.0 the identifiers in the <a href="../../diagnostics/">Diagnostics Reference</a>
-are a public interface: users write them into <code>[[diagnostics.ignore]]</code>,
-<code>@phpantom-ignore</code> comments, and <code>analyze --code</code>, so renaming one later
-silently re-enables every diagnostic it used to suppress. Review the
-full list once and rename what does not follow one scheme. The
-convention in <code>src/diagnostics/mod.rs</code> reserves <code>unknown_*</code> for
-symbols that could not be resolved and <code>invalid_*</code> for structural
-violations; the list does not keep to it:</p>
-<ul>
-<li><strong>"Name not declared" has two prefixes.</strong> Framework names use
-  <code>invalid_&lt;framework&gt;_*</code> (<code>invalid_laravel_route</code>), but
-  <code>unknown_form_option</code>, <code>unknown_constraint_option</code>,
-  <code>unknown_blade_component</code>, <code>unknown_livewire_component</code>,
-  <code>unknown_entity_field</code>, and <code>unknown_dql_variable</code> use <code>unknown_*</code>.</li>
-<li><strong>The framework sits in different places.</strong> A prefix in
-  <code>invalid_laravel_route</code>, the middle in <code>unknown_blade_component</code> and
-  <code>unclosed_blade_directive</code>, the start in
-  <code>blade_signature_widens_layout</code>. Some Laravel-only codes name no
-  framework at all (<code>invalid_command_parameter</code>,
-  <code>invalid_validation_rule</code>, <code>invalid_validation_message</code>), and the
-  Inertia page is <code>invalid_inertia_page</code> beside
-  <code>invalid_laravel_vite_asset</code>.</li>
-<li><strong>Same word, two spellings.</strong> <code>invalid_laravel_trans</code> vs
-  <code>invalid_symfony_translation</code>; <code>missing_view_variable</code> /
-  <code>unused_view_variable</code> vs <code>unrendered_blade_section</code> for the same
-  templates; Twig template names report as <code>invalid_symfony_template</code>
-  while filters and functions are <code>invalid_twig_*</code>.</li>
-<li><strong>Word order.</strong> <code>void_result_used</code> vs <code>discarded_return_value</code>.</li>
-<li><strong>The member-access family.</strong> <code>invalid_member_access</code> is about
-  visibility while <code>scalar_member_access</code> and <code>unresolved_member_access</code>
-  are about the subject's type, and <code>unknown_member</code> is also emitted when
-  the subject's class could not be resolved, which overlaps
-  <code>unresolved_member_access</code>.</li>
-<li><strong>One code for two problems.</strong> <code>uninitialized_property</code> covers both
-  "never initialized" and "read before anything writes it";
-  <code>unused_property</code> covers both "never read" and "only written";
-  <code>invalid_enum_case</code> covers a missing or extra value as well as a
-  duplicate one. Decide per pair whether a user would want to silence
-  one without the other.</li>
-<li><strong>A broad name for a narrow check.</strong> <code>incompatible_override</code> only
-  checks a parent's <code>static</code> return type. Either name it for that or
-  let it grow into the general override check.</li>
-<li><strong>Severity.</strong> <code>unknown_class</code> is a Warning while <code>unknown_function</code>
-  and <code>unknown_variable</code> are Errors.</li>
-<li><strong>Names that look like identifiers but are not.</strong> The <code>analyze</code>
-  timing labels <code>invalid_string_key</code>, <code>unused_private_member</code>,
-  <code>match_type_mismatch</code>, and <code>enum_error</code> read like codes, and an
-  ignore rule written with one matches nothing. The <code>fix</code> rule for
-  deprecated calls is <code>deprecated</code>, not <code>deprecated_usage</code>. Rename them
-  to match the codes they produce, or make it impossible to mistake them
-  for codes.</li>
-</ul>
-<p>Keep each old identifier working for the ignore rules, inline comments,
-and <code>--code</code> by mapping it to the new one (X20's warning hook can report
-the old spelling as deprecated), update the reference page, and list
-every rename in the changelog.</p>
+<h2 id="d52-incompatible_override-only-checks-a-static-return-type">D52. <code>incompatible_override</code> only checks a <code>static</code> return type<a class="headerlink" href="#d52-incompatible_override-only-checks-a-static-return-type" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p><code>incompatible_override</code> reports an override that does not return
+<code>static</code> where the parent method does, and nothing else. PHP refuses
+every override whose signature the parent's callers could not use: a
+return type that is not a subtype of the parent's, a parameter type
+narrower than the parent's, a parameter the parent has that the
+override drops, a new required parameter, a narrower visibility, a
+<code>static</code> method overriding an instance one or the reverse, and an
+override of a <code>final</code> method. All of these are fatal when the class is
+loaded, so all belong under this identifier, which was kept broad so the
+check can grow into them without a rename.</p>
+<p>Comparing types needs the subtype check <code>type_mismatch_*</code> already uses,
+with the parent's templates substituted the way inheritance merging does,
+and native types only: a docblock that disagrees with the parent is not
+an error PHP raises.</p>
+<p><strong>Where to look:</strong> <code>src/diagnostics/incompatible_override.rs</code> and the
+subtype check behind <code>src/diagnostics/type_errors/</code>.</p>
 
 
 

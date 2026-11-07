@@ -2464,7 +2464,7 @@ example, a project with hundreds of unused <code>use</code> statements can be
 cleaned up in seconds rather than file by file.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w">                                  </span><span class="c1"># apply all preferred fixers</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w">             </span><span class="c1"># only remove unused imports</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--rule<span class="w"> </span>deprecated<span class="w">  </span><span class="c1"># multiple rules</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--rule<span class="w"> </span>deprecated_usage<span class="w">  </span><span class="c1"># multiple rules</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w">                        </span><span class="c1"># preview without writing</span>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>src/<span class="w">                             </span><span class="c1"># restrict to a subdirectory</span>
 <a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>src/Foo.php<span class="w">                      </span><span class="c1"># fix a single file</span>
@@ -2538,7 +2538,7 @@ cleaned up in seconds rather than file by file.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>deprecated</code></td>
+<td><code>deprecated_usage</code></td>
 <td>Rewrite calls to deprecated functions and methods whose <code>#[Deprecated(replacement: "...")]</code> names a replacement</td>
 </tr>
 <tr>

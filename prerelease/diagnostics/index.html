@@ -666,6 +666,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#renamed-identifiers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Renamed identifiers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1523,6 +1534,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#renamed-identifiers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Renamed identifiers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1563,6 +1585,11 @@ output, and it is what these take:</p>
 them on in <a href="../configuration/#diagnostics"><code>[diagnostics]</code></a>; their rows
 name the key. Framework checks run only in a project PHPantom detects as
 using that framework, and need no setting.</p>
+<p>An identifier starts with the kind of problem (<code>unknown_</code>, <code>invalid_</code>,
+<code>missing_</code>, <code>unused_</code>, <code>type_mismatch_</code>, and so on). One that belongs to
+a framework or template language names it next, as in
+<code>invalid_laravel_route</code> or <code>unclosed_blade_directive</code>. A name a framework
+expects to be declared somewhere, but is not, is always <code>invalid_</code>.</p>
 <h2 id="php-code">PHP code<a class="headerlink" href="#php-code" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1581,7 +1608,7 @@ using that framework, and need no setting.</p>
 <tr>
 <td><code>unknown_class</code></td>
 <td>Warning</td>
-<td>A class, interface, trait, or enum that cannot be found.</td>
+<td>A class, interface, trait, or enum that cannot be found, including one named by the type of a value whose member is used.</td>
 </tr>
 <tr>
 <td><code>unknown_function</code></td>
@@ -1609,7 +1636,7 @@ using that framework, and need no setting.</p>
 <td><code>-&gt;</code> or <code>::</code> on a scalar, <code>null</code>, or an array.</td>
 </tr>
 <tr>
-<td><code>invalid_member_access</code></td>
+<td><code>inaccessible_member</code></td>
 <td>Error</td>
 <td>A <code>private</code> or <code>protected</code> member reached from where it is not visible.</td>
 </tr>
@@ -1666,7 +1693,12 @@ using that framework, and need no setting.</p>
 <tr>
 <td><code>uninitialized_property</code></td>
 <td>Warning</td>
-<td>A typed property with no default that nothing writes, or one read on a new object before anything writes it.</td>
+<td>A typed property with no default that nothing writes.</td>
+</tr>
+<tr>
+<td><code>uninitialized_property_read</code></td>
+<td>Warning</td>
+<td>A typed property read on a new object before anything writes it.</td>
 </tr>
 <tr>
 <td><code>missing_return</code></td>
@@ -1674,7 +1706,7 @@ using that framework, and need no setting.</p>
 <td>A function that can end without returning the value it promises.</td>
 </tr>
 <tr>
-<td><code>void_result_used</code></td>
+<td><code>used_void_result</code></td>
 <td>Warning</td>
 <td>The result of a <code>void</code> call used as a value.</td>
 </tr>
@@ -1851,27 +1883,27 @@ using that framework, and need no setting.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>invalid_data_provider</code></td>
+<td><code>invalid_phpunit_data_provider</code></td>
 <td>Error or Warning</td>
 <td>A data provider that is not <code>public</code>, or not <code>static</code> where the PHPUnit version requires it.</td>
 </tr>
 <tr>
-<td><code>missing_parent_call</code></td>
+<td><code>missing_phpunit_parent_call</code></td>
 <td>Warning</td>
 <td>A <code>setUp()</code> or <code>tearDown()</code> override that skips a parent that does work.</td>
 </tr>
 <tr>
-<td><code>unknown_entity_field</code></td>
+<td><code>invalid_doctrine_field</code></td>
 <td>Warning</td>
 <td>A field in a repository call that the entity does not map.</td>
 </tr>
 <tr>
-<td><code>dql_syntax_error</code></td>
+<td><code>invalid_dql_syntax</code></td>
 <td>Error</td>
 <td>A DQL string that does not parse.</td>
 </tr>
 <tr>
-<td><code>unknown_dql_variable</code></td>
+<td><code>invalid_dql_alias</code></td>
 <td>Error</td>
 <td>A DQL alias nothing in the query declares.</td>
 </tr>
@@ -1903,7 +1935,7 @@ using that framework, and need no setting.</p>
 <td>A <code>config()</code> key no config file declares.</td>
 </tr>
 <tr>
-<td><code>invalid_laravel_trans</code></td>
+<td><code>invalid_laravel_translation</code></td>
 <td>Warning</td>
 <td>A translation key no language file declares.</td>
 </tr>
@@ -1923,7 +1955,7 @@ using that framework, and need no setting.</p>
 <td>An Artisan command name that is not registered.</td>
 </tr>
 <tr>
-<td><code>invalid_command_parameter</code></td>
+<td><code>invalid_laravel_command_parameter</code></td>
 <td>Warning</td>
 <td>An <code>argument()</code> or <code>option()</code> name the command's signature does not declare.</td>
 </tr>
@@ -1993,37 +2025,37 @@ using that framework, and need no setting.</p>
 <td>A storage disk not in the config.</td>
 </tr>
 <tr>
-<td><code>invalid_validation_rule</code></td>
+<td><code>invalid_laravel_validation_rule</code></td>
 <td>Warning</td>
 <td>A validation rule name Laravel does not have.</td>
 </tr>
 <tr>
-<td><code>invalid_validation_message</code></td>
+<td><code>invalid_laravel_validation_message</code></td>
 <td>Warning</td>
 <td>A form request <code>messages()</code> or <code>attributes()</code> key naming an unknown field or rule.</td>
 </tr>
 <tr>
-<td><code>missing_view_variable</code></td>
+<td><code>missing_blade_variable</code></td>
 <td>Error</td>
 <td>A variable a Blade template declares that the call site does not pass.</td>
 </tr>
 <tr>
-<td><code>unused_view_variable</code></td>
+<td><code>unused_blade_variable</code></td>
 <td>Warning</td>
 <td>A variable passed to a view that the template does not use.</td>
 </tr>
 <tr>
-<td><code>type_mismatch_view_variable</code></td>
+<td><code>type_mismatch_blade_variable</code></td>
 <td>Error</td>
 <td>A variable passed to a view whose type the template's declaration does not accept.</td>
 </tr>
 <tr>
-<td><code>unknown_blade_component</code></td>
+<td><code>invalid_blade_component</code></td>
 <td>Warning</td>
 <td>An <code>&lt;x-…&gt;</code> tag with no component class or template.</td>
 </tr>
 <tr>
-<td><code>unknown_livewire_component</code></td>
+<td><code>invalid_livewire_component</code></td>
 <td>Warning</td>
 <td>A <code>&lt;livewire:…&gt;</code> tag with no component.</td>
 </tr>
@@ -2073,7 +2105,7 @@ using that framework, and need no setting.</p>
 <td>A second <code>@bladestan-signature</code> block in one template.</td>
 </tr>
 <tr>
-<td><code>blade_signature_widens_layout</code></td>
+<td><code>incompatible_blade_signature</code></td>
 <td>Error</td>
 <td>A <code>@bladestan-signature</code> the parent layout does not accept.</td>
 </tr>
@@ -2115,7 +2147,7 @@ using that framework, and need no setting.</p>
 <td>A Messenger bus that is not configured.</td>
 </tr>
 <tr>
-<td><code>invalid_symfony_template</code></td>
+<td><code>invalid_twig_template</code></td>
 <td>Warning</td>
 <td>A Twig template name with no template.</td>
 </tr>
@@ -2130,12 +2162,12 @@ using that framework, and need no setting.</p>
 <td>A Twig function that is not declared.</td>
 </tr>
 <tr>
-<td><code>unknown_form_option</code></td>
+<td><code>invalid_symfony_form_option</code></td>
 <td>Error</td>
 <td>An option the form type does not accept.</td>
 </tr>
 <tr>
-<td><code>unknown_constraint_option</code></td>
+<td><code>invalid_symfony_constraint_option</code></td>
 <td>Error</td>
 <td>An option the validation constraint does not take.</td>
 </tr>
@@ -2213,6 +2245,49 @@ keep the tool's own identifier: PHPStan's error identifier (such as
 <code>UnusedLocalVariable</code>), and the Mago issue code (such as
 <code>invalid-return-statement</code>). Both <code>[[diagnostics.ignore]]</code> and
 <code>@phpantom-ignore</code> match them the same way.</p>
+<h2 id="renamed-identifiers">Renamed identifiers<a class="headerlink" href="#renamed-identifiers" title="Permanent link">&para;</a></h2>
+<p>These identifiers were renamed. The old spelling still works in
+<code>[[diagnostics.ignore]]</code>, <code>@phpantom-ignore</code>, and <code>analyze --code</code> and
+<code>--exclude-code</code>; the config and the command line warn when they meet
+one.</p>
+<table>
+<thead>
+<tr>
+<th>Old</th>
+<th>New</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invalid_member_access</code></td>
+<td><code>inaccessible_member</code></td>
+</tr>
+<tr>
+<td><code>invalid_laravel_trans</code></td>
+<td><code>invalid_laravel_translation</code></td>
+</tr>
+<tr>
+<td><code>invalid_command_parameter</code></td>
+<td><code>invalid_laravel_command_parameter</code></td>
+</tr>
+<tr>
+<td><code>missing_view_variable</code></td>
+<td><code>missing_blade_variable</code></td>
+</tr>
+<tr>
+<td><code>unused_view_variable</code></td>
+<td><code>unused_blade_variable</code></td>
+</tr>
+<tr>
+<td><code>type_mismatch_view_variable</code></td>
+<td><code>type_mismatch_blade_variable</code></td>
+</tr>
+<tr>
+<td><code>blade_signature_widens_layout</code></td>
+<td><code>incompatible_blade_signature</code></td>
+</tr>
+</tbody>
+</table>
 
 
 
