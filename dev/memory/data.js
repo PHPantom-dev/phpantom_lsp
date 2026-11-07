@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794018717181,
+  "lastUpdate": 1794022302571,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -11365,6 +11365,60 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 109.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8c48427b1e45c0ddea0335de50d504c9e65502e5",
+          "message": "Fix Yii on Windows",
+          "timestamp": "2026-11-07T03:42:33+01:00",
+          "tree_id": "bdd631df9549fe3c62aacf67e2643f79b5f336f5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8c48427b1e45c0ddea0335de50d504c9e65502e5"
+        },
+        "date": 1794022290063,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 435.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 45.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 78.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 129.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 105.6,
             "unit": "MiB"
           }
         ]
