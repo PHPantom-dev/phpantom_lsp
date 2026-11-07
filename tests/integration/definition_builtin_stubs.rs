@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::common::{goto_definition_at, open_php};
+use crate::common::{goto_definition_at, hover_on, open_php};
 use phpantom_lsp::Backend;
 use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
@@ -379,4 +379,57 @@ async fn updating_the_package_mid_session_follows_the_new_map() {
         .await;
 
     assert_lands_in(goto_definition_at(&backend, &uri, 1, 12).await, &moved, 8);
+}
+
+#[tokio::test]
+async fn installing_stubs_replaces_previously_loaded_embedded_declarations() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = backend_for(dir.path()).await;
+    let uri = open_app(&backend, dir.path()).await;
+    assert!(hover_on(&backend, &uri, APP, "PDO").await.contains("PDO"));
+    assert!(goto_definition_at(&backend, &uri, 1, 12).await.is_none());
+
+    install_stubs(dir.path());
+    let lock = dir.path().join("composer.lock");
+    write(&lock, "{}");
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Uri::from_file_path(&lock).unwrap(),
+                kind: FileChangeType::Changed,
+            }],
+        })
+        .await;
+
+    let installed = stubs_root(dir.path()).join("PDO/PDO.php");
+    assert_lands_in(
+        goto_definition_at(&backend, &uri, 1, 12).await,
+        &installed,
+        7,
+    );
+}
+
+#[tokio::test]
+async fn installed_stub_navigation_preserves_php_namespace_resolution() {
+    let dir = tempfile::tempdir().unwrap();
+    install_stubs(dir.path());
+    let local = dir.path().join("local.php");
+    let declaration = "<?php namespace App;\nclass PDO {}\n";
+    write(&local, declaration);
+    let local = dunce::canonicalize(local).unwrap();
+    let backend = backend_for(dir.path()).await;
+    let local_uri = Uri::from_file_path(&local).unwrap();
+    open_php(&backend, &local_uri, declaration).await;
+    let uri = Uri::from_file_path(dir.path().join("caller.php")).unwrap();
+    let caller = "<?php\nnamespace App;\nnew PDO();\nnamespace Client;\nuse PDO;\nnew PDO();\nnamespace Other;\nnew PDO();\n";
+    open_php(&backend, &uri, caller).await;
+
+    assert_lands_in(goto_definition_at(&backend, &uri, 2, 5).await, &local, 1);
+    let installed = stubs_root(dir.path()).join("PDO/PDO.php");
+    assert_lands_in(
+        goto_definition_at(&backend, &uri, 5, 5).await,
+        &installed,
+        7,
+    );
+    assert!(goto_definition_at(&backend, &uri, 7, 5).await.is_none());
 }

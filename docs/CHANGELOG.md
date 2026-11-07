@@ -153,6 +153,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Installed PHP stub navigation.** Go to definition uses Composer-installed stubs after a package is installed or updated, even when embedded declarations were already loaded. Contributed by @shuvroroy.
+
 - **Tempest attribute casing.** Component attributes such as `BookTitle` now expose `$bookTitle`, matching Tempest’s naming rules. Contributed by @shuvroroy.
 
 - **Registered Tempest component names.** Tag completion now offers explicitly registered components whose names do not start with `x-`. Contributed by @shuvroroy.
