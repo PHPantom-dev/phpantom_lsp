@@ -1562,7 +1562,13 @@ statement grows with the square of its length.</p>
 most of the second phase of a Drupal site's workspace index, and they are
 what lifts the <code>memory_drupal_module</code> scenario of
 <code>benches/memory_usage.py</code> to a peak of about 860 MiB on the way to
-settling under 300 MiB.</p>
+settling under 300 MiB. Leaving out the fixtures and <code>.phpstan-baseline.php</code>
+brings that peak down to about 330 MiB.</p>
+<p>On a Drupal site the files go dormant once indexed, so the cost is only a
+spike. In a project where such a file is the project's own code, it stays
+resident: <code>drupal7.php</code> alone, as the only file of a workspace, settles at
+about 170 MiB above an empty server, some 90 times its size on disk
+(release build, 2026-11-07).</p>
 <p><strong>Where to look:</strong> <code>src/symbol_map/extraction/subject_text.rs</code>
 (<code>lower_spine_base</code>, <code>format_arg_expr</code>) and <code>SubjectText</code> in
 <code>src/symbol_map/span.rs</code>.</p>
