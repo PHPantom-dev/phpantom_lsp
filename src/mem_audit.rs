@@ -232,6 +232,7 @@ fn variant_name(t: &PhpType) -> &'static str {
         TypeKind::UnsealedShape(_) => "UnsealedShape",
         TypeKind::ClassNameLiteral(_) => "ClassNameLiteral",
         TypeKind::EnumCase(..) => "EnumCase",
+        TypeKind::DqlBuilder(..) => "DqlBuilder",
     }
 }
 
@@ -271,7 +272,8 @@ fn ty(t: &PhpType) -> Sz {
         | TypeKind::ListShape(b)
         | TypeKind::TemplateParam(_, b)
         | TypeKind::ClassNameLiteral(b)
-        | TypeKind::EnumCase(b, _) => {
+        | TypeKind::EnumCase(b, _)
+        | TypeKind::DqlBuilder(b, _) => {
             z.slot(1);
             z += ty(b);
         }
@@ -1367,6 +1369,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             sym.add(sm.template_defs.capacity() * size_of::<crate::symbol_map::TemplateParamDef>());
             sym.add(sm.call_sites.heap_bytes());
             sym.add(sm.discarded_calls.capacity() * 8);
+            sym.add(sm.used_result_calls.capacity() * 8);
             sym.add(sm.breakable_scopes.capacity() * 8);
             sym.add(sm.loop_scopes.capacity() * 8);
             sym.add(sm.switch_scopes.capacity() * 8);
@@ -1403,6 +1406,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 sm.container_values.capacity() * size_of::<crate::symbol_map::ContainerValueSite>(),
             );
             sym.add(sm.entity_types.capacity() * size_of::<crate::symbol_map::EntityTypeSite>());
+            sym.add(
+                sm.drupal_plugin_classes.capacity()
+                    * size_of::<crate::symbol_map::PluginClassSite>(),
+            );
             sym.add(sm.drupal_route_patterns.capacity() * size_of::<String>());
             sym.add(sm.drupal_route_aliases.capacity() * size_of::<String>());
             sym.add(sm.drupal_hooks.capacity() * size_of::<crate::symbol_map::HookSite>());
@@ -1450,6 +1457,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                     sym.add(placeholder.name.capacity());
                 }
             }
+            sym.add(
+                sm.yii_definitions.capacity() * size_of::<crate::symbol_map::YiiDefinitionSite>(),
+            );
         }
     }
     eprintln!(
@@ -1896,6 +1906,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         *backend.laravel.pivots.write() = Default::default();
         *backend.laravel.commands.write() = Default::default();
         *backend.laravel.gates.write() = Default::default();
+        *backend.laravel.events.write() = Default::default();
         *backend.laravel.runtime_config_keys.write() = Default::default();
     });
     probe("blade_uris", &mut || {

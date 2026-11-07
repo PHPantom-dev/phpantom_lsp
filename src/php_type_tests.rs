@@ -2021,6 +2021,30 @@ fn shorten_union() {
 }
 
 #[test]
+fn shorten_keeps_classes_sharing_a_short_name_apart() {
+    let ty = PhpType::parse("class-string<App\\C>|class-string<App\\D>|class-string<Other\\C>");
+    assert_eq!(
+        ty.shorten().to_string(),
+        "class-string<\\App\\C>|class-string<D>|class-string<\\Other\\C>"
+    );
+}
+
+#[test]
+fn shorten_keeps_global_and_namespaced_class_apart() {
+    let ty = PhpType::parse("Collection<int, \\Collection>|App\\Collection");
+    assert_eq!(
+        ty.shorten().to_string(),
+        "\\Collection<int, \\Collection>|\\App\\Collection"
+    );
+}
+
+#[test]
+fn shorten_same_class_repeated_stays_short() {
+    let ty = PhpType::parse("App\\User|array<App\\User>");
+    assert_eq!(ty.shorten().to_string(), "User|array<User>");
+}
+
+#[test]
 fn shorten_generic() {
     let ty = PhpType::parse("array<int, App\\Models\\User>");
     assert_eq!(ty.shorten().to_string(), "array<int, User>");

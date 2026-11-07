@@ -85,6 +85,16 @@ impl Backend {
             ));
         }
 
+        // ── Drupal entity type annotations ──────────────────────
+        // `admin_permission = "|"` names a permission.
+        if in_docblock
+            && self.is_drupal_project()
+            && let Some(response) =
+                self.try_drupal_annotation_permission_completion(uri, content, position)
+        {
+            return ControlFlow::Break(Some(response));
+        }
+
         // ── Docblock type / variable completion ─────────────────
         // Always short-circuits when inside a docblock.
         if in_docblock {

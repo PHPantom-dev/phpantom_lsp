@@ -5995,3 +5995,84 @@ fn an_environment_variable_is_read_from_both_spellings() {
         );
     }
 }
+
+/// The class names of the `Annotation` references in `map`, with the text
+/// each span covers in `php`.
+fn annotation_refs<'a>(map: &SymbolMap, php: &'a str) -> Vec<(String, &'a str)> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::ClassReference {
+                name,
+                context: ClassRefContext::Annotation,
+                ..
+            } => Some((
+                name.to_string(),
+                &php[span.start as usize..span.end as usize],
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn doctrine_annotations_name_their_classes() {
+    let php = r#"<?php
+/**
+ * @ORM\Entity
+ * @ORM\Table(name="users", indexes={@ORM\Index(columns={"a"}), @ORM\Index(name="@Fake")},
+ *     uniqueConstraints={
+ *         @ORM\UniqueConstraint(name="email")
+ *     })
+ */
+final class User
+{
+    /**
+     * @Route("/users", name="users")
+     * @Block(admin_label = @Translation("Users"))
+     */
+    public function list() {}
+}
+"#;
+    let map = parse_and_extract(php);
+    let refs = annotation_refs(&map, php);
+    let names: Vec<&str> = refs.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "ORM\\Entity",
+            "ORM\\Table",
+            "ORM\\Index",
+            "ORM\\Index",
+            "ORM\\UniqueConstraint",
+            "Route",
+            "Block",
+            "Translation",
+        ]
+    );
+    for (name, text) in &refs {
+        assert_eq!(name, text, "the span covers the name, without the `@`");
+    }
+}
+
+#[test]
+fn phpdoc_and_lowercase_tags_are_not_annotations() {
+    let php = r#"<?php
+/**
+ * @param string $name
+ * @phpstan-param non-empty-string $name
+ * @psalm-pure
+ * @group slow
+ * @todo something @Later
+ * @see Other
+ * @inheritDoc
+ */
+function f(string $name) {}
+"#;
+    let map = parse_and_extract(php);
+    assert!(
+        annotation_refs(&map, php).is_empty(),
+        "{:?}",
+        annotation_refs(&map, php)
+    );
+}

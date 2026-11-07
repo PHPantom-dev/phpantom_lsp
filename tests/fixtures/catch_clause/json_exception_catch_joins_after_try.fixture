@@ -1,0 +1,15 @@
+// test: a catch for JsonException is joined after a try whose json_decode() passes JSON_THROW_ON_ERROR
+// feature: hover
+// expect: caught
+---
+<?php
+
+function test(string $json): void {
+    $s = 1;
+    try {
+        json_decode($json, flags: JSON_THROW_ON_ERROR);
+    } catch (\JsonException $e) {
+        $s = 'caught';
+    }
+    echo $<>s;
+}

@@ -41,7 +41,7 @@ class GoToDefinitionDemo
         GtdTarget::$defaultRole;                  // Ctrl+Click → GtdTarget (not Scaffolding\User::$defaultRole)
 
         $helper = gtdHelper();
-        echo $helper;                             // Ctrl+Click on $helper → jumps to assignment
+        echo $helper->label();                    // Ctrl+Click on $helper → jumps to assignment
 
         define('APP_VERSION', '1.0.0');
         echo APP_VERSION;                         // BUG: Ctrl+Click should jump to define() above

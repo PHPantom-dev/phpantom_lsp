@@ -201,6 +201,7 @@ pub(crate) fn narrow_leaf_truthy<'b>(
 
     // Type guard narrowing: `is_object($x)`, `is_array($x)`, etc.
     apply_type_guard_narrowing_truthy(condition, scope, ctx);
+    apply_ctype_digit_narrowing(condition, scope, true);
 
     // A check on `$x->prop` discriminates a union of objects when only
     // some of them declare a `prop` that could have passed it.
@@ -632,6 +633,7 @@ pub(crate) fn narrow_leaf_falsey<'b>(
 
     // Inverse type guard narrowing: `if (is_object($x))` in else → exclude object.
     apply_type_guard_narrowing_inverse(condition, scope, ctx);
+    apply_ctype_digit_narrowing(condition, scope, false);
 
     // Inverse class-string guard narrowing: `if (!is_a($x, Class::class, true))`
     // guard clause → after it, `$x` is a class-string of `Class`.

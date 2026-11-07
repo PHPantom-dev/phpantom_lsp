@@ -25,15 +25,17 @@ class QueryBuilderExpressionTypeResolverTest
 		$query = $this->getQueryBuilder($em)->getQuery();
 		$branchingQuery = $this->getBranchingQueryBuilder($em)->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $query); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>#1|Doctrine\ORM\Query<null, QueryResult\Entities\Many>#2', $branchingQuery); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $query);
+		// Upstream tells the two branches' queries apart (`#1|#2`); both
+		// build the same DQL, so they are one type.
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $branchingQuery);
 	}
 
 	public function testQueryTypeIsInferredOnAcrossMethodsEvenWhenVariableAssignmentIsUsed(EntityManagerInterface $em): void
 	{
 		$queryBuilder = $this->getQueryBuilder($em);
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $queryBuilder->getQuery()); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $queryBuilder->getQuery());
 	}
 
 	public function testQueryBuilderPassedElsewhereNotTracked(EntityManagerInterface $em): void
@@ -43,14 +45,14 @@ class QueryBuilderExpressionTypeResolverTest
 
 		$this->adjustQueryBuilderToIndexByInt($queryBuilder);
 
-		assertType('Doctrine\ORM\Query<string, QueryResult\Entities\Many>', $queryBuilder->getQuery()); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<string, QueryResult\Entities\Many>', $queryBuilder->getQuery());
 	}
 
 	public function testDiveIntoCustomEntityRepository(EntityManagerInterface $em): void
 	{
 		$queryBuilder = $this->myRepository->getCustomQueryBuilder($em);
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $queryBuilder->getQuery()); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $queryBuilder->getQuery());
 	}
 
 
@@ -58,7 +60,7 @@ class QueryBuilderExpressionTypeResolverTest
 	{
 		$queryBuilder = self::getStaticQueryBuilder($em);
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $queryBuilder->getQuery()); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $queryBuilder->getQuery());
 	}
 
 	public function testFirstClassCallableDoesNotFail(EntityManagerInterface $em): void

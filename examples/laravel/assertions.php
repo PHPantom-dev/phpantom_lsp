@@ -2369,6 +2369,35 @@ check(
     ($bakeryActionRoutes['cancel'] ?? []) === ['bakeries.cancel']
 );
 
+// ─── Related classes ────────────────────────────────────────────────────────
+
+// The code lens above BlogPost links it to the factory `HasFactory` guesses
+// and the observer its `#[ObservedBy]` attribute registers.
+check(
+    'BlogPost::factory() guesses Database\\Factories\\BlogPostFactory',
+    \Illuminate\Database\Eloquent\Factories\Factory::resolveFactoryName(\App\Models\BlogPost::class)
+        === \Database\Factories\BlogPostFactory::class
+);
+$observedBy = (new ReflectionClass(\App\Models\BlogPost::class))
+    ->getAttributes(\Illuminate\Database\Eloquent\Attributes\ObservedBy::class);
+check(
+    'BlogPost is observed by BlogPostObserver',
+    count($observedBy) === 1
+        && (array) $observedBy[0]->newInstance()->classes === [\App\Observers\BlogPostObserver::class]
+);
+
+// Event discovery pairs NotifyBlogAuthor with the event its handle() names,
+// which is what the lenses on BlogPostPublished and the listener show.
+\Illuminate\Foundation\Events\DiscoverEvents::guessClassNamesUsing(
+    fn (SplFileInfo $file) => 'App\\Listeners\\' . $file->getBasename('.php')
+);
+$discovered = \Illuminate\Foundation\Events\DiscoverEvents::within(__DIR__ . '/app/Listeners', __DIR__);
+check(
+    'event discovery registers NotifyBlogAuthor@handle for BlogPostPublished',
+    ($discovered[\App\Events\BlogPostPublished::class] ?? [])
+        === [\App\Listeners\NotifyBlogAuthor::class . '@handle']
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

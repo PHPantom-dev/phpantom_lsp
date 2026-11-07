@@ -198,12 +198,110 @@ pub(crate) fn evaluate_constant_operands(ty: &PhpType, ctx: &ResolutionCtx<'_>) 
     } else {
         ty.substitute(&subs)
     };
-    let evaluated = if evaluated.contains_unevaluated_operator() {
+    let evaluated = if evaluated.contains_type_operator() {
         evaluate_enum_value_of(&evaluated, ctx)
     } else {
         evaluated
     };
+    let evaluated = if evaluated.contains_unevaluated_operator() {
+        read_class_member_references(&evaluated, ctx)
+    } else {
+        evaluated
+    };
     (evaluated != *ty).then_some(evaluated)
+}
+
+/// Replace every class constant `ty` names as a type with the value it
+/// holds: `Foo::BAR` with the constant's type, `Foo::BAR_*` with the union
+/// of every constant whose name matches, `Foo::class` with the class's name,
+/// and an enum's `Suit::Hearts` with that case.
+///
+/// The operand of a type operator is left alone: the operator reads the
+/// constant through [`constant_operand_shape`], or through the enum it
+/// names, and is not finished by the constant's value type.  A reference
+/// nothing can read stays as written.
+fn read_class_member_references(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpType {
+    match ty.raw_kind() {
+        TypeKind::KeyOf(_) | TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => ty.clone(),
+        TypeKind::Raw(text) => read_class_member_reference(text, ty, ctx),
+        TypeKind::Named(name) => read_class_member_reference(name, ty, ctx),
+        _ if !ty.contains_unevaluated_operator() => ty.clone(),
+        _ => ty.map_children(&|child| read_class_member_references(child, ctx)),
+    }
+}
+
+fn read_class_member_reference(text: &str, ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpType {
+    crate::php_type::class_member_reference(text)
+        .and_then(|(class_part, member)| class_member_type(class_part, member, ctx))
+        .unwrap_or_else(|| ty.clone())
+}
+
+/// The type `Class::member` names in a type position.
+fn class_member_type(class_part: &str, member: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    if member.eq_ignore_ascii_case("class") {
+        // `static::class` is only known at the call.
+        if class_part.eq_ignore_ascii_case("static") {
+            return None;
+        }
+        let class_name = crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class);
+        let class_name = class_name
+            .as_deref()
+            .unwrap_or_else(|| class_part.strip_prefix('\\').unwrap_or(class_part));
+        return Some(PhpType::class_name_literal(crate::atom::atom(class_name)));
+    }
+    let class = load_operand_class(class_part, ctx)?;
+    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        &class,
+        ctx.file.class_loader,
+        ctx.resolved_class_cache,
+    );
+    let constant_type = |name: &str| -> Option<PhpType> {
+        let constant = merged.constants.iter().find(|c| c.name == name)?;
+        if constant.is_enum_case {
+            return Some(PhpType::enum_case(merged.fqn(), constant.name));
+        }
+        super::return_types::class_constant_type(&merged, name, ctx)
+    };
+    if !member.contains('*') {
+        return constant_type(member);
+    }
+    let mut values: Vec<PhpType> = Vec::new();
+    for constant in merged.constants.iter() {
+        if !glob_matches(member, &constant.name) {
+            continue;
+        }
+        let value = constant_type(&constant.name)?;
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    match values.len() {
+        0 => None,
+        1 => values.pop(),
+        _ => Some(PhpType::union(values)),
+    }
+}
+
+/// Whether `name` matches `pattern`, where each `*` stands for any run of
+/// characters.
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    let mut parts = pattern.split('*');
+    let first = parts.next().unwrap_or_default();
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let mut parts: Vec<&str> = parts.collect();
+    let last = parts.pop();
+    for part in parts {
+        match rest.find(part) {
+            Some(at) => rest = &rest[at + part.len()..],
+            None => return false,
+        }
+    }
+    match last {
+        Some(last) => rest.len() >= last.len() && rest.ends_with(last),
+        None => rest.is_empty(),
+    }
 }
 
 /// Finish every `value-of<…>` in `ty` whose operand is a backed enum or one

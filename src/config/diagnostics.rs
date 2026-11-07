@@ -62,6 +62,35 @@ pub struct DiagnosticsConfig {
     #[serde(rename = "partial-union-members")]
     pub partial_union_members: Option<bool>,
 
+    /// Report an exception a function or method lets escape without
+    /// listing it in its `@throws` tags.
+    ///
+    /// Off by default. When enabled, PHPantom emits a hint-level
+    /// diagnostic on every `throw`, and every call whose callee declares
+    /// `@throws`, where the exception is neither caught by an enclosing
+    /// `try` nor covered by a `@throws` tag of the function the code is
+    /// written in. Exceptions extending a class listed in
+    /// `unchecked-exceptions` are never reported.
+    #[serde(rename = "unhandled-exceptions")]
+    pub unhandled_exceptions: Option<bool>,
+
+    /// Report a parameter a function, closure, or method never reads.
+    ///
+    /// Off by default: an unused parameter is often deliberate (a
+    /// callback that ignores what it is handed, a stub kept for its
+    /// signature), so whether it is worth flagging is a matter of style.
+    #[serde(rename = "unused-parameters")]
+    pub unused_parameters: Option<bool>,
+
+    /// The exception classes `unhandled-exceptions` leaves alone, along
+    /// with every class extending them.
+    ///
+    /// Defaults to `["Error", "LogicException", "RuntimeException"]`,
+    /// the classes PhpStorm treats as unchecked. Names are fully
+    /// qualified, with or without a leading `\`.
+    #[serde(rename = "unchecked-exceptions")]
+    pub unchecked_exceptions: Option<Vec<String>>,
+
     /// Compute diagnostics for the whole workspace in the background.
     ///
     /// Off by default. When enabled (which requires the default `full`
@@ -142,6 +171,9 @@ pub struct DiagnosticsConfig {
     pub ignore: Vec<IgnoreRule>,
 }
 
+/// The exception classes PhpStorm treats as unchecked by default.
+const DEFAULT_UNCHECKED_EXCEPTIONS: [&str; 3] = ["Error", "LogicException", "RuntimeException"];
+
 /// A single `[[diagnostics.ignore]]` rule.
 ///
 /// See [`DiagnosticsConfig::ignore`] for the matching semantics.
@@ -193,6 +225,33 @@ impl DiagnosticsConfig {
     /// Defaults to `false` (off) when not explicitly set.
     pub fn partial_union_members_enabled(&self) -> bool {
         self.partial_union_members.unwrap_or(false)
+    }
+
+    /// Whether the unhandled-exceptions diagnostic is enabled.
+    ///
+    /// Defaults to `false` (off) when not explicitly set.
+    pub fn unhandled_exceptions_enabled(&self) -> bool {
+        self.unhandled_exceptions.unwrap_or(false)
+    }
+
+    /// Whether the unused-parameters diagnostic is enabled.
+    ///
+    /// Defaults to `false` (off) when not explicitly set.
+    pub fn unused_parameters_enabled(&self) -> bool {
+        self.unused_parameters.unwrap_or(false)
+    }
+
+    /// The exception classes, without a leading `\`, that
+    /// `unhandled-exceptions` does not report, nor their subclasses.
+    pub fn unchecked_exceptions(&self) -> Vec<&str> {
+        match &self.unchecked_exceptions {
+            Some(names) => names
+                .iter()
+                .map(|name| name.trim().trim_start_matches('\\'))
+                .filter(|name| !name.is_empty())
+                .collect(),
+            None => DEFAULT_UNCHECKED_EXCEPTIONS.to_vec(),
+        }
     }
 
     /// Whether background workspace diagnostics are enabled.

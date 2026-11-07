@@ -82,6 +82,10 @@ impl OutParamCallee {
     /// A built-in's by-reference parameter type is often looser than what
     /// it actually writes (`array_shift(array &$array)` keeps the element
     /// type), while a user callee is held to its declaration.
+    ///
+    /// A function is judged by its name alone: PHP cannot redeclare a
+    /// built-in, so a declaration of one found in the project is a stub
+    /// package (`phpstan/php-8-stubs`) or a polyfill describing it.
     pub(crate) fn is_builtin(&self, backend: &Backend) -> bool {
         match self {
             Self::Function(fi) => {
@@ -90,11 +94,9 @@ impl OutParamCallee {
                     None => fi.name.to_string(),
                 };
                 backend
-                    .symbols
-                    .global_functions
+                    .stub_function_index
                     .read()
-                    .get(fqn.as_str())
-                    .is_some_and(|(uri, _)| crate::stubs::is_embedded_stub_uri(uri))
+                    .contains_key(fqn.as_str())
             }
             Self::Method(cls, name) => {
                 let loader = |n: Fqn<'_>| backend.find_or_load_class(&n);

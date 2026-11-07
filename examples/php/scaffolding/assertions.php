@@ -61,6 +61,9 @@ function runDemoAssertions(): void
     assert(in_array(Scaffolding\scaffoldingAnyToolDefault(), Scaffolding\TOOL_DEFAULTS, true), "the untemplated return really is one of Scaffolding\TOOL_DEFAULTS' values");
     assert(Scaffolding\scaffoldingToolDefaultFor('ink') === 'black', "a key read inside the body really picks the table's own value");
     assert(array_key_exists(Scaffolding\ScaffoldingLimits::anyLimitName(), Scaffolding\ScaffoldingLimits::LIMITS), "the declared return really is one of LIMITS' keys");
+    assert((new ClassConstantTypeDemo())->urgent() === 'high', "self::PRIORITY_HIGH really is the string 'high'");
+    assert((new ClassConstantTypeDemo())->badge(ClassConstantTypeDemo::PRIORITY_LOW) === 'grey', "the switch really covers PRIORITY_LOW");
+    assert((new ClassConstantTypeDemo())->badge(ClassConstantTypeDemo::PRIORITY_HIGH) === 'red', "the switch really covers PRIORITY_HIGH");
 
     // ── List order ──────────────────────────────────────────────────────
     assert(array_is_list(['left', 'right']), 'a literal written without keys really is a list');
@@ -2175,6 +2178,29 @@ function runDemoAssertions(): void
         assert(false, 'clone() cannot write a readonly property from outside its class');
     } catch (\Error) {
     }
+
+    try {
+        Scaffolding\Status::from('Active');
+        assert(false, "Status::from('Active') throws: no case is backed by 'Active'");
+    } catch (\ValueError) {
+    }
+    assert(Scaffolding\Priority::tryFrom(4) === null, 'no Priority case is backed by 4');
+    assert(Scaffolding\Status::from('pending') === Scaffolding\Status::Pending, "'pending' backs Status::Pending");
+
+    $unhandled = new UnhandledExceptionDemo();
+    assert($unhandled->caught('/nonexistent/demo.txt') === '', 'caught() handles the StorageException');
+    try {
+        $unhandled->load('/nonexistent/demo.txt');
+        assert(false, 'load() lets the StorageException escape');
+    } catch (Scaffolding\StorageException) {
+    }
+    assert(!is_subclass_of(Scaffolding\StorageException::class, \RuntimeException::class), 'StorageException is a checked exception');
+    assert(is_subclass_of(\InvalidArgumentException::class, \LogicException::class), 'InvalidArgumentException is unchecked');
+
+    // ── Unused private members ──────────────────────────────────────────
+    $unused = new UnusedPrivateMemberDemo();
+    assert($unused->sorted([3, 1, 2]) === [1, 2, 3], 'usort() calls compare() through the callable array');
+    assert($unused->bill(7) === 'N-7', 'nothing writes $discount, so it adds nothing');
 
     echo "All assertions passed.\n";
 }

@@ -50,10 +50,10 @@ pub(crate) use installed::{
     path_repo_psr4_mappings, read_installed_packages, stub_package_roots,
 };
 pub(crate) use project::{
-    detect_drupal_web_root, explicit_dependency_names, has_dependency, has_laravel_aware_phpstan,
-    has_require_dev, has_runtime_permission_package, is_application_project, is_doctrine_project,
-    is_laravel_application, is_laravel_project, is_symfony_project, is_twig_project,
-    is_yii_project, locked_phpunit_major,
+    detect_drupal_web_root, drupal_web_root_on_disk, explicit_dependency_names, has_dependency,
+    has_laravel_aware_phpstan, has_require_dev, has_runtime_permission_package,
+    is_application_project, is_doctrine_project, is_laravel_application, is_laravel_project,
+    is_symfony_project, is_twig_project, is_yii_project, locked_phpunit_major,
 };
 pub use project::{detect_php_version, detect_php_version_from_package};
 pub use psr4::{
@@ -211,6 +211,37 @@ pub(crate) fn get_bin_dir(package: &ComposerPackage) -> String {
 /// returns `[(monorepo/project-a, "vendor"), (monorepo/packages/project-b, "vendor")]`.
 pub fn discover_subproject_roots(workspace_root: &Path) -> Vec<(PathBuf, String)> {
     outermost_with_vendor_dirs(composer_json_dirs(workspace_root, &[]))
+}
+
+/// The Composer projects of a workspace without a `composer.json` of its
+/// own (see [`discover_subproject_roots`]), and the web root of a Drupal
+/// tree in it that none of them owns.
+///
+/// A Drupal tree holds `composer.json` files that are no project to index
+/// on its own: core's, the extensions', and the packages of a `vendor/`
+/// shipped with the tree.  So a subproject inside the web root is kept
+/// only when it is the web root or has its own dependencies installed.  A
+/// project that is the web root or holds it owns the site, which is then
+/// indexed as part of that project.
+pub fn discover_workspace_projects(
+    workspace_root: &Path,
+) -> (Vec<(PathBuf, String)>, Option<PathBuf>) {
+    let mut subprojects = discover_subproject_roots(workspace_root);
+    let Some(web_root) = drupal_web_root_on_disk(workspace_root) else {
+        return (subprojects, None);
+    };
+    subprojects.retain(|(sub_root, vendor_dir)| {
+        *sub_root == web_root
+            || !sub_root.starts_with(&web_root)
+            || sub_root
+                .join(vendor_dir)
+                .join("composer/installed.json")
+                .is_file()
+    });
+    let owned = subprojects
+        .iter()
+        .any(|(sub_root, _)| web_root.starts_with(sub_root));
+    (subprojects, (!owned).then_some(web_root))
 }
 
 /// The Composer projects nested inside a workspace that has a

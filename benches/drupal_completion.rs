@@ -7,14 +7,21 @@ use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
 /// Custom modules in the generated site, each declaring `SERVICES`
-/// services, `ROUTES` routes, `ENTITY_TYPES` entity types, and documenting
-/// `HOOKS` hooks, and implementing the hooks the module before it
-/// documents.
+/// services, `ROUTES` routes, `ENTITY_TYPES` entity types, `PERMISSIONS`
+/// permissions, `CONFIGS` configuration objects, with their default
+/// configuration and schema, `ELEMENTS` render elements, `THEME_HOOKS`
+/// theme hooks, and `LIBRARIES` libraries, documenting `HOOKS` hooks, and
+/// implementing the hooks the module before it documents.
 const MODULES: usize = 30;
 const SERVICES: usize = 10;
 const ROUTES: usize = 10;
 const ENTITY_TYPES: usize = 3;
+const PERMISSIONS: usize = 10;
+const CONFIGS: usize = 10;
+const ELEMENTS: usize = 3;
 const HOOKS: usize = 10;
+const THEME_HOOKS: usize = 5;
+const LIBRARIES: usize = 10;
 
 const COMPOSER: &str = r#"{
     "require": { "drupal/core-recommended": "^11" },
@@ -22,12 +29,12 @@ const COMPOSER: &str = r#"{
 }"#;
 
 /// Just enough of core, where Composer puts it, for the type engine to
-/// tell a container, the entity type manager, the module handler, and a
-/// URL from any other receiver.
+/// tell a container, the entity type manager, the module handler, an
+/// account, and a URL from any other receiver.
 const STUBS: &[(&str, &str)] = &[
     (
         "web/core/lib/Drupal.php",
-        "<?php\nclass Drupal {\n    public static function service(string $id): object {}\n    public static function hasService(string $id): bool {}\n}\n",
+        "<?php\nclass Drupal {\n    public static function service(string $id): object {}\n    public static function hasService(string $id): bool {}\n    public static function config($name) {}\n}\n",
     ),
     (
         "web/core/lib/Drupal/Core/Url.php",
@@ -42,8 +49,16 @@ const STUBS: &[(&str, &str)] = &[
         "<?php\nnamespace Drupal\\Core\\Entity\\Attribute;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass ContentEntityType {\n    public function __construct(public readonly string $id) {}\n}\n",
     ),
     (
+        "web/core/lib/Drupal/Core/Render/Attribute/RenderElement.php",
+        "<?php\nnamespace Drupal\\Core\\Render\\Attribute;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass RenderElement {\n    public function __construct(public readonly string $id) {}\n}\n",
+    ),
+    (
         "web/core/lib/Drupal/Core/Extension/ModuleHandlerInterface.php",
         "<?php\nnamespace Drupal\\Core\\Extension;\ninterface ModuleHandlerInterface {\n    public function invokeAll($hook, array $args = []);\n    public function invoke($module, $hook, array $args = []);\n    public function alter($type, &$data, &$context1 = NULL, &$context2 = NULL);\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Session/AccountInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Session;\ninterface AccountInterface {\n    public function hasPermission(string $permission);\n}\n",
     ),
     (
         "web/core/lib/Drupal/Core/Hook/Attribute/Hook.php",
@@ -59,6 +74,7 @@ namespace Drupal\acme;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Hook\Attribute\Hook;
+use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Url;
 
 final class Consumer
@@ -66,6 +82,7 @@ final class Consumer
     public function __construct(
         private EntityTypeManagerInterface $manager,
         private ModuleHandlerInterface $modules,
+        private AccountInterface $account,
     ) {}
 
     #[Hook('mod1_')]
@@ -75,6 +92,11 @@ final class Consumer
         Url::fromRoute('mod1.');
         $this->manager->getStorage('mod1_');
         $this->modules->invokeAll('mod1_');
+        $this->account->hasPermission('administer mod1 ');
+        \Drupal::config('mod1.');
+        $build = ['#type' => 'mod1_'];
+        $themed = ['#theme' => 'mod1_'];
+        $build = ['#attached' => ['library' => ['mod1/']]];
     }
 }
 "#;
@@ -92,7 +114,8 @@ fn rt() -> tokio::runtime::Runtime {
 }
 
 /// The files of a site with many custom modules: their services, routes,
-/// entity types, documented hooks, and hook implementations.
+/// entity types, render elements, documented hooks, hook implementations,
+/// and theme hooks.
 fn generate_site() -> Vec<(String, String)> {
     let mut files = Vec::new();
 
@@ -121,11 +144,51 @@ fn generate_site() -> Vec<(String, String)> {
         }
         files.push((format!("{dir}/mod{m}.routing.yml"), routing));
 
+        let mut permissions = String::new();
+        for p in 0..PERMISSIONS {
+            let _ = writeln!(
+                permissions,
+                "administer mod{m} thing{p}:\n  title: 'Administer thing {p} of module {m}'"
+            );
+        }
+        files.push((format!("{dir}/mod{m}.permissions.yml"), permissions));
+
+        let mut schema = String::new();
+        for c in 0..CONFIGS {
+            files.push((
+                format!("{dir}/config/install/mod{m}.setting{c}.yml"),
+                "enabled: true\n".to_string(),
+            ));
+            let _ = writeln!(
+                schema,
+                "mod{m}.setting{c}:\n  type: config_object\n  label: 'Setting {c} of module {m}'"
+            );
+        }
+        files.push((format!("{dir}/config/schema/mod{m}.schema.yml"), schema));
+
+        let mut libraries = String::new();
+        for l in 0..LIBRARIES {
+            let _ = writeln!(
+                libraries,
+                "library{l}:\n  version: 1.x\n  js:\n    js/library{l}.js: {{}}\n  dependencies:\n    - core/drupal"
+            );
+        }
+        files.push((format!("{dir}/mod{m}.libraries.yml"), libraries));
+
         for e in 0..ENTITY_TYPES {
             files.push((
                 format!("{dir}/src/Entity/Entity{e}.php"),
                 format!(
                     "<?php\nnamespace Drupal\\mod{m}\\Entity;\n\nuse Drupal\\Core\\Entity\\Attribute\\ContentEntityType;\n\n#[ContentEntityType(\n    id: 'mod{m}_entity{e}',\n)]\nclass Entity{e} {{}}\n"
+                ),
+            ));
+        }
+
+        for e in 0..ELEMENTS {
+            files.push((
+                format!("{dir}/src/Element/Element{e}.php"),
+                format!(
+                    "<?php\nnamespace Drupal\\mod{m}\\Element;\n\nuse Drupal\\Core\\Render\\Attribute\\RenderElement;\n\n#[RenderElement('mod{m}_element{e}')]\nclass Element{e} {{}}\n"
                 ),
             ));
         }
@@ -138,6 +201,18 @@ fn generate_site() -> Vec<(String, String)> {
             );
         }
         files.push((format!("{dir}/mod{m}.api.php"), api));
+
+        let mut theme = format!(
+            "<?php\nnamespace Drupal\\mod{m}\\Hook;\n\nuse Drupal\\Core\\Hook\\Attribute\\Hook;\n\nfinal class ThemeHooks {{\n    #[Hook('theme')]\n    public function theme(): array {{\n        return [\n"
+        );
+        for t in 0..THEME_HOOKS {
+            let _ = writeln!(
+                theme,
+                "            'mod{m}_widget{t}' => ['variables' => ['label' => NULL, 'items' => []]],"
+            );
+        }
+        theme.push_str("        ];\n    }\n}\n");
+        files.push((format!("{dir}/src/Hook/ThemeHooks.php"), theme));
 
         if m > 0 {
             let previous = m - 1;
@@ -277,6 +352,27 @@ fn bench_drupal_name_completion(c: &mut Criterion) {
             "mod1_entity2",
         ),
         (
+            "permission_name",
+            &consumer,
+            CONSUMER_PHP,
+            "hasPermission('administer mod1 '",
+            "administer mod1 thing7",
+        ),
+        (
+            "config_name",
+            &consumer,
+            CONSUMER_PHP,
+            "config('mod1.'",
+            "mod1.setting7",
+        ),
+        (
+            "render_element",
+            &consumer,
+            CONSUMER_PHP,
+            "'#type' => 'mod1_'",
+            "mod1_element2",
+        ),
+        (
             "hook_name_invoke_all",
             &consumer,
             CONSUMER_PHP,
@@ -289,6 +385,20 @@ fn bench_drupal_name_completion(c: &mut Criterion) {
             CONSUMER_PHP,
             "#[Hook('mod1_'",
             "mod1_event7",
+        ),
+        (
+            "theme_hook_name",
+            &consumer,
+            CONSUMER_PHP,
+            "'#theme' => 'mod1_'",
+            "mod1_widget4",
+        ),
+        (
+            "library_name",
+            &consumer,
+            CONSUMER_PHP,
+            "['library' => ['mod1/'",
+            "mod1/library7",
         ),
         (
             "hook_implementation",

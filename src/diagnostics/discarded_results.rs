@@ -122,7 +122,7 @@ impl Backend {
 
 /// The method a `$subject->method` or `Class::method` call expression
 /// names.
-fn member_name(expr: &str) -> Option<&str> {
+pub(super) fn member_name(expr: &str) -> Option<&str> {
     let arrow = expr.rfind("->").map(|i| i + 2);
     let colons = expr.rfind("::").map(|i| i + 2);
     Some(&expr[arrow.max(colons)?..])

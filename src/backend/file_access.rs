@@ -339,6 +339,18 @@ impl Backend {
         self.whole_file_import_block(uri)
     }
 
+    /// [`import_block_at`](Self::import_block_at) for a file whose source is
+    /// `content`, read from the source itself when the file has no parse
+    /// state.  A file loaded on demand (PSR-4, the class map, a vendor
+    /// package) records only its classes, so its imports would otherwise
+    /// come back empty.
+    pub(crate) fn import_block_in(&self, uri: &str, content: &str, offset: usize) -> ImportBlock {
+        if self.files.read().contains_key(uri) {
+            return self.import_block_at(uri, offset);
+        }
+        Self::import_block_in_source(content, offset as u32)
+    }
+
     /// The one [`ImportBlock`] of a file that does not declare several
     /// `namespace` blocks.
     fn whole_file_import_block(&self, uri: &str) -> ImportBlock {
@@ -558,6 +570,7 @@ pub(crate) fn namespace_in_spans(spans: &[NamespaceSpan], byte_offset: u32) -> O
 }
 
 /// One `namespace` block's imports, from [`Backend::import_blocks`].
+#[derive(Default)]
 pub(crate) struct ImportBlock {
     /// The block's namespace, or `None` for the global namespace.
     pub(crate) namespace: Option<String>,
@@ -572,7 +585,7 @@ pub(crate) struct ImportBlock {
 
 impl ImportBlock {
     /// The block `span` covers, in a file that declares several.
-    fn of_span(span: &NamespaceSpan) -> ImportBlock {
+    pub(crate) fn of_span(span: &NamespaceSpan) -> ImportBlock {
         ImportBlock {
             namespace: span.namespace.clone(),
             use_map: span.use_map.clone(),

@@ -57,6 +57,7 @@ pub(super) fn extract_from_statement<'a>(
             if let Some(call) = discarded_call(expr_stmt.expression) {
                 ctx.discarded_calls.push(call);
             }
+            record_unused_results(expr_stmt.expression, ctx);
             extract_from_expression(expr_stmt.expression, ctx, scope_start);
         }
         Statement::Return(ret) => {
@@ -97,13 +98,21 @@ pub(super) fn extract_from_statement<'a>(
         }
         Statement::For(for_stmt) => {
             emit_keyword(&for_stmt.r#for, ctx);
+            // Only the last condition decides the loop; every other header
+            // expression's value is dropped.
+            let last_condition = for_stmt.conditions.len().checked_sub(1);
             for expr in for_stmt.initializations.iter() {
+                record_unused_results(expr, ctx);
                 extract_from_expression(expr, ctx, scope_start);
             }
-            for expr in for_stmt.conditions.iter() {
+            for (i, expr) in for_stmt.conditions.iter().enumerate() {
+                if Some(i) != last_condition {
+                    record_unused_results(expr, ctx);
+                }
                 extract_from_expression(expr, ctx, scope_start);
             }
             for expr in for_stmt.increments.iter() {
+                record_unused_results(expr, ctx);
                 extract_from_expression(expr, ctx, scope_start);
             }
             let body_span = for_stmt.body.span();
@@ -517,4 +526,63 @@ fn discarded_call(mut expr: &Expression<'_>) -> Option<(u32, u32)> {
         call.span().start.offset,
         argument_list.left_parenthesis.end.offset,
     ))
+}
+
+/// Record the `args_start` of every call in `expr` whose value goes
+/// nowhere, given that the value of `expr` itself goes nowhere.
+///
+/// The value of a short-circuit operator's right-hand side, and of a
+/// ternary or `match` branch, is the value of the whole expression, so it
+/// goes nowhere too.  A left-hand side or condition is read by the
+/// operator itself.
+pub(super) fn record_unused_results(mut expr: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    loop {
+        match expr {
+            Expression::Parenthesized(inner) => expr = inner.expression,
+            Expression::UnaryPrefix(prefix)
+                if matches!(
+                    prefix.operator,
+                    UnaryPrefixOperator::VoidCast(..) | UnaryPrefixOperator::ErrorControl(_)
+                ) =>
+            {
+                expr = prefix.operand;
+            }
+            Expression::Binary(binary)
+                if binary.operator.is_null_coalesce()
+                    || matches!(
+                        binary.operator,
+                        BinaryOperator::And(_)
+                            | BinaryOperator::Or(_)
+                            | BinaryOperator::LowAnd(_)
+                            | BinaryOperator::LowOr(_)
+                    ) =>
+            {
+                expr = binary.rhs;
+            }
+            Expression::Conditional(conditional) => {
+                if let Some(then) = conditional.then {
+                    record_unused_results(then, ctx);
+                }
+                expr = conditional.r#else;
+            }
+            Expression::Match(r#match) => {
+                for arm in r#match.arms.iter() {
+                    record_unused_results(arm.expression(), ctx);
+                }
+                return;
+            }
+            Expression::Call(call) => {
+                let argument_list = match call {
+                    Call::Function(call) => &call.argument_list,
+                    Call::Method(call) => &call.argument_list,
+                    Call::NullSafeMethod(call) => &call.argument_list,
+                    Call::StaticMethod(call) => &call.argument_list,
+                };
+                ctx.unused_result_calls
+                    .push(argument_list.left_parenthesis.end.offset);
+                return;
+            }
+            _ => return,
+        }
+    }
 }

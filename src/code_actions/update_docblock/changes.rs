@@ -11,7 +11,7 @@ use crate::code_actions::phpstan::fix_return_type::enrichment_return_type;
 use crate::completion::phpdoc::generation::{enrichment_plain, enrichment_plain_typed};
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
 use crate::docblock::is_compatible_refinement_typed;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, FunctionLoader};
 
 use super::{BodyFacts, DocParam, FunctionWithDocblock};
@@ -142,11 +142,13 @@ pub(super) fn check_needs_update(
         }
     }
 
-    // Check for type contradictions in @param tags.
+    // Check for type contradictions in @param tags, and for tags that copy
+    // a nullable hint without its `null`.
     for sig_param in &info.sig_params {
         if let Some(native_type) = &sig_param.type_hint
             && let Some(doc_param) = info.doc_param(&sig_param.name)
-            && is_type_contradiction(&doc_param.type_parsed, native_type)
+            && (is_type_contradiction(&doc_param.type_parsed, native_type)
+                || doc_param.type_parsed.omits_only_null_of(native_type))
         {
             return true;
         }
@@ -182,7 +184,9 @@ pub(super) fn check_needs_update(
         if sig_ret.is_void() && doc_ret.type_parsed.is_void() {
             return true;
         }
-        if is_type_contradiction(&doc_ret.type_parsed, sig_ret) {
+        if is_type_contradiction(&doc_ret.type_parsed, sig_ret)
+            || doc_ret.type_parsed.omits_only_null_of(sig_ret)
+        {
             return true;
         }
     }
@@ -246,6 +250,15 @@ pub(super) fn should_remove_return(info: &FunctionWithDocblock) -> bool {
         return true;
     }
     false
+}
+
+/// The docblock spelling of `ty` (written as `spelled`) with `|null` added.
+pub(super) fn with_null(spelled: &str, ty: &PhpType) -> String {
+    if matches!(ty.kind(), TypeKind::Intersection(_)) {
+        format!("({})|null", spelled)
+    } else {
+        format!("{}|null", spelled)
+    }
 }
 
 /// Check if the `@return` tag needs its type updated.

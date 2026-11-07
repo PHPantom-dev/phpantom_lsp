@@ -470,6 +470,17 @@ impl Backend {
             .map(|i| atom(&resolve_to_fqn(i, use_map, namespace)))
             .collect();
 
+        if let Some(doctrine) = class.doctrine.as_deref_mut() {
+            if let Some(ref repository) = doctrine.repository {
+                doctrine.repository = Some(atom(&resolve_to_fqn(repository, use_map, namespace)));
+            }
+            for (_, target) in &mut doctrine.associations {
+                if let Some(name) = target {
+                    *name = atom(&resolve_to_fqn(name, use_map, namespace));
+                }
+            }
+        }
+
         // Resolve the `@phpstan-require-extends` base class to its
         // fully-qualified name so it is loadable cross-file.
         if let Some(ref required) = class.require_extends {
@@ -564,6 +575,16 @@ impl Backend {
         // loadable cross-file.
         if let Some(policy) = class.laravel().and_then(|l| l.policy_class.clone()) {
             class.laravel_mut().policy_class = Some(resolve_to_fqn(&policy, use_map, namespace));
+        }
+        if let Some(related) = class
+            .laravel
+            .as_deref_mut()
+            .and_then(|l| l.related_classes.as_deref_mut())
+        {
+            let resolve = |name: &mut String| *name = resolve_to_fqn(name, use_map, namespace);
+            related.observers.iter_mut().for_each(resolve);
+            related.resource.iter_mut().for_each(resolve);
+            related.resource_collection.iter_mut().for_each(resolve);
         }
 
         // Resolve custom pivot class names (`->using(X::class)`) to FQNs so

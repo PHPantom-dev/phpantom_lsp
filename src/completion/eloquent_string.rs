@@ -31,7 +31,7 @@ use crate::text_position::{offset_to_position, position_to_offset};
 use crate::text_scan::collapse_continuation_lines;
 use crate::type_engine::resolver::resolve_target_classes;
 use crate::type_engine::subject_extraction::detect_access_operator;
-use crate::types::{AccessKind, ClassInfo, FileContext};
+use crate::types::{AccessKind, ClassInfo, FileContext, ParameterInfo};
 use crate::virtual_members::laravel::{
     classify_relationship_typed, extends_eloquent_model, resolve_relation_chain,
 };
@@ -613,8 +613,8 @@ impl Backend {
         items
     }
 
-    /// The declared type of the parameter the string under the cursor
-    /// fills, with the call context it was found through.
+    /// The parameter the string under the cursor fills, with the call
+    /// context it was found through.
     ///
     /// The prologue every *type*-driven string strategy shares, resolved
     /// once and handed to each: locating the enclosing call is a scan and
@@ -628,7 +628,7 @@ impl Backend {
         position: Position,
         ctx: &FileContext,
         code: &CodeContext<'_>,
-    ) -> Option<(StringCallContext, PhpType)> {
+    ) -> Option<(StringCallContext, ParameterInfo)> {
         let cursor_offset = position_to_offset(content, position) as usize;
         let sc = detect_string_call_context(content, cursor_offset, code)?;
 
@@ -639,13 +639,8 @@ impl Backend {
         };
 
         let resolved = self.resolve_callable_target(&call_expr, content, position, ctx)?;
-        let param_type = resolved
-            .parameters
-            .get(sc.arg_index)?
-            .type_hint
-            .as_ref()?
-            .clone();
-        Some((sc, param_type))
+        let param = resolved.parameters.get(sc.arg_index)?.clone();
+        Some((sc, param))
     }
 
     /// Try completion for `model-property<Model>` typed parameters.

@@ -79,29 +79,88 @@ pub(crate) fn find_uncaught_throw_types_with_context(
     };
     with_documented_function_body(content, position, |body, content, trivia| {
         // Every receiver is typed from one walk of the body (see
-        // `record_scopes`), and a callee's inferred return type is worked
-        // out once however often the body calls it.
+        // `record_body_scopes`), and a callee's inferred return type is
+        // worked out once however often the body calls it.
         let _engine_caches = crate::type_engine::call_resolution::activate_type_engine_caches();
         let _scope_cache = forward_walk::with_diagnostic_scope_cache();
-        let mut analysis = Analysis {
-            content,
-            ctx,
-            resolved_class_loader: ctx.resolved_class_loader,
-            placeholder: crate::class_lookup::class_context_placeholder(
-                content,
-                body.span().start.offset,
-            ),
-            sites: Vec::new(),
-            tries: Vec::new(),
-        };
-        analysis.record_scopes(body);
-        for statement in body.statements.iter() {
-            walk_throw_sites(statement, &mut analysis);
+        record_body_scopes(content, ctx, None, &[body.span().start.offset]);
+        let mut uncaught: Vec<PhpType> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for site in uncaught_throw_sites(body, content, trivia, ctx) {
+            if seen.insert(site.exception.to_ascii_lowercase()) {
+                uncaught.push(PhpType::named(atom(&site.exception)));
+            }
         }
-        analysis.inline_annotations(body.span(), trivia);
-        analysis.uncaught()
+        uncaught
     })
     .unwrap_or_default()
+}
+
+/// One place a body lets an exception escape.
+pub(crate) struct UncaughtThrow {
+    /// The byte range of the code that throws: the `throw`, the call
+    /// whose callee declares the exception, or the inline `@throws`
+    /// annotation.
+    pub start: u32,
+    pub end: u32,
+    /// The exception class, fully qualified and spelled the way its
+    /// declaration spells it when it can be loaded.
+    pub exception: String,
+}
+
+/// Walk the bodies starting at `body_offsets` once for the scope each of
+/// their statements runs in, so typing a receiver reads the scope there
+/// instead of walking the body up to it.  Only takes effect while a
+/// diagnostic scope cache is active.
+pub(crate) fn record_body_scopes(
+    content: &str,
+    ctx: &ThrowsContext<'_>,
+    uri: Option<&str>,
+    body_offsets: &[u32],
+) {
+    forward_walk::build_diagnostic_scopes_for_offsets(
+        content,
+        ctx.local_classes,
+        &PerBlock::single(ctx.resolved_class_loader),
+        &PerBlock::single(ctx.class_loader),
+        &PerBlock::single(ctx.use_map),
+        ctx.backend,
+        uri,
+        Loaders::with_function(ctx.function_loader),
+        ctx.backend.map(|backend| &backend.resolved_class_cache),
+        body_offsets,
+    );
+}
+
+/// Every place in `body` that throws an exception no enclosing `try`
+/// catches, in source order.  An exception thrown in several places is
+/// listed at each of them.
+///
+/// The scopes the receivers are typed with are read from the active
+/// diagnostic scope cache when [`record_body_scopes`] filled it for the
+/// body, and worked out on demand otherwise.
+pub(crate) fn uncaught_throw_sites(
+    body: &Block<'_>,
+    content: &str,
+    trivia: &[Trivia<'_>],
+    ctx: &ThrowsContext<'_>,
+) -> Vec<UncaughtThrow> {
+    let mut analysis = Analysis {
+        content,
+        ctx,
+        resolved_class_loader: ctx.resolved_class_loader,
+        placeholder: crate::class_lookup::class_context_placeholder(
+            content,
+            body.span().start.offset,
+        ),
+        sites: Vec::new(),
+        tries: Vec::new(),
+    };
+    for statement in body.statements.iter() {
+        walk_throw_sites(statement, &mut analysis);
+    }
+    analysis.inline_annotations(body.span(), trivia);
+    analysis.uncaught()
 }
 
 /// Run `with` on the body of the function or method documented at
@@ -243,32 +302,12 @@ struct Analysis<'a, 'c> {
     resolved_class_loader: &'a ResolvedClassLoader<'a>,
     /// What `$this` and `self` are read as outside a class.
     placeholder: ClassInfo,
-    /// Each exception class a site can throw, with the site's offset.
-    sites: Vec<(u32, String)>,
+    /// Each exception class a site can throw, with the site's range.
+    sites: Vec<UncaughtThrow>,
     tries: Vec<TryRegion>,
 }
 
 impl Analysis<'_, '_> {
-    /// Walk the body once for the scope each of its statements runs in, so
-    /// typing a receiver reads the scope there instead of walking the body
-    /// up to it.
-    fn record_scopes(&self, body: &Block<'_>) {
-        forward_walk::build_diagnostic_scopes_for_offsets(
-            self.content,
-            self.ctx.local_classes,
-            &PerBlock::single(self.resolved_class_loader),
-            &PerBlock::single(self.ctx.class_loader),
-            &PerBlock::single(self.ctx.use_map),
-            self.ctx.backend,
-            None,
-            Loaders::with_function(self.ctx.function_loader),
-            self.ctx
-                .backend
-                .map(|backend| &backend.resolved_class_cache),
-            &[body.span().start.offset],
-        );
-    }
-
     /// The class the code at `offset` is written in, or the placeholder
     /// for its namespace outside one.
     fn current_class(&self, offset: u32) -> &ClassInfo {
@@ -364,12 +403,16 @@ impl Analysis<'_, '_> {
     }
 
     /// Add the exceptions a callee declares with `@throws`.
-    fn add_declared(&mut self, offset: u32, throws: &[PhpType]) {
+    fn add_declared(&mut self, (start, end): (u32, u32), throws: &[PhpType]) {
         for ty in throws {
             for member in ty.union_members() {
                 if let Some(name) = member.base_name() {
-                    let fqn = self.canonical(name);
-                    self.sites.push((offset, fqn));
+                    let exception = self.canonical(name);
+                    self.sites.push(UncaughtThrow {
+                        start,
+                        end,
+                        exception,
+                    });
                 }
             }
         }
@@ -377,7 +420,7 @@ impl Analysis<'_, '_> {
 
     fn add_method(
         &mut self,
-        offset: u32,
+        range: (u32, u32),
         classes: Vec<String>,
         method: &ClassLikeMemberSelector<'_>,
     ) {
@@ -390,7 +433,7 @@ impl Analysis<'_, '_> {
                 && let Some(method) = merged.get_method(method_name)
             {
                 let throws = method.throws().to_vec();
-                self.add_declared(offset, &throws);
+                self.add_declared(range, &throws);
             }
         }
     }
@@ -411,6 +454,7 @@ impl Analysis<'_, '_> {
                 continue;
             };
             let offset = comment.span.start.offset;
+            let end = comment.span.end.offset;
             for tag in info.tags_by_kind(crate::docblock::TagKind::Throws) {
                 let Some(name) = tag.description.split_whitespace().next() else {
                     continue;
@@ -418,8 +462,12 @@ impl Analysis<'_, '_> {
                 if name.starts_with('$') {
                     continue;
                 }
-                let fqn = self.written_class(name, offset);
-                self.sites.push((offset, fqn));
+                let exception = self.written_class(name, offset);
+                self.sites.push(UncaughtThrow {
+                    start: offset,
+                    end,
+                    exception,
+                });
             }
         }
     }
@@ -442,26 +490,23 @@ impl Analysis<'_, '_> {
         }
     }
 
-    /// The exception classes thrown where no enclosing `try` catches them,
-    /// first throw first, each once.
-    fn uncaught(mut self) -> Vec<PhpType> {
-        self.sites.sort_by_key(|(offset, _)| *offset);
-        let mut uncaught: Vec<PhpType> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for (offset, thrown) in &self.sites {
-            let caught = self.tries.iter().any(|region| {
-                region.block.0 < *offset
-                    && *offset < region.block.1
-                    && region
-                        .catches
-                        .iter()
-                        .any(|caught| self.catches(caught, thrown))
-            });
-            if !caught && seen.insert(thrown.to_ascii_lowercase()) {
-                uncaught.push(PhpType::named(atom(thrown)));
-            }
-        }
-        uncaught
+    /// The throw sites no enclosing `try` catches, in source order.
+    fn uncaught(mut self) -> Vec<UncaughtThrow> {
+        self.sites.sort_by_key(|site| site.start);
+        let sites = std::mem::take(&mut self.sites);
+        sites
+            .into_iter()
+            .filter(|site| {
+                !self.tries.iter().any(|region| {
+                    region.block.0 < site.start
+                        && site.start < region.block.1
+                        && region
+                            .catches
+                            .iter()
+                            .any(|caught| self.catches(caught, &site.exception))
+                })
+            })
+            .collect()
     }
 }
 
@@ -470,11 +515,26 @@ impl<'ast, 'arena> ThrowSiteSink<'ast, 'arena> for Analysis<'_, '_> {
         let Expression::Identifier(ident) = call.function else {
             return;
         };
-        let offset = call.span().start.offset;
+        let span = call.span();
         if let Some(function_loader) = self.ctx.function_loader
-            && let Some(function) = function_loader(bytes_to_str(ident.value()), offset)
+            && let Some(function) = function_loader(bytes_to_str(ident.value()), span.start.offset)
         {
-            self.add_declared(offset, &function.throws);
+            let range = (span.start.offset, span.end.offset);
+            self.add_declared(range, &function.throws);
+            if !crate::type_engine::type_ops::call_site_returns::has_call_site_throws(&function) {
+                return;
+            }
+            let var_ctx = self.var_ctx(span.start.offset);
+            let rctx = var_ctx.as_resolution_ctx();
+            let resolve = |text: &str| crate::Backend::resolve_arg_text_to_type(text, &rctx);
+            if let Some(thrown) = crate::type_engine::type_ops::call_site_returns::call_site_throws(
+                &function,
+                &call.argument_list,
+                self.content,
+                Some(&resolve),
+            ) {
+                self.add_declared(range, &[thrown]);
+            }
         }
     }
 
@@ -484,39 +544,47 @@ impl<'ast, 'arena> ThrowSiteSink<'ast, 'arena> for Analysis<'_, '_> {
         method: &'ast ClassLikeMemberSelector<'arena>,
     ) {
         let classes = self.classes_of(object);
-        self.add_method(object.span().start.offset, classes, method);
+        let range = (object.span().start.offset, method.span().end.offset);
+        self.add_method(range, classes, method);
     }
 
     fn static_method_call(&mut self, call: &'ast StaticMethodCall<'arena>) {
-        let offset = call.span().start.offset;
+        let span = call.span();
+        let offset = span.start.offset;
         let classes = match self.class_named(call.class, offset) {
             Some(class) => vec![class],
             None => self.classes_of(call.class),
         };
-        self.add_method(offset, classes, &call.method);
+        self.add_method((offset, span.end.offset), classes, &call.method);
     }
 
     fn instantiation(&mut self, new: &'ast Instantiation<'arena>) {
-        let offset = new.span().start.offset;
+        let span = new.span();
+        let offset = span.start.offset;
         if let Some(class) = self.class_named(new.class, offset)
             && let Some(merged) = self.merged(&class)
             && let Some(constructor) = merged.get_method("__construct")
         {
             let throws = constructor.throws().to_vec();
-            self.add_declared(offset, &throws);
+            self.add_declared((offset, span.end.offset), &throws);
         }
     }
 
     fn throw(&mut self, throw: &'ast Throw<'arena>) {
-        let offset = throw.span().start.offset;
+        let span = throw.span();
+        let offset = span.start.offset;
         let classes = match throw.exception {
             Expression::Instantiation(new) => {
                 self.class_named(new.class, offset).into_iter().collect()
             }
             thrown => self.classes_of(thrown),
         };
-        for class in classes {
-            self.sites.push((offset, class));
+        for exception in classes {
+            self.sites.push(UncaughtThrow {
+                start: offset,
+                end: span.end.offset,
+                exception,
+            });
         }
     }
 

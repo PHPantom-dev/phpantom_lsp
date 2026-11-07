@@ -72,6 +72,42 @@ pub(in crate::symbol_map::extraction) fn is_view_first_arg_call(
             && member_name.eq_ignore_ascii_case("view"))
 }
 
+/// Whether a static call links to a file under `public/`:
+/// `URL::asset('css/app.css')`, `URL::secureAsset(…)`.
+fn is_url_asset_call(clean_subject: &str, member_name: &str) -> bool {
+    matches_laravel_facade(clean_subject, "URL") && is_url_asset_method(member_name)
+}
+
+/// Whether a URL generator method links to a file under `public/`.
+pub(crate) fn is_url_asset_method(member_name: &str) -> bool {
+    member_name.eq_ignore_ascii_case("asset") || member_name.eq_ignore_ascii_case("secureAsset")
+}
+
+/// Whether a static call names a source file Vite builds:
+/// `Vite::asset('resources/images/logo.png')`, `Vite::content(…)`.
+fn is_vite_asset_call(clean_subject: &str, member_name: &str) -> bool {
+    matches_laravel_facade(clean_subject, "Vite")
+        && (member_name.eq_ignore_ascii_case("asset")
+            || member_name.eq_ignore_ascii_case("content"))
+}
+
+/// Whether a static call renders the Inertia page its first argument names:
+/// `Inertia::render('Users/Index')`, and `Inertia::modal(…)`, which the
+/// Inertia Modal package adds.
+fn is_inertia_render_call(clean_subject: &str, member_name: &str) -> bool {
+    matches_laravel_class(clean_subject, "Inertia", "Inertia")
+        && (member_name.eq_ignore_ascii_case("render") || member_name.eq_ignore_ascii_case("modal"))
+}
+
+/// The argument `Route::inertia('/about', 'About')` names its page in,
+/// after the URI it binds.
+const ROUTE_INERTIA_ARG: usize = 1;
+
+/// Whether a static call binds a URI straight to an Inertia page.
+fn is_route_inertia_call(clean_subject: &str, member_name: &str) -> bool {
+    matches_laravel_facade(clean_subject, "Route") && member_name.eq_ignore_ascii_case("inertia")
+}
+
 /// The argument `Route::view('/about', 'pages.about')` names its template
 /// in, after the URI it binds.
 const ROUTE_VIEW_ARG: usize = 1;
@@ -106,6 +142,8 @@ pub(crate) fn facade_static_call_arg_kind(
         || (index == ROUTE_VIEW_ARG && is_route_view_call(clean_subject, member_name))
     {
         Some(StringKeyKind::View)
+    } else if index == ROUTE_INERTIA_ARG && is_route_inertia_call(clean_subject, member_name) {
+        Some(StringKeyKind::InertiaPage)
     } else if is_route_pattern_call(clean_subject, member_name) {
         Some(StringKeyKind::Route)
     } else if matches_laravel_facade(clean_subject, "App")
@@ -189,6 +227,12 @@ fn facade_static_call_first_arg_kind(
         Some(StringKeyKind::GateAbility)
     } else if is_morph_alias_lookup_call(clean_subject, member_name) {
         Some(StringKeyKind::MorphAlias)
+    } else if is_url_asset_call(clean_subject, member_name) {
+        Some(StringKeyKind::Asset)
+    } else if is_vite_asset_call(clean_subject, member_name) {
+        Some(StringKeyKind::ViteAsset)
+    } else if is_inertia_render_call(clean_subject, member_name) {
+        Some(StringKeyKind::InertiaPage)
     } else {
         None
     }
@@ -254,6 +298,35 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
             ctx.content,
             &mut ctx.spans,
         );
+    }
+    // `Route::inertia('/about', 'About')` binds a URI straight to an
+    // Inertia page, naming it second.
+    if is_route_inertia_call(clean_subject, member_name) {
+        try_emit_laravel_string_span_at(
+            crate::symbol_map::StringKeyKind::InertiaPage,
+            ROUTE_INERTIA_ARG,
+            argument_list,
+            ctx.content,
+            &mut ctx.spans,
+        );
+    }
+    for (is_call, kind) in [
+        (
+            is_url_asset_call as fn(&str, &str) -> bool,
+            crate::symbol_map::StringKeyKind::Asset,
+        ),
+        (
+            is_vite_asset_call,
+            crate::symbol_map::StringKeyKind::ViteAsset,
+        ),
+        (
+            is_inertia_render_call,
+            crate::symbol_map::StringKeyKind::InertiaPage,
+        ),
+    ] {
+        if is_call(clean_subject, member_name) {
+            try_emit_laravel_string_span(kind, argument_list, ctx.content, &mut ctx.spans);
+        }
     }
     // `URL::signedRoute('orders.show')`,
     // `Redirect::route('home')`, `Response::redirectToRoute(…)`.
@@ -411,6 +484,14 @@ pub(crate) fn helper_function_first_arg_kind(name: &str) -> Option<StringKeyKind
         Some(StringKeyKind::ContainerBinding)
     } else if name.eq_ignore_ascii_case(markers::CAN) {
         Some(StringKeyKind::GateAbility)
+    } else if is_one_of(&["asset", "secure_asset"]) {
+        Some(StringKeyKind::Asset)
+    } else if name.eq_ignore_ascii_case("mix") {
+        Some(StringKeyKind::MixAsset)
+    } else if name.eq_ignore_ascii_case(markers::VITE) {
+        Some(StringKeyKind::ViteAsset)
+    } else if name.eq_ignore_ascii_case("inertia") {
+        Some(StringKeyKind::InertiaPage)
     } else {
         None
     }
@@ -419,9 +500,15 @@ pub(crate) fn helper_function_first_arg_kind(name: &str) -> Option<StringKeyKind
 /// Whether a helper takes a list of names in its first argument as well as
 /// a single one: `@includeFirst`, `@componentFirst` and `@extendsFirst`
 /// lower to their directive's marker with an array of candidate templates,
-/// and `@canany` to the `@can` marker with an array of abilities.
+/// `@canany` to the `@can` marker with an array of abilities, and `@vite`
+/// takes an array of entry points.
 pub(crate) fn helper_function_accepts_name_list(name: &str) -> bool {
-    [markers::VIEW, markers::COMPONENT, markers::CAN]
-        .iter()
-        .any(|n| name.eq_ignore_ascii_case(n))
+    [
+        markers::VIEW,
+        markers::COMPONENT,
+        markers::CAN,
+        markers::VITE,
+    ]
+    .iter()
+    .any(|n| name.eq_ignore_ascii_case(n))
 }

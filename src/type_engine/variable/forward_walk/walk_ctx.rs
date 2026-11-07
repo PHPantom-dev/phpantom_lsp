@@ -40,22 +40,34 @@ pub(crate) struct WalkFlow {
     /// Byte ranges of the branches a decidable guard rules out, when this
     /// walk collects them (the diagnostic pass's walk of a file).
     pub(super) unreachable: Option<RefCell<Vec<(u32, u32)>>>,
+    /// The classes `catch` clauses name and whether their `try` body can
+    /// throw into them, when this walk collects them (alongside
+    /// `unreachable`).
+    pub(super) catch_types: Option<RefCell<Vec<CatchTypeReach>>>,
 }
 
 impl WalkFlow {
-    /// A walk that collects the branches it proves cannot run.
+    /// A walk that collects the branches it proves cannot run, and the
+    /// `catch` clauses no exception can reach.
     pub(crate) fn collecting_unreachable() -> Self {
         Self {
             unreachable: Some(RefCell::default()),
+            catch_types: Some(RefCell::default()),
             ..Self::default()
         }
     }
 
-    /// The ranges the walk proved cannot run, empty when it collected none.
-    pub(crate) fn into_unreachable(self) -> Vec<(u32, u32)> {
-        self.unreachable
-            .map(RefCell::into_inner)
-            .unwrap_or_default()
+    /// The ranges the walk proved cannot run, and the classes `catch`
+    /// clauses name, both empty when it collected none.
+    pub(crate) fn into_unreachable(self) -> (Vec<(u32, u32)>, Vec<CatchTypeReach>) {
+        (
+            self.unreachable
+                .map(RefCell::into_inner)
+                .unwrap_or_default(),
+            self.catch_types
+                .map(RefCell::into_inner)
+                .unwrap_or_default(),
+        )
     }
 }
 

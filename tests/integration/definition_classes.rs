@@ -989,3 +989,42 @@ namespace App {
         "`\\Foo` is the global class"
     );
 }
+
+/// A Doctrine-style annotation names its class through the imports of the
+/// block it is written in, nested annotations included.
+#[tokio::test]
+async fn test_goto_definition_on_annotation_class() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///annotation.php").unwrap();
+    let text = r#"<?php
+namespace Doctrine\ORM\Mapping {
+    class Entity {}
+    class Index {}
+    class Table {}
+}
+namespace App {
+    use Doctrine\ORM\Mapping as ORM;
+
+    /**
+     * @ORM\Entity
+     * @ORM\Table(indexes={@ORM\Index(columns={"a"})})
+     */
+    final class User {}
+}
+"#;
+    open_php(&backend, &uri, text).await;
+
+    for (line, character, target_line) in [(10, 13, 2), (11, 33, 3)] {
+        let locations = crate::common::definition_locations(
+            goto_definition_at(&backend, &uri, line, character).await,
+        );
+        assert_eq!(
+            locations
+                .iter()
+                .map(|l| l.range.start.line)
+                .collect::<Vec<_>>(),
+            vec![target_line],
+            "line {line}"
+        );
+    }
+}

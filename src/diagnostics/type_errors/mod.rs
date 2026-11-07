@@ -12,6 +12,7 @@
 //! [`CallSite`]: crate::symbol_map::CallSite
 
 mod arguments;
+mod enum_from;
 
 use mago_syntax::cst::Program;
 use mago_syntax::cst::expression::Expression;

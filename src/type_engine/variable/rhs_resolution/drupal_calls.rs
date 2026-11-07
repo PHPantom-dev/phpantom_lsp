@@ -67,6 +67,41 @@ pub(super) fn try_resolve_entity_storage_type(
     )
 }
 
+/// What a call that reads a configuration object by a literal name
+/// returns: its declared type tagged with the name.
+pub(super) fn try_resolve_config_object_type(
+    owner: &ClassInfo,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let is = |name: &str| method_name.eq_ignore_ascii_case(name);
+    if !is("config") && !is("get") && !is("getEditable") {
+        return None;
+    }
+    let backend = ctx
+        .file
+        .backend
+        .filter(|backend| backend.is_drupal_project())?;
+    let name = literal_first(argument_list, "name", ctx.file.content)?;
+    let ty = crate::drupal::types::config_object_type(
+        backend,
+        owner,
+        method_name,
+        name,
+        ctx.file.class_loader,
+        ctx.resolved_class_cache,
+    )?;
+    Some(
+        crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+            ty,
+            "",
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+        ),
+    )
+}
+
 /// What a load on a tagged entity storage returns.
 pub(super) fn try_resolve_entity_load_type(
     method_name: &str,

@@ -299,13 +299,12 @@ name a repository, and the repository's own
 `parent::__construct()`) names its entity. A pair that breaks the naming
 convention gets no lens.
 
-The attribute needs reading at parse time, with its class name resolved
-the way the parser resolves `extends`, into `ClassInfo` (a field every
-class pays for, or a slot in an optional per-class box). The
-entity-to-repository direction can then read the entity's `ClassInfo`,
-and the repository-to-entity direction the first generic argument of
-its `ServiceEntityRepository`/`EntityRepository` ancestor in
-`extends_generics`. T45 needs the same attribute.
+The parser already records the attribute's repository, fully qualified,
+in `ClassInfo::doctrine_repository`, which is what types
+`getRepository()`. The entity-to-repository direction can read it, and
+the repository-to-entity direction the first generic argument of its
+`ServiceEntityRepository`/`EntityRepository` ancestor in
+`extends_generics`.
 
 **Where to look:** `src/framework.rs`
 (`doctrine_repository_fqns_for_entity`,
@@ -796,74 +795,6 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ---
 
-## F43. Doctrine entity fields in repository calls
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-$users->findByEmail($email);                    // unknown method
-$users->findBy(['emial' => $email], ['name' => 'ASC']); // a typo, not reported
-```
-
-An entity's repository answers `findBy<Field>()`, `findOneBy<Field>()`, and
-`countBy<Field>()` for each of the entity's fields, and its `findBy()`,
-`findOneBy()`, `count()`, and `findBy()`'s `$orderBy` take field names as
-array keys. None of the magic methods resolve, and the keys neither
-complete, navigate, nor get checked. The magic methods are virtual members
-of the repository, the way Eloquent's are, which needs the repository's
-entity (T45). The keys are member references to the entity's mapped
-properties, the same member spans a form field and a validation mapping
-record.
-
-The fields come from the entity's mapping: `#[ORM\Column]`,
-`#[ORM\Id]`, and the relation attributes, or the XML mapping the CodeLens
-already reads.
-
-The extension's fixtures are `magic_repository_method_call.fixture` and
-`repository_method_call.fixture` in `tests/fixtures/phpstan_doctrine/`.
-
-**Where to look:** `src/virtual_members/`, `src/framework.rs` (the
-Doctrine mapping index), and PHPStan's Doctrine extension
-(`Reflection/Doctrine/EntityRepositoryClassReflectionExtension`,
-`Rules/Doctrine/ORM/RepositoryMethodCallRule`).
-
----
-
-## F44. Doctrine DQL and query builder strings
-
-**Impact: Medium · Complexity: High**
-
-```php
-$em->createQuery('SELECT u FROM App\Entity\User u WHERE u.emial = :e');
-$qb->select('u')->from(User::class, 'u')->where('u.email = :e')->getQuery()->getResult();
-```
-
-DQL names entity classes and their fields in strings, directly or through
-a query builder's `select()`, `from()`, `join()`, and `where()`. Nothing in
-them completes or navigates, an unknown entity or field is not reported,
-and `getResult()` is `mixed` where the query settles it (`list<User>`, or
-an array shape for a scalar select). PHPStan's Doctrine extension parses the
-DQL with Doctrine's own parser and the booted metadata; PHPantom would need
-a DQL reader of its own over the static mapping, with the query builder's
-chain followed the way T45's repository is.
-
-Navigation and completion of the entity and field names are the cheaper
-half and the one an editor user notices; result types follow. The extension
-also types a query as `Query<TKey, TResult>`, so `getResult()` and its
-siblings follow from a `Query` passed in with its result type, and reads
-the expression builder's methods (`expr()->isNull('u.email')`) as the DQL
-fragment they build.
-
-The extension's fixtures are `tests/phpstan_doctrine/data/QueryResult/`
-for the types and the `dql*.fixture` and `query_builder_dql*.fixture`
-fixtures in `tests/fixtures/phpstan_doctrine/` for the checks.
-
-**Where to look:** `src/framework.rs` (the Doctrine mapping index), and
-PHPStan's Doctrine extension (`Rules/Doctrine/ORM/DqlRule`,
-`QueryBuilderDqlRule`, `Type/Doctrine/Query/`, `Type/Doctrine/QueryBuilder/`).
-
----
-
 ## F45. Symfony events named by their class or a constant
 
 **Impact: Medium · Complexity: Medium**
@@ -1050,29 +981,6 @@ or XML, so it needs a scan of the controller files' class members.
 
 **Where to look:** `references/symfony-language-tools`
 (`docs/features/stimulus.rst`).
-
----
-
-## F54. Symfony form options, constraint options, and serializer groups
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$builder->add('email', EmailType::class, ['requird' => true]);  // a typo, not reported
-#[Assert\Length(mni: 3)]                                        // likewise
-#[Groups(['user:read'])]                                         // used where?
-```
-
-A form type's options are the ones its `configureOptions()` and its
-parents' define, and a constraint's are its constructor's parameters. The
-keys of a `createForm()` or `$builder->add()` options array neither
-complete nor get checked against them. Serializer groups, named by
-`#[Groups]`, `#[Context]`, the `groups` a serializer or a controller's
-`json()` is given, and the `groups` keys of a YAML serializer mapping,
-neither navigate between their uses nor complete.
-
-**Where to look:** `src/symfony/forms.rs`, `src/symfony/validation.rs`,
-and `references/symfony-language-tools` (`docs/features/metadata.rst`).
 
 ---
 

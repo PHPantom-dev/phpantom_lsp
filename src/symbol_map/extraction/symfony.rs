@@ -2,12 +2,14 @@
 //! parameters, route names, translation keys and domains, Twig templates,
 //! the configuration keys a bundle's schema declares, the data-class
 //! properties a form type's fields map to, event names and the listener
-//! methods that subscribe to them, and Messenger bus names.  The Messenger
-//! handlers a class registers are recorded beside them.
+//! methods that subscribe to them, Messenger bus names, and serializer
+//! groups.  The Messenger handlers a class registers are recorded beside
+//! them.
 //!
 //! The configurator functions (`service('app.mailer')`, `param('app.name')`),
-//! the `#[Autowire]`, `#[Route]`, `#[Template]`, `#[AsEventListener]`, and
-//! `#[AsMessageHandler]` attributes, `TranslatableMessage`, `BusNameStamp`,
+//! the `#[Autowire]`, `#[Route]`, `#[Template]`, `#[AsEventListener]`,
+//! `#[AsMessageHandler]`, and serializer `#[Groups]` and `#[Context]`
+//! attributes, `TranslatableMessage`, `BusNameStamp`,
 //! and `t()` are recognised by their resolved name.
 //! A method call names one only on the right receiver: `get()` on a
 //! container, `set()` on a configurator, `register()` on a container
@@ -75,7 +77,7 @@ pub(crate) fn symfony_receiver_method(
     // turned away on a single byte.
     if !matches!(
         member_name.as_bytes().first().map(u8::to_ascii_lowercase),
-        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f' | b'c')
+        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f' | b'c' | b'l')
     ) {
         return None;
     }
@@ -148,6 +150,12 @@ pub(crate) fn symfony_receiver_method(
         {
             Some((ReceiverClass::EntityTypeManager, false))
         }
+        0 if is("hasPermission") => Some((ReceiverClass::PermissionCheck, false)),
+        0 if is("getEditable") || is("loadMultiple") => Some((ReceiverClass::ConfigFactory, false)),
+        0 if is("config") => Some((ReceiverClass::ConfigShortcut, false)),
+        0 if is("grantPermission") || is("revokePermission") => {
+            Some((ReceiverClass::RolePermissions, false))
+        }
         0 if is("addListener") => Some((ReceiverClass::EventListeners, true)),
         0 if is("removeListener")
             || is("hasListeners")
@@ -172,6 +180,11 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     if !ctx.service_container && !ctx.twig && !ctx.yii {
         return;
     }
+    // Only Drupal's config factory has a method starting with `l` the
+    // table names, so elsewhere the one byte still turns those away.
+    if !ctx.drupal && matches!(member_name.as_bytes().first(), Some(b'l' | b'L')) {
+        return;
+    }
     if ctx.symfony && member_name.eq_ignore_ascii_case("trans") {
         record_translator_sites(argument_list, ctx);
         return;
@@ -193,6 +206,7 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         return;
     }
     if ctx.symfony {
+        record_serializer_context_sites(member_name, argument_list, ctx);
         record_configurator_placeholders(member_name, argument_list, ctx);
         if member_name.eq_ignore_ascii_case("parent") {
             record_configured_parent(object, argument_list, ctx);
@@ -1409,6 +1423,53 @@ pub(in crate::symbol_map::extraction) fn emit_autowire_attribute_spans(
     }
 }
 
+/// Emit the serializer groups an attribute's arguments name (see
+/// [`crate::symfony::serializer`]).
+pub(in crate::symbol_map::extraction) fn emit_serializer_group_spans(
+    attribute: crate::symfony::serializer::GroupsAttribute,
+    argument_list: &PartialArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let (groups, is_write) = crate::symfony::serializer::attribute_groups(attribute, argument_list);
+    for group in groups {
+        push_laravel_string_span(
+            StringKeyKind::SerializerGroup,
+            is_write,
+            false,
+            group,
+            ctx.content,
+            &mut ctx.spans,
+        );
+    }
+}
+
+/// Record the serializer groups the context of a serializer call names, for
+/// the type engine to confirm against its receiver.
+fn record_serializer_context_sites(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some((receiver, groups)) =
+        crate::symfony::serializer::call_context_groups(member_name, argument_list)
+    else {
+        return;
+    };
+    for group in groups {
+        if let Some((key, start, end)) = resolved_string_literal(group, ctx.content) {
+            ctx.typed_receiver_sites.push(TypedReceiverSite {
+                start: start as u32,
+                end: end as u32,
+                key: key.to_string(),
+                is_write: false,
+                is_optional: false,
+                guards: 0,
+                receiver,
+            });
+        }
+    }
+}
+
 /// Whether `class_name`, as resolved, is Symfony's `#[Template]`.
 pub(crate) fn is_template_attribute(class_name: &str) -> bool {
     class_name
@@ -2585,6 +2646,7 @@ mod tests {
                 service_container: true,
                 drupal: false,
                 twig: true,
+                doctrine: false,
             },
             None,
         )
@@ -3304,6 +3366,7 @@ mod tests {
                 service_container: false,
                 drupal: false,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -3327,6 +3390,7 @@ mod tests {
                 service_container: true,
                 drupal: false,
                 twig: true,
+                doctrine: false,
             },
             None,
         );
@@ -3356,6 +3420,7 @@ mod tests {
                 service_container: false,
                 drupal: false,
                 twig: true,
+                doctrine: false,
             },
             None,
         );

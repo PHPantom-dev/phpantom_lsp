@@ -186,10 +186,10 @@ namespace PsalmTest_type_reconciliation_reconciler_constants {
      * @param Foo::PREFIX_B* $wildcard
      */
     function constants($prefixed, $single, $referencing, $all, $wildcard): void {
-        assertType("'bar'|'baz'", $prefixed); // SKIP: a class constant named as a docblock type is not read
-        assertType("'bar'", $single); // SKIP: a class constant named as a docblock type is not read
-        assertType("'bar'", $referencing); // SKIP: a class constant named as a docblock type is not read
-        assertType("'bar'|'baz'", $all); // SKIP: a class constant named as a docblock type is not read
-        assertType("'bar'|'baz'", $wildcard); // SKIP: a class constant named as a docblock type is not read
+        assertType("'bar'|'baz'", $prefixed);
+        assertType("'bar'", $single);
+        assertType("'bar'", $referencing);
+        assertType("'bar'|'baz'", $all);
+        assertType("'bar'|'baz'", $wildcard);
     }
 }

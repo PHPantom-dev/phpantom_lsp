@@ -384,9 +384,9 @@ impl UnknownMemberPass<'_> {
         // false positive: the receiver has explicitly opted into handling
         // arbitrary method names.
         //
-        // Eloquent's handlers are the exception: they accept a closed set
-        // of names and throw for the rest, so a call they reject is
-        // reported like any other unknown method.
+        // Eloquent's and Doctrine's repository handlers are the exception:
+        // they accept a closed set of names and throw for the rest, so a
+        // call they reject is reported like any other unknown method.
         let has_magic_call_at = |i: usize| {
             has_magic_method_for_access(&base_classes[i], is_static, true, report_magic)
                 || has_magic_method_for_access(&resolved_classes[i], is_static, true, report_magic)
@@ -394,7 +394,16 @@ impl UnknownMemberPass<'_> {
         let has_magic_call = is_method_call && (0..base_classes.len()).any(has_magic_call_at);
         if has_magic_call
             && (is_docblock_ref
-                || !self.eloquent_rejects_call(access, &resolved_classes, types, has_magic_call_at))
+                || !(self.eloquent_rejects_call(
+                    access,
+                    &resolved_classes,
+                    types,
+                    has_magic_call_at,
+                ) || self.doctrine_rejects_call(
+                    base_classes,
+                    &resolved_classes,
+                    has_magic_call_at,
+                )))
         {
             return (MemberCheckResult::MagicFallback, diagnostics);
         }

@@ -11,6 +11,7 @@ use crate::virtual_members::ResolvedClassCache;
 
 use super::arithmetic::OverloadedNumber;
 use super::scalar_fold;
+use crate::type_engine::type_ops::int_interval::IntInterval;
 
 /// The type a unary prefix expression produces, for the operators whose
 /// result is determined by the operator plus (for `(object)`, `~` and the
@@ -64,7 +65,18 @@ pub(crate) fn unary_prefix_result_type(
             }
             return Some(bitwise_not_type(&resolved));
         }
-        UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => PhpType::int(),
+        UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => {
+            if !scalar_fold::is_cheap_scalar_operand(operand) {
+                return Some(PhpType::int());
+            }
+            let resolved = resolve_operand();
+            if let Some(folded) = scalar_fold::single_scalar(&resolved)
+                .and_then(|scalar| scalar_fold::fold_cast(operator, &scalar))
+            {
+                return Some(folded);
+            }
+            return Some(int_cast_type(&resolved));
+        }
         UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
             return Some(string_cast_type(&resolve_operand(), class_loader, cache));
         }
@@ -84,6 +96,45 @@ pub(crate) fn unary_prefix_result_type(
         return Some(folded);
     }
     Some(base)
+}
+
+/// The type `(int)` gives an operand of the resolved type: an integer
+/// keeps its range, `null`, `bool` and arrays become the `0` or `1` PHP
+/// converts them to, and anything else gives a plain `int`.
+fn int_cast_type(operand: &[ResolvedType]) -> PhpType {
+    if operand.is_empty() {
+        return PhpType::int();
+    }
+    let joined = ResolvedType::types_joined(operand);
+    let null = PhpType::null();
+    let members: Vec<&PhpType> = match joined.kind() {
+        TypeKind::Nullable(inner) => {
+            let mut members = inner.union_members();
+            members.push(&null);
+            members
+        }
+        _ => joined.union_members(),
+    };
+    let mut cast: Vec<PhpType> = Vec::with_capacity(members.len());
+    for member in members {
+        if IntInterval::of_int(member).is_some() {
+            cast.push(member.clone());
+        } else if let Some(interval) = IntInterval::of_operand(member) {
+            // Past the integers, only `null`, `false`, `true` and `bool`
+            // have an interval, so this is `0`, `1`, or both.
+            cast.extend(
+                [interval.min, interval.max]
+                    .into_iter()
+                    .flatten()
+                    .map(|value| PhpType::literal_int(value.to_string())),
+            );
+        } else if member.is_array_like() {
+            cast.extend([PhpType::literal_int("0"), PhpType::literal_int("1")]);
+        } else {
+            return PhpType::int();
+        }
+    }
+    PhpType::union(cast)
 }
 
 /// The type unary `-` (`negated`) or `+` produces: the operand's numeric

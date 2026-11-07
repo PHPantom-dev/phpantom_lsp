@@ -96,3 +96,15 @@ fn aliases_resolve_through_each_other() {
     assert_eq!(aliases.resolve("@loop/x"), None);
     assert_eq!(aliases.resolve("/plain").as_deref(), Some("/plain"));
 }
+
+#[test]
+fn an_alias_is_the_name_a_string_starts_with() {
+    use super::aliases::alias_prefix;
+    assert_eq!(alias_prefix("@runtime/logs"), Some("@runtime"));
+    assert_eq!(alias_prefix("@views"), Some("@views"));
+    assert_eq!(alias_prefix("@yii-app.x_y/z"), Some("@yii-app.x_y"));
+    assert_eq!(alias_prefix("@"), None);
+    assert_eq!(alias_prefix("@/x"), None);
+    assert_eq!(alias_prefix("@ x"), None);
+    assert_eq!(alias_prefix("user@example.com"), None);
+}

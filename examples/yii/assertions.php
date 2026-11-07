@@ -58,6 +58,8 @@ $container = $runner->getContainer();
 $aliases = $container->get(Aliases::class);
 check('@views is declared in config/common/aliases.php', $aliases->get('@views') === __DIR__ . '/resources/views');
 check('@views/blog is a directory', is_dir($aliases->get('@views/blog')));
+check('@assetsSource is declared in config/common/aliases.php', $aliases->get('@assetsSource') === __DIR__ . '/assets');
+check("MainAsset's @assetsSource/main is a directory", is_dir($aliases->get('@assetsSource/main')));
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
@@ -85,6 +87,9 @@ check("generate('blog/post', ['slug' => ...]) builds its URL", $urls->generate('
 $repository = $container->get(PostRepositoryInterface::class);
 check('PostRepositoryInterface is bound to InMemoryPostRepository', $repository instanceof InMemoryPostRepository);
 check("'__construct()' passes the posts from params", array_keys(privateProperty($repository, 'posts')) === ['hello-yii', 'config-is-code']);
+check("'posts' names a constructor parameter", array_map(fn (ReflectionParameter $p) => $p->getName(), (new ReflectionMethod(InMemoryPostRepository::class, '__construct'))->getParameters()) === ['posts']);
+check("'\$pageSize' names a public property", (new ReflectionProperty(InMemoryPostRepository::class, 'pageSize'))->isPublic());
+check('config/common/di/logger.php binds LoggerInterface', $container->get(LoggerInterface::class) instanceof \Yiisoft\Log\Logger);
 check("'setLogger()' is a method the class declares", method_exists(InMemoryPostRepository::class, 'setLogger'));
 check("'setLogger()' hands it the container's logger", privateProperty($repository, 'logger') === $container->get(LoggerInterface::class));
 check("'\$pageSize' sets the public property", $repository instanceof InMemoryPostRepository && $repository->pageSize === 5);

@@ -959,3 +959,61 @@ function foo(string $a, int $b): void {
         "should not offer update docblock when cursor is on standalone function signature"
     );
 }
+
+#[test]
+fn adds_null_a_param_tag_left_out_of_its_nullable_hint() {
+    let php = r#"<?php
+/**
+ * @param string $name The name
+ * @param non-empty-string $title
+ */
+function greet(?string $name, ?string $title): void {}
+"#;
+    let pos = php.find("@param string").unwrap() as u32;
+    let info = find_info(php, pos).unwrap();
+    let cl = no_class_loader();
+    assert!(needs_update(&info, php, &cl));
+    let updated = updated_docblock(&info, php, &cl);
+    assert!(
+        updated.contains("@param string|null      $name The name"),
+        "got: {updated}"
+    );
+    // A refinement says more than the hint and is kept as written.
+    assert!(
+        updated.contains("@param non-empty-string $title"),
+        "got: {updated}"
+    );
+}
+
+#[test]
+fn adds_null_a_return_tag_left_out_of_its_nullable_hint() {
+    let php = r#"<?php
+/**
+ * @return int|string The id
+ */
+function id(): int|string|null { return lookup(); }
+"#;
+    let pos = php.find("@return").unwrap() as u32;
+    let info = find_info(php, pos).unwrap();
+    let cl = no_class_loader();
+    assert!(needs_update(&info, php, &cl));
+    let updated = updated_docblock(&info, php, &cl);
+    assert!(
+        updated.contains("@return int|string|null The id"),
+        "got: {updated}"
+    );
+}
+
+#[test]
+fn refined_param_on_nullable_hint_needs_no_update() {
+    let php = r#"<?php
+/**
+ * @param non-empty-string $name
+ */
+function greet(?string $name): void {}
+"#;
+    let pos = php.find("@param").unwrap() as u32;
+    let info = find_info(php, pos).unwrap();
+    let cl = no_class_loader();
+    assert!(!needs_update(&info, php, &cl));
+}

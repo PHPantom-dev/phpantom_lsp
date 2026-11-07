@@ -34,6 +34,7 @@ mod builtin_checks;
 mod class_checks;
 mod conditional_returns;
 mod exits;
+mod fall_through;
 mod resolve;
 
 pub(in crate::type_engine) use assert_annotations::*;
@@ -48,3 +49,6 @@ pub(crate) use resolve::array_index_key;
 // The unreachable-code diagnostic asks the same "does control leave this
 // list?" question without types, so it shares the structural rules.
 pub(crate) use exits::{contains_entry_label, statement_leaves_block};
+// The missing-return diagnostic asks whether a body can run off its end.
+pub(crate) use exits::{condition_always_holds_at, is_never_call_at, switch_covers_every_value_at};
+pub(crate) use fall_through::{FlowFacts, body_end_is_reachable};

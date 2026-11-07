@@ -564,12 +564,12 @@ fn variadic_tag_element(tag_type: &PhpType) -> &PhpType {
 }
 
 /// What every argument check in one file shares.
-struct ArgumentCheck<'a> {
+pub(super) struct ArgumentCheck<'a> {
     backend: &'a Backend,
     uri: &'a str,
     content: &'a str,
-    class_loader: &'a ResolvedClassLoader<'a>,
-    strict_types: bool,
+    pub(super) class_loader: &'a ResolvedClassLoader<'a>,
+    pub(super) strict_types: bool,
     report_possibly_empty: bool,
     report_partial_union: bool,
     /// Whether an argument is checked against the parameter's docblock
@@ -624,7 +624,7 @@ impl<'a> CheckedCall<'a> {
 }
 
 impl ArgumentCheck<'_> {
-    fn range(&self, start: usize, end: usize) -> Option<Range> {
+    pub(super) fn range(&self, start: usize, end: usize) -> Option<Range> {
         self.backend
             .offset_range_to_lsp_range(self.uri, self.content, start, end)
     }
@@ -633,6 +633,7 @@ impl ArgumentCheck<'_> {
         // Track how many positional args we've seen so far for
         // mapping positional args to parameter indices.
         let mut positional_idx: usize = 0;
+        let mut first_param_arg = None;
         for (arg_idx, arg) in call.args.args.iter().enumerate() {
             // Skip spread arguments.
             if call_site.spread_arg_indices.contains(&(arg_idx as u32)) {
@@ -648,8 +649,17 @@ impl ArgumentCheck<'_> {
             ) else {
                 continue;
             };
+            if std::ptr::eq(param, call.target.parameters.as_ptr()) {
+                first_param_arg = Some((&arg.ty, arg.start, arg.end));
+            }
             self.check_argument(call, arg, arg_idx, positional_idx, param, out);
         }
+        self.check_enum_from(
+            call_site,
+            call.context_class.as_deref(),
+            first_param_arg,
+            out,
+        );
     }
 
     /// Check one argument against the parameter it fills.

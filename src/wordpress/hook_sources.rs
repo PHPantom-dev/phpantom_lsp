@@ -118,6 +118,7 @@ pub(crate) fn hook_firings(content: &str) -> Vec<Firing> {
             service_container: false,
             drupal: false,
             twig: false,
+            doctrine: false,
         },
         None,
         crate::drupal::hooks::DrupalFile::Other,

@@ -63,6 +63,14 @@ impl Backend {
             return vec![location];
         }
 
+        // An option of a Symfony form type, in the options array a call
+        // passes the type.
+        let options =
+            self.form_option_definition(uri, content, position_to_offset(content, position));
+        if !options.is_empty() {
+            return options;
+        }
+
         // Request input keys: jump to the validation rule that declares them.
         if let Some(loc) = laravel::resolve_request_field_definition(self, uri, content, position) {
             return vec![loc];
@@ -333,7 +341,7 @@ impl Backend {
                     subject,
                     access_kind,
                     access_hint,
-                    mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
+                    docblock_ref: *docblock_ref,
                 };
 
                 self.resolve_member_definition_with(uri, content, position, &mctx)
@@ -409,7 +417,7 @@ impl Backend {
                             MemberKind::Method => MemberAccessHint::MethodCall,
                             _ => MemberAccessHint::PropertyAccess,
                         },
-                        mock_expectation: false,
+                        docblock_ref: DocblockMemberRef::No,
                     };
                     if let Some(loc) =
                         self.resolve_member_definition_with(uri, content, position, &mctx)

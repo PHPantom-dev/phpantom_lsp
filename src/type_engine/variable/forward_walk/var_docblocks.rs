@@ -266,7 +266,8 @@ pub(crate) fn try_process_inline_var_override<'b>(
                 }
 
                 apply_preceding_var_docblocks(further, scope, ctx);
-                process_array_key_write(array_access, resolved, scope, ctx);
+                // The declared type is the same on every pass of a loop.
+                process_array_key_write(array_access, resolved, true, scope, ctx);
                 return VarOverrideResult::NoVar;
             }
         } else if let Expression::Variable(Variable::Direct(dv)) = expr {

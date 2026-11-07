@@ -54,12 +54,16 @@ mod patching;
 mod phpdoc;
 mod string_arguments;
 
-/// Append named-argument items into an existing [`CompletionResponse`].
+/// Append the call-argument items (named arguments and expected values)
+/// into an existing [`CompletionResponse`].
 ///
 /// If `named_arg_items` is empty the response is returned unchanged.
 /// Otherwise the items are appended to the response's item list,
 /// preserving the `is_incomplete` flag when the response is a
-/// [`CompletionList`].
+/// [`CompletionList`].  An item of the response with the same label as
+/// one of them (a constant the argument expects, also offered as a plain
+/// constant) is dropped in its favour, so it is listed once, ranked as an
+/// expected value.
 fn merge_named_args_into_response(
     response: CompletionResponse,
     named_arg_items: Vec<CompletionItem>,
@@ -67,13 +71,17 @@ fn merge_named_args_into_response(
     if named_arg_items.is_empty() {
         return response;
     }
+    let merge = |items: &mut Vec<CompletionItem>| {
+        items.retain(|item| !named_arg_items.iter().any(|arg| arg.label == item.label));
+        items.extend(named_arg_items);
+    };
     match response {
         CompletionResponse::CompletionItemList(mut items) => {
-            items.extend(named_arg_items);
+            merge(&mut items);
             CompletionResponse::CompletionItemList(items)
         }
         CompletionResponse::CompletionList(mut list) => {
-            list.items.extend(named_arg_items);
+            merge(&mut list.items);
             CompletionResponse::CompletionList(list)
         }
     }

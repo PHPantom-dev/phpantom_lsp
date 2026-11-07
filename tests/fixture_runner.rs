@@ -41,6 +41,16 @@ interface BackedEnum extends UnitEnum
 }
 ";
 
+static JSON_EXCEPTION_STUB: &str = "\
+<?php
+class JsonException extends Exception {}
+";
+
+static VALUE_ERROR_STUB: &str = "\
+<?php
+class ValueError extends Error {}
+";
+
 // ─── Function stubs ─────────────────────────────────────────────────────────
 // Minimal function stubs so that fixture tests can resolve return types of
 // built-in functions.  These mirror the phpstorm-stubs signatures; the
@@ -88,11 +98,23 @@ function array_map(?callable $callback, array $array): array {}
 function array_filter(array $array, ?callable $callback = null): array {}
 ";
 
+static JSON_FUNC_STUB: &str = "\
+<?php
+/**
+ * @throws \\ValueError
+ */
+function json_decode(string $json, ?bool $associative = null, int $depth = 512, int $flags = 0): mixed {}
+
+function json_encode(mixed $value, int $flags = 0, int $depth = 512): string|false {}
+";
+
 /// Create a test backend with embedded class and function stubs pre-loaded.
 fn create_fixture_backend() -> Backend {
     let mut class_stubs: HashMap<&'static str, &'static str> = HashMap::new();
     class_stubs.insert("UnitEnum", UNIT_ENUM_STUB);
     class_stubs.insert("BackedEnum", BACKED_ENUM_STUB);
+    class_stubs.insert("JsonException", JSON_EXCEPTION_STUB);
+    class_stubs.insert("ValueError", VALUE_ERROR_STUB);
 
     let mut func_stubs: HashMap<&'static str, &'static str> = HashMap::new();
     func_stubs.insert("array_reduce", ARRAY_FUNC_STUB);
@@ -100,6 +122,8 @@ fn create_fixture_backend() -> Backend {
     func_stubs.insert("array_product", ARRAY_FUNC_STUB);
     func_stubs.insert("array_map", ARRAY_FUNC_STUB);
     func_stubs.insert("array_filter", ARRAY_FUNC_STUB);
+    func_stubs.insert("json_decode", JSON_FUNC_STUB);
+    func_stubs.insert("json_encode", JSON_FUNC_STUB);
 
     Backend::new_test_with_all_stubs(class_stubs, func_stubs, HashMap::new())
 }

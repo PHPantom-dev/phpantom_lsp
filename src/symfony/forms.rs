@@ -212,7 +212,7 @@ fn is_unmapped(options: Option<&Argument<'_>>) -> bool {
 
 /// The receiver a chain of method calls starts from, with the calls in the
 /// order they run.
-fn chain_root<'e, 'a>(
+pub(super) fn chain_root<'e, 'a>(
     expr: &'e Expression<'a>,
     calls: &mut Vec<(&'a [u8], &'e ArgumentList<'a>)>,
 ) -> Option<&'e Expression<'a>> {

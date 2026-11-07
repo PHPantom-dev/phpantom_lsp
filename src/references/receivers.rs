@@ -134,6 +134,22 @@ impl Backend {
             is_static,
             docblock_ref,
         } = receiver;
+        // A repository's entity can be bound by a type argument
+        // (`EntityRepository<User>`), which a class name loses.
+        if docblock_ref == DocblockMemberRef::EntityField {
+            let Some(ty) =
+                self.resolve_subject_type_at(subject_text, is_static, ctx, access_offset, content)
+            else {
+                return Vec::new();
+            };
+            let class_loader = self.resolved_class_loader_with(&ctx.classes);
+            return crate::doctrine::managed_entity_names(
+                &ty,
+                &ctx.classes,
+                &class_loader,
+                &self.resolved_class_cache,
+            );
+        }
         let mut fqns =
             self.resolve_subject_to_fqns(subject_text, is_static, ctx, access_offset, content);
         if fqns.is_empty() {

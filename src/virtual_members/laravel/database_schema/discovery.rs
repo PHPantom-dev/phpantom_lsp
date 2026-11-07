@@ -104,7 +104,9 @@ pub(super) fn load_migration_plan(
 }
 
 pub(super) fn apply_migration_plan(index: &mut SchemaIndex, plan: &MigrationPlan) {
-    for file in &plan.files {
+    index.table_migrations.clear();
+    for (position, file) in plan.files.iter().enumerate() {
+        index.applying_migration = position as u32;
         apply_migration_file(index, &file.content);
     }
 }

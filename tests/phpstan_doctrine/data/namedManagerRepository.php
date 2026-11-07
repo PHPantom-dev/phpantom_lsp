@@ -11,8 +11,8 @@ class Example
 
 	public function explicitManagerName(ManagerRegistry $registry): void
 	{
-		assertType(DefaultSharedRepository::class . '<' . SharedEntity::class . '>', $registry->getRepository(SharedEntity::class, 'default')); // SKIP: Doctrine getRepository() is typed as the generic repository
-		assertType(TenantSharedRepository::class . '<' . SharedEntity::class . '>', $registry->getRepository(SharedEntity::class, 'tenant')); // SKIP: Doctrine getRepository() is typed as the generic repository
+		assertType(DefaultSharedRepository::class . '<' . SharedEntity::class . '>', $registry->getRepository(SharedEntity::class, 'default')); // SKIP: a repository an object manager sets at runtime
+		assertType(TenantSharedRepository::class . '<' . SharedEntity::class . '>', $registry->getRepository(SharedEntity::class, 'tenant')); // SKIP: a repository an object manager sets at runtime
 	}
 
 }

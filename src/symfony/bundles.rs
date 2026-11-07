@@ -189,6 +189,7 @@ fn read_php_file(uri: &str, content: &str) -> SymbolMap {
             service_container: true,
             drupal: false,
             twig: false,
+            doctrine: false,
         },
         None,
         crate::drupal::hooks::DrupalFile::Other,

@@ -1,16 +1,18 @@
 //! The entity types a Drupal entity class declares, by attribute or by the
-//! annotation older code uses, and the route names Drupal's static and
-//! constructor calls read (see [`crate::drupal`]).
+//! annotation older code uses, the route names Drupal's static and
+//! constructor calls read, and the libraries a render array attaches (see
+//! [`crate::drupal`]).
 
 use super::*;
 use crate::symbol_map::extraction::symfony::{
     RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
 use crate::symbol_map::{
-    DeclaredParameter, DrupalRouteSite, EntityTypeSite, ReceiverClass, StringKeyKind,
-    TypedReceiverSite,
+    DeclaredParameter, DrupalRouteSite, EntityTypeSite, PluginClassSite, ReceiverClass,
+    StringKeyKind, TypedReceiverSite,
 };
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
+use mago_syntax::cst::sequence::TokenSeparatedSequence;
 
 const CONTENT_STORAGE: &str = "Drupal\\Core\\Entity\\Sql\\SqlContentEntityStorage";
 const CONFIG_STORAGE: &str = "Drupal\\Core\\Config\\Entity\\ConfigEntityStorage";
@@ -43,8 +45,18 @@ const ENTITY_TYPE_KINDS: [EntityTypeKind; 3] = [
     },
 ];
 
+/// Whether `attribute`, a resolved class name, is one of the attributes
+/// that declare an entity type.
+pub(crate) fn is_entity_type_attribute(attribute: &str) -> bool {
+    let attribute = attribute.trim_start_matches('\\');
+    ENTITY_TYPE_KINDS
+        .iter()
+        .any(|kind| kind.attribute.eq_ignore_ascii_case(attribute))
+}
+
 /// Record the entity type `class` declares: a span over its ID, and the
-/// class and storage the ID stands for.
+/// class and storage the ID stands for, and a span over the permission its
+/// `admin_permission` names.
 pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
     class: &Class<'_>,
     ctx: &mut ExtractionCtx<'_>,
@@ -53,6 +65,7 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
         return;
     }
     let mut found = Vec::new();
+    let mut admin_permissions = Vec::new();
     for kind in &ENTITY_TYPE_KINDS {
         for attribute in attributes_named(&class.attribute_lists, kind.attribute, ctx) {
             let mut id = None;
@@ -64,6 +77,16 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
                         if let Some(named) = handler_class(value, "storage", ctx) {
                             storage = Some(named);
                         }
+                    }
+                    "admin_permission" => {
+                        push_laravel_string_span(
+                            StringKeyKind::DrupalPermission,
+                            false,
+                            false,
+                            value,
+                            ctx.content,
+                            &mut admin_permissions,
+                        );
                     }
                     _ => {}
                 }
@@ -78,10 +101,14 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
         && doc.contains("EntityType(")
     {
         found.extend(annotation_entity_type(doc, offset));
+        if !found.is_empty() {
+            admin_permissions.extend(annotation_admin_permission(doc, offset));
+        }
     }
     if found.is_empty() {
         return;
     }
+    ctx.spans.extend(admin_permissions);
     let Some(fqn) = ctx
         .resolved_name_at(class.name.span.start.offset)
         .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
@@ -105,6 +132,173 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
             storage: storage.map(|storage| crate::atom::atom(&storage)),
         });
     }
+}
+
+/// A Drupal plugin attribute and the annotation older code writes instead.
+struct PluginMarker {
+    attribute: &'static str,
+    /// The annotation's opening, matched by short name, the way Drupal's
+    /// annotation discovery reads it.
+    annotation: &'static str,
+}
+
+const RENDER_ELEMENT_MARKERS: [PluginMarker; 2] = [
+    PluginMarker {
+        attribute: "Drupal\\Core\\Render\\Attribute\\RenderElement",
+        annotation: "@RenderElement(",
+    },
+    PluginMarker {
+        attribute: "Drupal\\Core\\Render\\Attribute\\FormElement",
+        annotation: "@FormElement(",
+    },
+];
+
+/// Record the render element `class` declares: a span over its ID, and
+/// the class beside it.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_element_spans(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    emit_drupal_plugin_spans(
+        class,
+        &RENDER_ELEMENT_MARKERS,
+        StringKeyKind::DrupalRenderElement,
+        ctx,
+    );
+}
+
+/// Record the plugin ID `class` declares by one of the `markers`, as a key
+/// of `kind`, with the class it is written on.  An attribute wins over an
+/// annotation, as in Drupal's discovery.
+fn emit_drupal_plugin_spans(
+    class: &Class<'_>,
+    markers: &[PluginMarker],
+    kind: StringKeyKind,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let mut found = Vec::new();
+    for marker in markers {
+        for attribute in attributes_named(&class.attribute_lists, marker.attribute, ctx) {
+            let id = attribute_arguments(attribute, &["id"])
+                .into_iter()
+                .find(|(parameter, _)| *parameter == "id")
+                .and_then(|(_, value)| resolved_string_literal(value, ctx.content));
+            if let Some((key, start, end)) = id {
+                found.push((key.to_string(), start as u32, end as u32));
+            }
+        }
+    }
+    if found.is_empty()
+        && let Some((doc, offset)) = get_docblock_text_with_offset(ctx.trivias, ctx.content, class)
+        && let Some((start, end)) = markers.iter().find_map(|marker| {
+            let at = doc.find(marker.annotation)?;
+            annotation_plugin_id(doc, at + marker.annotation.len())
+        })
+    {
+        found.push((
+            doc[start..end].to_string(),
+            offset + start as u32,
+            offset + end as u32,
+        ));
+    }
+    found.retain(|(key, _, _)| !key.is_empty());
+    if found.is_empty() {
+        return;
+    }
+    let Some(fqn) = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
+    else {
+        return;
+    };
+    for (key, start, end) in found {
+        ctx.spans.push(SymbolSpan {
+            start,
+            end,
+            kind: SymbolKind::StringKey {
+                kind,
+                key,
+                is_write: true,
+                is_optional: false,
+            },
+        });
+        ctx.drupal_plugin_classes
+            .push(PluginClassSite { start, class: fqn });
+    }
+}
+
+/// The range of the ID a plugin annotation whose arguments start at `from`
+/// in `doc` declares: its first argument when that is a string
+/// (`@RenderElement("details")`), else its `id = "…"`.
+fn annotation_plugin_id(doc: &str, from: usize) -> Option<(usize, usize)> {
+    let rest = doc.get(from..)?;
+    let first = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '*');
+    if let Some(quoted) = first.strip_prefix('"') {
+        let start = doc.len() - quoted.len();
+        return Some((start, start + quoted.find('"')?));
+    }
+    annotation_entries(doc, from)
+        .into_iter()
+        .find(|entry| entry.path.is_empty() && entry.key == "id")
+        .map(|entry| (entry.value_start, entry.value_end))
+}
+
+/// Record the render element name a `'#type' => 'x'` entry of an array
+/// literal reads.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_element_reads(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_type_keys {
+        return;
+    }
+    for element in elements.iter() {
+        if let ArrayElement::KeyValue(entry) = element {
+            push_render_element_read(entry.key, entry.value, ctx);
+        }
+    }
+}
+
+/// Record the render element name a `$form['x']['#type'] = 'x'`
+/// assignment reads.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_element_assignment(
+    assign: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_type_keys || !assign.operator.is_assign() {
+        return;
+    }
+    if let Expression::ArrayAccess(access) = assign.lhs {
+        push_render_element_read(access.index, assign.rhs, ctx);
+    }
+}
+
+/// Record `value` as the render element name it reads when `key` is the
+/// literal `#type` and `value` a string literal.
+fn push_render_element_read(
+    key: &Expression<'_>,
+    value: &Expression<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !resolved_string_literal(key, ctx.content).is_some_and(|(key, _, _)| key == "#type") {
+        return;
+    }
+    let Some((name, start, end)) = resolved_string_literal(value, ctx.content) else {
+        return;
+    };
+    ctx.spans.push(SymbolSpan {
+        start: start as u32,
+        end: end as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalRenderElement,
+            key: name.to_string(),
+            is_write: false,
+            is_optional: false,
+        },
+    });
 }
 
 /// Record the routes the `#[Route]` attributes of a controller declare, the
@@ -148,12 +342,15 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
     // Drupal's discovery reads attributes only, never `@Route` annotations.
     let class_routes = route_declarations(&class.attribute_lists, None, class, ctx);
     let class_details = route_details(&class.attribute_lists, ctx);
+    let mut spans: Vec<SymbolSpan> = class_details
+        .iter()
+        .flat_map(|details| details.permissions.iter().cloned())
+        .collect();
     let prefix = match class_routes.first().map(|route| &route.name) {
         Some(RouteName::Literal(name, _, _)) => name.as_str(),
         _ => "",
     };
     let is_named = |route: &&RouteDeclaration| matches!(route.name, RouteName::Literal(..));
-    let mut spans = Vec::new();
     let mut sites = Vec::new();
     let mut aliases = Vec::new();
     let mut route_count = 0usize;
@@ -169,6 +366,11 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
         invokable |= is_invoke;
         let routes = route_declarations(&method.attribute_lists, None, class, ctx);
         let details = route_details(&method.attribute_lists, ctx);
+        spans.extend(
+            details
+                .iter()
+                .flat_map(|details| details.permissions.iter().cloned()),
+        );
         any_method_route |= !routes.is_empty();
         let named = routes.iter().filter(is_named).count();
         route_count += named;
@@ -246,6 +448,8 @@ struct RouteDetails {
     title_callback: Option<String>,
     entity_view: Option<String>,
     entity_form: Option<String>,
+    /// The spans of the permissions its `_permission` requirement names.
+    permissions: Vec<SymbolSpan>,
 }
 
 /// The details of each `#[Route]` among `attribute_lists`, in the order
@@ -293,6 +497,9 @@ fn route_details(
                     details.entity_form = default("_entity_form")
                         .and_then(|form| crate::drupal::routing::entity_type_of(&form));
                     details.defaults = default_values(value, content);
+                }
+                "requirements" => {
+                    push_requirements_permissions(value, content, &mut details.permissions);
                 }
                 _ => {}
             }
@@ -692,6 +899,162 @@ fn extension_of(fqn: &str) -> Option<&str> {
     let mut segments = fqn.trim_start_matches('\\').split('\\');
     let extension = (segments.next() == Some("Drupal")).then(|| segments.next())??;
     (!matches!(extension, "Core" | "Component") && segments.next().is_some()).then_some(extension)
+}
+
+/// Record the theme hooks a render array literal names: its `#theme`, a
+/// string or a list of names, and its `#theme_wrappers`, a list of names or
+/// of names keying their own variables.  When `#theme` is one name, every
+/// other `#` key may pass one of the hook's variables, which is decided
+/// when it is looked up, and the array is a render of the hook's templates
+/// (a [`TwigContextSite`](crate::symbol_map::TwigContextSite) keyed by the
+/// `#theme` value's span) passing those keys without the `#`.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_array_spans(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_theme_keys {
+        return;
+    }
+    let mut hook = None;
+    let mut keys = Vec::new();
+    for element in elements.iter() {
+        let ArrayElement::KeyValue(entry) = element else {
+            continue;
+        };
+        let Some((key, start, end)) = resolved_string_literal(entry.key, ctx.content) else {
+            continue;
+        };
+        match key {
+            "#theme" => {
+                hook = resolved_string_literal(entry.value, ctx.content);
+                push_theme_hook_spans(entry.value, false, ctx);
+            }
+            "#theme_wrappers" => push_theme_hook_spans(entry.value, true, ctx),
+            _ if key.len() > 1 && key.starts_with('#') && !is_render_api_key(key) => {
+                let span = entry.value.span();
+                keys.push((key, start, end, (span.start.offset, span.end.offset)));
+            }
+            _ => {}
+        }
+    }
+    let Some((hook, hook_start, _)) = hook else {
+        return;
+    };
+    let vars: Vec<crate::symbol_map::TwigContextVar> = keys
+        .iter()
+        .filter(|(key, ..)| crate::twig::variables::is_twig_variable_name(&key[1..]))
+        .map(
+            |(key, start, end, (value_start, value_end))| crate::symbol_map::TwigContextVar {
+                name: crate::atom::atom(&key[1..]),
+                start: *start as u32 + 1,
+                end: *end as u32,
+                value: crate::symbol_map::TwigContextValue::Expression {
+                    start: *value_start,
+                    end: *value_end,
+                },
+            },
+        )
+        .collect();
+    if !vars.is_empty() {
+        ctx.twig_contexts.push(crate::symbol_map::TwigContextSite {
+            template_start: hook_start as u32,
+            vars,
+            shape: None,
+        });
+    }
+    for (key, start, end, _) in keys {
+        ctx.spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::DrupalThemeHookVariable,
+                key: crate::drupal::theme_hooks::theme_variable_key(hook, &key[1..]),
+                is_write: false,
+                is_optional: false,
+            },
+        });
+    }
+}
+
+/// The render array keys Drupal's renderer reads itself, which no theme
+/// hook declares as a variable, sorted.
+const RENDER_API_KEYS: [&str; 23] = [
+    "#access",
+    "#access_callback",
+    "#after_build",
+    "#allowed_tags",
+    "#attached",
+    "#cache",
+    "#cache_properties",
+    "#create_placeholder",
+    "#defaults_loaded",
+    "#lazy_builder",
+    "#markup",
+    "#plain_text",
+    "#post_render",
+    "#pre_render",
+    "#prefix",
+    "#printed",
+    "#process",
+    "#render_children",
+    "#sorted",
+    "#states",
+    "#suffix",
+    "#type",
+    "#weight",
+];
+
+fn is_render_api_key(key: &str) -> bool {
+    RENDER_API_KEYS.binary_search(&key).is_ok()
+}
+
+/// Record the theme hooks `$build['#theme'] = …` and
+/// `$build['#theme_wrappers'] = …` name.
+pub(in crate::symbol_map::extraction) fn emit_drupal_render_array_assignment(
+    assignment: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_theme_keys || !assignment.operator.is_assign() {
+        return;
+    }
+    let Expression::ArrayAccess(access) = assignment.lhs else {
+        return;
+    };
+    match resolved_string_literal(access.index, ctx.content) {
+        Some(("#theme", _, _)) => push_theme_hook_spans(assignment.rhs, false, ctx),
+        Some(("#theme_wrappers", _, _)) => push_theme_hook_spans(assignment.rhs, true, ctx),
+        _ => {}
+    }
+}
+
+/// Record the theme hook names `value` holds: a string, or the strings of a
+/// list, and for `#theme_wrappers` the keys of a keyed list.
+fn push_theme_hook_spans(value: &Expression<'_>, wrappers: bool, ctx: &mut ExtractionCtx<'_>) {
+    let push = |name: &Expression<'_>, ctx: &mut ExtractionCtx<'_>| {
+        if let Some((key, start, end)) = resolved_string_literal(name, ctx.content) {
+            ctx.spans.push(SymbolSpan {
+                start: start as u32,
+                end: end as u32,
+                kind: SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalThemeHook,
+                    key: key.to_string(),
+                    is_write: false,
+                    is_optional: false,
+                },
+            });
+        }
+    };
+    let Some(elements) = crate::parser::array_literal_elements(value) else {
+        push(value, ctx);
+        return;
+    };
+    for element in elements.iter() {
+        match element {
+            ArrayElement::Value(item) => push(item.value, ctx),
+            ArrayElement::KeyValue(entry) if wrappers => push(entry.key, ctx),
+            _ => {}
+        }
+    }
 }
 
 const HOOK_ATTRIBUTE: &str = "Drupal\\Core\\Hook\\Attribute\\Hook";
@@ -1182,6 +1545,403 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_url_spans(
     }
 }
 
+/// Record the permissions `new Route()` requires: the `_permission` of its
+/// requirements array, the third argument.
+pub(in crate::symbol_map::extraction) fn emit_drupal_route_permission_spans(
+    class: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Expression::Identifier(identifier) = class else {
+        return;
+    };
+    let resolved = ctx
+        .resolved_name_at(identifier.span().start.offset)
+        .unwrap_or_else(|| bytes_to_str(identifier.value()));
+    if resolved
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case(SYMFONY_ROUTE)
+        && let Some(requirements) = argument_at(argument_list, 2, b"requirements")
+    {
+        push_requirements_permissions(requirements, ctx.content, &mut ctx.spans);
+    }
+}
+
+const SYMFONY_ROUTE: &str = "Symfony\\Component\\Routing\\Route";
+
+/// Record the permissions a method call reads: the `_permission` a route's
+/// `setRequirement()` or `setRequirements()` sets.  The calls that check a
+/// permission on an account or a role are recorded with the receiver they
+/// need (see `symfony_receiver_method`).
+pub(in crate::symbol_map::extraction) fn emit_drupal_requirement_permission_spans(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let is = |name: &str| member_name.eq_ignore_ascii_case(name);
+    if !ctx.drupal || !(is("setRequirement") || is("setRequirements")) {
+        return;
+    }
+    if is("setRequirement") {
+        let is_permission = argument_at(argument_list, 0, b"key")
+            .and_then(|key| resolved_string_literal(key, ctx.content))
+            .is_some_and(|(key, _, _)| key == "_permission");
+        if is_permission && let Some(value) = argument_at(argument_list, 1, b"regex") {
+            push_requirement_permissions(value, ctx.content, &mut ctx.spans);
+        }
+    } else if let Some(requirements) = argument_at(argument_list, 0, b"requirements") {
+        push_requirements_permissions(requirements, ctx.content, &mut ctx.spans);
+    }
+}
+
+/// Record the permissions a static call reads: the second argument of
+/// `AccessResult::allowedIfHasPermission()`, and each one in the array
+/// `allowedIfHasPermissions()` takes second.
+pub(in crate::symbol_map::extraction) fn emit_drupal_static_permission_spans(
+    class: &str,
+    method: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some(list) = crate::drupal::permissions::static_permission_call(class, method) else {
+        return;
+    };
+    let Some(argument) = argument_at(argument_list, 1, b"permission")
+        .or_else(|| argument_at(argument_list, 1, b"permissions"))
+    else {
+        return;
+    };
+    if list {
+        push_permission_list(argument, ctx.content, &mut ctx.spans);
+    } else {
+        push_laravel_string_span(
+            StringKeyKind::DrupalPermission,
+            false,
+            false,
+            argument,
+            ctx.content,
+            &mut ctx.spans,
+        );
+    }
+}
+
+/// Record the permissions `user_role_grant_permissions()` and
+/// `user_role_revoke_permissions()`, written as `written`, take in the
+/// array they take second.
+pub(in crate::symbol_map::extraction) fn emit_drupal_function_permission_spans(
+    written: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || !crate::drupal::permissions::is_role_permissions_function(written) {
+        return;
+    }
+    if let Some(permissions) = argument_at(argument_list, 1, b"permissions") {
+        push_permission_list(permissions, ctx.content, &mut ctx.spans);
+    }
+}
+
+/// Push a span for each permission an array literal lists.
+fn push_permission_list(list: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
+    let Some(elements) = crate::parser::array_literal_elements(list) else {
+        return;
+    };
+    for element in elements.iter() {
+        if let ArrayElement::Value(value) = element {
+            push_laravel_string_span(
+                StringKeyKind::DrupalPermission,
+                false,
+                false,
+                value.value,
+                content,
+                spans,
+            );
+        }
+    }
+}
+
+/// Push the spans of the permissions a requirements array's `_permission`
+/// names.
+fn push_requirements_permissions(
+    requirements: &Expression<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    if let Some(value) = array_entry(requirements, "_permission", content) {
+        push_requirement_permissions(value, content, spans);
+    }
+}
+
+/// Push the spans of the permissions a `_permission` requirement written
+/// as `value` names, each part of an `a+b` or `a,b` on its own.
+fn push_requirement_permissions(
+    value: &Expression<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    // A string with escapes reads differently from its text, whose
+    // offsets the parts would not match.
+    if let Some((text, start, end)) = resolved_string_literal(value, content)
+        && text.len() == end - start
+    {
+        spans.extend(crate::drupal::permissions::requirement_spans(text, start));
+    }
+}
+
+/// Record the configuration name `new ConfigTarget()` reads first, and the
+/// keys of that object its property path, a key or a list of them, names
+/// second.
+pub(in crate::symbol_map::extraction) fn emit_drupal_config_target_spans(
+    class: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Expression::Identifier(identifier) = class else {
+        return;
+    };
+    let resolved = ctx
+        .resolved_name_at(identifier.span().start.offset)
+        .unwrap_or_else(|| bytes_to_str(identifier.value()));
+    if !crate::drupal::is_config_target_class(resolved) {
+        return;
+    }
+    let Some(name) = argument_at(argument_list, 0, b"configName") else {
+        return;
+    };
+    push_laravel_string_span(
+        StringKeyKind::DrupalConfigName,
+        false,
+        false,
+        name,
+        ctx.content,
+        &mut ctx.spans,
+    );
+    let Some((name, _, _)) = resolved_string_literal(name, ctx.content) else {
+        return;
+    };
+    let Some(path) = argument_at(argument_list, 1, b"propertyPath") else {
+        return;
+    };
+    let keys: Vec<&Expression<'_>> = match crate::parser::array_literal_elements(path) {
+        Some(elements) => elements
+            .iter()
+            .filter_map(|element| match element {
+                ArrayElement::Value(value) => Some(value.value),
+                _ => None,
+            })
+            .collect(),
+        None => vec![path],
+    };
+    for key in keys {
+        if let Some((key, start, end)) =
+            resolved_string_literal(key, ctx.content).filter(|(key, _, _)| !key.is_empty())
+        {
+            push_config_key_span(name, key, start, end, &mut ctx.spans);
+        }
+    }
+}
+
+/// Push the span of the key `key` of the configuration object `name`,
+/// written from `start` to `end`.
+fn push_config_key_span(
+    name: &str,
+    key: &str,
+    start: usize,
+    end: usize,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    spans.push(SymbolSpan {
+        start: start as u32,
+        end: end as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalConfigKey,
+            key: crate::drupal::config_keys::config_key(name, key),
+            is_write: false,
+            is_optional: false,
+        },
+    });
+}
+
+/// Record the key an editable config object's `set()` or `clear()` reads,
+/// for the type engine to confirm against its receiver, whose type carries
+/// the object's name.  Its `get()` is recorded as a container lookup's,
+/// which the config object is one of the targets of.
+pub(in crate::symbol_map::extraction) fn record_drupal_config_key_sites(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    if !member_name.eq_ignore_ascii_case("set") && !member_name.eq_ignore_ascii_case("clear") {
+        return;
+    }
+    let Some(Argument::Positional(key)) = argument_list.arguments.first() else {
+        return;
+    };
+    if let Some((key, start, end)) =
+        resolved_string_literal(key.value, ctx.content).filter(|(key, _, _)| !key.is_empty())
+    {
+        ctx.typed_receiver_sites.push(TypedReceiverSite {
+            start: start as u32,
+            end: end as u32,
+            key: key.to_string(),
+            is_write: false,
+            is_optional: false,
+            guards: 0,
+            receiver: ReceiverClass::EditableConfigKeys,
+        });
+    }
+}
+
+/// Record the configuration name a form element's `#config_target` names
+/// before its `:`, among the entries of an array literal.
+pub(in crate::symbol_map::extraction) fn emit_drupal_config_target_entry_spans(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    for element in elements.iter() {
+        let ArrayElement::KeyValue(entry) = element else {
+            continue;
+        };
+        let is_target = resolved_string_literal(entry.key, ctx.content)
+            .is_some_and(|(key, _, _)| key == "#config_target");
+        if !is_target {
+            continue;
+        }
+        if let Some((target, start, end)) = resolved_string_literal(entry.value, ctx.content)
+            && target.len() == end - start
+        {
+            let (name, key) = target.split_once(':').unwrap_or((target, ""));
+            if !name.is_empty() && !key.is_empty() {
+                let key_start = start + name.len() + 1;
+                push_config_key_span(name, key, key_start, end, &mut ctx.spans);
+            }
+            if !name.is_empty() {
+                ctx.spans.push(SymbolSpan {
+                    start: start as u32,
+                    end: (start + name.len()) as u32,
+                    kind: SymbolKind::StringKey {
+                        kind: StringKeyKind::DrupalConfigName,
+                        key: name.to_string(),
+                        is_write: false,
+                        is_optional: false,
+                    },
+                });
+            }
+        }
+    }
+}
+
+/// Record each configuration name the array a config factory's
+/// `loadMultiple()` takes lists, for the type engine to confirm against
+/// its receiver.
+pub(in crate::symbol_map::extraction) fn record_drupal_config_list_sites(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || !member_name.eq_ignore_ascii_case("loadMultiple") {
+        return;
+    }
+    let Some(Argument::Positional(names)) = argument_list.arguments.first() else {
+        return;
+    };
+    let Some(elements) = crate::parser::array_literal_elements(names.value) else {
+        return;
+    };
+    for element in elements.iter() {
+        let ArrayElement::Value(value) = element else {
+            continue;
+        };
+        if let Some((name, start, end)) = resolved_string_literal(value.value, ctx.content)
+            .filter(|(name, _, _)| !name.is_empty())
+        {
+            ctx.typed_receiver_sites.push(TypedReceiverSite {
+                start: start as u32,
+                end: end as u32,
+                key: name.to_string(),
+                is_write: false,
+                is_optional: false,
+                guards: 0,
+                receiver: ReceiverClass::ConfigFactory,
+            });
+        }
+    }
+}
+
+/// Record the configuration names a config form's
+/// `getEditableConfigNames()` returns in an array literal.
+pub(in crate::symbol_map::extraction) fn emit_drupal_editable_config_spans(
+    members: &Sequence<'_, ClassLikeMember<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    for member in members.iter() {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        if !method
+            .name
+            .value
+            .eq_ignore_ascii_case(b"getEditableConfigNames")
+        {
+            continue;
+        }
+        let mut returned = Vec::new();
+        mago_syntax::walker::Walker::walk_method(&ReturnWalker, method, &mut returned);
+        for value in returned {
+            let Some(elements) = crate::parser::array_literal_elements(value) else {
+                continue;
+            };
+            for element in elements.iter() {
+                if let ArrayElement::Value(name) = element {
+                    push_laravel_string_span(
+                        StringKeyKind::DrupalConfigName,
+                        false,
+                        false,
+                        name.value,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The values a method's `return` statements return.
+struct ReturnWalker;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<&'ast Expression<'arena>>>
+    for ReturnWalker
+{
+    fn walk_in_return(
+        &self,
+        statement: &'ast Return<'arena>,
+        returned: &mut Vec<&'ast Expression<'arena>>,
+    ) {
+        if let Some(value) = statement.value {
+            returned.push(value);
+        }
+    }
+}
+
 /// Record the route name a call reads in its positional argument `index`,
 /// or in the `route_name:` argument that names it, and the parameters of
 /// that route it passes in the argument after it, or in the
@@ -1348,6 +2108,29 @@ fn annotation_entity_type(doc: &str, offset: u32) -> Option<(String, u32, u32, O
     })
 }
 
+/// The span of the permission the `admin_permission` of an entity type
+/// annotation in the docblock `doc`, which starts at `offset` in the file,
+/// names.
+fn annotation_admin_permission(doc: &str, offset: u32) -> Option<SymbolSpan> {
+    let body = ENTITY_TYPE_KINDS
+        .iter()
+        .find_map(|kind| Some(doc.find(kind.annotation)? + kind.annotation.len()))?;
+    let entry = annotation_entries(doc, body)
+        .into_iter()
+        .find(|entry| entry.path.is_empty() && entry.key == "admin_permission")?;
+    let key = &doc[entry.value_start..entry.value_end];
+    (!key.is_empty()).then(|| SymbolSpan {
+        start: offset + entry.value_start as u32,
+        end: offset + entry.value_end as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalPermission,
+            key: key.to_string(),
+            is_write: false,
+            is_optional: false,
+        },
+    })
+}
+
 /// A `key = "value"` pair of an annotation, with the keys of the `{…}`
 /// blocks around it.
 struct AnnotationEntry<'d> {
@@ -1448,6 +2231,124 @@ fn annotation_entries(doc: &str, from: usize) -> Vec<AnnotationEntry<'_>> {
     entries
 }
 
+// ─── Libraries ──────────────────────────────────────────────────────────────
+
+/// The key a render array attaches its assets under.
+const ATTACHED: &str = "#attached";
+
+/// The key of the libraries among them.
+const LIBRARY: &str = "library";
+
+/// Record the libraries an array literal attaches: the `library` list of
+/// its `'#attached'` entry.
+pub(in crate::symbol_map::extraction) fn emit_drupal_attached_array_spans(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_attached {
+        return;
+    }
+    for element in elements.iter() {
+        if let ArrayElement::KeyValue(entry) = element
+            && is_literal_key(entry.key, ATTACHED, ctx.content)
+        {
+            push_attached_libraries(entry.value, ctx);
+        }
+    }
+}
+
+/// Record the libraries an assignment into a render array's `#attached`
+/// attaches: `$build['#attached']['library'][] = '…'`, a whole `library`
+/// list, or a whole `#attached` array.
+pub(in crate::symbol_map::extraction) fn emit_drupal_attached_assignment_spans(
+    assign: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_attached || !assign.operator.is_assign() {
+        return;
+    }
+    match assign.lhs {
+        Expression::ArrayAppend(append)
+            if accesses_keys(append.array, &[ATTACHED, LIBRARY], ctx.content) =>
+        {
+            push_library(assign.rhs, ctx);
+        }
+        lhs if accesses_keys(lhs, &[ATTACHED, LIBRARY], ctx.content) => {
+            push_library_list(assign.rhs, ctx);
+        }
+        lhs if accesses_keys(lhs, &[ATTACHED], ctx.content) => {
+            push_attached_libraries(assign.rhs, ctx);
+        }
+        _ => {}
+    }
+}
+
+/// Whether `expression` is an array access whose last offsets are the
+/// string literals `keys`, in order.
+fn accesses_keys(mut expression: &Expression<'_>, keys: &[&str], content: &str) -> bool {
+    for key in keys.iter().rev() {
+        let Expression::ArrayAccess(access) = expression else {
+            return false;
+        };
+        if !is_literal_key(access.index, key, content) {
+            return false;
+        }
+        expression = access.array;
+    }
+    true
+}
+
+/// Whether `expression` is the string literal `key`.
+fn is_literal_key(expression: &Expression<'_>, key: &str, content: &str) -> bool {
+    resolved_string_literal(expression, content).is_some_and(|(found, _, _)| found == key)
+}
+
+/// Record the libraries of the `library` list of an `#attached` array
+/// literal.
+fn push_attached_libraries(attached: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some(entries) = crate::parser::array_literal_elements(attached) else {
+        return;
+    };
+    for entry in entries.iter() {
+        if let ArrayElement::KeyValue(entry) = entry
+            && is_literal_key(entry.key, LIBRARY, ctx.content)
+        {
+            push_library_list(entry.value, ctx);
+        }
+    }
+}
+
+/// Record the libraries of a list literal of them.
+fn push_library_list(list: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some(items) = crate::parser::array_literal_elements(list) else {
+        return;
+    };
+    for item in items.iter() {
+        if let ArrayElement::Value(item) = item {
+            push_library(item.value, ctx);
+        }
+    }
+}
+
+/// Record the library a string literal names.
+fn push_library(expression: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some((name, start, end)) = resolved_string_literal(expression, ctx.content) else {
+        return;
+    };
+    if crate::drupal::libraries::is_library_name(name) {
+        ctx.spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::DrupalLibrary,
+                key: name.to_string(),
+                is_write: false,
+                is_optional: false,
+            },
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1486,6 +2387,304 @@ mod tests {
         }
     }
 
+    /// Each method that checks or changes a permission reaches the classes
+    /// that have it, and no other table claims the method first.
+    #[test]
+    fn every_permission_method_reaches_its_drupal_classes() {
+        for (method, classes) in [
+            (
+                "hasPermission",
+                &[
+                    "Drupal\\Core\\Session\\AccountInterface",
+                    "Drupal\\user\\RoleInterface",
+                    "Drupal\\Core\\Session\\PermissionCheckerInterface",
+                    "Drupal\\Core\\Session\\CalculatedPermissionsItemInterface",
+                ][..],
+            ),
+            ("grantPermission", &["Drupal\\user\\RoleInterface"][..]),
+            ("revokePermission", &["Drupal\\user\\RoleInterface"][..]),
+        ] {
+            let (receiver, is_write) =
+                crate::symbol_map::extraction::symfony_receiver_method(method, 0)
+                    .unwrap_or_else(|| panic!("{method} names no permission"));
+            assert!(!is_write, "{method}");
+            for class in classes {
+                assert!(
+                    receiver
+                        .targets()
+                        .contains(&(*class, StringKeyKind::DrupalPermission)),
+                    "{method}: {receiver:?} has no {class} target"
+                );
+            }
+            assert!(hook_invocation(method, 0).is_none(), "{method}");
+            assert!(
+                crate::drupal::route_parameter_call(method).is_none(),
+                "{method}"
+            );
+        }
+    }
+
+    /// Each method that reads a configuration name reaches the classes that
+    /// have it, and no other table claims the method first.
+    #[test]
+    fn every_config_method_reaches_its_drupal_classes() {
+        for (method, classes) in [
+            ("get", &["Drupal\\Core\\Config\\ConfigFactoryInterface"][..]),
+            (
+                "getEditable",
+                &["Drupal\\Core\\Config\\ConfigFactoryInterface"][..],
+            ),
+            (
+                "loadMultiple",
+                &["Drupal\\Core\\Config\\ConfigFactoryInterface"][..],
+            ),
+            (
+                "config",
+                &[
+                    "Drupal\\Core\\Controller\\ControllerBase",
+                    "Drupal\\Core\\Form\\FormBase",
+                ][..],
+            ),
+        ] {
+            let (receiver, is_write) =
+                crate::symbol_map::extraction::symfony_receiver_method(method, 0)
+                    .unwrap_or_else(|| panic!("{method} names no configuration"));
+            assert!(!is_write, "{method}");
+            for class in classes {
+                assert!(
+                    receiver
+                        .targets()
+                        .contains(&(*class, StringKeyKind::DrupalConfigName)),
+                    "{method}: {receiver:?} has no {class} target"
+                );
+            }
+            assert!(hook_invocation(method, 0).is_none(), "{method}");
+            assert!(
+                crate::drupal::route_parameter_call(method).is_none(),
+                "{method}"
+            );
+        }
+    }
+
+    /// Each configuration name a static call, a `ConfigTarget`, a
+    /// `#config_target`, or a config form's editable names reads is a span
+    /// over its own text, and the names a `loadMultiple()` lists are left
+    /// for the type engine.
+    #[test]
+    fn config_name_spans_cover_each_name() {
+        let php = r#"<?php
+namespace Drupal\acme\Form;
+use Drupal\Core\Form\ConfigTarget;
+class SettingsForm {
+    protected function getEditableConfigNames(): array {
+        $unused = ['not.this'];
+        return ['acme.a', 'acme.b'];
+    }
+    public function run($factory): void {
+        \Drupal::config('acme.c');
+        new ConfigTarget('acme.d', 'key');
+        $form = ['#config_target' => 'acme.e:key', '#title' => 'acme.not'];
+        $factory->loadMultiple(['acme.f', 'acme.g']);
+    }
+}
+"#;
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: true,
+                twig: false,
+                doctrine: false,
+            },
+            None,
+        );
+        let found: Vec<&str> = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalConfigName,
+                    key,
+                    ..
+                } => {
+                    let text = &php[span.start as usize..span.end as usize];
+                    assert_eq!(key, text);
+                    Some(text)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(found, ["acme.a", "acme.b", "acme.c", "acme.d", "acme.e"]);
+        let listed: Vec<&str> = map
+            .typed_receiver_sites
+            .iter()
+            .filter(|site| site.receiver == ReceiverClass::ConfigFactory)
+            .map(|site| site.key.as_str())
+            .collect();
+        assert_eq!(listed, ["acme.f", "acme.g"]);
+    }
+
+    /// A configuration key written beside its object's name is a span over
+    /// its own text, keyed by both, and one a config object reads is left
+    /// for the type engine, which knows the object.
+    #[test]
+    fn config_key_spans_cover_each_key() {
+        let php = r#"<?php
+namespace Drupal\acme\Form;
+use Drupal\Core\Form\ConfigTarget;
+class SettingsForm {
+    public function run($config): void {
+        $form = ['#config_target' => 'acme.a:notify.email'];
+        new ConfigTarget('acme.b', 'one');
+        new ConfigTarget('acme.c', ['two', 'three']);
+        $config->get('four');
+        $config->set('five', 1);
+        $config->clear('six');
+        $config->other('seven');
+    }
+}
+"#;
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: true,
+                twig: false,
+                doctrine: false,
+            },
+            None,
+        );
+        let found: Vec<(&str, &str)> = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalConfigKey,
+                    key,
+                    ..
+                } => Some((&php[span.start as usize..span.end as usize], key.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("notify.email", "acme.a#notify.email"),
+                ("one", "acme.b#one"),
+                ("two", "acme.c#two"),
+                ("three", "acme.c#three"),
+            ]
+        );
+        let sites: Vec<(&str, ReceiverClass)> = map
+            .typed_receiver_sites
+            .iter()
+            .filter(|site| {
+                site.receiver
+                    .targets()
+                    .iter()
+                    .any(|(_, kind)| *kind == StringKeyKind::DrupalConfigKey)
+            })
+            .map(|site| (site.key.as_str(), site.receiver))
+            .collect();
+        assert_eq!(
+            sites,
+            [
+                ("four", ReceiverClass::ContainerLookup),
+                ("five", ReceiverClass::EditableConfigKeys),
+                ("six", ReceiverClass::EditableConfigKeys),
+            ]
+        );
+    }
+
+    /// Each permission a requirement, a list, or an entity type names is a
+    /// span over its own text.
+    #[test]
+    fn permission_spans_cover_each_name() {
+        let php = r#"<?php
+namespace Drupal\acme;
+use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+use Symfony\Component\Routing\Route;
+#[ContentEntityType(id: 'acme_note', admin_permission: 'administer acme')]
+class Note {
+    public function run($account, $route): void {
+        new Route('/a', [], ['_permission' => 'a+b']);
+        new Route('/a', requirements: ['_permission' => 'c,d+e']);
+        $route->setRequirement('_permission', 'f');
+        $route->setRequirement('_format', 'json');
+        AccessResult::allowedIfHasPermissions($account, ['g', 'h'], 'OR');
+        AccessResult::allowedIfHasPermission($account, 'i');
+        user_role_grant_permissions('editor', ['j']);
+    }
+}
+"#;
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: true,
+                twig: false,
+                doctrine: false,
+            },
+            None,
+        );
+        let found: Vec<&str> = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalPermission,
+                    key,
+                    ..
+                } => {
+                    let text = &php[span.start as usize..span.end as usize];
+                    assert_eq!(key, text);
+                    Some(text)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "administer acme",
+                "a",
+                "b",
+                "c",
+                "d+e",
+                "f",
+                "g",
+                "h",
+                "i",
+                "j"
+            ]
+        );
+    }
+
     /// The entity type IDs, classes, and storages `php` declares.
     fn declared(php: &str) -> Vec<(String, String, Option<String>)> {
         let arena = mago_allocator::LocalArena::new();
@@ -1502,6 +2701,7 @@ mod tests {
                 service_container: false,
                 drupal: true,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -1547,6 +2747,7 @@ mod tests {
                 service_container: true,
                 drupal: true,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -1635,6 +2836,7 @@ trait LayoutRoutes {
                 service_container: true,
                 drupal: true,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -1721,6 +2923,7 @@ abstract class Base {
                 service_container: true,
                 drupal: true,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -1862,6 +3065,7 @@ final class About {
                 service_container: true,
                 drupal: true,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -1958,6 +3162,7 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
                     service_container: true,
                     drupal: true,
                     twig: false,
+                    doctrine: false,
                 },
                 None,
                 file,
@@ -2056,5 +3261,267 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
     #[test]
     fn a_doc_comment_without_an_entity_type_declares_none() {
         assert!(annotation_entity_type("/** @see EntityType(id = \"x\") */", 0).is_none());
+    }
+
+    /// The symbol map of `php` in a Drupal project, or in another one.
+    fn map_of(php: &str, drupal: bool) -> crate::symbol_map::SymbolMap {
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: drupal,
+                drupal,
+                twig: false,
+                doctrine: false,
+            },
+            None,
+        )
+    }
+
+    /// The render elements `php` declares, each with the ID's text and its
+    /// class.
+    fn elements(php: &str) -> Vec<(String, String, String)> {
+        let map = map_of(php, true);
+        map.drupal_plugin_classes
+            .iter()
+            .filter_map(|site| {
+                let span = map.spans.iter().find(|span| {
+                    span.start == site.start
+                        && matches!(
+                            span.kind,
+                            SymbolKind::StringKey {
+                                kind: StringKeyKind::DrupalRenderElement,
+                                is_write: true,
+                                ..
+                            }
+                        )
+                })?;
+                let SymbolKind::StringKey { key, .. } = &span.kind else {
+                    return None;
+                };
+                Some((
+                    key.clone(),
+                    php[span.start as usize..span.end as usize].to_string(),
+                    site.class.to_string(),
+                ))
+            })
+            .collect()
+    }
+
+    /// The render element names `php` reads, in source order.
+    fn element_reads(php: &str, drupal: bool) -> Vec<String> {
+        map_of(php, drupal)
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalRenderElement,
+                    key,
+                    is_write: false,
+                    ..
+                } => {
+                    assert_eq!(&php[span.start as usize..span.end as usize], key);
+                    Some(key.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn render_and_form_element_attributes_declare_their_ids() {
+        let php = "<?php\nnamespace Drupal\\acme\\Element;\nuse Drupal\\Core\\Render\\Attribute\\RenderElement;\nuse Drupal\\Core\\Render\\Attribute\\FormElement;\n#[RenderElement('acme_card')]\nclass Card {}\n#[FormElement(id: 'acme_input')]\nclass Input {}\n#[\\Drupal\\Core\\Render\\Attribute\\RenderElement('acme_badge')]\nclass Badge {}\n";
+        assert_eq!(
+            elements(php),
+            vec![
+                (
+                    "acme_card".to_string(),
+                    "acme_card".to_string(),
+                    "Drupal\\acme\\Element\\Card".to_string()
+                ),
+                (
+                    "acme_input".to_string(),
+                    "acme_input".to_string(),
+                    "Drupal\\acme\\Element\\Input".to_string()
+                ),
+                (
+                    "acme_badge".to_string(),
+                    "acme_badge".to_string(),
+                    "Drupal\\acme\\Element\\Badge".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn element_annotations_declare_by_position_or_by_id() {
+        let php = "<?php\nnamespace Drupal\\acme\\Element;\n/**\n * Provides a card.\n *\n * @RenderElement(\"acme_card\")\n */\nclass Card {}\n/**\n * @FormElement(id = \"acme_input\")\n */\nclass Input {}\n/**\n * @see RenderElement(\"nope\")\n */\nclass Nope {}\n";
+        assert_eq!(
+            elements(php),
+            vec![
+                (
+                    "acme_card".to_string(),
+                    "acme_card".to_string(),
+                    "Drupal\\acme\\Element\\Card".to_string()
+                ),
+                (
+                    "acme_input".to_string(),
+                    "acme_input".to_string(),
+                    "Drupal\\acme\\Element\\Input".to_string()
+                ),
+            ]
+        );
+    }
+
+    /// An attribute is matched by the class its name resolves to, so a
+    /// class of the same short name elsewhere declares nothing.
+    #[test]
+    fn another_render_element_attribute_declares_nothing() {
+        let imported = "<?php\nnamespace Drupal\\acme\\Element;\nuse Acme\\Attribute\\RenderElement;\n#[RenderElement('acme_card')]\nclass Card {}\n";
+        let unimported = "<?php\nnamespace Drupal\\acme\\Element;\n#[RenderElement('acme_card')]\nclass Card {}\n";
+        assert!(elements(imported).is_empty());
+        assert!(elements(unimported).is_empty());
+    }
+
+    #[test]
+    fn an_element_with_attribute_and_annotation_declares_once() {
+        let php = "<?php\nnamespace Drupal\\acme\\Element;\nuse Drupal\\Core\\Render\\Attribute\\RenderElement;\n/**\n * @RenderElement(\"acme_card\")\n */\n#[RenderElement('acme_card')]\nclass Card {}\n";
+        assert_eq!(elements(php).len(), 1);
+    }
+
+    #[test]
+    fn type_keys_of_render_arrays_read_element_names() {
+        let php = "<?php\nfunction build(array $form, string $type): array {\n    $form['name']['#type'] = 'textfield';\n    $form[\"#type\"] = \"form\";\n    $form['other']['#type'] .= 'nope';\n    $form['dynamic']['#type'] = $type;\n    $form['type'] = 'not_an_element';\n    return [\n        '#type' => 'details',\n        'inner' => array('#type' => 'container', '#title' => 'not_an_element'),\n        '#theme' => 'not_an_element',\n        'computed' => ['#type' => $type],\n    ];\n}\n";
+        assert_eq!(
+            element_reads(php, true),
+            ["textfield", "form", "details", "container"]
+        );
+        assert!(element_reads(php, false).is_empty());
+    }
+
+    /// The theme hook and variable spans `php` reads, as kind, key, and
+    /// text, read as a Drupal project's file or not.
+    fn render_array_reads(php: &str, drupal: bool) -> Vec<(StringKeyKind, String, String)> {
+        map_of(php, drupal)
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey { kind, key, .. }
+                    if matches!(
+                        kind,
+                        StringKeyKind::DrupalThemeHook | StringKeyKind::DrupalThemeHookVariable
+                    ) =>
+                {
+                    Some((
+                        *kind,
+                        key.clone(),
+                        php[span.start as usize..span.end as usize].to_string(),
+                    ))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn render_arrays_name_theme_hooks_and_pass_their_variables() {
+        let php = r#"<?php
+$build = [
+  '#theme' => 'acme_greeting',
+  '#name' => $name,
+  '#' => 1,
+  'child' => ['#theme' => ['acme_box__wide', 'acme_box'], '#label' => 'x'],
+  '#theme_wrappers' => ['container', 'acme_panel' => ['#title' => 'y']],
+];
+$build['more']['#theme'] = 'item_list';
+"#;
+        let hook = |key: &str| {
+            (
+                StringKeyKind::DrupalThemeHook,
+                key.to_string(),
+                key.to_string(),
+            )
+        };
+        assert_eq!(
+            render_array_reads(php, true),
+            vec![
+                hook("acme_greeting"),
+                (
+                    StringKeyKind::DrupalThemeHookVariable,
+                    "acme_greeting#name".to_string(),
+                    "#name".to_string()
+                ),
+                hook("acme_box__wide"),
+                hook("acme_box"),
+                hook("container"),
+                hook("acme_panel"),
+                hook("item_list"),
+            ]
+        );
+        assert!(render_array_reads(php, false).is_empty());
+    }
+
+    /// A render array whose `#theme` is one name renders that hook's
+    /// templates with its other `#` keys, without the `#`.
+    #[test]
+    fn a_theme_render_array_passes_its_hash_keys_to_the_hooks_templates() {
+        let php = r#"<?php
+$build = [
+  '#theme' => 'acme_greeting',
+  '#name' => $name,
+  '#' => 1,
+  '#not-a-name' => 2,
+  '#cache' => ['max-age' => 0],
+  '#weight' => 5,
+  'child' => ['#theme' => ['acme_box__wide', 'acme_box'], '#label' => 'x'],
+];
+$build['more']['#theme'] = 'item_list';
+"#;
+        assert!(RENDER_API_KEYS.is_sorted());
+        let map = map_of(php, true);
+        // The renderer's own keys pass nothing.
+        assert!(!map.spans.iter().any(|span| matches!(
+            &span.kind,
+            SymbolKind::StringKey { kind: StringKeyKind::DrupalThemeHookVariable, key, .. }
+                if key.ends_with("#cache") || key.ends_with("#weight")
+        )));
+        let sites: Vec<(String, Vec<(String, String)>)> = map
+            .twig_contexts
+            .iter()
+            .map(|site| {
+                let start = site.template_start as usize;
+                let hook = &php[start..start + php[start..].find('\'').unwrap()];
+                let vars = site
+                    .vars
+                    .iter()
+                    .map(|var| {
+                        assert_eq!(&php[var.start as usize..var.end as usize], &*var.name);
+                        let value = match var.value {
+                            crate::symbol_map::TwigContextValue::Expression { start, end } => {
+                                php[start as usize..end as usize].to_string()
+                            }
+                            other => format!("{other:?}"),
+                        };
+                        (var.name.to_string(), value)
+                    })
+                    .collect();
+                (hook.to_string(), vars)
+            })
+            .collect();
+        assert_eq!(
+            sites,
+            vec![(
+                "acme_greeting".to_string(),
+                vec![("name".to_string(), "$name".to_string())]
+            )]
+        );
+        assert!(map_of(php, false).twig_contexts.is_empty());
     }
 }

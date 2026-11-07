@@ -15,7 +15,7 @@ use std::cmp::Ordering;
 
 use mago_syntax::cst::string::{CompositeString, StringPart};
 use mago_syntax::cst::unary::UnaryPrefixOperator;
-use mago_syntax::cst::{Access, Expression, Variable};
+use mago_syntax::cst::{Access, ClassLikeConstantSelector, Expression, Variable};
 
 use crate::atom::bytes_to_str;
 use crate::php_type::{LiteralValue, PhpType, TypeKind, with_keyword_lowercase};
@@ -170,6 +170,47 @@ pub(super) fn is_cheap_scalar_operand(expr: &Expression<'_>) -> bool {
             folds && is_cheap_scalar_operand(unary.operand)
         }
         _ => false,
+    }
+}
+
+/// The one scalar a concatenation operand holds: a scalar its type pins,
+/// or the name `Foo::class` gives.  PHP resolves a class name written
+/// before `::class` at compile time, so it is one known string; the type,
+/// `class-string<Foo>`, also admits the names of subclasses, so the
+/// expression is read rather than the type.  `static::class` and
+/// `$object::class` name the runtime class, which is not known, and so does
+/// `self::class` in a trait.
+pub(super) fn concat_operand_scalar(
+    expr: &Expression<'_>,
+    types: &[ResolvedType],
+) -> Option<Scalar> {
+    if let Some(scalar) = single_scalar(types) {
+        return Some(scalar);
+    }
+    let mut expr = expr;
+    while let Expression::Parenthesized(inner) = expr {
+        expr = inner.expression;
+    }
+    let Expression::Access(Access::ClassConstant(access)) = expr else {
+        return None;
+    };
+    let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
+        return None;
+    };
+    if !constant.value.eq_ignore_ascii_case(b"class")
+        || !matches!(access.class, Expression::Identifier(_))
+    {
+        return None;
+    }
+    let [only] = types else {
+        return None;
+    };
+    match only.type_string.kind() {
+        TypeKind::ClassString(Some(inner)) => match inner.kind() {
+            TypeKind::Named(name) => Some(Scalar::String(name.to_string())),
+            _ => None,
+        },
+        _ => None,
     }
 }
 

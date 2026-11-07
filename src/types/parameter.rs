@@ -68,6 +68,38 @@ pub struct ParameterInfo {
     /// PHPStan's defaults: a function runs its callable arguments before
     /// it returns, a method keeps them for later.
     pub callable_invocation: Option<CallableInvocation>,
+    /// The values the argument is expected to be, declared with
+    /// `#[JetBrains\PhpStorm\ExpectedValues]`.
+    ///
+    /// phpstorm-stubs use it to list the constants a flag or mode
+    /// parameter takes (`pathinfo()`'s `PATHINFO_*`, `phpinfo()`'s
+    /// `INFO_*`). Completion offers them inside the argument. Shared,
+    /// since a parameter list is cloned far more often than it carries
+    /// the attribute.
+    pub expected_values: Option<Arc<ExpectedValues>>,
+}
+
+/// The values an `#[ExpectedValues]` attribute declares for a parameter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedValues {
+    /// Whether the values are bit flags to be combined with `|`
+    /// (`flags:` / `flagsFromClass:`) rather than one value to pick
+    /// (`values:` / `valuesFromClass:`).
+    pub is_flags: bool,
+    /// Where the values come from.
+    pub source: ExpectedValuesSource,
+}
+
+/// The values of an [`ExpectedValues`] attribute.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExpectedValuesSource {
+    /// Each value as PHP source text that reads the same from any file:
+    /// a class constant's class is written fully qualified with a leading
+    /// `\` (`\Ev::READ`), a global constant as written (`PATHINFO_DIRNAME`),
+    /// and a literal as written (`'cli'`, `-1`).
+    Listed(Vec<String>),
+    /// Every constant of the class with this FQN (no leading `\`).
+    FromClass(String),
 }
 
 /// When a callee runs a callable it is handed.
@@ -96,6 +128,7 @@ impl ParameterInfo {
             && self.closure_this_type == other.closure_this_type
             && self.param_out_type == other.param_out_type
             && self.callable_invocation == other.callable_invocation
+            && self.expected_values == other.expected_values
     }
 
     /// Fold `null` into the effective type when the default value is the

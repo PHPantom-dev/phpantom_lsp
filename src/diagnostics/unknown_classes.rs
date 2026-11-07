@@ -118,7 +118,12 @@ impl Backend {
             // addition to FQSENs, so a target that resolves to nothing is
             // not an error.  PHPUnit coverage metadata shares the emitter
             // but carries `CoversTarget`, so `@covers` is still checked.
-            if ref_context == ClassRefContext::DocblockSee {
+            // Nor is a capitalised docblock tag obliged to name a class
+            // (`@Given`, `@SuppressWarnings`).
+            if matches!(
+                ref_context,
+                ClassRefContext::DocblockSee | ClassRefContext::Annotation
+            ) {
                 continue;
             }
 

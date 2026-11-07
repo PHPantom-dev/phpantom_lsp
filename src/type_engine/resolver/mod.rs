@@ -319,6 +319,44 @@ fn resolve_target_classes_expr_inner(
         // ── Bare variable ───────────────────────────────────────
         SubjectExpr::Variable(var_name) => resolve_variable_fallback(var_name, access_kind, ctx),
 
+        // ── The entity a DQL variable joined through an association
+        //    stands for ─────────────────────────────────────────────
+        SubjectExpr::DqlAssociation { base, association } => {
+            let owners = ResolvedType::into_arced_classes(resolve_target_classes_expr(
+                base,
+                AccessKind::Arrow,
+                ctx,
+            ));
+            crate::doctrine::association_targets(
+                owners,
+                association,
+                class_loader,
+                ctx.resolved_class_cache,
+            )
+            .into_iter()
+            .map(ResolvedType::from_arc)
+            .collect()
+        }
+
+        // ── The entity a query builder's DQL variable stands for ──
+        SubjectExpr::DqlBuilderAlias { base, alias } => {
+            let builders = resolve_target_classes_expr(base, AccessKind::Arrow, ctx);
+            let mut out: Vec<Arc<ClassInfo>> = Vec::new();
+            for builder in &builders {
+                for member in builder.type_string.union_members() {
+                    let Some((_, state)) = member.as_dql_builder() else {
+                        continue;
+                    };
+                    for class in dql_builder_alias_entities(state, alias, ctx) {
+                        if !out.iter().any(|known| known.fqn() == class.fqn()) {
+                            out.push(class);
+                        }
+                    }
+                }
+            }
+            out.into_iter().map(ResolvedType::from_arc).collect()
+        }
+
         // ── Callee-only variants (MethodCall, StaticMethodCall,
         //    FunctionCall) should not appear as top-level subjects;
         //    they are wrapped in CallExpr.  If they do appear
@@ -336,6 +374,46 @@ fn resolve_target_classes_expr_inner(
                 .collect()
         }
     }
+}
+
+/// The entities the DQL variable `alias` a query builder in `state` has
+/// declared stands for, following each join back to the entity it starts
+/// from.  A variable joined from itself, directly or not, stands for
+/// nothing.
+fn dql_builder_alias_entities(
+    state: &crate::doctrine::query::QueryBuilderState,
+    alias: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    use crate::doctrine::query::AliasRoot;
+    let class_loader = ctx.file.class_loader;
+    let mut path: Vec<&str> = Vec::new();
+    let mut current = alias;
+    let entity = loop {
+        if path.len() > state.alias_count() {
+            return Vec::new();
+        }
+        match state.alias_root(current) {
+            Some(AliasRoot::Entity(entity)) => break entity,
+            Some(AliasRoot::Association { alias, field }) => {
+                path.push(field);
+                current = alias;
+            }
+            None => return Vec::new(),
+        }
+    };
+    let mut classes: Vec<Arc<ClassInfo>> = class_loader(Fqn::new(entity.trim_start_matches('\\')))
+        .into_iter()
+        .collect();
+    for field in path.into_iter().rev() {
+        classes = crate::doctrine::association_targets(
+            classes,
+            field,
+            class_loader,
+            ctx.resolved_class_cache,
+        );
+    }
+    classes
 }
 
 /// Resolve `Foo::MEMBER` / `Foo::$prop`: the type a static property or a
@@ -472,9 +550,17 @@ fn resolve_call_subject(
     // of alternatives.  The same holds for an intersection inside a
     // union (`(A&I)|B`).
     if let Some(h) = hint {
-        let hint_names_a_class = matches!(h.kind(), TypeKind::Generic(g) if classes
-            .iter()
-            .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()));
+        let generic_names_a_class = |t: &PhpType| {
+            matches!(t.kind(), TypeKind::Generic(g) if classes
+                .iter()
+                .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()))
+        };
+        // A union of such generics (`Config<'a'>|ImmutableConfig<'a'>`)
+        // carries them for each of its classes.
+        let hint_names_a_class = match h.kind() {
+            TypeKind::Union(members) => members.iter().any(generic_names_a_class),
+            _ => generic_names_a_class(&h),
+        };
         let is_intersection = match h.kind() {
             TypeKind::Intersection(_) => true,
             TypeKind::Union(members) => members
@@ -493,10 +579,14 @@ fn resolve_call_subject(
             TypeKind::Union(members) => members.iter().any(is_closure_signature),
             _ => is_closure_signature(&h),
         };
+        // A Doctrine query builder carries the DQL it has built, which the
+        // class alone has lost.
+        let carries_dql = h.has_dql_builder();
         if is_intersection
             || classes.iter().any(|c| !c.template_params.is_empty())
             || hint_names_a_class
             || carries_closure_signature
+            || carries_dql
         {
             return ResolvedType::from_classes_with_hint(classes, h);
         }

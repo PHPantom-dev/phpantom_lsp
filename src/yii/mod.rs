@@ -1,6 +1,7 @@
 //! Yii 3: the views an application renders and the path aliases it names
-//! them through, and the route names it declares and the arguments a
-//! handler takes from its route's path.
+//! them through, the route names it declares and the arguments a handler
+//! takes from its route's path, and the DI definitions it configures its
+//! container with.
 //!
 //! A view is named by a path (`__DIR__ . '/template'`) or by a name the
 //! renderer's view path prefixes (`render('index')` after
@@ -17,8 +18,12 @@
 //! [`crate::symfony`]), and what a route's name alone does not say, its path
 //! and its handler, is kept beside its span (see
 //! [`crate::symbol_map::RouteSite`] and [`routes`]).
+//!
+//! A DI definition is recognised by its shape wherever it is written, and
+//! its keys are spans on the class it builds (see [`definitions`]).
 
 pub(crate) mod aliases;
+pub(crate) mod definitions;
 pub(crate) mod routes;
 pub(crate) mod views;
 
@@ -37,6 +42,9 @@ use crate::Backend;
 #[derive(Default)]
 pub(crate) struct YiiState {
     aliases: RwLock<Option<Arc<aliases::Aliases>>>,
+    /// The DI definitions the installed packages contribute, read on first
+    /// use and dropped when the dependencies change.
+    package_definitions: parking_lot::Mutex<Option<Arc<Vec<definitions::PackageDefinitionFile>>>>,
 }
 
 impl Backend {

@@ -169,7 +169,20 @@ impl Backend {
         let target = resolved_class_loader(Fqn::new(&fqn))
             .or_else(|| class_loader(name))
             .map(Arc::unwrap_or_clone)?;
-        self.class_implementation(uri, content, target, &resolved_class_loader)
+        // What a Yii container hands out for a class is what its DI
+        // definitions say, so those come first, from the class and from a
+        // `$container->get()` or `Reference::to()` that names it alike.
+        let mut locations = if self.is_yii_project() {
+            self.yii_definition_locations(target.fqn().as_str())
+        } else {
+            Vec::new()
+        };
+        if let Some(implementations) =
+            self.class_implementation(uri, content, target, &resolved_class_loader)
+        {
+            locations.extend(implementations);
+        }
+        (!locations.is_empty()).then_some(locations)
     }
 
     /// Go-to-implementation for the class `target`.

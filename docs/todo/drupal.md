@@ -1,12 +1,18 @@
 # PHPantom — Drupal
 
 Known gaps and missing features in PHPantom's Drupal support. The web
-root is detected, core, contrib, and the Drupal file extensions
-(`.module`, `.install`, `.theme`, …) are indexed past `.gitignore`, and
+root is detected with or without a `composer.json`. Core and every
+module, theme, and profile, with the Drupal file extensions (`.module`,
+`.install`, `.theme`, …), are indexed past `.gitignore`, and
 the services the `*.services.yml` files declare, the entity types
 entity classes declare, the routes the routing files, route attributes,
-and route builders declare, and the hooks the `*.api.php` files document
-and the extensions implement are read. Nothing reads fields yet.
+and route builders declare, the hooks the `*.api.php` files document
+and the extensions implement, the permissions the `*.permissions.yml`
+files declare, the configuration objects and keys the default
+configuration and the configuration schema declare, the theme hooks
+`hook_theme()` implementations declare, the render elements element
+classes declare, and the libraries the `*.libraries.yml` files declare
+are read. Nothing reads fields yet.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -23,10 +29,11 @@ is what they expect from an editor.
 **Benchmarks.** `benches/memory_usage.py` measures memory on a site that
 installs core into `web/core` through Composer (`memory_drupal_module`),
 next to the other framework scenarios. `benches/drupal_completion.rs`
-measures completion of service IDs, route names, entity type IDs, hook
-names, and hook implementations over a generated site with many custom
-modules. Every item that adds a name Drupal declares adds its case to
-it.
+measures completion of service IDs, route names, entity type IDs,
+permission names, configuration names, render element names, hook names,
+theme hook names, library names, and hook implementations over a
+generated site with many custom modules. Every item that adds a name
+Drupal declares adds its case to it.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
@@ -62,74 +69,6 @@ names and report a misspelt one.
 
 ---
 
-## DR7. Render arrays, theme hooks, and libraries
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-return [
-    '#theme' => 'acme_order_summary',
-    '#order' => $order,
-    '#attached' => ['library' => ['acme/order-summary']],
-];
-```
-
-- **`#theme`** names a theme hook a `hook_theme()` implementation
-  declares, which renders `templates/acme-order-summary.html.twig`.
-  Navigate from the string to both, complete it, and complete the
-  `#`-prefixed variables the hook declares.
-- **`#type`** names a render or form element class
-  (`#[RenderElement('details')]`, `#[FormElement('textfield')]`).
-- **Libraries** in `#attached` name entries in `<module>.libraries.yml`.
-
-The Twig support already finds templates outside Symfony, and a
-template's variables from the renders that name it; a theme hook's
-variables would be one more source of them (see `src/twig/variables.rs`).
-
----
-
-## DR8. Permission and configuration names
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$account->hasPermission('administer acme orders');
-\Drupal::config('acme.settings')->get('notify_email');
-```
-
-Permissions are declared in `<module>.permissions.yml` (and by
-permission callbacks), configuration objects in `config/install` and
-`config/schema`. Complete and navigate both, and complete the keys
-`get()` reads from the schema.
-
----
-
-## DR9. Drupal directories outside `contrib` and `custom`
-
-**Impact: Medium-High · Complexity: Low-Medium**
-
-The scan that bypasses `.gitignore` covers `core`, `modules/contrib`,
-`modules/custom`, `themes/contrib`, `themes/custom`, `profiles`, and
-`sites` under the web root. Sites also group modules by vendor
-(`modules/acme/`) or keep them directly under `modules/`, and profiles
-carry their own `modules/` and `themes/`; a module a site's `.gitignore`
-hides in any of those places is not indexed, and its classes read as
-unknown. Scan `modules`, `themes`, and `profiles` whole.
-
-The scan also runs only when the Drupal site is the workspace's Composer
-root. A workspace that holds the site beside other Composer projects, or
-opens a Drupal tree without a `composer.json`, gets none of it. Run it
-for each Composer project in the workspace that requires `drupal/core`,
-and give the scanned classes the same origin (project, vendor) other
-classes get, so completion ranks and filters them the same way.
-
-**Where to look:** `scan_drupal_directories` in
-`src/classmap_scanner/discovery.rs`, its caller in
-`src/indexing/init.rs`, and how per-project Composer roots are handled
-there.
-
----
-
 ## DR10. Plugin IDs
 
 **Impact: Medium · Complexity: Medium**
@@ -145,9 +84,11 @@ Blocks, field types, formatters, widgets, queue workers, and the other
 plugin types declare an ID in an attribute (or, in older code, a
 docblock annotation). Complete and navigate plugin IDs where a plugin
 manager takes one (`createInstance()`, `getDefinition()`,
-`hasDefinition()`), and in the YAML and render arrays that name them
-(`'#type'` is [DR7](#dr7-render-arrays-theme-hooks-and-libraries)), and
-type `createInstance()` as the plugin class.
+`hasDefinition()`), and in the YAML that names them, and type
+`createInstance()` as the plugin class. Render elements, the plugins a
+render array's `'#type'` names, already complete and navigate, and the
+reader that finds their attributes and annotations takes the attribute
+class as a parameter, so the other plugin types can reuse it.
 
 ---
 
@@ -344,3 +285,118 @@ type. Give both the precise type, through the same mechanism as the
 other framework corrections ([E7](external-stubs.md#e7-stub-based-framework-patches)
 if it has shipped), so a `string` parameter takes the plain
 `toString()` and the extender's methods resolve.
+
+---
+
+## DR22. Complete permissions built in code
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$account->hasPermission('create article content');
+$account->hasPermission('use text format basic_html');
+```
+
+Permissions a permissions file builds through its
+`permission_callbacks` neither complete nor go to a definition, since no
+key of the file declares them. Ten of core's permissions files do, among
+them node, taxonomy, media, block content, and filter, which build one
+set of permissions per bundle or text format. Read them from where
+Drupal builds them: each callback returns an array keyed by names such as
+`"create $type_id content"`, and the bundles and formats the names are
+built from are configuration entities (`node.type.*`,
+`filter.format.*`). Their names come from the default configuration,
+and on most sites from the exported configuration, which
+[DR4](#dr4-entity-field-access) reads. A name built from something the
+site's files do not hold could be kept as a pattern, as route builders'
+names are.
+
+---
+
+## DR23. Warn on unknown permission names
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$account->hasPermission('administer acme ordres');
+$account->hasPermission('administer acme+access content');
+```
+
+A permission name no `*.permissions.yml` declares is a typo or a module
+the site lacks, and Drupal does not throw for it: the check fails, and the
+mistake shows only as access denied. `hasPermission()` checks one exact
+name, so `'administer acme+access content'` is a name of its own; `+` and
+`,` only combine permissions in a route's `_permission`. Report a name
+nothing declares wherever permission names are read: the access checks,
+the access result helpers, the user module's role functions, each part of
+a route's `_permission`, and an entity type's `admin_permission`. This
+depends on [DR22](#dr22-complete-permissions-built-in-code): the names
+permission callbacks build would otherwise be reported.
+
+---
+
+## DR24. Warn on unknown theme hook names
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```php
+return ['#theme' => 'acme_order_sumary', '#order' => $order];
+```
+
+A `#theme` that names no theme hook never reaches a template: Drupal
+logs a warning and renders only the array's children and `#markup`. Render element and library names are reported when
+nothing declares them, but theme hook names are not, because the hooks
+read from `hook_theme()` implementations are not all of them. Views, in
+core, and some contributed modules build their hooks in a loop or from
+other calls, which are not read, and a hook name does not say which
+extension declares it, so the only safe rule, silence wherever an
+implementation cannot be read, would silence every site. Report a name
+only once those hooks are read, or with a rule that knows which names
+such an implementation can add. A suggestion such as
+`acme_greeting__compact` is valid when its base hook is.
+
+---
+
+## DR25. Warn on unknown plugin IDs
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$fields['total'] = BaseFieldDefinition::create('decimel');
+$block = $this->blockManager->createInstance('acme_order_sumary');
+```
+
+A plugin ID that no plugin of its type declares is a typo or a module the
+site lacks. The plugin manager throws for it, except for widgets and
+formatters, which silently fall back to the field type's default. Report
+one wherever [DR10](#dr10-plugin-ids) reads plugin IDs: field types,
+widgets and formatters, constraints, and a plugin manager's
+`createInstance()`. A derivative ID (`system_menu_block:main`) is known
+only at run time, so an ID whose base plugin has a deriver must not
+warn. This depends on DR10.
+
+---
+
+## DR26. Annotation class names
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+/**
+ * @Block(
+ *   id = "acme_order_summary",
+ *   admin_label = @Translation("Order summary"),
+ * )
+ */
+final class OrderSummaryBlock extends BlockBase { … }
+```
+
+Plugins written before Drupal 10.2 declare themselves in a docblock
+annotation, and many contributed modules still do. `@Block` and
+`@Translation` name annotation classes, but Drupal's annotated plugin
+discovery finds them without a `use` import: it reads a plugin type's
+annotation class and namespaces from its plugin manager, not from the
+file. Annotations are read through the imports already; resolve a name
+the imports don't cover through the namespaces of the plugin type the
+class is discovered for, so that go-to-definition, hover, and references
+reach the class.

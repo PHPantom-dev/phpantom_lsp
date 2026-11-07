@@ -6,12 +6,16 @@
 //! their own (`config/common/aliases.php` in `yiisoft/app`).  They are read
 //! statically from the params files under `config/`: each one that names
 //! `yiisoft/aliases` is parsed, and the array it gives the key, written in
-//! place or returned by the file it requires, is the aliases.
+//! place or returned by the file it requires, is the aliases.  Where each
+//! one is declared is kept beside the path it names, for navigation.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use mago_syntax::cst::*;
+use tower_lsp_server::gen_lsp_types::{Location, Range};
+
+use crate::Backend;
 
 /// How deep under `config/` a params file is looked for.  `yiisoft/app`
 /// keeps them two levels down (`config/common/params.php`,
@@ -27,6 +31,15 @@ const ALIASES_PARAM: &str = "yiisoft/aliases";
 #[derive(Debug, Default)]
 pub(crate) struct Aliases {
     entries: HashMap<String, String>,
+    declarations: HashMap<String, AliasDeclaration>,
+}
+
+/// Where an alias is declared: the file, and the range of its name's string
+/// there, inside the quotes.
+#[derive(Debug, Clone)]
+pub(crate) struct AliasDeclaration {
+    pub(crate) file: PathBuf,
+    pub(crate) range: Range,
 }
 
 impl Aliases {
@@ -58,7 +71,25 @@ impl Aliases {
                 .iter()
                 .map(|(name, path)| (name.to_string(), path.to_string()))
                 .collect(),
+            declarations: HashMap::new(),
         }
+    }
+
+    /// The names of the declared aliases, sorted.
+    pub(crate) fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.entries.keys().cloned().collect();
+        names.sort_unstable();
+        names
+    }
+
+    /// The path the alias `name` was declared with, as written.
+    pub(crate) fn declared_path(&self, name: &str) -> Option<&str> {
+        self.entries.get(name).map(String::as_str)
+    }
+
+    /// Where the alias `name` is declared.
+    pub(crate) fn declaration(&self, name: &str) -> Option<&AliasDeclaration> {
+        self.declarations.get(name)
     }
 
     /// The path `path` names once its alias is replaced, as Yii's
@@ -112,7 +143,7 @@ impl Aliases {
                                     Expression::Construct(construct) => {
                                         required = required_path(construct, dir);
                                     }
-                                    array => self.read_alias_array(array, dir),
+                                    array => self.read_alias_array(array, file, content),
                                 }
                             }
                         },
@@ -122,25 +153,28 @@ impl Aliases {
             });
         if let Some(required) = required
             && let Ok(content) = std::fs::read_to_string(&required)
-            && let Some(dir) = required.parent()
         {
-            crate::parser::with_parsed_program(&content, "yii_aliases", |program, _| {
+            crate::parser::with_parsed_program(&content, "yii_aliases", |program, content| {
                 for returned in crate::virtual_members::laravel::array_file::returned_exprs(program)
                 {
-                    self.read_alias_array(returned, dir);
+                    self.read_alias_array(returned, &required, content);
                 }
             });
         }
     }
 
-    /// Record the `'@name' => path` entries of an array written in a file
-    /// in `dir`.
-    fn read_alias_array(&mut self, array: &Expression<'_>, dir: &Path) {
+    /// Record the `'@name' => path` entries of an array written in `file`,
+    /// whose text is `content`.
+    fn read_alias_array(&mut self, array: &Expression<'_>, file: &Path, content: &str) {
+        let Some(dir) = file.parent() else {
+            return;
+        };
         let elements = match array {
             Expression::Array(array) => &array.elements,
             Expression::LegacyArray(array) => &array.elements,
             _ => return,
         };
+        let mut lines = None;
         for element in elements.iter() {
             let ArrayElement::KeyValue(entry) = element else {
                 continue;
@@ -154,6 +188,11 @@ impl Aliases {
             let Some(path) = alias_path(entry.value, dir) else {
                 continue;
             };
+            let lines = lines.get_or_insert_with(|| crate::text_position::LineIndex::new(content));
+            let range = Range::new(
+                lines.position(key.span.start.offset as usize + 1),
+                lines.position((key.span.end.offset as usize).saturating_sub(1)),
+            );
             // Yii adds the `@` a name is declared without, and drops the
             // separator a path ends in.
             let name = if name.starts_with('@') {
@@ -161,10 +200,137 @@ impl Aliases {
             } else {
                 format!("@{name}")
             };
+            self.declarations.insert(
+                name.clone(),
+                AliasDeclaration {
+                    file: file.to_path_buf(),
+                    range,
+                },
+            );
             self.entries
                 .insert(name, path.trim_end_matches(['/', '\\']).to_string());
         }
     }
+}
+
+impl Backend {
+    /// Go-to-definition on an alias: the string that declares it.
+    pub(crate) fn yii_alias_definitions(&self, name: &str) -> Vec<Location> {
+        self.yii_aliases()
+            .declaration(name)
+            .and_then(|declaration| {
+                Some(Location {
+                    uri: crate::util::path_to_url(&declaration.file)?,
+                    range: declaration.range,
+                })
+            })
+            .into_iter()
+            .collect()
+    }
+
+    /// The hover detail of a declared alias: the path it is declared with,
+    /// and, when that starts with another alias, the path it resolves to.
+    /// `None` when the project does not declare it.
+    pub(crate) fn yii_alias_detail(&self, name: &str) -> Option<String> {
+        let aliases = self.yii_aliases();
+        let declared = aliases.declared_path(name)?;
+        let shown = |path: &str| {
+            let root = self.workspace.workspace_root.read().clone();
+            root.and_then(|root| {
+                Path::new(path)
+                    .strip_prefix(&root)
+                    .ok()
+                    .filter(|relative| !relative.as_os_str().is_empty())
+                    .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+            })
+            .unwrap_or_else(|| path.to_string())
+        };
+        let mut detail = format!("`{}`", shown(declared));
+        if declared.starts_with('@')
+            && let Some(resolved) = aliases.resolve(declared)
+        {
+            detail.push_str(&format!(", which is `{}`", shown(&resolved)));
+        }
+        Some(detail)
+    }
+}
+
+impl Backend {
+    /// The document links of the strings in `uri` that start with an alias
+    /// and go on to name a file or directory in the project: each covers
+    /// the part after the alias, which the alias itself leaves to
+    /// go-to-definition, and leads to what the whole string names.
+    pub(crate) fn yii_alias_links(&self, uri: &str, content: &str) -> Vec<(usize, usize, PathBuf)> {
+        if !self.is_yii_project() {
+            return Vec::new();
+        }
+        let Some(map) = self.symbol_map_for(uri) else {
+            return Vec::new();
+        };
+        if !map.matches_source(content) {
+            return Vec::new();
+        }
+        let Some(root) = self.workspace.workspace_root.read().clone() else {
+            return Vec::new();
+        };
+        let mut aliases = None;
+        let mut links = Vec::new();
+        for span in map.spans.iter() {
+            let crate::symbol_map::SymbolKind::StringKey {
+                kind: crate::symbol_map::StringKeyKind::YiiAlias,
+                ..
+            } = &span.kind
+            else {
+                continue;
+            };
+            let (start, alias_end) = (span.start as usize, span.end as usize);
+            let Some(end) = string_end(content, start, alias_end) else {
+                continue;
+            };
+            if end == alias_end {
+                continue;
+            }
+            let aliases = aliases.get_or_insert_with(|| self.yii_aliases());
+            let Some(resolved) = aliases.resolve(&content[start..end]) else {
+                continue;
+            };
+            let path = crate::document_links::normalize_path(Path::new(&resolved));
+            if path.starts_with(&root) && path.exists() {
+                links.push((alias_end, end, path));
+            }
+        }
+        links
+    }
+}
+
+/// Where the string whose text starts at `start` ends, read on from
+/// `from`: its closing quote.  `None` for a string with an escape or, in
+/// double quotes, an interpolation, whose text is not the path it names.
+fn string_end(content: &str, start: usize, from: usize) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let quote = *bytes.get(start.checked_sub(1)?)?;
+    if quote != b'\'' && quote != b'"' {
+        return None;
+    }
+    let len = bytes.get(from..)?.iter().position(|&b| b == quote)?;
+    let text = &bytes[from..from + len];
+    if text.contains(&b'\\') || (quote == b'"' && text.contains(&b'$')) {
+        return None;
+    }
+    Some(from + len)
+}
+
+/// The alias the text of a string starts with: an `@`, and the name up to
+/// the first `/`.  A name is letters, digits, `_`, `-`, and `.`, which
+/// leaves out an `@` that starts something other than a path.
+pub(crate) fn alias_prefix(text: &str) -> Option<&str> {
+    let name = text.strip_prefix('@')?;
+    let len = name.find('/').unwrap_or(name.len());
+    let valid = len > 0
+        && name.as_bytes()[..len]
+            .iter()
+            .all(|&b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'));
+    valid.then(|| &text[..len + 1])
 }
 
 /// The path an alias is declared with: a string, which may start with

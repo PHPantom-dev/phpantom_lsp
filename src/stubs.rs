@@ -15,6 +15,7 @@
 //!    - `STUB_CLASS_MAP`: a `(class_name, file_index)` array mapping
 //!      class/interface/trait names to indices into `STUB_FILES`.
 //!    - `STUB_FUNCTION_MAP`: the same for standalone functions.
+//!    - `STUB_FILE_EXTENSIONS`: the extension directory of each file.
 //!
 //! 2. At `Backend` construction time, [`build_stub_class_index`] and
 //!    [`build_stub_function_index`] convert the static arrays into
@@ -77,6 +78,114 @@ pub(crate) fn is_embedded_stub_uri(uri: &str) -> bool {
 /// searched for references, or edited.
 pub(crate) fn is_stub_uri(uri: &str) -> bool {
     is_embedded_stub_uri(uri)
+}
+
+/// Extensions whose phpstorm-stubs directory describes code shipped with
+/// php-src (the engine, its SAPIs, and every extension bundled with it,
+/// including ones since moved to PECL).
+///
+/// Their parameter names are fixed by the PHP version, which the stubs
+/// track.  Every other directory stubs a separately released extension
+/// whose parameter names change from one of its own releases to the next
+/// (the `RedisSentinel` constructor took `$options_or_host` in redis 5 and
+/// `$options` in 6), so the stub cannot be trusted to name them right for
+/// the version a project runs.
+const BUNDLED_EXTENSIONS: &[&str] = &[
+    "apache",
+    "bcmath",
+    "bz2",
+    "calendar",
+    "com_dotnet",
+    "core",
+    "ctype",
+    "curl",
+    "date",
+    "dba",
+    "dom",
+    "enchant",
+    "exif",
+    "ffi",
+    "fileinfo",
+    "filter",
+    "fpm",
+    "ftp",
+    "gd",
+    "gettext",
+    "gmp",
+    "hash",
+    "iconv",
+    "imap",
+    "intl",
+    "json",
+    "ldap",
+    "libxml",
+    "litespeed",
+    "mbstring",
+    "mysqli",
+    "oci8",
+    "odbc",
+    "openssl",
+    "pcntl",
+    "pcre",
+    "pdo",
+    "pgsql",
+    "phar",
+    "phpdbg",
+    "posix",
+    "pspell",
+    "random",
+    "readline",
+    "reflection",
+    "session",
+    "shmop",
+    "simplexml",
+    "snmp",
+    "soap",
+    "sockets",
+    "sodium",
+    "spl",
+    "sqlite3",
+    "standard",
+    "sysvmsg",
+    "sysvsem",
+    "sysvshm",
+    "tidy",
+    "tokenizer",
+    "uri",
+    "xml",
+    "xmlreader",
+    "xmlwriter",
+    "xsl",
+    "zend opcache",
+    "zip",
+    "zlib",
+];
+
+/// Whether `content`, parsed under `uri`, is the phpstorm-stubs file of an
+/// extension php-src does not ship (see [`BUNDLED_EXTENSIONS`]).
+///
+/// An embedded file is recognised by its address, since every caller hands
+/// the embedded `&'static str` on unchanged; a checkout under a stub path
+/// by the directory its file sits in.
+pub(crate) fn is_unbundled_extension_stub(uri: &str, content: &str) -> bool {
+    let extension = STUB_FILES
+        .iter()
+        .position(|file| std::ptr::eq(file.as_ptr(), content.as_ptr()))
+        .map(|i| STUB_FILE_EXTENSIONS[i])
+        .or_else(|| {
+            if is_embedded_stub_uri(uri) {
+                return None;
+            }
+            let mut segments = uri.rsplit('/');
+            segments.next();
+            segments.next()
+        });
+    extension.is_some_and(|ext| {
+        let ext = ext.replace("%20", " ");
+        !BUNDLED_EXTENSIONS
+            .iter()
+            .any(|bundled| bundled.eq_ignore_ascii_case(&ext))
+    })
 }
 
 /// Build a lookup table mapping class/interface/trait short names to their

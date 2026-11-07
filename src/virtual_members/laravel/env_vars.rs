@@ -94,7 +94,7 @@ pub(crate) fn env_declaration(backend: &Backend, key: &str) -> Option<EnvDeclara
     let root = backend.workspace.workspace_root.read().clone()?;
     dotenv_file_names(&root).into_iter().find_map(|file| {
         let content = std::fs::read_to_string(root.join(&file)).ok()?;
-        let value = declared_value(&content, key)?;
+        let value = declared_env_value(&content, key)?;
         Some(EnvDeclaration { file, value })
     })
 }
@@ -172,7 +172,7 @@ fn declared_entry(line: &str) -> Option<(&str, &str)> {
 ///
 /// phpdotenv lets a later line of the same file overwrite an earlier one, so a
 /// redeclared name takes its last value.
-fn declared_value(env_content: &str, key: &str) -> Option<String> {
+pub(crate) fn declared_env_value(env_content: &str, key: &str) -> Option<String> {
     env_content
         .lines()
         .filter_map(declared_entry)
@@ -262,9 +262,12 @@ mod tests {
     #[test]
     fn reads_the_value_a_name_is_set_to() {
         let env = "APP_NAME=Laravel\nAPP_DEBUG=\n";
-        assert_eq!(declared_value(env, "APP_NAME").as_deref(), Some("Laravel"));
-        assert_eq!(declared_value(env, "APP_DEBUG").as_deref(), Some(""));
-        assert_eq!(declared_value(env, "MISSING"), None);
+        assert_eq!(
+            declared_env_value(env, "APP_NAME").as_deref(),
+            Some("Laravel")
+        );
+        assert_eq!(declared_env_value(env, "APP_DEBUG").as_deref(), Some(""));
+        assert_eq!(declared_env_value(env, "MISSING"), None);
     }
 
     /// Quotes belong to the file, not the value, and a `#` only opens a

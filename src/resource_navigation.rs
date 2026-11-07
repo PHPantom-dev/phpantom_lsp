@@ -163,6 +163,7 @@ impl Backend {
     /// one.
     pub(crate) fn update_resource_symbol_index(&self, uri: &str, content: &str) {
         self.note_twig_source(uri, content);
+        self.note_drupal_config_document(uri, Some(content));
         if self.is_resource_uri(uri) {
             self.publish_resource_symbol_index(uri, content);
         } else if self.symbol_map_for(uri).is_some() {
@@ -263,6 +264,7 @@ impl Backend {
                     );
                     let parameters = crate::drupal::routing::twig_parameter_spans(content, &spans);
                     spans.extend(parameters);
+                    spans.extend(crate::drupal::libraries::twig_library_spans(content));
                     spans.sort_by_key(|span| span.start);
                     spans
                 } else {
@@ -307,6 +309,18 @@ impl Backend {
                     spans = crate::drupal::links::links_route_spans(content);
                     spans.extend(crate::drupal::links::links_parameter_spans(content));
                 }
+                crate::drupal::DeclarationFile::Permissions => {
+                    spans = crate::drupal::permissions::permissions_spans(content);
+                }
+                crate::drupal::DeclarationFile::Libraries => {
+                    if let Some(extension) = crate::drupal::libraries::libraries_file_extension(uri)
+                    {
+                        spans = crate::drupal::libraries::libraries_file_spans(extension, content);
+                    }
+                }
+                crate::drupal::DeclarationFile::Info => {
+                    spans = crate::drupal::libraries::info_file_spans(content);
+                }
             }
         } else if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
             declares_twig_loader = crate::symfony::tags::tags_twig_loader(content);
@@ -342,6 +356,11 @@ impl Backend {
             spans.extend(crate::symfony::translations::catalogue_spans(uri, content));
             if crate::symfony::validation::is_validation_mapping_uri(uri) {
                 spans.extend(crate::symfony::validation::validation_spans(uri, content));
+            }
+            if crate::symfony::serializer::is_serializer_mapping_uri(uri) {
+                spans.extend(crate::symfony::serializer::serializer_mapping_spans(
+                    uri, content,
+                ));
             }
             if crate::symfony::config_tree::is_bundle_config_uri(uri) {
                 spans.extend(crate::symfony::config_tree::config_key_spans(content));
@@ -430,6 +449,9 @@ impl Backend {
                 content, &routes,
             ));
             spans.extend(routes);
+        }
+        if self.is_drupal_project() {
+            spans.extend(crate::drupal::libraries::twig_library_spans(content));
         }
         if is_symfony {
             spans.extend(crate::symfony::translations::twig_translation_spans(

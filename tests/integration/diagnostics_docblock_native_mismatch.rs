@@ -200,7 +200,7 @@ class Entry {
         let php = r#"<?php
 class Entry {
     /**
-     * @return string
+     * @return non-empty-string
      */
     public function getPath(): ?string
     {
@@ -209,6 +209,97 @@ class Entry {
 }
 "#;
         assert!(collect(php).is_empty());
+    }
+
+    #[test]
+    fn param_copying_nullable_hint_without_null_is_hinted() {
+        let php = r#"<?php
+/**
+ * @param string $name
+ */
+function greet(?string $name): void {}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert_eq!(
+            diags[0].code,
+            Some(Code::String("docblock_missing_null".to_string()))
+        );
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Hint));
+        let message = message_text(&diags[0].message);
+        assert!(message.contains("'string'"), "{message}");
+        assert!(message.contains("$name"), "{message}");
+        assert!(message.contains("'?string'"), "{message}");
+        // The range covers the `@param` tag, not the signature.
+        assert_eq!(diags[0].range.start.line, 2);
+        assert_eq!(diags[0].range.start.character, 3);
+        assert_eq!(diags[0].range.end.line, 2);
+    }
+
+    #[test]
+    fn union_and_class_hints_without_null_are_hinted() {
+        let php = r#"<?php
+class Foo {}
+/**
+ * @param int|string $id
+ * @param Foo $foo
+ */
+function find(int|string|null $id, ?Foo $foo): void {}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 2, "got: {diags:?}");
+        assert!(
+            diags
+                .iter()
+                .all(|d| d.severity == Some(DiagnosticSeverity::Hint))
+        );
+    }
+
+    #[test]
+    fn return_copying_nullable_hint_without_null_is_hinted() {
+        let php = r#"<?php
+class Entry {
+    /**
+     * @return string The path
+     */
+    public function getPath(): ?string
+    {
+        return $this->path;
+    }
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert_eq!(
+            diags[0].code,
+            Some(Code::String("docblock_missing_null".to_string()))
+        );
+        assert!(message_text(&diags[0].message).contains("Documented return type 'string'"));
+        assert_eq!(diags[0].range.start.line, 3);
+    }
+
+    #[test]
+    fn implicit_nullable_default_does_not_ask_for_null() {
+        // The hint itself never spelled the `null`, so the tag copies it
+        // faithfully.
+        let php = r#"<?php
+/**
+ * @param string $name
+ */
+function greet(string $name = null): void {}
+"#;
+        assert!(collect(php).is_empty(), "got: {:?}", collect(php));
+    }
+
+    #[test]
+    fn vendor_tag_copying_nullable_hint_is_not_hinted() {
+        let php = r#"<?php
+/**
+ * @phpstan-param string $name
+ */
+function greet(?string $name): void {}
+"#;
+        assert!(collect(php).is_empty(), "got: {:?}", collect(php));
     }
 
     #[test]

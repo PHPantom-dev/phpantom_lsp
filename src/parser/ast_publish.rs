@@ -76,13 +76,20 @@ fn declared_function<'a>(
 
 /// Mirror the lowest-sorting declaration of `fqn` into the lookup map,
 /// dropping the name entirely once nothing declares it.
+///
+/// WordPress's script-loader no-ops only win a name nothing else declares
+/// (see [`crate::wordpress::function_file_outranks`]).
 fn publish_winning_function(
     fmap: &mut CiMap<(String, FunctionInfo)>,
     dupes: &mut CiMap<BTreeMap<String, FunctionInfo>>,
     fqn: &str,
 ) {
     let Some(decls) = dupes.get(fqn) else { return };
-    match decls.iter().next() {
+    let winner = decls
+        .iter()
+        .find(|(uri, _)| !crate::wordpress::is_script_loader_noops_uri(uri))
+        .or_else(|| decls.iter().next());
+    match winner {
         Some((uri, info)) => {
             let winner = (uri.clone(), info.clone());
             fmap.insert(fqn.to_string(), winner);
@@ -270,6 +277,15 @@ impl Backend {
             .diag
             .epoch
             .begin_publication(updates.iter().map(|update| update.uri.as_str()));
+
+        let mut connections_changed = false;
+        for update in &updates {
+            connections_changed |= crate::doctrine::connection::record(
+                &self.doctrine_connections,
+                &update.uri,
+                update.doctrine_connections.clone(),
+            );
+        }
 
         let old_classes_by_update: Vec<Vec<Arc<ClassInfo>>> = {
             let uri_classes = self.symbols.uri_classes_index.read();
@@ -500,7 +516,12 @@ impl Backend {
             }
         }
 
-        let changed = structural_changed || !refreshed_existing.is_empty();
+        // What a query's DQL selects is fetched as the connection's driver
+        // gives it, in every file.
+        if connections_changed {
+            self.clear_resolved_class_cache();
+        }
+        let changed = structural_changed || connections_changed || !refreshed_existing.is_empty();
 
         self.reindex_references_for_symbol_maps_batch(reference_items);
 

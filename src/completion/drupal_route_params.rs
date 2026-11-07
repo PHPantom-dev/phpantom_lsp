@@ -115,7 +115,7 @@ impl Backend {
 
 /// The string literal the call whose `(` is at `paren` passes as its
 /// argument `index`, when the argument is one.
-fn string_argument(content: &str, paren: usize, index: usize) -> Option<String> {
+pub(crate) fn string_argument(content: &str, paren: usize, index: usize) -> Option<String> {
     let bytes = content.as_bytes();
     let mut argument = 0;
     let mut depth = 0usize;

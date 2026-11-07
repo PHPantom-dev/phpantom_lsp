@@ -99,11 +99,23 @@ pub(crate) enum ClassRefContext {
     /// backed enum (`value-of<Suit>`) is the one genuine class operand, so
     /// the reference is still recorded and still navigable.
     TypeOperatorOperand,
+    /// As a class name in Doctrine Query Language text, which DQL always
+    /// writes fully qualified.  The name lives in a string, so it is never
+    /// shortened to an import.
+    Dql,
     /// As the target of a `@see` or `{@see …}` docblock tag.
     ///
     /// `@see` legally carries URIs, prose, and naming suggestions in
     /// addition to FQSENs, so an unresolvable target is not an error.
     DocblockSee,
+    /// As the name of a Doctrine-style docblock annotation (`@ORM\Entity`,
+    /// `@Route("/users")`), at the start of a docblock line or nested in
+    /// another annotation's arguments.
+    ///
+    /// The name resolves through the file's imports like any class name, but
+    /// a docblock tag is not obliged to name a class (`@Given`, `@group`),
+    /// so one that resolves to nothing is not an error.
+    Annotation,
 }
 
 /// How a [`SymbolKind::MemberAccess`] span names its member.
@@ -153,6 +165,17 @@ pub(crate) enum DocblockMemberRef {
     /// resolves the subject keeps only what [`crate::mock_methods`]
     /// accepts as a mock, and drops the span otherwise.
     MockedMethod,
+    /// A field name a Doctrine repository call keys its criteria or order
+    /// by, `$users->findBy(['email' => $email])`, with the repository as
+    /// the subject, or one a DQL variable names, `u.email`, with the entity
+    /// or the repository the variable stands for as the subject.
+    ///
+    /// The name is the property of the entity that the field maps.  A
+    /// consumer that resolves the subject swaps each repository for the
+    /// entity it manages and keeps each entity (see
+    /// [`crate::doctrine::managed_entity_classes`]), and drops the span
+    /// when there is neither.
+    EntityField,
     /// A named argument's label in an attribute, `#[Foo(bar: 1)]`, with the
     /// attribute class as the subject.
     ///
@@ -162,6 +185,14 @@ pub(crate) enum DocblockMemberRef {
     /// [`crate::class_lookup::constructor_promotes`]), and drops the span
     /// otherwise.
     AttributeNamedArg,
+    /// A method or property a Yii DI definition names by a key,
+    /// `'setLogger()'` or `'$pageSize'`, with the class the definition
+    /// builds as the subject (see [`crate::yii::definitions`]).
+    ///
+    /// The container calls the method or sets the property on the object
+    /// it builds, and throws for one the class does not have, so it is
+    /// checked.
+    YiiDefinition,
 }
 
 impl DocblockMemberRef {

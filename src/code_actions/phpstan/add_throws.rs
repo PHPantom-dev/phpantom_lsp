@@ -1,6 +1,7 @@
-//! "Add @throws" code action for PHPStan `missingType.checkedException`.
+//! "Add @throws" code action for PHPStan `missingType.checkedException`
+//! and PHPantom's own `unhandled_exception`.
 //!
-//! When PHPStan reports that a method or function throws a checked
+//! When either reports that a method or function throws a checked
 //! exception that is not documented in the `@throws` tag, this code
 //! action offers to:
 //!
@@ -10,7 +11,8 @@
 //!    not already imported.
 //!
 //! **Trigger:** A PHPStan diagnostic with identifier
-//! `missingType.checkedException` overlaps the cursor.
+//! `missingType.checkedException`, or an `unhandled_exception`
+//! diagnostic, overlaps the cursor.
 //!
 //! **Code action kind:** `quickfix`.
 //!
@@ -33,6 +35,9 @@ use crate::code_actions::{
 };
 use crate::completion::use_edit::{
     analyze_use_block_in, build_use_edit, short_name_needs_import, use_import_conflicts,
+};
+use crate::diagnostics::unhandled_exceptions::{
+    UNHANDLED_EXCEPTION_CODE, unhandled_exception_name,
 };
 use crate::parser::with_parsed_program;
 use crate::text_position::{line_start_byte_offset, offset_to_position};
@@ -66,62 +71,105 @@ impl Backend {
                 continue;
             }
 
-            let exception_fqn =
-                match extract_exception_fqn(crate::util::message_text(&diag.message)) {
-                    Some(fqn) => fqn,
-                    None => continue,
-                };
-
-            let short_name = crate::util::short_name(&exception_fqn);
-
-            let block = self.import_block_at(
-                uri,
-                crate::text_position::position_to_byte_offset(
-                    content,
-                    Position::new(diag.range.start.line, 0),
-                ),
-            );
-            let file_use_map = &block.use_map;
-            let file_namespace = &block.namespace;
-
-            // The @throws tag always uses the short name, adding a use
-            // import when it does not already name the exception.
-            let needs_import =
-                short_name_needs_import(&exception_fqn, file_use_map, file_namespace);
-
-            if needs_import && use_import_conflicts(&exception_fqn, file_use_map) {
+            let Some(exception_fqn) =
+                extract_exception_fqn(crate::util::message_text(&diag.message))
+            else {
                 continue;
-            }
-
-            let diag_line = diag.range.start.line as usize;
-            let docblock_info =
-                match function_docblock_at_line(content, diag_line, FunctionKinds::Named) {
-                    Some(info) => info,
-                    None => continue,
-                };
-
-            if docblock_already_has_throws(
-                &docblock_info,
+            };
+            if let Some(action) = self.add_throws_action(
+                uri,
+                content,
+                params,
+                diag,
                 &exception_fqn,
-                file_use_map,
-                file_namespace,
+                "phpstan.addThrows",
             ) {
+                out.push(action);
+            }
+        }
+    }
+
+    /// Collect "Add @throws" code actions for PHPantom's own
+    /// `unhandled_exception` diagnostics.
+    pub(crate) fn collect_unhandled_exception_actions(
+        &self,
+        uri: &str,
+        content: &str,
+        params: &CodeActionParams,
+        out: &mut Vec<CodeActionResponse>,
+    ) {
+        for diag in &params.context.diagnostics {
+            if !matches!(&diag.code, Some(Code::String(code)) if code == UNHANDLED_EXCEPTION_CODE) {
                 continue;
             }
-
-            // ── Phase 1: emit lightweight action with data ──────────
-            let title = format!("Add @throws {}", short_name);
-
-            out.push(deferred_quickfix(
-                title,
-                "phpstan.addThrows",
+            let Some(exception_fqn) =
+                unhandled_exception_name(crate::util::message_text(&diag.message))
+            else {
+                continue;
+            };
+            if let Some(action) = self.add_throws_action(
                 uri,
-                &params.range,
-                vec![diag.clone()],
-                true,
-                serde_json::Value::Null,
-            ));
+                content,
+                params,
+                diag,
+                exception_fqn,
+                "phpantom.addThrows",
+            ) {
+                out.push(action);
+            }
         }
+    }
+
+    /// The deferred "Add @throws" action for `diag`, which reports that
+    /// the function holding it does not document `exception_fqn`, or
+    /// `None` when the tag cannot be added.
+    fn add_throws_action(
+        &self,
+        uri: &str,
+        content: &str,
+        params: &CodeActionParams,
+        diag: &Diagnostic,
+        exception_fqn: &str,
+        action_kind: &str,
+    ) -> Option<CodeActionResponse> {
+        let short_name = crate::util::short_name(exception_fqn);
+
+        let block = self.import_block_at(
+            uri,
+            crate::text_position::position_to_byte_offset(
+                content,
+                Position::new(diag.range.start.line, 0),
+            ),
+        );
+        let file_use_map = &block.use_map;
+        let file_namespace = &block.namespace;
+
+        // The @throws tag always uses the short name, adding a use
+        // import when it does not already name the exception.
+        let needs_import = short_name_needs_import(exception_fqn, file_use_map, file_namespace);
+
+        if needs_import && use_import_conflicts(exception_fqn, file_use_map) {
+            return None;
+        }
+
+        let diag_line = diag.range.start.line as usize;
+        let docblock_info = function_docblock_at_line(content, diag_line, FunctionKinds::Named)?;
+
+        if docblock_already_has_throws(&docblock_info, exception_fqn, file_use_map, file_namespace)
+        {
+            return None;
+        }
+
+        // ── Phase 1: emit lightweight action with data ──────────
+        Some(deferred_quickfix(
+            format!("Add @throws {}", short_name),
+            action_kind,
+            uri,
+            &params.range,
+            vec![diag.clone()],
+            true,
+            serde_json::Value::Null,
+        ))
     }
 
     /// Resolve the "Add @throws" code action by computing the full
@@ -141,7 +189,8 @@ impl Backend {
         let diagnostic_message = data.extra.get("diagnostic_message")?.as_str()?;
         let diagnostic_line = data.extra.get("diagnostic_line")?.as_u64()? as usize;
 
-        let exception_fqn = extract_exception_fqn(diagnostic_message)?;
+        let exception_fqn = extract_exception_fqn(diagnostic_message)
+            .or_else(|| unhandled_exception_name(diagnostic_message).map(str::to_string))?;
         let short_name = crate::util::short_name(&exception_fqn);
 
         let block = self.import_block_at(

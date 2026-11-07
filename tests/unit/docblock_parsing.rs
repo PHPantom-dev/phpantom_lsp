@@ -1045,6 +1045,39 @@ fn effective_type_both_incompatible() {
 }
 
 #[test]
+fn effective_type_drops_doc_members_a_mixed_native_union_cannot_hold() {
+    let effective = |native: &str, doc: &str| {
+        resolve_effective_type_typed(Some(&PhpType::parse(native)), Some(&PhpType::parse(doc)))
+            .map(|t| t.to_string())
+    };
+    // phpstorm-stubs' `socket_import_stream()`.
+    assert_eq!(
+        effective("Socket|false", "resource|Socket|false|null"),
+        Some("Socket|false".into())
+    );
+    assert_eq!(
+        effective("int|false", "positive-int|string|false"),
+        Some("positive-int|false".into())
+    );
+    // `bool` overlaps the native `false`, and a template is not judged.
+    assert_eq!(
+        effective("Foo|false", "Foo<T>|bool|T"),
+        Some("Foo<T>|bool|T".into())
+    );
+    // Nothing survives: the native type stands.
+    assert_eq!(
+        effective("int|false", "string|null"),
+        Some("int|false".into())
+    );
+    assert_eq!(effective("int|false", "?string"), Some("int|false".into()));
+    // A native `null` keeps the docblock's.
+    assert_eq!(
+        effective("?Socket", "resource|Socket|null"),
+        Some("?Socket".into())
+    );
+}
+
+#[test]
 fn effective_type_neither() {
     assert_eq!(
         resolve_effective_type_typed(None, None).map(|t| t.to_string()),

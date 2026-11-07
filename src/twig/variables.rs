@@ -820,6 +820,9 @@ pub(crate) enum OriginKind {
     Template,
     /// A global the project declares.
     Global,
+    /// A variable the Drupal theme hook `hook` declares for its templates:
+    /// a key of its `variables`, or its `render element`.
+    ThemeHook { hook: String },
 }
 
 /// One place a variable a template receives comes from: the file, and the
@@ -898,16 +901,18 @@ impl Backend {
         origins
     }
 
-    /// The globals the framework defines itself, with what each holds.
-    fn twig_framework_globals(&self) -> &'static [(&'static str, &'static str)] {
+    /// The globals the framework defines itself for the template at `uri`,
+    /// with what each holds.
+    fn twig_framework_globals(&self, uri: &str) -> Vec<(&'static str, &'static str)> {
+        let mut globals = Vec::new();
         if self.is_symfony_project() {
-            &[(
+            globals.push((
                 "app",
                 "Symfony's `AppVariable`: the request, the user, the session, and the flash messages",
-            )]
-        } else {
-            &[]
+            ));
         }
+        globals.extend_from_slice(self.drupal_template_default_variables(uri));
+        globals
     }
 
     /// Every variable the template at `uri` is handed by the renders and
@@ -932,6 +937,9 @@ impl Backend {
         if !visited.insert(uri.to_string()) {
             return;
         }
+        // A Drupal template is named by the theme hooks that claim it, not
+        // by a template name.
+        self.collect_drupal_template_received(uri, origins);
         let roots = self.twig_roots();
         let names = crate::util::uri_to_path(uri)
             .map(|path| roots.template_names(&path))
@@ -1038,37 +1046,58 @@ impl Backend {
                 })
                 .map(|span| span.start)
                 .collect();
-            let sites: Vec<&crate::symbol_map::TwigContextSite> = map
-                .twig_contexts
-                .iter()
-                .filter(|site| starts.contains(&site.template_start))
-                .collect();
-            for site in &sites {
-                origins.extend(site.vars.iter().map(|var| Origin {
-                    name: var.name.to_string(),
-                    kind: OriginKind::Render,
-                    uri: file_uri.clone(),
-                    start: var.start,
-                    end: var.end,
-                    value: OriginValue::Php(var.value),
-                }));
-            }
-            // A context passed as a whole names its entries by its type.
-            let shapes: Vec<(u32, u32)> = sites.iter().filter_map(|site| site.shape).collect();
-            if !shapes.is_empty() {
-                for ((start, end), entries) in shapes
+            self.collect_render_site_origins(&file_uri, &map, &starts, |_| true, origins);
+        }
+    }
+
+    /// The variables the renders in the PHP file `file_uri`, whose map is
+    /// `map`, pass: those of the sites keyed by a span starting at one of
+    /// `starts`, whose names `passes` lets through.
+    pub(crate) fn collect_render_site_origins(
+        &self,
+        file_uri: &str,
+        map: &crate::symbol_map::SymbolMap,
+        starts: &[u32],
+        passes: impl Fn(&str) -> bool,
+        origins: &mut Vec<Origin>,
+    ) {
+        let sites: Vec<&crate::symbol_map::TwigContextSite> = map
+            .twig_contexts
+            .iter()
+            .filter(|site| starts.contains(&site.template_start))
+            .collect();
+        for site in &sites {
+            origins.extend(
+                site.vars
                     .iter()
-                    .zip(self.twig_context_shapes(&file_uri, &shapes))
-                {
-                    origins.extend(entries.into_iter().map(|(name, ty)| Origin {
+                    .filter(|var| passes(&var.name))
+                    .map(|var| Origin {
+                        name: var.name.to_string(),
+                        kind: OriginKind::Render,
+                        uri: file_uri.to_string(),
+                        start: var.start,
+                        end: var.end,
+                        value: OriginValue::Php(var.value),
+                    }),
+            );
+        }
+        // A context passed as a whole names its entries by its type.
+        let shapes: Vec<(u32, u32)> = sites.iter().filter_map(|site| site.shape).collect();
+        if !shapes.is_empty() {
+            for ((start, end), entries) in shapes
+                .iter()
+                .zip(self.twig_context_shapes(file_uri, &shapes))
+            {
+                origins.extend(entries.into_iter().filter(|(name, _)| passes(name)).map(
+                    |(name, ty)| Origin {
                         name,
                         kind: OriginKind::Render,
-                        uri: file_uri.clone(),
+                        uri: file_uri.to_string(),
                         start: *start,
                         end: *end,
                         value: OriginValue::Type(ty),
-                    }));
-                }
+                    },
+                ));
             }
         }
     }
@@ -1118,8 +1147,9 @@ impl Backend {
         if declared.is_empty() && origins.is_empty() {
             let builtin = BUILTINS
                 .iter()
-                .chain(self.twig_framework_globals())
-                .find(|(builtin, _)| *builtin == name);
+                .chain(self.twig_framework_globals(uri).iter())
+                .find(|(builtin, _)| *builtin == name)
+                .copied();
             if let Some((_, description)) = builtin {
                 return Resolved::Builtin(description);
             }
@@ -1282,8 +1312,12 @@ impl Backend {
                     }
                 }
                 for origin in &origins {
-                    let line = match origin.kind {
+                    let line = match &origin.kind {
                         OriginKind::Render => format!("Passed by `{}`", relative(&origin.uri)),
+                        OriginKind::ThemeHook { hook } => format!(
+                            "Declared by the theme hook `{hook}` in `{}`",
+                            relative(&origin.uri)
+                        ),
                         OriginKind::Template => {
                             format!("Passed on by `{}`", relative(&origin.uri))
                         }
@@ -1335,7 +1369,7 @@ impl Backend {
         names.extend(
             BUILTINS
                 .iter()
-                .chain(self.twig_framework_globals())
+                .chain(self.twig_framework_globals(uri).iter())
                 .filter(|(name, _)| *name != "loop")
                 .map(|(name, _)| name.to_string()),
         );

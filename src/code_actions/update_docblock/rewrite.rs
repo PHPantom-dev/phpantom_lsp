@@ -8,7 +8,9 @@ use crate::class_lookup::{ResolvedClassLoader, SourceClassLoader};
 use crate::completion::phpdoc::generation::{enrichment_plain, enrichment_plain_typed};
 use crate::php_type::PhpType;
 
-use super::changes::{is_type_contradiction, should_remove_return, should_update_return};
+use super::changes::{
+    is_type_contradiction, should_remove_return, should_update_return, with_null,
+};
 use super::{BodyFacts, DocParam, FunctionWithDocblock, SigParam};
 
 /// The file's imports and class loader, for spelling the types a rewrite
@@ -71,6 +73,12 @@ pub(super) fn build_updated_docblock(
         && let Some(sig_ret) = &info.sig_return
     {
         set_return_type(&mut lines, info, &sig_ret.to_string());
+    } else if let Some(sig_ret) = &info.sig_return
+        && let Some(doc_ret) = &info.doc_return
+        && doc_ret.type_parsed.omits_only_null_of(sig_ret)
+    {
+        let ty = with_null(&doc_ret.type_parsed.to_string(), &doc_ret.type_parsed);
+        set_return_type(&mut lines, info, &ty);
     }
 
     // Body-based @return enrichment.
@@ -187,6 +195,9 @@ fn param_doc_type(
                 .enriched(sig.type_hint.as_ref())
                 .unwrap_or_else(|| native.to_string()),
         );
+    }
+    if existing.type_parsed.omits_only_null_of(native) {
+        return Some(with_null(&existing.type_str_raw, &existing.type_parsed));
     }
     if existing.type_parsed.has_type_structure() {
         // Doc already has generics / callable / shape — keep it.

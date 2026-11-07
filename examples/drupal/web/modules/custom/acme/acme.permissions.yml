@@ -1,0 +1,8 @@
+# Try: find the references of a permission to see the route, the entity
+# type, and the access checks that require it.
+administer acme:
+  title: 'Administer acme'
+  description: 'Change the greeting and manage every note.'
+  restrict access: true
+view acme notes:
+  title: 'View acme notes'

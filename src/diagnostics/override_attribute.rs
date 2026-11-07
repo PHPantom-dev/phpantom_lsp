@@ -197,6 +197,17 @@ fn attribute_target(program: &mago_syntax::cst::Program<'_>, offset: u32) -> Tar
     .unwrap_or(Target::Other)
 }
 
+/// Whether the method `name` of `class` has a prototype: a parent class,
+/// interface, or abstract trait method whose signature it must stay
+/// compatible with.  This is what `#[\Override]` asks for.
+pub(crate) fn method_has_prototype(
+    class: &ClassInfo,
+    name: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> bool {
+    overrides_something(class, name, MemberKind::Method, class_loader)
+}
+
 /// Whether a parent class or interface of `class` declares the member
 /// `name`, as PHP decides it for `#[\Override]`.
 ///

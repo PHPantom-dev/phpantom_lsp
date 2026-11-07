@@ -91,6 +91,14 @@
 //!   unresolved-member-access = true` in `.phpantom.toml`.  Uses
 //!   `Severity::HINT` to surface type-coverage gaps without drowning
 //!   the editor in warnings.
+//! - **Unhandled exception diagnostics** (opt-in) — report a `throw`, or
+//!   a call whose callee declares `@throws`, whose checked exception no
+//!   enclosing `try` catches and the function's own `@throws` does not
+//!   cover.  Off by default; enable via `[diagnostics]
+//!   unhandled-exceptions = true`.
+//! - **Unused parameter diagnostics** (opt-in) — dim trailing
+//!   parameters a function, closure, or method never reads.  Off by
+//!   default; enable via `[diagnostics] unused-parameters = true`.
 //! - **Argument count diagnostics** — report calls where the number of
 //!   arguments does not match the function/method signature.
 //! - **Implementation error diagnostics** — report concrete classes that
@@ -111,6 +119,9 @@
 //! - **Type mismatch diagnostics** — report argument, return, and
 //!   property-assignment values whose type does not satisfy the
 //!   declared/inferred type.
+//! - **String conversion diagnostics** — report an object used as a
+//!   string (`echo`, concatenation, interpolation, a `(string)` cast)
+//!   whose class has no `__toString()`.
 //! - **Member visibility diagnostics** — report a `private` or
 //!   `protected` property, method, or class constant reached from a
 //!   scope PHP does not let see it.  Emitted from the unknown-member
@@ -256,11 +267,13 @@ pub(crate) mod class_name_mismatch;
 mod collect;
 pub(crate) mod cross_file;
 pub(crate) mod data_providers;
+mod dead_catches;
 mod delivery;
 mod deprecated;
 mod destructuring_offsets;
 mod discarded_results;
 mod docblock_native_mismatch;
+pub(crate) mod dql_syntax;
 mod drupal_route_parameters;
 mod dynamic_member_names;
 mod enum_errors;
@@ -276,6 +289,7 @@ mod laravel_string_keys;
 mod match_type_errors;
 pub(crate) mod member_lookup;
 pub(crate) mod member_visibility;
+mod missing_return;
 pub(crate) mod namespace_mismatch;
 mod override_attribute;
 pub(crate) mod parent_calls;
@@ -285,12 +299,16 @@ mod readonly_writes;
 mod return_type_errors;
 mod stale;
 pub(crate) mod state;
+mod string_conversions;
 mod subject_cache;
 pub(crate) mod suppression;
+mod symfony_constraint_options;
+mod symfony_form_options;
 mod syntax_errors;
 mod trait_property_conflicts;
 mod type_errors;
 pub(crate) mod undefined_variables;
+pub(crate) mod unhandled_exceptions;
 mod uninitialized_properties;
 mod uninitialized_reads;
 pub(crate) mod unknown_classes;
@@ -299,9 +317,12 @@ pub(crate) mod unknown_members;
 pub(crate) mod unreachable_code;
 pub(crate) mod unresolved_member_access;
 mod unused_imports;
+pub(crate) mod unused_parameters;
+pub(crate) mod unused_private_members;
 pub(crate) mod unused_variables;
 pub(crate) mod use_statements;
 mod validation_strings;
+mod void_results;
 pub(crate) mod workspace;
 
 use tower_lsp_server::gen_lsp_types::*;

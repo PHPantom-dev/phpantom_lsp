@@ -273,7 +273,9 @@ impl Backend {
                 if hierarchy.is_none()
                     && matches!(
                         docblock_ref,
-                        DocblockMemberRef::MockedMethod | DocblockMemberRef::AttributeNamedArg
+                        DocblockMemberRef::MockedMethod
+                            | DocblockMemberRef::AttributeNamedArg
+                            | DocblockMemberRef::EntityField
                     )
                 {
                     return Vec::new();

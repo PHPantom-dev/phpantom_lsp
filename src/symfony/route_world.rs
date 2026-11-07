@@ -211,6 +211,7 @@ fn read_routing_file(path: &Path, content: &str) -> Option<SymbolMap> {
                 service_container: true,
                 drupal: false,
                 twig: false,
+                doctrine: false,
             },
             None,
             crate::drupal::hooks::DrupalFile::Other,

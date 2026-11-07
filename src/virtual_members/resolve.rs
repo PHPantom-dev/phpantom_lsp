@@ -641,6 +641,19 @@ pub fn resolve_class_for_type_hint(
     // through `Relation`) gets Builder's own methods from the mixin
     // expansion, but the model's scopes only once the model is known.
     laravel::try_inject_mixin_builder_scopes(&mut result, class, generic_args, class_loader);
+    // `EntityRepository<User>` finds the entity its argument names.
+    if !generic_args.is_empty() {
+        let doctrine = cache
+            .map(|c| c.read().doctrine().clone())
+            .unwrap_or_default();
+        crate::doctrine::apply_to_repository(
+            &mut result,
+            class,
+            generic_args,
+            class_loader,
+            &doctrine,
+        );
+    }
 
     let result = Arc::new(result);
     if let Some(c) = cache
@@ -1065,6 +1078,15 @@ fn apply_post_merge_stages(
     // non-Laravel projects.
     if is_laravel {
         apply_laravel_patches(merged, &fqn);
+    }
+
+    // ── Doctrine magic finders ─────────────────────────────────────
+    // A repository bound to its entity through its own `@extends` chain
+    // (`UserRepository extends ServiceEntityRepository<User>`); one bound
+    // by a type argument gets them in `resolve_class_for_type_hint`.
+    if effective_class.parent_class.is_some() {
+        let doctrine = cache.read().doctrine().clone();
+        crate::doctrine::apply_to_repository(merged, effective_class, &[], class_loader, &doctrine);
     }
 }
 

@@ -18,7 +18,8 @@ use crate::types::FileContext;
 
 impl Backend {
     /// Collect `name:` argument completion items inside function/method
-    /// call parentheses.
+    /// call parentheses, together with the values an `#[ExpectedValues]`
+    /// attribute declares for the argument under the cursor.
     ///
     /// Returns an empty `Vec` when the cursor is not in a named-argument
     /// context or when no parameters could be resolved.  The items are
@@ -67,7 +68,11 @@ impl Backend {
             }
         }
 
-        crate::completion::named_args::build_named_arg_completions(&na_ctx, &params)
+        let mut items = self.expected_value_items(&na_ctx, &params, ctx);
+        items.extend(crate::completion::named_args::build_named_arg_completions(
+            &na_ctx, &params,
+        ));
+        items
     }
 
     /// Detect a named-argument context using precomputed [`CallSite`] data
@@ -141,6 +146,7 @@ impl Backend {
             existing_named_args: existing_named,
             positional_count,
             prefix,
+            args_text: args_text.to_string(),
         })
     }
 

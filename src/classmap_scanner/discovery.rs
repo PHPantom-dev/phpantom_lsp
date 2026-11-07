@@ -242,8 +242,10 @@ fn scan_files_parallel_psr4(
 /// stem matches the class's short name displaces one whose stem does not:
 /// a package with conditional loading declares the same trait in
 /// `ArraySubsetAsserts.php` and `ArraySubsetAssertsEmpty.php`, and PSR-4
-/// says the first of those is the real one. The origin tier follows
-/// whichever file the classmap ends up pointing at.
+/// says the first of those is the real one. A function likewise goes to a
+/// later file that [outranks](crate::wordpress::function_file_outranks)
+/// the first. The origin tier follows whichever file the index ends up
+/// pointing at.
 fn merge_scanned_file(
     result: &mut WorkspaceScanResult,
     scan: ScanResult,
@@ -276,11 +278,18 @@ fn merge_scanned_file(
         }
     }
     for fqn in scan.functions {
-        result
-            .function_index
-            .entry(fqn.clone())
-            .or_insert_with(|| path.to_path_buf());
-        result.function_origins.entry(fqn).or_insert(origin);
+        match result.function_index.entry(fqn) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                result.function_origins.insert(e.key().clone(), origin);
+                e.insert(path.to_path_buf());
+            }
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                if crate::wordpress::function_file_outranks(path, e.get()) {
+                    result.function_origins.insert(e.key().clone(), origin);
+                    e.insert(path.to_path_buf());
+                }
+            }
+        }
     }
     for name in scan.constants {
         result
@@ -644,15 +653,10 @@ pub fn scan_drupal_directories(
 ) -> (WorkspaceScanResult, DrupalDeclarationFiles) {
     use ignore::WalkBuilder;
 
-    let drupal_dirs = [
-        "core",
-        "modules/contrib",
-        "modules/custom",
-        "themes/contrib",
-        "themes/custom",
-        "profiles",
-        "sites",
-    ];
+    // Whole folders, not only their `contrib` and `custom` halves: sites
+    // also group modules by vendor (`modules/acme/`), keep them directly
+    // under `modules/`, or ship them inside a profile.
+    let drupal_dirs = ["core", "modules", "themes", "profiles", "sites"];
 
     let mut php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
     let mut declaration_files = DrupalDeclarationFiles::default();
@@ -693,8 +697,14 @@ pub fn scan_drupal_directories(
                 if crate::drupal::is_hook_php_file(path, web_root) {
                     declaration_files.declarations.push(path.to_path_buf());
                 }
+            } else if crate::drupal::config::is_default_config_file(path, web_root) {
+                declaration_files.default_config.push(path.to_path_buf());
+            } else if crate::drupal::config::is_schema_file(path, web_root) {
+                declaration_files.config_schemas.push(path.to_path_buf());
             } else if crate::drupal::is_declaration_file(path, web_root) {
                 declaration_files.declarations.push(path.to_path_buf());
+            } else if crate::drupal::is_template_file(path, web_root) {
+                declaration_files.templates.push(path.to_path_buf());
             }
         }
     }
@@ -716,6 +726,14 @@ pub struct DrupalDeclarationFiles {
     /// The service providers whose `alter()` may give a service another
     /// class (see `drupal::service_providers`).
     pub service_providers: Vec<PathBuf>,
+    /// The default configuration files, which are never parsed (see
+    /// `drupal::config`).
+    pub default_config: Vec<PathBuf>,
+    /// The configuration schema files.
+    pub config_schemas: Vec<PathBuf>,
+    /// The Twig templates theme hooks are drawn with (see
+    /// `drupal::is_template_file`), recorded without being read.
+    pub templates: Vec<PathBuf>,
 }
 
 /// The extensions besides `.php` that Drupal treats as PHP source.

@@ -1,0 +1,12 @@
+{#
+/**
+ * @file
+ * Acme Theme's override of the acme_greeting template.
+ *
+ * Available variables:
+ * - name: The name being greeted.
+ * - greeting: The full greeting text.
+ * - attributes: HTML attributes for the wrapper.
+ */
+#}
+<p{{ attributes.addClass('acme-greeting') }} data-name="{{ name }}"><strong>{{ greeting }}</strong></p>

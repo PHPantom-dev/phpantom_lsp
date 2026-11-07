@@ -315,7 +315,9 @@ pub(crate) fn build_receiver_template_subs(
 
 /// Reads a variable's types from the forward walker's scope, for a
 /// resolution context built mid-walk.
-fn scope_variable_resolver(scope: &ScopeState) -> impl Fn(&str) -> Vec<ResolvedType> + '_ {
+pub(super) fn scope_variable_resolver(
+    scope: &ScopeState,
+) -> impl Fn(&str) -> Vec<ResolvedType> + '_ {
     |var_name: &str| {
         scope
             .locals

@@ -808,6 +808,7 @@ pub(crate) fn merge_param_docblock_into_parameters(
                 closure_this_type: None,
                 param_out_type: None,
                 callable_invocation: None,
+                expected_values: None,
             });
         }
     }

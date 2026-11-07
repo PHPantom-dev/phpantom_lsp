@@ -196,7 +196,9 @@ fn walk_file_for_scopes(
         // foreach, etc.) that lives outside any function body.
         walk_top_level_statements(program.statements.iter(), &default_class, &diag_ctx);
     });
-    record_scope_unreachable(flow.into_unreachable());
+    let (unreachable, catch_types) = flow.into_unreachable();
+    record_scope_unreachable(unreachable);
+    record_scope_catch_types(catch_types);
 }
 
 /// Walk a sequence of top-level (or namespace-level) statements,

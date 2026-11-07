@@ -410,7 +410,18 @@ pub(super) fn resolve_owner_method_call(
         || resolve_call_site_arg_types(method_ref, argument_list, ctx, &resolved_args).to_vec();
 
     let ret_type_string = native_ret_type_string
-        .map(|d| refine_declared_return(d, method_ref, owner, ctx, &call_args));
+        .map(|d| refine_declared_return(d, method_ref, owner, ctx, &call_args))
+        // A method that returns a Doctrine query builder it set up hands
+        // over the DQL the builder carries.
+        .map(|declared| {
+            method_ref
+                .and_then(|method| {
+                    crate::type_engine::call_resolution::builder_returned_by(
+                        owner, method, &declared, &rctx,
+                    )
+                })
+                .unwrap_or(declared)
+        });
 
     let mr_ctx = MethodReturnCtx {
         all_classes: ctx.file.all_classes,

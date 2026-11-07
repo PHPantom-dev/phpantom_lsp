@@ -67,6 +67,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\View;
+use Illuminate\Support\Facades\Vite;
 use Illuminate\View\Factory as ViewFactory;
 
 class Demo
@@ -716,9 +717,35 @@ class Demo
         lang_path('en/messages.php');             // → lang/en/messages.php
         resource_path('views/welcome.blade.php'); // → resources/views/welcome.blade.php
 
-        // public_path() and storage_path() work the same way; this demo
-        // project ships no public/ or storage/ directory to point them at.
+        public_path('css/app.css');               // → public/css/app.css
+
+        // storage_path() works the same way; this demo project ships no
+        // storage/ directory to point it at.
         database_path('factories');               // a directory — completes, no link
+    }
+
+
+    // ── Laravel Assets ──────────────────────────────────────────────────────
+
+    /**
+     * Asset helpers name files on disk: asset() a path under public/, and
+     * Vite::asset() and @vite a source file Vite builds, relative to the
+     * project root. Inertia's Inertia::render() names a page under
+     * resources/js/Pages the same way.
+     *
+     * Try:
+     *  1. Ctrl+Click "css/app.css" to jump to public/css/app.css.
+     *  2. Trigger completion inside `asset('|')` — offers the entries of
+     *     public/, a directory at a time.
+     *  3. Change "resources/js/app.js" to "resources/js/ap.js" to see the
+     *     unknown Vite asset reported.
+     */
+    public function laravelAssets(): void
+    {
+        asset('css/app.css');                     // → public/css/app.css
+        asset('images/logo.svg?v=2');             // the query string is not part of the path
+        URL::asset('css/app.css');
+        Vite::asset('resources/js/app.js');       // → resources/js/app.js
     }
 
 

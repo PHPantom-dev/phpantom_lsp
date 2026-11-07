@@ -492,6 +492,49 @@ fn applies_migration_table_drop_rename_and_connections() {
 }
 
 #[test]
+fn records_the_migrations_that_shape_each_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("database/migrations")).unwrap();
+    let create = r#"<?php return new class { public function up(): void { Schema::create('drafts', function (Blueprint $table): void { $table->id(); }); } };"#;
+    let rename = r#"<?php return new class { public function up(): void { Schema::table('drafts', function (Blueprint $table): void { $table->string('title'); }); Schema::rename('drafts', 'articles'); } };"#;
+    let alter = r#"<?php return new class { public function up(): void { Schema::table('articles', function (Blueprint $table): void { $table->text('body'); }); Schema::table('articles', function (Blueprint $table): void { $table->text('summary'); }); } };"#;
+    for (name, content) in [
+        ("2024_01_01_000000_create_drafts.php", create),
+        ("2024_02_01_000000_rename_drafts.php", rename),
+        ("2024_03_01_000000_add_body.php", alter),
+    ] {
+        std::fs::write(root.join("database/migrations").join(name), content).unwrap();
+    }
+
+    let index = load_schema_index(root, &LaravelConfig::default(), &HashMap::new()).unwrap();
+    let sites: Vec<(String, &str)> = index
+        .table_migrations("default", "ARTICLES")
+        .map(|(path, content, offset)| {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            (name, &content[offset as usize..offset as usize + 10])
+        })
+        .collect();
+    // A table keeps the migrations it went through under its old name, and
+    // a migration that names it twice is listed once, at the first call.
+    assert_eq!(
+        sites,
+        vec![
+            (
+                "2024_01_01_000000_create_drafts.php".to_string(),
+                "'drafts', "
+            ),
+            (
+                "2024_02_01_000000_rename_drafts.php".to_string(),
+                "'drafts', "
+            ),
+            ("2024_03_01_000000_add_body.php".to_string(), "'articles'"),
+        ]
+    );
+    assert_eq!(index.table_migrations("default", "drafts").count(), 0);
+}
+
+#[test]
 fn loads_checked_in_laravel_migration_fixtures() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/laravel_migrations");
     let index = load_schema_index(&root, &LaravelConfig::default(), &HashMap::new()).unwrap();

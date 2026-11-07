@@ -24,10 +24,12 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_twig_global_declarations(class, ctx);
     emit_yii_route_argument_spans(class, ctx);
     emit_drupal_entity_type_spans(class, ctx);
+    emit_drupal_render_element_spans(class, ctx);
     emit_drupal_route_attribute_spans(class, ctx);
     emit_drupal_hook_attribute_spans(class, ctx);
     emit_drupal_computed_hook_sites(&class.members, class.name.span.start.offset, ctx);
     emit_drupal_route_builder_spans(&class.members, class.name.span.start.offset, ctx);
+    emit_drupal_editable_config_spans(&class.members, ctx);
 
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {
@@ -363,6 +365,16 @@ pub(super) fn extract_from_attribute_lists<'a>(
                 // result with a template.
                 if is_template_attribute(semantic_class_name) {
                     emit_template_attribute_span(arg_list, ctx);
+                }
+
+                // `#[Groups(['user:read'])]` puts a member in serializer
+                // groups, and `#[Context]` and `#[MapRequestPayload]` name
+                // the groups they serialize with.
+                if ctx.symfony
+                    && let Some(attribute) =
+                        crate::symfony::serializer::groups_attribute(semantic_class_name)
+                {
+                    emit_serializer_group_spans(attribute, arg_list, ctx);
                 }
 
                 // `#[Middleware('auth')]` on a controller or an action names
@@ -710,6 +722,8 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         let s = body.left_brace.start.offset;
         let e = body.right_brace.end.offset;
         ctx.scopes.push((s, e));
+        note_dql_body(s, body.statements.as_slice(), ctx);
+        note_dql_method(s, method, ctx);
         if is_static {
             ctx.static_method_scopes.push((s, e));
         } else {
@@ -870,6 +884,7 @@ fn extract_from_hook<'a>(hook: &'a PropertyHook<'a>, ctx: &mut ExtractionCtx<'a>
 
     match body {
         PropertyHookConcreteBody::Block(block) => {
+            note_dql_body(scope_start, block.statements.as_slice(), ctx);
             for stmt in block.statements.iter() {
                 extract_from_statement(stmt, ctx, scope_start);
             }
@@ -1002,6 +1017,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
     let func_scope_start = func.body.left_brace.start.offset;
     let func_scope_end = func.body.right_brace.end.offset;
     ctx.scopes.push((func_scope_start, func_scope_end));
+    note_dql_body(func_scope_start, func.body.statements.as_slice(), ctx);
 
     // Emit Variable spans and VarDefSite markers for `@param $varName`
     // tokens in the docblock so that rename and find-references cover

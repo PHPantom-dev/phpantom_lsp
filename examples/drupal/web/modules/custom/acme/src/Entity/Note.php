@@ -23,6 +23,8 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
         'label' => 'title',
     ],
     base_table: 'acme_note',
+    // Try: complete a permission inside `admin_permission: ''`.
+    admin_permission: 'administer acme',
 )]
 final class Note extends ContentEntityBase
 {

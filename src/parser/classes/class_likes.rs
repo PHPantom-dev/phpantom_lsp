@@ -251,6 +251,11 @@ pub(super) fn extract_class<'a>(
         class_docblock_start: doc_info.docblock_start,
         doc_members: doc_info.doc_members,
         attribute_targets: attr_targets,
+        doctrine: attributes::extract_doctrine_mapping(
+            &class.attribute_lists,
+            class.members.iter(),
+            doc_ctx,
+        ),
         laravel: Some(Box::new(laravel_metadata)),
         ..Default::default()
     }
@@ -405,6 +410,11 @@ pub(super) fn extract_trait<'a>(
         class_docblock: doc_info.raw_docblock,
         class_docblock_start: doc_info.docblock_start,
         doc_members: doc_info.doc_members,
+        doctrine: attributes::extract_doctrine_mapping(
+            &trait_def.attribute_lists,
+            trait_def.members.iter(),
+            doc_ctx,
+        ),
         laravel,
         ..Default::default()
     }

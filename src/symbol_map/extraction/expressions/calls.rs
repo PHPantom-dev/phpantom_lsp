@@ -45,6 +45,9 @@ pub(super) fn extract_instantiation_expr<'a>(
         emit_symfony_instantiation_spans(inst.class, args, ctx);
         emit_twig_callable_instantiation(inst.class, args, ctx);
         emit_drupal_url_spans(inst.class, args, ctx);
+        emit_drupal_route_permission_spans(inst.class, args, ctx);
+        emit_drupal_config_target_spans(inst.class, args, ctx);
+        record_dql_instantiation(inst.class, args, ctx, scope_start);
         if !class_text.is_empty() {
             emit_call_site(
                 format!("new {}", class_text),
@@ -407,6 +410,20 @@ fn extract_function_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                // `@vite(['resources/css/app.css', 'resources/js/app.js'])`
+                // names every entry point it loads.
+                Some(kind @ crate::symbol_map::StringKeyKind::ViteAsset) => {
+                    try_emit_laravel_string_spans_listed(
+                        kind,
+                        &func_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // A second argument points `mix()` at the manifest of
+                // another build directory, which is not the one read.
+                Some(crate::symbol_map::StringKeyKind::MixAsset)
+                    if func_call.argument_list.arguments.len() > 1 => {}
                 Some(kind) => {
                     try_emit_laravel_string_span(
                         kind,
@@ -423,6 +440,7 @@ fn extract_function_call<'a>(
                 ctx,
             );
             emit_wordpress_hook_span(raw, &func_call.argument_list, ctx);
+            emit_drupal_function_permission_spans(raw, &func_call.argument_list, ctx);
             if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
                 ctx.content,
                 name_clean,
@@ -452,6 +470,10 @@ fn extract_function_call<'a>(
             extract_from_expression(func_call.function, ctx, scope_start);
         }
     }
+    ctx.value_calls.push((
+        func_call.span().start.offset,
+        func_call.argument_list.left_parenthesis.end.offset,
+    ));
     let func_text = invoked_callee_text(func_call.function);
     if !func_text.is_empty() {
         emit_call_site(
@@ -490,10 +512,26 @@ fn extract_method_call<'a>(
         record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
         record_drupal_route_parameter_sites(&member_name, argument_list, ctx);
         record_drupal_hook_invocations(&member_name, argument_list, ctx);
+        emit_drupal_requirement_permission_spans(&member_name, argument_list, ctx);
+        record_drupal_config_list_sites(&member_name, argument_list, ctx);
+        record_drupal_config_key_sites(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
+        emit_entity_field_spans(object, &member_name, argument_list, ctx);
+        record_dql_call(
+            object,
+            &member_name,
+            ident.span.start.offset,
+            argument_list,
+            ctx,
+            scope_start,
+        );
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
+        ctx.value_calls.push((
+            object.span().start.offset,
+            argument_list.left_parenthesis.end.offset,
+        ));
         emit_call_site(
             format!("{}->{}", subject_text, member_name),
             argument_list,
@@ -552,6 +590,12 @@ fn extract_static_method_call<'a>(
 
     if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
         let member_name = crate::atom::atom_bytes(ident.value);
+        record_dql_passes(
+            ident.span.start.offset,
+            &static_call.argument_list,
+            ctx,
+            scope_start,
+        );
         if member_name.eq_ignore_ascii_case("macro") {
             try_emit_laravel_macro_string_span(
                 &static_call.argument_list,
@@ -565,6 +609,10 @@ fn extract_static_method_call<'a>(
             &static_call.argument_list,
             ctx,
         );
+        ctx.value_calls.push((
+            static_call.span().start.offset,
+            static_call.argument_list.left_parenthesis.end.offset,
+        ));
         emit_call_site(
             format!("{}::{}", subject_text, member_name),
             &static_call.argument_list,
@@ -610,6 +658,14 @@ fn extract_static_method_call<'a>(
                 &mut ctx.spans,
             );
         }
+        if ctx.drupal && crate::drupal::is_config_lookup(semantic_subject, &member_name) {
+            try_emit_laravel_string_span(
+                crate::symbol_map::StringKeyKind::DrupalConfigName,
+                &static_call.argument_list,
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
         if ctx.drupal && crate::drupal::is_entity_query(semantic_subject, &member_name) {
             try_emit_laravel_string_span(
                 crate::symbol_map::StringKeyKind::DrupalEntityType,
@@ -624,6 +680,12 @@ fn extract_static_method_call<'a>(
         {
             emit_drupal_route_span(index, &static_call.argument_list, ctx);
         }
+        emit_drupal_static_permission_spans(
+            semantic_subject,
+            &member_name,
+            &static_call.argument_list,
+            ctx,
+        );
     }
     extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);
 }
@@ -721,6 +783,7 @@ mod tests {
                 service_container: true,
                 drupal,
                 twig: false,
+                doctrine: false,
             },
             None,
         );
@@ -765,6 +828,7 @@ mod tests {
                 service_container: true,
                 drupal: false,
                 twig: true,
+                doctrine: false,
             },
             None,
         );

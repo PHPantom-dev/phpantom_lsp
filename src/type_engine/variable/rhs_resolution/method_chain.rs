@@ -72,8 +72,25 @@ pub(super) fn resolve_method_chain<'b>(
         links.push(link);
     }
 
+    // A link the walker typed before a call in the chain changed what it
+    // reads (`$qb->from(…)` in `$qb->from(…)->getQuery()`, where the call
+    // changes `$qb`) is what the rest of the chain was handed, so the fold
+    // starts there rather than at a base that now reads the changed scope.
+    // The outermost link is the expression itself, which the caller has
+    // already looked up.
     let mut receiver: Option<MethodReceiver> = None;
-    for link in links.iter().rev() {
+    let mut fold = links.len();
+    if let Some((index, recorded)) = links
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(index, link)| Some((index, ctx.recorded_expr_type(link.call)?)))
+    {
+        let recorded = recorded.to_vec();
+        receiver = Some((ResolvedType::into_arced_classes(recorded.clone()), recorded));
+        fold = index;
+    }
+    for link in links[..fold].iter().rev() {
         let (owners, receiver_resolved) =
             receiver.unwrap_or_else(|| resolve_method_receiver(link.object, ctx));
         let nullability = ReceiverNullability::of(&receiver_resolved);

@@ -1,0 +1,51 @@
+// test: ctype_digit() narrows a string to a numeric string and an integer to the ones whose spelling is digits
+// feature: hover
+// expect_hover: $digits => $digits = numeric-string
+// expect_hover: $notDigits => $notDigits = string
+// expect_hover: $digitInt => $digitInt = int<48, 57>|int<256, max>
+// expect_hover: $otherInt => $otherInt = int<min, 47>|int<58, 255>
+// expect_hover: $byte => $byte = int<50, 57>
+// expect_hover: $either => $either = int<48, 57>|int<256, max>|numeric-string
+// expect_hover: $digitLiteral => $digitLiteral = '0042'
+// expect_hover: $kept => $kept = numeric-string
+// expect_hover: $failedNullable => $failedNullable = ?string
+// expect_hover: $passedNullable => $passedNullable = numeric-string
+---
+<?php
+
+/**
+ * @param int<50, 300> $range
+ * @param '0042'|'-1'|'' $literal
+ * @param numeric-string $numeric
+ */
+function test(string $s, int $n, int $range, int|string|null $mixed, string $literal, string $numeric, ?string $maybe): void {
+    if (ctype_digit($s)) {
+        $digits = $s;
+    } else {
+        $notDigits = $s;
+    }
+    if (ctype_digit($n)) {
+        $digitInt = $n;
+    } else {
+        $otherInt = $n;
+    }
+    if (!ctype_digit($range) || $range > 255) {
+        return;
+    }
+    $byte = $range;
+    if (ctype_digit($mixed)) {
+        $either = $mixed;
+    }
+    if (ctype_digit($literal)) {
+        $digitLiteral = $literal;
+    }
+    if (!ctype_digit($numeric)) {
+        $kept = $numeric;
+    }
+    if (ctype_digit($maybe)) {
+        $passedNullable = $maybe;
+    } else {
+        $failedNullable = $maybe;
+    }
+    $<>kept;
+}

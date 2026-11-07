@@ -172,8 +172,13 @@ impl Backend {
                 } => {
                     // A mock expectation names the method it stubs rather
                     // than calling it, and a deprecated method is still one
-                    // a test has to mock.
-                    if *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod {
+                    // a test has to mock.  A repository call's field name is
+                    // a column the query reads, not the property.
+                    if matches!(
+                        docblock_ref,
+                        crate::symbol_map::DocblockMemberRef::MockedMethod
+                            | crate::symbol_map::DocblockMemberRef::EntityField
+                    ) {
                         continue;
                     }
                     let subject_ctx =

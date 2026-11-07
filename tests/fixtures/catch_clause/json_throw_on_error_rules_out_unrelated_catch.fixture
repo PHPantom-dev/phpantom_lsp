@@ -1,0 +1,18 @@
+// test: json_decode() with JSON_THROW_ON_ERROR throws only JsonException, so an unrelated catch is not joined
+// feature: hover
+// expect: $s
+// expect_absent: caught
+---
+<?php
+
+class QueueError extends \Exception {}
+
+function test(string $json): void {
+    $s = 1;
+    try {
+        json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+    } catch (QueueError $e) {
+        $s = 'caught';
+    }
+    echo $<>s;
+}

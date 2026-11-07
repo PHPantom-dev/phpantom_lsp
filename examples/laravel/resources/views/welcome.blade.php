@@ -11,6 +11,8 @@
 <html lang="{{ config('app.locale') }}">
 <head>
     <title>{{ config('app.name') }} - {{ __('messages.welcome') }}</title>
+    {{-- Try: Ctrl+Click the entry point to open resources/js/app.js. --}}
+    @vite(['resources/js/app.js'])
 </head>
 <body>
     <h1>{{ __('messages.welcome') }}</h1>

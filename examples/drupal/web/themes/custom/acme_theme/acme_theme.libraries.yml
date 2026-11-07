@@ -1,0 +1,7 @@
+global:
+  version: 1.x
+  css:
+    theme:
+      css/global.css: {}
+  dependencies:
+    - acme/greeting

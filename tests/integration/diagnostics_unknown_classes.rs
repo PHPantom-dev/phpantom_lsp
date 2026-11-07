@@ -11,6 +11,29 @@ mod tests {
         collect_diagnostics_with(backend, content, Backend::collect_unknown_class_diagnostics)
     }
 
+    /// A capitalised docblock tag is read as an annotation class, but one
+    /// with no class behind it (`@Given`, `@SuppressWarnings`) is not an
+    /// error: tools define tags like these without declaring a class.
+    #[test]
+    fn unresolved_annotation_is_not_reported() {
+        let backend = Backend::new_test();
+        let content = r#"<?php
+namespace App;
+
+/**
+ * @Given there is a user
+ * @SuppressWarnings(PHPMD.StaticAccess)
+ */
+function f(): void {}
+"#;
+        let diags = collect(&backend, content);
+        assert!(
+            diags.is_empty(),
+            "{:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
     /// PHP class names are case-insensitive (B25): `new stdclass()` and
     /// `extends \pdo` refer to the built-in classes and must not be
     /// flagged as unknown.

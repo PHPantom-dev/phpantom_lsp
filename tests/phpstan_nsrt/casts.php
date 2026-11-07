@@ -98,7 +98,7 @@ class Foo extends Bar
 		$boolToInt = (int) $boolParam;
 		$boolToFloat = (float) $boolParam;
 		$boolToString = (string) $boolParam;
-		assertType('int', $boolToInt);
+		assertType('0|1', $boolToInt); // upstream expected int, current PHPStan gives 0|1 too
 		assertType('float', $boolToFloat);
 		assertType("''|'1'", $boolToString);
 	}

@@ -1,0 +1,11 @@
+doctrine:
+    dbal:
+        # The driver the URL's scheme names decides what the database gives
+        # back for a DQL expression like AVG().
+        url: 'sqlite:///%kernel.project_dir%/var/data.db'
+    orm:
+        mappings:
+            App:
+                type: xml
+                dir: '%kernel.project_dir%/config/doctrine'
+                prefix: 'App\Entity'

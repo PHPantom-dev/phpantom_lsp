@@ -1144,9 +1144,12 @@ pub fn translate_directive(directive: &str) -> String {
         // render directive's data array, so it gets a marker of its own.
         "each" => markers::EACH.to_string(),
         "slot" | "props" | "aware" | "class" | "style" | "checked" | "selected" | "disabled"
-        | "readonly" | "required" | "json" | "dump" | "js" | "vite" | "fonts" | "dd" => {
+        | "readonly" | "required" | "json" | "dump" | "js" | "fonts" | "dd" => {
             markers::DIRECTIVE.to_string()
         }
+        // `@vite` names its entry points, a key symbol extraction
+        // recognises by the callee it is passed to.
+        "vite" => markers::VITE.to_string(),
         // `@lang('key')` and `@choice('key', $n)` compile to
         // `app('translator')->get('key')` / `->choice('key', $n)`, so they
         // lower to the real helper calls rather than the generic

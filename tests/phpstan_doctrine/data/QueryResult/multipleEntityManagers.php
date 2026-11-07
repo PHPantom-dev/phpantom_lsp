@@ -18,8 +18,8 @@ class MultipleEntityManagers
 	{
 		$query = $repository->createQueryBuilder('u')->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\MultipleEntityManagers\Main\User>', $query); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('list<QueryResult\MultipleEntityManagers\Main\User>', $query->getResult()); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\MultipleEntityManagers\Main\User>', $query);
+		assertType('list<QueryResult\MultipleEntityManagers\Main\User>', $query->getResult());
 	}
 
 	/**
@@ -29,45 +29,45 @@ class MultipleEntityManagers
 	{
 		$query = $repository->createQueryBuilder('a')->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\MultipleEntityManagers\Tenant\App>', $query); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('list<QueryResult\MultipleEntityManagers\Tenant\App>', $query->getResult()); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\MultipleEntityManagers\Tenant\App>', $query);
+		assertType('list<QueryResult\MultipleEntityManagers\Tenant\App>', $query->getResult());
 	}
 
 	public function directTenantQuery(EntityManagerInterface $entityManager): void
 	{
 		$query = $entityManager->createQuery('SELECT a FROM QueryResult\MultipleEntityManagers\Tenant\App a');
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\MultipleEntityManagers\Tenant\App>', $query); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('list<QueryResult\MultipleEntityManagers\Tenant\App>', $query->getResult()); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\MultipleEntityManagers\Tenant\App>', $query);
+		assertType('list<QueryResult\MultipleEntityManagers\Tenant\App>', $query->getResult());
 	}
 
 	public function directDefaultQuery(EntityManagerInterface $entityManager): void
 	{
 		$query = $entityManager->createQuery('SELECT u FROM QueryResult\MultipleEntityManagers\Main\User u');
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\MultipleEntityManagers\Main\User>', $query); // SKIP: Doctrine DQL and query builder result types are not read
-		assertType('list<QueryResult\MultipleEntityManagers\Main\User>', $query->getResult()); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\MultipleEntityManagers\Main\User>', $query);
+		assertType('list<QueryResult\MultipleEntityManagers\Main\User>', $query->getResult());
 	}
 
 	public function directTenantDelete(EntityManagerInterface $entityManager): void
 	{
 		$query = $entityManager->createQuery('DELETE QueryResult\MultipleEntityManagers\Tenant\App a');
 
-		assertType('Doctrine\ORM\Query<void, void>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<void, void>', $query);
 	}
 
 	public function directTenantDeleteWithFrom(EntityManagerInterface $entityManager): void
 	{
 		$query = $entityManager->createQuery('DELETE FROM QueryResult\MultipleEntityManagers\Tenant\App a');
 
-		assertType('Doctrine\ORM\Query<void, void>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<void, void>', $query);
 	}
 
 	public function directTenantUpdate(EntityManagerInterface $entityManager): void
 	{
 		$query = $entityManager->createQuery('UPDATE QueryResult\MultipleEntityManagers\Tenant\App a SET a.id = :id');
 
-		assertType('Doctrine\ORM\Query<void, void>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<void, void>', $query);
 	}
 
 }

@@ -291,6 +291,54 @@ class Child extends Base {
     }
 
     #[test]
+    fn trait_method_alias_satisfies_abstract_method() {
+        let php = r#"<?php
+abstract class Base {
+    abstract protected function isSafe(string $url): bool;
+}
+
+trait Local {
+    protected function isLocal(string $url): bool { return true; }
+    abstract protected function other(): void;
+}
+
+class Qualified extends Base {
+    use Local { Local::isLocal as isSafe; }
+    protected function other(): void {}
+}
+
+class Unqualified extends Base {
+    use Local { isLocal as protected isSafe; }
+    protected function other(): void {}
+}
+
+abstract class Middle extends Base {
+    use Local { isLocal as isSafe; }
+}
+
+class Leaf extends Middle {
+    protected function other(): void {}
+}
+
+abstract class Needs { abstract public function run(): void; }
+
+class AliasOfAbstract extends Needs {
+    use Local { other as run; }
+    protected function other(): void {}
+}
+"#;
+        let messages: Vec<String> = collect(php)
+            .iter()
+            .map(|d| message_text(&d.message).to_string())
+            .collect();
+        assert_eq!(
+            messages,
+            ["Class 'AliasOfAbstract' must implement method 'run()' from class 'Needs'"],
+            "an alias of a concrete trait method implements the abstract method it names"
+        );
+    }
+
+    #[test]
     fn nested_trait_satisfies_interface() {
         let php = r#"<?php
 interface HasLabel {

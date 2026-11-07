@@ -212,6 +212,46 @@ function run(Pen $pen, Ink $ink): void {
     assert!(text.contains("Pen"), "should resolve to Pen: {text}");
 }
 
+/// A body read from a file loaded through PSR-4, never opened, resolves the
+/// names it writes through that file's own imports.
+#[tokio::test]
+async fn hover_untyped_method_in_unopened_file_reads_body_with_its_imports() {
+    let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
+    let user = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let decoy = "<?php\nnamespace App\\Repository;\nclass User {}\n";
+    let queries = concat!(
+        "<?php\n",
+        "namespace App\\Repository;\n",
+        "use App\\Entity\\User;\n",
+        "final class Queries {\n",
+        "    public function make() { return new User(); }\n",
+        "}\n",
+    );
+    let service = concat!(
+        "<?php\n",
+        "namespace App\\Service;\n",
+        "use App\\Repository\\Queries;\n",
+        "function run(Queries $queries): void {\n",
+        "    $made = $queries->make();\n",
+        "}\n",
+    );
+    let (backend, dir) = create_psr4_workspace(
+        composer,
+        &[
+            ("src/Entity/User.php", user),
+            ("src/Repository/User.php", decoy),
+            ("src/Repository/Queries.php", queries),
+            ("src/Service/Users.php", service),
+        ],
+    );
+    let uri = Uri::from_file_path(dir.path().join("src/Service/Users.php")).unwrap();
+    open_php(&backend, &uri, service).await;
+
+    let text = markup_hover_at(&backend, &uri, 4, 6).await;
+    assert!(text.contains("namespace App\\Entity;"), "{text}");
+    assert!(text.contains("$made = User"), "{text}");
+}
+
 /// An arrow function's body writes what `return <expr>;` would, so a
 /// variable assigned there is in the arrow's scope, and reads the scope
 /// `Closure::call()` binds rather than the lexical `$this`.
@@ -9210,6 +9250,26 @@ function formatUtfDate(string $tz): void {
 }
 
 #[test]
+fn hover_variable_keeps_class_strings_sharing_a_short_name_apart() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+namespace App;
+
+/** @param class-string<\App\C>|class-string<\Other\C> $s */
+function foo(string $s): void {
+    $s;
+}
+"#;
+
+    let text = crate::common::hover_last(&backend, content, "$s;");
+    assert!(
+        text.contains("$s = class-string<\\App\\C>|class-string<\\Other\\C>"),
+        "both classes should be shown, got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_function_shows_class_string_param_type() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
@@ -15146,6 +15206,29 @@ class Demo {
     );
 }
 
+/// PHP converts an `int` returned through a declared `float` to a float, so
+/// the closure returns `float` however its body computes the value.
+#[test]
+fn hover_closure_declared_float_return_is_not_narrowed_to_int() {
+    let backend = create_test_backend();
+    let uri = "file:///closure_float_return.php";
+    let content = r#"<?php
+function test(): void {
+    $half = static fn (int $x): float => $x / 2;
+    $same = fn (int $x): int|float => $x;
+    $half;
+    $same;
+}
+"#;
+
+    let hover =
+        hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $half")).to_string();
+    assert!(hover.contains("Closure(int): float"), "{hover}");
+    let hover =
+        hover_text(&hover_at(&backend, uri, content, 5, 6).expect("hover $same")).to_string();
+    assert!(hover.contains("Closure(int): int"), "{hover}");
+}
+
 #[test]
 fn hover_generator_closure_infers_return_type() {
     let backend = create_test_backend();
@@ -17353,4 +17436,24 @@ async fn test_hover_attribute_named_argument() {
         hover.is_none_or(|text| !text.contains("The label of the thing")),
         "a label naming a plain parameter is not the property of its name"
     );
+}
+
+/// `foreach` over a `RecursiveIteratorIterator` binds the key and value the
+/// wrapped iterator iterates as, not the iterator itself.
+#[test]
+fn recursive_iterator_iterator_binds_the_wrapped_key_and_value() {
+    let backend = create_test_backend_with_full_stubs();
+    let php = r#"<?php
+/** @param array<string, int> $data */
+function size(array $data): void {
+    $leaves = new RecursiveIteratorIterator(new RecursiveArrayIterator($data));
+    foreach ($leaves as $key => $datum) {
+        echo $datum, $key;
+    }
+}
+"#;
+    let value = crate::common::hover_last(&backend, php, "$datum, $key");
+    assert!(value.contains("$datum = int"), "{value}");
+    let key = crate::common::hover_last(&backend, php, "$key;");
+    assert!(key.contains("$key = string"), "{key}");
 }

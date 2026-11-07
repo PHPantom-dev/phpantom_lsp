@@ -17,6 +17,7 @@ fn params(names: &[&str]) -> Vec<ParameterInfo> {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         })
         .collect()
 }

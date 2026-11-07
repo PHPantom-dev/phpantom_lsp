@@ -268,6 +268,10 @@ pub struct LaravelMetadata {
     /// which policy governs the model, so the abilities a `$user->can(…)`
     /// check may name are read from the declared class.
     pub policy_class: Option<String>,
+    /// The observers and API resources a model names in its class
+    /// attributes, for navigating from the model to them.  Boxed because
+    /// only the odd model declares any.
+    pub related_classes: Option<Box<ModelRelatedClasses>>,
     /// Pivot configuration recovered from `belongsToMany`/`morphToMany`
     /// relationship method bodies.
     ///
@@ -298,6 +302,18 @@ pub struct LaravelMetadata {
     /// does not declare the method, which is all but the handful of
     /// facades in a project.
     pub facade_accessor: Option<FacadeAccessor>,
+}
+
+/// Classes an Eloquent model names in its own attributes, each resolved
+/// to an FQN in the name-resolution pass.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelRelatedClasses {
+    /// Every class an `#[ObservedBy]` attribute registers, in order.
+    pub observers: Vec<String>,
+    /// The class `#[UseResource]` names.
+    pub resource: Option<String>,
+    /// The class `#[UseResourceCollection]` names.
+    pub resource_collection: Option<String>,
 }
 
 /// What a facade's `getFacadeAccessor()` returns.

@@ -74,6 +74,7 @@
 
 mod access;
 mod chains;
+mod doctrine;
 mod eloquent;
 mod member_check;
 
@@ -100,6 +101,10 @@ use chains::BrokenChains;
 /// Diagnostic code used for unknown-member diagnostics so that code
 /// actions can match on it.
 pub(crate) const UNKNOWN_MEMBER_CODE: &str = "unknown_member";
+
+/// Diagnostic code for a field a Doctrine repository call names that the
+/// entity does not map.
+pub(crate) const UNKNOWN_ENTITY_FIELD_CODE: &str = "unknown_entity_field";
 
 /// Diagnostic code for a member that some classes of a union declare and
 /// others do not.  Opt-in through `partial-union-members`.
@@ -287,6 +292,14 @@ impl UnknownMemberPass<'_> {
         outcome: &SubjectOutcome,
         out: &mut Vec<Diagnostic>,
     ) -> MemberCheckResult {
+        if access.entity_field {
+            // Only a repository whose entity is known takes field names:
+            // on anything else the key is an ordinary array key.
+            if let SubjectOutcome::Resolved { classes, .. } = outcome {
+                self.report_unmapped_field(access, classes, out);
+            }
+            return MemberCheckResult::Ok;
+        }
         if access.mock_expectation {
             // Only a mock has mocked methods: on anything else the string
             // is an ordinary argument, and not this check's business.

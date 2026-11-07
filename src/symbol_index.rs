@@ -371,10 +371,13 @@ impl SymbolIndex {
         }
         {
             let mut index = self.autoload_function_index.write();
+            let mut origins = self.autoload_function_origin_index.write();
             index.retain(|_, path| !in_tree(path));
+            let mut function_index = function_index;
+            settle_outranked_functions(&mut index, &mut *origins, &mut function_index);
             merge_into(
                 &mut *index,
-                &mut *self.autoload_function_origin_index.write(),
+                &mut *origins,
                 function_index,
                 function_origins,
                 Path::to_path_buf,
@@ -468,9 +471,13 @@ impl SymbolIndex {
             );
         }
         if !function_index.is_empty() {
+            let mut index = self.autoload_function_index.write();
+            let mut origins = self.autoload_function_origin_index.write();
+            let mut function_index = function_index;
+            settle_outranked_functions(&mut index, &mut *origins, &mut function_index);
             merge_into(
-                &mut *self.autoload_function_index.write(),
-                &mut *self.autoload_function_origin_index.write(),
+                &mut *index,
+                &mut *origins,
                 function_index,
                 function_origins,
                 Path::to_path_buf,
@@ -579,6 +586,29 @@ impl GlobalTags {
         self.types.clear();
         self.generation += 1;
     }
+}
+
+/// Settle, before a scan's `entries` merge into the function `index`, the
+/// names where one file [outranks](crate::wordpress::function_file_outranks)
+/// the other whichever came first: an outranked entry of the scan is
+/// dropped, and an outranked one already indexed makes way for the scan's.
+fn settle_outranked_functions(
+    index: &mut CiMap<PathBuf>,
+    origins: &mut impl NameMap<ClassCompletionOrigin>,
+    entries: &mut HashMap<String, PathBuf>,
+) {
+    if index.is_empty() {
+        return;
+    }
+    entries.retain(|name, path| match index.get(name) {
+        Some(existing) if crate::wordpress::function_file_outranks(existing, path) => false,
+        Some(existing) if crate::wordpress::function_file_outranks(path, existing) => {
+            index.remove(name);
+            origins.remove(name);
+            true
+        }
+        _ => true,
+    });
 }
 
 /// Receives a location of a name that a merge did not index; see
@@ -1257,5 +1287,59 @@ mod tests {
         let indexed = index.autoload_constant_index.read();
         assert_eq!(indexed.get("FOO"), Some(&PathBuf::from("/a.php")));
         assert_eq!(indexed.get("foo"), Some(&PathBuf::from("/b.php")));
+    }
+
+    const NOOPS: &str = "/wp/wp-admin/includes/noop.php";
+    const L10N: &str = "/wp/wp-includes/l10n.php";
+
+    fn function_scan(functions: &[(&str, &str)]) -> WorkspaceScanResult {
+        let mut scan = WorkspaceScanResult::default();
+        for &(name, path) in functions {
+            scan.function_index
+                .insert(name.to_string(), PathBuf::from(path));
+        }
+        scan
+    }
+
+    fn indexed_function(index: &SymbolIndex, name: &str) -> Option<PathBuf> {
+        index.autoload_function_index.read().get(name).cloned()
+    }
+
+    #[test]
+    fn wordpress_script_loader_noops_give_way_in_either_merge_order() {
+        for noops_first in [true, false] {
+            let index = SymbolIndex::new();
+            let noops = function_scan(&[("__", NOOPS), ("get_file", NOOPS)]);
+            let l10n = function_scan(&[("__", L10N)]);
+            if noops_first {
+                index.merge_scan(noops);
+                index.merge_scan(l10n);
+            } else {
+                index.merge_scan(l10n);
+                index.merge_scan(noops);
+            }
+            assert_eq!(indexed_function(&index, "__"), Some(PathBuf::from(L10N)));
+            assert_eq!(
+                indexed_function(&index, "get_file"),
+                Some(PathBuf::from(NOOPS)),
+                "a name only the no-ops declare stays theirs"
+            );
+        }
+    }
+
+    #[test]
+    fn rescanning_wordpress_script_loader_noops_keeps_the_real_declaration() {
+        let index = SymbolIndex::new();
+        index.merge_scan(function_scan(&[("__", L10N)]));
+        index.replace_tree(
+            &[PathBuf::from(NOOPS)],
+            function_scan(&[("__", NOOPS), ("get_file", NOOPS)]),
+        );
+
+        assert_eq!(indexed_function(&index, "__"), Some(PathBuf::from(L10N)));
+        assert_eq!(
+            indexed_function(&index, "get_file"),
+            Some(PathBuf::from(NOOPS))
+        );
     }
 }

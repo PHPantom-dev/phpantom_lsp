@@ -312,6 +312,14 @@ impl Backend {
             self.discover_workspace_symbols(&root, php_version, composer_package, Some(&progress))
                 .await;
 
+            // After the pass above, which tells a Doctrine project from
+            // composer.json, and before the open files are diagnosed.
+            let mapping_backend = self.clone_for_blocking();
+            run_blocking_cancel_safe("index_doctrine_mapping_files", move || {
+                mapping_backend.index_doctrine_mapping_files();
+            })
+            .await;
+
             // Laravel-only startup work.  The project classification is
             // set by the init pass above from composer.json, so it has to
             // run after it: a Symfony workspace must never pay for the

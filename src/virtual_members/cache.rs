@@ -60,6 +60,8 @@ pub struct ResolvedCacheInner {
     reverse_deps: HashMap<String, HashSet<ResolvedClassCacheKey>>,
     /// The project facts the Laravel providers read.
     laravel: crate::virtual_members::laravel::LaravelCacheState,
+    /// The project facts the Doctrine repository members read.
+    doctrine: crate::doctrine::DoctrineCacheState,
     /// Classes currently being resolved by `resolve_class_fully_inner`,
     /// keyed per thread so one thread's in-progress resolution never
     /// degrades another thread's independent resolution of the same
@@ -333,6 +335,14 @@ impl ResolvedCacheInner {
     /// The project facts the Laravel providers read.
     pub(crate) fn laravel(&self) -> &crate::virtual_members::laravel::LaravelCacheState {
         &self.laravel
+    }
+
+    pub(crate) fn doctrine(&self) -> &crate::doctrine::DoctrineCacheState {
+        &self.doctrine
+    }
+
+    pub(crate) fn set_doctrine(&mut self, doctrine: crate::doctrine::DoctrineCacheState) {
+        self.doctrine = doctrine;
     }
 
     pub(crate) fn laravel_mut(

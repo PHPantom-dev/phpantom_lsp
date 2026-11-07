@@ -337,6 +337,25 @@ used_fn(USED_CONST);
     );
 }
 
+/// `Foo::class` and `Foo::BAR` written as docblock types name the class.
+#[test]
+fn an_import_named_by_a_class_constant_docblock_type_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use Lib\C as E;
+use Lib\D;
+use Lib\Unused;
+
+/** @param E::class $s */
+function foo(string $s): void {}
+
+/** @return D::FIRST|D::SECOND */
+function bar(): int { return 1; }
+"#;
+    assert_eq!(unused_imports(content), ["Unused import 'Lib\\Unused'"]);
+}
+
 /// A function import is used by a call, not by a class or constant of the
 /// same name, and the other way round.
 #[test]
@@ -471,6 +490,40 @@ final class SanctumSession {
         unused_imports(content),
         [
             "Unused import 'Http\\Emailed'",
+            "Unused import 'Http\\Mentioned'",
+        ]
+    );
+}
+
+/// A Doctrine-style annotation names its class through the file's imports,
+/// at the start of a docblock line or nested in another one's arguments.
+#[test]
+fn an_import_named_by_an_annotation_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Routing\Annotation\Route;
+use Drupal\Core\Annotation\Translation;
+use Drupal\Core\Block\Annotation\Block;
+use Http\Mentioned;
+use Http\Group;
+
+/**
+ * @ORM\Entity
+ * @Block(admin_label = @Translation("Users"))
+ * @group slow
+ */
+final class User
+{
+    /** @Route("/users", name="Mentioned") */
+    public function list(): void {}
+}
+"#;
+    assert_eq!(
+        unused_imports(content),
+        [
+            "Unused import 'Http\\Group'",
             "Unused import 'Http\\Mentioned'",
         ]
     );

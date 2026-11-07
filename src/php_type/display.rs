@@ -15,6 +15,8 @@ impl fmt::Display for PhpType {
             // The name is a `class-string<T>` wherever it is shown.
             TypeKind::ClassNameLiteral(inner) => write!(f, "{inner}"),
             TypeKind::EnumCase(enum_type, case) => write!(f, "{enum_type}::{case}"),
+            // The DQL a builder has built is not part of its type's name.
+            TypeKind::DqlBuilder(class, _) => write!(f, "{class}"),
             // The ordering promise is part of the type the developer wrote,
             // so it is spelled back the same way.
             TypeKind::ListShape(inner) => match inner.kind() {

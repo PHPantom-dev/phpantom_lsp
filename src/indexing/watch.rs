@@ -92,6 +92,11 @@ impl Backend {
     ) -> bool {
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let changes = self.spell_changes_as_indexed(&params.changes);
+        // Default configuration files are never indexed, and an open schema
+        // file is skipped below, so both are followed before that.
+        if self.is_drupal_project() {
+            self.note_drupal_config_changes(&changes);
+        }
         if self.is_symfony_project()
             && changes.iter().any(|change| {
                 crate::symfony::translations::is_translation_setup_uri(change.uri.as_str())
@@ -99,9 +104,10 @@ impl Backend {
         {
             self.forget_symfony_judged_translation_domains();
         }
+        let theme_hooks_changed = self.note_drupal_theme_watched_changes(&changes);
         let mut batch = self.classify_watched_changes(&changes, root, is_laravel);
         if batch.is_empty() {
-            return false;
+            return theme_hooks_changed;
         }
 
         if batch.translations_changed {
@@ -142,6 +148,8 @@ impl Backend {
             self.rescan_composer_indexes(root, &batch.composer_changes);
             self.forget_vendor_twig_callables();
             self.forget_symfony_bundle_declarations();
+            self.forget_yii_package_definitions();
+            self.forget_vendor_form_classes();
             self.forget_wordpress_dependency_hooks();
         }
 

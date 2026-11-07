@@ -21,7 +21,10 @@
 //!
 //! A form field is completed from its form type's data class, by the same
 //! reading of the form type the symbol map makes (see
-//! [`crate::symfony::forms`]), and a configuration key in
+//! [`crate::symfony::forms`]), a form option from the options the type
+//! accepts (see [`crate::symfony::form_options`]), a serializer group in a
+//! string the symbol map reads as one (see [`crate::symfony::serializer`]),
+//! and a configuration key in
 //! `config/packages/` from the keys declared under the one it is nested in
 //! (see [`crate::symfony::config_tree`]).
 //!
@@ -71,12 +74,35 @@ impl Backend {
         {
             return Some(response);
         }
+        if self.is_symfony_project()
+            && let Some(response) = self.symfony_serializer_group_completion(
+                uri,
+                content,
+                literal_start,
+                cursor,
+                position,
+                ctx,
+            )
+        {
+            return Some(response);
+        }
 
+        let mut receiver_type = None;
         let (kind, prefix_start) = self
-            .symfony_call_key(content, cursor, code, ctx)
+            .symfony_call_key(content, cursor, code, ctx, &mut receiver_type)
             .map(|kind| (kind, literal_start))
             .or_else(|| attribute_key(content, code, literal, literal_start, ctx))
             .filter(|(kind, _)| self.string_key_kind_enabled(*kind))?;
+        // A config object's `get()`: its keys come from the name its type,
+        // resolved once above, carries.
+        if kind == StringKeyKind::DrupalConfigKey {
+            let names = self.drupal_config_names_of(
+                receiver_type.as_ref()?,
+                false,
+                self.file_loaders(ctx).resolved_class_loader(),
+            );
+            return self.drupal_config_key_response(&names, content, prefix_start, position);
+        }
         if kind == StringKeyKind::YiiRouteArgument {
             let arguments = handler_at(ctx, literal_start as u32)
                 .and_then(|handler| self.yii_handler_arguments(&handler))
@@ -190,6 +216,105 @@ impl Backend {
         )
     }
 
+    /// Complete a serializer group, in a string the symbol map reads as one
+    /// (see [`crate::symfony::serializer`]), once the type engine confirms
+    /// the receiver of a serializer call.
+    fn symfony_serializer_group_completion(
+        &self,
+        uri: &str,
+        content: &str,
+        literal_start: usize,
+        cursor: usize,
+        position: Position,
+        ctx: &FileContext,
+    ) -> Option<CompletionResponse> {
+        // `#[Groups]`, a `groups` key, or `AbstractNormalizer::GROUPS`.
+        let bytes = content.as_bytes();
+        if memchr::memmem::find(bytes, b"roups").is_none()
+            && memchr::memmem::find(bytes, b"GROUPS").is_none()
+        {
+            return None;
+        }
+        let start = literal_start as u32;
+        let loaders = self.file_loaders(ctx);
+        let resolve = |written: &str, offset: u32| ctx.resolve_name_at(written, offset);
+        let names_group = crate::parser::with_parsed_program(
+            content,
+            "symfony_serializer_groups",
+            |program, content| {
+                let strings = crate::symfony::serializer::group_strings(program, &resolve);
+                let string = strings
+                    .iter()
+                    .find(|string| string.start == start && cursor as u32 <= string.end)?;
+                let Some((receiver, class)) = string.receiver else {
+                    return Some(());
+                };
+                let var_ctx =
+                    loaders.var_ctx_at(content, mago_span::HasSpan::span(receiver).start.offset);
+                let ty = crate::type_engine::variable::iterable_elements::resolve_expression_type(
+                    receiver, &var_ctx,
+                )?;
+                class
+                    .targets()
+                    .iter()
+                    .any(|(fqn, _)| {
+                        crate::class_lookup::is_subtype_of_named(
+                            &ty,
+                            fqn,
+                            loaders.resolved_class_loader(),
+                        )
+                    })
+                    .then_some(())
+            },
+        );
+        names_group?;
+        self.symfony_key_response(
+            uri,
+            StringKeyKind::SerializerGroup,
+            content,
+            literal_start,
+            cursor,
+            position,
+        )
+    }
+
+    /// Complete an option of a form type, in the options array a call
+    /// passes the type (see [`crate::symfony::form_options`]).  The options
+    /// the array already sets are left out.
+    pub(crate) fn try_symfony_form_option_completion(
+        &self,
+        content: &str,
+        position: Position,
+        code: &CodeContext<'_>,
+        ctx: &FileContext,
+    ) -> Option<CompletionResponse> {
+        let cursor = position_to_offset(content, position) as usize;
+        let (quote, _) = code.open_string?;
+        let literal_start = quote + 1;
+        let start = literal_start as u32;
+        let (options, _, others) = self.form_options_at(content, ctx, |string| {
+            string.start == start && cursor as u32 <= string.end
+        })?;
+        let prefix = content.get(literal_start..cursor)?.as_bytes();
+        let names: Vec<String> = options
+            .names()
+            .into_iter()
+            .filter(|name| !others.contains(name))
+            .filter(|name| {
+                name.as_bytes()
+                    .get(..prefix.len())
+                    .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+            })
+            .collect();
+        string_key_response(
+            names,
+            tower_lsp_server::gen_lsp_types::CompletionItemKind::Property,
+            content,
+            literal_start,
+            position,
+        )
+    }
+
     /// The domain the translation key whose string starts at
     /// `literal_start` is looked up in, as the file's symbol map recorded
     /// it, or the default domain when it has no record of the string.
@@ -233,6 +358,7 @@ impl Backend {
         cursor: usize,
         code: &CodeContext<'_>,
         ctx: &FileContext,
+        receiver_type: &mut Option<crate::php_type::PhpType>,
     ) -> Option<StringKeyKind> {
         // A name is the argument itself, not an element of an array one.
         if !matches!(code.last_code_byte(), Some(b'(' | b',')) {
@@ -250,6 +376,9 @@ impl Backend {
                 }
                 if call.arg_index == 0 && crate::drupal::is_url_class(&class) {
                     return Some(StringKeyKind::DrupalRoute);
+                }
+                if call.arg_index == 0 && crate::drupal::is_config_target_class(&class) {
+                    return Some(StringKeyKind::DrupalConfigName);
                 }
                 is_translatable_message(&class)
             } else {
@@ -279,6 +408,9 @@ impl Backend {
                 if crate::drupal::is_entity_query(&class, &call.method_name) {
                     return Some(StringKeyKind::DrupalEntityType);
                 }
+                if crate::drupal::is_config_lookup(&class, &call.method_name) {
+                    return Some(StringKeyKind::DrupalConfigName);
+                }
             }
             return (crate::drupal::static_route_argument(&class, &call.method_name)
                 == Some(call.arg_index))
@@ -296,14 +428,18 @@ impl Backend {
                 ctx,
             );
         }
-        self.receiver_call_key(
+        // The receiver's type is kept for what it carries besides its
+        // class: a config object's name.
+        let (receiver, _) = symfony_receiver_method(&call.method_name, call.arg_index)?;
+        let (kind, ty) = self.receiver_key_and_type(
             subject,
-            &call.method_name,
-            call.arg_index,
+            (receiver, &call.method_name, call.arg_index),
             content,
             cursor,
             ctx,
-        )
+        )?;
+        *receiver_type = Some(ty);
+        Some(kind)
     }
 
     /// What the argument `index` of a call of `method` on `subject`, written
@@ -331,13 +467,31 @@ impl Backend {
         cursor: usize,
         ctx: &FileContext,
     ) -> Option<StringKeyKind> {
+        self.receiver_key_and_type(subject, (receiver, method, index), content, cursor, ctx)
+            .map(|(kind, _)| kind)
+    }
+
+    /// [`Self::receiver_key_for`], with the type the receiver resolved to.
+    fn receiver_key_and_type(
+        &self,
+        subject: &str,
+        (receiver, method, index): (crate::symbol_map::ReceiverClass, &str, usize),
+        content: &str,
+        cursor: usize,
+        ctx: &FileContext,
+    ) -> Option<(StringKeyKind, crate::php_type::PhpType)> {
+        // Resolving the receiver is the costly part, and is wasted on a
+        // call whose every kind of key the project does not read.
+        if !receiver.names_any(|kind| self.string_key_kind_enabled(kind)) {
+            return None;
+        }
         let loaders = self.file_loaders(ctx);
         let class_loader = loaders.resolved_class_loader();
         let rctx = loaders.resolution_ctx_at(content, cursor as u32);
         crate::type_engine::resolver::resolve_target_classes(subject, AccessKind::Arrow, &rctx)
             .into_iter()
-            .filter_map(|resolved| resolved.class_info)
-            .find_map(|class| {
+            .find_map(|resolved| {
+                let class = resolved.class_info?;
                 self.typed_receiver_key_kind(
                     &crate::php_type::PhpType::named(class.fqn()),
                     method,
@@ -345,10 +499,11 @@ impl Backend {
                     receiver,
                     class_loader,
                 )
+                .map(|kind| (kind, resolved.type_string))
             })
     }
 
-    fn symfony_key_response(
+    pub(crate) fn symfony_key_response(
         &self,
         uri: &str,
         kind: StringKeyKind,
@@ -363,7 +518,7 @@ impl Backend {
 
     /// The completion response offering those of `names` that start with
     /// what is typed between `prefix_start` and `cursor`.
-    fn symfony_names_response(
+    pub(crate) fn symfony_names_response(
         &self,
         kind: StringKeyKind,
         names: Vec<String>,
@@ -391,8 +546,9 @@ impl Backend {
     }
 
     /// Complete a service reference or parameter placeholder in a YAML or
-    /// XML configuration file, or a route name, translation key, template
-    /// name, block name, filter, or function in a Twig template.
+    /// XML configuration file, a constraint's option in a validation
+    /// mapping, or a route name, translation key, template name, block
+    /// name, filter, or function in a Twig template.
     pub(crate) fn try_symfony_resource_completion(
         &self,
         uri: &str,
@@ -407,6 +563,18 @@ impl Backend {
             if !self.is_twig_project() {
                 if !self.is_drupal_project() {
                     return None;
+                }
+                if let Some(start) =
+                    crate::drupal::libraries::twig_library_name_start(content, cursor)
+                {
+                    return self.symfony_key_response(
+                        uri,
+                        StringKeyKind::DrupalLibrary,
+                        content,
+                        start,
+                        cursor,
+                        position,
+                    );
                 }
                 let start = crate::symfony::routes::drupal_twig_route_name_start(content, cursor)?;
                 return self.symfony_key_response(
@@ -448,6 +616,12 @@ impl Backend {
             }
             if let Some(start) = crate::twig::templates::twig_template_name_start(content, cursor) {
                 (StringKeyKind::TwigTemplate, start)
+            } else if let Some(start) = self
+                .is_drupal_project()
+                .then(|| crate::drupal::libraries::twig_library_name_start(content, cursor))
+                .flatten()
+            {
+                (StringKeyKind::DrupalLibrary, start)
             } else if let Some(start) = self
                 .is_in_drupal_web_root(uri)
                 .then(|| crate::symfony::routes::drupal_twig_route_name_start(content, cursor))
@@ -511,10 +685,47 @@ impl Backend {
                     StringKeyKind::DrupalRoute,
                     crate::drupal::links::links_route_name_start(content, cursor)?,
                 ),
-                crate::drupal::DeclarationFile::Routing => return None,
+                crate::drupal::DeclarationFile::Routing => (
+                    StringKeyKind::DrupalPermission,
+                    crate::drupal::permissions::routing_permission_start(content, cursor)?,
+                ),
+                crate::drupal::DeclarationFile::Permissions => return None,
+                crate::drupal::DeclarationFile::Libraries => (
+                    StringKeyKind::DrupalLibrary,
+                    crate::drupal::libraries::libraries_file_name_start(content, cursor)?,
+                ),
+                crate::drupal::DeclarationFile::Info => (
+                    StringKeyKind::DrupalLibrary,
+                    crate::drupal::libraries::info_file_name_start(content, cursor)?,
+                ),
             }
         } else if !is_symfony {
             return None;
+        } else if crate::symfony::validation::is_validation_mapping_uri(uri)
+            && let Some((constraint, start, given)) =
+                crate::symfony::validation::option_key_at(uri, content, cursor)
+        {
+            // An option of a constraint, which the constraint's class
+            // names; the options it is already given are left out.
+            let options = self.constraint_options(&constraint)?;
+            let prefix = content.get(start..cursor)?.as_bytes();
+            let names: Vec<String> = options
+                .offered()
+                .filter(|name| !given.iter().any(|given| given == name))
+                .filter(|name| {
+                    name.as_bytes()
+                        .get(..prefix.len())
+                        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+                })
+                .map(str::to_string)
+                .collect();
+            return string_key_response(
+                names,
+                tower_lsp_server::gen_lsp_types::CompletionItemKind::Property,
+                content,
+                start,
+                position,
+            );
         } else if crate::symfony::resources::is_container_config_uri(uri) {
             match config_slot_at(uri, content, cursor).or_else(|| resource_key_at(content, cursor))
             {
@@ -587,6 +798,11 @@ fn attribute_key(
             ArgumentSlot::Named("hook") | ArgumentSlot::Positional(0)
         )
         .then_some((StringKeyKind::DrupalHook, literal_start));
+    }
+    if matches!(slot, ArgumentSlot::Named("admin_permission"))
+        && crate::symbol_map::extraction::is_entity_type_attribute(&attribute)
+    {
+        return Some((StringKeyKind::DrupalPermission, literal_start));
     }
     if is_message_handler_attribute(&attribute) {
         return matches!(

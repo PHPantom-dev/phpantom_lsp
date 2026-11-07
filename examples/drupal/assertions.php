@@ -15,12 +15,16 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Controller\NoteController;
+use Drupal\acme\Element\GreetingCard;
 use Drupal\acme\Entity\Note;
+use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
 use Drupal\acme\Hook\AcmeHooks;
 use Drupal\acme\NoteCounter;
 use Drupal\Component\FileCache\FileCacheFactory;
 use Drupal\Component\Serialization\Yaml;
+use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Config\ConfigBase;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
@@ -33,9 +37,16 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeManager;
 use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
+use Drupal\Core\Form\ConfigFormBase;
+use Drupal\Core\Form\ConfigTarget;
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Language\LanguageManager;
+use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Link;
+use Drupal\Core\Render\Attribute\FormElement;
+use Drupal\Core\Render\Attribute\RenderElement;
+use Drupal\Core\Render\Element\Details;
+use Drupal\Core\Render\Element\RenderElementBase;
 use Drupal\Core\Url;
 use Drupal\language\ConfigurableLanguageManager;
 use Drupal\language\LanguageServiceProvider;
@@ -209,6 +220,44 @@ check('NoteController::view() names its parameter after the acme_note entity typ
 check('NoteController::view() hints the parameter with an interface Note implements, so Drupal upcasts it', $noteParameter->getType()?->getName() === EntityInterface::class && is_subclass_of(Note::class, EntityInterface::class));
 check("acme.note's title callback is NoteController::title(), which receives the same parameter", ltrim($routes['acme.note']['defaults']['_title_callback'] ?? '', '\\') === NoteController::class . '::title' && (new ReflectionMethod(NoteController::class, 'title'))->getParameters()[0]->getName() === 'acme_note');
 
+// ─── Permissions ────────────────────────────────────────────────────────────
+
+$permissions = Yaml::decode((string) file_get_contents("$module/acme.permissions.yml"));
+$corePermissions = Yaml::decode((string) file_get_contents("$web/core/modules/system/system.permissions.yml"));
+$noteAccessSource = (string) file_get_contents("$module/src/NoteAccess.php");
+check('acme.permissions.yml declares administer acme with a title and a description', isset($permissions['administer acme']['title'], $permissions['administer acme']['description']));
+check('administer acme is restricted to trusted roles', ($permissions['administer acme']['restrict access'] ?? false) === true);
+check('acme.permissions.yml declares view acme notes', isset($permissions['view acme notes']['title']));
+check("core's system.permissions.yml declares access content", isset($corePermissions['access content']));
+check('NoteAccess::canManage() checks administer acme', str_contains($noteAccessSource, "\$account->hasPermission('administer acme')"));
+check('AccountInterface::hasPermission() takes the permission first', (new ReflectionMethod(AccountInterface::class, 'hasPermission'))->getParameters()[0]->getName() === 'permission');
+check('NoteAccess::view() lists access content and view acme notes', str_contains($noteAccessSource, "AccessResult::allowedIfHasPermissions(\$account, ['access content', 'view acme notes'], 'OR')"));
+check('AccessResult::allowedIfHasPermissions() takes the permissions second', (new ReflectionMethod(AccessResult::class, 'allowedIfHasPermissions'))->getParameters()[1]->getName() === 'permissions');
+$noteRequirement = $routes['acme.note']['requirements']['_permission'] ?? '';
+check('acme.note requires either of two acme permissions', explode('+', $noteRequirement) === ['view acme notes', 'administer acme'] && array_diff(explode('+', $noteRequirement), array_keys($permissions)) === []);
+check("PermissionAccessCheck reads a route's `+` as any of its permissions", str_contains((string) file_get_contents("$web/core/modules/user/src/Access/PermissionAccessCheck.php"), "explode('+', \$permission);"));
+check("acme_note's admin permission is administer acme, which acme.permissions.yml declares", $noteDefinition->getAdminPermission() === 'administer acme' && isset($permissions['administer acme']));
+
+// ─── Configuration ──────────────────────────────────────────────────────────
+
+$acmeSchema = Yaml::decode((string) file_get_contents("$module/config/schema/acme.schema.yml"));
+$systemSchema = Yaml::decode((string) file_get_contents("$web/core/modules/system/config/schema/system.schema.yml"));
+$editableNames = new ReflectionMethod(SettingsForm::class, 'getEditableConfigNames');
+$settingsSource = (string) file_get_contents("$module/src/Form/SettingsForm.php");
+check('acme ships default configuration for acme.settings', is_file("$module/config/install/acme.settings.yml"));
+check('acme.schema.yml describes acme.settings as a configuration object', ($acmeSchema['acme.settings']['type'] ?? null) === 'config_object');
+check('acme.settings is a valid configuration name', ConfigBase::validateName('acme.settings') === null);
+check('SettingsForm edits acme.settings', $editableNames->invoke((new ReflectionClass(SettingsForm::class))->newInstanceWithoutConstructor()) === ['acme.settings']);
+check('SettingsForm is a config form', is_subclass_of(SettingsForm::class, ConfigFormBase::class));
+check("SettingsForm's #config_target names acme.settings before its key", str_contains($settingsSource, "'#config_target' => 'acme.settings:notify_email'") && ConfigTarget::fromString('acme.settings:notify_email')->configName === 'acme.settings');
+check('acme.settings declares the notify_email key the form targets', isset($acmeSchema['acme.settings']['mapping']['notify_email']) && array_key_exists('notify_email', Yaml::decode((string) file_get_contents("$module/config/install/acme.settings.yml"))));
+check('acme.schema.yml declares the notifications.email key SettingsForm reads and sets', ($acmeSchema['acme.settings']['mapping']['notifications']['mapping']['email']['type'] ?? null) === 'boolean' && str_contains($settingsSource, "->get('notifications.email')") && str_contains($settingsSource, "->set('notifications.email', "));
+check('the default acme.settings sets notifications.email', (Yaml::decode((string) file_get_contents("$module/config/install/acme.settings.yml"))['notifications']['email'] ?? null) === true);
+check('ConfigFormBaseTrait::config() gives an editable Config for the names getEditableConfigNames() lists', str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/ConfigFormBaseTrait.php"), '@return \\Drupal\\Core\\Config\\Config|\\Drupal\\Core\\Config\\ImmutableConfig'));
+check('Only an ImmutableConfig refuses set()', (new ReflectionMethod(\Drupal\Core\Config\ImmutableConfig::class, 'set'))->getDeclaringClass()->getName() === \Drupal\Core\Config\ImmutableConfig::class);
+check('Greeter reads system.site', str_contains((string) file_get_contents("$module/src/Greeter.php"), "->get('system.site')"));
+check("core's system module ships and describes system.site", is_file("$web/core/modules/system/config/install/system.site.yml") && ($systemSchema['system.site']['type'] ?? null) === 'config_object');
+
 // ─── Hooks and theme hooks ──────────────────────────────────────────────────
 
 require_once "$module/acme.module";
@@ -224,6 +273,13 @@ check('hook_theme declares the acme_greeting theme hook', isset($themeHooks['acm
 check('acme_greeting declares the variables the controller passes', array_keys($themeHooks['acme_greeting']['variables'] ?? []) === ['name', 'greeting']);
 check('acme_greeting has the template its name implies', is_file("$module/templates/acme-greeting.html.twig"));
 check('acme_theme preprocesses acme_greeting', function_exists('acme_theme_preprocess_acme_greeting'));
+check('acme_theme overrides the acme_greeting template', is_file("$theme/templates/acme-greeting.html.twig"));
+check('GreetingController::greet() renders acme_greeting with its variables', str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#theme' => 'acme_greeting',\n            '#name' => \$name,\n            '#greeting' =>"));
+check('GreetingController::compactGreet() renders the acme_greeting__compact suggestion', str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#theme' => 'acme_greeting__compact'") && str_starts_with('acme_greeting__compact', 'acme_greeting__') && !isset($themeHooks['acme_greeting__compact']));
+check('acme_theme draws the suggestion with acme-greeting--compact.html.twig', is_file("$theme/templates/acme-greeting--compact.html.twig"));
+check('GreetingController::greet() passes a string as #name', (string) (new ReflectionMethod(GreetingController::class, 'greet'))->getParameters()[0]->getType() === 'string');
+check("core turns a theme hook template's attributes variables into an Attribute, which has addClass()", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeManager.php"), "foreach (['attributes', 'title_attributes', 'content_attributes'] as \$key) {") && method_exists(\Drupal\Core\Template\Attribute::class, 'addClass'));
+check("core's ThemeCommonElements declares item_list, drawn by system's item-list.html.twig", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeCommonElements.php"), "      'item_list' => [\n        'variables' => [\n          'items' => [],") && is_file("$web/core/modules/system/templates/item-list.html.twig"));
 
 // The module documents, invokes, and implements its own hook, and
 // implements core's form alter hooks.
@@ -237,6 +293,73 @@ check('acme_form_alter() implements hook_form_alter procedurally', function_exis
 check("core documents hook_form_alter() with the FormStateInterface acme_form_alter() leaves untyped", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/form.api.php"), 'function hook_form_alter(&$form, \\Drupal\\Core\\Form\\FormStateInterface $form_state, $form_id)') && (new ReflectionFunction('acme_form_alter'))->getParameters()[1]->getType() === null);
 check("core documents hook_form_alter() with a docblock acme_form_alter()'s hover shows", (bool) preg_match('~/\*\*\n \* Perform alterations before a form is rendered\.\n(?: \*[^\n]*\n)* \*/\nfunction hook_form_alter\(~', (string) file_get_contents("$web/core/lib/Drupal/Core/Form/form.api.php")));
 check("core's FormBuilder::prepareForm() fires the form alter hooks", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/FormBuilder.php"), '$this->moduleHandler->alter($hooks, $form, $form_state, $form_id);'));
+
+// ─── Render elements ────────────────────────────────────────────────────────
+
+$card = new ReflectionClass(GreetingCard::class);
+check('GreetingCard declares the acme_greeting_card element by attribute', (attributeArguments($card, RenderElement::class)[0] ?? null) === 'acme_greeting_card');
+check('GreetingCard is a render element', $card->isSubclassOf(RenderElementBase::class));
+check("core's Details declares the details element", (attributeArguments(new ReflectionClass(Details::class), RenderElement::class)[0] ?? null) === 'details');
+
+// Every element the controller names is one the module or core declares.
+$declaredElements = ['acme_greeting_card'];
+foreach (glob("$web/core/lib/Drupal/Core/Render/Element/*.php") ?: [] as $file) {
+    $class = 'Drupal\\Core\\Render\\Element\\' . basename($file, '.php');
+    if (!class_exists($class)) {
+        continue;
+    }
+    $element = new ReflectionClass($class);
+    foreach ([RenderElement::class, FormElement::class] as $attribute) {
+        $declaredElements[] = attributeArguments($element, $attribute)[0] ?? null;
+    }
+}
+preg_match_all("/'#type'(?:\\] =| =>) '([^']+)'/", $controllerSource, $namedElements);
+check('GreetingController names the custom and a core element in a literal and an assignment', $namedElements[1] === ['acme_greeting_card', 'details']);
+check('every element GreetingController names is declared', array_diff($namedElements[1], $declaredElements) === []);
+
+// ─── Libraries ──────────────────────────────────────────────────────────────
+
+// A library is `<extension>/<key>`, the key a top-level one of the
+// extension's libraries file (core's AssetResolver splits it on the first
+// slash).
+$libraryFiles = [
+    'core' => "$web/core/core.libraries.yml",
+    'acme' => "$module/acme.libraries.yml",
+    'acme_theme' => "$theme/acme_theme.libraries.yml",
+];
+$libraries = [];
+foreach ($libraryFiles as $extension => $file) {
+    foreach (Yaml::decode((string) file_get_contents($file)) as $key => $library) {
+        $libraries["$extension/$key"] = $library;
+    }
+}
+check('acme.libraries.yml declares acme/greeting', isset($libraries['acme/greeting']));
+check('acme_theme.libraries.yml declares acme_theme/global', isset($libraries['acme_theme/global']));
+check('core.libraries.yml declares core/drupal', isset($libraries['core/drupal']));
+check("acme/greeting's version is the 1.x its hover shows", ($libraries['acme/greeting']['version'] ?? null) === '1.x');
+check('the CSS files the libraries name exist', is_file("$module/css/acme-greeting.css") && is_file("$theme/css/global.css"));
+check("Drupal's AssetResolver splits a library name on its first slash", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Asset/AssetResolver.php"), "[\$extension, \$name] = explode('/', \$library, 2);"));
+
+// Every library the demo attaches or depends on is declared.
+$template = (string) file_get_contents("$module/templates/acme-greeting.html.twig");
+preg_match_all("/attach_library\\('([^']+)'\\)/", $template, $attachedInTwig);
+preg_match_all("/'#attached' => \\['library' => \\['([^']+)'\\]\\]/", $controllerSource, $attachedInPhp);
+$attached = [
+    'GreetingController::greet()' => $attachedInPhp[1],
+    'the acme_greeting template' => $attachedInTwig[1],
+    'the dependencies of acme/greeting' => $libraries['acme/greeting']['dependencies'] ?? [],
+    'the dependencies of acme_theme/global' => $libraries['acme_theme/global']['dependencies'] ?? [],
+    "acme_theme's info file" => $themeInfo['libraries'] ?? [],
+];
+$preprocessed = ['attributes' => ['class' => []]];
+acme_theme_preprocess_acme_greeting($preprocessed);
+$attached['acme_theme_preprocess_acme_greeting()'] = $preprocessed['#attached']['library'] ?? [];
+foreach ($attached as $where => $names) {
+    check("$where attaches a library", $names !== []);
+    check("every library $where attaches is declared", array_diff($names, array_keys($libraries)) === []);
+}
+check("core's Twig extension declares attach_library()", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Template/TwigExtension.php"), "new TwigFunction('attach_library'"));
+check("core's ThemeManager collects the #attached a preprocess function sets", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeManager.php"), "foreach (['#attached', '#cache'] as \$key)"));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

@@ -100,6 +100,8 @@ impl Backend {
                     | ClassRefContext::Attribute
                     | ClassRefContext::CoversTarget
                     | ClassRefContext::DocblockSee
+                    | ClassRefContext::Annotation
+                    | ClassRefContext::Dql
             ) {
                 continue;
             }
@@ -467,7 +469,9 @@ fn check_kind_in_context(
         | ClassRefContext::Attribute
         | ClassRefContext::CoversTarget
         | ClassRefContext::TypeOperatorOperand
-        | ClassRefContext::DocblockSee => None,
+        | ClassRefContext::DocblockSee
+        | ClassRefContext::Annotation
+        | ClassRefContext::Dql => None,
     }
 }
 

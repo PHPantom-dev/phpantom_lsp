@@ -253,6 +253,72 @@ fn judge_branch(
         return BranchVerdict::Permitted;
     }
 
+    judge_scope(
+        merged,
+        member_name,
+        is_static,
+        is_method_call,
+        restriction,
+        kind,
+        current_class,
+        subject_binds_scope,
+        class_loader,
+    )
+}
+
+/// Whether a call written in `current_class` reaches the non-public
+/// method `method_name` on `merged` directly, rather than being routed to
+/// `__call` / `__callStatic` (or rejected) because it cannot see it.
+///
+/// Answers `true` whenever the access cannot be judged, the way the
+/// visibility diagnostic stays silent, so a call is only taken away from
+/// the method's own signature when it positively cannot reach it.
+pub(crate) fn call_site_reaches_method(
+    merged: &Arc<ClassInfo>,
+    method_name: &str,
+    visibility: Visibility,
+    is_static: bool,
+    current_class: Option<&ClassInfo>,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> bool {
+    let Some(restriction) = Restriction::from_visibility(visibility) else {
+        return true;
+    };
+    if current_class.is_some_and(|c| c.kind == ClassLikeKind::Trait)
+        || merged.kind == ClassLikeKind::Trait
+    {
+        return true;
+    }
+    !matches!(
+        judge_scope(
+            merged,
+            method_name,
+            is_static,
+            true,
+            restriction,
+            MemberKind::Method,
+            current_class,
+            false,
+            class_loader,
+        ),
+        BranchVerdict::Rejected(_)
+    )
+}
+
+/// Judge a non-public member that is present on the assembled class
+/// against the scopes the access is written in.
+#[allow(clippy::too_many_arguments)]
+fn judge_scope(
+    merged: &Arc<ClassInfo>,
+    member_name: &str,
+    is_static: bool,
+    is_method_call: bool,
+    restriction: Restriction,
+    kind: MemberKind,
+    current_class: Option<&ClassInfo>,
+    subject_binds_scope: bool,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> BranchVerdict {
     // Every class the access counts as being written inside.  Normally
     // that is just the enclosing declaration, but a subject that names
     // its own binding adds the class it binds to — see

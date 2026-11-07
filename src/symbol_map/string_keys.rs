@@ -66,6 +66,21 @@ pub(crate) enum StringKeyKind {
     /// `Env::get('APP_NAME')` reads, resolving to the line that declares it
     /// in the project's `.env`.
     Env,
+    /// A public asset: the path under `public/` that `asset('css/app.css')`,
+    /// `secure_asset()`, `URL::asset()`, and `url()->asset()` link to.
+    Asset,
+    /// A Laravel Mix asset: the key of `public/mix-manifest.json` that
+    /// `mix('js/app.js')` looks up.
+    MixAsset,
+    /// A Vite entry point or asset: the source file, relative to the project
+    /// root, that `@vite('resources/js/app.js')`, `Vite::asset()`, and
+    /// `Vite::content()` name.
+    ViteAsset,
+    /// An Inertia page: the component under the page directories
+    /// `config/inertia.php` configures (`resources/js/Pages` by default)
+    /// that `Inertia::render('Users/Index')`, `inertia()`, and
+    /// `Route::inertia()` render, named without its extension.
+    InertiaPage,
     /// A Symfony service ID: the key a service is declared under in
     /// `services.yaml`, `services.xml`, or a PHP configurator's `->set()`,
     /// and the string `$container->get()`, `service()`, or
@@ -131,6 +146,11 @@ pub(crate) enum StringKeyKind {
     /// `framework.messenger.buses`, and read by `default_bus`,
     /// `#[AsMessageHandler(bus: …)]`, and a `BusNameStamp`.
     MessengerBus,
+    /// A Symfony serializer group: declared by each `#[Groups]` that puts a
+    /// property or method in it and by the `groups` of a YAML or XML
+    /// serializer mapping, and read by the `groups` of a serialization
+    /// context (see `symfony::serializer`).
+    SerializerGroup,
     /// A Yii view: the template a view renderer's `render()` family or a
     /// view's own `render()` loads, keyed by the path it names (see
     /// `yii::views`).
@@ -147,6 +167,16 @@ pub(crate) enum StringKeyKind {
     /// under the routes that dispatch to that handler, whose paths declare
     /// it.
     YiiRouteArgument,
+    /// A Yii path alias: the `@name` a string starts with (`'@runtime/logs'`
+    /// names `@runtime`), in any string of a Yii project.  Declared under
+    /// `params['yiisoft/aliases']['aliases']` (see `yii::aliases`).
+    YiiAlias,
+    /// An argument a Yii DI definition passes by name, `'transport'` in
+    /// `'__construct()' => ['transport' => …]` or in the arguments of a
+    /// `'setLogger()'` key, keyed by the class and the method as well as the
+    /// name (see `yii::definitions::definition_argument_key`).  Declared by
+    /// the method's parameter of that name.
+    YiiDefinitionArgument,
     /// A WordPress hook name: declared by each place that fires it (a
     /// `do_action()`, an `apply_filters()`, and their `_ref_array` and
     /// `_deprecated` forms), and read by `add_action()`, `add_filter()`, and
@@ -177,6 +207,45 @@ pub(crate) enum StringKeyKind {
     /// theme manager's calls that invoke it, and read by the implementations
     /// a `#[Hook]` attribute or a procedural function's name make.
     DrupalHook,
+    /// A Drupal permission name: declared by a top-level key of a
+    /// permissions file, and read by an account's or a role's
+    /// `hasPermission()`, the access result helpers, a route's
+    /// `_permission` requirement, and an entity type's `admin_permission`.
+    DrupalPermission,
+    /// A Drupal configuration name: declared by a default configuration
+    /// file's name and by a configuration schema entry (see
+    /// `drupal::config`), and read by `\Drupal::config()`, the config
+    /// factory, the `config()` shortcut of controllers and forms, a config
+    /// form's `getEditableConfigNames()`, and a form element's
+    /// `#config_target`.
+    DrupalConfigName,
+    /// A key of a Drupal configuration object, keyed by the object's name
+    /// as well as the key (see `drupal::config_keys::config_key`):
+    /// declared by the object's configuration schema, and read by a config
+    /// object's `get()`, `set()`, and `clear()`, the part after the `:` of
+    /// a `#config_target`, and a `ConfigTarget`'s property path.
+    DrupalConfigKey,
+    /// A Drupal render element name: declared by the ID of a class's
+    /// `#[RenderElement]` or `#[FormElement]` attribute, or of the
+    /// annotation older code uses, and read by the `#type` of a render
+    /// array.
+    DrupalRenderElement,
+    /// A Drupal theme hook name: declared by a key of the array a
+    /// `hook_theme()` implementation returns (see `drupal::theme_hooks`),
+    /// and read by a render array's `#theme` and `#theme_wrappers`.  A
+    /// suggestion (`node__article`) reads as the hook it falls back to.
+    DrupalThemeHook,
+    /// A variable of a Drupal theme hook, keyed by the hook as written as
+    /// well as the name (see `drupal::theme_hooks::theme_variable_key`):
+    /// declared by a key of the hook's `variables`, and read by the `#`
+    /// keys of a render array whose `#theme` names the hook.
+    DrupalThemeHookVariable,
+    /// A Drupal library, `<extension>/<name>`: declared by a top-level key
+    /// of an extension's libraries file, and read by the `library` list of
+    /// a render array's `#attached`, a template's `attach_library()`, the
+    /// `dependencies` of a library, and the `libraries` of a theme's info
+    /// file (see `drupal::libraries`).
+    DrupalLibrary,
 }
 
 impl StringKeyKind {
@@ -208,25 +277,41 @@ impl StringKeyKind {
             | Self::GateAbility
             | Self::ContainerBinding
             | Self::Middleware
-            | Self::Env => KeyFramework::Laravel,
+            | Self::Env
+            | Self::Asset
+            | Self::MixAsset
+            | Self::ViteAsset
+            | Self::InertiaPage => KeyFramework::Laravel,
             Self::ServiceId | Self::ContainerParameter => KeyFramework::ServiceContainer,
             Self::SymfonyRoute
             | Self::SymfonyTranslation
             | Self::TranslationDomain
             | Self::SymfonyConfigKey
             | Self::SymfonyEvent
-            | Self::MessengerBus => KeyFramework::Symfony,
+            | Self::MessengerBus
+            | Self::SerializerGroup => KeyFramework::Symfony,
             Self::TwigTemplate
             | Self::TwigBlock
             | Self::TwigFilter
             | Self::TwigFunction
             | Self::TwigVariable => KeyFramework::Twig,
-            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument => KeyFramework::Yii,
+            Self::YiiView
+            | Self::YiiRoute
+            | Self::YiiRouteArgument
+            | Self::YiiAlias
+            | Self::YiiDefinitionArgument => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
             Self::DrupalEntityType
             | Self::DrupalRoute
             | Self::DrupalRouteParameter
-            | Self::DrupalHook => KeyFramework::Drupal,
+            | Self::DrupalHook
+            | Self::DrupalPermission
+            | Self::DrupalConfigName
+            | Self::DrupalConfigKey
+            | Self::DrupalRenderElement
+            | Self::DrupalThemeHook
+            | Self::DrupalThemeHookVariable
+            | Self::DrupalLibrary => KeyFramework::Drupal,
         }
     }
 
@@ -375,11 +460,12 @@ impl StringKeyDependency {
             .iter()
             .any(|alias| name.eq_ignore_ascii_case(alias))
             || match name.len() {
-                3 => name.eq_ignore_ascii_case("App"),
+                3 => name.eq_ignore_ascii_case("App") || name.eq_ignore_ascii_case("URL"),
                 4 => {
                     name.eq_ignore_ascii_case("Gate")
                         || name.eq_ignore_ascii_case("Lang")
                         || name.eq_ignore_ascii_case("View")
+                        || name.eq_ignore_ascii_case("Vite")
                 }
                 5 => name.eq_ignore_ascii_case("Route"),
                 6 => name.eq_ignore_ascii_case("Config"),
@@ -563,12 +649,14 @@ pub(crate) enum TwigCallableTarget {
 }
 
 /// The variables one render of a Twig template hands it: the keys of a
-/// `render()`'s context array, of a templated email's `context()`, or of
-/// what a `#[Template]` action returns.
+/// `render()`'s context array, of a templated email's `context()`, of
+/// what a `#[Template]` action returns, or the `#` keys of a Drupal render
+/// array, without the `#`.
 ///
 /// Keyed by the template name it renders, whose span (or typed receiver
 /// site, for a `render()` only its receiver's type confirms) starts at
-/// [`Self::template_start`].
+/// [`Self::template_start`]; a render array's by the theme hook its
+/// `#theme` names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TwigContextSite {
     pub template_start: u32,
@@ -677,6 +765,17 @@ pub(crate) struct EntityTypeSite {
     pub storage: Option<crate::atom::Atom>,
 }
 
+/// The class a Drupal plugin declaration is written on, such as a render
+/// element's.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PluginClassSite {
+    /// Byte offset of the plugin ID's first character, matching the
+    /// declaration's [`SymbolKind::StringKey`] span.
+    pub start: u32,
+    /// The class the attribute or annotation is written on.
+    pub class: crate::atom::Atom,
+}
+
 /// The value a container declaration gives, read by the kind of name it
 /// turns out to declare.
 #[derive(Debug, Clone, PartialEq)]
@@ -693,6 +792,17 @@ pub(crate) enum ContainerValue {
     Parent(Atom),
     /// The type of a parameter's value, generalized (`'en'` is a `string`).
     Type(crate::php_type::PhpType),
+}
+
+/// A class a Yii DI definition names: the ID a definition is keyed by
+/// (`MailerInterface::class => …`), or the class it builds
+/// (`'class' => Mailer::class`).  The range is that of the class's name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct YiiDefinitionSite {
+    pub start: u32,
+    pub end: u32,
+    /// The class, fully qualified, without the leading `\`.
+    pub class: Atom,
 }
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
@@ -867,11 +977,23 @@ const DRUPAL_ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterfac
 const DRUPAL_ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
 pub(crate) const DRUPAL_MODULE_HANDLER: &str = "Drupal\\Core\\Extension\\ModuleHandlerInterface";
 pub(crate) const DRUPAL_THEME_MANAGER: &str = "Drupal\\Core\\Theme\\ThemeManagerInterface";
+pub(crate) const DRUPAL_CONFIG_FACTORY: &str = "Drupal\\Core\\Config\\ConfigFactoryInterface";
+const DRUPAL_CONFIG_BASE: &str = "Drupal\\Core\\Config\\ConfigBase";
+const DRUPAL_CONFIG: &str = "Drupal\\Core\\Config\\Config";
+const DRUPAL_ACCOUNT: &str = "Drupal\\Core\\Session\\AccountInterface";
+const DRUPAL_ROLE: &str = "Drupal\\user\\RoleInterface";
+const DRUPAL_PERMISSION_CHECKER: &str = "Drupal\\Core\\Session\\PermissionCheckerInterface";
+const DRUPAL_CALCULATED_PERMISSIONS_ITEM: &str =
+    "Drupal\\Core\\Session\\CalculatedPermissionsItemInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
 pub(crate) const SYMFONY_CONTAINER_CONFIGURATOR_NS: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\";
+const SYMFONY_SERIALIZER: &str = "Symfony\\Component\\Serializer\\SerializerInterface";
+const SYMFONY_NORMALIZER: &str = "Symfony\\Component\\Serializer\\Normalizer\\NormalizerInterface";
+const SYMFONY_DENORMALIZER: &str =
+    "Symfony\\Component\\Serializer\\Normalizer\\DenormalizerInterface";
 /// The namespace of the PHP configurators that build Symfony's routes.
 pub(crate) const SYMFONY_ROUTING_CONFIGURATOR_NS: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\";
@@ -893,7 +1015,10 @@ pub(crate) enum ReceiverClass {
     MailTemplate,
     /// What `get()` and `has()` look a name up in: a service container, or
     /// one of Symfony's parameter bags, whose same two methods take a
-    /// parameter name instead.
+    /// parameter name instead, or Drupal's config factory, whose `get()`
+    /// takes a configuration name, or a Drupal config object, whose `get()`
+    /// takes one of its keys; the object it is comes from its type (see
+    /// `drupal::types`).
     ContainerLookup,
     /// What `getParameter()`, `hasParameter()`, and `setParameter()` take a
     /// container parameter name in: the container itself, and the
@@ -993,6 +1118,31 @@ pub(crate) enum ReceiverClass {
     ThemeHooks,
     /// Either of the two, for the methods they share.
     Hooks,
+    /// What `hasPermission()` takes a permission name first on: an
+    /// account, a role, the permission checker, and a calculated
+    /// permissions item.
+    PermissionCheck,
+    /// A Drupal role, whose `grantPermission()` and `revokePermission()`
+    /// take a permission name.
+    RolePermissions,
+    /// Drupal's config factory, whose `getEditable()` takes a
+    /// configuration name and `loadMultiple()` a list of them; its `get()`
+    /// is a [`Self::ContainerLookup`].
+    ConfigFactory,
+    /// What has Drupal's `config()` shortcut, which takes a configuration
+    /// name: a controller or a form, a config form included.
+    ConfigShortcut,
+    /// An editable Drupal config object, whose `set()` and `clear()` take
+    /// one of its keys; an `ImmutableConfig` throws on both.  Its `get()`
+    /// is a [`Self::ContainerLookup`], as every config object's is.
+    EditableConfigKeys,
+    /// Symfony's serializer, normalizers, and denormalizers, whose
+    /// `serialize()`, `deserialize()`, `normalize()`, and `denormalize()`
+    /// take a context whose `groups` name serializer groups.
+    Serializer,
+    /// The `json()` shortcut a Symfony controller inherits, whose context
+    /// does too.
+    ControllerJson,
 }
 
 impl ReceiverClass {
@@ -1015,6 +1165,8 @@ impl ReceiverClass {
             // A container bag is a PSR container too, so it has to be asked
             // about first.
             Self::ContainerLookup => &[
+                (DRUPAL_CONFIG_FACTORY, StringKeyKind::DrupalConfigName),
+                (DRUPAL_CONFIG_BASE, StringKeyKind::DrupalConfigKey),
                 (SYMFONY_CONTAINER_BAG, ContainerParameter),
                 (SYMFONY_PARAMETER_BAG, ContainerParameter),
                 (PSR_CONTAINER, ServiceId),
@@ -1112,6 +1264,30 @@ impl ReceiverClass {
                 (DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook),
                 (DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook),
             ],
+            Self::PermissionCheck => &[
+                (DRUPAL_ACCOUNT, StringKeyKind::DrupalPermission),
+                (DRUPAL_ROLE, StringKeyKind::DrupalPermission),
+                (DRUPAL_PERMISSION_CHECKER, StringKeyKind::DrupalPermission),
+                (
+                    DRUPAL_CALCULATED_PERMISSIONS_ITEM,
+                    StringKeyKind::DrupalPermission,
+                ),
+            ],
+            Self::RolePermissions => &[(DRUPAL_ROLE, StringKeyKind::DrupalPermission)],
+            Self::ConfigFactory => &[(DRUPAL_CONFIG_FACTORY, StringKeyKind::DrupalConfigName)],
+            Self::EditableConfigKeys => &[(DRUPAL_CONFIG, StringKeyKind::DrupalConfigKey)],
+            Self::ConfigShortcut => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalConfigName),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalConfigName),
+            ],
+            Self::Serializer => &[
+                (SYMFONY_SERIALIZER, StringKeyKind::SerializerGroup),
+                (SYMFONY_NORMALIZER, StringKeyKind::SerializerGroup),
+                (SYMFONY_DENORMALIZER, StringKeyKind::SerializerGroup),
+            ],
+            Self::ControllerJson => {
+                &[(SYMFONY_ABSTRACT_CONTROLLER, StringKeyKind::SerializerGroup)]
+            }
         }
     }
 
@@ -1201,6 +1377,13 @@ impl TypedReceiverSite {
     /// Whether this site, once confirmed, could name `key` as a `kind`.
     /// The reference index files a site under each kind it could become.
     pub(crate) fn may_name(&self, kind: StringKeyKind, key: &str) -> bool {
+        // A configuration key's site holds the key alone; the object's
+        // name comes with its receiver's type.
+        let key = if kind == StringKeyKind::DrupalConfigKey {
+            crate::drupal::config_keys::split_config_key(key).1
+        } else {
+            key
+        };
         self.key == key
             && self
                 .receiver

@@ -171,7 +171,8 @@ fn type_hint_to_classes_typed_depth(
         | TypeKind::ListShape(inner)
         | TypeKind::TemplateParam(_, inner)
         | TypeKind::ClassNameLiteral(inner)
-        | TypeKind::EnumCase(inner, _) => type_hint_to_classes_typed_depth(
+        | TypeKind::EnumCase(inner, _)
+        | TypeKind::DqlBuilder(inner, _) => type_hint_to_classes_typed_depth(
             inner,
             owning_class_name,
             all_classes,

@@ -6,7 +6,7 @@
 //! under the project root, so the candidates for the segment being typed are
 //! simply the entries of the directory the argument has reached so far.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tower_lsp_server::gen_lsp_types::*;
 
@@ -76,22 +76,31 @@ fn detect_context(
     let root = backend.workspace.workspace_root.read().clone()?;
     let base = path_helper_base(&root, helper)?;
 
-    // A leading separator is concatenation in PHP rather than a new root, so
-    // it belongs to neither the directories walked nor the name being typed.
-    let typed = content
-        .get(quote_offset + 1..cursor_offset)?
-        .trim_start_matches(['/', '\\']);
-    let (typed_directories, prefix) = match typed.rfind(['/', '\\']) {
-        Some(last) => (&typed[..=last], &typed[last + 1..]),
-        None => ("", typed),
-    };
+    Some(PathHelperContext::new(
+        &base,
+        content.get(quote_offset + 1..cursor_offset)?,
+        quote_offset + 1,
+    ))
+}
 
-    Some(PathHelperContext {
-        directory: base.join(typed_directories),
-        typed_directories: typed_directories.to_string(),
-        prefix: prefix.to_string(),
-        content_start_offset: quote_offset + 1,
-    })
+impl PathHelperContext {
+    /// The context for `typed`, the literal so far, relative to `base`.
+    fn new(base: &Path, typed: &str, content_start_offset: usize) -> Self {
+        // A leading separator is concatenation in PHP rather than a new
+        // root, so it belongs to neither the directories walked nor the name
+        // being typed.
+        let typed = typed.trim_start_matches(['/', '\\']);
+        let (typed_directories, prefix) = match typed.rfind(['/', '\\']) {
+            Some(last) => (&typed[..=last], &typed[last + 1..]),
+            None => ("", typed),
+        };
+        Self {
+            directory: base.join(typed_directories),
+            typed_directories: typed_directories.to_string(),
+            prefix: prefix.to_string(),
+            content_start_offset,
+        }
+    }
 }
 
 /// One candidate entry of the directory being completed.
@@ -146,56 +155,80 @@ impl Backend {
     ) -> Option<CompletionResponse> {
         let cursor_offset = position_to_offset(content, position) as usize;
         let ctx = detect_context(self, content, cursor_offset, code)?;
-
-        // The whole literal so far is replaced, so a `/` in the middle of a
-        // completion does not break the editor's word-based filtering.
-        let edit_range = Range {
-            start: offset_to_position(content, ctx.content_start_offset),
-            end: position,
-        };
-
-        let (entries, truncated) = matching_entries(&ctx);
-        let items: Vec<CompletionItem> = entries
-            .into_iter()
-            .enumerate()
-            .map(|(index, entry)| {
-                // A directory completes to a path that is still being typed,
-                // so it keeps its separator and the next segment follows on.
-                let new_text = if entry.is_directory {
-                    format!("{}{}/", ctx.typed_directories, entry.name)
-                } else {
-                    format!("{}{}", ctx.typed_directories, entry.name)
-                };
-                CompletionItem {
-                    label: entry.name,
-                    kind: Some(if entry.is_directory {
-                        CompletionItemKind::Folder
-                    } else {
-                        CompletionItemKind::File
-                    }),
-                    sort_text: Some(format!("{:05}", index)),
-                    filter_text: Some(new_text.clone()),
-                    text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
-                        range: edit_range,
-                        new_text,
-                    })),
-                    ..Default::default()
-                }
-            })
-            .collect();
-
-        if items.is_empty() {
-            return None;
-        }
-        // A cut-short listing is reported as such, so the editor asks again
-        // as the name narrows rather than presenting the cap as the answer.
-        Some(CompletionResponse::CompletionList(CompletionList {
-            is_incomplete: truncated,
-            items,
-            apply_kind: None,
-            item_defaults: None,
-        }))
+        entry_completion(&ctx, content, position)
     }
+}
+
+/// Complete the path `typed` so far, relative to `base`, with the entries of
+/// the directory it has reached: `asset('css/|')` lists `public/css/`.
+/// `content_start` is where the literal's contents start.
+pub(crate) fn directory_entry_completion(
+    base: &Path,
+    typed: &str,
+    content_start: usize,
+    content: &str,
+    position: Position,
+) -> Option<CompletionResponse> {
+    entry_completion(
+        &PathHelperContext::new(base, typed, content_start),
+        content,
+        position,
+    )
+}
+
+fn entry_completion(
+    ctx: &PathHelperContext,
+    content: &str,
+    position: Position,
+) -> Option<CompletionResponse> {
+    // The whole literal so far is replaced, so a `/` in the middle of a
+    // completion does not break the editor's word-based filtering.
+    let edit_range = Range {
+        start: offset_to_position(content, ctx.content_start_offset),
+        end: position,
+    };
+
+    let (entries, truncated) = matching_entries(ctx);
+    let items: Vec<CompletionItem> = entries
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            // A directory completes to a path that is still being typed,
+            // so it keeps its separator and the next segment follows on.
+            let new_text = if entry.is_directory {
+                format!("{}{}/", ctx.typed_directories, entry.name)
+            } else {
+                format!("{}{}", ctx.typed_directories, entry.name)
+            };
+            CompletionItem {
+                label: entry.name,
+                kind: Some(if entry.is_directory {
+                    CompletionItemKind::Folder
+                } else {
+                    CompletionItemKind::File
+                }),
+                sort_text: Some(format!("{:05}", index)),
+                filter_text: Some(new_text.clone()),
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
+                    range: edit_range,
+                    new_text,
+                })),
+                ..Default::default()
+            }
+        })
+        .collect();
+
+    if items.is_empty() {
+        return None;
+    }
+    // A cut-short listing is reported as such, so the editor asks again
+    // as the name narrows rather than presenting the cap as the answer.
+    Some(CompletionResponse::CompletionList(CompletionList {
+        is_incomplete: truncated,
+        items,
+        apply_kind: None,
+        item_defaults: None,
+    }))
 }
 
 #[cfg(test)]

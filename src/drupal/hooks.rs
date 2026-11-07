@@ -108,6 +108,19 @@ impl ExtensionIndex {
             .map(|(_, is_theme)| *is_theme)
     }
 
+    /// The directory of the extension `name`, when the walk found it.
+    pub(crate) fn dir_of(&self, name: &str) -> Option<&Path> {
+        self.by_dir
+            .iter()
+            .find(|(_, (known, _))| known == name)
+            .map(|(dir, _)| dir.as_path())
+    }
+
+    /// Whether the file at `path` belongs to a theme.
+    pub(crate) fn owner_is_theme(&self, path: &Path) -> bool {
+        self.owner(path).is_some_and(|(_, _, is_theme)| is_theme)
+    }
+
     /// The extension a file belongs to: the one of its nearest ancestor
     /// directory holding an `.info.yml`, with that directory.
     fn owner<'a>(&'a self, path: &'a Path) -> Option<(&'a Path, &'a str, bool)> {
@@ -589,6 +602,22 @@ impl Backend {
         }
         found.sort_by(|a, b| (&a.uri, a.start).cmp(&(&b.uri, b.start)));
         found
+    }
+
+    /// Every implementation of the hook `key` Drupal collects: its file,
+    /// where the hook is named there, and its extension.
+    pub(crate) fn drupal_hook_implementations(&self, key: &str) -> Vec<(String, u32, String)> {
+        self.hook_occurrences(key)
+            .into_iter()
+            .filter_map(|occurrence| match occurrence.role {
+                Occurrence::Implementation {
+                    extension,
+                    collected: true,
+                    ..
+                } => Some((occurrence.uri, occurrence.start, extension.to_string())),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Whether the type engine confirms `site` of the file at `uri`, read

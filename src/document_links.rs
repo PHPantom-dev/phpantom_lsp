@@ -2,7 +2,8 @@
 //!
 //! Provides clickable links for `require` / `require_once` / `include` /
 //! `include_once` paths that resolve to existing files on disk, and for the
-//! arguments of Laravel's path helpers (`base_path('routes/web.php')`).
+//! arguments of Laravel's path helpers (`base_path('routes/web.php')`), and
+//! for the paths Yii aliases name (`'@runtime/logs'`).
 
 use std::path::{Path, PathBuf};
 
@@ -62,6 +63,20 @@ impl Backend {
         for (start, end, target) in
             crate::virtual_members::laravel::collect_path_helper_links(self, content, program)
         {
+            if let Some(target_url) = crate::util::path_to_url(&target) {
+                links.push(DocumentLink {
+                    range: Range {
+                        start: offset_to_position(content, start),
+                        end: offset_to_position(content, end),
+                    },
+                    target: Some(target_url),
+                    tooltip: Some(target.display().to_string()),
+                    data: None,
+                });
+            }
+        }
+
+        for (start, end, target) in self.yii_alias_links(uri, content) {
             if let Some(target_url) = crate::util::path_to_url(&target) {
                 links.push(DocumentLink {
                     range: Range {

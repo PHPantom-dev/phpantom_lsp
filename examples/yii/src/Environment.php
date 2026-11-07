@@ -101,18 +101,6 @@ final class Environment
             : (filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? $default);
     }
 
-    private static function setInteger(string $key, int $default): void
-    {
-        $value = self::getRawValue($key);
-        self::$values[$key] = $value === null ? $default : (int) $value;
-    }
-
-    private static function setString(string $key, string $default): void
-    {
-        $value = self::getRawValue($key);
-        self::$values[$key] = $value ?? $default;
-    }
-
     private static function setNonEmptyStringOrNull(string $key, ?string $default): void
     {
         $value = self::getRawValue($key);

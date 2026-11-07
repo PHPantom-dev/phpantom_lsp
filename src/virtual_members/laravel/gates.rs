@@ -464,6 +464,19 @@ impl LaravelGateIndex {
             .map(String::as_str)
     }
 
+    /// The models a `Gate::policy()` / `$policies` registration governs by
+    /// `policy_fqn`.
+    pub(crate) fn models_for_policy(&self, policy_fqn: &str) -> Vec<String> {
+        let mut models: Vec<String> = self
+            .policies
+            .iter()
+            .filter(|(_, policy)| policy.eq_ignore_ascii_case(policy_fqn))
+            .map(|(model, _)| model.clone())
+            .collect();
+        models.sort();
+        models
+    }
+
     /// Every explicitly registered policy class.
     pub(crate) fn registered_policy_fqns(&self) -> Vec<String> {
         let mut fqns: Vec<String> = self.policies.values().cloned().collect();

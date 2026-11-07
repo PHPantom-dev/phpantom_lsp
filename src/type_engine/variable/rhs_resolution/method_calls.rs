@@ -217,6 +217,31 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
         return result;
     }
 
+    // A Doctrine query's result methods: the row type rides on the query's
+    // type arguments, which its DQL decided.
+    if let Some(argument_list) = argument_list
+        && let Some(result) = super::doctrine_calls::try_resolve_query_result_type(
+            &method_name,
+            &receiver_resolved,
+            argument_list,
+            ctx,
+        )
+    {
+        return result;
+    }
+    // A Doctrine query builder that carries the DQL it has built: the next
+    // call on it adds to that DQL, and `getQuery()` is typed by it.
+    if let Some(argument_list) = argument_list
+        && let Some(result) = super::doctrine_calls::try_resolve_dql_builder_call(
+            &method_name,
+            &receiver_resolved,
+            argument_list,
+            ctx,
+        )
+    {
+        return result;
+    }
+
     // Laravel validated input: the rules that guard this request describe the
     // array it hands back, so `$data = $request->validated()` gets a shape
     // rather than plain `array`.  Classifying the call does not depend on the
@@ -259,7 +284,45 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             {
                 return result;
             }
+            if let Some(result) = super::doctrine_calls::try_resolve_create_query_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
+                return result;
+            }
+            if let Some(result) = super::doctrine_calls::try_resolve_builder_owner_call(
+                owner,
+                &receiver_resolved,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
+                return result;
+            }
+            if let Some(ty) = crate::type_engine::call_resolution::repository_at_call(
+                owner,
+                &method_name,
+                &arg_refs,
+                &rctx,
+            ) {
+                return crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+                    ty,
+                    "",
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
+                );
+            }
             if let Some(result) = super::drupal_calls::try_resolve_entity_storage_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
+                return result;
+            }
+            if let Some(result) = super::drupal_calls::try_resolve_config_object_type(
                 owner,
                 &method_name,
                 argument_list,
