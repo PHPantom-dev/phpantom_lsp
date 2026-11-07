@@ -1188,17 +1188,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l70-read-only-accessors-are-offered-as-columns" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L70. Read-only accessors are offered as columns
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1917,17 +1906,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l70-read-only-accessors-are-offered-as-columns" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L70. Read-only accessors are offered as columns
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2611,27 +2589,6 @@ declaratively like <code>$casts</code> is today.</p>
 <p>Until then the properties stay, so this is a precision gap rather
 than a missing feature. Reported as a follow-up on
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/issues/312">#312</a>.</p>
-<h4 id="l70-read-only-accessors-are-offered-as-columns">L70. Read-only accessors are offered as columns<a class="headerlink" href="#l70-read-only-accessors-are-offered-as-columns" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p><code>collect_column_names</code> reads the fully resolved model, so every virtual
-property counts as a column, including an accessor with no backing
-column and no mutator (a legacy <code>getDisplayNameAttribute()</code>, or an
-<code>Attribute::make(get: ...)</code> with no <code>set:</code>). <code>display_name</code> then
-completes in <code>where('…')</code>, <code>orderBy('…')</code> and <code>create([...])</code>. None of
-these work at runtime: the query hits a column that does not exist, and
-mass assignment of a computed-only attribute does nothing. <code>$appends</code>
-entries are counted as columns for the same reason, though they only
-name accessors to serialize.</p>
-<p>Skip <code>PropertySource::Accessor { column: None, mutator: None }</code> and
-<code>ComputedProperty { mutator: None }</code> in <code>collect_column_names</code>, and stop
-treating <code>$appends</code> as a column source there. An accessor that
-overrides a real column (one that <code>$casts</code>, <code>$fillable</code> or the
-migration schema also declares) stays. <code>create()</code> and <code>fill()</code> still
-want accessors that have a mutator.</p>
-<p><strong>Where to look:</strong> <code>collect_column_names</code> in
-<code>virtual_members/laravel/where_property.rs</code> and its callers in
-<code>completion/eloquent_string.rs</code>; <code>extract_column_names</code> in
-<code>virtual_members/laravel/model_extraction/</code> for <code>$appends</code>.</p>
 <h4 id="l8-withsum-withavg-withmin-withmax-aggregate-properties">L8. <code>withSum()</code> / <code>withAvg()</code> / <code>withMin()</code> / <code>withMax()</code> aggregate properties<a class="headerlink" href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>Less common than <code>withCount</code>; only affects codebases using aggregate
