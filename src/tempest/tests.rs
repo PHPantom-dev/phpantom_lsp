@@ -265,3 +265,29 @@ fn edits_reuse_inference_with_the_same_result_as_a_full_refresh() {
     backend.refresh_tempest_inference();
     assert_eq!(incremental, snapshot());
 }
+
+#[test]
+fn nullable_component_names_keep_known_targets_without_guessing_strings() {
+    use crate::php_type::PhpType;
+
+    for (ty, expected) in [
+        (
+            PhpType::nullable(PhpType::literal_string_value("x-card")),
+            vec!["x-card"],
+        ),
+        (
+            PhpType::nullable(PhpType::union(vec![
+                PhpType::literal_string_value("x-card"),
+                PhpType::literal_string_value("x-panel"),
+            ])),
+            vec!["x-card", "x-panel"],
+        ),
+        (PhpType::nullable(PhpType::string()), Vec::new()),
+    ] {
+        let names = super::component_context::component_names(&ty);
+        assert_eq!(
+            names.iter().map(|name| name.as_ref()).collect::<Vec<_>>(),
+            expected,
+        );
+    }
+}
