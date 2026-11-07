@@ -6,6 +6,7 @@ use App\Book;
 use App\BookController;
 use App\BookView;
 use App\ConfiguredViews;
+use App\DynamicViews;
 use Tempest\Container\GenericContainer;
 use Tempest\Discovery\BootDiscovery;
 use Tempest\View\ViewComponentDiscovery;
@@ -27,6 +28,8 @@ if (!isset($config->viewComponents['x-summary'], $config->viewComponents['book-n
     throw new RuntimeException('Configured component discovery produced the wrong names.');
 }
 $renderer = TempestViewRenderer::make(viewConfig: $config);
+GenericContainer::setInstance($container);
+$container->singleton(TempestViewRenderer::class, $renderer);
 
 $html = $renderer->render(new BookController()->index());
 foreach (['<h2>The PHP Book</h2>', '<p>Read The PHP Book</p>'] as $expected) {
@@ -83,6 +86,20 @@ foreach (['<h2>Configured views</h2>', '<aside>Configured views</aside>'] as $ex
     if (!str_contains($configured, $expected)) {
         throw new RuntimeException("Missing configured component or wrapper data: {$expected}");
     }
+}
+
+$dynamic = $renderer->render(new DynamicViews()->example());
+foreach (['<h2>Dynamic views</h2>', '<span>2</span>', '<span>1</span>', '<p>Read Dynamic views</p>'] as $expected) {
+    if (!str_contains($dynamic, $expected)) {
+        throw new RuntimeException("Missing dynamic component or slot data: {$expected}");
+    }
+}
+$dynamicTypes = $renderer->render(view(
+    '<x-component is="x-dynamic-book" :book="$book" :count="2"><p>{{ get_debug_type($count) }}</p></x-component>',
+    book: new Book('Types'),
+));
+if (!str_contains($dynamicTypes, '<p>string</p>')) {
+    throw new RuntimeException('Dynamic scalar attributes must reach the selected component as strings.');
 }
 
 echo "Tempest view assertions passed.\n";
