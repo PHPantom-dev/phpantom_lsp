@@ -654,6 +654,30 @@ template diagnostics for every Twig template in the project during
 
 ---
 
+## F68. Method names under `calls:` in a services file
+
+**Impact: Low · Complexity: Low**
+
+```yaml
+services:
+    App\Mailer:
+        calls:
+            - [setLogger, ['@logger']]
+            - setTransport: ['@mailer.transport']
+```
+
+A `calls:` entry names a method of the service's class, which the
+container calls after building it, but the method name is a bare word,
+so the YAML navigation that finds class names and `Class::method`
+strings under any key (`src/resource_navigation.rs`) does not see it. Go
+to the method from its name, count it among the method's references, and
+complete the class's public methods there, in Symfony's services files
+and Drupal's `*.services.yml` alike. The class is the service's `class:`,
+or its key when that is a class name. PHPlumb (MIT) navigates these
+(`crates/phplumb-index/src/frameworks/drupal/navigation.rs`).
+
+---
+
 ## F38. Twig components
 
 **Impact: Low-Medium · Complexity: Medium-High**

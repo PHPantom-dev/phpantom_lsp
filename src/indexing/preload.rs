@@ -443,6 +443,9 @@ impl Backend {
                     }),
                 );
             }
+            // Where the configuration is depends on the kernel, which is
+            // parsed by now.
+            self.refresh_symfony_kernel_config();
             if !resource_work.is_empty() {
                 self.report_workspace_index_progress(
                     progress,

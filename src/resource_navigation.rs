@@ -287,6 +287,14 @@ impl Backend {
         let mut route_imports = Vec::new();
         let mut drupal_routes = Vec::new();
         let mut declares_twig_loader = false;
+        // A file under a configuration directory the kernel moved is read
+        // as the same file under `config/`.
+        let config_uri = if is_symfony {
+            self.symfony_config_uri(uri)
+        } else {
+            std::borrow::Cow::Borrowed(uri)
+        };
+        let config = config_uri.as_ref();
         // A Drupal declaration file is Drupal's, also in a Drupal site that
         // requires Symfony's container and has a `config` directory on the
         // way to it, as core's `config` module does.
@@ -322,25 +330,26 @@ impl Backend {
                     spans = crate::drupal::libraries::info_file_spans(content);
                 }
             }
-        } else if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
+        } else if is_symfony && crate::symfony::resources::is_container_config_uri(config) {
             declares_twig_loader = crate::symfony::tags::tags_twig_loader(content);
             // A bus is declared by a key under `config/packages/`, which is
             // a configuration key too; the bus is the one that means
             // something, and the first of two spans over the same text is
             // the one kept.
-            let mut slots = crate::symfony::tags::tag_slots(uri, content);
-            slots.extend(crate::symfony::messenger::bus_slots(uri, content));
+            let mut slots = crate::symfony::tags::tag_slots(config, content);
+            slots.extend(crate::symfony::messenger::bus_slots(config, content));
             spans = crate::symfony::slot_spans(content, slots);
             let (container_spans, values) =
-                crate::symfony::resources::container_declarations(uri, content);
+                crate::symfony::resources::container_declarations(config, content);
             spans.extend(container_spans);
             container_values = values;
-            if crate::symfony::routes::is_routing_config_uri(uri) {
-                let (routes, imports) = crate::symfony::routes::routing_declarations(uri, content);
+            if crate::symfony::routes::is_routing_config_uri(config) {
+                let (routes, imports) =
+                    crate::symfony::routes::routing_declarations(config, content);
                 spans.extend(routes);
                 route_imports = imports;
-            } else if uri.contains("/config/packages/")
-                && crate::symfony::config_tree::configures_foreign_router_resource(uri, content)
+            } else if config.contains("/config/packages/")
+                && crate::symfony::config_tree::configures_foreign_router_resource(config, content)
             {
                 // The router loads its routes from somewhere else than the
                 // routing files, which is a loader whose routes cannot be
@@ -354,15 +363,17 @@ impl Backend {
         }
         if is_symfony {
             spans.extend(crate::symfony::translations::catalogue_spans(uri, content));
-            if crate::symfony::validation::is_validation_mapping_uri(uri) {
-                spans.extend(crate::symfony::validation::validation_spans(uri, content));
-            }
-            if crate::symfony::serializer::is_serializer_mapping_uri(uri) {
-                spans.extend(crate::symfony::serializer::serializer_mapping_spans(
-                    uri, content,
+            if crate::symfony::validation::is_validation_mapping_uri(config) {
+                spans.extend(crate::symfony::validation::validation_spans(
+                    config, content,
                 ));
             }
-            if crate::symfony::config_tree::is_bundle_config_uri(uri) {
+            if crate::symfony::serializer::is_serializer_mapping_uri(config) {
+                spans.extend(crate::symfony::serializer::serializer_mapping_spans(
+                    config, content,
+                ));
+            }
+            if crate::symfony::config_tree::is_bundle_config_uri(config) {
                 spans.extend(crate::symfony::config_tree::config_key_spans(content));
             }
         }

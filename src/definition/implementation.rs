@@ -703,7 +703,7 @@ impl Backend {
     /// The FQNs the reverse inheritance index lists below `target_fqn`:
     /// only the direct children in `direct_only` mode, otherwise every
     /// transitive descendant.
-    fn gti_descendants(&self, target_fqn: &str, direct_only: bool) -> Vec<String> {
+    pub(crate) fn gti_descendants(&self, target_fqn: &str, direct_only: bool) -> Vec<String> {
         let gti = self.symbols.gti_index.read();
         if direct_only {
             return gti.get(target_fqn).cloned().unwrap_or_default();

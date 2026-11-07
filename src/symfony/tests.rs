@@ -178,3 +178,94 @@ fn forms_validation_and_configuration_are_read_only_in_a_symfony_project() {
     );
     assert!(!mapped(&configuration));
 }
+
+/// A Symfony project on disk whose kernel's `getConfigDir()` returns
+/// `config_dir`, indexed the way the editor indexes it.
+fn project_with_kernel(
+    config_dir: &str,
+    files: &[(&str, &str)],
+) -> (crate::Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = format!(
+        "<?php\nnamespace App;\n\nuse Symfony\\Component\\HttpKernel\\Kernel as BaseKernel;\n\nfinal class Kernel extends BaseKernel\n{{\n    public function getConfigDir(): string\n    {{\n        return {config_dir};\n    }}\n}}\n"
+    );
+    let kernel_file = ("src/Kernel.php", kernel.as_str());
+    for (path, content) in files
+        .iter()
+        .chain([&kernel_file, &("composer.json", "{}\n")])
+    {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+    }
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    let backend = crate::Backend::new_test_with_workspace(root, vec![]);
+    backend.ensure_workspace_indexed();
+    (backend, dir)
+}
+
+#[test]
+fn a_kernel_that_moves_the_configuration_directory_is_followed() {
+    let (backend, _dir) = project_with_kernel(
+        "$this->getProjectDir().'/etc'",
+        &[
+            (
+                "etc/services.yaml",
+                "parameters:\n    app.sender: x\nservices:\n    app.mailer: ~\n",
+            ),
+            ("etc/routes.yaml", "home:\n    path: /\n"),
+        ],
+    );
+
+    assert!(!backend.symfony_config_unread());
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::ServiceId),
+        vec!["app.mailer".to_string()]
+    );
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::ContainerParameter),
+        vec!["app.sender".to_string()]
+    );
+    let (routes, world) = backend.symfony_routes();
+    assert_eq!(routes, vec!["home".to_string()]);
+    assert!(world.can_judge("missing"));
+}
+
+#[test]
+fn a_kernel_relative_configuration_directory_is_followed() {
+    let (backend, _dir) = project_with_kernel(
+        "\\dirname(__DIR__).'/app/../etc'",
+        &[("etc/services.yaml", "services:\n    app.mailer: ~\n")],
+    );
+
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::ServiceId),
+        vec!["app.mailer".to_string()]
+    );
+}
+
+#[test]
+fn a_configuration_directory_that_cannot_be_read_leaves_its_names_unjudged() {
+    let (backend, _dir) = project_with_kernel(
+        "$_SERVER['CONFIG_DIR']",
+        &[("config/routes.yaml", "home:\n    path: /\n")],
+    );
+
+    assert!(backend.symfony_config_unread());
+    let (_, world) = backend.symfony_routes();
+    assert!(!world.can_judge("missing"));
+}
+
+#[test]
+fn a_kernel_that_keeps_the_default_directory_changes_nothing() {
+    let (backend, _dir) = project_with_kernel(
+        "$this->getProjectDir().'/config'",
+        &[("config/services.yaml", "services:\n    app.mailer: ~\n")],
+    );
+
+    assert!(!backend.symfony_config_unread());
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::ServiceId),
+        vec!["app.mailer".to_string()]
+    );
+}

@@ -557,6 +557,8 @@ impl Backend {
     ) -> Option<CompletionResponse> {
         let is_symfony = self.is_symfony_project();
         let cursor = position_to_offset(content, position) as usize;
+        let config_uri = self.symfony_config_uri(uri);
+        let config = config_uri.as_ref();
         let (kind, prefix_start) = if self.is_twig_template_uri(uri) {
             // Template names are Twig's, and route names and translation
             // keys Symfony's; Drupal's Twig reads route names too.
@@ -701,9 +703,9 @@ impl Backend {
             }
         } else if !is_symfony {
             return None;
-        } else if crate::symfony::validation::is_validation_mapping_uri(uri)
+        } else if crate::symfony::validation::is_validation_mapping_uri(config)
             && let Some((constraint, start, given)) =
-                crate::symfony::validation::option_key_at(uri, content, cursor)
+                crate::symfony::validation::option_key_at(config, content, cursor)
         {
             // An option of a constraint, which the constraint's class
             // names; the options it is already given are left out.
@@ -726,11 +728,12 @@ impl Backend {
                 start,
                 position,
             );
-        } else if crate::symfony::resources::is_container_config_uri(uri) {
-            match config_slot_at(uri, content, cursor).or_else(|| resource_key_at(content, cursor))
+        } else if crate::symfony::resources::is_container_config_uri(config) {
+            match config_slot_at(config, content, cursor)
+                .or_else(|| resource_key_at(content, cursor))
             {
                 Some(found) => found,
-                None if crate::symfony::config_tree::is_bundle_config_uri(uri) => {
+                None if crate::symfony::config_tree::is_bundle_config_uri(config) => {
                     let (parent, start) =
                         crate::symfony::config_tree::config_key_completion(content, cursor)?;
                     let declared = self.symfony_declared_names(StringKeyKind::SymfonyConfigKey);

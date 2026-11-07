@@ -748,8 +748,13 @@ impl<'a> DeclaredKeys<'a> {
     /// A name under a Twig namespace is registered at runtime, and a name
     /// can only be told unknown once some root is known, and when it ends
     /// in an extension the project's templates use.
+    /// A kernel that keeps its configuration where it cannot be read can
+    /// configure Twig to load templates from anywhere.
     fn judge_twig_template(&self, key: &str) -> Verdict {
-        if key.starts_with('@') || self.twig_templates.is_empty() {
+        if key.starts_with('@')
+            || self.twig_templates.is_empty()
+            || self.backend.symfony_config_unread()
+        {
             return None;
         }
         let roots = self.backend.twig_roots();
@@ -765,13 +770,16 @@ impl<'a> DeclaredKeys<'a> {
 
     /// A service ID spelled as a class name is that class, which an
     /// autowired service needs no declaration to be: it is wrong only when
-    /// no such class exists.
+    /// no such class exists.  Any other is declared by the configuration,
+    /// which a kernel can keep where it cannot be read.
     fn judge_service(&self, key: &str) -> Verdict {
         let valid = if key.contains('\\') {
             self.services
                 .binary_search_by(|name| name.as_str().cmp(key))
                 .is_ok()
                 || self.backend.find_or_load_class(key).is_some()
+        } else if self.backend.symfony_config_unread() {
+            return None;
         } else {
             Self::judge_application_key(&self.services, "app.", key)?
         };
@@ -780,13 +788,16 @@ impl<'a> DeclaredKeys<'a> {
 
     /// A parameter set under a name built at runtime is declared as the
     /// pattern its literal start makes (`app.*`), under which no name can be
-    /// told missing.
+    /// told missing, and none can in configuration a kernel keeps where it
+    /// cannot be read.
     fn judge_parameter(&self, key: &str) -> Verdict {
-        if self.parameters.iter().any(|declared| {
-            declared
-                .strip_suffix('*')
-                .is_some_and(|prefix| key.starts_with(prefix))
-        }) {
+        if self.backend.symfony_config_unread()
+            || self.parameters.iter().any(|declared| {
+                declared
+                    .strip_suffix('*')
+                    .is_some_and(|prefix| key.starts_with(prefix))
+            })
+        {
             return None;
         }
         Self::judge_application_key(&self.parameters, "app.", key)

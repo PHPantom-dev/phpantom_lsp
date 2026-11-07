@@ -121,7 +121,9 @@ impl Backend {
         }
         if self.is_symfony_project()
             && changes.iter().any(|change| {
-                crate::symfony::translations::is_translation_setup_uri(change.uri.as_str())
+                crate::symfony::translations::is_translation_setup_uri(
+                    &self.symfony_config_uri(change.uri.as_str()),
+                )
             })
         {
             self.forget_symfony_judged_translation_domains();
@@ -154,6 +156,14 @@ impl Backend {
 
         if !batch.php_changes.is_empty() {
             self.reindex_watched_php_files(&batch.php_changes);
+            // A kernel's `getConfigDir()` says where the configuration is.
+            if batch
+                .php_changes
+                .iter()
+                .any(|(uri, ..)| self.is_symfony_kernel_source(uri))
+            {
+                self.refresh_symfony_kernel_config();
+            }
         }
 
         if !batch.global_tag_changes.is_empty() {

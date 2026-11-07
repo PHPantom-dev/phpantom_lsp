@@ -281,8 +281,10 @@ impl Backend {
     /// libraries or info file.
     pub(crate) fn has_resource_diagnostics(&self, uri: &str) -> bool {
         self.is_twig_template_uri(uri)
-            || (crate::symfony::validation::is_validation_mapping_uri(uri)
-                && self.is_symfony_project())
+            || (self.is_symfony_project()
+                && crate::symfony::validation::is_validation_mapping_uri(
+                    &self.symfony_config_uri(uri),
+                ))
             || self.reads_drupal_libraries(uri)
     }
 

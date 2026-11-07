@@ -36,6 +36,7 @@ pub(crate) mod config_tree;
 pub(crate) mod container;
 pub(crate) mod form_options;
 pub(crate) mod forms;
+pub(crate) mod kernel;
 pub(crate) mod messenger;
 pub(crate) mod resources;
 pub(crate) mod route_world;
@@ -127,6 +128,8 @@ pub(crate) struct SymfonyState {
     judged_translation_domains: translations::JudgedDomains,
     /// The form types and type extensions the installed packages declare.
     vendor_form_classes: form_options::VendorFormClasses,
+    /// Where the project's kernels keep their configuration.
+    kernel_config: RwLock<kernel::KernelConfig>,
 }
 
 /// Whether `map` declares a service ID, a container parameter, a route, a

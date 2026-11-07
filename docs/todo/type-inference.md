@@ -341,6 +341,37 @@ nested closures typed from an expected return type, generator escapes.
 
 ---
 
+## T70. A decorated service is typed as the class it decorates
+
+**Impact: Low-Medium · Complexity: Low**
+
+```yaml
+services:
+  acme.cached_greeter:
+    class: Drupal\acme\CachedGreeter
+    decorates: acme.greeter
+```
+
+```php
+$greeter = \Drupal::service('acme.greeter'); // Greeter, though the container returns CachedGreeter
+```
+
+A service that `decorates` another takes over its ID: the container
+returns the decorator, and the original lives on as `<id>.inner`. A
+service lookup is typed by the class the ID's own declaration names
+(`symfony_service_classes` in `src/symfony/container.rs`), so the
+decorator's methods are reported as unknown and navigation lands in the
+wrong class. `decorates` is read, but only for navigation
+(`src/symfony/resources.rs`). Add the classes of every service that
+decorates an ID to the classes the ID gives, alongside its own, as the
+classes Drupal service providers swap in are added: a decorator in a
+Drupal module that may not be enabled, or under a `when@` block of
+another environment, does not always apply. The same holds in Symfony
+projects. PHPlumb (MIT) types decorated services this way
+(`crates/phplumb-index/src/frameworks/drupal/services.rs`).
+
+---
+
 ## T41. A reading of the callee's body overrides a declared `@param-out`
 **Impact: Low-Medium · Complexity: Low**
 
