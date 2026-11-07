@@ -13,19 +13,23 @@ The `.view.php` files use the editor's PHP language-server connection.
 
 Template PHP infers data from callers and custom View objects. Component
 slots use the receiving component's scope, and explicit `@var` annotations
-can refine inferred types. Components use Composer discovery roots; explicit
-registrations and extra discovery locations are [follow-up work](../../docs/todo/lsp-features.md#f74-configured-tempest-view-discovery).
+can refine inferred types. Components use Composer and configured discovery
+roots, including explicit registrations. The files in `app/*.config.php`
+configure components outside the autoload root; `ConfiguredViews.php` passes
+a constant path through a View helper. In `resources/configured.view.php`,
+follow the configured component tags and inspect the inferred book data.
 
 Verify the playground with:
 
 ```sh
-find app -name '*.php' -print0 | xargs -0 -n1 php -l
+find app resources ui -name '*.php' -print0 | xargs -0 -n1 php -l
 php assertions.php
 phpantom_lsp analyze --project-root . --no-colour
 ```
 
 The assertions render the templates with Tempest's own renderer, checking
-the data and scope behavior demonstrated above.
+the data and scope behavior demonstrated above, and discover configured
+components with Tempest’s own discovery runner.
 
 Performance checks use this playground's declarations with a generated
 catalogue of 400 views. Completion and navigation results are checked before

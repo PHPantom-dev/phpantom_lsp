@@ -11,7 +11,7 @@ use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
 
 use super::inference::Scope;
-use super::view_data::{arguments, expression_type, literal_path, shape_vars};
+use super::view_data::{arguments, expression_type, path_definition, shape_vars};
 
 #[derive(Clone)]
 pub(super) struct CustomView {
@@ -88,9 +88,7 @@ pub(super) fn collect(backend: &Backend) -> BTreeMap<String, CustomView> {
                     }
                     match value {
                         Value::Property("path", expr) => {
-                            path = literal_path(expr).and_then(|(name, relative)| {
-                                backend.tempest_view_definition(&uri, name, relative)
-                            });
+                            path = path_definition(backend, &uri, expr, content, &loaders);
                         }
                         Value::Property("data", expr) => {
                             shape_vars(&expression_type(expr, content, &loaders), &mut scope.vars)

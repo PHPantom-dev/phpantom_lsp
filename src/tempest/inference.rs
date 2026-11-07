@@ -100,6 +100,7 @@ impl Backend {
             return;
         }
         let custom = super::custom_views::collect(self);
+        let wrappers = super::wrappers::names(self);
         let callers: Vec<_> = self
             .files
             .read()
@@ -108,8 +109,9 @@ impl Backend {
                 let map = file.symbol_map.as_ref()?;
                 map.spans
                     .iter()
-                    .any(|span| matches!(span.kind, SymbolKind::StringKey { kind: StringKeyKind::TempestView { .. }, .. }) || matches!(&span.kind, SymbolKind::MemberAccess { member_name, is_method_call: true, .. } if member_name.eq_ignore_ascii_case("data"))
-                        || matches!(&span.kind, SymbolKind::ClassReference { name, .. } if name.trim_start_matches('\\').eq_ignore_ascii_case("Tempest\\View\\GenericView")))
+                    .any(|span| matches!(span.kind, SymbolKind::StringKey { kind: StringKeyKind::TempestView { .. }, .. }) || matches!(&span.kind, SymbolKind::MemberAccess { member_name, is_method_call: true, .. } if (member_name.eq_ignore_ascii_case("data") || wrappers.methods.contains(&member_name.to_ascii_lowercase())))
+                        || matches!(&span.kind, SymbolKind::ClassReference { name, .. } if name.trim_start_matches('\\').eq_ignore_ascii_case("Tempest\\View\\GenericView"))
+                        || matches!(&span.kind, SymbolKind::FunctionCall { name, is_definition: false, .. } if { let name = file.resolved_names.as_ref().and_then(|names| names.get(span.start)).unwrap_or(name).trim_start_matches('\\'); name.eq_ignore_ascii_case("Tempest\\View\\view") || wrappers.functions.contains(&name.to_ascii_lowercase()) }))
                     .then(|| (uri.clone(), Arc::clone(map)))
             })
             .collect();
@@ -125,9 +127,15 @@ impl Backend {
                 continue;
             }
             let file = self.file_context(&uri);
-            for (target, scope) in
-                super::view_data::collect(self, &uri, &file, &content, &custom, &mut instantiated)
-            {
+            for (target, scope) in super::view_data::collect(
+                self,
+                &uri,
+                &file,
+                &content,
+                &custom,
+                &mut instantiated,
+                &wrappers,
+            ) {
                 scopes.entry(target).or_default().merge(scope);
             }
         }

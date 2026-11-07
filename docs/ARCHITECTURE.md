@@ -1491,17 +1491,24 @@ exact copied regions because an attribute written before `:foreach` still
 runs inside the loop. Both directions use sorted indexes, and generated
 syntax has no source position. Blade retains its existing column anchors.
 
-Component discovery is lazy and cached, under the project's Composer
-PSR-4 roots and installed packages' roots, with project components taking
-precedence. File creation/deletion and Composer changes invalidate the
-catalogue. Open buffers supply current component declarations. View-path
+Component discovery is lazy and cached, under Composer and configured
+roots, with project components taking precedence over vendor components.
+Installed packages follow Tempest's dependency and opt-in discovery rules.
+`tempest/configuration.rs` reads discovery locations and component registrations
+using the shared PHP engine. PHP edits refresh configuration values; unchanged
+locations reuse their filesystem scans. File creation/deletion and Composer
+changes invalidate the catalogue. Open buffers supply current declarations. View-path
 spans identify the fully qualified `Tempest\View\view` helper; navigation
 resolves paths from the project, caller, and discovery roots. References
 compare the resolved file, since identical relative paths in two callers
 can name different views.
 
 `tempest/view_data.rs` resolves render arguments through the shared type
-engine in the caller's namespace. Custom View declarations supply the
+engine in the caller's namespace. Helpers returning a View are read under
+their call-site parameter types, using shared forward-walker parameter seeding
+and the declaration's URI. File magic constants in stored initializers retain
+their declaration-file value when read through inheritance or from another
+namespace. Custom View declarations supply the
 renderer proxy's `$this` type; only explicit view data becomes local
 variables. `tempest/inference.rs` caches these declarations before parsing,
 and refreshes them after indexing and document changes. A stale indexing
