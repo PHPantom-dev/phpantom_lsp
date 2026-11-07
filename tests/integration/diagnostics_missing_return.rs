@@ -159,6 +159,32 @@ function g(): int {
     assert_eq!(lines(php), Vec::<u32>::new());
 }
 
+/// The try body always returns, so only the catch reaches the `if`, and
+/// there the flag it tests is always `true`.
+#[test]
+fn a_flag_only_the_catch_can_set_decides_the_code_after_the_try() {
+    let php = r#"<?php
+class Storage {
+    private function insert(): int { return 1; }
+    private function ensureTableExists(): bool { return true; }
+    public function getId(): int {
+        $tryAgain = false;
+        try {
+            return $this->insert();
+        } catch (\Exception $e) {
+            if (!$tryAgain = $this->ensureTableExists()) {
+                throw $e;
+            }
+        }
+        if ($tryAgain) {
+            return $this->insert();
+        }
+    }
+}
+"#;
+    assert_eq!(lines(php), Vec::<u32>::new());
+}
+
 #[test]
 fn a_generator_is_not_flagged() {
     let php = r#"<?php

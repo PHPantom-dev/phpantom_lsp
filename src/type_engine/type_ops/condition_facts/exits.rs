@@ -317,6 +317,20 @@ pub(crate) fn is_never_call_at(expr: &Expression<'_>, ctx: &VarResolutionCtx<'_>
     expression_is_never_call(expr, &exit_ctx)
 }
 
+/// Whether an `if` condition is truthy on every path that reaches it: its
+/// type, resolved at the condition, has no falsy member.
+///
+/// A condition that resolves to nothing is not known to hold.
+pub(crate) fn condition_always_holds_at(
+    condition: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> bool {
+    let ctx = ctx.with_cursor_offset(condition.span().start.offset);
+    let resolved =
+        crate::type_engine::variable::rhs_resolution::resolve_rhs_expression(condition, &ctx);
+    !resolved.is_empty() && ResolvedType::types_joined(&resolved).falsy_type().is_none()
+}
+
 /// Whether some `case` of a `switch` matches every value its subject can
 /// hold, so that control always enters one of them even without a
 /// `default`.

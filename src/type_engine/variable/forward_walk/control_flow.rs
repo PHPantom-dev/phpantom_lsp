@@ -230,7 +230,13 @@ pub(crate) fn process_try<'b>(
         .filter(|_| has_finally && !catches_everything(try_stmt))
         .cloned();
     let catch_entry = thrown.unwrap_or(pre_try);
-    let try_scope = scope.clone();
+    let mut try_scope = scope.clone();
+    // A try body that always returns or throws never runs off its end, so
+    // only the catches that carry on reach the statement after the `try`.
+    // The join treats an unreachable scope as contributing nothing.
+    if branch_exits_stmts(try_stmt.block.statements.iter(), &try_scope, ctx) {
+        try_scope.unreachable = true;
+    }
 
     let mut all_scopes = vec![try_scope];
     // The catches that return or rethrow, which leave through the

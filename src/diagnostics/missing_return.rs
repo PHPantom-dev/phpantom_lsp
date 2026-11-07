@@ -27,7 +27,8 @@ use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::php_type::PhpType;
 use crate::type_engine::type_ops::condition_facts::{
-    FlowFacts, body_end_is_reachable, is_never_call_at, switch_covers_every_value_at,
+    FlowFacts, body_end_is_reachable, condition_always_holds_at, is_never_call_at,
+    switch_covers_every_value_at,
 };
 
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
@@ -140,6 +141,9 @@ impl Backend {
                 let typed = FlowFacts {
                     never_call: &|expr| is_never_call_at(expr, &var_ctx),
                     switch_is_exhaustive: &|switch| switch_covers_every_value_at(switch, &var_ctx),
+                    condition_always_holds: &|condition| {
+                        condition_always_holds_at(condition, &var_ctx)
+                    },
                 };
                 if !body_end_is_reachable(statements, &typed) {
                     continue;

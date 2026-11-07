@@ -41,37 +41,6 @@ No outstanding items.
 
 ## Narrowing
 
-### B710. A `try` body that always returns still flows past its `catch`
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-public function getId(): int {
-    $tryAgain = false;
-    try {
-        return $this->insert();
-    } catch (\Exception $e) {
-        if (!$tryAgain = $this->ensureTableExists()) {
-            throw $e;
-        }
-    }
-    if ($tryAgain) {             // always true here
-        return $this->insert();
-    }
-}   // Method getId() should return int but can reach its end without returning
-```
-
-Code after a `try`/`catch` can only be reached from the end of a block
-that does not exit. Here the `try` body always returns, so only the
-`catch` reaches the `if`, and there `$tryAgain` is `true`. The state at
-the end of the `try` body is merged in anyway, so `$tryAgain` is `bool`,
-the `if` may be skipped, and the missing-return check reports the end of
-the method. The same shape with a plain assignment
-(`try { return; } catch (\Exception $e) { $y = true; }`) leaves `$y` as
-`bool` instead of `true`.
-
-Found by `analyze` on Drupal core (`Drupal\Core\Batch\BatchStorage::getId()`).
-
 ### B692. `(int)` of a `ctype_digit()`-checked string is not non-negative
 
 **Impact: Low · Complexity: Low-Medium**
