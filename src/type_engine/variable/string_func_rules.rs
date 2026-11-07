@@ -76,6 +76,26 @@ fn literal_type(name: &str, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     }
 
     let folded: Vec<String> = match name {
+        "dirname" => {
+            let levels = if args.has_arg(1) {
+                literal_int(args, 1)?
+            } else {
+                1
+            };
+            if !(1..=64).contains(&levels) {
+                return None;
+            }
+            map_subject(args, |subject| {
+                let mut path = std::path::Path::new(subject);
+                for _ in 0..levels {
+                    path = path.parent().unwrap_or(path);
+                    if path.as_os_str().is_empty() {
+                        path = std::path::Path::new(".");
+                    }
+                }
+                path.to_string_lossy().into_owned()
+            })?
+        }
         // `mb_*` agrees with the ASCII mapping on ASCII input, which is
         // the only input that gets this far.
         "strtolower" | "mb_strtolower" => map_subject(args, |s| s.to_ascii_lowercase())?,
@@ -655,6 +675,24 @@ fn trim_default(s: &str, left: bool, right: bool) -> String {
     .to_string()
 }
 
+/// A string builtin must resolve to the global declaration, even when a
+/// namespaced function or import shares its short name.
+pub(in crate::type_engine) fn is_builtin_string_function(
+    name: &str,
+    loader: crate::types::FunctionLoader<'_>,
+    offset: u32,
+) -> bool {
+    has_string_func_rule(name)
+        && loader
+            .and_then(|loader| loader(name, offset))
+            .is_none_or(|function| {
+                function.namespace.as_deref().is_none_or(str::is_empty)
+                    && function
+                        .name
+                        .eq_ignore_ascii_case(name.trim_start_matches('\\'))
+            })
+}
+
 /// Whether `func_name` is one of the string builtins
 /// [`string_func_return_type`] has a rule for.
 ///
@@ -667,6 +705,7 @@ pub(in crate::type_engine) fn has_string_func_rule(func_name: &str) -> bool {
             .to_ascii_lowercase()
             .as_str(),
         "strtolower"
+            | "dirname"
             | "mb_strtolower"
             | "strtoupper"
             | "mb_strtoupper"

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Static file paths.** Paths built from `__DIR__`, `__FILE__`, and `dirname()` keep their known values across files and inherited constants. Contributed by @shuvroroy.
 - **Tempest view data inference.** Templates infer data passed by callers and components, including custom View objects and slot scope. Explicit `@var` annotations can refine inferred types. Contributed by @shuvroroy.
 - **Tempest View completion and navigation.** PHP expressions in `.view.php` templates use imports and `@var` annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to `Tempest\View\view()` also complete and navigate. Contributed by @shuvroroy.
 - **Yii aliases.** In a Yii project, an alias such as `@runtime` at the start of any string jumps to the configuration that declares it, lists the strings that name it, and completes from the declared aliases. Hovering it shows the path it stands for, and the rest of the string links to the file or directory it names.
