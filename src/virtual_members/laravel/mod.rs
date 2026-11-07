@@ -113,6 +113,7 @@ mod builder_injection;
 mod cache_state;
 mod cast_literals;
 mod casts;
+pub(crate) mod collection_projection;
 mod collections;
 mod commands;
 mod completion_cache;

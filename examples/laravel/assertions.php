@@ -1626,6 +1626,24 @@ check(
 
 // ─── Higher-order collection proxies ────────────────────────────────────────
 
+$projectionReview = (new \App\Models\Review())->setRawAttributes(['id' => 3, 'title' => 'Sourdough', 'rating' => '5']);
+$projectionReview->setRelation('reviewable', (new \App\Models\Loaf())->setRawAttributes(['id' => 7]));
+$projectionReviews = new \App\Models\ReviewCollection(['first' => $projectionReview]);
+check('Review casts title to string and rating to int', $projectionReview->title === 'Sourdough' && $projectionReview->rating === 5);
+$byTitle = $projectionReviews->keyBy('title');
+check('keyBy uses a property as the key and keeps the custom collection', $byTitle::class === \App\Models\ReviewCollection::class && $byTitle->all() === ['Sourdough' => $projectionReview]);
+check('keyBy follows a dotted relation property', $projectionReviews->keyBy('reviewable.id')->all() === [7 => $projectionReview]);
+$pluckedTitles = $projectionReviews->pluck('title', 'id');
+check('Eloquent pluck returns a base collection with typed keys and values', $pluckedTitles::class === \Illuminate\Support\Collection::class && $pluckedTitles->all() === [3 => 'Sourdough']);
+$ratingGroups = $projectionReviews->groupBy('rating');
+check('groupBy resets item keys by default', $ratingGroups::class === \App\Models\ReviewCollection::class && $ratingGroups->keys()->all() === [5] && $ratingGroups[5]::class === \App\Models\ReviewCollection::class && $ratingGroups[5]->all() === [$projectionReview]);
+check('groupBy can preserve the original item keys', $projectionReviews->groupBy('rating', preserveKeys: true)[5]->all() === ['first' => $projectionReview]);
+$nestedGroups = $projectionReviews->groupBy(['rating', 'title'], true);
+check('multiple groupers nest groups and preserve only the innermost keys', $nestedGroups::class === \Illuminate\Support\Collection::class && $nestedGroups->keys()->all() === [5] && $nestedGroups[5]::class === \App\Models\ReviewCollection::class && $nestedGroups[5]->keys()->all() === ['Sourdough'] && $nestedGroups[5]['Sourdough']->all() === ['first' => $projectionReview]);
+check('keyBy property and method proxies keep string keys', $projectionReviews->keyBy->title->all() === $byTitle->all() && $projectionReviews->keyBy->getTitle()->keys()->all() === ['']);
+check('groupBy method proxies keep string group keys', $projectionReviews->groupBy->getTitle()->keys()->all() === ['']);
+
+
 // Every proxy the LSP knows how to type must actually be proxyable, and
 // every proxyable method must be one the LSP knows how to type — otherwise
 // `$reviews->somethingElse->x` would resolve against a proxy Laravel never

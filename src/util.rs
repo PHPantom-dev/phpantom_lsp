@@ -259,6 +259,11 @@ pub(crate) fn strip_fqn_prefix(name: &str) -> &str {
 /// is sufficient for class names). Returns `None` when `raw` is not a quoted
 /// string literal.
 pub(crate) fn unescape_php_string_literal(raw: &str) -> Option<String> {
+    unescape_php_string_literal_cow(raw).map(std::borrow::Cow::into_owned)
+}
+
+/// Unescape a quoted PHP string, borrowing its contents when no escapes occur.
+pub(crate) fn unescape_php_string_literal_cow(raw: &str) -> Option<std::borrow::Cow<'_, str>> {
     let (body, double_quoted) =
         if let Some(b) = raw.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')) {
             (b, false)
@@ -267,6 +272,9 @@ pub(crate) fn unescape_php_string_literal(raw: &str) -> Option<String> {
             (b, true)
         };
 
+    if !body.contains('\\') {
+        return Some(std::borrow::Cow::Borrowed(body));
+    }
     let mut out = String::with_capacity(body.len());
     let mut chars = body.chars();
     while let Some(c) = chars.next() {
@@ -285,7 +293,7 @@ pub(crate) fn unescape_php_string_literal(raw: &str) -> Option<String> {
             out.push(c);
         }
     }
-    Some(out)
+    Some(std::borrow::Cow::Owned(out))
 }
 
 /// Build a fully-qualified name from a short name and an optional namespace.
@@ -366,5 +374,18 @@ mod tests {
     fn unescape_string_literal_rejects_unquoted_input() {
         assert_eq!(unescape_php_string_literal("bare"), None);
         assert_eq!(unescape_php_string_literal("'unterminated"), None);
+    }
+
+    #[test]
+    fn unescape_string_literal_borrows_unescaped_contents() {
+        for raw in ["'email'", "\"profile.name\"", "''", "'naïve'"] {
+            let decoded = unescape_php_string_literal_cow(raw).unwrap();
+            assert!(matches!(decoded, std::borrow::Cow::Borrowed(_)));
+            assert_eq!(decoded, &raw[1..raw.len() - 1]);
+        }
+        assert_eq!(
+            unescape_php_string_literal_cow(r"'a\'b'").as_deref(),
+            Some("a'b"),
+        );
     }
 }

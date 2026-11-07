@@ -419,11 +419,7 @@ fn a_custom_collection_subclass_is_preserved() {
 
 #[test]
 fn key_by_moves_the_member_into_the_key() {
-    assert_type(
-        SUPPORT,
-        "$items->keyBy->email",
-        "Collection<array-key, User>",
-    );
+    assert_type(SUPPORT, "$items->keyBy->email", "Collection<string, User>");
 }
 
 #[test]
@@ -431,7 +427,7 @@ fn group_by_nests_the_collection() {
     assert_type(
         SUPPORT,
         "$items->groupBy->email",
-        "Collection<array-key, Collection<int, User>>",
+        "Collection<string, Collection<int, User>>",
     );
 }
 
