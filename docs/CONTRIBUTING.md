@@ -28,7 +28,7 @@ php examples/symfony/assertions.php
 php examples/yii/assertions.php
 php examples/wordpress/assertions.php
 php examples/drupal/assertions.php
-find examples/tempest/app -name '*.php' -print0 | xargs -0 -n1 php -l
+find examples/tempest/app examples/tempest/resources examples/tempest/ui -name '*.php' -print0 | xargs -0 -n1 php -l
 php examples/tempest/assertions.php
 phpantom_lsp analyze --project-root examples/laravel --no-colour
 phpantom_lsp analyze --project-root examples/symfony --no-colour

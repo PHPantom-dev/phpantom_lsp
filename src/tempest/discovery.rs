@@ -20,6 +20,8 @@ pub(crate) struct TempestState {
     /// Files the last refresh read view data from: render callers and
     /// custom View declarations.
     pub(super) sources: RwLock<HashSet<String>>,
+    /// View helper names as of the last inference refresh.
+    pub(super) wrappers: RwLock<Arc<super::wrappers::Names>>,
 }
 
 #[derive(Clone)]

@@ -41,7 +41,10 @@ type BodyInferMemo = crate::type_engine::BoundedMemo<BodyInferKey, Option<PhpTyp
 /// method)`.
 type CallSiteArgFrames = Vec<((Atom, Atom), Box<[PhpType]>)>;
 
+type DeclarationArgFrames = Vec<((Atom, u32), Box<[PhpType]>)>;
+
 thread_local! {
+    static DECLARATION_ARGS: RefCell<DeclarationArgFrames> = const { RefCell::new(Vec::new()) };
     /// When `Some`, `resolve_instance_method_callable` caches results
     /// by `"FQN::method_lower"`.  Activated by
     /// [`activate_type_engine_caches`], cleared on guard drop.
@@ -136,6 +139,44 @@ pub(crate) fn activate_body_infer_memo() -> impl Drop {
 /// call's argument types seeding an unrelated body.
 struct CallSiteArgsGuard;
 
+struct DeclarationArgsGuard;
+
+impl Drop for DeclarationArgsGuard {
+    fn drop(&mut self) {
+        DECLARATION_ARGS.with(|frames| {
+            frames.borrow_mut().pop();
+        });
+    }
+}
+
+/// Read a particular declaration under a call site's parameter types. The
+/// declaration URI and span distinguish same-named functions in other files.
+pub(crate) fn with_declaration_arguments(
+    uri: &str,
+    start: u32,
+    args: &[PhpType],
+) -> (impl Drop, impl Drop, impl Drop) {
+    DECLARATION_ARGS.with(|frames| frames.borrow_mut().push(((atom(uri), start), args.into())));
+    (
+        DeclarationArgsGuard,
+        crate::type_engine::variable::forward_walk::suspend_diagnostic_scope(),
+        crate::type_engine::resolver::with_isolated_chain_cache(),
+    )
+}
+
+/// The innermost invocation currently reading this declaration, if any.
+pub(crate) fn declaration_param_types(uri: Option<&str>, start: u32) -> Option<Box<[PhpType]>> {
+    let uri = uri?;
+    DECLARATION_ARGS.with(|frames| {
+        frames
+            .borrow()
+            .iter()
+            .rev()
+            .find(|((file, offset), _)| file == uri && *offset == start)
+            .map(|(_, args)| args.clone())
+    })
+}
+
 impl Drop for CallSiteArgsGuard {
     fn drop(&mut self) {
         BODY_INFER_ARGS.with(|cell| {
@@ -199,7 +240,7 @@ pub(crate) fn body_inference_context() -> u64 {
     use std::hash::{Hash, Hasher};
 
     let depth = body_infer_depth();
-    if depth == 0 {
+    if depth == 0 && DECLARATION_ARGS.with(|frames| frames.borrow().is_empty()) {
         return 0;
     }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -215,6 +256,7 @@ pub(crate) fn body_inference_context() -> u64 {
     });
     visited.hash(&mut hasher);
     BODY_INFER_ARGS.with(|cell| cell.borrow().hash(&mut hasher));
+    DECLARATION_ARGS.with(|cell| cell.borrow().hash(&mut hasher));
     // Never `0`, which stands for "no inference running".
     hasher.finish() | 1
 }

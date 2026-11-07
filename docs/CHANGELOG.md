@@ -155,7 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Tempest View completion and navigation.** In a Tempest project, PHP expressions in `.view.php` templates use imports and `@var` annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to `Tempest\View\view()` also complete and navigate. Contributed by @shuvroroy.
 - **Tempest view data inference.** Templates infer data passed by callers and components, including custom View objects and slot scope. Explicit `@var` annotations can refine inferred types. Contributed by @shuvroroy.
-- **Configured Tempest views.** Component completion and navigation read Tempest discovery configuration and explicit registrations. Contributed by @shuvroroy.
+- **Configured Tempest views.** Component completion and navigation read Tempest discovery configuration and explicit registrations. View helpers pass their callers’ data to templates through statically known paths. Contributed by @shuvroroy.
 
 #### Configuration and indexing
 
