@@ -139,6 +139,11 @@ way a real Yii 3 project declares them.
   a group name to complete the groups `config/configuration.php` and the
   installed packages use, and misspell a file name to see it reported. A
   `"$group"` entry goes to the group it names.
+- Open `config/configuration.php`, where the project declares its own
+  config groups. Go to the definition of `'common/params.php'` for its
+  file, or of `'$di'` for the `di` group, type `$` in a list to complete
+  the groups the project and the installed packages declare, and misspell
+  a file name to see it reported.
 
 ## Getting started
 

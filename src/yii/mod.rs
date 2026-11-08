@@ -30,8 +30,9 @@
 //! The files an asset bundle's `$css` and `$js` list are spans keyed by
 //! the directory the bundle names and the entry (see [`assets`]).
 //!
-//! The `config-plugin` of a `composer.json` names those groups and lists
-//! their files; it is read where it is written (see [`config_plugin`]).
+//! The `config-plugin` of a `composer.json`, or of the PHP file its
+//! `config-plugin-file` names, names those groups and lists their files;
+//! it is read where it is written (see [`config_plugin`]).
 //!
 //! The listeners the events configuration attaches to an event class are
 //! read from the files of the events groups, the project's and the
@@ -162,7 +163,9 @@ impl Backend {
         if !self.is_yii_project() {
             return;
         }
-        if uri.contains("/config/") && uri.ends_with(".php") {
+        if uri.ends_with(".php")
+            && (uri.contains("/config/") || self.is_yii_config_plugin_file(uri))
+        {
             *self.yii.aliases.write() = None;
             self.forget_yii_params();
             self.forget_yii_messages();

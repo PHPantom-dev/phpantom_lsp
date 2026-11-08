@@ -86,32 +86,3 @@ the DI configuration gives the renderer, from
 it, so a name such a class renders does not navigate, complete, or get
 reported. Read the value from the merged params (`src/yii/params.rs`),
 and use it as the base wherever the class gives none.
-
----
-
-## Y11. The config groups a project declares in PHP
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-// composer.json: "config-plugin-file": "config/configuration.php"
-return [
-    'config-plugin' => [
-        'params-site' => ['$params', 'site/params.php'],
-        'di' => 'common/di/*.php',
-    ],
-    'config-plugin-environments' => [
-        Environment::DEV => ['params' => ['environments/dev/params.php']],
-    ],
-];
-```
-
-A project generated from `yiisoft/app` declares its config groups in the
-PHP file `config-plugin-file` names, not in its `composer.json`. The
-same entries in a `composer.json`'s `config-plugin` go to their files,
-complete, and are reported when no file matches (`src/yii/config_plugin.rs`),
-but in this file the file names and the `$group` references do nothing.
-PHPantom already reads the file to merge params (`src/yii/params.rs`),
-so it knows which file it is. Give its string entries the same
-navigation, completion, and checks, relative to the file's directory,
-with the group names the installed packages declare offered after `$`.

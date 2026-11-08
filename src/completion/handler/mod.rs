@@ -238,6 +238,15 @@ impl Backend {
             return self.try_yii_config_plugin_completion(uri, &content, position);
         }
 
+        // The PHP file a Yii project declares its config groups in completes
+        // them inside its strings, and like PHP everywhere else.
+        if self.is_yii_config_plugin_file(uri)
+            && let Some(content) = self.get_file_content_arc(uri)
+            && let Some(response) = self.try_yii_config_plugin_completion(uri, &content, position)
+        {
+            return Some(response);
+        }
+
         let is_template = self.is_twig_template_uri(uri);
         if (is_template || self.is_resource_uri(uri))
             && let Some(content) = self.get_file_content_arc(uri)

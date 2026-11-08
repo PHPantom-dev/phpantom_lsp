@@ -97,6 +97,9 @@ pub(crate) struct ConfigPlan {
     events_files: HashSet<PathBuf>,
     /// The names of the project's groups, its environments' included.
     groups: Vec<String>,
+    /// The PHP file the project's `config-plugin-file` names, canonical,
+    /// and the project's root its entries are under.
+    plugin_file: Option<(PathBuf, PathBuf)>,
 }
 
 impl ConfigPlan {
@@ -111,10 +114,14 @@ impl ConfigPlan {
             return plan;
         };
         let extra = match extra.get("config-plugin-file").and_then(|f| f.as_str()) {
-            Some(file) => match read_php_config(&root.join(file)) {
-                Some(extra) => extra,
-                None => return plan,
-            },
+            Some(file) => {
+                let file = root.join(file);
+                plan.plugin_file = Some((canonical(&file), root.to_path_buf()));
+                match read_php_config(&file) {
+                    Some(extra) => extra,
+                    None => return plan,
+                }
+            }
             None => extra,
         };
         let source = extra
@@ -176,6 +183,28 @@ impl ConfigPlan {
     /// The names of the project's groups, its environments' included.
     pub(crate) fn groups(&self) -> &[String] {
         &self.groups
+    }
+
+    /// The project's root, when `path` is the PHP file its
+    /// `config-plugin-file` names.
+    pub(crate) fn plugin_file_root(&self, path: &Path) -> Option<&Path> {
+        let (file, root) = self.plugin_file.as_ref()?;
+        // Every PHP file a request is made in is asked about, so a file of
+        // another name is turned away before the filesystem is.
+        let same_name = match (path.file_name(), file.file_name()) {
+            (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+            _ => false,
+        };
+        (same_name
+            && (crate::document_links::normalize_path(path) == *file
+                || dunce::canonicalize(path).is_ok_and(|path| path == *file)))
+        .then_some(root.as_path())
+    }
+
+    /// Whether `path` is the PHP file the project's `config-plugin-file`
+    /// names.
+    pub(crate) fn is_plugin_file(&self, path: &Path) -> bool {
+        self.plugin_file_root(path).is_some()
     }
 
     /// The project's configuration files other than its params files: the
