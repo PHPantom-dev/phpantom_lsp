@@ -282,6 +282,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Narrowing and control flow
 
+- **Arrays filled by key in a loop with an inner loop.** An array written at every value of a literal list, as in `foreach ([1, 2, 3] as $node) { $labels[$node] = 0; … }`, now keeps every key required when the body also holds a nested loop or `switch`, so reading `$labels[1]` afterwards no longer adds `null`. A `continue` that only skips the inner loop no longer counts as skipping the write.
+- **Breaking out of two loops from a loop over a plain `array`.** A `break 2` inside a `foreach` over an untyped `array` now carries the values it set past the outer loop. On the outer loop's later passes the inner loop no longer judged that branch impossible from a stale value of its loop variable.
 - **Integers cast from a `ctype_digit()`-checked value.** After `ctype_digit($delay)` passes, `(int) $delay` and `intval($delay)` are known not to be negative, so passing them to a parameter such as `sleep()`'s `int<0, max>` is no longer reported.
 - **`ctype_digit()` narrows what it checks.** A string that passes `ctype_digit()` is now a `numeric-string`, and an integer is narrowed to the values the check accepts in either branch.
 - **Variables after a `try` whose body always returns.** When a `try` body always returns or throws, the code after the statement now sees only what the `catch` blocks left behind, so a variable set in a `catch` has that value afterwards instead of also keeping the one it had before the `try`.

@@ -410,17 +410,6 @@ pub(crate) fn process_foreach<'b>(
     let cursor_in_body = loop_ctxs.cursor_in_body;
 
     binding.bind(scope, ctx);
-    // When the iterable is a bare `array` (no generic parameters)
-    // and no @var docblock provided a concrete type, the element
-    // type is `mixed`.  Seed it so that assignments from the loop
-    // variable propagate `mixed` correctly through the body.
-    if let Some(ref vn) = binding.value_var_name
-        && binding.value_docblock_override.is_none()
-        && scope.get(vn).is_empty()
-        && iter_type.as_ref().is_some_and(|it| it.is_bare_array())
-    {
-        scope.set(vn, vec![ResolvedType::from_type_string(PhpType::mixed())]);
-    }
 
     // What one entry looks like before the body has said anything about
     // it, which is the baseline the loop's own guards narrow.
@@ -812,18 +801,35 @@ fn non_empty_generalized_shape(entries: &[crate::php_type::ShapeEntry]) -> Optio
 /// Whether a statement in a loop body may skip ahead to the next iteration,
 /// or a `continue` inside a nested structure may do so on its behalf.
 fn statement_may_continue(stmt: &Statement<'_>) -> bool {
+    continue_reaches_loop(stmt, 0)
+}
+
+/// [`statement_may_continue`] for a statement nested `depth` loops or
+/// `switch`es inside the loop body.
+///
+/// PHP counts a `switch` as a loop for `continue`, so a bare `continue`
+/// inside either only reaches the inner structure; it takes
+/// `continue N` with `N` above `depth` to skip the rest of this loop's
+/// iteration. A level that is not an integer literal is taken to reach it,
+/// and so is a `goto`, which may jump anywhere.
+fn continue_reaches_loop(stmt: &Statement<'_>, depth: u32) -> bool {
     match stmt {
-        Statement::Continue(_) => true,
-        Statement::Block(_) | Statement::If(_) => {
-            crate::parser::any_nested_statement(stmt, statement_may_continue)
+        Statement::Continue(cont) => {
+            let level = match cont.level {
+                None => Some(1),
+                Some(_) => super::loop_control::exit_level(cont.level),
+            };
+            level.is_none_or(|level| level > depth)
         }
-        Statement::Expression(_)
-        | Statement::Echo(_)
-        | Statement::EchoTag(_)
-        | Statement::Return(_) => false,
-        // Anything else (a nested loop, `switch`, `try`) is taken to possibly
-        // hold one, rather than walking every shape it comes in.
-        _ => true,
+        Statement::Goto(_) => true,
+        Statement::Foreach(_)
+        | Statement::For(_)
+        | Statement::While(_)
+        | Statement::DoWhile(_)
+        | Statement::Switch(_) => crate::parser::any_nested_statement(stmt, |inner| {
+            continue_reaches_loop(inner, depth + 1)
+        }),
+        _ => crate::parser::any_nested_statement(stmt, |inner| continue_reaches_loop(inner, depth)),
     }
 }
 
@@ -1294,12 +1300,21 @@ pub(crate) fn bind_foreach_value<'b>(
                 }
             }
         }
+        // A bare `array` holds `mixed` entries, which replaces whatever
+        // the name held before, including what an enclosing loop's
+        // earlier pass narrowed it to.
+        if iter_type.as_ref().is_some_and(PhpType::is_bare_array) {
+            scope.set(
+                &var_name,
+                vec![ResolvedType::from_type_string(PhpType::mixed())],
+            );
+            return;
+        }
         // Couldn't determine the element type (untyped/unknown iterable).
         // Seed `mixed` so body assignments like `$x = $value` after
         // `$x = null` overwrite pure-null and participate in post-loop
-        // merge + `is_null` early-return narrowing.  Bare `array` is
-        // already seeded as `mixed` above; fully untyped parameters
-        // hit this path with `iter_type = None`.
+        // merge + `is_null` early-return narrowing.  Fully untyped
+        // parameters hit this path with `iter_type = None`.
         if scope.get(&var_name).is_empty() {
             scope.set(
                 &var_name,
