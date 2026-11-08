@@ -1316,17 +1316,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#y13-a-definitions-__construct-key-goes-to-the-constructor" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y13. A definition's <code>'__construct()'</code> key goes to the constructor
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1472,21 +1461,6 @@ to its <code>{slug}</code> in the route's path, the way <code>#[RouteArgument('s
 already does (<code>yii_route_argument_locations</code> in <code>src/yii/routes.rs</code>), and
 hover it with the path. A key the path does not declare could be
 reported the same way an unknown <code>RouteArgument</code> is.</p>
-<hr />
-<h2 id="y13-a-definitions-__construct-key-goes-to-the-constructor">Y13. A definition's <code>'__construct()'</code> key goes to the constructor<a class="headerlink" href="#y13-a-definitions-__construct-key-goes-to-the-constructor" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">Mailer::class =&gt; [</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    '__construct()' =&gt; ['transport' =&gt; Reference::to(TransportInterface::class)],</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">],</span>
-</code></pre></div>
-<p>Every other <code>'name()'</code> key of a definition goes to its method, but
-<code>'__construct()'</code> goes nowhere. It is left out of the member spans
-deliberately (<code>emit_definition_keys</code> in
-<code>src/symbol_map/extraction/yii_definitions.rs</code>), because a class without
-a constructor still accepts the key and must not be reported. Navigate
-and hover it when the class (or an ancestor) declares a constructor,
-without reporting it when none does. Its argument keys already go to the
-constructor's parameters.</p>
 
 
 
