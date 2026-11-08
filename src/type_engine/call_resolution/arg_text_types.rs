@@ -144,9 +144,8 @@ impl Backend {
         // source `VarResolutionCtx`'s constant loader draws from) and infer
         // the type from its value, mirroring the
         // `Expression::ConstantAccess` branch the AST-based RHS resolver
-        // already has for a plain `$x = PHP_EOL;` assignment.  This path
-        // takes expression *text*, with no offset to resolve a namespaced
-        // name against, so only the name as written is tried.
+        // already has for a plain `$x = PHP_EOL;` assignment. The enclosing
+        // file supplies the imports even when the expression has no AST offset.
         if !trimmed.is_empty()
             && !trimmed.starts_with('$')
             && !trimmed.contains("::")
@@ -159,7 +158,20 @@ impl Backend {
             && !is_self_or_static(trimmed)
             && !trimmed.eq_ignore_ascii_case("parent")
             && let Some(backend) = ctx.file.backend
-            && let Some(ty) = match backend.lookup_global_constant(trimmed) {
+            && let Some(ty) = match ctx.file.uri.map_or_else(
+                || backend.lookup_global_constant(trimmed),
+                |uri| {
+                    let file = backend.file_context_at(uri, ctx.cursor_offset);
+                    backend.resolve_constant_name_at(
+                        trimmed,
+                        None,
+                        0,
+                        &file.use_map,
+                        &file.symbol_imports.constants,
+                        &file.namespace,
+                    )
+                },
+            ) {
                 None => None,
                 Some(Some(value)) => {
                     crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(

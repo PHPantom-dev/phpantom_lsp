@@ -31,6 +31,40 @@ $renderer = TempestViewRenderer::make(viewConfig: $config);
 GenericContainer::setInstance($container);
 $container->singleton(TempestViewRenderer::class, $renderer);
 
+$routes = new Tempest\Router\RouteConfig();
+$routeDiscovery = new Tempest\Router\RouteDiscovery(
+    new Tempest\Router\Routing\Construction\RouteConfigurator(),
+    $routes,
+);
+$routeDiscovery->setItems(new Tempest\Discovery\DiscoveryItems());
+$location = new Tempest\Discovery\DiscoveryLocation('App\\', __DIR__ . '/app');
+foreach ([BookController::class, App\HomeController::class] as $controller) {
+    $routeDiscovery->discover($location, new Tempest\Reflection\ClassReflector($controller));
+}
+$routeDiscovery->apply();
+$generator = new Tempest\Router\UriGenerator(
+    new Tempest\Core\AppConfig(baseUri: 'https://books.example'),
+    $routes,
+    new Tempest\Cryptography\Signing\GenericSigner(
+        new Tempest\Cryptography\Signing\SigningConfig(
+            Tempest\Cryptography\Signing\SigningAlgorithm::SHA256,
+            'playground',
+            false,
+        ),
+        new Tempest\Cryptography\Timelock(new Tempest\Clock\GenericClock()),
+    ),
+    $container,
+);
+$container->singleton(Tempest\Router\UriGenerator::class, $generator);
+if (new App\RouteLinks()->links() !== [
+    'https://books.example/books/php',
+    'https://books.example/books/php',
+    'https://books.example/home/en',
+    'https://books.example/home/en',
+]) {
+    throw new RuntimeException('Route discovery or URI arguments did not match the route demos.');
+}
+
 $html = $renderer->render(new BookController()->index());
 foreach (['<h2>The PHP Book</h2>', '<p>Read The PHP Book</p>'] as $expected) {
     if (!str_contains($html, $expected)) {

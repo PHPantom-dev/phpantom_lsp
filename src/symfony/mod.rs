@@ -160,6 +160,7 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         KeyFramework::Laravel | KeyFramework::WordPress | KeyFramework::Tempest => false,
     };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
+        || !map.tempest_routes.is_empty()
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
         || (!map.yii_definitions.is_empty() && enabled(StringKeyKind::YiiDefinitionArgument))
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
@@ -220,7 +221,12 @@ impl Backend {
     /// Dependencies are never part of the project's own configuration, so a
     /// vendor file that happens to be parsed is left out.
     pub(crate) fn note_symfony_declarations(&self, uri: &str, map: &SymbolMap) {
-        if !self.reads_service_container() && !self.is_twig_project() && !self.is_yii_project() {
+        if !self.reads_service_container()
+            && !self.is_twig_project()
+            && !self.is_yii_project()
+            && map.tempest_routes.is_empty()
+            && !self.is_declaring_uri(uri)
+        {
             return;
         }
         let declares = declares_symfony_keys(map, |kind| self.string_key_kind_enabled(kind))

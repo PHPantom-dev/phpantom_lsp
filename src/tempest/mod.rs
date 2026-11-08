@@ -8,6 +8,7 @@ mod discovery;
 pub(crate) mod inference;
 mod paths;
 pub(crate) mod preprocessor;
+pub(crate) mod routes;
 mod syntax;
 mod view_data;
 mod wrappers;

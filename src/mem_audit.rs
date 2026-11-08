@@ -1476,6 +1476,13 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 sm.yii_definition_bodies.capacity()
                     * size_of::<crate::symbol_map::YiiDefinitionBody>(),
             );
+            sym.add(std::mem::size_of_val(sm.tempest_routes.as_ref()));
+            sym.add(std::mem::size_of_val(sm.tempest_uri_calls.as_ref()));
+            for route in &sm.tempest_routes {
+                sym.add(route.path.capacity());
+                sym.add(route.placeholders.capacity() * size_of::<(u32, u32)>());
+                sym.add(std::mem::size_of_val(route.parameters.as_ref()));
+            }
         }
     }
     eprintln!(

@@ -247,6 +247,8 @@ struct ExtractionCtx<'a> {
     yii_read_chains: Vec<(u32, u32)>,
     /// The routes the file declares.
     routes: Vec<crate::symbol_map::RouteSite>,
+    tempest_routes: Vec<crate::tempest::routes::RouteAttribute>,
+    tempest_uri_calls: Vec<u32>,
     /// The classes the file's DI definitions bind and build.
     yii_definitions: Vec<crate::symbol_map::YiiDefinitionSite>,
     /// The file's DI definition arrays that build a known class.
@@ -643,6 +645,8 @@ fn extract_symbol_map_inner(
         names_yii_router: None,
         yii_read_chains: Vec::new(),
         routes: Vec::new(),
+        tempest_routes: Vec::new(),
+        tempest_uri_calls: Vec::new(),
         yii_definitions: Vec::new(),
         yii_definition_bodies: Vec::new(),
         yii_params,
@@ -784,6 +788,7 @@ fn extract_symbol_map_inner(
     ctx.drupal_plugin_classes.sort_by_key(|s| s.start);
     ctx.drupal_plugins.sort_by_key(|s| s.start);
     ctx.drupal_hooks.sort_by_key(|s| s.start);
+    ctx.tempest_uri_calls.sort_unstable();
     ctx.drupal_hooks.dedup_by_key(|s| s.start);
     ctx.routes.shrink_to_fit();
 
@@ -837,6 +842,8 @@ fn extract_symbol_map_inner(
         drupal_hooks: ctx.drupal_hooks,
         drupal_computed_hooks: ctx.drupal_computed_hooks,
         routes: ctx.routes,
+        tempest_routes: ctx.tempest_routes.into_boxed_slice(),
+        tempest_uri_calls: ctx.tempest_uri_calls.into_boxed_slice(),
         yii_definitions: ctx.yii_definitions,
         yii_definition_bodies: ctx.yii_definition_bodies,
         dql_aliases: ctx.dql_aliases,

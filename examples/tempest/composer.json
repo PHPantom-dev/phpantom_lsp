@@ -5,6 +5,7 @@
     "type": "project",
     "require": {
         "php": "^8.5",
+        "tempest/router": "^3.19",
         "tempest/view": "^3.19"
     },
     "autoload": {

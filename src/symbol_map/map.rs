@@ -349,6 +349,11 @@ pub(crate) struct SymbolMap {
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,
+    /// Method attributes whose URI argument may declare a Tempest route.
+    /// Their classes are confirmed through the `Route` interface on lookup.
+    pub tempest_routes: Box<[crate::tempest::routes::RouteAttribute]>,
+    /// Sorted argument-list starts of calls to the resolved Tempest `uri()` helper.
+    pub tempest_uri_calls: Box<[u32]>,
     /// The classes the file's Yii DI definitions bind and build, in source
     /// order.  Empty for every file that writes none.
     pub yii_definitions: Vec<YiiDefinitionSite>,

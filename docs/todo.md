@@ -35,7 +35,6 @@ contributor even though it's short.
 | TM1 | [Component attribute names navigate to the component's variable](todo/tempest.md#tm1-component-attribute-names-navigate-to-the-components-variable) | Low-Medium | Low |
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
-| TM3 | [Route URIs and route parameters](todo/tempest.md#tm3-route-uris-and-route-parameters) | Medium | Medium |
 | TM4 | [Model property names in query builders and model helpers](todo/tempest.md#tm4-model-property-names-in-query-builders-and-model-helpers) | Medium | Medium |
 | Y14 | [Event listeners in the events configuration](todo/yii.md#y14-event-listeners-in-the-events-configuration) | Medium      | Medium      |
 | Y15 | [Property names in hydrator attributes and form fields](todo/yii.md#y15-property-names-in-hydrator-attributes-and-form-fields) | Low-Medium  | Medium      |
@@ -165,7 +164,6 @@ ships, remove every row that names it.
 | TM1 | [Component attribute names navigate to the component's variable](todo/tempest.md#tm1-component-attribute-names-navigate-to-the-components-variable) | Low-Medium | Low |
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
-| TM3 | [Route URIs and route parameters](todo/tempest.md#tm3-route-uris-and-route-parameters) | Medium | Medium |
 | TM4 | [Model property names in query builders and model helpers](todo/tempest.md#tm4-model-property-names-in-query-builders-and-model-helpers) | Medium | Medium |
 
 ## PHPUnit & Pest
