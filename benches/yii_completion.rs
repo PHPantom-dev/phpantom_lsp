@@ -21,6 +21,7 @@ const COMPOSER: &str = r#"{
     "autoload": { "psr-4": {
         "App\\": "src/",
         "Yiisoft\\Router\\": "stubs/router/",
+        "Yiisoft\\Translator\\": "stubs/translator/",
         "Yiisoft\\Yii\\View\\Renderer\\": "stubs/yii-view-renderer/",
         "Yiisoft\\View\\": "stubs/view/"
     } },
@@ -65,6 +66,14 @@ const STUBS: &[(&str, &str)] = &[
     (
         "stubs/router/UrlGeneratorInterface.php",
         "<?php\nnamespace Yiisoft\\Router;\ninterface UrlGeneratorInterface {\n    public function generate(string $name, array $arguments = [], array $queryParameters = []): string;\n}\n",
+    ),
+    (
+        "stubs/translator/TranslatorInterface.php",
+        "<?php\nnamespace Yiisoft\\Translator;\ninterface TranslatorInterface {\n    public function translate(string $id, array $parameters = [], ?string $category = null, ?string $locale = null): string;\n}\n",
+    ),
+    (
+        "config/di/translation.php",
+        "<?php\nreturn [\n    'translation.app' => static fn () => new \\Yiisoft\\Translator\\Message\\Php\\MessageSource(dirname(__DIR__, 2) . '/resources/messages'),\n];\n",
     ),
     (
         "stubs/router/HydratorAttribute/RouteArgument.php",
@@ -166,6 +175,24 @@ return [
 ];
 "#;
 
+/// A class translating a message whose ID is being typed, among the
+/// `SECTIONS * ACTIONS` IDs the default category's message files declare.
+const TRANSLATION_CONSUMER_PHP: &str = r#"<?php
+namespace App\Web;
+
+use Yiisoft\Translator\TranslatorInterface;
+
+final class ConsumerTitle
+{
+    public function __construct(private TranslatorInterface $translator) {}
+
+    public function __invoke(): string
+    {
+        return $this->translator->translate('section1.');
+    }
+}
+"#;
+
 fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -259,6 +286,10 @@ fn generate_application() -> Vec<(String, String)> {
         "src/Asset/ConsumerAsset.php".to_string(),
         ASSET_CONSUMER_PHP.to_string(),
     ));
+    files.push((
+        "src/Web/ConsumerTitle.php".to_string(),
+        TRANSLATION_CONSUMER_PHP.to_string(),
+    ));
     files
 }
 
@@ -276,6 +307,22 @@ async fn setup_yii_backend() -> (Backend, tempfile::TempDir) {
         let full = dir.path().join(path);
         fs::create_dir_all(full.parent().unwrap()).unwrap();
         fs::write(&full, content).unwrap();
+    }
+    // The message files of the default category, which are never opened.
+    let mut messages = String::from("<?php\nreturn [\n");
+    for section in 0..SECTIONS {
+        for action in 0..ACTIONS {
+            let _ = writeln!(
+                messages,
+                "    'section{section}.action{action}' => 'Action {action}',"
+            );
+        }
+    }
+    messages.push_str("];\n");
+    for locale in ["en", "de"] {
+        let dir = dir.path().join(format!("resources/messages/{locale}"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("app.php"), &messages).unwrap();
     }
     // The stylesheets the asset bundle lists, which are never opened.
     for section in 0..SECTIONS {
@@ -343,6 +390,8 @@ fn bench_yii_name_completion(c: &mut Criterion) {
     let route_uri = Uri::from_file_path(dir.path().join("src/Web/ConsumerAction.php")).unwrap();
     let di_uri = Uri::from_file_path(dir.path().join("config/di/consumer.php")).unwrap();
     let asset_uri = Uri::from_file_path(dir.path().join("src/Asset/ConsumerAsset.php")).unwrap();
+    let translation_uri =
+        Uri::from_file_path(dir.path().join("src/Web/ConsumerTitle.php")).unwrap();
 
     // (benchmark, document, its text, the literal to complete inside, a
     // name the completion must offer)
@@ -424,6 +473,13 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             DI_CONSUMER_PHP,
             "['yiisoft/aliases']['a'",
             "aliases",
+        ),
+        (
+            "message_id",
+            &translation_uri,
+            TRANSLATION_CONSUMER_PHP,
+            "translate('section1.'",
+            "section1.action7",
         ),
     ];
 

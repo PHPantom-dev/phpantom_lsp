@@ -237,6 +237,15 @@ impl Backend {
         if let Some(known) = known.as_ref() {
             return Arc::clone(known);
         }
+        let found = Arc::new(read_package_definition_files(
+            &self.yii_package_definition_paths(),
+        ));
+        *known = Some(Arc::clone(&found));
+        found
+    }
+
+    /// The definition files the installed packages contribute.
+    pub(crate) fn yii_package_definition_paths(&self) -> Vec<PathBuf> {
         let vendors = self.workspace.vendor_dir_paths.lock().clone();
         let mut paths = Vec::new();
         for vendor in &vendors {
@@ -251,9 +260,7 @@ impl Backend {
         }
         paths.sort_unstable();
         paths.dedup();
-        let found = Arc::new(read_package_definition_files(&paths));
-        *known = Some(Arc::clone(&found));
-        found
+        paths
     }
 
     /// Forget what the installed packages define, once they changed.

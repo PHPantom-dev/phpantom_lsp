@@ -45,7 +45,9 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         | StringKeyKind::MixAsset
         | StringKeyKind::ViteAsset
         | StringKeyKind::InertiaPage => CompletionItemKind::File,
-        StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
+        StringKeyKind::Trans
+        | StringKeyKind::SymfonyTranslation
+        | StringKeyKind::YiiTranslation => CompletionItemKind::Text,
         StringKeyKind::DrupalPermission => CompletionItemKind::Constant,
         StringKeyKind::DrupalConfigName => CompletionItemKind::File,
         StringKeyKind::DrupalConfigKey => CompletionItemKind::Field,
@@ -228,8 +230,8 @@ impl Backend {
             // would have to confirm in every file that fires a hook.
             StringKeyKind::DrupalHook => self.drupal_documented_hooks().into(),
             StringKeyKind::DrupalThemeHook => self.drupal_theme_hook_names().into(),
-            // A translation key is completed in the domain it is looked up
-            // in, a configuration key under the key it is nested in, which
+            // A translation key is completed in the domain or the category it
+            // is looked up in, a configuration key under the key it is nested in, which
             // only the Symfony completion knows, and a route argument from
             // the routes of the handler it is written in, and a Drupal route
             // parameter from the route its call names, and a theme hook's
@@ -239,6 +241,7 @@ impl Backend {
             // completed with its patterns as snippets, which only the
             // WordPress completion builds.
             StringKeyKind::SymfonyTranslation
+            | StringKeyKind::YiiTranslation
             | StringKeyKind::WordPressHook
             | StringKeyKind::SymfonyConfigKey
             | StringKeyKind::YiiRouteArgument

@@ -195,6 +195,9 @@ struct ExtractionCtx<'a> {
     yii_dir: Option<&'a std::path::Path>,
     /// What a view name in the code being extracted is relative to.
     yii_view_scope: YiiViewScope,
+    /// The category the translators of the class being extracted look
+    /// message IDs up in when a call names none.
+    yii_category: YiiCategory,
     /// Where the name of the class being extracted is written, for the
     /// controller a renderer's `withController($this)` names and the class a
     /// Twig extension's `[$this, 'method']` callable calls.
@@ -386,6 +389,7 @@ mod wordpress;
 mod yii;
 mod yii_definitions;
 mod yii_routes;
+mod yii_translations;
 
 use class_like::*;
 use doctrine_dql::*;
@@ -407,6 +411,7 @@ use wordpress::*;
 use yii::*;
 use yii_definitions::*;
 use yii_routes::*;
+use yii_translations::*;
 
 pub(crate) use drupal::{hook_invocation, is_entity_type_attribute};
 pub(crate) use symfony::{
@@ -632,6 +637,7 @@ fn extract_symbol_map_inner(
         declares_twig_loader: false,
         yii_dir,
         yii_view_scope: YiiViewScope::Template,
+        yii_category: YiiCategory::Default,
         class_name_offset: None,
         yii: yii_dir.is_some(),
         names_yii_router: None,

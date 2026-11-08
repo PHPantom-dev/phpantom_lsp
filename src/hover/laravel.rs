@@ -508,6 +508,30 @@ impl Backend {
                     .unwrap_or_else(|| "No params file declares it".to_string());
                 ("Param", detail)
             }
+            // Shown by its ID, under the category it is looked up in.
+            StringKeyKind::YiiTranslation => {
+                shown = crate::yii::translations::split_message_key(key).1;
+                let found = self.yii_message_detail(key);
+                let mut detail = format!("Category {}", inline_code(&found.category));
+                if let Some((locale, text)) = &found.text {
+                    detail.push_str(&format!(
+                        "\n\n{}: {}",
+                        inline_code(locale),
+                        inline_code(text)
+                    ));
+                }
+                if found.locales.is_empty() {
+                    detail.push_str("\n\nNo message file of the category declares it");
+                } else {
+                    let locales: Vec<String> = found
+                        .locales
+                        .iter()
+                        .map(|locale| inline_code(locale))
+                        .collect();
+                    detail.push_str(&format!("\n\nDeclared for {}", locales.join(", ")));
+                }
+                ("Translation", detail)
+            }
             StringKeyKind::WordPressHook => ("Hook", self.wordpress_hook_detail(key)),
             StringKeyKind::DrupalRenderElement => {
                 ("Render element", self.drupal_render_element_detail(key))

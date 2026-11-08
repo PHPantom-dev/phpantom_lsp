@@ -126,6 +126,7 @@ pub(crate) fn symfony_receiver_method(
         0 if is("decorate") || is("parent") => Some((ReceiverClass::ServiceConfigurator, false)),
         0 if is("trans") => Some((ReceiverClass::Translator, false)),
         2 if is("trans") => Some((ReceiverClass::TranslatorDomain, false)),
+        0 if is("translate") => Some((ReceiverClass::YiiTranslator, false)),
         0 if is("render")
             || is("renderView")
             || is("renderBlock")
@@ -186,6 +187,12 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     // Only Drupal's config factory has a method starting with `l` the
     // table names, so elsewhere the one byte still turns those away.
     if !ctx.drupal && matches!(member_name.as_bytes().first(), Some(b'l' | b'L')) {
+        return;
+    }
+    // A Yii translator's ID is recorded with the category it is looked up
+    // in, which the table below cannot read.
+    if ctx.yii && member_name.eq_ignore_ascii_case("translate") {
+        record_yii_translator_sites(object, argument_list, ctx);
         return;
     }
     if ctx.symfony && member_name.eq_ignore_ascii_case("trans") {

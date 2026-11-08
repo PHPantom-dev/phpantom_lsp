@@ -6,10 +6,11 @@ engine already types most of it. On top of that, route names, route
 arguments, view names, and the members and arguments DI definitions name
 complete, navigate, and are checked, path aliases navigate to their
 declarations, the files an asset bundle lists navigate, complete, and are
-checked, and the `$params` keys a configuration file reads complete,
-navigate, are checked, and are typed. What is still missing is the
-navigation between the rest of the names Yii keeps in configuration
-(events, translations) and the code and files they point to, and checking
+checked, the `$params` keys a configuration file reads complete,
+navigate, are checked, and are typed, and the message IDs a translator
+looks up complete, navigate, and are checked. What is still missing is
+the navigation between the rest of the names Yii keeps in configuration
+(events) and the code and files they point to, and checking
 the values a DI definition passes rather than only the names it uses.
 
 The items below are what the Yii team asked for in
@@ -78,30 +79,6 @@ the DI configuration gives the renderer, from
 it, so a name such a class renders does not navigate, complete, or get
 reported. Read the value from the merged params (`src/yii/params.rs`),
 and use it as the base wherever the class gives none.
-
----
-
-## Y13. Translation message IDs
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-$translator->translate('menu.blog', category: 'app');
-
-// resources/messages/en/app.php
-return ['menu.blog' => 'Blog'];
-```
-
-`yiisoft/translator` looks a message ID up in the category's message
-source, which for `yiisoft/translator-message-php` is a PHP file per
-locale and category returning an array. Complete the IDs the category's
-files declare, navigate from an ID to its entry in each locale, show the
-default locale's text on hover, and report an ID no file declares. The
-category is the `category` argument, else the translator's default
-(`withDefaultCategory()` or the DI configuration). The sources and their
-directories come from the translator's DI definitions, which `src/yii/definitions.rs`
-already reads. `yiisoft/demo-blog` does not
-translate, so test against the playground.
 
 ---
 

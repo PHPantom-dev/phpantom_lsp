@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Blog\Post;
+use Yiisoft\Html\Html;
 use Yiisoft\Router\UrlGeneratorInterface;
 use Yiisoft\View\WebView;
 
@@ -10,12 +11,13 @@ use Yiisoft\View\WebView;
  * @var WebView $this
  * @var UrlGeneratorInterface $urlGenerator
  * @var list<Post> $posts
+ * @var string $title
  */
 
-$this->setTitle('Blog');
+$this->setTitle($title);
 ?>
 
-<h1>Blog</h1>
+<h1><?= Html::encode($title) ?></h1>
 
 <?php foreach ($posts as $post): ?>
     <?php // Try: hover $post, or complete after $post->. The list is typed by the @var above. ?>

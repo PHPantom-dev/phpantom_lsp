@@ -23,6 +23,7 @@ use Yiisoft\Aliases\Aliases;
 use Yiisoft\Router\HydratorAttribute\RouteArgument;
 use Yiisoft\Router\RouteCollectionInterface;
 use Yiisoft\Router\UrlGeneratorInterface;
+use Yiisoft\Translator\TranslatorInterface;
 use Yiisoft\Yii\Runner\Http\HttpApplicationRunner;
 use Yiisoft\Yii\View\Renderer\WebViewRenderer;
 
@@ -146,19 +147,37 @@ check("The 'index' view is resources/views/blog/index.php", $renderer->getViewPa
 check("'_card' is the file beside index.php", is_file(__DIR__ . '/resources/views/blog/_card.php'));
 check("__DIR__ . '/template' is template.php beside the home page action", is_file(__DIR__ . '/src/Web/HomePage/template.php'));
 
-$html = $renderer->renderPartialAsString('index', ['posts' => $repository->latest()]);
+$html = $renderer->renderPartialAsString('index', ['posts' => $repository->latest(), 'title' => 'Blog']);
 check("index.php renders '_card' for each post", substr_count($html, '<article>') === 2);
 check("index.php links each post through generate('blog/post', ...)", str_contains($html, 'href="/blog/hello-yii"'));
 
 $html = $renderer->renderPartialAsString('post', ['post' => $repository->findBySlug('config-is-code')]);
 check("post.php links back through generate('blog/index')", str_contains($html, 'href="/blog"'));
 check("post.php gives the link the class 'back-link'", str_contains($html, 'class="back-link"'));
+check("post.php translates 'blog.all_posts' in the 'blog' category", str_contains($html, '>All posts</a>'));
 check("assets/main/site.css declares .back-link", preg_match('/^\.back-link\s*\{/m', (string) file_get_contents(__DIR__ . '/assets/main/site.css')) === 1);
 
 check("withLayout('@src/Web/Shared/Layout/Main/layout') is layout.php", is_file(__DIR__ . '/src/Web/Shared/Layout/Main/layout.php'));
 
 $html = $container->get(WebViewRenderer::class)->renderPartialAsString(__DIR__ . '/src/Web/HomePage/template');
 check("The home page links to generate('blog/index')", str_contains($html, 'href="/blog"'));
+check("The home page translates 'home.greeting' in the default category", str_contains($html, '<h1>Hello!</h1>'));
+
+// ─── Translations ───────────────────────────────────────────────────────────
+
+// config/common/di/translator.php gives both categories a MessageSource
+// reading resources/messages/ through the @messages alias.
+$translator = $container->get(TranslatorInterface::class);
+check('@messages is resources/messages', $aliases->get('@messages') === __DIR__ . '/resources/messages');
+check("The translator's default category is 'app'", $params['yiisoft/translator']['defaultCategory'] === 'app');
+check("translate('home.greeting') reads resources/messages/en/app.php", $translator->translate('home.greeting') === 'Hello!');
+check("translate('blog.all_posts', category: 'blog') reads blog.php", $translator->translate('blog.all_posts', category: 'blog') === 'All posts');
+check("withDefaultCategory('blog') makes translate('blog.title') read blog.php", $translator->withDefaultCategory('blog')->translate('blog.title') === 'Blog');
+check("The 'de' files translate the same IDs", $translator->translate('home.greeting', locale: 'de') === 'Hallo!');
+foreach (['app', 'blog'] as $category) {
+    check("en/$category.php and de/$category.php declare the same IDs", array_keys(require __DIR__ . "/resources/messages/en/$category.php") === array_keys(require __DIR__ . "/resources/messages/de/$category.php"));
+}
+check("An ID no file declares is translated as itself", $translator->translate('home.missing') === 'home.missing');
 
 // ─── Handlers ───────────────────────────────────────────────────────────────
 

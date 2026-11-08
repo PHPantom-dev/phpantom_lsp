@@ -29,6 +29,8 @@
         "yiisoft/router": "^4.0.2",
         "yiisoft/router-fastroute": "^4.0.3",
         "yiisoft/session": "^3.0.1",
+        "yiisoft/translator": "^3.2",
+        "yiisoft/translator-message-php": "^1.1",
         "yiisoft/view": "^12.2.4",
         "yiisoft/yii-console": "^2.4.2",
         "yiisoft/yii-http": "^1.1.1",

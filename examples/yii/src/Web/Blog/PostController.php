@@ -9,20 +9,25 @@ use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
 use Yiisoft\Http\Status;
 use Yiisoft\Router\HydratorAttribute\RouteArgument;
+use Yiisoft\Translator\TranslatorInterface;
 use Yiisoft\Yii\View\Renderer\WebViewRenderer;
 
 final readonly class PostController
 {
     private WebViewRenderer $viewRenderer;
 
+    private TranslatorInterface $translator;
+
     public function __construct(
         WebViewRenderer $viewRenderer,
+        TranslatorInterface $translator,
         private PostRepositoryInterface $posts,
         private ResponseFactoryInterface $responseFactory,
     ) {
         // '@views' is declared in config/common/aliases.php, so the views
         // below are the files in resources/views/blog/.
         $this->viewRenderer = $viewRenderer->withViewPath('@views/blog');
+        $this->translator = $translator->withDefaultCategory('blog');
     }
 
     public function index(): ResponseInterface
@@ -30,7 +35,14 @@ final readonly class PostController
         // Try: go to the definition of 'index', which opens
         // resources/views/blog/index.php, or clear the name and complete it
         // from the views in that directory.
-        return $this->viewRenderer->render('index', ['posts' => $this->posts->latest()]);
+        // Try: go to the definition of 'blog.title', which lands on its
+        // entries in resources/messages/*/blog.php. The constructor's
+        // withDefaultCategory('blog') makes 'blog' the category this class
+        // translates in.
+        return $this->viewRenderer->render('index', [
+            'posts' => $this->posts->latest(),
+            'title' => $this->translator->translate('blog.title'),
+        ]);
     }
 
     // Try: go-to-definition on 'slug', which lands on the {slug} of the

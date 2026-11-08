@@ -188,6 +188,11 @@ pub(crate) enum StringKeyKind {
     /// on the string of the last one.  Declared by the params files the
     /// merge plan lists.
     YiiParam,
+    /// A message ID a Yii translator's `translate()` names, keyed by the
+    /// category it is looked up in as well as the ID (see
+    /// `yii::translations::message_key`).  Declared by the message files of
+    /// the directories the DI definitions give their message sources.
+    YiiTranslation,
     /// An argument a Yii DI definition passes by name, `'transport'` in
     /// `'__construct()' => ['transport' => …]` or in the arguments of a
     /// `'setLogger()'` key, keyed by the class and the method as well as the
@@ -332,6 +337,7 @@ impl StringKeyKind {
             | Self::YiiRouteArgument
             | Self::YiiAlias
             | Self::YiiParam
+            | Self::YiiTranslation
             | Self::YiiDefinitionArgument
             | Self::CssClass => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
@@ -1080,6 +1086,7 @@ const SYMFONY_PARAMETERS_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ParametersConfigurator";
 const SYMFONY_URL_GENERATOR: &str = "Symfony\\Component\\Routing\\Generator\\UrlGeneratorInterface";
 const YII_URL_GENERATOR: &str = "Yiisoft\\Router\\UrlGeneratorInterface";
+const YII_TRANSLATOR: &str = "Yiisoft\\Translator\\TranslatorInterface";
 pub(crate) const SYMFONY_ROUTING_CONFIGURATOR: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator";
 const SYMFONY_COLLECTION_CONFIGURATOR: &str =
@@ -1216,6 +1223,8 @@ pub(crate) enum ReceiverClass {
     /// `hasListeners()`, `getListeners()`, and `getListenerPriority()`
     /// look listeners up by it.
     EventListeners,
+    /// A Yii translator, whose `translate()` takes a message ID.
+    YiiTranslator,
     /// What renders a Yii view by its first argument: a view renderer's
     /// `render()` family and `withLayout()`, and a view's own `render()`
     /// inside a template.
@@ -1379,6 +1388,7 @@ impl ReceiverClass {
             // contract covers both.
             Self::EventDispatcher => &[(SYMFONY_EVENT_DISPATCHER_CONTRACT, SymfonyEvent)],
             Self::EventListeners => &[(SYMFONY_EVENT_DISPATCHER, SymfonyEvent)],
+            Self::YiiTranslator => &[(YII_TRANSLATOR, StringKeyKind::YiiTranslation)],
             Self::YiiViewRenderer => &[
                 (YII_WEB_VIEW_RENDERER, YiiView),
                 (YII_VIEW_RENDERER, YiiView),

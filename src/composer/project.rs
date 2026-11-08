@@ -202,17 +202,19 @@ pub(crate) fn is_twig_project(package: &ComposerPackage) -> bool {
 
 /// The packages that make a project a Yii application: the view layer
 /// itself and the renderer an application's actions use, under its current
-/// and its former name, and the router.
-const YII_PACKAGES: [&str; 4] = [
+/// and its former name, the router, and the translator.
+const YII_PACKAGES: [&str; 5] = [
     "yiisoft/view",
     "yiisoft/yii-view-renderer",
     "yiisoft/yii-view",
     "yiisoft/router",
+    "yiisoft/translator",
 ];
 
 /// Detect whether the project is a Yii application, which view names, route
-/// names, and route arguments are read in: it renders Yii views or routes
-/// requests with Yii's router.
+/// names, route arguments, and message IDs are read in: it renders Yii
+/// views, routes requests with Yii's router, or translates with Yii's
+/// translator.
 pub(crate) fn is_yii_project(package: &ComposerPackage) -> bool {
     package
         .require

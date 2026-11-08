@@ -5,7 +5,7 @@
 //! against what the project actually registers (routes, config keys,
 //! views, translation keys, console commands, morph aliases, middleware, gate
 //! abilities, Symfony service IDs, container parameters, routes, translation
-//! keys and Twig templates, Yii views, routes, the route arguments a handler reads, and params keys,
+//! keys and Twig templates, Yii views, routes, the route arguments a handler reads, params keys, and message IDs,
 //! asset paths, and Inertia pages), and report the ones nothing declares.
 
 use std::sync::Arc;
@@ -51,6 +51,7 @@ enum CheckedStringKind {
     YiiRouteArgument,
     YiiDefinitionArgument,
     YiiParam,
+    YiiTranslation,
     DrupalRoute,
     DrupalRenderElement,
     DrupalLibrary,
@@ -95,6 +96,7 @@ impl CheckedStringKind {
             StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
             StringKeyKind::YiiDefinitionArgument => Self::YiiDefinitionArgument,
             StringKeyKind::YiiParam => Self::YiiParam,
+            StringKeyKind::YiiTranslation => Self::YiiTranslation,
             StringKeyKind::DrupalRoute => Self::DrupalRoute,
             StringKeyKind::DrupalRenderElement => Self::DrupalRenderElement,
             StringKeyKind::DrupalLibrary => Self::DrupalLibrary,
@@ -602,6 +604,7 @@ impl<'a> DeclaredKeys<'a> {
             CheckedStringKind::ContainerParameter => self.judge_parameter(key),
             CheckedStringKind::SymfonyRoute => self.judge_symfony_route(key),
             CheckedStringKind::SymfonyTranslation => self.judge_symfony_translation(key),
+            CheckedStringKind::YiiTranslation => self.judge_yii_translation(key),
             CheckedStringKind::TwigTemplate => self.judge_twig_template(key),
             CheckedStringKind::TwigFilter => self
                 .twig_callables
@@ -699,6 +702,19 @@ impl<'a> DeclaredKeys<'a> {
             .binary_search_by(|declared| declared.as_str().cmp(key))
             .is_ok();
         Some((valid, "translation key", "invalid_symfony_translation"))
+    }
+
+    /// A message ID that is its own message (`translate('Save')`) needs no
+    /// message file, so, as a Symfony key is, an ID is only judged when it
+    /// is spelled like a key, and only in a category whose every message
+    /// file is read (see [`crate::yii::translations::Messages::declares`]).
+    fn judge_yii_translation(&self, key: &str) -> Verdict {
+        let (category, id) = crate::yii::translations::split_message_key(key);
+        if !crate::symfony::translations::is_dotted_key(id) {
+            return None;
+        }
+        let declared = self.backend.yii_messages().declares(category, id)?;
+        Some((declared, "message ID", "invalid_yii_translation"))
     }
 
     /// A Drupal route is declared by a routing file, a route attribute, or
@@ -1276,6 +1292,12 @@ impl Backend {
                         let (domain, message) =
                             crate::symfony::translations::split_translation_key(key);
                         format!("Unknown {label} '{message}' in domain '{domain}'")
+                    }
+                    CheckedStringKind::YiiTranslation => {
+                        let (category, id) = crate::yii::translations::split_message_key(key);
+                        let messages = self.yii_messages();
+                        let category = category.unwrap_or_else(|| messages.default_category());
+                        format!("Unknown {label} '{id}' in category '{category}'")
                     }
                     _ => format!("Unknown {label} '{key}'"),
                 };

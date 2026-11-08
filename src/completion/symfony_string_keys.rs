@@ -187,6 +187,11 @@ impl Backend {
                 position,
             );
         }
+        if kind == StringKeyKind::YiiTranslation {
+            let category = self.yii_translation_category_at(uri, content, literal_start);
+            let ids = self.yii_message_ids(category.as_deref());
+            return self.symfony_names_response(kind, ids, content, prefix_start, cursor, position);
+        }
         self.symfony_key_response(uri, kind, content, prefix_start, cursor, position)
     }
 
@@ -375,6 +380,27 @@ impl Backend {
             || DEFAULT_DOMAIN.to_string(),
             |key| split_translation_key(&key).0.to_string(),
         )
+    }
+
+    /// The category the message ID whose string starts at `literal_start`
+    /// is looked up in, as the file's symbol map recorded it, or the
+    /// translator's default when the map has no record of the string.
+    fn yii_translation_category_at(
+        &self,
+        uri: &str,
+        content: &str,
+        literal_start: usize,
+    ) -> Option<String> {
+        let start = literal_start as u32;
+        let map = self
+            .symbol_map_for(uri)
+            .filter(|map| map.matches_source(content))?;
+        let site = map.typed_receiver_sites.iter().find(|site| {
+            site.start == start && site.receiver == crate::symbol_map::ReceiverClass::YiiTranslator
+        })?;
+        crate::yii::translations::split_message_key(&site.key)
+            .0
+            .map(str::to_string)
     }
 
     /// What a string passed straight to a method or function call names:

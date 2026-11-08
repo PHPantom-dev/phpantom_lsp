@@ -31,6 +31,11 @@
 //!
 //! The `config-plugin` of a `composer.json` names those groups and lists
 //! their files; it is read where it is written (see [`config_plugin`]).
+//!
+//! The message IDs a `translate()` call names are spans keyed by the
+//! category they are looked up in, and are declared by the message files
+//! of the directories the DI definitions give their message sources (see
+//! [`translations`]).
 
 pub(crate) mod aliases;
 pub(crate) mod assets;
@@ -38,6 +43,7 @@ pub(crate) mod config_plugin;
 pub(crate) mod definitions;
 pub(crate) mod params;
 pub(crate) mod routes;
+pub(crate) mod translations;
 pub(crate) mod views;
 
 #[cfg(test)]
@@ -67,6 +73,11 @@ pub(crate) struct YiiState {
     /// The names of the config groups the installed packages declare, read
     /// on first use and dropped when the dependencies change.
     package_groups: parking_lot::Mutex<Option<Arc<Vec<String>>>>,
+    /// The message files, read on first use and dropped when a
+    /// configuration file, a message file, or the dependencies change.
+    messages: parking_lot::Mutex<Option<Arc<translations::Messages>>>,
+    /// The directories the message files were last read from.
+    message_dirs: RwLock<Vec<std::path::PathBuf>>,
 }
 
 /// The class names a string given to an HTML tag's `class()` names, each
@@ -107,12 +118,18 @@ impl Backend {
         aliases
     }
 
-    /// Forget the aliases and the params when the file at `uri` may
-    /// declare some, so the next lookup reads them again.
+    /// Forget the aliases, the params, and the message files when the file
+    /// at `uri` may declare some, so the next lookup reads them again.
     pub(crate) fn note_yii_config_change(&self, uri: &str) {
-        if self.is_yii_project() && uri.contains("/config/") && uri.ends_with(".php") {
+        if !self.is_yii_project() {
+            return;
+        }
+        if uri.contains("/config/") && uri.ends_with(".php") {
             *self.yii.aliases.write() = None;
             self.forget_yii_params();
+            self.forget_yii_messages();
+        } else if let Some(path) = crate::util::uri_to_path(uri) {
+            self.note_yii_message_change(&path);
         }
     }
 }

@@ -64,6 +64,15 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `config/common/application.php`, or hover it for the type of its value.
   Clear a key to complete the ones the params files declare beside it, and
   misspell one to see it reported.
+- Open `src/Web/HomePage/template.php`. Go to the definition of
+  `'home.greeting'` in `$translator->translate()`, which lands on its entry in
+  both `resources/messages/en/app.php` and `resources/messages/de/app.php`, or
+  hover it for the English message. The call names no category, so the ID is
+  looked up in the translator's default one, `app`. Clear the ID to complete
+  the ones the category declares, and misspell it to see it reported.
+  `resources/views/blog/post.php` names the `blog` category with
+  `category: 'blog'`, and `PostController` gives its translator that category
+  with `withDefaultCategory('blog')`.
 - Open `resources/views/blog/post.php`. Go to the definition of
   `'back-link'` in `->class()`, which lands on its selector in
   `assets/main/site.css`, or hover it for the stylesheets that declare it.

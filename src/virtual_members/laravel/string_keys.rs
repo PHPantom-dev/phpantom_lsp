@@ -106,6 +106,7 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::YiiAlias => backend.yii_alias_definitions(key),
         StringKeyKind::CssClass => backend.css_class_definitions(key),
         StringKeyKind::YiiParam => backend.yii_param_definitions(key),
+        StringKeyKind::YiiTranslation => backend.yii_message_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
         StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
@@ -388,6 +389,13 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::DrupalThemeHookVariable => {
             find_string_key_usages(kind, key, backend, snapshot, false)
         }
+        // A call that leaves its category to the translator and one that
+        // names the default category name the same message.
+        StringKeyKind::YiiTranslation => backend
+            .yii_message_key_spellings(key)
+            .iter()
+            .flat_map(|key| find_string_key_usages(kind, key, backend, snapshot, false))
+            .collect(),
         // The string that declares an alias is a span like any use, but
         // only the configuration says it declares one.
         StringKeyKind::YiiAlias => {

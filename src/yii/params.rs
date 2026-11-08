@@ -171,6 +171,12 @@ impl ConfigPlan {
         &self.groups
     }
 
+    /// The project's configuration files other than its params files: the
+    /// files `yiisoft/config` hands the `$params`.
+    pub(crate) fn config_files(&self) -> impl Iterator<Item = &PathBuf> {
+        self.receives_params.iter()
+    }
+
     /// Whether `yiisoft/config` hands the file at `path` the `$params`.
     pub(crate) fn receives_params(&self, path: &Path) -> bool {
         if self.receives_params.is_empty() {
@@ -301,6 +307,8 @@ pub(crate) struct ParamNode {
     in_every_environment: bool,
     /// The types of the values declared here other than arrays with keys.
     values: Vec<PhpType>,
+    /// The values declared here that are string literals.
+    strings: Vec<String>,
     /// Whether a value declared here holds keys that cannot be read: an
     /// array with a spread or a computed key, or a value that is no array
     /// literal.
@@ -324,6 +332,16 @@ impl ParamNode {
     /// The entries that declare this key.
     pub(crate) fn declarations(&self) -> &[ParamDeclaration] {
         &self.declarations
+    }
+
+    /// The string the key holds, when every value declared for it is that
+    /// one string literal.
+    pub(crate) fn string_value(&self) -> Option<&str> {
+        let (first, rest) = self.strings.split_first()?;
+        (self.values.len() == self.strings.len()
+            && self.children.is_empty()
+            && rest.iter().all(|other| other == first))
+        .then_some(first.as_str())
     }
 
     /// Whether every key under this one is known, so that a read of any
@@ -385,6 +403,7 @@ impl ParamNode {
                 self.declarations.clear();
             }
             self.values.clear();
+            self.strings.clear();
             self.open = false;
             self.rank = Some(rank);
         }
@@ -557,6 +576,11 @@ fn merge_value(
     }
     if !merges(value) {
         node.values.push(value_type(value, source));
+        if let Expression::Literal(Literal::String(literal)) = value
+            && let Some(text) = literal.value.and_then(crate::atom::literal_bytes_to_str)
+        {
+            node.strings.push(text.to_string());
+        }
         return;
     }
     let Some(elements) = array_elements(value) else {
