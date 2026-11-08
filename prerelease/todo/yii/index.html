@@ -1295,17 +1295,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#y13-translation-message-ids" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y13. Translation message IDs
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#y14-event-listeners-in-the-events-configuration" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1403,10 +1392,11 @@ engine already types most of it. On top of that, route names, route
 arguments, view names, and the members and arguments DI definitions name
 complete, navigate, and are checked, path aliases navigate to their
 declarations, the files an asset bundle lists navigate, complete, and are
-checked, and the <code>$params</code> keys a configuration file reads complete,
-navigate, are checked, and are typed. What is still missing is the
-navigation between the rest of the names Yii keeps in configuration
-(events, translations) and the code and files they point to, and checking
+checked, the <code>$params</code> keys a configuration file reads complete,
+navigate, are checked, and are typed, and the message IDs a translator
+looks up complete, navigate, and are checked. What is still missing is
+the navigation between the rest of the names Yii keeps in configuration
+(events) and the code and files they point to, and checking
 the values a DI definition passes rather than only the names it uses.</p>
 <p>The items below are what the Yii team asked for in
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/discussions/505">discussion #505</a>.
@@ -1474,33 +1464,15 @@ it, so a name such a class renders does not navigate, complete, or get
 reported. Read the value from the merged params (<code>src/yii/params.rs</code>),
 and use it as the base wherever the class gives none.</p>
 <hr />
-<h2 id="y13-translation-message-ids">Y13. Translation message IDs<a class="headerlink" href="#y13-translation-message-ids" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$translator-&gt;translate('menu.blog', category: 'app');</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">// resources/messages/en/app.php</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">return ['menu.blog' =&gt; 'Blog'];</span>
-</code></pre></div>
-<p><code>yiisoft/translator</code> looks a message ID up in the category's message
-source, which for <code>yiisoft/translator-message-php</code> is a PHP file per
-locale and category returning an array. Complete the IDs the category's
-files declare, navigate from an ID to its entry in each locale, show the
-default locale's text on hover, and report an ID no file declares. The
-category is the <code>category</code> argument, else the translator's default
-(<code>withDefaultCategory()</code> or the DI configuration). The sources and their
-directories come from the translator's DI definitions, which <code>src/yii/definitions.rs</code>
-already reads. <code>yiisoft/demo-blog</code> does not
-translate, so test against the playground.</p>
-<hr />
 <h2 id="y14-event-listeners-in-the-events-configuration">Y14. Event listeners in the events configuration<a class="headerlink" href="#y14-event-listeners-in-the-events-configuration" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// config/common/events.php</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">return [</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    UserRegistered::class =&gt; [</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">        [WelcomeMailer::class, 'send'],</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">        static fn (UserRegistered $event) =&gt; ...,</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    ],</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">];</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// config/common/events.php</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">return [</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    UserRegistered::class =&gt; [</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">        [WelcomeMailer::class, 'send'],</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        static fn (UserRegistered $event) =&gt; ...,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    ],</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">];</span>
 </code></pre></div>
 <p><code>yiisoft/yii-event</code> reads listeners from the <code>events</code>, <code>events-web</code>, and
 <code>events-console</code> groups. The method string of an <code>[Handler::class,
@@ -1514,15 +1486,15 @@ included. The groups come from <code>configuration.php</code> and the packages'
 <hr />
 <h2 id="y7-render-parameters-against-the-templates-var-list">Y7. Render parameters against the template's <code>@var</code> list<a class="headerlink" href="#y7-render-parameters-against-the-templates-var-list" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// Action.php</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">return $this-&gt;viewRenderer-&gt;render(__DIR__ . '/template', ['form' =&gt; $form]);</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">// template.php</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">/**</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x"> * @var WebView $this</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x"> * @var UrlGenerator $urlGenerator</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x"> * @var Form $form</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x"> */</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// Action.php</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">return $this-&gt;viewRenderer-&gt;render(__DIR__ . '/template', ['form' =&gt; $form]);</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">// template.php</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">/**</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x"> * @var WebView $this</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x"> * @var UrlGenerator $urlGenerator</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x"> * @var Form $form</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x"> */</span>
 </code></pre></div>
 <p>Yii templates declare the variables they expect in a <code>@var</code> block at the
 top, and <code>yiisoft/demo-blog</code> does this in every template. That block is
@@ -1539,14 +1511,14 @@ missing one.</p>
 <hr />
 <h2 id="y15-property-names-in-hydrator-attributes-and-form-fields">Y15. Property names in hydrator attributes and form fields<a class="headerlink" href="#y15-property-names-in-hydrator-attributes-and-form-fields" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">final class PostForm extends FormModel</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">{</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    public function __construct(</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">        #[Data('post_title')] public string $title = '',</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    ) {}</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">}</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">Field::text($form, 'title');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">final class PostForm extends FormModel</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">{</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    public function __construct(</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">        #[Data('post_title')] public string $title = '',</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    ) {}</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">Field::text($form, 'title');</span>
 </code></pre></div>
 <p><code>yiisoft/hydrator</code>'s <code>#[Data]</code> and <code>#[Map]</code> name the keys of the data
 array a property is filled from, and <code>yiisoft/form-model</code>'s field
@@ -1558,9 +1530,9 @@ its property side.</p>
 <hr />
 <h2 id="y8-column-names-in-query-arrays">Y8. Column names in query arrays<a class="headerlink" href="#y8-column-names-in-query-arrays" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$query-&gt;from(Table::POST . ' p')</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    -&gt;where(['p.status' =&gt; PostStatus::Published])</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    -&gt;orderBy(['p.publication_date' =&gt; SORT_DESC]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$query-&gt;from(Table::POST . ' p')</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    -&gt;where(['p.status' =&gt; PostStatus::Published])</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    -&gt;orderBy(['p.publication_date' =&gt; SORT_DESC]);</span>
 </code></pre></div>
 <p><code>yiisoft/db</code> queries name tables and columns as strings, and columns as
 array keys, often
@@ -1576,8 +1548,8 @@ demo is the only project known to query this way.</p>
 <hr />
 <h2 id="y18-active-record-attributes-and-relations">Y18. Active Record attributes and relations<a class="headerlink" href="#y18-active-record-attributes-and-relations" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$post = Post::query()-&gt;with('author')-&gt;where(['status' =&gt; 1])-&gt;one();</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$post-&gt;get('title');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$post = Post::query()-&gt;with('author')-&gt;where(['status' =&gt; 1])-&gt;one();</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$post-&gt;get('title');</span>
 </code></pre></div>
 <p><code>yiisoft/active-record</code> names attributes and relations as strings:
 <code>get()</code> and <code>set()</code> take an attribute, <code>with()</code> and <code>relation()</code> a
@@ -1589,7 +1561,7 @@ user to ask: no project in our test set uses it.</p>
 <hr />
 <h2 id="y17-key-paths-in-yiisoftarrays">Y17. Key paths in <code>yiisoft/arrays</code><a class="headerlink" href="#y17-key-paths-in-yiisoftarrays" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
 </code></pre></div>
 <p><code>ArrayHelper::getValue()</code>, <code>setValue()</code>, <code>keyExists()</code>, and <code>remove()</code>
 take a key or a dotted path into the array or object they are given.
