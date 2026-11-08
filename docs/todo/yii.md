@@ -312,18 +312,3 @@ type `getValue()` as the value the path reaches instead of `mixed`. Any
 dotted-path helper (Laravel's `data_get()` and `Arr::get()` take the
 same kind of path) would share the walk, so build it in the shared
 resolution path rather than for Yii alone.
-
----
-
-## Y21. CSS class names in HTML helpers
-
-**Impact: Low · Complexity: Medium-High**
-
-```php
-Html::div('...')->class('card-body');
-```
-
-`yiisoft/html` builds tags with `class()` and `addClass()`. Completing
-and navigating class names there needs an index of the project's
-stylesheets, which PHPantom does not have for any framework. File the
-stylesheet index as its own item first if this is ever taken up.

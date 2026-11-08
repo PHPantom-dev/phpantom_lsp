@@ -124,6 +124,7 @@ impl BackendState {
             phpunit_major: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             twig: crate::twig::TwigState::default(),
             yii: crate::yii::YiiState::default(),
+            stylesheets: crate::stylesheets::StylesheetState::default(),
             wordpress_hooks: crate::wordpress::hooks::HookFiles::default(),
             drupal: crate::drupal::DrupalState::default(),
             pest_configs: Arc::new(RwLock::new(None)),

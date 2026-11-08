@@ -83,6 +83,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         | StringKeyKind::TwigBlock
         | StringKeyKind::ContainerBinding => CompletionItemKind::Value,
         StringKeyKind::YiiViewPath => CompletionItemKind::Folder,
+        StringKeyKind::CssClass => CompletionItemKind::Constant,
     }
 }
 
@@ -256,6 +257,9 @@ impl Backend {
             // Any string can start with an alias, so the names are offered
             // wherever one is typed (`crate::completion::yii_aliases`).
             StringKeyKind::YiiAlias => Arc::new([]),
+            // A string holds several class names, and only the one being
+            // typed is replaced (`crate::completion::css_classes`).
+            StringKeyKind::CssClass => Arc::new([]),
             // The keys of a params read are offered a level at a time, under
             // the keys read before it (`crate::completion::yii_params`).
             StringKeyKind::YiiParam => Arc::new([]),

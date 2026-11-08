@@ -57,6 +57,11 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `config/common/application.php`, or hover it for the type of its value.
   Clear a key to complete the ones the params files declare beside it, and
   misspell one to see it reported.
+- Open `resources/views/blog/post.php`. Go to the definition of
+  `'back-link'` in `->class()`, which lands on its selector in
+  `assets/main/site.css`, or hover it for the stylesheets that declare it.
+  Clear the string to complete the classes the project's stylesheets
+  declare, a name at a time.
 - Open `vendor/yiisoft/router/composer.json` once the dependencies are
   installed. Its `config-plugin` lists the files the package adds to each
   config group: go to the definition of `"di.php"` for `config/di.php`, clear

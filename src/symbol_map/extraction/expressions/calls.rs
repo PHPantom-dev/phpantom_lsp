@@ -518,6 +518,7 @@ fn extract_method_call<'a>(
         record_drupal_config_key_sites(&member_name, argument_list, ctx);
         record_drupal_plugin_sites(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
+        record_yii_css_class_sites(&member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
         emit_entity_field_spans(object, &member_name, argument_list, ctx);
         record_dql_call(

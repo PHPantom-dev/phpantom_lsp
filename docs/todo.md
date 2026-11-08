@@ -47,7 +47,6 @@ contributor even though it's short.
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
 | Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
 | Y18 | [Active Record attributes and relations](todo/yii.md#y18-active-record-attributes-and-relations) (builds on Y8) | Low-Medium  | Medium-High |
-| Y21 | [CSS class names in HTML helpers](todo/yii.md#y21-css-class-names-in-html-helpers) | Low         | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -166,7 +165,6 @@ ships, remove every row that names it.
 | Y16 | [Asset bundle file paths](todo/yii.md#y16-asset-bundle-file-paths) | Low         | Low-Medium  |
 | Y19 | [Aliases in workspace symbols and folding](todo/yii.md#y19-aliases-in-workspace-symbols-and-folding) | Low         | Low-Medium  |
 | Y17 | [Key paths in `yiisoft/arrays`](todo/yii.md#y17-key-paths-in-yiisoftarrays) | Low         | Medium      |
-| Y21 | [CSS class names in HTML helpers](todo/yii.md#y21-css-class-names-in-html-helpers) | Low         | Medium-High |
 
 ## Tempest
 

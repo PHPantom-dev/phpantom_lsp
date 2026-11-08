@@ -488,6 +488,7 @@ impl Backend {
             // Strings start with an `@` for many reasons besides an alias,
             // so only a declared one is shown.
             StringKeyKind::YiiAlias => ("Alias", self.yii_alias_detail(key)?),
+            StringKeyKind::CssClass => ("CSS class", self.css_class_detail(key)),
             // A params key is keyed by the whole path the read names.
             StringKeyKind::YiiParam => {
                 view_path = crate::yii::params::param_key_display(key);

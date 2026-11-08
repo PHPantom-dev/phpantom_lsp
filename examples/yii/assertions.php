@@ -134,6 +134,8 @@ check("index.php links each post through generate('blog/post', ...)", str_contai
 
 $html = $renderer->renderPartialAsString('post', ['post' => $repository->findBySlug('config-is-code')]);
 check("post.php links back through generate('blog/index')", str_contains($html, 'href="/blog"'));
+check("post.php gives the link the class 'back-link'", str_contains($html, 'class="back-link"'));
+check("assets/main/site.css declares .back-link", preg_match('/^\.back-link\s*\{/m', (string) file_get_contents(__DIR__ . '/assets/main/site.css')) === 1);
 
 check("withLayout('@src/Web/Shared/Layout/Main/layout') is layout.php", is_file(__DIR__ . '/src/Web/Shared/Layout/Main/layout.php'));
 

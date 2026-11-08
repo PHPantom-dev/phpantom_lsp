@@ -6,7 +6,7 @@
 //! client's file watcher only ever reports paths inside the workspace
 //! (see [`Backend::global_config_watcher`]).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -92,6 +92,12 @@ impl Backend {
     ) -> bool {
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let changes = self.spell_changes_as_indexed(&params.changes);
+        if changes
+            .iter()
+            .any(|change| crate::stylesheets::is_stylesheet_path(Path::new(change.uri.path())))
+        {
+            self.forget_stylesheets();
+        }
         let is_tempest = self.is_tempest_project();
         for change in changes.iter().filter(|_| is_tempest) {
             if change.kind != FileChangeType::Changed
@@ -612,6 +618,7 @@ impl Backend {
         let is_symfony = self.is_symfony_project();
         let is_twig = self.is_twig_project();
         let is_tempest = self.is_tempest_project();
+        let is_yii = self.is_yii_project();
 
         // Create, change, and delete: what every watcher but the two
         // Composer ones asks for.
@@ -641,6 +648,9 @@ impl Backend {
         if is_tempest {
             // Tempest's CLI bootstrap is PHP without a filename extension.
             patterns.push(("**/tempest".to_string(), watch_all));
+        }
+        if is_yii {
+            patterns.push(("**/*.{css,scss,less}".to_string(), watch_all));
         }
         if is_laravel {
             patterns.extend([
@@ -694,6 +704,7 @@ impl Backend {
                 is_symfony,
                 is_twig,
                 is_tempest,
+                is_yii,
                 followed_links,
             },
         )

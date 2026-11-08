@@ -1,10 +1,10 @@
 //! Completion inside a string argument: array shape keys, the Laravel
 //! string keys (routes, config, views, translations, morph aliases, paths,
 //! route and command parameters, request input), Symfony service IDs and
-//! container parameters, Yii views and DI definition keys, WordPress hook
-//! names, Eloquent relation and column names, the strings a parameter's
-//! declared type asks for, and method names in mock expectations,
-//! route-controller groups and array callables.
+//! container parameters, Yii views, DI definition keys and CSS classes,
+//! WordPress hook names, Eloquent relation and column names, the strings a
+//! parameter's declared type asks for, and method names in mock
+//! expectations, route-controller groups and array callables.
 
 use tower_lsp_server::gen_lsp_types::CompletionResponse;
 
@@ -242,6 +242,16 @@ impl Backend {
             && self.is_yii_project()
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) = self.try_yii_view_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── CSS classes ─────────────────────────────────────────
+        // `Html::div()->class('card |')`, a name at a time.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_css_class_completion(content, position, code, ctx)
         {
             return Some(response);
         }

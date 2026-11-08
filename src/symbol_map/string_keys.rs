@@ -190,6 +190,10 @@ pub(crate) enum StringKeyKind {
     /// name (see `yii::definitions::definition_argument_key`).  Declared by
     /// the method's parameter of that name.
     YiiDefinitionArgument,
+    /// A CSS class name: one of the whitespace-separated names a Yii HTML
+    /// tag's `class()` or `addClass()` takes.  Declared by the class
+    /// selectors of the project's stylesheets (see `stylesheets`).
+    CssClass,
     /// A WordPress hook name: declared by each place that fires it (a
     /// `do_action()`, an `apply_filters()`, and their `_ref_array` and
     /// `_deprecated` forms), and read by `add_action()`, `add_filter()`, and
@@ -323,7 +327,8 @@ impl StringKeyKind {
             | Self::YiiRouteArgument
             | Self::YiiAlias
             | Self::YiiParam
-            | Self::YiiDefinitionArgument => KeyFramework::Yii,
+            | Self::YiiDefinitionArgument
+            | Self::CssClass => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
             Self::DrupalEntityType
             | Self::DrupalRoute
@@ -1079,6 +1084,7 @@ const YII_WEB_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\Renderer\\WebViewRender
 /// The renderer before `yiisoft/yii-view-renderer` 7 moved it.
 const YII_LEGACY_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\ViewRenderer";
 const YII_VIEW: &str = "Yiisoft\\View\\ViewInterface";
+const YII_HTML_TAG: &str = "Yiisoft\\Html\\Tag\\Base\\Tag";
 pub(crate) const DRUPAL_ENTITY_TYPE_MANAGER: &str =
     "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
 pub(crate) const DRUPAL_PLUGIN_MANAGER: &str = "Drupal\\Component\\Plugin\\PluginManagerInterface";
@@ -1201,6 +1207,9 @@ pub(crate) enum ReceiverClass {
     /// A Yii view renderer, whose `withViewPath()` takes the directory its
     /// views are named relative to.
     YiiViewPath,
+    /// A Yii HTML tag, whose `class()` and `addClass()` take CSS class
+    /// names.
+    HtmlTag,
     /// Drupal's entity type manager, whose `getStorage()` and the other
     /// handler getters take an entity type ID first, `getDefinition()` and
     /// `hasDefinition()` through [`Self::DefinitionLookup`].
@@ -1365,6 +1374,7 @@ impl ReceiverClass {
                 (YII_VIEW_RENDERER, StringKeyKind::YiiViewPath),
                 (YII_LEGACY_VIEW_RENDERER, StringKeyKind::YiiViewPath),
             ],
+            Self::HtmlTag => &[(YII_HTML_TAG, StringKeyKind::CssClass)],
             Self::EntityTypeManager => {
                 &[(DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType)]
             }

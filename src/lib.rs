@@ -156,6 +156,9 @@ pub(crate) struct WatchedFileInputs {
     /// Whether the project renders Tempest views, which adds the watcher
     /// for Tempest's extensionless CLI bootstrap.
     pub(crate) is_tempest: bool,
+    /// Whether the project is a Yii application, which adds the stylesheet
+    /// watchers.
+    pub(crate) is_yii: bool,
     /// Directory symlinks the index reached through, one relative-pattern
     /// watcher each. Empty when the client cannot match a relative
     /// pattern, since then there is nothing to ask it for.
@@ -330,6 +333,7 @@ mod signature_render;
 pub mod stub_map;
 pub mod stub_patches;
 pub mod stubs;
+mod stylesheets;
 mod symbol_index;
 pub(crate) mod symbol_map;
 mod symfony;
@@ -576,6 +580,8 @@ pub struct BackendState {
     pub(crate) phpunit_major: Arc<std::sync::atomic::AtomicU8>,
     /// The Yii path aliases the project's configuration declares.
     pub(crate) yii: yii::YiiState,
+    /// The CSS class names the project's stylesheets declare.
+    pub(crate) stylesheets: stylesheets::StylesheetState,
     /// The files that fire or use a WordPress hook.
     pub(crate) wordpress_hooks: wordpress::hooks::HookFiles,
     /// The web roots of the workspace's Drupal projects.

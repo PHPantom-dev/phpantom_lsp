@@ -19,7 +19,7 @@ use mago_syntax::walker::Walker;
 use super::*;
 use crate::document_links::try_evaluate_path_expr;
 use crate::symbol_map::{ReceiverClass, StringKeyKind};
-use crate::virtual_members::laravel::helpers::resolved_string_literal;
+use crate::virtual_members::laravel::helpers::{extract_string_literal, resolved_string_literal};
 use crate::yii::views::{
     controller_name, is_absolute_view_path, is_layout_method, is_view_render_method, layout_key,
     normalize_view_path, view_key,
@@ -257,6 +257,43 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
         guards: 0,
         receiver: ReceiverClass::YiiViewRenderer,
     });
+}
+
+/// Record each class name the string arguments of a `class()` or an
+/// `addClass()` name, `'card'` and `'card-body'` in
+/// `->class('card card-body')`, for the type engine to confirm the receiver
+/// is an HTML tag.
+pub(in crate::symbol_map::extraction) fn record_yii_css_class_sites(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.yii
+        || !(member_name.eq_ignore_ascii_case("class")
+            || member_name.eq_ignore_ascii_case("addClass"))
+    {
+        return;
+    }
+    for argument in argument_list.arguments.iter() {
+        let Argument::Positional(argument) = argument else {
+            continue;
+        };
+        let Some((text, start, _)) = extract_string_literal(argument.value, ctx.content) else {
+            continue;
+        };
+        for (offset, name) in crate::yii::css_class_names(text) {
+            let start = (start + offset) as u32;
+            ctx.typed_receiver_sites.push(TypedReceiverSite {
+                start,
+                end: start + name.len() as u32,
+                key: name.to_string(),
+                is_write: false,
+                is_optional: false,
+                guards: 0,
+                receiver: ReceiverClass::HtmlTag,
+            });
+        }
+    }
 }
 
 /// Record the directory the argument of a `withViewPath()` names, for the

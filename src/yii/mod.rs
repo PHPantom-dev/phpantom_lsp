@@ -65,6 +65,17 @@ pub(crate) struct YiiState {
     package_groups: parking_lot::Mutex<Option<Arc<Vec<String>>>>,
 }
 
+/// The class names a string given to an HTML tag's `class()` names, each
+/// with its byte offset in the string.  The string is written into the
+/// tag's `class` attribute as it is, so every name separated by whitespace
+/// is a class of its own.  A name written with an escape or built with
+/// interpolation is not read.
+pub(crate) fn css_class_names(text: &str) -> impl Iterator<Item = (usize, &str)> {
+    text.split(|c: char| c.is_ascii_whitespace())
+        .filter(|name| !name.is_empty() && !name.contains(['\\', '$', '{', '}']))
+        .map(move |name| (name.as_ptr() as usize - text.as_ptr() as usize, name))
+}
+
 impl Backend {
     /// Whether the project is a Yii application; see
     /// [`Backend::is_yii`](crate::Backend::is_yii).

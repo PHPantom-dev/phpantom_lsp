@@ -492,7 +492,7 @@ impl Backend {
 
     /// What the argument `index` of a call of `method` on `subject` names
     /// when the type engine confirms the subject is a `receiver`.
-    fn receiver_key_for(
+    pub(crate) fn receiver_key_for(
         &self,
         subject: &str,
         (receiver, method, index): (crate::symbol_map::ReceiverClass, &str, usize),
