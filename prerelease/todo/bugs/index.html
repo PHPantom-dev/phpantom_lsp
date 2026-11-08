@@ -878,23 +878,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b735-a-class-that-does-not-load-fails-every-parameter-type-it-is-passed-to" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B735. A class that does not load fails every parameter type it is passed to
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1535,23 +1518,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b735-a-class-that-does-not-load-fails-every-parameter-type-it-is-passed-to" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B735. A class that does not load fails every parameter type it is passed to
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1748,21 +1714,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<h3 id="b735-a-class-that-does-not-load-fails-every-parameter-type-it-is-passed-to">B735. A class that does not load fails every parameter type it is passed to<a class="headerlink" href="#b735-a-class-that-does-not-load-fails-every-parameter-type-it-is-passed-to" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">use ColinODell\PsrTestLogger\TestLogger; // package not installed</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">$logger = new TestLogger();</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">$factory-&gt;addLogger($logger); // expects Psr\Log\LoggerInterface, got TestLogger</span>
-</code></pre></div>
-<p>When the argument's class cannot be loaded, nothing is known about its
-parents or interfaces, so whether it satisfies <code>LoggerInterface</code> cannot be
-decided. It is still reported as a mismatch, beside the <code>unknown_class</code>
-already reported for the name itself, so one missing package gives two
-errors per use. Drupal core's tests hit it wherever a dev-only package is
-absent (about a dozen <code>addLogger()</code> calls in <code>projects/drupal</code>). An
-argument whose class does not load should leave the subtype check
-undecided rather than failed.</p>
+<p>No outstanding items.</p>
 <h2 id="conditional-return-types">Conditional return types<a class="headerlink" href="#conditional-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
@@ -1784,19 +1736,19 @@ undecided rather than failed.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b740-a-constant-named-in-another-files-initializer-has-no-type">B740. A constant named in another file's initializer has no type<a class="headerlink" href="#b740-a-constant-named-in-another-files-initializer-has-no-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// src/Lib/Box.php</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">namespace Lib;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">use const Vendor\DEFAULT_LIMIT;</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">const LIMIT = 5;</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">class Box {</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    const MAX = LIMIT;          // 5</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    const FLOOR = DEFAULT_LIMIT;</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">}</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">// src/App/run.php</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">namespace App;</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">$max = \Lib\Box::MAX;           // should be 5, has no type</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// src/Lib/Box.php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">namespace Lib;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">use const Vendor\DEFAULT_LIMIT;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">const LIMIT = 5;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">class Box {</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    const MAX = LIMIT;          // 5</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    const FLOOR = DEFAULT_LIMIT;</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">}</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">// src/App/run.php</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">namespace App;</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">$max = \Lib\Box::MAX;           // should be 5, has no type</span>
 </code></pre></div>
 <p>A class constant's initializer, a namespaced constant's initializer and a
 parameter default are source text that the reader resolves later, in a
