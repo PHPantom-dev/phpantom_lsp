@@ -166,6 +166,7 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_yii_asset` | Warning | An asset bundle's `$css` or `$js` file that is not in the bundle's directory. |
 | `invalid_yii_definition_argument` | Warning | A DI definition argument that names no parameter of the method. |
 | `invalid_yii_definition_key` | Error | A DI definition key that is not `class`, `__construct()`, a method call (`'name()'`), or a property (`'$name'`). |
+| `invalid_yii_event_listener` | Error | An event listener with a required parameter that has no class type, which neither the event nor the container can fill. |
 | `invalid_yii_param` | Warning | A `$params` key no params file declares. |
 | `invalid_yii_translation` | Warning | A message ID, spelled like a key (`menu.blog`), that no message file of its category declares. |
 | `invalid_yii_config_file` | Warning | A file a `config-plugin` in `composer.json` lists that does not exist. |

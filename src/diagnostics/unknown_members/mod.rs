@@ -205,6 +205,7 @@ impl Backend {
             local_classes: &ctx.file.classes,
             existence_guards: compute_existence_guards(content),
             isset_empty_ranges: compute_isset_empty_argument_ranges(content),
+            called_array_callables: self.yii_listener_method_offsets(uri, content),
         };
 
         // ── Parse cache for this diagnostic pass ────────────────────────

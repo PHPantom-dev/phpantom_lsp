@@ -187,6 +187,7 @@ impl Backend {
             self.forget_vendor_twig_callables();
             self.forget_symfony_bundle_declarations();
             self.forget_yii_package_definitions();
+            self.forget_yii_package_listeners();
             self.forget_yii_package_groups();
             self.forget_yii_params();
             self.forget_yii_messages();

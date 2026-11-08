@@ -28,6 +28,15 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   complete it, or misspell one to see it reported. Drop the `$` from
   `'$pageSize'` to see the key reported with a fix that puts it back, or set
   it to `'5'` to see the value reported, since the property takes an `int`.
+- Open `config/common/events.php`. Go to the definition of `'count'` in
+  `[ViewCounter::class, 'count']`, which opens `src/Blog/ViewCounter.php`.
+  Clear it to complete `ViewCounter`'s public methods, rename `count()` and
+  the string follows, or misspell it to see it reported. Point it at
+  `'viewsOf'` to see the listener reported, since its `string $slug` can be
+  filled with neither the event nor a service, and drop the `PostViewed`
+  type from the closure's `$event` for the same report. Open
+  `src/Blog/PostViewed.php` for the lens listing its listeners, which
+  go-to-implementation on the class name lists too.
 - Open `src/Blog/PostRepositoryInterface.php`. The lens above the interface,
   and go-to-implementation on its name, lead to the definition that binds it.
   Go-to-implementation on `LoggerInterface` in `Reference::to()` does the same

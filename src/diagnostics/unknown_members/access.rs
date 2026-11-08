@@ -19,6 +19,9 @@ pub(super) struct AccessFilters<'a> {
     /// Member/array access inside `isset()` / `empty()` never triggers a
     /// runtime error even when the accessed member doesn't exist.
     pub(super) isset_empty_ranges: Vec<ByteRange>,
+    /// Where the method names of the array callables known to be called
+    /// start, in order: the listeners of a Yii events file.
+    pub(super) called_array_callables: Vec<u32>,
 }
 
 /// One member access the check judges.
@@ -66,10 +69,16 @@ impl<'a> MemberAccessSite<'a> {
         // (a callable parameter, `is_callable`, or a direct invocation).
         // Without type-flow analysis we cannot tell such an array apart
         // from a plain data pair like `return [[Foo::class, 'name'], ...]`,
-        // so we do not validate its second element as a method.  The span
-        // still drives navigation, hover, and semantic tokens, which only
-        // surface information when the member actually resolves.
-        if *is_array_callable {
+        // so we do not validate its second element as a method, unless the
+        // file is known to call it.  The span still drives navigation,
+        // hover, and semantic tokens, which only surface information when
+        // the member actually resolves.
+        if *is_array_callable
+            && filters
+                .called_array_callables
+                .binary_search(&span.start)
+                .is_err()
+        {
             return None;
         }
         // `@see` legally carries URIs, prose, and naming suggestions in

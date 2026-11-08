@@ -76,10 +76,20 @@ fn is_definition_group(group: &str) -> bool {
     matches!(group, "di" | "di-web" | "di-console" | "widgets") || group.starts_with("widgets-")
 }
 
-/// The definition files `package` contributes: each file a definition group
-/// of its `config-plugin` lists, under its `source-directory`.  A group that
-/// names another (`'$di'`) adds no file of its own.
+/// The definition files `package` contributes.
 fn package_definition_files(package: &serde_json::Value, root: &Path) -> Vec<PathBuf> {
+    package_group_files(package, root, is_definition_group)
+}
+
+/// The files `package` contributes to the groups `is_group` accepts: each
+/// file such a group of its `config-plugin` lists, under its
+/// `source-directory`.  A group that names another (`'$di'`) adds no file
+/// of its own.
+pub(crate) fn package_group_files(
+    package: &serde_json::Value,
+    root: &Path,
+    is_group: fn(&str) -> bool,
+) -> Vec<PathBuf> {
     let Some(extra) = package.get("extra") else {
         return Vec::new();
     };
@@ -94,7 +104,7 @@ fn package_definition_files(package: &serde_json::Value, root: &Path) -> Vec<Pat
     let dir = root.join(source);
     let mut files = Vec::new();
     for (group, entries) in groups {
-        if is_definition_group(group) {
+        if is_group(group) {
             group_files(entries, &dir, &mut files);
         }
     }
@@ -220,7 +230,7 @@ fn read_package_definition_files(paths: &[PathBuf]) -> Vec<PackageDefinitionFile
 }
 
 /// The location of the bytes `[start, end)` of `content`, at `uri`.
-fn location(uri: &str, lines: &LineIndex, start: u32, end: u32) -> Option<Location> {
+pub(crate) fn location(uri: &str, lines: &LineIndex, start: u32, end: u32) -> Option<Location> {
     Some(Location {
         uri: crate::util::parse_url(uri)?,
         range: Range {

@@ -16,10 +16,15 @@ require_once __DIR__ . '/vendor/autoload.php';
 use App\Blog\InMemoryPostRepository;
 use App\Blog\Post;
 use App\Blog\PostRepositoryInterface;
+use App\Blog\PostViewed;
+use App\Blog\ViewCounter;
 use App\Web\Blog\PostController;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
 use Yiisoft\Aliases\Aliases;
+use Yiisoft\Injector\Injector;
+use Yiisoft\Injector\MissingRequiredArgumentException;
 use Yiisoft\Router\HydratorAttribute\RouteArgument;
 use Yiisoft\Router\RouteCollectionInterface;
 use Yiisoft\Router\UrlGeneratorInterface;
@@ -178,6 +183,33 @@ foreach (['app', 'blog'] as $category) {
     check("en/$category.php and de/$category.php declare the same IDs", array_keys(require __DIR__ . "/resources/messages/en/$category.php") === array_keys(require __DIR__ . "/resources/messages/de/$category.php"));
 }
 check("An ID no file declares is translated as itself", $translator->translate('home.missing') === 'home.missing');
+
+// ─── Events ─────────────────────────────────────────────────────────────────
+
+// config/configuration.php lists config/common/events.php under 'events',
+// which 'events-web' adds, and yiisoft/yii-event attaches its listeners to
+// the dispatcher the container builds.
+$events = $runner->getConfig()->get('events-web');
+check('The events-web group attaches two listeners to PostViewed', count($events[PostViewed::class]) === 2);
+check("[ViewCounter::class, 'count'] names a public method", (new ReflectionMethod(ViewCounter::class, 'count'))->isPublic());
+$container->get(EventDispatcherInterface::class)->dispatch(new PostViewed('hello-yii'));
+check('Dispatching PostViewed calls ViewCounter::count() on the shared instance', $container->get(ViewCounter::class)->viewsOf('hello-yii') === 1);
+$injector = new Injector($container);
+$threw = false;
+try {
+    $injector->invoke([new ViewCounter(), 'viewsOf'], [new PostViewed('hello-yii')]);
+} catch (MissingRequiredArgumentException) {
+    $threw = true;
+}
+check("ViewCounter::viewsOf()'s string \$slug cannot be filled by the event", $threw);
+$threw = false;
+try {
+    $injector->invoke(static fn ($event) => $event, [new PostViewed('hello-yii')]);
+} catch (MissingRequiredArgumentException) {
+    $threw = true;
+}
+check('A listener parameter with no type cannot be filled by the event', $threw);
+check('A listener takes the event in any parameter its class fits', $injector->invoke(static fn (LoggerInterface $logger, PostViewed $event) => $event->slug, [new PostViewed('hello-yii')]) === 'hello-yii');
 
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
