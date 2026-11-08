@@ -1339,17 +1339,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#y12-missing-layouts-and-view-directories" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y12. Missing layouts and view directories
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#y15-property-names-in-hydrator-attributes-and-form-fields" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1620,29 +1609,16 @@ renderer's injections (<code>CsrfViewInjection</code> gives <code>$csrf</code>) 
 rest, and the layout receives its own. Collect those before reporting a
 missing one.</p>
 <hr />
-<h2 id="y12-missing-layouts-and-view-directories">Y12. Missing layouts and view directories<a class="headerlink" href="#y12-missing-layouts-and-view-directories" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$this-&gt;viewRenderer</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    -&gt;withViewPath('@views/blogg')     // no such directory</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    -&gt;withLayout('@layout/mainn');     // no such file</span>
-</code></pre></div>
-<p>A view a class renders by name is reported when no template matches it,
-but the layout and the view path the name is resolved against are not.
-Navigate from a <code>withLayout()</code> argument to its template and complete it
-the way a view name completes, and report a layout with no file and a
-<code>withViewPath()</code> directory that does not exist. The aliases resolve
-through the configuration's declarations, as view names already do.</p>
-<hr />
 <h2 id="y15-property-names-in-hydrator-attributes-and-form-fields">Y15. Property names in hydrator attributes and form fields<a class="headerlink" href="#y15-property-names-in-hydrator-attributes-and-form-fields" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">final class PostForm extends FormModel</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">{</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    public function __construct(</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">        #[Data('post_title')] public string $title = '',</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">    ) {}</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">}</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">Field::text($form, 'title');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">final class PostForm extends FormModel</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">{</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    public function __construct(</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">        #[Data('post_title')] public string $title = '',</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">    ) {}</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">}</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">Field::text($form, 'title');</span>
 </code></pre></div>
 <p><code>yiisoft/hydrator</code>'s <code>#[Data]</code> and <code>#[Map]</code> name the keys of the data
 array a property is filled from, and <code>yiisoft/form-model</code>'s field
@@ -1654,9 +1630,9 @@ its property side.</p>
 <hr />
 <h2 id="y8-column-names-in-query-arrays">Y8. Column names in query arrays<a class="headerlink" href="#y8-column-names-in-query-arrays" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$query-&gt;from(Table::POST . ' p')</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    -&gt;where(['p.status' =&gt; PostStatus::Published])</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    -&gt;orderBy(['p.publication_date' =&gt; SORT_DESC]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$query-&gt;from(Table::POST . ' p')</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    -&gt;where(['p.status' =&gt; PostStatus::Published])</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    -&gt;orderBy(['p.publication_date' =&gt; SORT_DESC]);</span>
 </code></pre></div>
 <p><code>yiisoft/db</code> queries name tables and columns as strings, and columns as
 array keys, often
@@ -1672,8 +1648,8 @@ demo is the only project known to query this way.</p>
 <hr />
 <h2 id="y18-active-record-attributes-and-relations">Y18. Active Record attributes and relations<a class="headerlink" href="#y18-active-record-attributes-and-relations" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$post = Post::query()-&gt;with('author')-&gt;where(['status' =&gt; 1])-&gt;one();</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">$post-&gt;get('title');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$post = Post::query()-&gt;with('author')-&gt;where(['status' =&gt; 1])-&gt;one();</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">$post-&gt;get('title');</span>
 </code></pre></div>
 <p><code>yiisoft/active-record</code> names attributes and relations as strings:
 <code>get()</code> and <code>set()</code> take an attribute, <code>with()</code> and <code>relation()</code> a
@@ -1685,11 +1661,11 @@ user to ask: no project in our test set uses it.</p>
 <hr />
 <h2 id="y16-asset-bundle-file-paths">Y16. Asset bundle file paths<a class="headerlink" href="#y16-asset-bundle-file-paths" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">final class MainAsset extends AssetBundle</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">{</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    public ?string $sourcePath = '@assetsSource/main';</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    public array $css = ['site.css'];</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">final class MainAsset extends AssetBundle</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">{</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    public ?string $sourcePath = '@assetsSource/main';</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    public array $css = ['site.css'];</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>The aliases in <code>$basePath</code>, <code>$baseUrl</code>, and <code>$sourcePath</code> already
 navigate. The entries of <code>$css</code> and <code>$js</code> are relative to <code>$sourcePath</code>
@@ -1707,7 +1683,7 @@ an aliased path whose collapsed text is the path it resolves to.</p>
 <hr />
 <h2 id="y17-key-paths-in-yiisoftarrays">Y17. Key paths in <code>yiisoft/arrays</code><a class="headerlink" href="#y17-key-paths-in-yiisoftarrays" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
 </code></pre></div>
 <p><code>ArrayHelper::getValue()</code>, <code>setValue()</code>, <code>keyExists()</code>, and <code>remove()</code>
 take a key or a dotted path into the array or object they are given.
@@ -1720,7 +1696,7 @@ resolution path rather than for Yii alone.</p>
 <hr />
 <h2 id="y21-css-class-names-in-html-helpers">Y21. CSS class names in HTML helpers<a class="headerlink" href="#y21-css-class-names-in-html-helpers" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">Html::div('...')-&gt;class('card-body');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">Html::div('...')-&gt;class('card-body');</span>
 </code></pre></div>
 <p><code>yiisoft/html</code> builds tags with <code>class()</code> and <code>addClass()</code>. Completing
 and navigating class names there needs an index of the project's
