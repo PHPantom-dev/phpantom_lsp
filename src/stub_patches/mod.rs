@@ -145,7 +145,7 @@
 //! functions, the docblock shape) and leave everything else alone. They
 //! cover a few `@phpstan-assert-if-true` promises PHPStan's own classes
 //! leave undeclared, the `$args` docblock of Mockery's mock factories,
-//! whose `array<TMock>` alternative is really constructor arguments, and the
+//! whose `array<TMock>` alternative is really constructor arguments, the
 //! record class a `yiisoft/active-record` query is for (see
 //! `active_record.rs`), and the model class accepted by Tempest's `query()`.
 //!

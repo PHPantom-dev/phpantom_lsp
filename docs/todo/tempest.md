@@ -12,9 +12,8 @@ Work out each behaviour from the framework's own source
 (`tempest/view`, `tempest/router`, `tempest/database`,
 `tempest/container`) and the [view spec](https://tempestphp.com/3.x/internals/view-spec).
 
-`examples/tempest/` is the playground. It installs the view and router
-layers. The database items add `tempest/database` to its `composer.json`
-along with their demos.
+`examples/tempest/` is the playground. It installs the view, router, and
+database layers.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
