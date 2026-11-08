@@ -115,21 +115,3 @@ PHPantom already reads the file to merge params (`src/yii/params.rs`),
 so it knows which file it is. Give its string entries the same
 navigation, completion, and checks, relative to the file's directory,
 with the group names the installed packages declare offered after `$`.
-
----
-
-## Y12. The route arguments a URL generator call passes navigate
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-$urlGenerator->generate('blog/post/view', ['slug' => $post->slug]);
-```
-
-The keys of the arguments array complete from the placeholders of the
-named route's path (`src/completion/yii_route_params.rs`), but
-go-to-definition and hover on `'slug'` find nothing. Navigate from a key
-to its `{slug}` in the route's path, the way `#[RouteArgument('slug')]`
-already does (`yii_route_argument_locations` in `src/yii/routes.rs`), and
-hover it with the path. A key the path does not declare could be
-reported the same way an unknown `RouteArgument` is.

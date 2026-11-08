@@ -68,6 +68,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
         StringKeyKind::SerializerGroup => CompletionItemKind::EnumMember,
         StringKeyKind::YiiRouteArgument
+        | StringKeyKind::YiiUrlArgument
         | StringKeyKind::YiiViewParameter
         | StringKeyKind::DrupalRouteParameter
         | StringKeyKind::DrupalThemeHookVariable => CompletionItemKind::Field,
@@ -234,8 +235,9 @@ impl Backend {
             // A translation key is completed in the domain or the category it
             // is looked up in, a configuration key under the key it is nested in, which
             // only the Symfony completion knows, and a route argument from
-            // the routes of the handler it is written in, and a Drupal route
-            // parameter from the route its call names, and a theme hook's
+            // the routes of the handler it is written in, and a Yii URL
+            // argument or a Drupal route parameter from the route its call
+            // names (`crate::completion::yii_route_params`), and a theme hook's
             // variable from the `#theme` of its render array, and a DI
             // definition's argument from the method it is passed to, and a
             // plugin ID from the manager its receiver is, and a Yii view's
@@ -248,6 +250,7 @@ impl Backend {
             | StringKeyKind::WordPressHook
             | StringKeyKind::SymfonyConfigKey
             | StringKeyKind::YiiRouteArgument
+            | StringKeyKind::YiiUrlArgument
             | StringKeyKind::YiiViewParameter
             | StringKeyKind::YiiDefinitionArgument
             | StringKeyKind::DrupalRouteParameter

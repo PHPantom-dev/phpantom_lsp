@@ -511,6 +511,7 @@ fn extract_method_call<'a>(
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
         record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
         record_drupal_route_parameter_sites(&member_name, argument_list, ctx);
+        record_yii_url_argument_sites(&member_name, argument_list, ctx);
         record_drupal_hook_invocations(&member_name, argument_list, ctx);
         emit_drupal_requirement_permission_spans(&member_name, argument_list, ctx);
         record_drupal_config_list_sites(&member_name, argument_list, ctx);

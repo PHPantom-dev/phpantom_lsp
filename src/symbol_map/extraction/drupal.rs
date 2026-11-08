@@ -2439,7 +2439,7 @@ pub(in crate::symbol_map::extraction) fn record_drupal_route_parameter_sites(
 
 /// The argument a call passes its parameter `index` in: positional, or
 /// named `name`.
-fn argument_at<'a, 'arena>(
+pub(in crate::symbol_map::extraction) fn argument_at<'a, 'arena>(
     argument_list: &'a ArgumentList<'arena>,
     index: usize,
     name: &[u8],
@@ -2455,9 +2455,10 @@ fn argument_at<'a, 'arena>(
         })
 }
 
-/// The keys of an array literal of route parameters that are written out,
-/// each with the byte range of its text.
-fn parameter_keys<'arena>(
+/// The keys of an array literal of route parameters, or of a Yii URL
+/// generator's route arguments, that are written out, each with the byte
+/// range of its text.
+pub(in crate::symbol_map::extraction) fn parameter_keys<'arena>(
     parameters: &Expression<'arena>,
     content: &str,
 ) -> Vec<(&'arena str, u32, u32)> {

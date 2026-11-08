@@ -183,6 +183,13 @@ pub(crate) enum StringKeyKind {
     /// under the routes that dispatch to that handler, whose paths declare
     /// it.
     YiiRouteArgument,
+    /// An argument a Yii URL generator's `generate()` or
+    /// `generateAbsolute()` passes the route it names, `'slug'` in
+    /// `generate('blog/post', ['slug' => $slug])`, keyed by the route as
+    /// well as the name (see `yii::routes::url_argument_key`).  Declared by
+    /// the placeholders of the paths of the routes of that name; an
+    /// argument none of them declares is sent as the query string.
+    YiiUrlArgument,
     /// A Yii path alias: the `@name` a string starts with (`'@runtime/logs'`
     /// names `@runtime`), in any string of a Yii project.  Declared under
     /// `params['yiisoft/aliases']['aliases']` (see `yii::aliases`).
@@ -341,6 +348,7 @@ impl StringKeyKind {
             | Self::YiiAssetFile
             | Self::YiiRoute
             | Self::YiiRouteArgument
+            | Self::YiiUrlArgument
             | Self::YiiAlias
             | Self::YiiParam
             | Self::YiiTranslation
@@ -1354,6 +1362,9 @@ pub(crate) enum ReceiverClass {
     /// What renders a Yii view again, for the parameters its render call
     /// passes after the view's name.
     YiiViewParameters,
+    /// A Yii URL generator again, for the route arguments its `generate()`
+    /// and `generateAbsolute()` pass after the route name.
+    YiiUrlArguments,
     /// A Yii HTML tag, whose `class()` and `addClass()` take CSS class
     /// names.
     HtmlTag,
@@ -1523,6 +1534,7 @@ impl ReceiverClass {
                 (YII_LEGACY_VIEW_RENDERER, StringKeyKind::YiiViewParameter),
                 (YII_VIEW, StringKeyKind::YiiViewParameter),
             ],
+            Self::YiiUrlArguments => &[(YII_URL_GENERATOR, StringKeyKind::YiiUrlArgument)],
             Self::YiiViewPath => &[
                 (YII_WEB_VIEW_RENDERER, StringKeyKind::YiiViewPath),
                 (YII_VIEW_RENDERER, StringKeyKind::YiiViewPath),

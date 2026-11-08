@@ -21,6 +21,6 @@ $this->setTitle($title);
 
 <?php foreach ($posts as $post): ?>
     <?php // Try: hover $post, or complete after $post->. The list is typed by the @var above. ?>
-    <?php // Try: go-to-definition on 'blog/post', which lands on ->name('post') in config/common/routes.php under its group's blog/ prefix. Complete the name, or the 'slug' key, which is the placeholder the route's path declares. ?>
+    <?php // Try: go-to-definition on 'blog/post', which lands on ->name('post') in config/common/routes.php under its group's blog/ prefix. Complete the name, or the 'slug' key, which goes to the {slug} placeholder the route's path declares and shows that path on hover. ?>
     <?= $this->render('_card', ['post' => $post, 'url' => $urlGenerator->generate('blog/post', ['slug' => $post->slug])]) ?>
 <?php endforeach ?>

@@ -439,6 +439,21 @@ impl Backend {
                 };
                 ("Route argument", detail)
             }
+            // An argument is shown by its name, under the paths of the
+            // routes it names.
+            StringKeyKind::YiiUrlArgument => {
+                let (route, name) = crate::yii::routes::split_url_argument_key(key);
+                shown = name;
+                let mut detail = format!("Route `{}`", route);
+                let paths = self.yii_route_paths(route);
+                if paths.is_empty() {
+                    detail.push_str("\n\nNot declared in the project's routes");
+                }
+                for path in paths {
+                    detail.push_str(&format!("\n\nPath `{}`", path));
+                }
+                ("Route argument", detail)
+            }
             // An argument is shown by its name, as the parameter it fills.
             StringKeyKind::YiiDefinitionArgument => {
                 let (class, method, name) =

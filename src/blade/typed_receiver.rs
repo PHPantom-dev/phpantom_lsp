@@ -270,6 +270,20 @@ impl Backend {
         receiver: ReceiverClass,
         class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<StringKeyKind> {
+        // A route argument is the route's that the call names first, so the
+        // call is confirmed by that name, through the project's own
+        // wrappers too.
+        if receiver == ReceiverClass::YiiUrlArguments {
+            let name = self.typed_receiver_key_kind(
+                ty,
+                method,
+                0,
+                ReceiverClass::UrlGenerator,
+                class_loader,
+            );
+            return (name == Some(StringKeyKind::YiiRoute))
+                .then_some(StringKeyKind::YiiUrlArgument);
+        }
         // A Drupal target is not worth a subtype check outside Drupal: a
         // Symfony project's `get()` is never asked about the config factory.
         if let Some((_, kind)) = receiver.targets().iter().find(|(fqn, kind)| {

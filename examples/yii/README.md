@@ -16,7 +16,8 @@ way a real Yii 3 project declares them.
 - Open `resources/views/blog/index.php`. Go to the definition of
   `'blog/post'` in `$urlGenerator->generate()`, which lands on the route that
   declares it under its group's `blog/` prefix. Complete route names there,
-  and the `'slug'` key, which is the placeholder the route's path declares.
+  and the `'slug'` key, which goes to the `{slug}` placeholder the route's
+  path declares and shows that path on hover.
   In `PostController::view()`, `#[RouteArgument('slug')]` goes to that
   `{slug}` and completes from it, and a name the path does not declare is
   reported.

@@ -123,7 +123,7 @@ impl CheckedStringKind {
             // by one that builds its context at runtime.  A module can add
             // an entity type in PHP, through `hook_entity_type_build()`.
             // Drupal sends a route parameter no path declares as the query
-            // string.  A serializer group nothing puts a member in selects
+            // string, and so does a Yii URL generator a route argument.  A serializer group nothing puts a member in selects
             // nothing, which is no error either.  A module can declare
             // permissions in PHP, through a permissions file's
             // `permission_callbacks`.  Configuration is created at runtime
@@ -141,6 +141,7 @@ impl CheckedStringKind {
             | StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
             | StringKeyKind::DrupalRouteParameter
+            | StringKeyKind::YiiUrlArgument
             | StringKeyKind::DrupalHook
             | StringKeyKind::DrupalPermission
             | StringKeyKind::DrupalConfigName

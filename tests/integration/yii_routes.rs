@@ -372,6 +372,75 @@ async fn a_route_argument_goes_to_the_placeholder_of_its_route() {
 }
 
 #[tokio::test]
+async fn a_generated_url_argument_goes_to_the_placeholder_of_its_route() {
+    let (backend, dir) = workspace(&[
+        ("config/routes.php", ROUTES_PHP),
+        ("src/Web/PostController.php", CONTROLLER_PHP),
+        ("src/Shared/UrlGenerator.php", WRAPPER_PHP),
+    ])
+    .await;
+    let controller = uri_for(&dir, "src/Web/PostController.php");
+    let wrapper = uri_for(&dir, "src/Shared/UrlGenerator.php");
+    let routes = uri_for(&dir, "config/routes.php");
+    let slug = position_in(CONTROLLER_PHP, "['slug'", 3);
+
+    assert_eq!(
+        definitions(&backend, &controller, slug).await,
+        vec![(routes.clone(), position_in(ROUTES_PHP, "{slug}", 1))]
+    );
+    // A class of the project's own that passes the route name on.
+    assert_eq!(
+        definitions(&backend, &wrapper, position_in(WRAPPER_PHP, "['slug'", 3)).await,
+        vec![(routes.clone(), position_in(ROUTES_PHP, "{slug}", 1))]
+    );
+
+    let hover = hover_text(&backend, &controller, slug).await;
+    assert!(hover.contains("**Route argument** `slug`"), "{hover}");
+    assert!(hover.contains("Route `blog/post`"), "{hover}");
+    assert!(hover.contains("Path `/blog/{slug}`"), "{hover}");
+
+    // Every call that passes it, but not the handler's own
+    // `#[RouteArgument]`, which reads it under every route of the handler.
+    assert_eq!(
+        references(&backend, &controller, slug).await,
+        vec![
+            (routes, position_in(ROUTES_PHP, "{slug}", 1).line),
+            (wrapper, position_in(WRAPPER_PHP, "['slug'", 0).line),
+            (controller.clone(), slug.line),
+        ]
+    );
+
+    // An argument the path does not declare is sent as the query string,
+    // and an `ArrayObject` is no URL generator.
+    let other = CONTROLLER_PHP
+        .replace(
+            "['slug' => 'hello']",
+            "['slug' => 'hello', 'ref' => 'feed']",
+        )
+        .replace(
+            "$this->other->offsetGet('blog/post');",
+            "$this->other->generate('blog/post', ['slug' => 'x']);",
+        );
+    open_document(&backend, &controller, "php", &other).await;
+    assert!(
+        definitions(&backend, &controller, position_in(&other, "'ref'", 1))
+            .await
+            .is_empty()
+    );
+    let hover = hover_text(&backend, &controller, position_in(&other, "'ref'", 1)).await;
+    assert!(hover.contains("**Route argument** `ref`"), "{hover}");
+    assert!(
+        definitions(
+            &backend,
+            &controller,
+            position_in(&other, "generate('blog/post', ['slug' => 'x'", 24)
+        )
+        .await
+        .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn a_wrapper_around_the_url_generator_names_routes_too() {
     let (backend, dir) = workspace(&[
         ("config/routes.php", ROUTES_PHP),
