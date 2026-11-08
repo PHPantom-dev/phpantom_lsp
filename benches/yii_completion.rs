@@ -180,6 +180,11 @@ final class ConsumerController
         $this->viewRenderer->render(__DIR__ . '/');
         return $this->viewRenderer->render('');
     }
+
+    public function parameters(): object
+    {
+        return $this->viewRenderer->render('action7', ['p']);
+    }
 }
 "#;
 
@@ -304,7 +309,7 @@ fn generate_application() -> Vec<(String, String)> {
             );
             files.push((
                 format!("resources/views/section{c}/action{a}.php"),
-                "<?php\n/** @var \\Yiisoft\\View\\WebView $this */\necho $this->render('_partial');\n"
+                "<?php\n/**\n * @var \\Yiisoft\\View\\WebView $this\n * @var string $title\n * @var int $page\n */\necho $this->render('_partial');\n"
                     .to_string(),
             ));
         }
@@ -563,6 +568,13 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             CONSUMER_TEMPLATE,
             "render(''",
             "_partial",
+        ),
+        (
+            "view_parameter",
+            &view_uri,
+            VIEW_CONSUMER_PHP,
+            "render('action7', ['p'",
+            "page",
         ),
         ("alias_name", &view_uri, VIEW_CONSUMER_PHP, "'@'", "@views"),
         (

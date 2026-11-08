@@ -167,6 +167,10 @@ check("The 'index' view is resources/views/blog/index.php", $renderer->getViewPa
 check("'_card' is the file beside index.php", is_file(__DIR__ . '/resources/views/blog/_card.php'));
 check("__DIR__ . '/template' is template.php beside the home page action", is_file(__DIR__ . '/src/Web/HomePage/template.php'));
 
+preg_match_all('/@var \S+ \$(\w+)/', (string) file_get_contents(__DIR__ . '/resources/views/blog/index.php'), $declared);
+$shared = array_keys($params['yiisoft/view']['parameters']);
+check("index.php declares 'posts' and 'title' besides \$this and what every view is given", array_values(array_diff($declared[1], ['this', ...$shared])) === ['posts', 'title']);
+
 $html = $renderer->renderPartialAsString('index', ['posts' => $repository->latest(), 'title' => 'Blog']);
 check("index.php renders '_card' for each post", substr_count($html, '<article>') === 2);
 check("index.php links each post through generate('blog/post', ...)", str_contains($html, 'href="/blog/hello-yii"'));

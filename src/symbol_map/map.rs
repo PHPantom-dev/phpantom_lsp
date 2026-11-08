@@ -390,6 +390,10 @@ pub(crate) struct SymbolMap {
     /// class that is one, or a service tagged `twig.loader`.  Such a loader
     /// can serve any template name, so no name can be told missing.
     pub declares_twig_loader: bool,
+    /// Whether the file sets parameters every Yii view shares in a way that
+    /// cannot be read (`setParameters($parameters)`), so that any name could
+    /// be one of them.
+    pub sets_unread_yii_view_parameters: bool,
     /// The Symfony routes the file loads from elsewhere, and the ones it
     /// declares in a way that cannot be read, including every route of a
     /// kernel that loads them itself or a router configured to load them

@@ -340,6 +340,7 @@ pub(crate) mod workspace;
 pub(crate) mod yii_definitions;
 pub(crate) mod yii_queries;
 pub(crate) mod yii_relations;
+pub(crate) mod yii_view_parameters;
 
 use tower_lsp_server::gen_lsp_types::*;
 

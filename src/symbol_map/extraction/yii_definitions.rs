@@ -258,11 +258,19 @@ fn emit_definition_keys(
                 },
             });
         }
-        if is_method
-            && let Some(fqn) = &class.fqn
-            && let ArrayElement::KeyValue(entry) = element
-        {
-            emit_argument_keys(entry.value, fqn, name, ctx);
+        if is_method && let ArrayElement::KeyValue(entry) = element {
+            if let Some(first) = crate::parser::array_literal_elements(entry.value)
+                .and_then(|arguments| arguments.iter().next())
+                .and_then(|argument| match argument {
+                    ArrayElement::Value(value) => Some(value.value),
+                    _ => None,
+                })
+            {
+                super::yii::emit_yii_shared_view_parameters(name, first, ctx);
+            }
+            if let Some(fqn) = &class.fqn {
+                emit_argument_keys(entry.value, fqn, name, ctx);
+            }
         }
     }
 }

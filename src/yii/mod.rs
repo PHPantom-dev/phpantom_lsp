@@ -54,6 +54,10 @@
 //!
 //! The key paths `ArrayHelper` reads are walked through the value they
 //! read (see [`array_helper`]).
+//!
+//! The parameters a render call passes its view are spans keyed by the view
+//! and the name, read against the `@var` block the template opens with (see
+//! [`view_parameters`]).
 
 pub(crate) mod active_record;
 pub(crate) mod aliases;
@@ -69,6 +73,7 @@ pub(crate) mod queries;
 pub(crate) mod relations;
 pub(crate) mod routes;
 pub(crate) mod translations;
+pub(crate) mod view_parameters;
 pub(crate) mod views;
 
 #[cfg(test)]

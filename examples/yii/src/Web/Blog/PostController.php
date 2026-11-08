@@ -41,6 +41,13 @@ final readonly class PostController
         // entries in resources/messages/*/blog.php. The constructor's
         // withDefaultCategory('blog') makes 'blog' the category this class
         // translates in.
+        // Try: go to the definition of 'posts', which lands on its @var in
+        // index.php, or hover it for the type the template declares. Clear a
+        // key to complete the template's parameters, pass 'title' a number,
+        // or add a key the template has no use for, to see it reported.
+        // Leave 'title' out and it is reported missing, while $urlGenerator,
+        // which index.php declares too, is every view's: config/common/
+        // params.php sets it under 'yiisoft/view' => 'parameters'.
         return $this->viewRenderer->render('index', [
             'posts' => $this->posts->latest(),
             'title' => $this->translator->translate('blog.title'),

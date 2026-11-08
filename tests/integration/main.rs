@@ -374,4 +374,5 @@ mod yii_params;
 mod yii_queries;
 mod yii_routes;
 mod yii_translations;
+mod yii_view_parameters;
 mod yii_views;

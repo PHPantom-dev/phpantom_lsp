@@ -162,6 +162,11 @@ pub(crate) enum StringKeyKind {
     /// The directory of views a Yii renderer's `withViewPath()` gives it,
     /// keyed by the path it names, alias and all.
     YiiViewPath,
+    /// A parameter a Yii render call passes its view, `'post'` in
+    /// `render('blog/post', ['post' => $post])`, keyed by the view as well
+    /// as the name (see `yii::view_parameters::parameter_key`).  Declared by
+    /// the `@var` block the template opens with.
+    YiiViewParameter,
     /// A file a Yii asset bundle's `$css` or `$js` lists, keyed by the path
     /// it names under the bundle's `$sourcePath` (or `$basePath`), alias
     /// and all (see `yii::assets`).
@@ -332,6 +337,7 @@ impl StringKeyKind {
             | Self::TwigVariable => KeyFramework::Twig,
             Self::YiiView
             | Self::YiiViewPath
+            | Self::YiiViewParameter
             | Self::YiiAssetFile
             | Self::YiiRoute
             | Self::YiiRouteArgument
@@ -1321,6 +1327,9 @@ pub(crate) enum ReceiverClass {
     /// A Yii view renderer, whose `withViewPath()` takes the directory its
     /// views are named relative to.
     YiiViewPath,
+    /// What renders a Yii view again, for the parameters its render call
+    /// passes after the view's name.
+    YiiViewParameters,
     /// A Yii HTML tag, whose `class()` and `addClass()` take CSS class
     /// names.
     HtmlTag,
@@ -1483,6 +1492,12 @@ impl ReceiverClass {
                 (YII_VIEW_RENDERER, YiiView),
                 (YII_LEGACY_VIEW_RENDERER, YiiView),
                 (YII_VIEW, YiiView),
+            ],
+            Self::YiiViewParameters => &[
+                (YII_WEB_VIEW_RENDERER, StringKeyKind::YiiViewParameter),
+                (YII_VIEW_RENDERER, StringKeyKind::YiiViewParameter),
+                (YII_LEGACY_VIEW_RENDERER, StringKeyKind::YiiViewParameter),
+                (YII_VIEW, StringKeyKind::YiiViewParameter),
             ],
             Self::YiiViewPath => &[
                 (YII_WEB_VIEW_RENDERER, StringKeyKind::YiiViewPath),

@@ -15,8 +15,10 @@ queries name navigate, complete, and are checked, the columns of a record
 without properties read from the project's migrations, and so do the
 properties form fields and hydration maps name, and the tables and
 columns `yiisoft/db` queries name, read against those migrations. The key
-paths `ArrayHelper` reads complete, navigate, and are typed. What is left
-is below.
+paths `ArrayHelper` reads complete, navigate, and are typed, and the
+parameters a render call passes its view complete, navigate, and are
+checked against the `@var` block the template opens with. What is left is
+below.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).
@@ -84,35 +86,3 @@ the DI configuration gives the renderer, from
 it, so a name such a class renders does not navigate, complete, or get
 reported. Read the value from the merged params (`src/yii/params.rs`),
 and use it as the base wherever the class gives none.
-
----
-
-## Y7. Render parameters against the template's `@var` list
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-// Action.php
-return $this->viewRenderer->render(__DIR__ . '/template', ['form' => $form]);
-
-// template.php
-/**
- * @var WebView $this
- * @var UrlGenerator $urlGenerator
- * @var Form $form
- */
-```
-
-Yii templates declare the variables they expect in a `@var` block at the
-top, and `yiisoft/demo-blog` does this in every template. That block is
-the template's signature, so the `render()` call can be checked against
-it: complete the parameter array's keys from it, navigate from a key to
-its `@var`, report a value whose type does not match, and report a key
-the template does not declare.
-
-A declared variable that the call does not pass is not always an error:
-the view's shared parameters (`WebView::setParameters()` in the DI
-config, or `parameters` under `params['yiisoft/view']`) and the
-renderer's injections (`CsrfViewInjection` gives `$csrf`) supply the
-rest, and the layout receives its own. Collect those before reporting a
-missing one.

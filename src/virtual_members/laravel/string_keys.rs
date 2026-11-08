@@ -113,6 +113,7 @@ pub(crate) fn resolve_laravel_string_key(
             backend.twig_callable_definitions(*kind, key)
         }
         StringKeyKind::YiiRouteArgument => backend.yii_route_argument_locations(key),
+        StringKeyKind::YiiViewParameter => backend.yii_view_parameter_locations(key),
         StringKeyKind::YiiDefinitionArgument => backend.yii_definition_argument_locations(key),
         StringKeyKind::WordPressHook => backend.wordpress_hook_definitions(key),
     }
@@ -372,14 +373,16 @@ pub(crate) fn find_laravel_string_key_references(
         StringKeyKind::DrupalHook => {
             return backend.drupal_hook_references(key, include_declaration);
         }
-        // The catalogues named after a domain declare it, and the paths of
-        // its handler's routes a route argument, and are added below.  A
+        // The catalogues named after a domain declare it, the paths of its
+        // handler's routes a route argument, and a template's `@var` block
+        // the parameters a render passes it, and are added below.  A
         // route's name may be put together by the imports that load it, or
         // declared by a bundle's routing file outside the workspace, so its
         // declarations are too, as are a theme hook's and its variables',
         // which `hook_theme()` arrays declare.
         StringKeyKind::TranslationDomain
         | StringKeyKind::YiiRouteArgument
+        | StringKeyKind::YiiViewParameter
         | StringKeyKind::YiiDefinitionArgument
         | StringKeyKind::YiiParam
         | StringKeyKind::SymfonyRoute

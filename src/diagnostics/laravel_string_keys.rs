@@ -132,9 +132,11 @@ impl CheckedStringKind {
             // read, and a render array may pass anything besides a hook's
             // variables.  A Yii alias can be set at runtime with
             // `Aliases::set()`, and an `@` starts plenty of strings that
-            // name no path.  A CSS class may come from a stylesheet the
+            // name no path.  A Yii view's parameters are judged with their
+            // values, which the view parameter pass reads.  A CSS class may come from a stylesheet the
             // page loads from elsewhere, or only be there for a script.
             StringKeyKind::YiiAlias
+            | StringKeyKind::YiiViewParameter
             | StringKeyKind::CssClass
             | StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType

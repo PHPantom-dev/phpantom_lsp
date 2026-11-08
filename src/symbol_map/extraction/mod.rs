@@ -234,6 +234,9 @@ struct ExtractionCtx<'a> {
     own_receiver_lookups: Vec<(u32, String, u8)>,
     /// Whether the file declares a Twig loader class of its own.
     declares_twig_loader: bool,
+    /// Whether the file sets parameters every Yii view shares in a way that
+    /// cannot be read.
+    sets_unread_yii_view_parameters: bool,
     /// Whether the project is a Yii application, which [`Self::yii_dir`]
     /// says.  Gates the route definitions, the route arguments, and the URL
     /// generator calls recorded for the type engine to confirm.
@@ -433,7 +436,7 @@ pub(crate) use symfony::{
     is_event_listener_attribute, is_message_handler_attribute, is_template_attribute,
     is_translatable_message, is_translate_function, symfony_receiver_method,
 };
-pub(crate) use yii::{chain_view_base, class_view_base};
+pub(crate) use yii::{chain_view_base, class_view_base, yii_view_parameters_argument};
 
 /// Descend generically through a node the typed dispatchers have no arm for,
 /// re-entering the typed extractors at the next expression or statement
@@ -649,6 +652,7 @@ fn extract_symbol_map_inner(
         own_receivers: Vec::new(),
         own_receiver_lookups: Vec::new(),
         declares_twig_loader: false,
+        sets_unread_yii_view_parameters: false,
         yii_dir,
         yii_view_scope: YiiViewScope::Template,
         yii_category: YiiCategory::Default,
@@ -866,6 +870,7 @@ fn extract_symbol_map_inner(
         dql_bodies: ctx.dql_bodies,
         dql_runs: ctx.dql_runs,
         declares_twig_loader: ctx.declares_twig_loader,
+        sets_unread_yii_view_parameters: ctx.sets_unread_yii_view_parameters,
         route_imports: ctx
             .route_imports
             .into_iter()

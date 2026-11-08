@@ -54,6 +54,13 @@ way a real Yii 3 project declares them.
 - Open `resources/views/blog/index.php`. Hover `$post` inside the loop, or
   complete after `$post->`. The template declares the variables the
   controller passes it with `@var`.
+- In `PostController::index()`, go to the definition of `'posts'` in the
+  array `render()` passes, which lands on its `@var` in
+  `resources/views/blog/index.php`, or hover it for its type. Clear a key to
+  complete the parameters the template declares. A value the declaration does
+  not accept, a key the template has no use for, and a declared parameter
+  the call leaves out are reported. `$urlGenerator` is not one the call has
+  to pass: `config/common/params.php` gives it to every view.
 - In `PostController::index()`, go to the definition of `'index'`. The
   controller's `withViewPath('@views/blog')` and the `@views` alias in
   `config/common/aliases.php` make it `resources/views/blog/index.php`. Clear
