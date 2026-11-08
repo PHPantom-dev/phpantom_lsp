@@ -433,3 +433,40 @@ async fn references_to_a_message_id_include_both_spellings_of_the_default_catego
         ]
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn symlinked_message_directories_navigate_and_refresh_at_the_canonical_path() {
+    let (backend, dir) = workspace(&[]).await;
+    let source = dir.path().join("resources/messages");
+    let target = dir.path().join("resources/catalogue");
+    std::fs::rename(&source, &target).unwrap();
+    std::os::unix::fs::symlink(&target, &source).unwrap();
+    let home = uri_for(&dir, "src/HomeController.php");
+    open_document(&backend, &home, "php", HOME_CONTROLLER_PHP).await;
+    let position = position_in(HOME_CONTROLLER_PHP, "'home.title')", 3);
+    assert_eq!(
+        definitions(&backend, &home, position).await,
+        vec![
+            entry(&dir, "resources/messages/de/site.php", "'home.title'"),
+            entry(&dir, "resources/messages/en/site.php", "'home.title'"),
+        ]
+    );
+
+    let message = uri_for(&dir, "resources/messages/en/site.php");
+    std::fs::write(
+        target.join("en/site.php"),
+        EN_SITE_PHP.replace("Welcome", "Welcome back"),
+    )
+    .unwrap();
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: message,
+                kind: FileChangeType::Changed,
+            }],
+        })
+        .await;
+    let hover = markup_hover_at(&backend, &home, position.line, position.character).await;
+    assert!(hover.contains("Welcome back"), "{hover}");
+}

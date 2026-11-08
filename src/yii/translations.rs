@@ -260,7 +260,7 @@ impl Messages {
 fn read_message_file(locale: &str, path: PathBuf) -> MessageFile {
     let mut file = MessageFile {
         locale: locale.to_string(),
-        path,
+        path: crate::util::canonical_path_for_comparison(&path),
         messages: Vec::new(),
         open: true,
     };
@@ -412,7 +412,9 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<PathBuf>>
                 Argument::Positional(positional) => Some(positional.value),
                 Argument::Named(_) => None,
             });
-        if let Some(dir) = path.and_then(|value| self.directory(value))
+        if let Some(dir) = path
+            .and_then(|value| self.directory(value))
+            .map(|dir| crate::util::canonical_path_for_comparison(&dir))
             && !out.contains(&dir)
         {
             out.push(dir);
