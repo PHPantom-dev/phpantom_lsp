@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794113388657,
+  "lastUpdate": 1794118958530,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12404,6 +12404,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 101.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e0fc6b23510b92c38a446dac1ac37f70c980606b",
+          "message": "Properties a trait leaves to its users",
+          "timestamp": "2026-11-08T06:34:00+01:00",
+          "tree_id": "ae3d09bcb3b23443988c25096f0e7ba236b54c55",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e0fc6b23510b92c38a446dac1ac37f70c980606b"
+        },
+        "date": 1794118950463,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 306.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 43.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 82,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 71.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 74.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 108,
             "unit": "MiB"
           }
         ]
