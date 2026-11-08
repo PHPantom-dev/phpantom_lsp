@@ -6072,6 +6072,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h4 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h4>
 <ul>
+<li><strong>Container call parameters.</strong> The parameter keys passed to <code>app()-&gt;call()</code> complete from the callable's parameters and go to them. Contributed by @shuvroroy.</li>
 <li><strong>Laravel asset paths and Inertia pages.</strong> The paths <code>asset()</code>, <code>mix()</code>, <code>@vite</code> and <code>Vite::asset()</code> name, and the pages <code>Inertia::render()</code>, <code>inertia()</code> and <code>Route::inertia()</code> render, complete from the files on disk, jump to the file, and are reported when nothing is there. An unknown Inertia page gets a quick fix that creates it. Page directories and extensions are read from <code>config/inertia.php</code>.</li>
 <li><strong>Laravel related classes.</strong> Code lenses on an Eloquent model go to its factory, policy, observers, migrations, API resources, and custom collection, and a factory, policy, or observer gets one back to its model. An event lists the listeners that handle it, whether registered or discovered from their <code>handle()</code> type hint, and a listener links to the events it handles.</li>
 <li><strong>Eloquent column attributes.</strong> Columns a model lists in class attributes such as <code>#[Fillable(['name'])]</code> or <code>#[Hidden([...])]</code> now complete on the model and in queries like those in <code>$fillable</code> and <code>$hidden</code>, and <code>#[Fillable]</code> columns are offered first in <code>create([...])</code> and <code>fill([...])</code>. Attributes and properties combine and inherit the way Laravel applies them. Contributed by @shuvroroy.</li>
@@ -6171,6 +6172,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h4 id="tempest">Tempest<a class="headerlink" href="#tempest" title="Permanent link">&para;</a></h4>
 <ul>
+<li><strong>Container invocation arguments.</strong> The named arguments <code>Container::invoke()</code> and the <code>invoke()</code> helper forward complete from the callable's parameters and go to them. Contributed by @shuvroroy.</li>
 <li><strong>Built-in view documentation.</strong> Completion and hover explain Tempest's built-in components and directives, with links to the view specification. Contributed by @shuvroroy.</li>
 <li><strong>Component attribute navigation and hover.</strong> Follow an attribute name to the variable its component reads, and hover it to see the type in that view. Dynamic components use their selected views. Contributed by @shuvroroy.</li>
 <li><strong>Tempest model property names.</strong> Complete and navigate model properties in typed query builders and model helpers, including forwarded named arguments and array keys. Raw SQL strings keep their existing handling. Contributed by @shuvroroy.</li>
@@ -6363,6 +6365,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h4 id="closures-and-callables">Closures and callables<a class="headerlink" href="#closures-and-callables" title="Permanent link">&para;</a></h4>
 <ul>
+<li><strong>Generic array callable results.</strong> Calling a method through an array callable preserves the receiver's generic return type, so completion and type checks see the concrete result. Contributed by @shuvroroy.</li>
 <li><strong>Closures declared to return <code>float</code>.</strong> A closure or arrow function declared <code>: float</code> is now shown returning <code>float</code> even when its body computes an integer, since PHP converts the value on return.</li>
 <li><strong>Closures that capture by reference the variable they are assigned to.</strong> In <code>$lock = new Lock(function () use (&amp;$lock) { ... })</code>, <code>$lock</code> inside the closure is now what the assignment stores, <code>@var</code> included, instead of <code>null</code>.</li>
 <li><strong>Union types in <code>@param-closure-this</code>.</strong> A closure whose tag names several classes, such as <code>@param-closure-this WebContext|ApiContext</code>, now binds <code>$this</code>, <code>self::</code>, and <code>static::</code> to every one of them instead of falling back to the class around the closure, and an <code>instanceof</code> check narrows <code>$this</code> to the one it proves. Contributed by @ace-of-aces.</li>
@@ -6572,6 +6575,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h4 id="completion-hover-and-editor-features">Completion, hover, and editor features<a class="headerlink" href="#completion-hover-and-editor-features" title="Permanent link">&para;</a></h4>
 <ul>
+<li><strong>Global class member navigation.</strong> Following a member of a global class goes to its declaration even when another namespace contains a class with the same short name. Contributed by @shuvroroy.</li>
 <li><strong>Classes that share a short name in one type.</strong> Hover, completion, and signature help now show each class by its full name when a type names two classes with the same short name, such as <code>class-string&lt;\App\C&gt;|class-string&lt;\Other\C&gt;</code>, instead of printing them as one.</li>
 <li><strong>Code examples in hover.</strong> A multi-line <code>&lt;code&gt;</code> or <code>&lt;pre&gt;</code> example in a docblock, as in Doctrine's query builder, now shows as a code block instead of running together on one line.</li>
 <li><strong>Hover on a <code>global</code> statement's variable.</strong> Hovering the variable in <code>global $x;</code> now shows the type it imports, instead of nothing.</li>

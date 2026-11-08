@@ -1690,6 +1690,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#container-invocation-arguments" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Container invocation arguments
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tempest-routes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3387,6 +3398,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#container-invocation-arguments" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Container invocation arguments
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tempest-routes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4935,6 +4957,12 @@ span it is looking at can be reached.</p>
 <li><strong>No namespace</strong> → keep as-is.</li>
 </ol>
 <p>This runs on every name a <code>ClassInfo</code> extracted from a file carries: its parents, interfaces, traits and mixins, its members' native and docblock types, its <code>@property</code> and <code>@method</code> tags, and the classes its constants' initializers name. A function's types get the same treatment. Names read later, in a method body or by whoever consumes a resolved name, follow <a href="#source-names-and-resolved-names">Source Names and Resolved Names</a>.</p>
+<h2 id="container-invocation-arguments">Container invocation arguments<a class="headerlink" href="#container-invocation-arguments" title="Permanent link">&para;</a></h2>
+<p><code>container_calls.rs</code> resolves the callable passed to Tempest's <code>invoke()</code> and
+Laravel's <code>call()</code> through the shared type engine. Both completion and definition
+read its parameters; definition looks up their source spans only when requested.
+Container recognition checks the receiver's resolved interface and method
+signature, so unrelated methods with the same name retain ordinary handling.</p>
 <h2 id="tempest-routes">Tempest routes<a class="headerlink" href="#tempest-routes" title="Permanent link">&para;</a></h2>
 <p>In a Tempest project, route attributes are collected alongside classes in the
 symbol map.
