@@ -35,7 +35,7 @@ pub(crate) mod upcasting;
 
 use crate::Backend;
 use crate::atom::Atom;
-use crate::symbol_map::{ReceiverClass, StringKeyKind, SymbolKind};
+use crate::symbol_map::{ReceiverClass, StringKeyKind, SymbolKind, SymbolMap};
 
 /// The web roots of the workspace's Drupal projects, and the declaration
 /// files found under them.
@@ -82,6 +82,10 @@ pub(crate) struct DrupalState {
     /// they declare is kept apart from the index's plugins (see
     /// [`plugins::PluginIndex::declares`]).
     plugin_test_sources: RwLock<std::collections::HashSet<String>>,
+    /// The closed test modules' files that declare entity types, by URI:
+    /// only test code sees what they declare (see
+    /// [`Backend::drupal_entity_types_seen_from`]).
+    entity_type_test_sources: RwLock<std::collections::HashSet<String>>,
     /// The default configuration files and configuration schema files of
     /// every extension, and the configuration names read from them.
     config: config::ConfigSources,
@@ -339,6 +343,34 @@ pub(crate) fn is_hook_php_file(path: &Path, web_root: &Path) -> bool {
     (by_name || in_hook_dir) && !is_test_fixture(path, web_root) && !is_unloaded(path, web_root)
 }
 
+/// Add the entity class and storage handler of each declaration of the
+/// entity type `id` in `map` to `found`, once each.
+fn collect_entity_types(map: &SymbolMap, id: &str, found: &mut Vec<(Atom, Option<Atom>)>) {
+    for site in &map.entity_types {
+        let at = map.spans.partition_point(|span| span.start < site.start);
+        let declares_id = map.spans[at..]
+            .iter()
+            .take_while(|span| span.start == site.start)
+            .any(|span| {
+                matches!(
+                    &span.kind,
+                    SymbolKind::StringKey {
+                        kind: StringKeyKind::DrupalEntityType,
+                        key,
+                        ..
+                    } if key == id
+                )
+            });
+        if declares_id
+            && !found
+                .iter()
+                .any(|(class, storage)| *class == site.class && *storage == site.storage)
+        {
+            found.push((site.class, site.storage));
+        }
+    }
+}
+
 /// Whether `path` lies under a `tests` folder of the web root: it belongs to
 /// a test module, which no real site enables.  Roughly half of core's
 /// declaration files are.
@@ -375,6 +407,7 @@ impl Backend {
         *self.drupal.theme_suggestions.write() = None;
         *self.drupal.plugin_index.write() = None;
         self.drupal.plugin_test_sources.write().clear();
+        self.drupal.entity_type_test_sources.write().clear();
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
         self.drupal.service_definition_files.write().clear();
@@ -474,32 +507,58 @@ impl Backend {
     /// none and has no default.
     pub(crate) fn drupal_entity_types(&self, id: &str) -> Vec<(Atom, Option<Atom>)> {
         let mut found: Vec<(Atom, Option<Atom>)> = Vec::new();
-        self.visit_declaring_symbol_maps(|_, map| {
-            for site in &map.entity_types {
-                let at = map.spans.partition_point(|span| span.start < site.start);
-                let declares_id = map.spans[at..]
-                    .iter()
-                    .take_while(|span| span.start == site.start)
-                    .any(|span| {
-                        matches!(
-                            &span.kind,
-                            SymbolKind::StringKey {
-                                kind: StringKeyKind::DrupalEntityType,
-                                key,
-                                ..
-                            } if key == id
-                        )
-                    });
-                if declares_id
-                    && !found
-                        .iter()
-                        .any(|(class, storage)| *class == site.class && *storage == site.storage)
-                {
-                    found.push((site.class, site.storage));
+        self.visit_declaring_symbol_maps(|_, map| collect_entity_types(map, id, &mut found));
+        found
+    }
+
+    /// [`Self::drupal_entity_types`] as code in the file at `uri` sees them:
+    /// test code also sees the entity types test modules declare, since the
+    /// tests that run it enable those modules.  A site's own code never
+    /// does, because no real site enables a test module.  Drupal allows one
+    /// declaration per ID among the enabled modules, so test modules are
+    /// only read for an ID the rest of the site leaves undeclared.
+    pub(crate) fn drupal_entity_types_seen_from(
+        &self,
+        id: &str,
+        uri: Option<&str>,
+    ) -> Vec<(Atom, Option<Atom>)> {
+        let mut found = self.drupal_entity_types(id);
+        if found.is_empty()
+            && uri
+                .and_then(crate::util::uri_to_path)
+                .is_some_and(|path| self.is_drupal_test_path(&path))
+        {
+            let mut uris: Vec<String> = self
+                .drupal
+                .entity_type_test_sources
+                .read()
+                .iter()
+                .cloned()
+                .collect();
+            uris.sort_unstable();
+            for uri in uris {
+                if let Some(map) = self.symbol_map_for(&uri) {
+                    collect_entity_types(&map, id, &mut found);
                 }
             }
-        });
+        }
         found
+    }
+
+    /// Keep the closed test modules' files that declare entity types in
+    /// step with the symbol map of the file at `uri` (`None` once it is
+    /// gone).
+    pub(crate) fn note_drupal_entity_type_test_sources(&self, uri: &str, map: Option<&SymbolMap>) {
+        let test_source = map.is_some_and(|map| !map.entity_types.is_empty())
+            && self.is_closed_drupal_test_fixture(uri);
+        if test_source != self.drupal.entity_type_test_sources.read().contains(uri) {
+            let mut sources = self.drupal.entity_type_test_sources.write();
+            if test_source {
+                sources.insert(uri.to_string());
+            } else {
+                sources.remove(uri);
+            }
+        }
     }
 
     /// The shapes of the route names the project's route builders give the

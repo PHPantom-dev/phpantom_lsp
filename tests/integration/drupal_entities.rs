@@ -256,6 +256,71 @@ final class Chained {
     }
 }
 
+/// The tests that enable a test module see the entity types it declares,
+/// and a site's own code, which never runs with it enabled, does not.
+#[tokio::test]
+async fn test_code_sees_its_test_modules_entity_types() {
+    const TEST_ENTITY: &str =
+        "web/core/modules/system/tests/modules/entity_test/src/Entity/EntityTest.php";
+    const KERNEL_TEST: &str = "web/core/modules/system/tests/src/Kernel/EntityTestTest.php";
+    let user = |namespace: &str| {
+        format!(
+            "<?php\nnamespace {namespace};\n\nuse Drupal\\Core\\Entity\\EntityTypeManagerInterface;\n\nfinal class User {{\n    public function run(EntityTypeManagerInterface $manager): void {{\n        $storage = $manager->getStorage('entity_test');\n        $storage;\n        $query = \\Drupal::entityQuery('entity_test');\n        $query;\n    }}\n}}\n"
+        )
+    };
+    let in_test = user("Drupal\\Tests\\system\\Kernel");
+    let in_site = user("Drupal\\acme");
+    let dir = tempfile::tempdir().unwrap();
+    let full = dir.path().join(TEST_ENTITY);
+    std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+    std::fs::write(
+        full,
+        "<?php\nnamespace Drupal\\entity_test\\Entity;\n/**\n * @ContentEntityType(\n *   id = \"entity_test\",\n * )\n */\nclass EntityTest {}\n",
+    )
+    .unwrap();
+    let mut files: Vec<(&str, &str)> = STORAGE_STUBS.to_vec();
+    files.extend(QUERY_STUBS);
+    files.extend([
+        (MANAGER_PATH, MANAGER),
+        (KERNEL_TEST, in_test.as_str()),
+        (LOADER_PATH, in_site.as_str()),
+    ]);
+    let (backend, dir) = workspace_in(dir, &files).await;
+    // Finding references indexes the workspace, the test module included.
+    references_at(
+        &backend,
+        &uri_for(&dir, LOADER_PATH),
+        position_in(&in_site, "getStorage('entity_test')", 13),
+    )
+    .await;
+
+    let hover = |path: &'static str, content: &str, needle: &str| {
+        let position = position_in(content, needle, 2);
+        let backend = &backend;
+        let php = uri_for(&dir, path);
+        async move {
+            crate::common::hover_text_at(backend, &php, position.line, position.character)
+                .await
+                .unwrap_or_default()
+        }
+    };
+    let storage = hover(KERNEL_TEST, &in_test, "$storage;").await;
+    assert!(
+        storage.contains("SqlContentEntityStorage<EntityTest>"),
+        "{storage}"
+    );
+    let query = hover(KERNEL_TEST, &in_test, "$query;").await;
+    assert!(query.contains("QueryInterface<EntityTest>"), "{query}");
+
+    let storage = hover(LOADER_PATH, &in_site, "$storage;").await;
+    assert!(
+        storage.contains("EntityStorageInterface") && !storage.contains("EntityTest"),
+        "{storage}"
+    );
+    let query = hover(LOADER_PATH, &in_site, "$query;").await;
+    assert!(!query.contains("EntityTest"), "{query}");
+}
+
 /// `getStorage(entity_type_id: 'x')` names the same entity type as the
 /// positional form.
 #[tokio::test]
