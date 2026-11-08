@@ -121,18 +121,17 @@ pub(crate) fn with_callable_method<T>(
         )
     };
 
+    let hinted = match receiver.kind() {
+        TypeKind::ClassString(Some(inner)) => inner,
+        _ => receiver,
+    };
+    // A receiver without type arguments (`$this`, a bare class name) keeps
+    // the class's own template parameters, as a direct method call does.
+    let args = match hinted.kind() {
+        TypeKind::Generic(generic) => generic.args.as_slice(),
+        _ => &[],
+    };
     owners.iter().find_map(|owner| {
-        let hinted = match receiver.kind() {
-            TypeKind::ClassString(Some(inner)) => inner,
-            _ => receiver,
-        };
-        let defaults;
-        let args = if let TypeKind::Generic(generic) = hinted.kind() {
-            generic.args.as_slice()
-        } else {
-            defaults = crate::inheritance::default_type_args(owner);
-            &defaults
-        };
         // The class cache reloads the raw declaration, so retain the type's
         // arguments when merging inherited methods into a callable receiver.
         let merged = crate::virtual_members::resolve_class_fully_with_type_args(

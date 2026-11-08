@@ -123,20 +123,9 @@ impl Backend {
 
             // Try to find the declaring class within the mixin's own
             // hierarchy (itself, its traits, its parents).
-            if let Some((declaring_class, fqn)) =
-                Self::find_declaring_class(&mixin_class, member_name, class_loader)
+            if let Some(found) = Self::find_declaring_class(&mixin_class, member_name, class_loader)
             {
-                // When find_declaring_class finds the member directly on
-                // the mixin class, it returns the short name (e.g.
-                // "Builder") because ClassInfo.name is always short.
-                // Replace it with the fully-qualified mixin_name so that
-                // find_class_file_content can disambiguate classes that
-                // share the same short name (e.g. Eloquent\Builder vs
-                // Query\Builder).
-                if !fqn.contains('\\') && fqn == mixin_class.name {
-                    return Some((declaring_class, mixin_name.to_string()));
-                }
-                return Some((declaring_class, fqn));
+                return Some(found);
             }
 
             // Recurse into mixins declared by this mixin class.

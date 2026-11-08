@@ -347,6 +347,14 @@ impl Backend {
         position: Position,
         ctx: &FileContext,
     ) -> Option<Vec<CompletionItem>> {
+        // Laravel forwards through an array, not named arguments; skip its
+        // `call()` before resolving the receiver.
+        if context.call_expression.contains(['$', ':', '>', '(', ')'])
+            && extract_identifier_backwards(&context.call_expression)
+                .is_some_and(|(name, _)| name.eq_ignore_ascii_case("call"))
+        {
+            return None;
+        }
         let offset = position_to_offset(content, position);
         let kind = self.forwarding_container(&context.call_expression, content, offset, ctx)?;
         if kind == ContainerKind::Laravel {
@@ -442,16 +450,24 @@ impl Backend {
         {
             return None;
         }
-        let ctx = self.file_context(uri);
-        let kind = self.forwarding_container(call.call_expression, content, offset, &ctx)?;
-        let name = match kind {
+        // Classify the call by its syntax and check the cursor sits on a
+        // forwarded name before resolving the receiver, which is the
+        // expensive part and runs on every go-to-definition inside a call.
+        let expected = if !call.call_expression.contains(['$', ':', '>', '(', ')']) {
+            ContainerKind::TempestFunction
+        } else if method.eq_ignore_ascii_case("call") {
+            ContainerKind::Laravel
+        } else {
+            ContainerKind::Tempest
+        };
+        let name = match expected {
             ContainerKind::Tempest | ContainerKind::TempestFunction => call
                 .named_arg_indices
                 .iter()
                 .zip(call.named_arg_names.iter())
                 .find_map(|(&index, name)| {
                     let start = call.arg_offsets[index as usize];
-                    (name != kind.callback_name()
+                    (name != expected.callback_name()
                         && start <= offset
                         && offset <= start + name.len() as u32)
                         .then_some(name)
@@ -474,6 +490,11 @@ impl Backend {
                 content.get(quote + 1..argument.string_end)?
             }
         };
+        let ctx = self.file_context(uri);
+        let kind = self.forwarding_container(call.call_expression, content, offset, &ctx)?;
+        if kind != expected {
+            return None;
+        }
         let callable = self.container_callable(kind, content, call.args_start, &ctx)?;
         self.callable_parameter_location(&callable, uri, content, name)
     }

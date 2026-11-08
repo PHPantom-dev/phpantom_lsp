@@ -2767,6 +2767,123 @@ fn push_library(expression: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
     }
 }
 
+/// The code `program` runs only when a module is installed (see
+/// [`ModuleGuard`]): the branch an `if` takes when a `moduleExists('m')`
+/// it requires holds, and the rest of a block after an `if` that leaves
+/// it when one is false.
+pub(in crate::symbol_map::extraction) fn module_guards(
+    program: &Program<'_>,
+    content: &str,
+) -> Vec<ModuleGuard> {
+    use mago_syntax::cst::Node;
+    let mut guards = Vec::new();
+    let guard_list = |statements: &[Statement<'_>], end: u32, guards: &mut Vec<ModuleGuard>| {
+        for statement in statements {
+            let Statement::If(if_stmt) = statement else {
+                continue;
+            };
+            let then: Vec<&Statement<'_>> = if_stmt.body.statements().iter().collect();
+            let (Some(first), Some(last)) = (then.first(), then.last()) else {
+                continue;
+            };
+            let mut required = Vec::new();
+            collect_required_modules(if_stmt.condition, true, content, &mut required);
+            for module in required {
+                guards.push(ModuleGuard {
+                    start: first.span().start.offset,
+                    end: last.span().end.offset,
+                    module,
+                });
+            }
+            // `if (!moduleExists('m')) { return; }` with nothing else to
+            // run guards what follows it.
+            let has_else = !if_stmt.body.else_if_statements().is_empty()
+                || if_stmt.body.else_statements().is_some();
+            let leaves = then.iter().any(|statement| {
+                crate::type_engine::type_ops::condition_facts::statement_leaves_block(
+                    statement,
+                    &|_| false,
+                )
+            });
+            if !has_else && leaves {
+                let mut missing = Vec::new();
+                collect_required_modules(if_stmt.condition, false, content, &mut missing);
+                let start = if_stmt.span().end.offset;
+                for module in missing {
+                    guards.push(ModuleGuard { start, end, module });
+                }
+            }
+        }
+    };
+    guard_list(
+        program.statements.as_slice(),
+        program.span().end.offset,
+        &mut guards,
+    );
+    crate::parser::for_each_node_with_ancestors(Node::Program(program), |node, _| {
+        if let Node::Block(block) = node {
+            guard_list(
+                block.statements.as_slice(),
+                block.span().end.offset,
+                &mut guards,
+            );
+        }
+    });
+    guards
+}
+
+/// Add to `modules` each module whose `moduleExists('m')` must be `holds`
+/// for `condition` to be true: the call itself, or under a `!`, an `&&`,
+/// or, for a call that must be false, an `||`.
+fn collect_required_modules(
+    condition: &Expression<'_>,
+    holds: bool,
+    content: &str,
+    modules: &mut Vec<String>,
+) {
+    match condition {
+        Expression::Parenthesized(inner) => {
+            collect_required_modules(inner.expression, holds, content, modules)
+        }
+        Expression::UnaryPrefix(unary) if matches!(unary.operator, UnaryPrefixOperator::Not(_)) => {
+            collect_required_modules(unary.operand, !holds, content, modules)
+        }
+        Expression::Binary(binary)
+            if (holds
+                && matches!(
+                    binary.operator,
+                    BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
+                ))
+                || (!holds
+                    && matches!(
+                        binary.operator,
+                        BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+                    )) =>
+        {
+            collect_required_modules(binary.lhs, holds, content, modules);
+            collect_required_modules(binary.rhs, holds, content, modules);
+        }
+        Expression::Call(Call::Method(call)) if holds => {
+            let ClassLikeMemberSelector::Identifier(name) = &call.method else {
+                return;
+            };
+            if !bytes_to_str(name.value).eq_ignore_ascii_case("moduleExists") {
+                return;
+            }
+            if let Some((module, _, _)) = call
+                .argument_list
+                .arguments
+                .first()
+                .and_then(|argument| resolved_string_literal(argument.value(), content))
+                && !module.is_empty()
+            {
+                modules.push(module.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3961,122 +4078,5 @@ $build['more']['#theme'] = 'item_list';
             )]
         );
         assert!(map_of(php, false).twig_contexts.is_empty());
-    }
-}
-
-/// The code `program` runs only when a module is installed (see
-/// [`ModuleGuard`]): the branch an `if` takes when a `moduleExists('m')`
-/// it requires holds, and the rest of a block after an `if` that leaves
-/// it when one is false.
-pub(in crate::symbol_map::extraction) fn module_guards(
-    program: &Program<'_>,
-    content: &str,
-) -> Vec<ModuleGuard> {
-    use mago_syntax::cst::Node;
-    let mut guards = Vec::new();
-    let guard_list = |statements: &[Statement<'_>], end: u32, guards: &mut Vec<ModuleGuard>| {
-        for statement in statements {
-            let Statement::If(if_stmt) = statement else {
-                continue;
-            };
-            let then: Vec<&Statement<'_>> = if_stmt.body.statements().iter().collect();
-            let (Some(first), Some(last)) = (then.first(), then.last()) else {
-                continue;
-            };
-            let mut required = Vec::new();
-            collect_required_modules(if_stmt.condition, true, content, &mut required);
-            for module in required {
-                guards.push(ModuleGuard {
-                    start: first.span().start.offset,
-                    end: last.span().end.offset,
-                    module,
-                });
-            }
-            // `if (!moduleExists('m')) { return; }` with nothing else to
-            // run guards what follows it.
-            let has_else = !if_stmt.body.else_if_statements().is_empty()
-                || if_stmt.body.else_statements().is_some();
-            let leaves = then.iter().any(|statement| {
-                crate::type_engine::type_ops::condition_facts::statement_leaves_block(
-                    statement,
-                    &|_| false,
-                )
-            });
-            if !has_else && leaves {
-                let mut missing = Vec::new();
-                collect_required_modules(if_stmt.condition, false, content, &mut missing);
-                let start = if_stmt.span().end.offset;
-                for module in missing {
-                    guards.push(ModuleGuard { start, end, module });
-                }
-            }
-        }
-    };
-    guard_list(
-        program.statements.as_slice(),
-        program.span().end.offset,
-        &mut guards,
-    );
-    crate::parser::for_each_node_with_ancestors(Node::Program(program), |node, _| {
-        if let Node::Block(block) = node {
-            guard_list(
-                block.statements.as_slice(),
-                block.span().end.offset,
-                &mut guards,
-            );
-        }
-    });
-    guards
-}
-
-/// Add to `modules` each module whose `moduleExists('m')` must be `holds`
-/// for `condition` to be true: the call itself, or under a `!`, an `&&`,
-/// or, for a call that must be false, an `||`.
-fn collect_required_modules(
-    condition: &Expression<'_>,
-    holds: bool,
-    content: &str,
-    modules: &mut Vec<String>,
-) {
-    match condition {
-        Expression::Parenthesized(inner) => {
-            collect_required_modules(inner.expression, holds, content, modules)
-        }
-        Expression::UnaryPrefix(unary) if matches!(unary.operator, UnaryPrefixOperator::Not(_)) => {
-            collect_required_modules(unary.operand, !holds, content, modules)
-        }
-        Expression::Binary(binary)
-            if (holds
-                && matches!(
-                    binary.operator,
-                    BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
-                ))
-                || (!holds
-                    && matches!(
-                        binary.operator,
-                        BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
-                    )) =>
-        {
-            collect_required_modules(binary.lhs, holds, content, modules);
-            collect_required_modules(binary.rhs, holds, content, modules);
-        }
-        Expression::Call(Call::Method(call)) if holds => {
-            let ClassLikeMemberSelector::Identifier(name) = &call.method else {
-                return;
-            };
-            if !bytes_to_str(name.value).eq_ignore_ascii_case("moduleExists") {
-                return;
-            }
-            if let Some((module, _, _)) = call
-                .argument_list
-                .arguments
-                .first()
-                .and_then(|argument| resolved_string_literal(argument.value(), content))
-                && !module.is_empty()
-            {
-                modules.push(module.to_string());
-            }
-        }
-        _ => {}
     }
 }
