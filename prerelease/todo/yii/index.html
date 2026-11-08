@@ -1306,17 +1306,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#y15-property-names-in-hydrator-attributes-and-form-fields" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y15. Property names in hydrator attributes and form fields
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#y8-column-names-in-query-arrays" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1386,7 +1375,8 @@ navigate, are checked, and are typed, and the message IDs a translator
 looks up complete, navigate, and are checked, and so do the listeners
 the events configuration attaches. Active Record queries are typed by the
 record they are for, and the attributes and relations a record and its
-queries name navigate, complete, and are checked. What is left is below.</p>
+queries name navigate, complete, and are checked, and so do the properties
+form fields and hydration maps name. What is left is below.</p>
 <p>The items below are what the Yii team asked for in
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/discussions/505">discussion #505</a>.
 <code>examples/yii/</code> (generated from <code>yiisoft/app</code>) is the playground, with a
@@ -1478,30 +1468,11 @@ renderer's injections (<code>CsrfViewInjection</code> gives <code>$csrf</code>) 
 rest, and the layout receives its own. Collect those before reporting a
 missing one.</p>
 <hr />
-<h2 id="y15-property-names-in-hydrator-attributes-and-form-fields">Y15. Property names in hydrator attributes and form fields<a class="headerlink" href="#y15-property-names-in-hydrator-attributes-and-form-fields" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">final class PostForm extends FormModel</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">{</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    public function __construct(</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">        #[Data('post_title')] public string $title = '',</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    ) {}</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">Field::text($form, 'title');</span>
-</code></pre></div>
-<p><code>yiisoft/hydrator</code>'s <code>#[Data]</code> and <code>#[Map]</code> name the keys of the data
-array a property is filled from, and <code>yiisoft/form-model</code>'s field
-helpers name a property of the form model they are given. A form field
-name should navigate to the property, complete from the model's
-properties, rename with it, and be reported when the model has no such
-property. A <code>#[Map]</code> entry is the same check in the other direction, on
-its property side.</p>
-<hr />
 <h2 id="y8-column-names-in-query-arrays">Y8. Column names in query arrays<a class="headerlink" href="#y8-column-names-in-query-arrays" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$query-&gt;from(Table::POST . ' p')</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    -&gt;where(['p.status' =&gt; PostStatus::Published])</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    -&gt;orderBy(['p.publication_date' =&gt; SORT_DESC]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$query-&gt;from(Table::POST . ' p')</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    -&gt;where(['p.status' =&gt; PostStatus::Published])</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    -&gt;orderBy(['p.publication_date' =&gt; SORT_DESC]);</span>
 </code></pre></div>
 <p><code>yiisoft/db</code> queries name tables and columns as strings, and columns as
 array keys, often
@@ -1517,10 +1488,10 @@ demo is the only project known to query this way.</p>
 <hr />
 <h2 id="y19-attributes-of-an-active-record-without-properties">Y19. Attributes of an Active Record without properties<a class="headerlink" href="#y19-attributes-of-an-active-record-without-properties" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">#[\AllowDynamicProperties]</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">final class Post extends ActiveRecord {}</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">$post-&gt;get('title');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">#[\AllowDynamicProperties]</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">final class Post extends ActiveRecord {}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">$post-&gt;get('title');</span>
 </code></pre></div>
 <p>An Active Record's <code>get()</code>, <code>set()</code>, and the rest of its attribute API
 name an attribute, which navigates, completes, and is checked against
@@ -1535,7 +1506,7 @@ report one no migration creates.</p>
 <hr />
 <h2 id="y17-key-paths-in-yiisoftarrays">Y17. Key paths in <code>yiisoft/arrays</code><a class="headerlink" href="#y17-key-paths-in-yiisoftarrays" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
 </code></pre></div>
 <p><code>ArrayHelper::getValue()</code>, <code>setValue()</code>, <code>keyExists()</code>, and <code>remove()</code>
 take a key or a dotted path into the array or object they are given.
