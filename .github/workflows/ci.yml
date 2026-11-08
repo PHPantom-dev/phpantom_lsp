@@ -5,124 +5,255 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      benchmark-shards:
+        description: Benchmark workers for a controlled timing run
+        type: choice
+        options: ["8", "12", "16"]
+        default: "12"
+
+# A newer revision makes the previous PR measurements obsolete. Main pushes
+# keep separate groups so publishing benchmark history is never interrupted.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
-  # The Linux binaries we ship are static musl builds (see
-  # release.yml). CI builds, tests, and benchmarks the same target so
-  # it exercises exactly what users run, including the mimalloc
-  # allocator that is only compiled in for musl.
-  CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
-  # Full debuginfo makes every debug test binary 500-900 MB, and the
-  # coverage and lint jobs build a dozen of them, which fills the
-  # runner's disk. Line tables keep file:line in panic backtraces,
-  # and coverage does not read debuginfo at all.
+  CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  # Coverage uses instrumentation rather than debuginfo. Smaller test
+  # binaries avoid slow links and the need to delete runner software.
+  CARGO_PROFILE_TEST_DEBUG: 0
 
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
       - uses: actions/checkout@v4
       - name: Test benchmark helpers
         run: python3 -m unittest discover -s benches -p 'test_*.py'
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.99.1"
           components: rustfmt, clippy
           targets: ${{ env.CARGO_BUILD_TARGET }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: build
+          shared-key: lint
       - name: Set up musl build
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools mold
-          mkdir -p .cargo
-          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --locked --all-targets -- -D warnings
       # `semantic-export` is off by default, so nothing above compiles it.
       # Without these steps a refactor of an internal API breaks the module
       # and no job notices until someone builds with the feature on. They
       # run here rather than in the test job so that job keeps measuring
       # exactly the feature set the released binary is built with.
-      - run: cargo clippy --all-targets --features semantic-export -- -D warnings
-      # Only the lib and the integration binary hold these tests; building
-      # every other test target as well would only cost disk.
-      - run: cargo test --features semantic-export --lib --test integration semantic_export
+      - run: cargo clippy --locked --all-targets --features semantic-export -- -D warnings
+      - run: cargo test --locked --features semantic-export --lib --test semantic_export semantic_export
 
-  # Path handling differs on Windows (drive letters, `\` separators,
-  # `\\?\` canonical paths), and nothing else in CI runs there. It does not
-  # block until the suite passes there.
-  test-windows:
-    name: Test (Windows)
-    runs-on: windows-latest
+  test-windows-build:
+    name: Test (Windows build)
+    runs-on: windows-2025
     continue-on-error: true
     env:
       CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
     steps:
-      # The runner checks out with CRLF line endings, which would shift
-      # every offset the fixtures and embedded stubs are tested at.
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: windows
+          toolchain: "1.99.1"
+      - name: Identify Windows test archive
+        id: identity
+        shell: pwsh
+        run: |
+          $inputs = (rustc -vV | Out-String) + $env:ImageVersion + $env:CARGO_BUILD_TARGET + $env:CARGO_PROFILE_DEV_DEBUG + $env:CARGO_PROFILE_TEST_DEBUG + $env:CARGO_INCREMENTAL
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes($inputs)
+          $digest = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+          "key=windows-test-archive-v1-$env:GITHUB_SHA-$digest" >> $env:GITHUB_OUTPUT
+      - name: Restore exact Windows test archive
+        id: archive
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            windows-tests.tar.zst
+            target/cargo-timings
+          key: ${{ steps.identity.outputs.key }}
+      - uses: Swatinem/rust-cache@v2
+        if: steps.archive.outputs.cache-hit != 'true'
+        with:
+          shared-key: windows-2025
+      - uses: taiki-e/install-action@v2
+        if: steps.archive.outputs.cache-hit != 'true'
+        with:
+          tool: cargo-nextest@0.9.151
+      - name: Build Windows tests once
+        if: steps.archive.outputs.cache-hit != 'true'
+        run: cargo nextest archive --locked --archive-file windows-tests.tar.zst --timings
+      - uses: actions/cache/save@v4
+        if: steps.archive.outputs.cache-hit != 'true'
+        with:
+          path: |
+            windows-tests.tar.zst
+            target/cargo-timings
+          key: ${{ steps.identity.outputs.key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-tests
+          path: windows-tests.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-timings
+          path: target/cargo-timings/
+          if-no-files-found: error
+          retention-days: 1
+
+  test-windows-shard:
+    name: Test (Windows shard ${{ matrix.shard }}/4)
+    runs-on: windows-2025
+    needs: test-windows-build
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest
-      - run: cargo nextest run --no-fail-fast
+          tool: cargo-nextest@0.9.151
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-tests
+      - name: Run compiled Windows tests
+        run: >-
+          cargo nextest run --archive-file windows-tests.tar.zst
+          --partition hash:${{ matrix.shard }}/4 --no-fail-fast
+      - name: Record successful partition
+        shell: pwsh
+        run: Set-Content -Path "windows-shard-${{ matrix.shard }}.passed" -Value "$env:GITHUB_SHA" -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-result-${{ matrix.shard }}
+          path: windows-shard-${{ matrix.shard }}.passed
+          if-no-files-found: error
+          retention-days: 1
+
+  # Preserve the existing non-blocking Windows check while accounting for
+  # the build and every partition of the full suite.
+  test-windows:
+    name: Test (Windows)
+    runs-on: ubuntu-24.04
+    needs: [test-windows-build, test-windows-shard]
+    if: ${{ !cancelled() }}
+    continue-on-error: true
+    steps:
+      - name: Check every Windows shard passed
+        env:
+          BUILD_RESULT: ${{ needs.test-windows-build.result }}
+          SHARD_RESULT: ${{ needs.test-windows-shard.result }}
+        run: |
+          test "$BUILD_RESULT" = success
+          test "$SHARD_RESULT" = success
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: windows-result-*
+          path: windows-results
+          merge-multiple: true
+      - name: Verify all four partitions completed this revision
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          for shard in range(1, 5):
+              path = Path(f"windows-results/windows-shard-{shard}.passed")
+              if not path.is_file() or path.read_text(encoding="utf-8-sig").strip() != os.environ["GITHUB_SHA"]:
+                  raise SystemExit(f"Windows shard {shard} has no successful result for this revision")
+          PY
+
+  test-build:
+    name: Test (build coverage)
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: -C link-arg=-fuse-ld=mold
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+          components: llvm-tools-preview
+          targets: ${{ env.CARGO_BUILD_TARGET }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: coverage
+          workspaces: . -> target/llvm-cov-target
+      - name: Set up musl build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools mold
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.9.1,cargo-nextest@0.9.151
+      - name: Build instrumented tests once
+        run: cargo llvm-cov nextest-archive --locked --archive-file coverage-tests.tar.zst --timings
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-tests
+          path: coverage-tests.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-build-timings
+          path: target/llvm-cov-target/cargo-timings/
+          if-no-files-found: error
+          retention-days: 1
 
   test-shard:
     name: Test (shard ${{ matrix.shard }}/${{ strategy.job-total }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    needs: test-build
+    env:
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
-      # Every shard builds the full instrumented test suite, the largest
-      # build in this workflow. Drop preinstalled toolchains we never use
-      # to give it headroom.
-      - name: Free disk space
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
-          df -h /
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ env.CARGO_BUILD_TARGET }}
-      - uses: Swatinem/rust-cache@v2
+          toolchain: "1.99.1"
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@v2
         with:
-          shared-key: coverage
-          # All shards build the same binaries and share one dependency cache.
-          save-if: ${{ matrix.shard == 1 }}
-      - name: Set up musl build
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools mold
-          mkdir -p .cargo
-          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
-      - name: Install cargo-llvm-cov and cargo-nextest
-        uses: taiki-e/install-action@v2
+          tool: cargo-llvm-cov@0.9.1,cargo-nextest@0.9.151
+      - uses: actions/download-artifact@v4
         with:
-          tool: cargo-llvm-cov,cargo-nextest
-      - name: Run tests with coverage
+          name: coverage-tests
+      - name: Run compiled tests with coverage
         env:
-          # nextest runs each test in its own process, and the default
-          # `%p` (per-pid) profile name leaves one full-size .profraw per
-          # test, thousands per shard. `%m` without `%p` merges every
-          # process of the same binary into a small pool of files instead.
           LLVM_PROFILE_FILE_NAME: phpantom-%8m.profraw
         run: >-
-          cargo llvm-cov nextest
+          cargo llvm-cov nextest --archive-file coverage-tests.tar.zst
           --partition hash:${{ matrix.shard }}/${{ strategy.job-total }}
           --lcov --output-path lcov-${{ matrix.shard }}.info
-      - name: Save coverage report
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ matrix.shard }}
           path: lcov-${{ matrix.shard }}.info
@@ -132,19 +263,24 @@ jobs:
   # Preserve the required "Test" check and upload only complete coverage.
   test:
     name: Test
-    runs-on: ubuntu-latest
-    needs: test-shard
+    runs-on: ubuntu-24.04
+    needs: [test-build, test-shard]
     if: always()
+    env:
+      CODECOV_AVAILABLE: ${{ secrets.CODECOV_TOKEN != '' }}
     steps:
       - name: Check all test shards passed
         env:
+          BUILD_RESULT: ${{ needs.test-build.result }}
           SHARD_RESULT: ${{ needs.test-shard.result }}
-        run: test "$SHARD_RESULT" = success
+        run: |
+          test "$BUILD_RESULT" = success
+          test "$SHARD_RESULT" = success
       - uses: actions/checkout@v4
       - name: Download coverage reports
         uses: actions/download-artifact@v4
         with:
-          pattern: coverage-*
+          pattern: coverage-[1-6]
           path: coverage
           merge-multiple: true
       - name: List coverage reports
@@ -153,6 +289,7 @@ jobs:
           reports=(coverage/lcov-*.info)
           (IFS=,; echo "files=${reports[*]}") >> "$GITHUB_OUTPUT"
       - name: Upload to Codecov
+        if: github.event_name != 'workflow_dispatch' || env.CODECOV_AVAILABLE == 'true'
         uses: codecov/codecov-action@v5
         with:
           files: ${{ steps.reports.outputs.files }}
@@ -163,22 +300,21 @@ jobs:
 
   wasm:
     name: WebAssembly
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.99.1"
           components: clippy
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: wasm
-      # `--target` on the command line overrides the musl CARGO_BUILD_TARGET
-      # this workflow sets for every other job.
-      - run: cargo clippy --lib --target wasm32-wasip1 -- -D warnings
+      - run: cargo clippy --locked --lib --target wasm32-wasip1 -- -D warnings
       - name: Build the wasm reactor
         run: |
-          cargo rustc --lib --crate-type cdylib \
+          cargo rustc --locked --lib --crate-type cdylib \
             --profile wasm-release --target wasm32-wasip1
       - uses: actions/setup-node@v4
         with:
@@ -188,7 +324,7 @@ jobs:
 
   php-lint:
     name: PHP Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -204,32 +340,193 @@ jobs:
       - run: find examples/drupal/web/modules/custom examples/drupal/web/themes/custom -type f \( -name '*.php' -o -name '*.module' -o -name '*.theme' \) -print0 | xargs -0 -n1 php -l
       - run: find examples/tempest/app examples/tempest/resources examples/tempest/ui -name '*.php' -print0 | xargs -0 -n1 php -l
 
+  benchmark-head:
+    name: Benchmark (build head)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: -C link-arg=-fuse-ld=mold
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      BENCHMARK_SHARDS: ${{ inputs.benchmark-shards || '12' }}
+    outputs:
+      shards: ${{ steps.shards.outputs.matrix }}
+      cache-hit: ${{ steps.build.outputs.cache-hit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: ./.github/actions/build-benchmarks
+        id: build
+        with:
+          revision: ${{ github.sha }}
+          shards: ${{ env.BENCHMARK_SHARDS }}
+      - name: Set measurement workers
+        id: shards
+        run: |
+          python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          print("matrix=" + json.dumps(list(range(1, int(os.environ["BENCHMARK_SHARDS"]) + 1))))
+          PYTHON
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-head
+          path: |
+            benchmark-build/binaries.tar
+            benchmark-build/manifest.json
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-binary
+          path: benchmark-build/release-binary.tar
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-head-timings
+          path: benchmark-build/cargo-timings/
+          if-no-files-found: error
+          retention-days: 1
+
+  benchmark-base:
+    name: Benchmark (build base)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'push'
+    permissions:
+      contents: read
+    env:
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: -C link-arg=-fuse-ld=mold
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    outputs:
+      revision: ${{ steps.base.outputs.revision }}
+      cache-hit: ${{ steps.build.outputs.cache-hit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Identify the actual test-merge parent
+        id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            git rev-parse --verify --quiet HEAD^2 > /dev/null
+          fi
+          echo "revision=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/build-benchmarks
+        id: build
+        with:
+          revision: ${{ steps.base.outputs.revision }}
+          baseline: "true"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-base
+          path: |
+            benchmark-build/binaries.tar
+            benchmark-build/manifest.json
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-base-timings
+          path: benchmark-build/cargo-timings/
+          if-no-files-found: error
+          retention-days: 1
+
+  benchmark-shard:
+    name: Benchmark (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-24.04
+    needs: [benchmark-head, benchmark-base]
+    if: ${{ !cancelled() && needs.benchmark-head.result == 'success' && (needs.benchmark-base.result == 'success' || needs.benchmark-base.result == 'skipped') }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: ${{ fromJSON(needs.benchmark-head.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark-head
+          path: benchmark-build
+      - uses: actions/download-artifact@v4
+        if: github.event_name != 'push'
+        with:
+          name: benchmark-base
+          path: baseline-build
+      # Pairing is local and deterministic; it does not need a queued job.
+      - name: Prepare the base and head pair
+        if: github.event_name != 'push'
+        env:
+          BASE_REVISION: ${{ needs.benchmark-base.outputs.revision }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/benchmark-base" "$BASE_REVISION"
+          python3 benches/ci_benchmarks.py pair --build-dir benchmark-build --baseline-dir baseline-build
+          mkdir -p benchmark-build/baseline-bin
+          tar -xf baseline-build/binaries.tar --strip-components=1 -C benchmark-build/baseline-bin
+      - name: Record benchmark runner
+        run: lscpu
+      - name: Run benchmark shard
+        env:
+          BASE_REVISION: ${{ needs.benchmark-base.outputs.revision }}
+          SHARD: ${{ matrix.shard }}
+        shell: bash
+        run: |
+          tar -xf benchmark-build/binaries.tar -C benchmark-build
+          baseline_args=()
+          if [ -n "$BASE_REVISION" ]; then
+            baseline_args=(--baseline-source "$RUNNER_TEMP/benchmark-base")
+          fi
+          python3 benches/ci_benchmarks.py run \
+            --build-dir benchmark-build --shard "$SHARD" \
+            "${baseline_args[@]}" --output "shard-$SHARD.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.shard }}
+          path: shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 1
+
   benchmark:
     name: Benchmark
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    needs: [benchmark-head, benchmark-base, benchmark-shard]
     permissions:
       contents: write
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    # Both jobs push their results to gh-pages. Two pushes to main in
-    # quick succession would otherwise race, and the later push is
-    # rejected as a non-fast-forward.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.benchmark-shard.result == 'success' }}
+    # Only publishing needs this lock; measurements run concurrently.
     concurrency:
       group: gh-pages
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
         with:
-          targets: ${{ env.CARGO_BUILD_TARGET }}
-      - uses: Swatinem/rust-cache@v2
+          name: benchmark-head
+          path: benchmark-build
+      - uses: actions/download-artifact@v4
         with:
-          shared-key: build
-      - name: Set up musl build
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools mold
-          mkdir -p .cargo
-          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
+          pattern: benchmark-results-*
+          path: benchmark-results
+          merge-multiple: true
+      - name: Check and combine benchmark results
+        run: >-
+          python3 benches/ci_benchmarks.py merge --build-dir benchmark-build
+          --reports-dir benchmark-results --output output.json
       - name: Ensure gh-pages branch exists
         run: |
           if ! git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
@@ -239,28 +536,6 @@ jobs:
             commit="$(git commit-tree "$empty_tree" -m 'Initial gh-pages branch')"
             git push origin "$commit:refs/heads/gh-pages"
           fi
-      - name: Run benchmarks
-        shell: bash
-        run: |
-          # History lives on gh-pages, so Criterion's own baseline is
-          # unused -- and the restored target cache leaves a partial one
-          # behind that it then errors on for every benchmark.
-          rm -rf target/criterion
-          cargo bench --bench completion --bench references \
-            --bench laravel_completion --bench custom_builder \
-            --bench symfony_completion --bench yii_completion \
-            --bench wordpress_completion --bench drupal_completion \
-            --bench tempest \
-            -- --output-format bencher | tee raw_output.txt
-      - name: Convert to milliseconds
-        shell: bash
-        run: |
-          python3 benches/format_bench_output.py < raw_output.txt > output.json || {
-            echo "::group::raw_output.txt"
-            cat raw_output.txt
-            echo "::endgroup::"
-            exit 1
-          }
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -272,197 +547,102 @@ jobs:
           auto-push: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  benchmark-build-pr:
-    name: Benchmark (build)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: -C link-arg=-fuse-ld=mold
-    outputs:
-      base-revision: ${{ steps.base.outputs.revision }}
-      shards: ${{ steps.prepare.outputs.shards }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-          persist-credentials: false
-      # The checkout is GitHub's test merge of the PR into its base, so its
-      # first parent is exactly the base the measured head was built on.
-      # `pull_request.base.sha` is not guaranteed to be that parent.
-      - name: Find base revision
-        id: base
-        run: |
-          git rev-parse --verify --quiet HEAD^2 > /dev/null
-          echo "revision=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ env.CARGO_BUILD_TARGET }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: build
-      - name: Set up musl build
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools mold
-      - name: Build both revisions and partition benchmarks
-        id: prepare
-        env:
-          SHARD_COUNT: 4
-          BASE_REVISION: ${{ steps.base.outputs.revision }}
-        shell: bash
-        run: |
-          benchmark_root="$PWD"
-          base_source="$RUNNER_TEMP/benchmark-base"
-          git worktree add --detach "$base_source" "$BASE_REVISION"
-          cargo bench --locked --manifest-path "$base_source/Cargo.toml" \
-            --bench '*' --no-run --message-format=json > baseline-build.jsonl
-          (
-            cd "$base_source"
-            python3 "$benchmark_root/benches/ci_benchmarks.py" prepare \
-              --build-dir "$benchmark_root/baseline-build" --shards 1 \
-              < "$benchmark_root/baseline-build.jsonl"
-          )
-          cargo bench --locked --bench '*' --no-run --message-format=json \
-            > benchmark-build.jsonl
-          python3 benches/ci_benchmarks.py prepare \
-            --build-dir benchmark-build --shards "$SHARD_COUNT" \
-            --baseline-dir baseline-build < benchmark-build.jsonl
-          python3 -c 'import json, os; print("shards=" + json.dumps(list(range(1, int(os.environ["SHARD_COUNT"]) + 1))))' >> "$GITHUB_OUTPUT"
-      - name: Save benchmark executables
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-executables
-          path: benchmark-build/binaries.tar
-          if-no-files-found: error
-          retention-days: 1
-      - name: Save benchmark manifest
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-manifest
-          path: benchmark-build/manifest.json
-          if-no-files-found: error
-          retention-days: 1
-
-  benchmark-shard-pr:
-    name: Benchmark (shard ${{ matrix.shard }}/${{ strategy.job-total }})
-    runs-on: ubuntu-latest
-    needs: benchmark-build-pr
-    if: github.event_name == 'pull_request' && needs.benchmark-build-pr.result == 'success'
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ${{ fromJSON(needs.benchmark-build-pr.outputs.shards) }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-          persist-credentials: false
-      - name: Check out baseline fixtures
-        env:
-          BASE_REVISION: ${{ needs.benchmark-build-pr.outputs.base-revision }}
-        run: git worktree add --detach "$RUNNER_TEMP/benchmark-base" "$BASE_REVISION"
-      - uses: actions/download-artifact@v4
-        with:
-          name: benchmark-executables
-          path: benchmark-build
-      - uses: actions/download-artifact@v4
-        with:
-          name: benchmark-manifest
-          path: benchmark-build
-      - name: Record benchmark runner
-        run: lscpu
-      # Both static musl revisions run on this machine with their own fixtures.
-      # Tar preserves executable permissions; no toolchain is needed here.
-      - name: Run paired benchmark shard
-        run: |
-          tar -xf benchmark-build/binaries.tar -C benchmark-build
-          python3 benches/ci_benchmarks.py run \
-            --build-dir benchmark-build --shard "${{ matrix.shard }}" \
-            --baseline-source "$RUNNER_TEMP/benchmark-base" \
-            --output "shard-${{ matrix.shard }}.json"
-      - name: Save benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results-${{ matrix.shard }}
-          path: shard-${{ matrix.shard }}.json
-          if-no-files-found: error
-          retention-days: 1
-
   # Preserve the required check and compare only a complete set of results.
   benchmark-pr:
     name: Benchmark (PR comparison)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
-    needs: [benchmark-build-pr, benchmark-shard-pr]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+      actions: read
+    needs: [benchmark-head, benchmark-base, benchmark-shard]
+    if: ${{ !cancelled() && github.event_name != 'push' }}
     steps:
       - name: Check benchmark jobs passed
         env:
-          BUILD_RESULT: ${{ needs.benchmark-build-pr.result }}
-          SHARD_RESULT: ${{ needs.benchmark-shard-pr.result }}
+          BUILD_RESULT: ${{ needs.benchmark-head.result }}
+          BASE_RESULT: ${{ needs.benchmark-base.result }}
+          SHARD_RESULT: ${{ needs.benchmark-shard.result }}
         run: |
           test "$BUILD_RESULT" = success
+          test "$BASE_RESULT" = success
           test "$SHARD_RESULT" = success
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: benchmark-manifest
+          name: benchmark-head
           path: benchmark-build
       - uses: actions/download-artifact@v4
         with:
           pattern: benchmark-results-*
           path: benchmark-results
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark-base
+          path: baseline-build
+      - name: Pair benchmark manifests
+        run: python3 benches/ci_benchmarks.py pair --build-dir benchmark-build --baseline-dir baseline-build
       - name: Check and combine benchmark results
         run: >-
           python3 benches/ci_benchmarks.py merge --build-dir benchmark-build
           --reports-dir benchmark-results --output output.json
       - name: Compare paired measurements
         env:
-          BASE_REVISION: ${{ needs.benchmark-build-pr.outputs.base-revision }}
+          BASE_REVISION: ${{ needs.benchmark-base.outputs.revision }}
           HEAD_REVISION: ${{ github.sha }}
         run: |
           python3 benches/ci_benchmarks.py compare --build-dir benchmark-build \
             --results output.json --summary "$GITHUB_STEP_SUMMARY" \
             --base-revision "$BASE_REVISION" --head-revision "$HEAD_REVISION" \
             --threshold 1.30
+      - name: Report workflow timing and cache outcomes
+        if: ${{ !cancelled() }}
+        uses: actions/github-script@v7
+        env:
+          HEAD_CACHE_HIT: ${{ needs.benchmark-head.outputs.cache-hit }}
+          BASE_CACHE_HIT: ${{ needs.benchmark-base.outputs.cache-hit }}
+        with:
+          script: |
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              ...context.repo, run_id: context.runId, per_page: 100
+            });
+            const seconds = (start, end) => Math.max(0, Math.round((Date.parse(end) - Date.parse(start)) / 1000));
+            const rows = [["Job", "Queue (s)", "Execution (s)", "Result"]];
+            for (const job of jobs) {
+              if (!job.started_at || job.started_at.startsWith("0001")) continue;
+              rows.push([
+                job.name,
+                String(seconds(job.created_at, job.started_at)),
+                job.completed_at ? String(seconds(job.started_at, job.completed_at)) : "Running",
+                job.conclusion || job.status
+              ]);
+            }
+            await core.summary
+              .addHeading("Workflow timings", 2)
+              .addRaw(`Exact release artifact cache: head=${process.env.HEAD_CACHE_HIT || "false"}, base=${process.env.BASE_CACHE_HIT || "false"}\n\n`)
+              .addTable(rows)
+              .write();
 
   scaling:
     name: Scaling
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    needs: benchmark-head
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
         with:
-          targets: ${{ env.CARGO_BUILD_TARGET }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: build
-      - name: Set up musl build
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools mold
-          mkdir -p .cargo
-          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
-      - name: Build release binary
-        run: cargo build --release
-      # Compares the time of each pathological input shape at N and 2N,
-      # so it needs no history and holds on any runner.
+          name: release-binary
+      - run: tar -xf release-binary.tar
+      # Compare each pathological input at N and 2N on the shared release build.
       - name: Check how analysis cost grows with input size
-        run: python3 benches/scaling.py --binary "target/$CARGO_BUILD_TARGET/release/phpantom_lsp"
+        run: python3 benches/scaling.py --binary "$PWD/phpantom_lsp"
 
   memory-benchmark:
     name: Memory Benchmark
-    runs-on: ubuntu-latest
-    needs: benchmark
+    runs-on: ubuntu-24.04
+    needs: benchmark-head
     permissions:
       contents: write
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -472,31 +652,44 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
         with:
-          targets: ${{ env.CARGO_BUILD_TARGET }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: build
+          name: release-binary
+      - run: tar -xf release-binary.tar
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.5"
           tools: composer
-      - name: Set up musl build
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools mold
-          mkdir -p .cargo
-          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
-      - name: Build release binary
-        run: cargo build --release
+      - name: Find Composer download cache
+        id: composer-cache
+        run: echo "path=$(composer config --global cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: composer
+        with:
+          path: ${{ steps.composer-cache.outputs.path }}
+          key: composer-${{ runner.os }}-${{ hashFiles('benches/fixtures/**/composer.lock', 'examples/tempest/composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
       - name: Measure memory usage
         shell: bash
         run: |
           # THP mode affects resident memory (2 MiB backing pages in
           # `always` mode); log it so the numbers are interpretable.
           cat /sys/kernel/mm/transparent_hugepage/enabled || true
-          python3 benches/memory_usage.py --binary "target/$CARGO_BUILD_TARGET/release/phpantom_lsp" | tee memory_output.json
+          python3 benches/memory_usage.py --binary "$PWD/phpantom_lsp" | tee memory_output.json
+      - uses: actions/cache/save@v4
+        if: steps.composer.outputs.cache-hit != 'true'
+        with:
+          path: ${{ steps.composer-cache.outputs.path }}
+          key: ${{ steps.composer.outputs.cache-primary-key }}
+      - name: Ensure gh-pages branch exists
+        run: |
+          if ! git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            empty_tree="$(git hash-object -t tree /dev/null)"
+            commit="$(git commit-tree "$empty_tree" -m 'Initial gh-pages branch')"
+            git push origin "$commit:refs/heads/gh-pages"
+          fi
       - name: Store memory benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -510,31 +703,31 @@ jobs:
 
   memory-benchmark-pr:
     name: Memory Benchmark (PR comparison)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    needs: benchmark-head
     permissions:
       contents: read
       pull-requests: write
-    if: github.event_name == 'pull_request'
+    if: github.event_name != 'push'
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
         with:
-          targets: ${{ env.CARGO_BUILD_TARGET }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: build
+          name: release-binary
+      - run: tar -xf release-binary.tar
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.5"
           tools: composer
-      - name: Set up musl build
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools mold
-          mkdir -p .cargo
-          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
-      - name: Build release binary
-        run: cargo build --release
+      - name: Find Composer download cache
+        id: composer-cache
+        run: echo "path=$(composer config --global cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: composer
+        with:
+          path: ${{ steps.composer-cache.outputs.path }}
+          key: composer-${{ runner.os }}-${{ hashFiles('benches/fixtures/**/composer.lock', 'examples/tempest/composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
       - name: Check gh-pages branch exists
         id: check-gh-pages
         run: |
@@ -549,7 +742,12 @@ jobs:
         shell: bash
         run: |
           cat /sys/kernel/mm/transparent_hugepage/enabled || true
-          python3 benches/memory_usage.py --binary "target/$CARGO_BUILD_TARGET/release/phpantom_lsp" | tee memory_output.json
+          python3 benches/memory_usage.py --binary "$PWD/phpantom_lsp" | tee memory_output.json
+      - uses: actions/cache/save@v4
+        if: steps.check-gh-pages.outputs.exists == 'true' && steps.composer.outputs.cache-hit != 'true'
+        with:
+          path: ${{ steps.composer-cache.outputs.path }}
+          key: ${{ steps.composer.outputs.cache-primary-key }}
       - name: Compare against baseline
         if: steps.check-gh-pages.outputs.exists == 'true'
         uses: benchmark-action/github-action-benchmark@v1

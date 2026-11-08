@@ -1,0 +1,121 @@
+name: Build benchmark revision
+description: Restore or build release benchmarks for one exact revision and toolchain
+inputs:
+  revision:
+    description: Exact source commit
+    required: true
+  baseline:
+    description: Build the revision in a detached worktree
+    default: "false"
+  shards:
+    description: Number of measurement runners
+    default: "1"
+outputs:
+  cache-hit:
+    description: Whether the exact release artifacts were restored
+    value: ${{ steps.artifacts.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: "1.99.1"
+        targets: x86_64-unknown-linux-musl
+    - name: Install musl and mold
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y musl-tools mold
+    - name: Identify release artifacts
+      id: identity
+      shell: bash
+      env:
+        SOURCE_REVISION: ${{ inputs.revision }}
+        BUILD_RECIPE: ${{ hashFiles('.github/actions/build-benchmarks/action.yml') }}
+      run: |
+        python3 - <<'PY' >> "$GITHUB_OUTPUT"
+        import hashlib
+        import json
+        import os
+        import subprocess
+        inputs = {
+            "revision": os.environ["SOURCE_REVISION"],
+            "recipe": os.environ["BUILD_RECIPE"],
+            "compiler": subprocess.check_output(["rustc", "-vV"], text=True),
+            "native_compiler": subprocess.check_output(["musl-gcc", "--version"], text=True),
+            "runner_image": os.environ.get("ImageVersion", ""),
+            "native": subprocess.check_output([
+                "dpkg-query", "-W", "musl-tools", "musl-dev", "mold"
+            ], text=True),
+            "environment": {
+                key: value for key, value in os.environ.items()
+                if key in (
+                    "RUSTFLAGS", "RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER",
+                    "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_TARGET", "CC", "CXX",
+                    "CFLAGS", "CXXFLAGS", "LDFLAGS", "AR", "ARFLAGS",
+                    "HOST_CC", "HOST_CXX", "TARGET_CC", "TARGET_CXX",
+                ) or key.startswith((
+                    "CARGO_PROFILE_", "CARGO_TARGET_", "CC_", "CXX_", "CFLAGS_", "CXXFLAGS_", "AR_",
+                ))
+            },
+        }
+        digest = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+        print("key=benchmark-artifacts-v3-" + digest)
+        PY
+    - name: Restore exact release artifacts
+      id: artifacts
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          benchmark-build/binaries.tar
+          benchmark-build/manifest.json
+          benchmark-build/release-binary.tar
+          benchmark-build/cargo-timings
+        key: ${{ steps.identity.outputs.key }}
+    - uses: Swatinem/rust-cache@v2
+      if: steps.artifacts.outputs.cache-hit != 'true'
+      with:
+        shared-key: performance
+        save-if: ${{ inputs.baseline != 'true' }}
+    - name: Compile release benchmarks and server
+      if: steps.artifacts.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        SOURCE_REVISION: ${{ inputs.revision }}
+        BUILD_BASELINE: ${{ inputs.baseline }}
+      run: |
+        benchmark_root="$PWD"
+        source_dir="$PWD"
+        if [ "$BUILD_BASELINE" = true ]; then
+          source_dir="$RUNNER_TEMP/benchmark-base"
+          git worktree add --detach "$source_dir" "$SOURCE_REVISION"
+        fi
+        cargo build --locked --release --manifest-path "$source_dir/Cargo.toml" \
+          --bench '*' --bin phpantom_lsp --timings --message-format=json > benchmark-build.jsonl
+        (
+          cd "$source_dir"
+          python3 "$benchmark_root/benches/ci_benchmarks.py" prepare \
+            --build-dir "$benchmark_root/benchmark-build" --shards 1 \
+            < "$benchmark_root/benchmark-build.jsonl"
+        )
+        tar -cf benchmark-build/release-binary.tar -C "target/$CARGO_BUILD_TARGET/release" phpantom_lsp
+        cp -R target/cargo-timings benchmark-build/cargo-timings
+    # PR caches stay in that PR's merge-ref scope. Main publishes entries
+    # that subsequent PRs can restore for their exact base commit.
+    - uses: actions/cache/save@v4
+      if: steps.artifacts.outputs.cache-hit != 'true'
+      with:
+        path: |
+          benchmark-build/binaries.tar
+          benchmark-build/manifest.json
+          benchmark-build/release-binary.tar
+          benchmark-build/cargo-timings
+        key: ${{ steps.identity.outputs.key }}
+    - name: Assign measurement shards
+      shell: bash
+      env:
+        SHARDS: ${{ inputs.shards }}
+        RESTORED: ${{ steps.artifacts.outputs.cache-hit }}
+      run: |
+        python3 benches/ci_benchmarks.py partition --build-dir benchmark-build --shards "$SHARDS"
+        echo "Exact benchmark artifact cache hit: ${RESTORED:-false}" >> "$GITHUB_STEP_SUMMARY"
