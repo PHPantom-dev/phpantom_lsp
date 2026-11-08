@@ -148,7 +148,7 @@ pub(crate) fn resolve_class_with_inheritance(
         class_loader,
         0,
         &mut dedup,
-        &class.fqn(),
+        (class, None),
     );
 
     // 2. Walk up the `extends` chain and merge parent members.
@@ -383,7 +383,7 @@ fn merge_parent_members(
         class_loader,
         0,
         dedup,
-        &parent.fqn(),
+        (parent, Some(level_subs)),
     );
 
     let transform = LevelTransform::new(parent, level_subs);

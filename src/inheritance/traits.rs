@@ -47,11 +47,14 @@ pub(crate) fn merge_traits_into(
     class_loader: &ResolvedClassLoader<'_>,
     depth: u32,
     dedup: &mut MergeDedup,
-    self_class_name: &str,
+    self_owner: (&ClassInfo, Option<&HashMap<String, PhpType>>),
 ) {
     if depth > MAX_TRAIT_DEPTH {
         return;
     }
+    // Build these only when a trait actually uses `self`, and share them
+    // across its methods. Parent traits bind to that parent's substitutions.
+    let self_args = std::cell::OnceCell::new();
 
     for trait_name in trait_names {
         let trait_info = if let Some(t) = class_loader(Fqn::new(trait_name)) {
@@ -138,7 +141,7 @@ pub(crate) fn merge_traits_into(
                 class_loader,
                 depth + 1,
                 dedup,
-                self_class_name,
+                self_owner,
             );
         }
 
@@ -175,7 +178,7 @@ pub(crate) fn merge_traits_into(
                     class_loader,
                     parent_depth + 1,
                     dedup,
-                    self_class_name,
+                    self_owner,
                 );
             }
 
@@ -255,7 +258,21 @@ pub(crate) fn merge_traits_into(
                     apply_substitution_to_method(&mut method, &trait_subs);
                 }
                 if needs_bare_self {
-                    replace_bare_self_in_method(&mut method, self_class_name);
+                    let args = self_args.get_or_init(|| {
+                        self_owner
+                            .0
+                            .template_params
+                            .iter()
+                            .map(|name| {
+                                self_owner
+                                    .1
+                                    .and_then(|subs| subs.get(name.as_str()))
+                                    .cloned()
+                                    .unwrap_or_else(|| PhpType::named(*name))
+                            })
+                            .collect::<Vec<_>>()
+                    });
+                    replace_bare_self_in_method(&mut method, &self_owner.0.fqn(), args);
                 }
                 method
             };

@@ -116,7 +116,7 @@ pub(crate) fn bind_inherited_class_keywords(
     class_name: &str,
     declaring_parent: Option<&str>,
 ) {
-    replace_bare_self_in_method(method, class_name);
+    replace_bare_self_in_method(method, class_name, &[]);
     let Some(declaring_parent) = declaring_parent else {
         return;
     };
@@ -185,12 +185,16 @@ pub(crate) fn bind_inherited_class_keywords_in_property(
 /// docblock override, so binding only one side would make the bound copy
 /// look richer than it is and let it overwrite an override's narrower
 /// native return type.
-pub(crate) fn replace_bare_self_in_method(method: &mut MethodInfo, class_name: &str) {
+pub(crate) fn replace_bare_self_in_method(
+    method: &mut MethodInfo,
+    class_name: &str,
+    args: &[PhpType],
+) {
     let bind = |ty: &mut Option<PhpType>| {
         if let Some(t) = ty
             && t.contains_bare_self()
         {
-            *t = t.replace_bare_self(class_name);
+            *t = t.replace_bare_self_with_args(class_name, args);
         }
     };
     bind(&mut method.return_type);

@@ -2265,6 +2265,8 @@ class TraitGenericDemo
 
         $idx = new Scaffolding\PenIndex();                    // @use Scaffolding\Indexable<int, Scaffolding\Pen>
         $idx->get()->write();                     // TValue → Scaffolding\Pen
+        $pens = Scaffolding\TypedCollection::make([new Scaffolding\Pen()]);
+        $pens->same()->first()->write();          // Try: after first()->, Pen members survive the trait's self return
     }
 }
 

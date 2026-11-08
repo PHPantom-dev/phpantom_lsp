@@ -236,6 +236,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Type inference
 
 - **Constants passed to calls.** Namespaced and imported constants keep their values and types when used as arguments. Contributed by @shuvroroy.
+- **Generic chains through traits.** A trait method returning `self` keeps the using class's generic types, including when the trait is inherited or aliased. Contributed by @shuvroroy.
 - **Property types on an annotated `$this`.** Reading a property through an explicitly typed `$this` now preserves its type in assignments and loops, including Tempest views. Contributed by @shuvroroy.
 - **`(int)` casts keep what the value says.** Casting an integer range with `(int)` now keeps the range, and casting `null`, a `bool`, or an array gives `0` or `1`, instead of a plain `int`.
 - **Untyped methods that return `new static()`.** Calling such a method through a subclass, or on a class that uses the trait declaring it, now gives that class instead of the one the method is declared in.

@@ -451,7 +451,17 @@ impl PhpType {
     /// inherited methods carry the declaring class's identity for `self`
     /// while preserving `static` for late-static-binding resolution.
     pub fn replace_bare_self(&self, class_name: &str) -> PhpType {
-        self.replace_bare_keyword("self", class_name)
+        self.replace_bare_keyword("self", class_name, &[])
+    }
+
+    /// Bind `self` to its declaring class with the class's template arguments,
+    /// preserving explicit arguments on `self<U>` and late-bound `static`.
+    pub(crate) fn replace_bare_self_with_args(
+        &self,
+        class_name: &str,
+        args: &[PhpType],
+    ) -> PhpType {
+        self.replace_bare_keyword("self", class_name, args)
     }
 
     /// Replace only the `parent` keyword with a concrete class name.
@@ -461,22 +471,26 @@ impl PhpType {
     /// resolving `parent` against the class the call is made on names the
     /// wrong class as soon as another subclass is in between.
     pub fn replace_bare_parent(&self, class_name: &str) -> PhpType {
-        self.replace_bare_keyword("parent", class_name)
+        self.replace_bare_keyword("parent", class_name, &[])
     }
 
-    fn replace_bare_keyword(&self, keyword: &str, class_name: &str) -> PhpType {
+    fn replace_bare_keyword(&self, keyword: &str, class_name: &str, args: &[PhpType]) -> PhpType {
         match self.raw_kind() {
             TypeKind::Named(s) if s.eq_ignore_ascii_case(keyword) => {
-                PhpType::named(atom(class_name))
+                if args.is_empty() {
+                    PhpType::named(atom(class_name))
+                } else {
+                    PhpType::generic_atom(atom(class_name), args.to_vec())
+                }
             }
             TypeKind::Generic(g) if g.name.eq_ignore_ascii_case(keyword) => PhpType::generic_atom(
                 atom(class_name),
                 g.args
                     .iter()
-                    .map(|a| a.replace_bare_keyword(keyword, class_name))
+                    .map(|a| a.replace_bare_keyword(keyword, class_name, args))
                     .collect(),
             ),
-            _ => self.map_children(&|t| t.replace_bare_keyword(keyword, class_name)),
+            _ => self.map_children(&|t| t.replace_bare_keyword(keyword, class_name, args)),
         }
     }
 
