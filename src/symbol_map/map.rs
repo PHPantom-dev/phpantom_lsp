@@ -311,6 +311,9 @@ pub(crate) struct SymbolMap {
     /// parameter declarations give, sorted by `start`.  Empty for every file
     /// that declares none.
     pub container_values: Vec<ContainerValueSite>,
+    /// The services the file's declarations say decorate another, in
+    /// source order.  Empty for every file that declares none.
+    pub service_decorations: Vec<ServiceDecoration>,
     /// The entity types the file's entity classes declare, sorted by
     /// `start`.  Empty for every file that declares none.
     pub entity_types: Vec<EntityTypeSite>,

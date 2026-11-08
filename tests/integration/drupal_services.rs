@@ -521,6 +521,50 @@ async fn a_chained_drupal_service_call_is_typed() {
     );
 }
 
+/// A service that decorates another takes over its ID, so a lookup of the
+/// decorated ID is the decorator too, and the `decorates:` value is a
+/// reference to the service it names.
+#[tokio::test]
+async fn a_decorated_service_is_typed_as_its_decorator_too() {
+    let services = format!(
+        "{SERVICES}  acme.cached_greeter:\n    class: Drupal\\acme\\CachedGreeter\n    decorates: acme.greeter\n"
+    );
+    let consumer = STATIC_CONSUMER.replace("$greeter;", "$greeter->greetFromCache();");
+    let (backend, dir) = workspace(&[
+        (SERVICES_PATH, services.as_str()),
+        (
+            "web/modules/custom/acme/src/CachedGreeter.php",
+            "<?php\nnamespace Drupal\\acme;\nclass CachedGreeter extends Greeter {\n    public function greetFromCache(): string { return ''; }\n}\n",
+        ),
+        (STATIC_CONSUMER_PATH, consumer.as_str()),
+    ])
+    .await;
+    let php = uri_for(&dir, STATIC_CONSUMER_PATH);
+    let found = definitions_at(&backend, &php, position_in(&consumer, "greetFromCache", 1)).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        found[0].uri,
+        uri_for(&dir, "web/modules/custom/acme/src/CachedGreeter.php")
+    );
+    let diagnostics = crate::common::slow_diagnostic_messages(
+        &backend,
+        php.as_str(),
+        &consumer,
+        "unknown_member",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    let yaml = uri_for(&dir, SERVICES_PATH);
+    let found = references_at(
+        &backend,
+        &yaml,
+        position_in(&services, "decorates: acme", 12),
+    )
+    .await;
+    assert!(found.contains(&(yaml.clone(), 1)), "{found:?}");
+    assert!(found.contains(&(yaml, 8)), "{found:?}");
+}
+
 /// `\Drupal::service(id: 'x')` names the same service as the positional
 /// form, assigned or chained.
 #[tokio::test]

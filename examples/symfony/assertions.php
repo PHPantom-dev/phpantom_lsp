@@ -26,6 +26,8 @@ use App\Message\SendWelcomeEmail;
 use App\MessageHandler\CountWelcomeEmailsHandler;
 use App\MessageHandler\SendWelcomeEmailHandler;
 use App\Query\QueryBus;
+use App\Service\CachingSlugger;
+use App\Service\Slugger;
 use App\Service\WelcomeMailer;
 use App\Twig\AppExtension;
 use App\Twig\Badges;
@@ -157,6 +159,11 @@ $mailerCalls = $container->getDefinition(WelcomeMailer::class)->getMethodCalls()
 check("WelcomeMailer's calls: in config/services.yaml calls setSender", ($mailerCalls[0][0] ?? null) === 'setSender' && method_exists(WelcomeMailer::class, 'setSender'));
 $demoCache = $container->getDefinition('app.demo_cache');
 check('app.demo_cache is a child of cache.app', $demoCache instanceof ChildDefinition && $demoCache->getParent() === 'cache.app');
+check('app.slugger is built from Slugger', $container->getDefinition('app.slugger')->getClass() === Slugger::class);
+check('CachingSlugger decorates app.slugger', ($container->getDefinition(CachingSlugger::class)->getDecoratedService()[0] ?? null) === 'app.slugger');
+check('Only CachingSlugger declares cachedCount()', method_exists(CachingSlugger::class, 'cachedCount') && !method_exists(Slugger::class, 'cachedCount'));
+$cachingSlugger = new CachingSlugger(new Slugger());
+check('CachingSlugger slugs as Slugger does, and counts what it cached', $cachingSlugger->slug('Hello World') === 'hello-world' && $cachingSlugger->cachedCount() === 1);
 
 // FrameworkBundle declares cache.app in its own configuration, read from
 // the bundle's directory.

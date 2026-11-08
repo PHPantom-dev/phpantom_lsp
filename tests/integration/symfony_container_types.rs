@@ -41,7 +41,7 @@ const STUBS: &[(&str, &str)] = &[
     ),
     (
         "stubs/dependency-injection/Loader/Configurator/ServiceConfigurator.php",
-        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ServiceConfigurator {\n    public function class(?string $class): static {}\n    public function parent(string $parent): static {}\n    public function args(array $arguments): static {}\n}\n",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ServiceConfigurator {\n    public function class(?string $class): static {}\n    public function parent(string $parent): static {}\n    public function decorate(?string $id): static {}\n    public function args(array $arguments): static {}\n}\n",
     ),
     (
         "stubs/dependency-injection/Loader/Configurator/ParametersConfigurator.php",
@@ -83,6 +83,26 @@ const STUBS: &[(&str, &str)] = &[
         "src/Service/Newsletter.php",
         "<?php\nnamespace App\\Service;\nclass Newsletter {}\n",
     ),
+    (
+        "src/Service/Notifier.php",
+        "<?php\nnamespace App\\Service;\nclass Notifier {}\n",
+    ),
+    (
+        "src/Service/LoggingNotifier.php",
+        "<?php\nnamespace App\\Service;\nclass LoggingNotifier extends Notifier {}\n",
+    ),
+    (
+        "src/Service/QueuedNotifier.php",
+        "<?php\nnamespace App\\Service;\nclass QueuedNotifier extends Notifier {}\n",
+    ),
+    (
+        "src/Service/TracingNotifier.php",
+        "<?php\nnamespace App\\Service;\nclass TracingNotifier extends Notifier {}\n",
+    ),
+    (
+        "src/Service/PhpNotifier.php",
+        "<?php\nnamespace App\\Service;\nclass PhpNotifier extends Notifier {}\n",
+    ),
 ];
 
 const SERVICES_YAML: &str = "parameters:
@@ -106,6 +126,12 @@ services:
     app.smtp_mailer:
         class: '%app.mailer_class%'
     app.unknown: ~
+    app.notifier:
+        class: App\\Service\\Notifier
+    app.logging_notifier:
+        class: App\\Service\\LoggingNotifier
+        decorates: app.notifier
+    App\\Service\\QueuedNotifier: { decorates: 'app.notifier' }
 ";
 
 const SERVICES_XML: &str = r#"<?xml version="1.0"?>
@@ -117,6 +143,7 @@ const SERVICES_XML: &str = r#"<?xml version="1.0"?>
   <services>
     <service id="app.xml_mailer" class="App\Service\Mailer"/>
     <service id="app.xml_alias" alias="app.xml_mailer"/>
+    <service id="app.tracing_notifier" class="App\Service\TracingNotifier" decorates="app.notifier"/>
   </services>
 </container>
 "#;
@@ -125,6 +152,7 @@ const SERVICES_PHP: &str = r#"<?php
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
 use App\Service\Newsletter;
+use App\Service\PhpNotifier;
 use App\Service\SmtpMailer;
 
 return static function (ContainerConfigurator $container): void {
@@ -137,6 +165,7 @@ return static function (ContainerConfigurator $container): void {
     $parameters->set('app.php_sender', 'PHPantom');
     $parameters->set('app.php_retries', 3);
     $services->set('app.php_child')->parent('app.mailer');
+    $services->set(PhpNotifier::class)->decorate('app.notifier');
 };
 "#;
 
@@ -240,6 +269,27 @@ async fn php_configurators_declare_service_classes() {
         .await;
         assert!(shows(&hover, class), "{id}: {hover}");
     }
+}
+
+#[tokio::test]
+async fn a_decorated_service_is_also_typed_as_its_decorators() {
+    let decorated =
+        hover("        $notifier = $container->get('app.notifier');\n        $noti§fier;").await;
+    for class in [
+        "Notifier",
+        "LoggingNotifier",
+        "QueuedNotifier",
+        "TracingNotifier",
+        "PhpNotifier",
+    ] {
+        assert!(shows(&decorated, class), "{class}: {decorated}");
+    }
+
+    // The decorator's own ID keeps its own class.
+    let own =
+        hover("        $notifier = $container->get('app.logging_notifier');\n        $noti§fier;")
+            .await;
+    assert!(shows(&own, "LoggingNotifier"), "{own}");
 }
 
 #[tokio::test]

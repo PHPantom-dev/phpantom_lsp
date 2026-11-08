@@ -24,7 +24,8 @@
 use super::*;
 use crate::symbol_map::{
     ContainerValue, ContainerValueSite, MessengerHandlerSite, ReceiverClass, ReceiverFrameworks,
-    RouteImport, SYMFONY_CONTAINER_CONFIGURATOR_NS, SYMFONY_ROUTING_CONFIGURATOR, StringKeyKind,
+    RouteImport, SYMFONY_CONTAINER_CONFIGURATOR_NS, SYMFONY_ROUTING_CONFIGURATOR,
+    ServiceDecoration, StringKeyKind,
 };
 use crate::symfony::translations::{DEFAULT_DOMAIN, is_domain_name, translation_key};
 use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_literal_at_range};
@@ -212,6 +213,8 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         record_configurator_placeholders(member_name, argument_list, ctx);
         if member_name.eq_ignore_ascii_case("parent") {
             record_configured_parent(object, argument_list, ctx);
+        } else if member_name.eq_ignore_ascii_case("decorate") {
+            record_configured_decoration(object, argument_list, ctx);
         }
     }
     // A Yii `generateFromCurrent()` takes its fallback route fourth.
@@ -727,6 +730,16 @@ fn defined_value(value: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<Cont
 /// is that chain: the configurator methods in between (`->args()`,
 /// `->tag()`) return the same service's configurator.
 fn chained_service_start(object: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) -> Option<u32> {
+    let id = chained_service_id(object)?;
+    let (_, start, _) = resolved_string_literal(id, ctx.content)?;
+    uses_configurators(CONFIGURATOR_NS, ctx).then_some(start as u32)
+}
+
+/// The ID argument of the `set()` a configurator chain starts from, when
+/// `object` is that chain.
+fn chained_service_id<'a, 'arena>(
+    object: &'a Expression<'arena>,
+) -> Option<&'a Expression<'arena>> {
     let mut link = object;
     let set = loop {
         let Expression::Call(Call::Method(call)) = link else {
@@ -742,8 +755,7 @@ fn chained_service_start(object: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) -
     let Some(Argument::Positional(id)) = set.argument_list.arguments.first() else {
         return None;
     };
-    let (_, start, _) = resolved_string_literal(id.value, ctx.content)?;
-    uses_configurators(CONFIGURATOR_NS, ctx).then_some(start as u32)
+    Some(id.value)
 }
 
 /// Record the class a configurator's `->set('app.mailer')->class(Mailer::class)`
@@ -788,6 +800,40 @@ fn record_configured_parent(
         start,
         value: ContainerValue::Parent(parent),
     });
+}
+
+/// Record that the service a configurator's `->set('app.cached')` chain
+/// declares decorates the one its `->decorate('app.mailer')` names.  Either
+/// ID may be a class, as `Mailer::class`.
+fn record_configured_decoration(
+    object: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some(Argument::Positional(decorated)) = argument_list.arguments.first() else {
+        return;
+    };
+    let Some(decorator) = chained_service_id(object) else {
+        return;
+    };
+    let service_id =
+        |value: &Expression<'_>, ctx: &ExtractionCtx<'_>| match configured_value(value, ctx) {
+            Some(ContainerValue::Class(class)) if !class.starts_with('%') => Some(class),
+            _ => resolved_string_literal(value, ctx.content)
+                .filter(|(id, _, _)| !id.is_empty())
+                .map(|(id, _, _)| crate::atom::atom(id)),
+        };
+    let (Some(decorator), Some(decorated)) =
+        (service_id(decorator, ctx), service_id(decorated.value, ctx))
+    else {
+        return;
+    };
+    if uses_configurators(CONFIGURATOR_NS, ctx) {
+        ctx.service_decorations.push(ServiceDecoration {
+            decorator,
+            decorated,
+        });
+    }
 }
 
 /// Whether a configurator's `member_name` call may hold `%name%`

@@ -111,6 +111,9 @@ catalogues together, the way a real Symfony project does.
   the service ID `app.mailer`, or `$supportEmail`, read with
   `getParameter()`. In `src/Query/QueryBus.php`, hover `$count`, which
   `HandleTrait::handle()` gets back from the message's handler.
+- A service that decorates another takes over its ID. In `DemoController`,
+  hover `$slugger`: `config/services.yaml` builds `app.slugger` from
+  `Slugger` and decorates it with `CachingSlugger`, so it is either class.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
 - In `DemoController`, hover `$users`. `getRepository(User::class)` returns

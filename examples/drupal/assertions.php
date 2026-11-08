@@ -23,6 +23,9 @@ use Drupal\acme\Hook\AcmeHooks;
 use Drupal\acme\Plugin\Block\FarewellBlock;
 use Drupal\acme\Plugin\Block\GreetingBlock;
 use Drupal\acme\NoteCounter;
+use Drupal\acme\RequestClock;
+use Drupal\Component\Datetime\Time;
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Component\FileCache\FileCacheFactory;
 use Drupal\Component\Serialization\Yaml;
 use Drupal\Core\Access\AccessResult;
@@ -163,6 +166,16 @@ $languageProvider->alter($altered);
 check('LanguageServiceProvider::alter() builds language_manager from ConfigurableLanguageManager', ltrim((string) $altered->getDefinition('language_manager')->getClass(), '\\') === ConfigurableLanguageManager::class);
 check('Only ConfigurableLanguageManager declares getLanguageConfigOverride()', method_exists(ConfigurableLanguageManager::class, 'getLanguageConfigOverride') && !method_exists(LanguageManager::class, 'getLanguageConfigOverride'));
 check('acme_french_site_name() looks up language_manager', str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('language_manager')"));
+
+// The module decorates core's clock, so the container hands out
+// RequestClock for datetime.time.
+check('core.services.yml builds datetime.time from Time', $core->getDefinition('datetime.time')->getClass() === Time::class);
+check('acme.request_clock is built from RequestClock', $container->getDefinition('acme.request_clock')->getClass() === RequestClock::class);
+check('acme.request_clock decorates datetime.time', ($container->getDefinition('acme.request_clock')->getDecoratedService()[0] ?? null) === 'datetime.time');
+check('RequestClock can stand in for Time', is_subclass_of(RequestClock::class, TimeInterface::class) && is_subclass_of(Time::class, TimeInterface::class));
+check('Only RequestClock declares secondsSinceRequest()', method_exists(RequestClock::class, 'secondsSinceRequest') && !method_exists(Time::class, 'secondsSinceRequest'));
+check('RequestClock::secondsSinceRequest() returns an int', is_int((new RequestClock(new Time()))->secondsSinceRequest()));
+check('acme_request_age() looks up datetime.time', str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('datetime.time')"));
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
 

@@ -150,7 +150,7 @@ fn env_placeholder_type(text: &str) -> Option<PhpType> {
 }
 
 /// Whether `name` is spelled as a class name.
-fn is_class_name(name: &str) -> bool {
+pub(crate) fn is_class_name(name: &str) -> bool {
     !name.is_empty()
         && !name.starts_with(|c: char| c.is_ascii_digit())
         && !name.ends_with('\\')
@@ -213,10 +213,12 @@ impl Backend {
 
     /// The classes the service `id` is built from, following aliases, a
     /// class given as a parameter, and the parent a child definition takes
-    /// its class from when it names none.  In Drupal, the classes service
-    /// providers replace it with join it.  An ID spelled as a class is that class
-    /// when no declaration says otherwise.  Empty when nothing the project
-    /// declares says.
+    /// its class from when it names none.  The classes of the services
+    /// that decorate it join them, as do, in Drupal, the classes service
+    /// providers replace it with: either may apply only in some
+    /// environments, or with some modules enabled.  An ID spelled as a
+    /// class is that class when no declaration says otherwise.  Empty when
+    /// nothing the project declares says.
     pub(crate) fn symfony_service_classes(&self, id: &str) -> Vec<Atom> {
         let mut classes = Vec::new();
         self.collect_service_classes(id, &mut HashSet::new(), &mut classes);
@@ -274,6 +276,29 @@ impl Backend {
                 push_unique(out, crate::atom::atom(class));
             }
         }
+        for decorator in self.service_decorators(id) {
+            self.collect_service_classes(&decorator, seen, out);
+        }
+    }
+
+    /// The services the project and its bundles declare to decorate `id`.
+    fn service_decorators(&self, id: &str) -> Vec<Atom> {
+        let id = id.strip_prefix('\\').unwrap_or(id);
+        let mut decorators = Vec::new();
+        let mut visit = |map: &crate::symbol_map::SymbolMap| {
+            for decoration in &map.service_decorations {
+                if decoration.decorated == id {
+                    push_unique(&mut decorators, decoration.decorator);
+                }
+            }
+        };
+        self.visit_declaring_symbol_maps(|_, map| visit(map));
+        if self.is_symfony_project() {
+            for (_, map) in &self.symfony_bundle_declarations().files {
+                visit(map);
+            }
+        }
+        decorators
     }
 
     /// The values the parameter `name` is declared with, following a value

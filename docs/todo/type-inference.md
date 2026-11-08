@@ -341,37 +341,6 @@ nested closures typed from an expected return type, generator escapes.
 
 ---
 
-## T70. A decorated service is typed as the class it decorates
-
-**Impact: Low-Medium · Complexity: Low**
-
-```yaml
-services:
-  acme.cached_greeter:
-    class: Drupal\acme\CachedGreeter
-    decorates: acme.greeter
-```
-
-```php
-$greeter = \Drupal::service('acme.greeter'); // Greeter, though the container returns CachedGreeter
-```
-
-A service that `decorates` another takes over its ID: the container
-returns the decorator, and the original lives on as `<id>.inner`. A
-service lookup is typed by the class the ID's own declaration names
-(`symfony_service_classes` in `src/symfony/container.rs`), so the
-decorator's methods are reported as unknown and navigation lands in the
-wrong class. `decorates` is read, but only for navigation
-(`src/symfony/resources.rs`). Add the classes of every service that
-decorates an ID to the classes the ID gives, alongside its own, as the
-classes Drupal service providers swap in are added: a decorator in a
-Drupal module that may not be enabled, or under a `when@` block of
-another environment, does not always apply. The same holds in Symfony
-projects. PHPlumb (MIT) types decorated services this way
-(`crates/phplumb-index/src/frameworks/drupal/services.rs`).
-
----
-
 ## T41. A reading of the callee's body overrides a declared `@param-out`
 **Impact: Low-Medium · Complexity: Low**
 
@@ -759,3 +728,30 @@ the subject keeps the declared interface. Store the permitted list on
 enum's cases are subtracted.
 
 Found by `analyze` on azjezz/psl, whose tree nodes are sealed this way.
+
+---
+
+## T71. A service `#[AsDecorator]` registers does not take over the ID
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+#[AsDecorator(decorates: 'app.mailer')]
+final class LoggingMailer extends Mailer
+{
+    public function sentCount(): int { return 0; }
+}
+
+$container->get('app.mailer')->sentCount(); // Method Mailer::sentCount() not found
+```
+
+A lookup of a service that a services file or a PHP configurator
+decorates is typed as the decorator's class too (`service_decorators` in
+`src/symfony/container.rs`, fed by `SymbolMap::service_decorations`).
+A class that the resource loader registers and that decorates a service
+with Symfony's `#[AsDecorator]` attribute is not read, though that is how
+most applications decorate. Record a `ServiceDecoration` for the
+attribute's `decorates` argument (a string or `Foo::class`) with the
+class as the decorator, where `#[AsMessageHandler]` is read in
+`src/symbol_map/extraction/symfony.rs`, and count the file as one that
+declares in `declares_symfony_keys`.

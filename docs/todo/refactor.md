@@ -215,9 +215,8 @@ Each item must include:
 
 ### Read the services files with a YAML parser
 
-T70 (decorated services) and F68 (method names under `calls:`) both
-read services files, and F68 needs the key path down to a sequence
-item, which the line scan in `scan_yaml` (`src/symfony/resources.rs`)
+F68 (method names under `calls:`) reads services files and needs the
+key path down to a sequence item, which the line scan in `scan_yaml` (`src/symfony/resources.rs`)
 does not give. PHPantom has no YAML parser: about 50 functions across
 18 files read YAML line by line, each handling indentation, comments,
 quotes, and flow collections its own way.

@@ -136,6 +136,11 @@ Run `composer install` here first. Composer puts core and contrib into
   hover `$languageManager`: core declares `language_manager` as
   `LanguageManager`, and the language module's `LanguageServiceProvider`
   swaps in `ConfigurableLanguageManager`, so it is either class.
+- A service that decorates another takes over its ID. In
+  `acme_request_age()` in `web/modules/custom/acme/acme.module`, hover
+  `$clock`: core declares `datetime.time` as `Time`, and
+  `acme.services.yml` decorates it with `RequestClock`, so it is either
+  class and `secondsSinceRequest()` is no unknown method.
 - Render element names in `#type` navigate to the element class that
   declares them. In `card()` in
   `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the

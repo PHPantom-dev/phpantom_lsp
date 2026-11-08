@@ -66,3 +66,17 @@ function acme_french_site_name(): ?string
 
     return is_string($name) ? $name : null;
 }
+
+/**
+ * How many seconds the current request has run.
+ */
+function acme_request_age(): int
+{
+    // Try: hover `$clock`. core.services.yml builds datetime.time from
+    // Time, and acme.services.yml decorates it with RequestClock, so it is
+    // either class. Go to the definition of secondsSinceRequest(), which
+    // only RequestClock declares.
+    $clock = \Drupal::service('datetime.time');
+
+    return $clock->secondsSinceRequest();
+}

@@ -14,5 +14,12 @@ services:
     # the brackets.
     calls:
       - [setStringTranslation, ['@string_translation']]
+  acme.request_clock:
+    class: Drupal\acme\RequestClock
+    # Try: go to the definition of datetime.time, which core declares. The
+    # container hands out RequestClock for it, so a lookup of datetime.time
+    # is typed as either class (see acme_request_age() in acme.module).
+    decorates: datetime.time
+    arguments: ['@.inner']
   # Lets controllers and hook classes autowire the greeter by its class.
   Drupal\acme\Greeter: '@acme.greeter'

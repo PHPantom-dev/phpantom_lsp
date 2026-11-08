@@ -290,6 +290,7 @@ impl Backend {
 
         let mut spans = Vec::new();
         let mut container_values = Vec::new();
+        let mut service_decorations = Vec::new();
         let mut route_imports = Vec::new();
         let mut drupal_routes = Vec::new();
         let mut declares_twig_loader = false;
@@ -307,13 +308,13 @@ impl Backend {
         if let Some(file) = self.drupal_declaration_file(uri) {
             match file {
                 crate::drupal::DeclarationFile::Services => {
-                    let (container_spans, values) =
-                        crate::symfony::resources::container_declarations(uri, content);
-                    spans = container_spans;
+                    let declared = crate::symfony::resources::container_declarations(uri, content);
+                    spans = declared.spans;
                     spans.extend(crate::symfony::service_calls::service_call_spans(
                         uri, content,
                     ));
-                    container_values = values;
+                    container_values = declared.values;
+                    service_decorations = declared.decorations;
                 }
                 crate::drupal::DeclarationFile::Routing => {
                     spans = crate::symfony::routes::drupal_routing_spans(content);
@@ -348,13 +349,13 @@ impl Backend {
             let mut slots = crate::symfony::tags::tag_slots(config, content);
             slots.extend(crate::symfony::messenger::bus_slots(config, content));
             spans = crate::symfony::slot_spans(content, slots);
-            let (container_spans, values) =
-                crate::symfony::resources::container_declarations(config, content);
-            spans.extend(container_spans);
+            let declared = crate::symfony::resources::container_declarations(config, content);
+            spans.extend(declared.spans);
             spans.extend(crate::symfony::service_calls::service_call_spans(
                 config, content,
             ));
-            container_values = values;
+            container_values = declared.values;
+            service_decorations = declared.decorations;
             if crate::symfony::routes::is_routing_config_uri(config) {
                 let (routes, imports) =
                     crate::symfony::routes::routing_declarations(config, content);
@@ -433,6 +434,7 @@ impl Backend {
             spans,
             member_access_indices,
             container_values,
+            service_decorations,
             route_imports,
             drupal_routes,
             declares_twig_loader,

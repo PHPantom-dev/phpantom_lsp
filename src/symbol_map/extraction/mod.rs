@@ -107,6 +107,8 @@ struct ExtractionCtx<'a> {
     /// What the file's PHP configurator calls declare a service or a
     /// parameter as.
     container_values: Vec<crate::symbol_map::ContainerValueSite>,
+    /// The services the file's PHP configurator calls say decorate another.
+    service_decorations: Vec<crate::symbol_map::ServiceDecoration>,
     /// The entity types the file's entity classes declare.
     entity_types: Vec<crate::symbol_map::EntityTypeSite>,
     /// The classes the file's Drupal plugin declarations are written on.
@@ -585,6 +587,7 @@ fn extract_symbol_map_inner(
         twig_callables: Vec::new(),
         twig_contexts: Vec::new(),
         container_values: Vec::new(),
+        service_decorations: Vec::new(),
         entity_types: Vec::new(),
         drupal_plugin_classes: Vec::new(),
         drupal_plugin_managers: Vec::new(),
@@ -808,6 +811,7 @@ fn extract_symbol_map_inner(
         twig_callables: ctx.twig_callables,
         twig_contexts: ctx.twig_contexts,
         container_values: ctx.container_values,
+        service_decorations: ctx.service_decorations,
         entity_types: ctx.entity_types,
         drupal_plugin_classes: ctx.drupal_plugin_classes,
         drupal_plugin_managers: ctx.drupal_plugin_managers,

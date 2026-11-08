@@ -392,8 +392,8 @@ fn read_service_ids(uri: &str, content: &str) -> FileServiceIds {
     if !uri.ends_with(".yml") {
         return defined_service_ids(content);
     }
-    let (spans, _) = crate::symfony::resources::container_declarations(uri, content);
-    let ids = spans
+    let ids = crate::symfony::resources::container_declarations(uri, content)
+        .spans
         .into_iter()
         .filter_map(|span| match span.kind {
             crate::symbol_map::SymbolKind::StringKey {

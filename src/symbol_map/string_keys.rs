@@ -896,6 +896,17 @@ pub(crate) enum ContainerValue {
     Type(crate::php_type::PhpType),
 }
 
+/// A service that decorates another: the container returns the decorator
+/// for the decorated ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ServiceDecoration {
+    /// The decorator's own service ID, a class name without the leading
+    /// `\` when the ID is spelled as one.
+    pub decorator: Atom,
+    /// The ID it decorates, spelled the same way.
+    pub decorated: Atom,
+}
+
 /// A class a Yii DI definition names: the ID a definition is keyed by
 /// (`MailerInterface::class => …`), or the class it builds
 /// (`'class' => Mailer::class`).  The range is that of the class's name.
