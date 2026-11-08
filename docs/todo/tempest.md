@@ -5,9 +5,9 @@ templates already get completion, hover, go-to-definition, and
 diagnostics through virtual PHP, the data a view is rendered with is
 typed from the calls and View objects that render it, and component
 tags, their attributes, and the paths passed to `view()` complete and
-navigate. What is still missing is navigating from a component
-attribute, documentation for the built-in tags and directives, routes,
-and the names Tempest's database and container layers take as strings.
+navigate. What is still missing is the model a `query()` call builds,
+the named arguments the container forwards, and route URIs that a
+project's own decorators change.
 
 Work out each behaviour from the framework's own source
 (`tempest/view`, `tempest/router`, `tempest/database`,
@@ -45,24 +45,6 @@ builder's own constructor says what is meant
 `Book::select()` already gives `SelectQueryBuilder<Book>`. Read
 `query()`'s parameter the way the constructor declares it, so a class name
 binds `TModel` to the class, and offer the docblock fix upstream.
-
----
-
-## TM2. Documentation for built-in components and directives
-
-**Impact: Low · Complexity: Low**
-
-```html
-<x-form action="/books"><x-input name="title" /></x-form>
-<li :foreach="$books as $book" :if="$book->published">…</li>
-```
-
-Completion offers the directives (`:if`, `:elseif`, `:else`, `:isset`,
-`:foreach`, `:forelse`, `:apply`, `:as`) and the built-in tags, but
-neither the completion items nor hover say what they do. Add a short
-description and a link to the matching section of the view spec for
-each, shown in the completion item's documentation and on hover over
-the directive or tag name.
 
 ---
 

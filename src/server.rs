@@ -575,7 +575,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
 
         self.run_position_request("hover", uri, position, |backend, uri, position| {
-            if let Some(hover) = backend.tempest_component_attribute_hover(uri, position) {
+            if let Some(hover) = backend.tempest_source_hover(uri, position) {
                 return Ok(Some(hover));
             }
             // For Blade files, check if the cursor is on an echo delimiter

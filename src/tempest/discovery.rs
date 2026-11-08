@@ -291,6 +291,14 @@ impl Backend {
 }
 
 impl Catalog {
+    /// The path of a component a package provides and the project does not override.
+    pub(super) fn vendor_component(&self, name: &str) -> Option<&Path> {
+        if !self.vendor_components.contains(name) {
+            return None;
+        }
+        self.components.get(name).map(PathBuf::as_path)
+    }
+
     /// Whether a file belongs to an active discovery root, and its precedence.
     pub(super) fn discovery_kind(&self, path: &Path) -> Option<bool> {
         self.locations

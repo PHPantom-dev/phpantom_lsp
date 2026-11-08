@@ -1,5 +1,8 @@
 //! Component tags and directive names in the template's own coordinates.
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
@@ -21,6 +24,23 @@ struct AttributeTarget {
 }
 
 impl Backend {
+    /// Whether a tag names one of Tempest's own components rather than a
+    /// project component of the same name, which takes its place when rendering.
+    fn tempest_builtin_component(
+        &self,
+        name: &str,
+        components: &BTreeMap<String, PathBuf>,
+    ) -> bool {
+        let Some(path) = components.get(name) else {
+            return BUILTINS.contains(&name);
+        };
+        self.tempest_catalog()
+            .vendor_component(name)
+            .is_some_and(|vendor| {
+                path == vendor || crate::util::canonical_path_for_comparison(path) == vendor
+            })
+    }
+
     fn tempest_selected_components(&self, uri: &str, source: &str, tag: &Tag<'_>) -> Vec<String> {
         if tag.name != "x-component" {
             return vec![tag.name.to_owned()];
@@ -134,12 +154,8 @@ impl Backend {
         Some((range, targets))
     }
 
-    /// Show the variable's PHP hover at the component attribute's source range.
-    pub(crate) fn tempest_component_attribute_hover(
-        &self,
-        uri: &str,
-        position: Position,
-    ) -> Option<Hover> {
+    /// Show built-in documentation or a component attribute's PHP hover.
+    pub(crate) fn tempest_source_hover(&self, uri: &str, position: Position) -> Option<Hover> {
         if !self.is_tempest_view(uri) {
             return None;
         }
@@ -153,6 +169,9 @@ impl Backend {
         let source = self.get_file_content_arc(uri)?;
         let offset = position_to_offset(&source, position) as usize;
         let tag = tag_at(&source, offset)?;
+        if let Some(hover) = self.tempest_builtin_hover(&source, &tag, offset) {
+            return Some(hover);
+        }
         let (range, targets) =
             self.tempest_component_attribute_targets(uri, &source, &tag, offset)?;
         let mut hovers = targets.into_iter().filter_map(|target| {
@@ -271,12 +290,17 @@ impl Backend {
                     .into_iter()
                     .filter(|name| name.starts_with(prefix))
                     .map(|name| {
-                        item(
+                        let mut item = item(
                             name,
                             "Tempest view component",
                             range,
                             CompletionItemKind::Class,
-                        )
+                        );
+                        if self.tempest_builtin_component(name, &components) {
+                            item.documentation =
+                                builtin_documentation(name).map(Documentation::MarkupContent);
+                        }
+                        item
                     })
                     .collect(),
             ));
@@ -312,8 +336,9 @@ impl Backend {
                     .iter()
                     .any(|attr| attr.name == *name && attr.span.start != start)
             })
-            .map(|name| {
-                item(
+            .map(|name| CompletionItem {
+                documentation: builtin_documentation(name).map(Documentation::MarkupContent),
+                ..item(
                     name,
                     "Tempest directive",
                     range,
@@ -383,5 +408,119 @@ fn item(name: &str, detail: &str, range: Range, kind: CompletionItemKind) -> Com
             new_text: name.to_string(),
         })),
         ..Default::default()
+    }
+}
+
+fn builtin_documentation(name: &str) -> Option<MarkupContent> {
+    // The spec's per-component headings carry their backticks into the
+    // anchor (`#`x-form``), so components link to the section that lists
+    // them, or to the section they defer to.
+    let (description, section) = match name {
+        ":if" => (
+            "Render this element when its PHP condition is true.",
+            "control-structures",
+        ),
+        ":elseif" => (
+            "Render this branch when earlier conditions were false and this condition is true.",
+            "control-structures",
+        ),
+        ":else" => (
+            "Render the fallback branch when the preceding conditional branches were false.",
+            "control-structures",
+        ),
+        ":isset" => (
+            "Check variables with PHP's `isset()` before rendering this element.",
+            "control-structures",
+        ),
+        ":foreach" => (
+            "Repeat this element for each item in a PHP iterable.",
+            "control-structures",
+        ),
+        ":forelse" => (
+            "Render this branch when the preceding `:foreach` iterable is empty.",
+            "control-structures",
+        ),
+        ":apply" => (
+            "Apply attributes from a PHP array or `ImmutableArray` to this element or component.",
+            "dynamic-attributes",
+        ),
+        ":as" => (
+            "Use a PHP expression to choose this HTML element's tag name.",
+            "expression-attributes",
+        ),
+        "x-base" => (
+            "A starter HTML page with named slots and Tailwind CSS from its CDN.",
+            "built-in-components",
+        ),
+        "x-form" => (
+            "Render a form that uses POST by default and supports HTTP method spoofing.",
+            "built-in-components",
+        ),
+        "x-input" => (
+            "Render a labeled form field with its original value and validation errors.",
+            "built-in-components",
+        ),
+        "x-submit" => (
+            "Render a submit input whose default label is `Submit`.",
+            "built-in-components",
+        ),
+        "x-icon" => (
+            "Render an Iconify SVG icon, fetching and caching it on first use.",
+            "built-in-components",
+        ),
+        "x-vite-tags" => (
+            "Insert tags for registered Vite entrypoints, optionally selecting one with `entrypoint`.",
+            "built-in-components",
+        ),
+        "x-template" => (
+            "Group content under directives without adding an HTML wrapper element.",
+            "templates",
+        ),
+        "x-slot" => (
+            "Provide or render component slot content, with optional names and fallback content.",
+            "using-slots",
+        ),
+        "x-markdown" => (
+            "Render Markdown from the `content` attribute or the component's body.",
+            "built-in-components",
+        ),
+        "x-component" => (
+            "Render the component selected by `is` or `:is`, forwarding attributes and slot content.",
+            "dynamic-view-components",
+        ),
+        _ => return None,
+    };
+    Some(MarkupContent {
+        kind: MarkupKind::Markdown,
+        value: format!(
+            "**`{name}`**\n\n{description}\n\n[Tempest view specification](https://tempestphp.com/3.x/internals/view-spec#{section})"
+        ),
+    })
+}
+
+impl Backend {
+    fn tempest_builtin_hover(&self, source: &str, tag: &Tag<'_>, offset: usize) -> Option<Hover> {
+        let (name, start, end) = if tag.name_span.start <= offset && offset <= tag.name_span.end {
+            if !self.tempest_builtin_component(tag.name, &self.tempest_components()) {
+                return None;
+            }
+            (tag.name, tag.name_span.start, tag.name_span.end)
+        } else {
+            let attr = tag.attributes.iter().find(|attr| {
+                !tag.closing
+                    && DIRECTIVES.contains(&attr.name)
+                    && attr.span.start <= offset
+                    && offset <= attr.span.start + attr.name.len()
+            })?;
+            (
+                attr.name,
+                attr.span.start,
+                attr.span.start + attr.name.len(),
+            )
+        };
+        Some(Hover {
+            contents: Contents::MarkupContent(builtin_documentation(name)?),
+            range: Some(byte_range_to_lsp_range(source, start, end)),
+        })
     }
 }
