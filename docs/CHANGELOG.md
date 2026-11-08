@@ -368,6 +368,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Closures and callables
 
+- **Generic array callable results.** Calling a method through an array callable preserves the receiver's generic return type, so completion and type checks see the concrete result. Contributed by @shuvroroy.
+
 - **Closures declared to return `float`.** A closure or arrow function declared `: float` is now shown returning `float` even when its body computes an integer, since PHP converts the value on return.
 - **Closures that capture by reference the variable they are assigned to.** In `$lock = new Lock(function () use (&$lock) { ... })`, `$lock` inside the closure is now what the assignment stores, `@var` included, instead of `null`.
 - **Union types in `@param-closure-this`.** A closure whose tag names several classes, such as `@param-closure-this WebContext|ApiContext`, now binds `$this`, `self::`, and `static::` to every one of them instead of falling back to the class around the closure, and an `instanceof` check narrows `$this` to the one it proves. Contributed by @ace-of-aces.
