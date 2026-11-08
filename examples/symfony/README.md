@@ -12,6 +12,9 @@ catalogues together, the way a real Symfony project does.
   `controller`.
 - Use find references on a class or method mentioned there, such as
   `DemoController::legacy()`. The YAML and XML occurrences are included.
+- A method a service's `calls:` names in `config/services.yaml`, such as
+  `setSender`, goes to its declaration and completes from the public
+  methods of the service's class.
 - Rename `legacy` in `config/routes.yaml`, or rename `UserRepository` from
   `config/doctrine/User.orm.xml`. The PHP declaration and every configuration
   file that names it are renamed together.

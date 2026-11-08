@@ -174,6 +174,11 @@ project. What works today:
   to `GreetingController` and to its `greet()` method, and in
   `web/modules/custom/acme/acme.services.yml`, `class:` goes to `Greeter`.
   Each counts among the references of the class or method it names.
+- **Methods under `calls:`.** In
+  `web/modules/custom/acme/acme.services.yml`, `setStringTranslation` goes
+  to the method `Greeter` takes from core's `StringTranslationTrait`, and a
+  method name there completes from the public methods of the service's
+  class.
 
 What does not work yet:
 

@@ -33,7 +33,6 @@ contributor even though it's short.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | T70 | [A decorated service is typed as the class it decorates](todo/type-inference.md#t70-a-decorated-service-is-typed-as-the-class-it-decorates) | Low-Medium | Low |
-| F68 | [Method names under `calls:` in a services file](todo/lsp-features.md#f68-method-names-under-calls-in-a-services-file) | Low | Low |
 | TM1 | [Component attribute names navigate to the component's variable](todo/tempest.md#tm1-component-attribute-names-navigate-to-the-components-variable) | Low-Medium | Low |
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
@@ -80,7 +79,6 @@ ships, remove every row that names it.
 | F64 | [Report unknown parameters in YAML and XML configuration](todo/lsp-features.md#f64-report-unknown-parameters-in-yaml-and-xml-configuration) | Low-Medium  | Low-Medium  |
 | F63 | [Check container parameters outside `app.*`](todo/lsp-features.md#f63-check-container-parameters-outside-app) | Low-Medium  | Medium      |
 | T70 | [A decorated service is typed as the class it decorates](todo/type-inference.md#t70-a-decorated-service-is-typed-as-the-class-it-decorates) | Low-Medium | Low |
-| F68 | [Method names under `calls:` in a services file](todo/lsp-features.md#f68-method-names-under-calls-in-a-services-file) | Low | Low |
 | F62 | [Check Symfony logout route names](todo/lsp-features.md#f62-check-symfony-logout-route-names) | Low         | Low-Medium  |
 | F65 | [Check interpolated and listed Twig names](todo/lsp-features.md#f65-check-interpolated-and-listed-twig-names) | Low         | Medium      |
 | F30 | [Symfony translations outside YAML, XLIFF, and the `trans` filter](todo/lsp-features.md#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter) | Low-Medium  | Medium      |
@@ -138,7 +136,6 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | F59 | [Send Twig, YAML, and XML documents to the server from Zed](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed) (Zed PR) | Medium | Low |
 | T70 | [A decorated service is typed as the class it decorates](todo/type-inference.md#t70-a-decorated-service-is-typed-as-the-class-it-decorates) | Low-Medium | Low |
-| F68 | [Method names under `calls:` in a services file](todo/lsp-features.md#f68-method-names-under-calls-in-a-services-file) | Low | Low |
 | DR11 | [Form and render callbacks](todo/drupal.md#dr11-form-and-render-callbacks) | Low-Medium | Low-Medium |
 | DR12 | [Translation placeholders](todo/drupal.md#dr12-translation-placeholders) | Low-Medium | Low-Medium |
 | DR13 | [Module names and `*.info.yml`](todo/drupal.md#dr13-module-names-and-infoyml) | Low-Medium | Low-Medium |

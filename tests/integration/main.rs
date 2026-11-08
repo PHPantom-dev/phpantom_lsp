@@ -341,6 +341,7 @@ mod symfony_form_options;
 mod symfony_forms;
 mod symfony_routes;
 mod symfony_serializer_groups;
+mod symfony_service_calls;
 mod symfony_templates;
 mod symfony_translations;
 mod tempest;

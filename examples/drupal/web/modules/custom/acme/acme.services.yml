@@ -9,5 +9,10 @@ services:
     # Try: go to the definition of `@config.factory`, which core declares,
     # or of `%acme.greeting_format%`. Complete a service ID after `@`.
     arguments: ['@config.factory', '%acme.greeting_format%']
+    # Try: go to the definition of setStringTranslation, which Greeter takes
+    # from core's StringTranslationTrait, or complete a method name inside
+    # the brackets.
+    calls:
+      - [setStringTranslation, ['@string_translation']]
   # Lets controllers and hook classes autowire the greeter by its class.
   Drupal\acme\Greeter: '@acme.greeter'

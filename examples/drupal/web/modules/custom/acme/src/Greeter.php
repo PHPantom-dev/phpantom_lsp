@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace Drupal\acme;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\StringTranslation\StringTranslationTrait;
 
 /**
  * Builds the greeting the demo route shows.
  */
 final class Greeter
 {
+    use StringTranslationTrait;
+
     public function __construct(
         private readonly ConfigFactoryInterface $configFactory,
         private readonly string $format,

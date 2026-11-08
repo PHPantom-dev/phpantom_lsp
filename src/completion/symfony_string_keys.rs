@@ -33,7 +33,9 @@
 //! edited records it, and is the default domain while the call does not
 //! parse yet.
 
-use tower_lsp_server::gen_lsp_types::{CompletionItem, CompletionResponse, Position};
+use tower_lsp_server::gen_lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionResponse, Position,
+};
 
 use crate::Backend;
 use crate::completion::eloquent_string::detect_string_call_context;
@@ -50,7 +52,7 @@ use crate::symbol_map::extraction::{
 use crate::symbol_map::{StringKeyKind, SymbolKind};
 use crate::symfony::translations::{DEFAULT_DOMAIN, split_translation_key};
 use crate::text_position::position_to_offset;
-use crate::types::{AccessKind, FileContext};
+use crate::types::{AccessKind, FileContext, Visibility};
 
 impl Backend {
     /// Complete the service ID, parameter, route name, translation key or
@@ -713,7 +715,14 @@ impl Backend {
             }
         } else if let Some(file) = self.drupal_declaration_file(uri) {
             match file {
-                crate::drupal::DeclarationFile::Services => resource_key_at(content, cursor)?,
+                crate::drupal::DeclarationFile::Services => {
+                    if let Some(response) =
+                        self.service_call_completion(uri, content, cursor, position)
+                    {
+                        return Some(response);
+                    }
+                    resource_key_at(content, cursor)?
+                }
                 crate::drupal::DeclarationFile::Links => (
                     StringKeyKind::DrupalRoute,
                     crate::drupal::links::links_route_name_start(content, cursor)?,
@@ -760,6 +769,10 @@ impl Backend {
                 position,
             );
         } else if crate::symfony::resources::is_container_config_uri(config) {
+            if let Some(response) = self.service_call_completion(config, content, cursor, position)
+            {
+                return Some(response);
+            }
             match config_slot_at(config, content, cursor)
                 .or_else(|| resource_key_at(content, cursor))
             {
@@ -784,6 +797,48 @@ impl Backend {
             return None;
         };
         self.symfony_key_response(uri, kind, content, prefix_start, cursor, position)
+    }
+
+    /// Complete the name of a method a service definition's `calls:` names
+    /// with the public methods of the service's class.
+    fn service_call_completion(
+        &self,
+        uri: &str,
+        content: &str,
+        cursor: usize,
+        position: Position,
+    ) -> Option<CompletionResponse> {
+        let site = crate::symfony::service_calls::call_site_at(uri, content, cursor)?;
+        let loader = self.resolved_class_loader_with(&[]);
+        let class = loader(crate::class_lookup::Fqn::new(&site.class))?;
+        let class = crate::virtual_members::resolve_class_fully_cached(
+            &class,
+            &loader,
+            &self.resolved_class_cache,
+        );
+        let prefix = content.get(site.start..cursor)?.as_bytes();
+        let names: Vec<String> = class
+            .methods
+            .iter()
+            .filter(|method| {
+                method.visibility == Visibility::Public
+                    && !method.is_static
+                    && !method.name.starts_with("__")
+                    && method
+                        .name
+                        .as_bytes()
+                        .get(..prefix.len())
+                        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+            })
+            .map(|method| method.name.to_string())
+            .collect();
+        string_key_response(
+            names,
+            CompletionItemKind::Method,
+            content,
+            site.start,
+            position,
+        )
     }
 }
 

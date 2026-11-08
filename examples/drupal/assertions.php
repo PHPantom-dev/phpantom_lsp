@@ -133,6 +133,8 @@ check('The class acme.services.yml names exists', class_exists((string) $contain
 check('The Greeter class name is an alias of acme.greeter', $container->hasAlias(Greeter::class) && (string) $container->getAlias(Greeter::class) === 'acme.greeter');
 check("acme.greeter receives core's config.factory", (string) $container->getDefinition('acme.greeter')->getArgument(0) === 'config.factory');
 check('acme.greeter receives the acme.greeting_format parameter', $container->getDefinition('acme.greeter')->getArgument(1) === '%acme.greeting_format%');
+$greeterCalls = $container->getDefinition('acme.greeter')->getMethodCalls();
+check("acme.greeter's calls: calls setStringTranslation, which Greeter takes from StringTranslationTrait", ($greeterCalls[0][0] ?? null) === 'setStringTranslation' && method_exists(Greeter::class, 'setStringTranslation'));
 check('acme.greeting_format is a parameter declared in acme.services.yml', is_string($container->getParameter('acme.greeting_format')));
 check('Greeter takes the format as its second argument', (new ReflectionMethod(Greeter::class, '__construct'))->getParameters()[1]->getType()?->getName() === 'string');
 

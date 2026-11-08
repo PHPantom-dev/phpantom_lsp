@@ -13,11 +13,13 @@
 //! Event names, Messenger bus names, and serializer groups are string keys
 //! too (see [`tags`], [`messenger`], and [`serializer`]).  A form type's
 //! options are read from its class and the classes it builds on whenever
-//! they are asked for (see [`form_options`]).  Form fields, validation mappings, and the listener
-//! methods an event subscription names name a class's members, so they are
-//! member accesses instead (see [`forms`] and [`validation`]).  The
-//! Messenger handlers a project registers are recorded beside the spans of
-//! the file that declares them (see [`messenger`]).  What a service or
+//! they are asked for (see [`form_options`]).  Form fields, validation
+//! mappings, the listener methods an event subscription names, and the
+//! methods a service definition's `calls:` names name a class's members, so
+//! they are member accesses instead (see [`forms`], [`validation`], and
+//! [`service_calls`]).  The Messenger handlers a project registers are
+//! recorded beside the spans of the file that declares them (see
+//! [`messenger`]).  What a service or
 //! parameter declaration gives its name, a class or a value, is recorded
 //! beside its span too, for the type engine (see [`container`]).
 //! A declaration is a span with `is_write` set, or a configurator call
@@ -42,6 +44,7 @@ pub(crate) mod resources;
 pub(crate) mod route_world;
 pub(crate) mod routes;
 pub(crate) mod serializer;
+pub(crate) mod service_calls;
 pub(crate) mod tags;
 pub(crate) mod translations;
 pub(crate) mod validation;

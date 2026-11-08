@@ -153,6 +153,8 @@ check('app.welcome_mailer, which app.mailer aliases, is built from WelcomeMailer
 check('app.support_email is a string', is_string($container->getParameter('app.support_email')));
 check('The App\\ resource registers the controller as a service', $container->hasDefinition(DemoController::class));
 check("app.greeting's %app.sender_name% placeholder reads app.sender_name", $container->getParameterBag()->resolveValue($container->getParameter('app.greeting')) === 'Hello from PHPantom');
+$mailerCalls = $container->getDefinition(WelcomeMailer::class)->getMethodCalls();
+check("WelcomeMailer's calls: in config/services.yaml calls setSender", ($mailerCalls[0][0] ?? null) === 'setSender' && method_exists(WelcomeMailer::class, 'setSender'));
 $demoCache = $container->getDefinition('app.demo_cache');
 check('app.demo_cache is a child of cache.app', $demoCache instanceof ChildDefinition && $demoCache->getParent() === 'cache.app');
 

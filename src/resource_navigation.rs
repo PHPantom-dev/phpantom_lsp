@@ -310,6 +310,9 @@ impl Backend {
                     let (container_spans, values) =
                         crate::symfony::resources::container_declarations(uri, content);
                     spans = container_spans;
+                    spans.extend(crate::symfony::service_calls::service_call_spans(
+                        uri, content,
+                    ));
                     container_values = values;
                 }
                 crate::drupal::DeclarationFile::Routing => {
@@ -348,6 +351,9 @@ impl Backend {
             let (container_spans, values) =
                 crate::symfony::resources::container_declarations(config, content);
             spans.extend(container_spans);
+            spans.extend(crate::symfony::service_calls::service_call_spans(
+                config, content,
+            ));
             container_values = values;
             if crate::symfony::routes::is_routing_config_uri(config) {
                 let (routes, imports) =

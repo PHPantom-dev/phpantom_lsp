@@ -4,6 +4,12 @@ parameters:
 services:
   App\:
     resource: '../src/'
+  App\Service\WelcomeMailer:
+    # Try: go to the definition of setSender, which the container calls
+    # after building the mailer, or complete a method name inside the
+    # brackets.
+    calls:
+      - [setSender, ['%app.sender_name%']]
   App\EventListener\OrderPlacedListener:
     tags:
       - { name: kernel.event_listener, event: app.order.placed, method: onOrderPlaced }
