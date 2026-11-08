@@ -1317,17 +1317,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#y19-attributes-of-an-active-record-without-properties" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y19. Attributes of an Active Record without properties
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#y17-key-paths-in-yiisoftarrays" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1375,8 +1364,9 @@ navigate, are checked, and are typed, and the message IDs a translator
 looks up complete, navigate, and are checked, and so do the listeners
 the events configuration attaches. Active Record queries are typed by the
 record they are for, and the attributes and relations a record and its
-queries name navigate, complete, and are checked, and so do the properties
-form fields and hydration maps name. What is left is below.</p>
+queries name navigate, complete, and are checked, the columns of a record
+without properties read from the project's migrations, and so do the
+properties form fields and hydration maps name. What is left is below.</p>
 <p>The items below are what the Yii team asked for in
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/discussions/505">discussion #505</a>.
 <code>examples/yii/</code> (generated from <code>yiisoft/app</code>) is the playground, with a
@@ -1480,33 +1470,17 @@ qualified by a table alias the same query declares, and the table
 itself is often a class constant with the alias appended (<code>'post p'</code>,
 or <code>['p' =&gt; 'post']</code>). The columns come
 from the project's migrations (<code>yiisoft/db-migration</code>'s
-<code>createTable()</code> and <code>addColumn()</code>). Complete and navigate table and
-column names, and report one no migration creates. Laravel's migration
-scanning (<code>src/virtual_members/laravel/database_schema/</code>) is the
-precedent for reading the schema statically. Wait for a user to ask: the
-demo is the only project known to query this way.</p>
-<hr />
-<h2 id="y19-attributes-of-an-active-record-without-properties">Y19. Attributes of an Active Record without properties<a class="headerlink" href="#y19-attributes-of-an-active-record-without-properties" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">#[\AllowDynamicProperties]</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">final class Post extends ActiveRecord {}</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">$post-&gt;get('title');</span>
-</code></pre></div>
-<p>An Active Record's <code>get()</code>, <code>set()</code>, and the rest of its attribute API
-name an attribute, which navigates, completes, and is checked against
-the record's properties (<code>src/yii/active_record.rs</code>). A record that
-declares no properties, real or <code>@property</code> ones, reads its attributes
-from its table's columns instead, so on one of those nothing completes
-and every name passes. Once Y8 reads the schema from the project's
-migrations, complete those names from the columns of the record's table
-(<code>tableName()</code>, or the name <code>AbstractActiveRecord::tableName()</code> derives
-from the class), navigate to the migration that creates each one, and
-report one no migration creates.</p>
+<code>createTable()</code> and <code>addColumn()</code>), which <code>src/yii/migrations.rs</code>
+already reads for the attributes of a record without properties. It
+reads a table named by a string literal only, and a table named any other
+way leaves the columns of every table open, so the class constants the
+demo names its tables with need resolving first. Complete and navigate table and column names, and report one no
+migration creates. Wait for a user to ask: the demo is the only project
+known to query this way.</p>
 <hr />
 <h2 id="y17-key-paths-in-yiisoftarrays">Y17. Key paths in <code>yiisoft/arrays</code><a class="headerlink" href="#y17-key-paths-in-yiisoftarrays" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
 </code></pre></div>
 <p><code>ArrayHelper::getValue()</code>, <code>setValue()</code>, <code>keyExists()</code>, and <code>remove()</code>
 take a key or a dotted path into the array or object they are given.
