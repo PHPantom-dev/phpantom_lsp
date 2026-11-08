@@ -295,6 +295,7 @@ mod laravel_validated_shape;
 mod laravel_validation_strings;
 mod laravel_view_names;
 mod lsp_concurrency;
+mod lsp_progress_tokens;
 mod lsp_refresh_resilience;
 mod lsp_registration_resilience;
 mod mock_method_names;
