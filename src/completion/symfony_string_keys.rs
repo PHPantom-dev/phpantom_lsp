@@ -753,10 +753,17 @@ impl Backend {
                     StringKeyKind::DrupalRoute,
                     crate::drupal::links::links_route_name_start(content, cursor)?,
                 ),
-                crate::drupal::DeclarationFile::Routing => (
-                    StringKeyKind::DrupalPermission,
-                    crate::drupal::permissions::routing_permission_start(content, cursor)?,
-                ),
+                crate::drupal::DeclarationFile::Routing => {
+                    if let Some(response) =
+                        self.drupal_service_method_completion(content, cursor, position)
+                    {
+                        return Some(response);
+                    }
+                    (
+                        StringKeyKind::DrupalPermission,
+                        crate::drupal::permissions::routing_permission_start(content, cursor)?,
+                    )
+                }
                 crate::drupal::DeclarationFile::Permissions => return None,
                 crate::drupal::DeclarationFile::Libraries => (
                     StringKeyKind::DrupalLibrary,
@@ -835,19 +842,53 @@ impl Backend {
         position: Position,
     ) -> Option<CompletionResponse> {
         let site = crate::symfony::service_calls::call_site_at(uri, content, cursor)?;
+        self.public_method_response(
+            &[crate::atom::atom(&site.class)],
+            content,
+            site.start,
+            cursor,
+            position,
+        )
+    }
+
+    /// Complete the method of a Drupal `_controller` or `_title_callback`
+    /// written as `service:method` with the public methods of the
+    /// service's classes.
+    fn drupal_service_method_completion(
+        &self,
+        content: &str,
+        cursor: usize,
+        position: Position,
+    ) -> Option<CompletionResponse> {
+        let (service, start) = crate::drupal::routing::service_method_start(content, cursor)?;
+        let classes = self.symfony_service_classes(&service);
+        self.public_method_response(&classes, content, start, cursor, position)
+    }
+
+    /// The public instance methods of `classes` whose name starts with
+    /// what is written between `start` and `cursor`.
+    fn public_method_response(
+        &self,
+        classes: &[crate::atom::Atom],
+        content: &str,
+        start: usize,
+        cursor: usize,
+        position: Position,
+    ) -> Option<CompletionResponse> {
         let loader = self.resolved_class_loader_with(&[]);
-        let class = loader(crate::class_lookup::Fqn::new(&site.class))?;
-        let class = crate::virtual_members::resolve_class_fully_cached(
-            &class,
-            &loader,
-            &self.resolved_class_cache,
-        );
-        let prefix = content.get(site.start..cursor)?.as_bytes();
-        let names: Vec<String> = class
-            .methods
-            .iter()
-            .filter(|method| {
-                method.visibility == Visibility::Public
+        let prefix = content.get(start..cursor)?.as_bytes();
+        let mut names: Vec<String> = Vec::new();
+        for class in classes {
+            let Some(class) = loader(crate::class_lookup::Fqn::new(class)) else {
+                continue;
+            };
+            let class = crate::virtual_members::resolve_class_fully_cached(
+                &class,
+                &loader,
+                &self.resolved_class_cache,
+            );
+            for method in &class.methods {
+                if method.visibility == Visibility::Public
                     && !method.is_static
                     && !method.name.starts_with("__")
                     && method
@@ -855,16 +896,13 @@ impl Backend {
                         .as_bytes()
                         .get(..prefix.len())
                         .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
-            })
-            .map(|method| method.name.to_string())
-            .collect();
-        string_key_response(
-            names,
-            CompletionItemKind::Method,
-            content,
-            site.start,
-            position,
-        )
+                    && !names.iter().any(|name| name == method.name.as_str())
+                {
+                    names.push(method.name.to_string());
+                }
+            }
+        }
+        string_key_response(names, CompletionItemKind::Method, content, start, position)
     }
 }
 

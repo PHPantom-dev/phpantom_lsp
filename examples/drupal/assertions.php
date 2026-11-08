@@ -186,6 +186,9 @@ check('acme.greeting is declared in acme.routing.yml', isset($routes['acme.greet
 check('acme.greeting points at GreetingController::greet()', $controllerClass === GreetingController::class && method_exists($controllerClass, $controllerMethod));
 check('The _controller string names a public method', (new ReflectionMethod($controllerClass, $controllerMethod))->isPublic());
 check('acme.greeting declares the {name} the controller takes', str_contains($routes['acme.greeting']['path'], '{name}') && (new ReflectionMethod(GreetingController::class, 'greet'))->getParameters()[0]->getName() === 'name');
+[$titleService, $titleMethod] = explode(':', $routes['acme.greeting']['defaults']['_title_callback'] ?? '') + [1 => ''];
+check("acme.greeting's title callback is the greet() method of the acme.greeter service", $titleService === 'acme.greeter' && $titleMethod === 'greet' && $container->getDefinition('acme.greeter')->getClass() === Greeter::class && (new ReflectionMethod(Greeter::class, 'greet'))->isPublic());
+check('Greeter::greet() takes the {name} of the route, which the title resolver passes it by name', (new ReflectionMethod(Greeter::class, 'greet'))->getParameters()[0]->getName() === 'name');
 check('GreetingController inherits the helpers of ControllerBase', is_subclass_of(GreetingController::class, ControllerBase::class));
 check('ControllerBase::redirect(), which greetTheWorld() calls, takes a route name first', (new ReflectionMethod(ControllerBase::class, 'redirect'))->getParameters()[0]->getName() === 'route_name');
 check('Url::fromRoute() takes a route name first', (new ReflectionMethod(Url::class, 'fromRoute'))->getParameters()[0]->getName() === 'route_name');

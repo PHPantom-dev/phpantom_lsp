@@ -1,7 +1,7 @@
 //! Drupal's route names: the keys a routing file declares, read by the
 //! calls that build a URL or a redirect to a route.
 
-use crate::common::{completion_response, hover_text_at, response_labels};
+use crate::common::{completion_response, hover_text_at, open_document, response_labels};
 use crate::drupal_services::{
     definitions_at, position_in, references_at, uri_for, workspace, workspace_in,
 };
@@ -482,6 +482,82 @@ async fn routing_defaults_navigate_to_entity_types_services_and_methods() {
             (&uri_for(&dir, target), line),
             "{needle}"
         );
+    }
+}
+
+const SERVICE_HANDLERS: &str = "acme.greet:\n  path: '/greet'\n  defaults:\n    _controller: 'acme.greeter:greet'\n    _title_callback: acme.titles:title\n";
+
+const TITLES: &str = "<?php\nnamespace Drupal\\acme;\nclass Titles {\n    public function title(): string { return ''; }\n    public function subtitle(): string { return ''; }\n    protected function secret(): string { return ''; }\n    public static function make(): static { return new static(); }\n    public function __construct() {}\n}\n";
+
+const HANDLER_SERVICES: &str = "services:\n  acme.greeter:\n    class: Drupal\\acme\\Greeter\n  acme.titles:\n    class: Drupal\\acme\\Titles\n";
+
+/// The method of a `service:method` controller or title callback is a
+/// method of the service's class: it navigates there, counts among the
+/// method's references, and completes from the class's public methods.
+#[tokio::test]
+async fn service_handler_methods_navigate_reference_and_complete() {
+    let routing_path = "web/modules/custom/acme/acme.routing.yml";
+    let titles_path = "web/modules/custom/acme/src/Titles.php";
+    let (backend, dir) = workspace(&files(&[
+        (
+            "web/modules/custom/acme/acme.services.yml",
+            HANDLER_SERVICES,
+        ),
+        (titles_path, TITLES),
+        (routing_path, SERVICE_HANDLERS),
+    ]))
+    .await;
+    let yaml = uri_for(&dir, routing_path);
+    let greeter = uri_for(&dir, "web/modules/custom/acme/src/Greeter.php");
+    let titles = uri_for(&dir, titles_path);
+
+    for (needle, inside, target) in [("greeter:greet", 10, &greeter), ("title\n", 2, &titles)] {
+        let found = definitions_at(
+            &backend,
+            &yaml,
+            position_in(SERVICE_HANDLERS, needle, inside),
+        )
+        .await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!((&found[0].uri, found[0].range.start.line), (target, 3));
+    }
+    // The service ID still goes to its declaration.
+    let found = definitions_at(
+        &backend,
+        &yaml,
+        position_in(SERVICE_HANDLERS, "acme.titles", 2),
+    )
+    .await;
+    assert_eq!(
+        found
+            .iter()
+            .map(|location| location.range.start.line)
+            .collect::<Vec<_>>(),
+        [3]
+    );
+
+    let found = references_at(&backend, &titles, position_in(TITLES, "title()", 2)).await;
+    assert_eq!(found, vec![(yaml.clone(), 4), (titles.clone(), 3)]);
+    let found = references_at(&backend, &yaml, position_in(SERVICE_HANDLERS, "title\n", 2)).await;
+    assert_eq!(found, vec![(yaml.clone(), 4), (titles, 3)]);
+
+    let typed = SERVICE_HANDLERS.replace("acme.titles:title", "acme.titles:t");
+    for (content, needle, inside, expected) in [
+        (typed.as_str(), "titles:t\n", 8, vec!["title"]),
+        (
+            "acme.greet:\n  path: '/greet'\n  defaults:\n    _title_callback: 'acme.titles:'\n",
+            "titles:'",
+            7,
+            vec!["subtitle", "title"],
+        ),
+    ] {
+        let position = position_in(content, needle, inside);
+        open_document(&backend, &yaml, "yaml", content).await;
+        let mut labels = response_labels(
+            completion_response(&backend, &yaml, position.line, position.character, None).await,
+        );
+        labels.sort();
+        assert_eq!(labels, expected, "{needle}");
     }
 }
 

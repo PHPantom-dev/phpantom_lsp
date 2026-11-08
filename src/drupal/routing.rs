@@ -8,8 +8,10 @@
 //! A parameter only means something under its route, so its span's key
 //! names the route as well as the parameter (see [`route_parameter_key`]).
 
+use crate::atom::atom;
 use crate::symbol_map::{
-    DeclaredParameter, DrupalRouteSite, StringKeyKind, SymbolKind, SymbolSpan,
+    DeclaredParameter, DocblockMemberRef, DrupalRouteSite, StringKeyKind, SubjectText, SymbolKind,
+    SymbolSpan,
 };
 
 /// The key of a [`StringKeyKind::DrupalRouteParameter`] span: the
@@ -379,8 +381,8 @@ pub(crate) fn entity_type_of(value: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The entity type, service, and permission spans of a routing file, in
-/// source order.
+/// The entity type, service, and permission spans of a routing file, and
+/// the method a `service:method` handler calls, in source order.
 pub(crate) fn routing_value_spans(content: &str) -> Vec<SymbolSpan> {
     let mut spans = Vec::new();
     for (line_start, line) in crate::framework::line_offsets(content) {
@@ -414,26 +416,109 @@ pub(crate) fn routing_value_spans(content: &str) -> Vec<SymbolSpan> {
                 .map(|id| (StringKeyKind::DrupalEntityType, id)),
             // `acme.greeter:greet` calls `greet()` on the service
             // `acme.greeter`; a `Class::method` names a class instead.
-            "_controller" | "_title_callback" if !value.contains("::") => value
-                .split_once(':')
-                .map(|(service, _)| (StringKeyKind::ServiceId, service)),
+            "_controller" | "_title_callback" => {
+                let Some((service, method)) = service_method(value) else {
+                    continue;
+                };
+                if is_plain_name(service) {
+                    spans.push(service_id_span(service, value_start));
+                    let method_start = value_start + service.len() + 1;
+                    if is_method_name(method) {
+                        spans.push(SymbolSpan {
+                            start: method_start as u32,
+                            end: (method_start + method.len()) as u32,
+                            kind: SymbolKind::MemberAccess {
+                                subject_text: SubjectText::owned(service_subject(service)),
+                                member_name: atom(method),
+                                is_static: false,
+                                is_method_call: true,
+                                docblock_ref: DocblockMemberRef::No,
+                                is_array_callable: false,
+                                is_nullsafe: false,
+                            },
+                        });
+                    }
+                }
+                continue;
+            }
             _ => None,
         };
         let Some((kind, name)) = found.filter(|(_, name)| is_plain_name(name)) else {
             continue;
         };
-        spans.push(SymbolSpan {
-            start: value_start as u32,
-            end: (value_start + name.len()) as u32,
-            kind: SymbolKind::StringKey {
-                kind,
-                key: name.to_string(),
-                is_write: false,
-                is_optional: false,
-            },
-        });
+        spans.push(name_span(kind, name, value_start));
     }
     spans
+}
+
+fn name_span(kind: StringKeyKind, name: &str, start: usize) -> SymbolSpan {
+    SymbolSpan {
+        start: start as u32,
+        end: (start + name.len()) as u32,
+        kind: SymbolKind::StringKey {
+            kind,
+            key: name.to_string(),
+            is_write: false,
+            is_optional: false,
+        },
+    }
+}
+
+fn service_id_span(service: &str, start: usize) -> SymbolSpan {
+    name_span(StringKeyKind::ServiceId, service, start)
+}
+
+/// The service and the method a `_controller` or `_title_callback` value
+/// written as `service:method` names.  `None` for a `Class::method`.
+fn service_method(value: &str) -> Option<(&str, &str)> {
+    if value.contains("::") {
+        return None;
+    }
+    value.split_once(':')
+}
+
+/// The receiver a `service:method` handler's method is called on, written
+/// as the PHP expression that returns the service, so that the type engine
+/// resolves it through the container like any `\Drupal::service()` call.
+pub(crate) fn service_subject(service: &str) -> String {
+    format!("\\Drupal::service('{service}')")
+}
+
+/// The service ID a receiver built by [`service_subject`] names.
+pub(crate) fn service_of_subject(subject: &str) -> Option<&str> {
+    subject
+        .strip_prefix("\\Drupal::service('")?
+        .strip_suffix("')")
+}
+
+/// Where the method of a `service:method` `_controller` or
+/// `_title_callback` value starts, when the cursor is in it: the service
+/// and the method's start offset.
+pub(crate) fn service_method_start(content: &str, cursor: usize) -> Option<(String, usize)> {
+    let line_start = content[..cursor].rfind('\n').map_or(0, |at| at + 1);
+    let line = &content[line_start..cursor];
+    let indent = crate::framework::leading_spaces(line);
+    let text = &line[indent..];
+    let colon = text.find(':')?;
+    if !matches!(text[..colon].trim_end(), "_controller" | "_title_callback") {
+        return None;
+    }
+    let raw = &text[colon + 1..];
+    let trimmed = raw.trim_start();
+    let value = trimmed.strip_prefix(['\'', '"']).unwrap_or(trimmed);
+    let (service, method) = service_method(value)?;
+    if !is_plain_name(service) || !(method.is_empty() || is_method_name(method)) {
+        return None;
+    }
+    Some((service.to_string(), cursor - method.len()))
+}
+
+fn is_method_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes
+        .next()
+        .is_some_and(|first| first == b'_' || first.is_ascii_alphabetic() || !first.is_ascii())
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric() || !byte.is_ascii())
 }
 
 /// Whether `name` can be an entity type ID or a service ID.
@@ -451,26 +536,41 @@ mod tests {
     #[test]
     fn entity_and_service_defaults_read_their_names() {
         let yaml = "a:\n  path: '/a'\n  defaults:\n    _entity_form: 'node.edit'\n    _entity_view: node.full\n    _entity_list: node_type\n    _controller: acme.greeter:greet\n    _title_callback: '\\Drupal\\acme\\Title::get'\n  requirements:\n    _entity_access: node.update\n    _permission: 'access content+administer acme'\n";
-        let found: Vec<(&str, StringKeyKind)> = routing_value_spans(yaml)
+        let found: Vec<(&str, String)> = routing_value_spans(yaml)
             .iter()
             .map(|span| {
-                let SymbolKind::StringKey { kind, .. } = span.kind else {
-                    unreachable!()
+                let kind = match &span.kind {
+                    SymbolKind::StringKey { kind, .. } => format!("{kind:?}"),
+                    SymbolKind::MemberAccess { subject_text, .. } => {
+                        subject_text.synthesised().unwrap().to_string()
+                    }
+                    _ => unreachable!(),
                 };
                 (&yaml[span.start as usize..span.end as usize], kind)
             })
             .collect();
+        let expected = [
+            ("node", "DrupalEntityType"),
+            ("node", "DrupalEntityType"),
+            ("node_type", "DrupalEntityType"),
+            ("acme.greeter", "ServiceId"),
+            ("greet", "\\Drupal::service('acme.greeter')"),
+            ("access content", "DrupalPermission"),
+            ("administer acme", "DrupalPermission"),
+        ];
+        assert_eq!(found, expected.map(|(text, kind)| (text, kind.to_string())));
+    }
+
+    #[test]
+    fn a_service_handler_method_starts_after_the_colon() {
+        let yaml = "a:\n  defaults:\n    _controller: 'acme.greeter:gr\n    _title_callback: \\Drupal\\acme\\Title::g\n";
+        let at = yaml.find(":gr").unwrap() + 3;
         assert_eq!(
-            found,
-            [
-                ("node", StringKeyKind::DrupalEntityType),
-                ("node", StringKeyKind::DrupalEntityType),
-                ("node_type", StringKeyKind::DrupalEntityType),
-                ("acme.greeter", StringKeyKind::ServiceId),
-                ("access content", StringKeyKind::DrupalPermission),
-                ("administer acme", StringKeyKind::DrupalPermission),
-            ]
+            service_method_start(yaml, at),
+            Some(("acme.greeter".to_string(), at - 2))
         );
+        let at = yaml.find("::g").unwrap() + 3;
+        assert_eq!(service_method_start(yaml, at), None);
     }
 
     #[test]

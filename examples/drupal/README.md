@@ -56,6 +56,11 @@ Run `composer install` here first. Composer puts core and contrib into
   `web/modules/custom/acme/src/CoreLinks.php`, `'entity.node.canonical'`,
   which core's entity route provider builds, and `'view.content.page_1'`,
   which Views builds for the content view's page, are not.
+- A controller or title callback written as `service:method` names a method
+  of the service's class. In `web/modules/custom/acme/acme.routing.yml`, go
+  to the definition of `greet` in `acme.greeter:greet`, which lands in
+  `Greeter`, complete a method after the `:`, or find the references of
+  `Greeter::greet()` to see the routing file among them.
 - Route parameters navigate from the keys that pass them to the placeholder
   of the route's path. In `worldLink()`, go to the definition of `'name'`,
   which lands on `{name}` in `acme.routing.yml`, or complete a key inside the

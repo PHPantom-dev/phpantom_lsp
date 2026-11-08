@@ -147,6 +147,28 @@ impl Backend {
             SymbolKind::StringKey { kind, key, .. } if self.string_key_kind_enabled(kind) => {
                 crate::virtual_members::laravel::resolve_laravel_string_key(self, &kind, &key, uri)
             }
+            // The method of a Drupal `service:method` handler, of the
+            // service's class.
+            SymbolKind::MemberAccess {
+                subject_text: ref subject @ SubjectText::Owned { .. },
+                member_name,
+                ..
+            } if let Some(service) = subject
+                .synthesised()
+                .and_then(crate::drupal::routing::service_of_subject) =>
+            {
+                self.symfony_service_classes(service)
+                    .iter()
+                    .filter_map(|class| {
+                        self.class_member_declaration_location(class, &member_name, false)
+                    })
+                    .fold(Vec::new(), |mut locations, location| {
+                        if !locations.contains(&location) {
+                            locations.push(location);
+                        }
+                        locations
+                    })
+            }
             SymbolKind::MemberAccess {
                 subject_text: ref subject @ SubjectText::Owned { .. },
                 member_name,

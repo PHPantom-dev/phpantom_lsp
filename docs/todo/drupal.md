@@ -86,27 +86,6 @@ complete them, and report one that names nothing.
 
 ---
 
-## DR29. Controller methods of a service
-
-**Impact: Low-Medium · Complexity: Low**
-
-```yaml
-acme.greet:
-  path: '/greet'
-  defaults:
-    _controller: 'acme.greeter:greet'
-    _title_callback: 'acme.titles:title'
-```
-
-A `_controller` or `_title_callback` written as `service:method` names a
-method of the service's class. The service ID jumps to its declaration,
-but the method does not jump to the method of the service's class, as the
-method of a `Class::method` value does. Navigate it, complete it from the
-class's public methods, and count it among the method's references.
-PHPlumb navigates it.
-
----
-
 ## DR12. Translation placeholders
 
 **Impact: Low-Medium · Complexity: Low-Medium**
