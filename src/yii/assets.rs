@@ -151,7 +151,9 @@ impl Backend {
     /// The path an asset file key names, whether a file is there or not.
     fn yii_asset_path(&self, key: &str) -> Option<PathBuf> {
         let (dir, entry) = split_asset_file_key(key);
-        Some(normalize_path(&self.yii_asset_dir(dir)?.join(entry)))
+        Some(crate::util::canonical_path_for_comparison(&normalize_path(
+            &self.yii_asset_dir(dir)?.join(entry),
+        )))
     }
 
     /// The file an asset file key names, when it exists.
@@ -178,7 +180,7 @@ impl Backend {
         };
         let root = self.workspace.workspace_root.read().clone();
         root.and_then(|root| {
-            path.strip_prefix(&root)
+            path.strip_prefix(crate::util::canonical_path_for_comparison(&root))
                 .ok()
                 .map(|relative| relative.to_string_lossy().replace('\\', "/"))
         })

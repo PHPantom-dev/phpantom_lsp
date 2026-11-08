@@ -226,6 +226,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Yii
+
+- **Asset paths through symlinked directories.** Asset entries navigate to the canonical file, and missing-file diagnostics keep their paths relative to the project. Contributed by @shuvroroy.
+
 #### Type inference
 
 - **Property types on an annotated `$this`.** Reading a property through an explicitly typed `$this` now preserves its type in assignments and loops, including Tempest views. Contributed by @shuvroroy.
