@@ -1284,17 +1284,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tm1-component-attribute-names-navigate-to-the-components-variable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        TM1. Component attribute names navigate to the component's variable
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#tm2-documentation-for-built-in-components-and-directives" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1403,23 +1392,10 @@ builder's own constructor says what is meant
 <code>query()</code>'s parameter the way the constructor declares it, so a class name
 binds <code>TModel</code> to the class, and offer the docblock fix upstream.</p>
 <hr />
-<h2 id="tm1-component-attribute-names-navigate-to-the-components-variable">TM1. Component attribute names navigate to the component's variable<a class="headerlink" href="#tm1-component-attribute-names-navigate-to-the-components-variable" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">&lt;</span><span class="nt">x-book-card</span> <span class="na">:book</span><span class="o">=</span><span class="s">"$book"</span> <span class="na">show-author</span> <span class="p">/&gt;</span>
-</code></pre></div>
-<p>Attribute names on a component tag already complete from the variables
-the component's view reads (<code>src/tempest/components.rs</code>), but
-go-to-definition on <code>show-author</code> or <code>:book</code> finds nothing. Navigate
-from an attribute name to the first read of <code>$showAuthor</code> (or <code>$book</code>)
-in the component's view, matching the kebab-case conversion completion
-uses, and hover the attribute with the type the component sees.
-Built-in directives (<code>:if</code>, <code>:foreach</code>, …) and <code>:is</code> on
-<code>&lt;x-component&gt;</code> keep their current handling.</p>
-<hr />
 <h2 id="tm2-documentation-for-built-in-components-and-directives">TM2. Documentation for built-in components and directives<a class="headerlink" href="#tm2-documentation-for-built-in-components-and-directives" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">&lt;</span><span class="nt">x-form</span> <span class="na">action</span><span class="o">=</span><span class="s">"/books"</span><span class="p">&gt;&lt;</span><span class="nt">x-input</span> <span class="na">name</span><span class="o">=</span><span class="s">"title"</span> <span class="p">/&gt;&lt;/</span><span class="nt">x-form</span><span class="p">&gt;</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="p">&lt;</span><span class="nt">li</span> <span class="na">:foreach</span><span class="o">=</span><span class="s">"$books as $book"</span> <span class="na">:if</span><span class="o">=</span><span class="s">"$book-&gt;published"</span><span class="p">&gt;</span>…<span class="p">&lt;/</span><span class="nt">li</span><span class="p">&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">&lt;</span><span class="nt">x-form</span> <span class="na">action</span><span class="o">=</span><span class="s">"/books"</span><span class="p">&gt;&lt;</span><span class="nt">x-input</span> <span class="na">name</span><span class="o">=</span><span class="s">"title"</span> <span class="p">/&gt;&lt;/</span><span class="nt">x-form</span><span class="p">&gt;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="p">&lt;</span><span class="nt">li</span> <span class="na">:foreach</span><span class="o">=</span><span class="s">"$books as $book"</span> <span class="na">:if</span><span class="o">=</span><span class="s">"$book-&gt;published"</span><span class="p">&gt;</span>…<span class="p">&lt;/</span><span class="nt">li</span><span class="p">&gt;</span>
 </code></pre></div>
 <p>Completion offers the directives (<code>:if</code>, <code>:elseif</code>, <code>:else</code>, <code>:isset</code>,
 <code>:foreach</code>, <code>:forelse</code>, <code>:apply</code>, <code>:as</code>) and the built-in tags, but
@@ -1430,7 +1406,7 @@ the directive or tag name.</p>
 <hr />
 <h2 id="tm5-named-arguments-containerinvoke-forwards">TM5. Named arguments <code>Container::invoke()</code> forwards<a class="headerlink" href="#tm5-named-arguments-containerinvoke-forwards" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$container-&gt;invoke([BookImporter::class, 'import'], path: $path);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$container-&gt;invoke([BookImporter::class, 'import'], path: $path);</span>
 </code></pre></div>
 <p><code>Tempest\Container\Container::invoke()</code> calls the callable it is given
 and forwards its remaining named arguments to it. Complete those names
@@ -1441,21 +1417,21 @@ let both use it.</p>
 <hr />
 <h2 id="tm7-a-projects-own-route-decorators-change-the-routes-uri">TM7. A project's own route decorators change the route's URI<a class="headerlink" href="#tm7-a-projects-own-route-decorators-change-the-routes-uri" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">final class Admin implements RouteDecorator</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">{</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    public function decorate(Route $route): Route</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    {</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">        return new Prefix('/admin')-&gt;decorate($route);</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">    }</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">}</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">#[Admin]</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="x">final class BookController</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="x">{</span>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="x">    #[Get('/books/{book}')] // the route is /admin/books/{book}</span>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="x">    public function show(Book $book): View { /* ... */ }</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">final class Admin implements RouteDecorator</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">{</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    public function decorate(Route $route): Route</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    {</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">        return new Prefix('/admin')-&gt;decorate($route);</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    }</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">}</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">#[Admin]</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">final class BookController</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="x">{</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="x">    #[Get('/books/{book}')] // the route is /admin/books/{book}</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="x">    public function show(Book $book): View { /* ... */ }</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="x">}</span>
 </code></pre></div>
 <p>Route discovery applies every attribute that implements
 <code>Tempest\Router\RouteDecorator</code>, method ones before class ones, but only
