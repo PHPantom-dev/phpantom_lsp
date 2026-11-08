@@ -92,6 +92,9 @@ enum Rank {
 pub(crate) struct ConfigPlan {
     params_files: Vec<(Rank, PathBuf)>,
     receives_params: HashSet<PathBuf>,
+    /// The files of the project's events groups, which list the event
+    /// listeners (see [`super::events`]).
+    events_files: HashSet<PathBuf>,
     /// The names of the project's groups, its environments' included.
     groups: Vec<String>,
 }
@@ -121,6 +124,7 @@ impl ConfigPlan {
             .unwrap_or("");
         let dir = crate::document_links::normalize_path(&root.join(source));
         let mut receives = Vec::new();
+        let mut events = Vec::new();
         if let Some(groups) = extra.get("config-plugin").and_then(|g| g.as_object()) {
             for (group, entries) in groups {
                 plan.groups.push(group.clone());
@@ -129,7 +133,12 @@ impl ConfigPlan {
                     group if is_params_group(group) => {
                         plan.add_params(Rank::NestedProject, entries, &dir);
                     }
-                    _ => super::definitions::group_files(entries, &dir, &mut receives),
+                    group => {
+                        if super::events::is_events_group(group) {
+                            super::definitions::group_files(entries, &dir, &mut events);
+                        }
+                        super::definitions::group_files(entries, &dir, &mut receives);
+                    }
                 }
             }
         }
@@ -143,19 +152,17 @@ impl ConfigPlan {
                     if is_params_group(group) {
                         plan.add_params(Rank::Environment, entries, &dir);
                     } else {
+                        if super::events::is_events_group(group) {
+                            super::definitions::group_files(entries, &dir, &mut events);
+                        }
                         super::definitions::group_files(entries, &dir, &mut receives);
                     }
                 }
             }
         }
         plan.params_files.sort_by_key(|(rank, _)| *rank);
-        plan.receives_params = receives
-            .iter()
-            .map(|path| {
-                dunce::canonicalize(path)
-                    .unwrap_or_else(|_| crate::document_links::normalize_path(path))
-            })
-            .collect();
+        plan.receives_params = receives.iter().map(|path| canonical(path)).collect();
+        plan.events_files = events.iter().map(|path| canonical(path)).collect();
         plan
     }
 
@@ -179,15 +186,31 @@ impl ConfigPlan {
 
     /// Whether `yiisoft/config` hands the file at `path` the `$params`.
     pub(crate) fn receives_params(&self, path: &Path) -> bool {
-        if self.receives_params.is_empty() {
-            return false;
-        }
-        // The files are kept canonical, which a path reached another way
-        // (a short name on Windows) only matches once it is too.
-        self.receives_params
-            .contains(&crate::document_links::normalize_path(path))
-            || dunce::canonicalize(path).is_ok_and(|path| self.receives_params.contains(&path))
+        contains_path(&self.receives_params, path)
     }
+
+    /// The files of the project's events groups.
+    pub(crate) fn events_files(&self) -> impl Iterator<Item = &PathBuf> {
+        self.events_files.iter()
+    }
+
+    /// Whether the file at `path` is one of the project's events groups'.
+    pub(crate) fn is_events_file(&self, path: &Path) -> bool {
+        contains_path(&self.events_files, path)
+    }
+}
+
+/// `path` as the plan keeps it: canonical when the file is there.
+fn canonical(path: &Path) -> PathBuf {
+    dunce::canonicalize(path).unwrap_or_else(|_| crate::document_links::normalize_path(path))
+}
+
+/// Whether `files`, kept canonical, hold `path`.  A path reached another
+/// way (a short name on Windows) only matches once it is canonical too.
+fn contains_path(files: &HashSet<PathBuf>, path: &Path) -> bool {
+    !files.is_empty()
+        && (files.contains(&crate::document_links::normalize_path(path))
+            || dunce::canonicalize(path).is_ok_and(|path| files.contains(&path)))
 }
 
 /// The params files `package` contributes, ranked: each file its

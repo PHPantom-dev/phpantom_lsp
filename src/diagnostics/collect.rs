@@ -210,6 +210,16 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_yii_definition_diagnostics,
     ),
     always(
+        "invalid_yii_event_listener",
+        |backend, _, uri, content, out| {
+            backend.collect_yii_event_listener_diagnostics(uri, content, out)
+        },
+    ),
+    always(
+        "invalid_yii_relation",
+        Backend::collect_yii_relation_diagnostics,
+    ),
+    always(
         "invalid_dql_syntax",
         Backend::collect_dql_syntax_diagnostics,
     ),

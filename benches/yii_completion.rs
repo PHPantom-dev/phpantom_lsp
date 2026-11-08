@@ -14,12 +14,14 @@ const ACTIONS: usize = 10;
 
 const COMPOSER: &str = r#"{
     "require": {
+        "yiisoft/active-record": "^1.1",
         "yiisoft/router": "^4.0",
         "yiisoft/yii-view-renderer": "^7.4",
         "yiisoft/view": "^12.2"
     },
     "autoload": { "psr-4": {
         "App\\": "src/",
+        "Yiisoft\\ActiveRecord\\": "stubs/active-record/",
         "Yiisoft\\Router\\": "stubs/router/",
         "Yiisoft\\Translator\\": "stubs/translator/",
         "Yiisoft\\Yii\\View\\Renderer\\": "stubs/yii-view-renderer/",
@@ -32,9 +34,22 @@ const COMPOSER: &str = r#"{
     } }
 }"#;
 
-/// Just enough of the view layer and the router for the type engine to
-/// tell a renderer, a view, and a URL generator from any other receiver.
+/// Just enough of the view layer, the router, and Active Record for the
+/// type engine to tell a renderer, a view, a URL generator, a record, and a
+/// query from any other receiver.
 const STUBS: &[(&str, &str)] = &[
+    (
+        "stubs/active-record/ActiveRecordInterface.php",
+        "<?php\nnamespace Yiisoft\\ActiveRecord;\ninterface ActiveRecordInterface {\n    public static function query(self|string|null $modelClass = null): ActiveQueryInterface;\n    public function get(string $propertyName): mixed;\n    public function relationQuery(string $name): ActiveQueryInterface;\n    public function hasOne(self|string $modelClass, array $link): ActiveQueryInterface;\n    public function hasMany(self|string $modelClass, array $link): ActiveQueryInterface;\n}\n",
+    ),
+    (
+        "stubs/active-record/ActiveRecord.php",
+        "<?php\nnamespace Yiisoft\\ActiveRecord;\nclass ActiveRecord implements ActiveRecordInterface {\n    public static function query(ActiveRecordInterface|string|null $modelClass = null): ActiveQueryInterface {}\n    public function get(string $propertyName): mixed {}\n    public function relationQuery(string $name): ActiveQueryInterface {}\n    public function hasOne(ActiveRecordInterface|string $modelClass, array $link): ActiveQueryInterface {}\n    public function hasMany(ActiveRecordInterface|string $modelClass, array $link): ActiveQueryInterface {}\n}\n",
+    ),
+    (
+        "stubs/active-record/ActiveQueryInterface.php",
+        "<?php\nnamespace Yiisoft\\ActiveRecord;\ninterface ActiveQueryInterface {\n    public function with(array|string ...$with): static;\n    public function one(): array|ActiveRecordInterface|null;\n}\n",
+    ),
     (
         "stubs/yii-view-renderer/WebViewRenderer.php",
         "<?php\nnamespace Yiisoft\\Yii\\View\\Renderer;\nfinal class WebViewRenderer {\n    public function withViewPath(string $viewPath): self {}\n    public function render(string $view, array $parameters = []): object {}\n}\n",
@@ -92,6 +107,22 @@ final class ConsumerAsset extends AssetBundle
 {
     public ?string $sourcePath = '@root/assets';
     public array $css = ['section1/'];
+}
+"#;
+
+/// The records' attributes and relations, named from a class of the
+/// application.
+const RECORD_CONSUMER_PHP: &str = r#"<?php
+namespace App\Catalog;
+
+final class Catalog
+{
+    public function read(Record1 $record): void
+    {
+        $record->get('');
+        Record1::query()->with('')->one();
+        Record1::query()->with('author.')->one();
+    }
 }
 "#;
 
@@ -203,8 +234,8 @@ fn rt() -> tokio::runtime::Runtime {
 /// The files of a mid-sized Yii application: controllers that render the
 /// views of a directory each, the views, and a partial each view renders,
 /// and grouped routes, an action class per route that reads its route's
-/// arguments, a wrapper around the URL generator, and a DI definition
-/// that binds it.
+/// arguments, a wrapper around the URL generator, a DI definition that
+/// binds it, and an Active Record per section, related to the next.
 fn generate_application() -> Vec<(String, String)> {
     let mut files = Vec::new();
 
@@ -289,6 +320,20 @@ fn generate_application() -> Vec<(String, String)> {
     files.push((
         "src/Web/ConsumerTitle.php".to_string(),
         TRANSLATION_CONSUMER_PHP.to_string(),
+    ));
+    // A record per section, each related to the next.
+    for s in 0..SECTIONS {
+        let next = (s + 1) % SECTIONS;
+        files.push((
+            format!("src/Catalog/Record{s}.php"),
+            format!(
+                "<?php\nnamespace App\\Catalog;\n\nuse Yiisoft\\ActiveRecord\\ActiveQueryInterface;\nuse Yiisoft\\ActiveRecord\\ActiveRecord;\n\nfinal class Record{s} extends ActiveRecord\n{{\n    public int $id;\n    public string $title;\n    public int $author_id;\n\n    public function relationQuery(string $name): ActiveQueryInterface\n    {{\n        return match ($name) {{\n            'author' => $this->hasOne(Record{next}::class, ['id' => 'author_id']),\n            'posts' => $this->hasMany(Record{next}::class, ['author_id' => 'id']),\n            default => parent::relationQuery($name),\n        }};\n    }}\n}}\n"
+            ),
+        ));
+    }
+    files.push((
+        "src/Catalog/Catalog.php".to_string(),
+        RECORD_CONSUMER_PHP.to_string(),
     ));
     files
 }
@@ -392,6 +437,7 @@ fn bench_yii_name_completion(c: &mut Criterion) {
     let asset_uri = Uri::from_file_path(dir.path().join("src/Asset/ConsumerAsset.php")).unwrap();
     let translation_uri =
         Uri::from_file_path(dir.path().join("src/Web/ConsumerTitle.php")).unwrap();
+    let record_uri = Uri::from_file_path(dir.path().join("src/Catalog/Catalog.php")).unwrap();
 
     // (benchmark, document, its text, the literal to complete inside, a
     // name the completion must offer)
@@ -480,6 +526,27 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             TRANSLATION_CONSUMER_PHP,
             "translate('section1.'",
             "section1.action7",
+        ),
+        (
+            "record_attribute",
+            &record_uri,
+            RECORD_CONSUMER_PHP,
+            "get(''",
+            "title",
+        ),
+        (
+            "record_relation",
+            &record_uri,
+            RECORD_CONSUMER_PHP,
+            "with(''",
+            "author",
+        ),
+        (
+            "record_relation_path",
+            &record_uri,
+            RECORD_CONSUMER_PHP,
+            "with('author.'",
+            "posts",
         ),
     ];
 

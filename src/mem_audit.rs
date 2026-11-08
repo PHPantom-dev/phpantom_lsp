@@ -724,6 +724,11 @@ impl Audit {
         tp.add(e.template_bindings.capacity() * size_of::<(Atom, Atom)>());
         self.m_tmpl += tp;
         self.m_tmpl += atom_map_ty(&e.template_param_bounds);
+        if let Some(relations) = &e.record_relations {
+            let mut rel = Sz::default();
+            rel.add(relations.len() * size_of::<crate::types::RecordRelation>());
+            self.m_struct += rel;
+        }
         self.m_docs += s(&e.return_description);
         self.m_docs += vs(&e.links);
         self.m_docs += see(&e.see_refs);
@@ -1482,6 +1487,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 sym.add(route.path.capacity());
                 sym.add(route.placeholders.capacity() * size_of::<(u32, u32)>());
                 sym.add(std::mem::size_of_val(route.parameters.as_ref()));
+            }
+            sym.add(sm.yii_relations.capacity() * size_of::<crate::symbol_map::YiiRelationSite>());
+            for site in &sm.yii_relations {
+                sym.add(site.subject.heap_bytes());
             }
         }
     }

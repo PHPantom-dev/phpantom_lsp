@@ -945,6 +945,29 @@ pub(crate) struct YiiDefinitionBody {
     pub class: Atom,
 }
 
+/// A relation a Yii Active Record call names: `'author'` in
+/// `$post->relation('author')` or `Post::query()->with('author')`, or one
+/// segment of a path of them, `'author.profile'` (see
+/// [`crate::yii::active_record`]).
+///
+/// Kept beside the spans rather than in them, since a relation is not a
+/// member of the record: what declares it is an arm of the record's
+/// `relationQuery()` or a `get{Name}Query()` method.
+#[derive(Debug, Clone)]
+pub(crate) struct YiiRelationSite {
+    /// The byte range of the relation's name.
+    pub start: u32,
+    pub end: u32,
+    /// The call's receiver: a record, or a query for one.
+    pub subject: crate::symbol_map::SubjectText,
+    /// Whether the receiver is a query, whose record the path starts from.
+    pub on_query: bool,
+    /// The relations before this one in its path, joined with `.`, which
+    /// lead from the receiver's record to the one this is a relation of.
+    /// Empty for the first.
+    pub path: Atom,
+}
+
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
 /// A route a file declares, with what its name alone does not say: the path

@@ -196,6 +196,17 @@ pub(crate) enum DocblockMemberRef {
     /// it builds, and throws for one the class does not have, so it is
     /// checked.
     YiiDefinition,
+    /// An attribute a Yii Active Record's `get()`, `set()`, or the rest of
+    /// its attribute API names, `$post->get('title')`, with the call's
+    /// receiver as the subject (see [`crate::yii::active_record`]).
+    ///
+    /// The attribute is the record's property of that name.  The extractor
+    /// cannot tell a record from any other object with a `get()`, so a
+    /// consumer that resolves the subject keeps only the records among it,
+    /// and drops the span when there are none.  A record that declares no
+    /// properties reads its attributes from its table's columns, so on one
+    /// of those a name that names nothing is not reported.
+    YiiAttribute,
 }
 
 impl DocblockMemberRef {

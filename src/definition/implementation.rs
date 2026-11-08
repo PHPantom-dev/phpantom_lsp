@@ -172,8 +172,12 @@ impl Backend {
         // What a Yii container hands out for a class is what its DI
         // definitions say, so those come first, from the class and from a
         // `$container->get()` or `Reference::to()` that names it alike.
+        // What handles an event is the listeners the events configuration
+        // attaches to it.
         let mut locations = if self.is_yii_project() {
-            self.yii_definition_locations(target.fqn().as_str())
+            let mut locations = self.yii_definition_locations(target.fqn().as_str());
+            locations.extend(self.yii_event_listener_locations(target.fqn().as_str()));
+            locations
         } else {
             Vec::new()
         };

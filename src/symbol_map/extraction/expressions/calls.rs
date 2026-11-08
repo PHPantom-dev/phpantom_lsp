@@ -520,6 +520,7 @@ fn extract_method_call<'a>(
         record_yii_css_class_sites(&member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
         emit_entity_field_spans(object, &member_name, argument_list, ctx);
+        emit_yii_active_record_spans(object, &member_name, argument_list, ctx);
         record_dql_call(
             object,
             &member_name,

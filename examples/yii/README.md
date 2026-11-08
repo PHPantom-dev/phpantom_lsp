@@ -2,8 +2,9 @@
 
 A standalone editor playground for PHPantom's Yii 3 support. It is the
 application `yiisoft/app` generates, with the tooling trimmed off and a small
-blog added: a route group, a controller, views rendered through an alias, and
-a DI definition, each declared the way a real Yii 3 project declares them.
+blog added: a route group, a controller, views rendered through an alias, a
+DI definition, and a book catalog kept in Active Records, each declared the
+way a real Yii 3 project declares them.
 
 ## What to try
 
@@ -28,6 +29,15 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   complete it, or misspell one to see it reported. Drop the `$` from
   `'$pageSize'` to see the key reported with a fix that puts it back, or set
   it to `'5'` to see the value reported, since the property takes an `int`.
+- Open `config/common/events.php`. Go to the definition of `'count'` in
+  `[ViewCounter::class, 'count']`, which opens `src/Blog/ViewCounter.php`.
+  Clear it to complete `ViewCounter`'s public methods, rename `count()` and
+  the string follows, or misspell it to see it reported. Point it at
+  `'viewsOf'` to see the listener reported, since its `string $slug` can be
+  filled with neither the event nor a service, and drop the `PostViewed`
+  type from the closure's `$event` for the same report. Open
+  `src/Blog/PostViewed.php` for the lens listing its listeners, which
+  go-to-implementation on the class name lists too.
 - Open `src/Blog/PostRepositoryInterface.php`. The lens above the interface,
   and go-to-implementation on its name, lead to the definition that binds it.
   Go-to-implementation on `LoggerInterface` in `Reference::to()` does the same
@@ -78,6 +88,15 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `assets/main/site.css`, or hover it for the stylesheets that declare it.
   Clear the string to complete the classes the project's stylesheets
   declare, a name at a time.
+- Open `src/Catalog/BookCatalog.php`. Hover `$book` in `find()`: the query
+  `Book::query()` builds returns a `Book`. Go to the definition of `'author'`
+  in `with()`, which lands on `Book::getAuthorQuery()`, and of `'books'` in
+  `with('books.author')`, which lands on its arm in `Author::relationQuery()`.
+  Each segment of the path is a relation of the record the one before it is
+  for. In `describe()`, `'title'` in `get()` goes to `Book::$title`, and
+  renaming the property renames the string. Clear a name to complete the
+  relations or attributes the record declares, and misspell one to see it
+  reported.
 - Open `vendor/yiisoft/router/composer.json` once the dependencies are
   installed. Its `config-plugin` lists the files the package adds to each
   config group: go to the definition of `"di.php"` for `config/di.php`, clear

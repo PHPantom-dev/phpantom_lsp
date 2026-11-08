@@ -14,12 +14,21 @@
 require_once __DIR__ . '/vendor/autoload.php';
 
 use App\Blog\InMemoryPostRepository;
+use App\Catalog\Author;
+use App\Catalog\Book;
+use App\Catalog\BookCatalog;
 use App\Blog\Post;
 use App\Blog\PostRepositoryInterface;
+use App\Blog\PostViewed;
+use App\Blog\ViewCounter;
 use App\Web\Blog\PostController;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
 use Yiisoft\Aliases\Aliases;
+use Yiisoft\Db\Connection\ConnectionInterface;
+use Yiisoft\Injector\Injector;
+use Yiisoft\Injector\MissingRequiredArgumentException;
 use Yiisoft\Router\HydratorAttribute\RouteArgument;
 use Yiisoft\Router\RouteCollectionInterface;
 use Yiisoft\Router\UrlGeneratorInterface;
@@ -179,11 +188,75 @@ foreach (['app', 'blog'] as $category) {
 }
 check("An ID no file declares is translated as itself", $translator->translate('home.missing') === 'home.missing');
 
+// ─── Events ─────────────────────────────────────────────────────────────────
+
+// config/configuration.php lists config/common/events.php under 'events',
+// which 'events-web' adds, and yiisoft/yii-event attaches its listeners to
+// the dispatcher the container builds.
+$events = $runner->getConfig()->get('events-web');
+check('The events-web group attaches two listeners to PostViewed', count($events[PostViewed::class]) === 2);
+check("[ViewCounter::class, 'count'] names a public method", (new ReflectionMethod(ViewCounter::class, 'count'))->isPublic());
+$container->get(EventDispatcherInterface::class)->dispatch(new PostViewed('hello-yii'));
+check('Dispatching PostViewed calls ViewCounter::count() on the shared instance', $container->get(ViewCounter::class)->viewsOf('hello-yii') === 1);
+$injector = new Injector($container);
+$threw = false;
+try {
+    $injector->invoke([new ViewCounter(), 'viewsOf'], [new PostViewed('hello-yii')]);
+} catch (MissingRequiredArgumentException) {
+    $threw = true;
+}
+check("ViewCounter::viewsOf()'s string \$slug cannot be filled by the event", $threw);
+$threw = false;
+try {
+    $injector->invoke(static fn ($event) => $event, [new PostViewed('hello-yii')]);
+} catch (MissingRequiredArgumentException) {
+    $threw = true;
+}
+check('A listener parameter with no type cannot be filled by the event', $threw);
+check('A listener takes the event in any parameter its class fits', $injector->invoke(static fn (LoggerInterface $logger, PostViewed $event) => $event->slug, [new PostViewed('hello-yii')]) === 'hello-yii');
+
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
 $controller = $container->get(PostController::class);
 check('PostController::index() returns a response', $controller->index() instanceof ResponseInterface);
 check('PostController::view() answers 200 for a known slug', $controller->view('hello-yii')->getStatusCode() === 200);
+
+// ─── Active Record ──────────────────────────────────────────────────────────
+
+// The bootstrap group runs yiisoft/active-record's bootstrap, which hands the
+// connection config/common/di/db.php defines to the records.
+foreach ($runner->getConfig()->get('bootstrap-web') as $bootstrap) {
+    $bootstrap($container);
+}
+$db = $container->get(ConnectionInterface::class);
+$db->createCommand('CREATE TABLE author (id INTEGER PRIMARY KEY, name TEXT NOT NULL)')->execute();
+$db->createCommand('CREATE TABLE book (id INTEGER PRIMARY KEY, title TEXT NOT NULL, author_id INTEGER NOT NULL)')->execute();
+$db->createCommand("INSERT INTO author (id, name) VALUES (1, 'Ursula')")->execute();
+$db->createCommand("INSERT INTO book (id, title, author_id) VALUES (1, 'Earthsea', 1), (2, 'The Dispossessed', 1)")->execute();
+
+check("Book declares the relation 'author' with getAuthorQuery()", (new Book())->relationNames() === ['author']);
+check("Author declares the relation 'books' in relationQuery()", (new Author())->relationQuery('books')->getModel() instanceof Book);
+try {
+    (new Author())->relationQuery('autor');
+    check("Author declares no relation 'autor'", false);
+} catch (InvalidArgumentException) {
+    check("Author declares no relation 'autor'", true);
+}
+
+$catalog = new BookCatalog();
+$book = $catalog->find(1);
+check("Book::query()->with('author')->one() is a Book", $book instanceof Book);
+check("with('author') loads the author", $book?->isRelationPopulated('author') === true);
+check("relation('author') is an Author", $book?->relation('author') instanceof Author);
+check("get('title') reads Book::\$title", $book?->get('title') === 'Earthsea');
+check('describe() reads the title and the author', $book !== null && $catalog->describe($book) === 'Earthsea by Ursula (Earthsea)');
+
+$authors = $catalog->authorsWithBooks();
+$author = $authors[0] ?? null;
+check("Author::query()->with('books.author')->all() returns Authors", $author instanceof Author);
+check("with('books.author') loads each author's books", $author instanceof Author && count($author->relation('books')) === 2);
+$first = $author instanceof Author ? ($author->relation('books')[0] ?? null) : null;
+check("with('books.author') loads the author of each book", $first instanceof Book && $first->isRelationPopulated('author'));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

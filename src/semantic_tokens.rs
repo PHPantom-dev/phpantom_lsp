@@ -333,12 +333,14 @@ impl Backend {
                     // run for a variable, so the string keeps its colour.
                     // An attribute's named-argument label names a parameter
                     // first, and keeps the colour the editor gives one, and
-                    // a repository call's field name is an array key first.
+                    // a repository call's field name is an array key first,
+                    // as a record's attribute name is a string first.
                     if matches!(
                         docblock_ref,
                         crate::symbol_map::DocblockMemberRef::MockedMethod
                             | crate::symbol_map::DocblockMemberRef::AttributeNamedArg
                             | crate::symbol_map::DocblockMemberRef::EntityField
+                            | crate::symbol_map::DocblockMemberRef::YiiAttribute
                     ) {
                         continue;
                     }

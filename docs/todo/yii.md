@@ -8,10 +8,10 @@ complete, navigate, and are checked, path aliases navigate to their
 declarations, the files an asset bundle lists navigate, complete, and are
 checked, the `$params` keys a configuration file reads complete,
 navigate, are checked, and are typed, and the message IDs a translator
-looks up complete, navigate, and are checked. What is still missing is
-the navigation between the rest of the names Yii keeps in configuration
-(events) and the code and files they point to, and checking
-the values a DI definition passes rather than only the names it uses.
+looks up complete, navigate, and are checked, and so do the listeners
+the events configuration attaches. Active Record queries are typed by the
+record they are for, and the attributes and relations a record and its
+queries name navigate, complete, and are checked. What is left is below.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).
@@ -79,32 +79,6 @@ the DI configuration gives the renderer, from
 it, so a name such a class renders does not navigate, complete, or get
 reported. Read the value from the merged params (`src/yii/params.rs`),
 and use it as the base wherever the class gives none.
-
----
-
-## Y14. Event listeners in the events configuration
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-// config/common/events.php
-return [
-    UserRegistered::class => [
-        [WelcomeMailer::class, 'send'],
-        static fn (UserRegistered $event) => ...,
-    ],
-];
-```
-
-`yiisoft/yii-event` reads listeners from the `events`, `events-web`, and
-`events-console` groups. The method string of an `[Handler::class,
-'method']` listener should navigate, complete from the handler's public
-methods, rename with the method, and be reported when the handler has
-none of that name, or when its first parameter cannot take the event.
-Go-to-implementation and a CodeLens on an event class should list the
-listeners the configuration attaches to it, the installed packages'
-included. The groups come from `configuration.php` and the packages'
-`config-plugin`, the same merge plan `src/yii/params.rs` reads.
 
 ---
 
@@ -189,22 +163,27 @@ demo is the only project known to query this way.
 
 ---
 
-## Y18. Active Record attributes and relations
+## Y19. Attributes of an Active Record without properties
 
-**Impact: Low-Medium · Complexity: Medium-High**
+**Impact: Low-Medium · Complexity: Low-Medium**
 
 ```php
-$post = Post::query()->with('author')->where(['status' => 1])->one();
+#[\AllowDynamicProperties]
+final class Post extends ActiveRecord {}
+
 $post->get('title');
 ```
 
-`yiisoft/active-record` names attributes and relations as strings:
-`get()` and `set()` take an attribute, `with()` and `relation()` a
-relation, whose getter is a `get{Name}Query()` method on the record.
-Complete, navigate, and check the relation names against those methods,
-and the attribute names against the record's properties, or, for a
-record without properties, against the table's columns (Y8). Wait for a
-user to ask: no project in our test set uses it.
+An Active Record's `get()`, `set()`, and the rest of its attribute API
+name an attribute, which navigates, completes, and is checked against
+the record's properties (`src/yii/active_record.rs`). A record that
+declares no properties, real or `@property` ones, reads its attributes
+from its table's columns instead, so on one of those nothing completes
+and every name passes. Once Y8 reads the schema from the project's
+migrations, complete those names from the columns of the record's table
+(`tableName()`, or the name `AbstractActiveRecord::tableName()` derives
+from the class), navigate to the migration that creates each one, and
+report one no migration creates.
 
 ---
 

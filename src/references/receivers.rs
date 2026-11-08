@@ -173,6 +173,14 @@ impl Backend {
                 });
                 fqns
             }
+            DocblockMemberRef::YiiAttribute => {
+                fqns.retain(|fqn| {
+                    class_loader(Fqn::new(fqn)).is_some_and(|class| {
+                        crate::yii::active_record::is_record(&class, &class_loader)
+                    })
+                });
+                fqns
+            }
             _ => fqns,
         }
     }

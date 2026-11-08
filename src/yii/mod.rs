@@ -1,7 +1,7 @@
 //! Yii 3: the views an application renders and the path aliases it names
 //! them through, the route names it declares and the arguments a handler
-//! takes from its route's path, and the DI definitions it configures its
-//! container with.
+//! takes from its route's path, the DI definitions it configures its
+//! container with, and the listeners it attaches to its events.
 //!
 //! A view is named by a path (`__DIR__ . '/template'`) or by a name the
 //! renderer's view path prefixes (`render('index')` after
@@ -32,16 +32,26 @@
 //! The `config-plugin` of a `composer.json` names those groups and lists
 //! their files; it is read where it is written (see [`config_plugin`]).
 //!
+//! The listeners the events configuration attaches to an event class are
+//! read from the files of the events groups, the project's and the
+//! installed packages' (see [`events`]).
+//!
 //! The message IDs a `translate()` call names are spans keyed by the
 //! category they are looked up in, and are declared by the message files
 //! of the directories the DI definitions give their message sources (see
 //! [`translations`]).
+//!
+//! The attributes and relations an Active Record names as strings are read
+//! against the record (see [`active_record`]).
 
+pub(crate) mod active_record;
 pub(crate) mod aliases;
 pub(crate) mod assets;
 pub(crate) mod config_plugin;
 pub(crate) mod definitions;
+pub(crate) mod events;
 pub(crate) mod params;
+pub(crate) mod relations;
 pub(crate) mod routes;
 pub(crate) mod translations;
 pub(crate) mod views;
@@ -64,6 +74,9 @@ pub(crate) struct YiiState {
     /// The DI definitions the installed packages contribute, read on first
     /// use and dropped when the dependencies change.
     package_definitions: parking_lot::Mutex<Option<Arc<Vec<definitions::PackageDefinitionFile>>>>,
+    /// The event listeners the installed packages attach, read on first
+    /// use and dropped when the dependencies change.
+    package_listeners: parking_lot::Mutex<Option<Arc<Vec<events::PackageListenerFile>>>>,
     /// The project's merge plan, read on first use and dropped when a
     /// configuration file changes.
     config_plan: RwLock<Option<Arc<params::ConfigPlan>>>,

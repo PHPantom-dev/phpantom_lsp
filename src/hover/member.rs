@@ -388,6 +388,9 @@ impl Backend {
                     &resolved_class_loader,
                 )
             }),
+            DocblockMemberRef::YiiAttribute => candidates.retain(|class| {
+                crate::yii::active_record::is_record(class, &resolved_class_loader)
+            }),
             _ => {}
         }
 

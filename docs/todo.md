@@ -36,12 +36,11 @@ contributor even though it's short.
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
 | TM4 | [Model property names in query builders and model helpers](todo/tempest.md#tm4-model-property-names-in-query-builders-and-model-helpers) | Medium | Medium |
-| Y14 | [Event listeners in the events configuration](todo/yii.md#y14-event-listeners-in-the-events-configuration) | Medium      | Medium      |
 | Y15 | [Property names in hydrator attributes and form fields](todo/yii.md#y15-property-names-in-hydrator-attributes-and-form-fields) | Low-Medium  | Medium      |
 | Y17 | [Key paths in `yiisoft/arrays`](todo/yii.md#y17-key-paths-in-yiisoftarrays) | Low         | Medium      |
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
 | Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
-| Y18 | [Active Record attributes and relations](todo/yii.md#y18-active-record-attributes-and-relations) (builds on Y8) | Low-Medium  | Medium-High |
+| Y19 | [Attributes of an Active Record without properties](todo/yii.md#y19-attributes-of-an-active-record-without-properties) (builds on Y8) | Low-Medium  | Low-Medium  |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -150,11 +149,10 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | Y9  | [Views a template renders by name](todo/yii.md#y9-views-a-template-renders-by-name) | Medium      | Medium      |
 | Y10 | [The renderer's configured view path](todo/yii.md#y10-the-renderers-configured-view-path) | Medium      | Medium      |
-| Y14 | [Event listeners in the events configuration](todo/yii.md#y14-event-listeners-in-the-events-configuration) | Medium      | Medium      |
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
 | Y15 | [Property names in hydrator attributes and form fields](todo/yii.md#y15-property-names-in-hydrator-attributes-and-form-fields) | Low-Medium  | Medium      |
 | Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
-| Y18 | [Active Record attributes and relations](todo/yii.md#y18-active-record-attributes-and-relations) (builds on Y8) | Low-Medium  | Medium-High |
+| Y19 | [Attributes of an Active Record without properties](todo/yii.md#y19-attributes-of-an-active-record-without-properties) (builds on Y8) | Low-Medium  | Low-Medium  |
 | Y17 | [Key paths in `yiisoft/arrays`](todo/yii.md#y17-key-paths-in-yiisoftarrays) | Low         | Medium      |
 
 ## Tempest
