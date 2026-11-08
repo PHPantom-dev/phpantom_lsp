@@ -91,7 +91,9 @@ mod template_subs;
 pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_for_call};
 
 pub(crate) use arg_text_types::array_literal_shape_type_with;
-pub(crate) use array_callable::array_callable_return_type;
+pub(crate) use array_callable::{
+    array_callable_return_type, with_array_callable_method, with_callable_method,
+};
 pub(crate) use callable_target::invoked_value_types;
 pub(crate) use closure_invoke::{closure_invoke_return, is_closure_invoke_call};
 pub(crate) use constant_operands::evaluate_constant_operands;
@@ -106,7 +108,8 @@ pub(crate) use reflection::{
 };
 pub(crate) use return_types::{
     MethodReturnCtx, answers_with_merged_method, class_constant_type, enum_case_property_literal,
-    folded_global_constant_type, global_constant_class_reference_type, resolve_static_access_type,
+    folded_global_constant_type, global_constant_class_reference_type, literal_arg_type,
+    resolve_static_access_type,
 };
 #[cfg(test)]
 pub(crate) use target_cache::test_body_inferences;

@@ -42,6 +42,11 @@ impl Backend {
             *cursor_offset as usize,
         );
         if let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.container_string_completions(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+        if let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.tempest_model_property_string_completion(content, position, ctx, code)
         {

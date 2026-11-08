@@ -21,6 +21,9 @@ require __DIR__ . '/vendor/autoload.php';
 $config = require __DIR__ . '/app/views.config.php';
 $discovery = require __DIR__ . '/app/discovery.config.php';
 $container = new GenericContainer();
+if (new App\ContainerCalls()->run($container) !== '/books:2') {
+    throw new RuntimeException('Container invocation did not forward the named arguments.');
+}
 $container->singleton(ViewConfig::class, $config);
 new BootDiscovery($container, $discovery)([ViewComponentDiscovery::class]);
 if (!isset($config->viewComponents['x-summary'], $config->viewComponents['book-notice'])
@@ -29,6 +32,10 @@ if (!isset($config->viewComponents['x-summary'], $config->viewComponents['book-n
 }
 $renderer = TempestViewRenderer::make(viewConfig: $config);
 GenericContainer::setInstance($container);
+if (new App\ContainerCalls()->invokeClass($container) !== '/books:3'
+    || new App\ContainerCalls()->invokeHelper() !== '/books:4') {
+    throw new RuntimeException('Class invocation or the invoke helper did not forward the named arguments.');
+}
 $container->singleton(TempestViewRenderer::class, $renderer);
 
 $routes = new Tempest\Router\RouteConfig();

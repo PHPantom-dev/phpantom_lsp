@@ -6,6 +6,8 @@ The `.view.php` files use the editor's PHP language-server connection.
 - In `app/BookController.php`, complete or follow the view path.
 - In `app/DatabaseQueries.php`, complete and follow model property names in
   query builders and model helpers.
+- In `app/ContainerCalls.php`, complete and follow the named arguments
+  forwarded to `BookImporter` by the container or its `invoke()` helper.
 - In `app/RouteLinks.php`, complete and follow route URIs and their arguments.
   In `BookController.php`, follow route placeholders to parameters and rename them
   together with their URI arguments. Routes without a leading slash complete

@@ -2435,6 +2435,11 @@ check(
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 
+check(
+    'container call forwards parameter keys to the callable',
+    new \App\Demo()->containerInvocation() === '/books:2'
+);
+
 echo "\n";
 if ($failed === 0) {
     echo "\033[32m✓ All $passed assertions passed.\033[0m\n";

@@ -1794,6 +1794,17 @@ class Demo
         Redis::connection();              // Facades\Redis static method
     }
 
+    public function containerInvocation(): mixed
+    {
+        // Try: complete the parameter keys and follow them to importBooks().
+        return app()->call([self::class, 'importBooks'], ['path' => '/books', 'limit' => 2]);
+    }
+
+    public static function importBooks(string $path, int $limit = 1): string
+    {
+        return "{$path}:{$limit}";
+    }
+
     public function dateHelpers(): \DateTime
     {
         // now()/today() are declared to return CarbonInterface, but they

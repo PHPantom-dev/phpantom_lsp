@@ -1491,6 +1491,14 @@ PHP class names go through resolution at parse time (`resolve_parent_class_names
 
 This runs on every name a `ClassInfo` extracted from a file carries: its parents, interfaces, traits and mixins, its members' native and docblock types, its `@property` and `@method` tags, and the classes its constants' initializers name. A function's types get the same treatment. Names read later, in a method body or by whoever consumes a resolved name, follow [Source Names and Resolved Names](#source-names-and-resolved-names).
 
+## Container invocation arguments
+
+`container_calls.rs` resolves the callable passed to Tempest's `invoke()` and
+Laravel's `call()` through the shared type engine. Both completion and definition
+read its parameters; definition looks up their source spans only when requested.
+Container recognition checks the receiver's resolved interface and method
+signature, so unrelated methods with the same name retain ordinary handling.
+
 ## Tempest routes
 
 In a Tempest project, route attributes are collected alongside classes in the
