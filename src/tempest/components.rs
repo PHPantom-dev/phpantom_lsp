@@ -14,6 +14,8 @@ const DIRECTIVES: [&str; 8] = [
 const BUILTINS: [&str; 3] = ["x-slot", "x-template", "x-component"];
 
 struct AttributeTarget {
+    /// The URI the component's symbol map is indexed under.
+    uri: String,
     location: Location,
     php_position: Position,
 }
@@ -112,6 +114,7 @@ impl Backend {
                         })
                         .min_by_key(|(range, _)| (range.start.line, range.start.character))?;
                     Some(AttributeTarget {
+                        uri: target_uri.clone(),
                         location: Location {
                             uri: crate::util::parse_url(&target_uri)?,
                             range,
@@ -153,7 +156,7 @@ impl Backend {
         let (range, targets) =
             self.tempest_component_attribute_targets(uri, &source, &tag, offset)?;
         let mut hovers = targets.into_iter().filter_map(|target| {
-            let uri = target.location.uri.as_str();
+            let uri = target.uri.as_str();
             self.with_file_content("tempest_component_attribute_hover", uri, None, |php, _| {
                 self.handle_hover(uri, php, target.php_position)
             })
@@ -192,11 +195,13 @@ impl Backend {
             if let Some((_, targets)) =
                 self.tempest_component_attribute_targets(uri, &source, &tag, offset)
             {
-                return (!targets.is_empty()).then(|| {
-                    Definition::LocationList(
-                        targets.into_iter().map(|target| target.location).collect(),
-                    )
-                });
+                let mut locations: Vec<_> =
+                    targets.into_iter().map(|target| target.location).collect();
+                return match locations.len() {
+                    0 => None,
+                    1 => locations.pop().map(Definition::Location),
+                    _ => Some(Definition::LocationList(locations)),
+                };
             }
             if tag.name != "x-component" {
                 return None;
