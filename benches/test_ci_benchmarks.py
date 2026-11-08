@@ -363,6 +363,74 @@ class BenchmarkShardingTests(unittest.TestCase):
         self.assertEqual([result["name"] for result in merged["base"]], ["b", "c", "d"])
         self.assertEqual(merged["removed"], ["removed"])
 
+    def test_independent_builds_pair_from_manifests_and_run_from_separate_archives(self):
+        baseline = self.root / "baseline-build"
+        record = self.binary("old-target", ["shared", "removed"], revision="base")
+        ci.prepare(baseline, 1, io.StringIO(json.dumps(record)))
+        head = self.prepare(
+            [self.binary("new-target", ["new", "shared"], revision="head")]
+        )
+        shutil.rmtree(baseline / "bin")
+        shutil.rmtree(self.build / "bin")
+
+        # The coordinator only downloads manifests, leaving archives for runners.
+        self.invoke([
+            "pair", "--build-dir", str(self.build), "--baseline-dir", str(baseline),
+        ])
+        manifest = json.loads((self.build / "manifest.json").read_text())
+        self.assertEqual(
+            [(case["name"], case["shard"]) for case in manifest["cases"]],
+            [(case["name"], case["shard"]) for case in head["cases"]],
+        )
+        self.assertEqual(manifest["removed"], ["removed"])
+        self.assertEqual(manifest["cases"][1]["baseline_target"], "old-target")
+        self.assertFalse((self.build / "baseline-bin").exists())
+
+        with tarfile.open(self.build / "binaries.tar") as archive:
+            archive.extractall(self.build)
+        baseline_bin = self.build / "baseline-bin"
+        baseline_bin.mkdir()
+        subprocess.run([
+            "tar", "-xf", str(baseline / "binaries.tar"),
+            "--strip-components=1", "-C", str(baseline_bin),
+        ], check=True)
+        for shard in (1, 2):
+            self.run_shard(shard, self.root)
+        merged = self.merge()
+        self.assertEqual([result["name"] for result in merged["head"]], ["new", "shared"])
+        self.assertEqual([result["name"] for result in merged["base"]], ["shared"])
+        self.assertIn("Regressions: 0.", self.compare(merged))
+
+    def test_manifest_pair_cannot_overwrite_itself(self):
+        self.prepare([self.binary("bench", ["case"])], shards=1)
+        original = (self.build / "manifest.json").read_bytes()
+        with self.assertRaises(ValueError):
+            ci.pair(self.build, self.build / ".")
+        self.assertEqual((self.build / "manifest.json").read_bytes(), original)
+
+    def test_cached_benchmarks_can_change_worker_count_without_rebuilding(self):
+        names = [f"case-{index}" for index in range(7)]
+        self.prepare([self.binary("bench", names)], shards=1)
+        archive = (self.build / "binaries.tar").read_bytes()
+        calls = (self.root / "bench.log").read_bytes()
+        shutil.rmtree(self.build / "bin")
+        self.invoke(["partition", "--build-dir", str(self.build), "--shards", "3"])
+        self.assertEqual((self.build / "binaries.tar").read_bytes(), archive)
+        self.assertEqual((self.root / "bench.log").read_bytes(), calls)
+        with tarfile.open(self.build / "binaries.tar") as packed:
+            packed.extractall(self.build)
+        for shard in (1, 2, 3):
+            self.run_shard(shard)
+        self.assertEqual([result["name"] for result in self.merge()], names)
+
+    def test_invalid_worker_count_leaves_cached_manifest_unchanged(self):
+        self.prepare([self.binary("bench", ["one", "two"])], shards=1)
+        original = (self.build / "manifest.json").read_bytes()
+        for count in (0, -1, 3):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                ci.partition(self.build, count)
+            self.assertEqual((self.build / "manifest.json").read_bytes(), original)
+
     def test_paired_shard_with_only_new_cases_needs_no_base_measurements(self):
         self.prepare_pair(
             [self.binary("bench", ["z"], revision="base")],

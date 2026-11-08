@@ -516,6 +516,31 @@ class LspClient:
 
         raise TimeoutError(f"Indexing did not finish within {timeout}s")
 
+    def wait_for_diagnostics(self, uri: str, timeout: float = INDEX_TIMEOUT) -> None:
+        """Wait for the native fast and slow passes for the opened document.
+
+        A hover response does not finish background diagnostics. Sampling
+        before the slow pass ends can include a large temporary stub parse.
+        This client uses push diagnostics, which publishes both passes.
+        """
+        deadline = time.monotonic() + timeout
+        remaining_passes = 2
+        while remaining_passes:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                msg = self._notifications.get(timeout=remaining)
+            except queue.Empty:
+                break
+            if (
+                msg.get("method") == "textDocument/publishDiagnostics"
+                and msg.get("params", {}).get("uri") == uri
+            ):
+                remaining_passes -= 1
+        if remaining_passes:
+            raise TimeoutError(f"Diagnostics did not finish for {uri} within {timeout}s")
+
     def drain_notifications(self, seconds: float) -> None:
         """Read and discard notifications for *seconds*."""
         deadline = time.monotonic() + seconds
@@ -637,6 +662,7 @@ def run_tempest_view(binary: str, work_dir: str) -> int:
             items = result.get("items", []) if isinstance(result, dict) else result or []
             if not any(item["label"].split("(")[0] == expected for item in items):
                 raise RuntimeError(f"Tempest completion did not offer {expected}: {result}")
+        client.wait_for_diagnostics(uri)
         client.drain_notifications(SETTLE_TIME)
         return sample_rss(client.pid)
     finally:
@@ -666,6 +692,7 @@ def run_hello_world(binary: str, work_dir: str) -> int:
         # Hover over ``array_map`` (line 3, col 11) to force the server
         # to load stubs and resolve types before we measure memory.
         client.hover(file_uri, line=3, character=11)
+        client.wait_for_diagnostics(file_uri)
         client.drain_notifications(SETTLE_TIME)
 
         rss = sample_rss(client.pid)
@@ -777,6 +804,7 @@ def run_laravel_model(binary: str, work_dir: str) -> int:
         # server to walk the full Eloquent parent chain and resolve
         # the virtual ``name`` property before we measure memory.
         client.hover(file_uri, line=11, character=50)
+        client.wait_for_diagnostics(file_uri)
         client.drain_notifications(SETTLE_TIME)
 
         rss = sample_rss(client.pid)
@@ -842,6 +870,7 @@ def run_symfony_controller(binary: str, work_dir: str) -> int:
 
         # Hover on ``$post->getTitle()`` (line 12, col 77).
         client.hover(file_uri, line=12, character=77)
+        client.wait_for_diagnostics(file_uri)
         client.drain_notifications(SETTLE_TIME)
 
         rss = sample_rss(client.pid)
@@ -912,6 +941,7 @@ def run_yii_action(binary: str, work_dir: str) -> int:
 
         # Hover on ``$post->title`` (line 23, col 92).
         client.hover(file_uri, line=23, character=92)
+        client.wait_for_diagnostics(file_uri)
         client.drain_notifications(SETTLE_TIME)
 
         rss = sample_rss(client.pid)
@@ -984,6 +1014,7 @@ def run_wordpress_plugin(binary: str, work_dir: str) -> int:
 
         # Hover on ``$post->post_title`` (line 15, col 31).
         client.hover(file_uri, line=15, character=31)
+        client.wait_for_diagnostics(file_uri)
         client.drain_notifications(SETTLE_TIME)
 
         rss = sample_rss(client.pid)
@@ -1061,6 +1092,7 @@ def run_drupal_module(binary: str, work_dir: str) -> int:
 
         # Hover on ``$node->getTitle()`` (line 13, col 38).
         client.hover(file_uri, line=13, character=38)
+        client.wait_for_diagnostics(file_uri)
         client.drain_notifications(SETTLE_TIME)
 
         rss = sample_rss(client.pid)

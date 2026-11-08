@@ -120,6 +120,11 @@ harness = false
 name = "assert_type_runner"
 harness = false
 
+[[test]]
+name = "semantic_export"
+path = "tests/integration/semantic_export_main.rs"
+required-features = ["semantic-export"]
+
 [[bench]]
 name = "completion"
 harness = false

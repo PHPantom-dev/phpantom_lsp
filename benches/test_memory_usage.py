@@ -108,6 +108,38 @@ class IndexingWaitTests(unittest.TestCase):
         self.assertEqual(notifications.now, 2.0)
         self.assertEqual(len(notifications.events), 1)
 
+    def test_memory_waits_for_the_slow_diagnostic_pass(self):
+        uri = "file:///project/Plugin.php"
+        client, notifications = self.client([
+            (0.5, {"method": "textDocument/publishDiagnostics", "params": {"uri": uri}}),
+            (8.0, {"method": "textDocument/publishDiagnostics", "params": {"uri": uri}}),
+        ])
+        client.wait_for_diagnostics(uri, timeout=10)
+        self.assertEqual(notifications.now, 8.0)
+        self.assertFalse(notifications.events)
+
+    def test_unrelated_diagnostics_do_not_complete_the_open_file(self):
+        uri = "file:///project/Plugin.php"
+        client, notifications = self.client([
+            (0.0, {"method": "textDocument/publishDiagnostics", "params": {"uri": uri}}),
+            (0.5, {"method": "textDocument/publishDiagnostics", "params": {"uri": "file:///other.php"}}),
+            (1.0, progress("workspace", "end")),
+        ])
+        with self.assertRaisesRegex(TimeoutError, "Diagnostics did not finish"):
+            client.wait_for_diagnostics(uri, timeout=5)
+        self.assertEqual(notifications.now, 5.0)
+
+    def test_diagnostic_wait_has_a_fixed_deadline(self):
+        uri = "file:///project/Plugin.php"
+        client, notifications = self.client([
+            (0.0, {"method": "textDocument/publishDiagnostics", "params": {"uri": uri}}),
+            (10.0, {"method": "textDocument/publishDiagnostics", "params": {"uri": uri}}),
+        ])
+        with self.assertRaises(TimeoutError):
+            client.wait_for_diagnostics(uri, timeout=2)
+        self.assertEqual(notifications.now, 2.0)
+        self.assertEqual(len(notifications.events), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
