@@ -92,6 +92,8 @@ enum Rank {
 pub(crate) struct ConfigPlan {
     params_files: Vec<(Rank, PathBuf)>,
     receives_params: HashSet<PathBuf>,
+    /// The names of the project's groups, its environments' included.
+    groups: Vec<String>,
 }
 
 impl ConfigPlan {
@@ -121,6 +123,7 @@ impl ConfigPlan {
         let mut receives = Vec::new();
         if let Some(groups) = extra.get("config-plugin").and_then(|g| g.as_object()) {
             for (group, entries) in groups {
+                plan.groups.push(group.clone());
                 match group.as_str() {
                     "params" => plan.add_params(Rank::Project, entries, &dir),
                     group if is_params_group(group) => {
@@ -136,6 +139,7 @@ impl ConfigPlan {
         {
             for groups in environments.values().filter_map(|g| g.as_object()) {
                 for (group, entries) in groups {
+                    plan.groups.push(group.clone());
                     if is_params_group(group) {
                         plan.add_params(Rank::Environment, entries, &dir);
                     } else {
@@ -160,6 +164,11 @@ impl ConfigPlan {
         super::definitions::group_files(entries, dir, &mut files);
         self.params_files
             .extend(files.into_iter().map(|file| (rank, file)));
+    }
+
+    /// The names of the project's groups, its environments' included.
+    pub(crate) fn groups(&self) -> &[String] {
+        &self.groups
     }
 
     /// Whether `yiisoft/config` hands the file at `path` the `$params`.

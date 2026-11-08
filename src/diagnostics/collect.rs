@@ -260,8 +260,8 @@ impl Backend {
     /// Returns `true` if the URI should be skipped for diagnostics: stub
     /// files (embedded or under a stub path), and resource documents (YAML,
     /// XML, and XLIFF files), which are not PHP.  A Twig template, a Symfony
-    /// validation mapping, and a Drupal file that reads library names are
-    /// resource documents too, but what they hold is judged (see
+    /// validation mapping, a Drupal file that reads library names, and a Yii
+    /// project's `composer.json` are resource documents too, but what they hold is judged (see
     /// [`Self::collect_resource_diagnostics`]).  Vendor
     /// files are
     /// not skipped here: users
@@ -277,10 +277,11 @@ impl Backend {
     }
 
     /// Whether the resource document at `uri` is one whose contents are
-    /// judged: a Twig template, a Symfony validation mapping, or a Drupal
-    /// libraries or info file.
+    /// judged: a Twig template, a Symfony validation mapping, a Drupal
+    /// libraries or info file, or a Yii project's `composer.json`.
     pub(crate) fn has_resource_diagnostics(&self, uri: &str) -> bool {
         self.is_twig_template_uri(uri)
+            || self.is_yii_config_plugin_uri(uri)
             || (self.is_symfony_project()
                 && crate::symfony::validation::is_validation_mapping_uri(
                     &self.symfony_config_uri(uri),
@@ -307,6 +308,8 @@ impl Backend {
     ) {
         if self.is_twig_template_uri(uri_str) {
             self.collect_template_diagnostics(uri_str, content, out);
+        } else if self.is_yii_config_plugin_uri(uri_str) {
+            self.collect_yii_config_plugin_diagnostics(uri_str, content, out);
         } else if self.reads_drupal_libraries(uri_str) {
             let ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
             if ctx.symbol_map.matches_source(content) {

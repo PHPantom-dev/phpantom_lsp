@@ -105,6 +105,12 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Vec<Location> {
+        if self.is_yii_config_plugin_uri(uri)
+            && let Some(locations) =
+                self.resolve_yii_config_plugin_definition(uri, content, position)
+        {
+            return locations;
+        }
         if let Some(location) = self.resolve_resource_symbol_definition(content, position) {
             return vec![location];
         }

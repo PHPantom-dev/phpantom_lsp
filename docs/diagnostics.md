@@ -164,6 +164,7 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_yii_view` | Warning | A view path with no view file. |
 | `invalid_yii_definition_argument` | Warning | A DI definition argument that names no parameter of the method. |
 | `invalid_yii_param` | Warning | A `$params` key no params file declares. |
+| `invalid_yii_config_file` | Warning | A file a `config-plugin` in `composer.json` lists that does not exist. |
 
 ## Drupal
 

@@ -25,8 +25,12 @@
 //! The `$params` a configuration file is handed are merged from the params
 //! files the merge plan lists, and the keys a file reads from them are
 //! spans keyed by their path (see [`params`]).
+//!
+//! The `config-plugin` of a `composer.json` names those groups and lists
+//! their files; it is read where it is written (see [`config_plugin`]).
 
 pub(crate) mod aliases;
+pub(crate) mod config_plugin;
 pub(crate) mod definitions;
 pub(crate) mod params;
 pub(crate) mod routes;
@@ -56,6 +60,9 @@ pub(crate) struct YiiState {
     /// The merged params, read on first use and dropped when a
     /// configuration file or the dependencies change.
     params: parking_lot::Mutex<Option<Arc<params::Params>>>,
+    /// The names of the config groups the installed packages declare, read
+    /// on first use and dropped when the dependencies change.
+    package_groups: parking_lot::Mutex<Option<Arc<Vec<String>>>>,
 }
 
 impl Backend {

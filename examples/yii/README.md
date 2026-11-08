@@ -53,6 +53,12 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `config/common/application.php`, or hover it for the type of its value.
   Clear a key to complete the ones the params files declare beside it, and
   misspell one to see it reported.
+- Open `vendor/yiisoft/router/composer.json` once the dependencies are
+  installed. Its `config-plugin` lists the files the package adds to each
+  config group: go to the definition of `"di.php"` for `config/di.php`, clear
+  a group name to complete the groups `config/configuration.php` and the
+  installed packages use, and misspell a file name to see it reported. A
+  `"$group"` entry goes to the group it names.
 
 ## Getting started
 

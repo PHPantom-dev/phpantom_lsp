@@ -283,27 +283,6 @@ user to ask: no project in our test set uses it.
 
 ---
 
-## Y20. `config-plugin` entries in `composer.json`
-
-**Impact: Low · Complexity: Low**
-
-```json
-"extra": {
-    "config-plugin": {
-        "params": "config/params.php",
-        "di-web": ["config/di-web.php", "$di"]
-    }
-}
-```
-
-A package's or the project's `config-plugin` maps each config group to
-its files. Complete the group names `configuration.php` and the
-installed packages already use, and the paths to the project's files,
-navigate from a path to its file and from a `$group` reference to that
-group's entries, and report a path with no file.
-
----
-
 ## Y16. Asset bundle file paths
 
 **Impact: Low · Complexity: Low-Medium**

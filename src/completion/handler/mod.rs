@@ -233,6 +233,11 @@ impl Backend {
             return Some(response);
         }
 
+        if self.is_yii_config_plugin_uri(uri) {
+            let content = self.get_file_content_arc(uri)?;
+            return self.try_yii_config_plugin_completion(uri, &content, position);
+        }
+
         let is_template = self.is_twig_template_uri(uri);
         if (is_template || self.is_resource_uri(uri))
             && let Some(content) = self.get_file_content_arc(uri)

@@ -64,6 +64,17 @@ check("\$params['application'] declares 'name', 'charset', and 'locale'", array_
 check("\$params['application']['name'] is a string", is_string($params['application']['name']));
 check("\$params['blog']['posts'] reaches the repository's constructor", array_keys($params['blog']['posts']) === ['hello-yii', 'config-is-code']);
 
+// ─── config-plugin ──────────────────────────────────────────────────────────
+
+// vendor/yiisoft/router/composer.json lists config/di.php and
+// config/params.php under its source directory, and the container builds
+// what config/di.php binds.
+$router = json_decode(file_get_contents(__DIR__ . '/vendor/yiisoft/router/composer.json'), true, flags: JSON_THROW_ON_ERROR);
+$routerConfig = __DIR__ . '/vendor/yiisoft/router/' . $router['extra']['config-plugin-options']['source-directory'];
+check("yiisoft/router's config-plugin lists 'di' and 'params'", array_keys($router['extra']['config-plugin']) === ['di', 'params']);
+check("Every file yiisoft/router's config-plugin lists is under its source directory", array_filter($router['extra']['config-plugin'], fn (string $file) => !is_file("$routerConfig/$file")) === []);
+check("The container builds what yiisoft/router's 'di.php' binds", $container->get(\Yiisoft\Router\RouteCollectorInterface::class) instanceof \Yiisoft\Router\RouteCollector);
+
 // ─── Aliases ────────────────────────────────────────────────────────────────
 
 $aliases = $container->get(Aliases::class);
