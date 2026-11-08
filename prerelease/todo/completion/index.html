@@ -1650,6 +1650,12 @@ in the docblock. Extending the same approach to bracket-access
 array shapes would require detecting the array key context in the
 GTD path (similar to array shape completion) and searching for the
 key inside the matching <code>array{…}</code> annotation.</p>
+<p>The keys of a path <code>ArrayHelper</code> reads in a Yii project
+(<code>getValueByPath($data, 'user.settings')</code>) complete from the same shapes
+and jump to the properties they read, but a key that reads an array's
+element jumps nowhere for the same reason. Once a shape key has a
+declaration to land on, <code>Backend::yii_array_path_definition</code> should land
+there too, from the type the keys before it reach.</p>
 <hr />
 <h2 id="c7-class_alias-support">C7. <code>class_alias()</code> support<a class="headerlink" href="#c7-class_alias-support" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>

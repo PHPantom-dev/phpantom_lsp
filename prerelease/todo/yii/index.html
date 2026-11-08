@@ -1316,17 +1316,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#y17-key-paths-in-yiisoftarrays" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y17. Key paths in <code>yiisoft/arrays</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1366,7 +1355,9 @@ the events configuration attaches. Active Record queries are typed by the
 record they are for, and the attributes and relations a record and its
 queries name navigate, complete, and are checked, the columns of a record
 without properties read from the project's migrations, and so do the
-properties form fields and hydration maps name. What is left is below.</p>
+properties form fields and hydration maps name. The key paths
+<code>ArrayHelper</code> reads complete, navigate, and are typed. What is left is
+below.</p>
 <p>The items below are what the Yii team asked for in
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/discussions/505">discussion #505</a>.
 <code>examples/yii/</code> (generated from <code>yiisoft/app</code>) is the playground, with a
@@ -1477,19 +1468,6 @@ way leaves the columns of every table open, so the class constants the
 demo names its tables with need resolving first. Complete and navigate table and column names, and report one no
 migration creates. Wait for a user to ask: the demo is the only project
 known to query this way.</p>
-<hr />
-<h2 id="y17-key-paths-in-yiisoftarrays">Y17. Key paths in <code>yiisoft/arrays</code><a class="headerlink" href="#y17-key-paths-in-yiisoftarrays" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
-</code></pre></div>
-<p><code>ArrayHelper::getValue()</code>, <code>setValue()</code>, <code>keyExists()</code>, and <code>remove()</code>
-take a key or a dotted path into the array or object they are given.
-When the shape of that value is known, complete each segment from its
-keys and properties, navigate from a segment to its declaration, and
-type <code>getValue()</code> as the value the path reaches instead of <code>mixed</code>. Any
-dotted-path helper (Laravel's <code>data_get()</code> and <code>Arr::get()</code> take the
-same kind of path) would share the walk, so build it in the shared
-resolution path rather than for Yii alone.</p>
 
 
 
