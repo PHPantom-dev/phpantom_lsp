@@ -97,8 +97,8 @@ pub(crate) struct ConfigPlan {
     events_files: HashSet<PathBuf>,
     /// The names of the project's groups, its environments' included.
     groups: Vec<String>,
-    /// The PHP file the project's `config-plugin-file` names, canonical,
-    /// and the project's root its entries are under.
+    /// The PHP file the project's `config-plugin-file` names and the
+    /// project's root its entries are under, both canonical.
     plugin_file: Option<(PathBuf, PathBuf)>,
 }
 
@@ -116,7 +116,7 @@ impl ConfigPlan {
         let extra = match extra.get("config-plugin-file").and_then(|f| f.as_str()) {
             Some(file) => {
                 let file = root.join(file);
-                plan.plugin_file = Some((canonical(&file), root.to_path_buf()));
+                plan.plugin_file = Some((canonical(&file), canonical(root)));
                 match read_php_config(&file) {
                     Some(extra) => extra,
                     None => return plan,
