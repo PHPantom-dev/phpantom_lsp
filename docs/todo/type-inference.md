@@ -755,3 +755,32 @@ attribute's `decorates` argument (a string or `Foo::class`) with the
 class as the decorator, where `#[AsMessageHandler]` is read in
 `src/symbol_map/extraction/symfony.rs`, and count the file as one that
 declares in `declares_symfony_keys`.
+
+---
+
+## T72. A property a trait assigns but does not declare is untyped
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+trait WorkspaceTestTrait {
+    protected function initializeWorkspacesModule(): void {
+        $this->entityTypeManager = \Drupal::entityTypeManager();
+    }
+
+    protected function switchToWorkspace($workspace_id): void {
+        $this->entityTypeManager->getStorage('workspace')->load($workspace_id); // untyped
+    }
+}
+```
+
+Inside a trait, `$this->entityTypeManager` names a property only the
+classes using the trait declare (each of Drupal's workspaces kernel tests
+declares it `@var EntityTypeManagerInterface`). The trait never declares
+it, so the read is untyped, `getStorage()` is not a reference to the
+entity type manager's method, and nothing after it resolves. PHPlumb
+types it from the trait's own assignment. Either source would do: the
+type the using classes all declare for the property, or what the trait
+assigns to it. The using classes are the sounder of the two, since an
+assignment in one method says nothing about what another method reads
+if a user overwrites it.

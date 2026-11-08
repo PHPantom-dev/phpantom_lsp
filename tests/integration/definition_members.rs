@@ -1,4 +1,6 @@
-use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
+use crate::common::{
+    create_psr4_workspace, create_test_backend, goto_definition_at, open_php, open_php_at,
+};
 use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Member Definition: Class Constants ─────────────────────────────────────
@@ -4443,5 +4445,61 @@ async fn test_goto_definition_attribute_named_argument() {
             "the label must not jump to the unrelated property"
         ),
         other => panic!("Unexpected response: {:?}", other),
+    }
+}
+
+/// A container that inherits `get()` through overrides whose docblocks
+/// state no return type keeps the conditional return type of the interface
+/// that declares one, so a lookup by `::class` is that class, on whichever
+/// line the chain continues.  The override nearest the call spells the
+/// omitted argument's default with a class constant of its own namespace,
+/// which is what the condition is decided against.  The three interfaces
+/// share their short name, as PSR's, Symfony's and Drupal's container
+/// interfaces do.
+#[tokio::test]
+async fn test_goto_definition_after_class_string_lookup_through_overrides() {
+    let composer =
+        r#"{"autoload":{"psr-4":{"Psr\\":"psr/","Sym\\":"sym/","Site\\":"site/","App\\":"app/"}}}"#;
+    let psr = "<?php\nnamespace Psr;\ninterface ContainerInterface {\n    /** @return mixed Entry. */\n    public function get(string $id);\n}\n";
+    let sym_interface = "<?php\nnamespace Sym;\nuse Psr\\ContainerInterface as PsrContainerInterface;\ninterface ContainerInterface extends PsrContainerInterface {\n    public const EXCEPTION_ON_INVALID_REFERENCE = 1;\n    /**\n     * @template C of object\n     * @template B of self::*_REFERENCE\n     * @param string|class-string<C> $id\n     * @param B $invalidBehavior\n     * @return ($id is class-string<C> ? (B is 0|1 ? C|object : C|object|null) : (B is 0|1 ? object : object|null))\n     */\n    public function get(string $id, int $invalidBehavior = self::EXCEPTION_ON_INVALID_REFERENCE): ?object;\n}\n";
+    let sym_container = "<?php\nnamespace Sym;\nclass Container implements ContainerInterface {\n    /**\n     * Gets a service.\n     *\n     * @see ContainerInterface\n     */\n    public function get(string $id, int $invalidBehavior = self::EXCEPTION_ON_INVALID_REFERENCE): ?object { return null; }\n}\n";
+    let sym_builder = "<?php\nnamespace Sym;\nclass ContainerBuilder extends Container {\n    /** @see Container */\n    public function get(string $id, int $invalidBehavior = ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE): ?object { return null; }\n}\n";
+    let site_interface = "<?php\nnamespace Site;\nuse Sym\\ContainerInterface as BaseContainerInterface;\ninterface ContainerInterface extends BaseContainerInterface {\n    public function getServiceIds();\n}\n";
+    let site_builder = "<?php\nnamespace Site;\nuse Sym\\ContainerBuilder as SymfonyContainerBuilder;\nclass ContainerBuilder extends SymfonyContainerBuilder implements ContainerInterface {\n    public function getServiceIds() { return []; }\n}\n";
+    let manager =
+        "<?php\nnamespace App;\ninterface Manager {\n    public function storage(): void;\n}\n";
+    let run = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use Site\\ContainerBuilder;\n",
+        "final class Run {\n",
+        "    public function run(ContainerBuilder $builder): void {\n",
+        "        $builder->get(Manager::class)->storage();\n",
+        "        $builder->get(Manager::class)\n",
+        "            ->storage();\n",
+        "    }\n",
+        "}\n",
+    );
+    let (backend, dir) = create_psr4_workspace(
+        composer,
+        &[
+            ("psr/ContainerInterface.php", psr),
+            ("sym/ContainerInterface.php", sym_interface),
+            ("sym/Container.php", sym_container),
+            ("sym/ContainerBuilder.php", sym_builder),
+            ("site/ContainerInterface.php", site_interface),
+            ("site/ContainerBuilder.php", site_builder),
+            ("app/Manager.php", manager),
+            ("app/Run.php", run),
+        ],
+    );
+    let uri = open_php_at(&backend, &dir, "app/Run.php", run).await;
+    let manager_uri = Uri::from_file_path(dir.path().join("app/Manager.php")).unwrap();
+    for (line, character) in [(5, 41), (7, 16)] {
+        let response = goto_definition_at(&backend, &uri, line, character).await;
+        let Some(DefinitionResponse::Definition(Definition::Location(location))) = response else {
+            panic!("line {line}: {response:?}");
+        };
+        assert_eq!(location.uri, manager_uri, "line {line}");
     }
 }

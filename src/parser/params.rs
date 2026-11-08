@@ -156,13 +156,15 @@ pub(crate) fn extract_parameters(
                 let start = span.start.offset as usize;
                 let end = span.end.offset as usize;
                 let raw = src.get(start..end)?.trim().to_string();
-                // Resolve `ClassName::class` to its FQN so that
-                // downstream template substitution can find the class.
-                if let Some(class_name) = raw.strip_suffix("::class") {
-                    Some(resolve_default_class_name(class_name, doc_ctx))
-                } else {
-                    Some(raw)
-                }
+                // Resolve the class of `ClassName::class` and
+                // `ClassName::CONSTANT` to its FQN, so that the call site,
+                // which reads the default back as text, finds the class.
+                Some(match class_member_default(&raw) {
+                    Some((class_name, member)) => {
+                        resolve_default_class_name(class_name, member, doc_ctx)
+                    }
+                    None => raw,
+                })
             });
 
             ParameterInfo {
@@ -208,9 +210,21 @@ pub(crate) fn param_default_is_null(
     }
 }
 
-/// Rewrite a parameter default `Foo::class` (given as `name`, the part
-/// before `::class`) to `\Fully\Qualified\Foo::class` using the file's
-/// use-map and namespace from [`DocblockCtx`].
+/// The class and member of a parameter default written `Foo::class` or
+/// `Foo::CONSTANT`, or `None` for any other default.
+fn class_member_default(raw: &str) -> Option<(&str, &str)> {
+    let (class_name, member) = raw.split_once("::")?;
+    let is_identifier = |c: char| c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii();
+    let class_ok =
+        !class_name.is_empty() && class_name.chars().all(|c| is_identifier(c) || c == '\\');
+    let member_ok = !member.is_empty() && member.chars().all(is_identifier);
+    (class_ok && member_ok).then_some((class_name, member))
+}
+
+/// Rewrite a parameter default `Foo::member` (given as `name`, the part
+/// before `::`, and `member`, the part after) to
+/// `\Fully\Qualified\Foo::member` using the file's use-map and namespace
+/// from [`DocblockCtx`].
 ///
 /// The default is read back as source text at the call site, so the result
 /// keeps a leading `\`: an unprefixed `Vendor\Foo` would be qualified with
@@ -218,27 +232,31 @@ pub(crate) fn param_default_is_null(
 /// against (a file in the global namespace with no `use` before the class)
 /// the default is left as written, for the qualification that follows the
 /// parse ([`qualify_param_default`]) to settle.
-fn resolve_default_class_name(name: &str, doc_ctx: Option<&DocblockCtx<'_>>) -> String {
+fn resolve_default_class_name(
+    name: &str,
+    member: &str,
+    doc_ctx: Option<&DocblockCtx<'_>>,
+) -> String {
     match doc_ctx {
         Some(ctx) if !ctx.use_map.is_empty() || ctx.namespace.is_some() => {
-            qualify_class_default(name, &ctx.use_map, &ctx.namespace)
+            qualify_class_default(name, member, &ctx.use_map, &ctx.namespace)
         }
-        _ => format!("{name}::class"),
+        _ => format!("{name}::{member}"),
     }
 }
 
-/// Qualify a `Foo::class` default of `param` written against `use_map` and
-/// `namespace`; see [`resolve_default_class_name`].
+/// Qualify a `Foo::class` or `Foo::CONSTANT` default of `param` written
+/// against `use_map` and `namespace`; see [`resolve_default_class_name`].
 pub(crate) fn qualify_param_default(
     param: &mut ParameterInfo,
     use_map: &HashMap<String, String>,
     namespace: &Option<String>,
 ) {
     if let Some(default) = &param.default_value
-        && let Some(name) = default.strip_suffix("::class")
+        && let Some((name, member)) = class_member_default(default)
         && !name.starts_with('\\')
     {
-        param.default_value = Some(qualify_class_default(name, use_map, namespace));
+        param.default_value = Some(qualify_class_default(name, member, use_map, namespace));
     }
 }
 
@@ -271,19 +289,20 @@ pub(crate) fn qualify_param_default_keyword(
     }
 }
 
-/// `\Fully\Qualified\Foo::class` for a `Foo::class` default written against
-/// `use_map` and `namespace`; see [`resolve_default_class_name`].  `self`,
-/// `static` and `parent` are left as written.
+/// `\Fully\Qualified\Foo::member` for a `Foo::member` default written
+/// against `use_map` and `namespace`; see [`resolve_default_class_name`].
+/// `self`, `static` and `parent` are left as written.
 fn qualify_class_default(
     name: &str,
+    member: &str,
     use_map: &HashMap<String, String>,
     namespace: &Option<String>,
 ) -> String {
     if name.starts_with('\\') || crate::class_lookup::is_class_keyword(name) {
-        return format!("{name}::class");
+        return format!("{name}::{member}");
     }
     let fqn = crate::names::resolve_to_fqn(name, use_map, namespace);
-    format!("\\{fqn}::class")
+    format!("\\{fqn}::{member}")
 }
 
 /// Extract visibility from a set of modifiers.

@@ -25,7 +25,25 @@ No outstanding items.
 
 ## Type comparison
 
-No outstanding items.
+### B735. A class that does not load fails every parameter type it is passed to
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+use ColinODell\PsrTestLogger\TestLogger; // package not installed
+
+$logger = new TestLogger();
+$factory->addLogger($logger); // expects Psr\Log\LoggerInterface, got TestLogger
+```
+
+When the argument's class cannot be loaded, nothing is known about its
+parents or interfaces, so whether it satisfies `LoggerInterface` cannot be
+decided. It is still reported as a mismatch, beside the `unknown_class`
+already reported for the name itself, so one missing package gives two
+errors per use. Drupal core's tests hit it wherever a dev-only package is
+absent (about a dozen `addLogger()` calls in `projects/drupal`). An
+argument whose class does not load should leave the subtype check
+undecided rather than failed.
 
 ## Conditional return types
 
@@ -45,7 +63,25 @@ No outstanding items.
 
 ## Array types
 
-No outstanding items.
+### B736. `$list['key']` on an `ArrayObject` subclass ignores its `offsetGet()`
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+final class InstalledPackagesList extends \ArrayObject {
+    public function offsetGet(mixed $key): ?InstalledPackage { /* ... */ }
+}
+
+$list['drupal/sub-module']->path; // Cannot check property $path, because type TValue could not be resolved
+```
+
+An array read on an object goes through its `offsetGet()`, so it has the
+type the class's own override declares. The read takes `ArrayObject`'s
+`TValue` instead, which the subclass never binds (it has no `@extends`),
+and the unbound template name leaks into the diagnostic. Read the
+element type from the `offsetGet()` the class resolves to, the way a
+direct `$list->offsetGet('x')` call is, before falling back to the
+template arguments. Seen in Drupal's package_manager tests.
 
 ## Laravel
 
@@ -61,7 +97,27 @@ No outstanding items.
 
 ## Framework names in strings
 
-No outstanding items.
+### B737. Test code does not see the entity types its test modules declare
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+// web/core/modules/config/tests/config_test/src/Entity/ConfigTest.php
+// declares `config_test`
+$storage = \Drupal::entityTypeManager()->getStorage('config_test');
+$storage->load('foo')->status(); // Method EntityInterface::status() not found
+```
+
+Declarations under a `tests` folder are skipped (`is_test_fixture` in
+`src/drupal/mod.rs`), because no real site enables a test module. The
+tests that enable them do, though, so in test code an entity type a test
+module declares leaves `getStorage()` with the declared
+`EntityStorageInterface`, and what it loads is a bare `EntityInterface`.
+That accounts for most of the ~150 `EntityInterface::get()` and
+`::status()` reports in `projects/drupal`'s tests. Services already make
+this exception (`is_test_services_file` in `src/drupal/services.rs`):
+read test modules' entity types too, and let them type lookups made from
+test code only, so production code keeps ignoring them.
 
 ## Name resolution
 

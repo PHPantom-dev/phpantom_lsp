@@ -249,6 +249,15 @@ async fn aliases_are_followed_to_the_service_they_name() {
     }
 }
 
+/// A call chained straight off the lookup, with no variable in between,
+/// is a call on the service.
+#[tokio::test]
+async fn a_chained_service_lookup_is_typed() {
+    let hover = hover("        $container->get('app.mailer')->se§nd();").await;
+    assert!(hover.contains("Mailer"), "{hover}");
+    assert!(hover.contains("function send"), "{hover}");
+}
+
 #[tokio::test]
 async fn a_class_given_as_a_parameter_is_the_parameter_value() {
     let hover =

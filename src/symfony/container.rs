@@ -9,11 +9,14 @@
 //! are typed by what the project's own configuration declares.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::symbol_map::{ContainerValue, StringKeyKind};
+use crate::types::ClassInfo;
 
 /// What a string value gives a service or a parameter as: the parameter a
 /// whole `%name%` placeholder copies, a class when the string is spelled as
@@ -342,6 +345,56 @@ impl Backend {
         }
         Some(PhpType::union(types))
     }
+
+    /// What `method_name(key)` on `owner` gives when it looks `key` up in
+    /// the container: the classes a service ID is built from for `get()`
+    /// on a container, and the type of a parameter's value for `get()` on
+    /// a parameter bag or `getParameter()`.  `None` when the call is no
+    /// container lookup or the project does not declare what `key` is, so
+    /// the call keeps the type the method declares.
+    pub(crate) fn container_lookup(
+        &self,
+        owner: &ClassInfo,
+        method_name: &str,
+        key: &str,
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Option<ContainerLookup> {
+        if !method_name.eq_ignore_ascii_case("get")
+            && !method_name.eq_ignore_ascii_case("getParameter")
+        {
+            return None;
+        }
+        if !self.reads_service_container() {
+            return None;
+        }
+        let (receiver, _) = crate::symbol_map::extraction::symfony_receiver_method(method_name, 0)?;
+        let (_, kind) = receiver
+            .targets()
+            .iter()
+            .find(|(fqn, _)| crate::class_lookup::is_subtype_of(owner, fqn, class_loader))?;
+        match kind {
+            StringKeyKind::ServiceId => {
+                let classes: Vec<Arc<ClassInfo>> = self
+                    .symfony_service_classes(key)
+                    .iter()
+                    .filter_map(|class| class_loader(Fqn::new(class)))
+                    .collect();
+                (!classes.is_empty()).then_some(ContainerLookup::Classes(classes))
+            }
+            StringKeyKind::ContainerParameter => {
+                self.symfony_parameter_type(key).map(ContainerLookup::Type)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// What a container lookup gives (see [`Backend::container_lookup`]).
+pub(crate) enum ContainerLookup {
+    /// The classes of the service an ID names.
+    Classes(Vec<Arc<ClassInfo>>),
+    /// The type of a parameter's value.
+    Type(PhpType),
 }
 
 fn push_unique(out: &mut Vec<Atom>, class: Atom) {

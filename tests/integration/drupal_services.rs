@@ -521,6 +521,26 @@ async fn a_chained_drupal_service_call_is_typed() {
     );
 }
 
+/// A call chained straight off a container lookup, with no variable in
+/// between, is typed by the service, and is a reference to the method.
+#[tokio::test]
+async fn a_chained_container_lookup_call_is_typed() {
+    let chained = CONSUMER.replace(
+        "$greeter = $container->get('acme.greeter');",
+        "$container->get('acme.greeter')->greet();",
+    );
+    let (backend, dir) =
+        workspace(&[(SERVICES_PATH, SERVICES), (CONSUMER_PATH, chained.as_str())]).await;
+    let php = uri_for(&dir, CONSUMER_PATH);
+    let found = definitions_at(&backend, &php, position_in(&chained, "->greet()", 3)).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    let greeter = uri_for(&dir, "web/modules/custom/acme/src/Greeter.php");
+    assert_eq!(found[0].uri, greeter);
+
+    let found = references_at(&backend, &greeter, found[0].range.start).await;
+    assert!(found.iter().any(|(uri, _)| *uri == php), "{found:?}");
+}
+
 /// A service that decorates another takes over its ID, so a lookup of the
 /// decorated ID is the decorator too, and the `decorates:` value is a
 /// reference to the service it names.
