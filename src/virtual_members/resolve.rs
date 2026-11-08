@@ -19,7 +19,7 @@ use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance::{
     ClassRef, apply_substitution_to_method, apply_substitution_to_property, build_generic_subs,
     build_substitution_map, enrich_method_arc_from_ancestor, enrich_property_arc_from_ancestor,
-    resolve_class_with_inheritance,
+    fill_template_bounds, resolve_class_with_inheritance,
 };
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
@@ -939,6 +939,12 @@ fn apply_post_merge_stages(
                 if level_subs.is_empty() && !active_subs.is_empty() {
                     level_subs = active_subs.clone();
                 }
+                // A parent template the subclass leaves unbound (`extends
+                // \ArrayObject` with no `@extends`) falls back to its bound,
+                // as it does in the member merge, so the parent's
+                // `@implements ArrayAccess<TKey, TValue>` does not reach the
+                // subclass with raw template names.
+                fill_template_bounds(&parent, &mut level_subs);
 
                 for iface in &parent.interfaces {
                     let iface_str = iface.to_string();
