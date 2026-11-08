@@ -28,6 +28,28 @@ within the same impact tier.
 
 ---
 
+## TM6. `query(Book::class)` builds a query for `Book`
+
+**Impact: Medium · Complexity: Low**
+
+```php
+$books = query(Book::class)->select()->where('title', $title)->all();
+// array<class-string<Book>>, should be array<Book>
+```
+
+`Tempest\Database\query()` declares `@template TModel` and
+`@param TModel $model`, so a class name binds `TModel` to
+`class-string<Book>`, and every builder after it, and every record its
+`all()` and `first()` return, is a class name instead of a `Book`. The
+builder's own constructor says what is meant
+(`@param class-string<TModel>|TModel|string $model`), and
+`Book::select()` already gives `SelectQueryBuilder<Book>`. Read
+`query()`'s parameter the way the constructor declares it, so a class name
+binds `TModel` to the class, and offer the docblock fix upstream. This is
+the builder type TM4 reads the model from, so it comes first.
+
+---
+
 ## TM3. Route URIs and route parameters
 
 **Impact: Medium · Complexity: Medium**

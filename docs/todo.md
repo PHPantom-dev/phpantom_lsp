@@ -35,8 +35,13 @@ contributor even though it's short.
 | TM1 | [Component attribute names navigate to the component's variable](todo/tempest.md#tm1-component-attribute-names-navigate-to-the-components-variable) | Low-Medium | Low |
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
+| TM6 | [`query(Book::class)` builds a query for `Book`](todo/tempest.md#tm6-querybookclass-builds-a-query-for-book) | Medium | Low |
 | TM3 | [Route URIs and route parameters](todo/tempest.md#tm3-route-uris-and-route-parameters) | Medium | Medium |
 | TM4 | [Model property names in query builders and model helpers](todo/tempest.md#tm4-model-property-names-in-query-builders-and-model-helpers) | Medium | Medium |
+| B739 | [Keys written from a literal list's values come out optional](todo/bugs.md#b739-keys-written-from-a-literal-lists-values-come-out-optional) | Low | Low-Medium |
+| Y13 | [A definition's `'__construct()'` key goes to the constructor](todo/yii.md#y13-a-definitions-__construct-key-goes-to-the-constructor) | Low | Low |
+| Y12 | [The route arguments a URL generator call passes navigate](todo/yii.md#y12-the-route-arguments-a-url-generator-call-passes-navigate) | Low-Medium | Low |
+| Y11 | [The config groups a project declares in PHP](todo/yii.md#y11-the-config-groups-a-project-declares-in-php) | Medium | Medium |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -145,6 +150,9 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | Y9  | [Views a template renders by name](todo/yii.md#y9-views-a-template-renders-by-name) | Medium      | Medium      |
 | Y10 | [The renderer's configured view path](todo/yii.md#y10-the-renderers-configured-view-path) | Medium      | Medium      |
+| Y11 | [The config groups a project declares in PHP](todo/yii.md#y11-the-config-groups-a-project-declares-in-php) | Medium      | Medium      |
+| Y12 | [The route arguments a URL generator call passes navigate](todo/yii.md#y12-the-route-arguments-a-url-generator-call-passes-navigate) | Low-Medium  | Low         |
+| Y13 | [A definition's `'__construct()'` key goes to the constructor](todo/yii.md#y13-a-definitions-__construct-key-goes-to-the-constructor) | Low         | Low         |
 
 ## Tempest
 
@@ -153,6 +161,7 @@ ships, remove every row that names it.
 | TM1 | [Component attribute names navigate to the component's variable](todo/tempest.md#tm1-component-attribute-names-navigate-to-the-components-variable) | Low-Medium | Low |
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
+| TM6 | [`query(Book::class)` builds a query for `Book`](todo/tempest.md#tm6-querybookclass-builds-a-query-for-book) | Medium | Low |
 | TM3 | [Route URIs and route parameters](todo/tempest.md#tm3-route-uris-and-route-parameters) | Medium | Medium |
 | TM4 | [Model property names in query builders and model helpers](todo/tempest.md#tm4-model-property-names-in-query-builders-and-model-helpers) | Medium | Medium |
 

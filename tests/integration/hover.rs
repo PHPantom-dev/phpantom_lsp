@@ -15229,6 +15229,60 @@ function test(): void {
     assert!(hover.contains("Closure(int): int"), "{hover}");
 }
 
+/// A `self` return keeps the instance's template arguments when the method
+/// comes from a trait the generic class uses, or from a generic parent the
+/// class extends with `@extends`.
+#[test]
+fn hover_inherited_self_return_keeps_template_arguments() {
+    let backend = create_test_backend();
+    let uri = "file:///inherited_self_generics.php";
+    let content = r#"<?php
+namespace App;
+
+trait Wheres {
+    public function where(string $s): self { return $this; }
+}
+
+/** @template T */
+final class Builder {
+    use Wheres;
+    /** @return T[] */
+    public function all(): array { return []; }
+}
+
+/** @template T */
+class Base {
+    public function again(): self { return $this; }
+    /** @return T[] */
+    public function items(): array { return []; }
+}
+
+/** @extends Base<Book> */
+class Child extends Base {}
+
+final class Book {}
+
+/** @param Builder<Book> $b */
+function f(Builder $b, Child $c): void {
+    $viaTrait = $b->where('x');
+    $traitRows = $b->where('x')->all();
+    $fromParent = $c->again();
+    $parentRows = $c->again()->items();
+}
+"#;
+
+    for (line, expected) in [
+        (28, "Builder<Book>"),
+        (29, "array<Book>"),
+        (30, "Base<Book>"),
+        (31, "array<Book>"),
+    ] {
+        let hover =
+            hover_text(&hover_at(&backend, uri, content, line, 6).expect("hover")).to_string();
+        assert!(hover.contains(expected), "line {line}: {hover}");
+    }
+}
+
 #[test]
 fn hover_generator_closure_infers_return_type() {
     let backend = create_test_backend();

@@ -83,6 +83,25 @@ element type from the `offsetGet()` the class resolves to, the way a
 direct `$list->offsetGet('x')` call is, before falling back to the
 template arguments. Seen in Drupal's package_manager tests.
 
+### B739. Keys written from a literal list's values come out optional
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$labels = [];
+foreach ([1, 2, 3] as $node) {
+    $labels[$node] = self::WHITE;
+}
+// $labels is array{1?: 0, 2?: 0, 3?: 0}, should be array{1: 0, 2: 0, 3: 0}
+```
+
+A loop over a literal list runs once for each of its values, so every
+key the body writes from the value is set when the loop ends. The keys
+come out optional, as if the loop might have skipped some, so reading
+`$labels[1]` afterwards adds `null`. Looping over a shape by key already
+keeps the keys it requires; a list's values used as keys should be
+treated the same way.
+
 ## Laravel
 
 No outstanding items.

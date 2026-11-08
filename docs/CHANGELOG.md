@@ -354,6 +354,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Inner iterators keep their element type.** `getInnerIterator()` on an `IteratorIterator` or `FilterIterator` subclass now returns `Iterator<TKey, TValue>`, so `$this->getInnerIterator()->current()` has the element type the class's `@extends` tag gives.
 - **Quotes and brackets inside call arguments.** An argument such as `'a' === 'b'`, a string holding a `|`, `]` or `->`, or a nested index like `$a[$b['x']]['y']` is read as written when a call's generic or conditional return type is worked out. A call chained off `new Box(…)` no longer takes `Box`'s template types from its constructor.
 - **Conditional return types decided by a default constant.** A method whose conditional return type depends on an argument left out of the call is now decided when the parameter's default is a class constant imported in the declaring file, as Symfony's `ContainerBuilder::get()` does. `$this->container->get(EntityTypeManagerInterface::class)->getStorage('node')` in a Drupal kernel test now resolves.
+- **Methods returning `self` keep the instance's type arguments.** A method declared `: self` in a trait that a generic class uses, or in a generic parent a class extends with `@extends`, now returns the class with the instance's type arguments, so `Book::select()->where('title', $title)->all()` in Tempest is still a list of `Book`s.
 
 #### Closures and callables
 

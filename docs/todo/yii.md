@@ -86,3 +86,71 @@ the DI configuration gives the renderer, from
 it, so a name such a class renders does not navigate, complete, or get
 reported. Read the value from the merged params (`src/yii/params.rs`),
 and use it as the base wherever the class gives none.
+
+---
+
+## Y11. The config groups a project declares in PHP
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+// composer.json: "config-plugin-file": "config/configuration.php"
+return [
+    'config-plugin' => [
+        'params-site' => ['$params', 'site/params.php'],
+        'di' => 'common/di/*.php',
+    ],
+    'config-plugin-environments' => [
+        Environment::DEV => ['params' => ['environments/dev/params.php']],
+    ],
+];
+```
+
+A project generated from `yiisoft/app` declares its config groups in the
+PHP file `config-plugin-file` names, not in its `composer.json`. The
+same entries in a `composer.json`'s `config-plugin` go to their files,
+complete, and are reported when no file matches (`src/yii/config_plugin.rs`),
+but in this file the file names and the `$group` references do nothing.
+PHPantom already reads the file to merge params (`src/yii/params.rs`),
+so it knows which file it is. Give its string entries the same
+navigation, completion, and checks, relative to the file's directory,
+with the group names the installed packages declare offered after `$`.
+
+---
+
+## Y12. The route arguments a URL generator call passes navigate
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+$urlGenerator->generate('blog/post/view', ['slug' => $post->slug]);
+```
+
+The keys of the arguments array complete from the placeholders of the
+named route's path (`src/completion/yii_route_params.rs`), but
+go-to-definition and hover on `'slug'` find nothing. Navigate from a key
+to its `{slug}` in the route's path, the way `#[RouteArgument('slug')]`
+already does (`yii_route_argument_locations` in `src/yii/routes.rs`), and
+hover it with the path. A key the path does not declare could be
+reported the same way an unknown `RouteArgument` is.
+
+---
+
+## Y13. A definition's `'__construct()'` key goes to the constructor
+
+**Impact: Low · Complexity: Low**
+
+```php
+Mailer::class => [
+    '__construct()' => ['transport' => Reference::to(TransportInterface::class)],
+],
+```
+
+Every other `'name()'` key of a definition goes to its method, but
+`'__construct()'` goes nowhere. It is left out of the member spans
+deliberately (`emit_definition_keys` in
+`src/symbol_map/extraction/yii_definitions.rs`), because a class without
+a constructor still accepts the key and must not be reported. Navigate
+and hover it when the class (or an ancestor) declares a constructor,
+without reporting it when none does. Its argument keys already go to the
+constructor's parameters.
