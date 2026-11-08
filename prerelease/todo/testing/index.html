@@ -1295,17 +1295,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ts7-prophecy" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        TS7. Prophecy
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#ts8-port-phpstans-phpunit-and-mockery-extension-tests" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1383,9 +1372,10 @@ nothing; a data provider PHPUnit cannot call and a <code>setUp()</code> or
 listing the tests that cover it or are named after it, and a test one
 back to its class, and a class without a test can have one created;
 Pest closures know the test case <code>Pest.php</code> binds them to; Mockery mocks
-keep the mocked class; and the method a PHPUnit or Mockery expectation
-names by string completes, navigates, renames, and is reported when the
-mocked class has no such method.</p>
+keep the mocked class, and Prophecy prophecies offer its methods; and
+the method a PHPUnit or Mockery expectation names by string completes,
+navigates, renames, and is reported when the mocked class has no such
+method.</p>
 <p>PHPStan's PHPUnit extension (<code>phpstan/phpstan-phpunit</code>) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
 PHPUnit support and Phpactor's PHPUnit and Prophecy integrations are
@@ -1428,19 +1418,6 @@ them. Add an assertion fixture per library covering the common forms
 <code>Assert::allIsInstanceOf()</code> and the <code>nullOr*</code> variants,
 <code>Psl\Type\shape()-&gt;coerce()</code>), and file each one that fails as a bug.</p>
 <hr />
-<h2 id="ts7-prophecy">TS7. Prophecy<a class="headerlink" href="#ts7-prophecy" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$repo = $this-&gt;prophesize(OrderRepository::class);</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$repo-&gt;findOpen()-&gt;willReturn([]);</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">$service = new Billing($repo-&gt;reveal());</span>
-</code></pre></div>
-<p>Phpactor completes the mocked class's methods on an <code>ObjectProphecy</code>.
-Check what PHPantom does with current Prophecy, which declares
-<code>ObjectProphecy</code> generic: <code>reveal()</code> should give the mocked class, and
-a call on the prophecy should complete the mocked class's methods and
-give a <code>MethodProphecy</code>. PHPUnit 10 removed <code>prophesize()</code>, so Prophecy
-is declining; fix only what is cheap.</p>
-<hr />
 <h2 id="ts8-port-phpstans-phpunit-and-mockery-extension-tests">TS8. Port PHPStan's PHPUnit and Mockery extension tests<a class="headerlink" href="#ts8-port-phpstans-phpunit-and-mockery-extension-tests" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
 <p>PHPStan's PHPUnit extension (<code>phpstan/phpstan-phpunit</code>) is this
@@ -1461,16 +1438,16 @@ gap as a <code>// SKIP: reason</code> in this document or <code>docs/todo/</code
 <hr />
 <h2 id="ts11-mock-unions-in-property-docblocks">TS11. Mock unions in property docblocks<a class="headerlink" href="#ts11-mock-unions-in-property-docblocks" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @var \Drupal\Core\Entity\EntityTypeManagerInterface|\PHPUnit\Framework\MockObject\MockObject */</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">protected $entityTypeManager;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">protected function setUp(): void {</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    $this-&gt;entityTypeManager = $this-&gt;createMock(EntityTypeManagerInterface::class);</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">public function testLoad(): void {</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">    new Loader($this-&gt;entityTypeManager);   // expects EntityTypeManagerInterface, got …|MockObject</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @var \Drupal\Core\Entity\EntityTypeManagerInterface|\PHPUnit\Framework\MockObject\MockObject */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">protected $entityTypeManager;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">protected function setUp(): void {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    $this-&gt;entityTypeManager = $this-&gt;createMock(EntityTypeManagerInterface::class);</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">public function testLoad(): void {</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    new Loader($this-&gt;entityTypeManager);   // expects EntityTypeManagerInterface, got …|MockObject</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">}</span>
 </code></pre></div>
 <p>Before PHPUnit types could be intersections, a mock property was
 documented as a union of the mocked class and <code>MockObject</code>, and
