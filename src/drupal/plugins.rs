@@ -424,13 +424,22 @@ impl Backend {
     pub(crate) fn note_drupal_plugin_sources(&self, uri: &str, map: Option<&SymbolMap>) {
         let feeds = map.is_none_or(feeds_index);
         // A test module's file is no declaring file, so it is kept apart.
-        let test_source = map.is_some_and(feeds_index) && self.is_closed_drupal_test_fixture(uri);
-        if test_source != self.drupal.plugin_test_sources.read().contains(uri) {
+        let test_plugins = match map {
+            Some(map) if feeds_index(map) && self.is_closed_drupal_test_fixture(uri) => {
+                Some(&map.drupal_plugins)
+            }
+            _ => None,
+        };
+        let unchanged = self.drupal.plugin_test_sources.read().get(uri) == test_plugins;
+        if !unchanged {
             let mut sources = self.drupal.plugin_test_sources.write();
-            if test_source {
-                sources.insert(uri.to_string());
-            } else {
-                sources.remove(uri);
+            match test_plugins {
+                Some(plugins) => {
+                    sources.insert(uri.to_string(), plugins.clone());
+                }
+                None => {
+                    sources.remove(uri);
+                }
             }
         }
         let stale = feeds
@@ -464,19 +473,9 @@ impl Backend {
             declarations.extend(map.drupal_plugins.iter().cloned());
         });
         let mut test_declarations = Vec::new();
-        let mut test_uris: Vec<String> = self
-            .drupal
-            .plugin_test_sources
-            .read()
-            .iter()
-            .cloned()
-            .collect();
-        test_uris.sort_unstable();
-        for uri in test_uris {
-            if let Some(map) = self.symbol_map_for(&uri) {
-                test_declarations.extend(map.drupal_plugins.iter().cloned());
-            }
-            index.sources.insert(uri);
+        for (uri, plugins) in self.drupal.plugin_test_sources.read().iter() {
+            test_declarations.extend(plugins.iter().cloned());
+            index.sources.insert(uri.clone());
         }
         let loader = self.resolved_class_loader_with(&[]);
         let mut subtypes: HashMap<(Atom, &str), bool> = HashMap::new();
@@ -502,10 +501,28 @@ impl Backend {
                     Some(fifth.unwrap_or_else(|| crate::atom::atom(DEFAULT_ANNOTATION))),
                 ),
             };
+            // A `getDiscovery()` that only decorates its parent's is the
+            // manager's own; one an ancestor declares is read from there.
             let finds_own_way = site.sets_discovery
-                || OWN_DISCOVERY
-                    .iter()
-                    .any(|method| declares_below_default(site.class, method, &loader));
+                || OWN_DISCOVERY.iter().any(|method| {
+                    if site.decorates_discovery && method.eq_ignore_ascii_case("getDiscovery") {
+                        loader(Fqn::new(&site.class))
+                            .and_then(|info| info.parent_class)
+                            .is_some_and(|parent| declares_below_default(parent, method, &loader))
+                    } else {
+                        declares_below_default(site.class, method, &loader)
+                    }
+                });
+            if !finds_own_way && !site.static_plugins.is_empty() {
+                let plugins = index
+                    .by_manager
+                    .entry(site.class.to_ascii_lowercase())
+                    .or_default();
+                plugins.extend(site.static_plugins.iter().map(|plugin| Plugin {
+                    id: plugin.id.clone(),
+                    class: plugin.class,
+                }));
+            }
             index.types.push(PluginType {
                 manager: site.class,
                 namespace: site

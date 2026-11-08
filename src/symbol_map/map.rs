@@ -327,6 +327,10 @@ pub(crate) struct SymbolMap {
     /// `Drupal\` namespace give them, sorted by `start`: the plugins among
     /// them are told apart by the plugin types (see `drupal::plugins`).
     pub drupal_plugins: Vec<PluginDeclarationSite>,
+    /// The code the file runs only when a module is installed, by a
+    /// `moduleExists('m')` check (see [`ModuleGuard`]).  Empty for every
+    /// file that checks none.
+    pub drupal_module_guards: Vec<ModuleGuard>,
     /// The shapes of the Drupal route names the file's route builders give
     /// routes they build from parts, `*` for each part that is not
     /// written out (`search.view_*`).  Empty for every file that builds

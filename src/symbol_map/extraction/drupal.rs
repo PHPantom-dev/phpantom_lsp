@@ -8,8 +8,9 @@ use crate::symbol_map::extraction::symfony::{
     RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
 use crate::symbol_map::{
-    DeclaredParameter, DrupalRouteSite, EntityTypeSite, PluginClassSite, PluginDeclarationSite,
-    PluginManagerSite, ReceiverClass, StringKeyKind, TypedReceiverSite,
+    DeclaredParameter, DrupalRouteSite, EntityTypeSite, ModuleGuard, PluginClassSite,
+    PluginDeclarationSite, PluginManagerSite, ReceiverClass, StaticPluginSite, StringKeyKind,
+    TypedReceiverSite,
 };
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
@@ -427,19 +428,155 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_manager(
             .and_then(|value| message_class(value, ctx))
             .map(|name| crate::atom::atom(&name))
     };
-    let span = class.span();
-    let sets_discovery = ctx
-        .content
-        .get(span.start.offset as usize..span.end.offset as usize)
-        .is_some_and(|text| text.contains("->discovery =") || text.contains("->discovery="));
+    let discovery = read_manager_discovery(class, ctx);
     let site = PluginManagerSite {
         class: fqn,
         subdir: subdir.to_string(),
         fifth: class_at(4),
         sixth: class_at(5),
-        sets_discovery,
+        sets_discovery: discovery.sets_discovery,
+        decorates_discovery: discovery.decorates,
+        static_plugins: discovery.static_plugins,
     };
     ctx.drupal_plugin_managers.push(site);
+}
+
+/// The decorators a manager's `getDiscovery()` may wrap its parent's
+/// discovery in without finding plugins no class or [`StaticPluginSite`]
+/// declares: derivatives are read from their base plugin's ID, and a static
+/// decorator's plugins from the `setDefinition()` calls the class makes.
+const ADDITIVE_DISCOVERY_DECORATORS: [&str; 3] = [
+    "Drupal\\Component\\Plugin\\Discovery\\StaticDiscoveryDecorator",
+    "Drupal\\Component\\Plugin\\Discovery\\DerivativeDiscoveryDecorator",
+    "Drupal\\Core\\Plugin\\Discovery\\ContainerDerivativeDiscoveryDecorator",
+];
+
+/// How a plugin manager class finds its plugins, beyond what its parent's
+/// discovery reads.
+#[derive(Default)]
+struct ManagerDiscovery {
+    /// It may find plugins no class or `setDefinition()` call declares.
+    sets_discovery: bool,
+    /// It declares a `getDiscovery()` that only decorates its parent's.
+    decorates: bool,
+    static_plugins: Vec<StaticPluginSite>,
+}
+
+/// Read how the plugin manager `class` sets its discovery: each assignment
+/// to `$this->discovery`, the `getDiscovery()` it declares, and the plugins
+/// it declares by `setDefinition('id', [...])`.
+///
+/// A `getDiscovery()` that starts from `parent::getDiscovery()`, wraps it in
+/// [`ADDITIVE_DISCOVERY_DECORATORS`] only, and returns `$this->discovery`
+/// still finds every plugin the default discovery does, plus the ones a
+/// `setDefinition()` with a literal ID adds, as core's constraint manager
+/// does for Symfony's constraints.  Any other shape may find plugins
+/// nothing here declares.
+fn read_manager_discovery(class: &Class<'_>, ctx: &ExtractionCtx<'_>) -> ManagerDiscovery {
+    use mago_syntax::cst::Node;
+    let is_this_discovery = |expr: &Expression<'_>| {
+        matches!(expr, Expression::Access(Access::Property(access))
+            if matches!(access.object, Expression::Variable(Variable::Direct(variable)) if variable.name == b"$this")
+                && matches!(&access.property, ClassLikeMemberSelector::Identifier(name) if name.value == b"discovery"))
+    };
+    let is_parent_discovery = |expr: &Expression<'_>| {
+        matches!(expr, Expression::Call(Call::StaticMethod(call))
+            if matches!(call.class, Expression::Parent(_))
+                && matches!(&call.method, ClassLikeMemberSelector::Identifier(name)
+                    if bytes_to_str(name.value).eq_ignore_ascii_case("getDiscovery")))
+    };
+    let is_additive_decorator = |expr: &Expression<'_>| {
+        let Expression::Instantiation(instantiation) = expr else {
+            return false;
+        };
+        let Expression::Identifier(identifier) = instantiation.class else {
+            return false;
+        };
+        let written = bytes_to_str(identifier.value());
+        let resolved = ctx
+            .resolved_name_at(identifier.span().start.offset)
+            .unwrap_or(written)
+            .trim_start_matches('\\');
+        ADDITIVE_DISCOVERY_DECORATORS
+            .iter()
+            .any(|decorator| decorator.eq_ignore_ascii_case(resolved))
+            && instantiation
+                .argument_list
+                .as_ref()
+                .and_then(|arguments| arguments.arguments.first())
+                .is_some_and(|first| is_this_discovery(first.value()))
+    };
+
+    let mut discovery = ManagerDiscovery::default();
+    let mut starts_from_parent = false;
+    let mut declares_get_discovery = false;
+    crate::parser::for_each_concrete_method(class.members.as_slice(), |method, body| {
+        let is_get_discovery = bytes_to_str(method.name.value).eq_ignore_ascii_case("getDiscovery");
+        declares_get_discovery |= is_get_discovery;
+        crate::parser::for_each_node_with_ancestors(Node::Block(body), |node, _| match node {
+            Node::Assignment(assignment) if is_this_discovery(assignment.lhs) => {
+                if !is_get_discovery || !assignment.operator.is_assign() {
+                    discovery.sets_discovery = true;
+                } else if is_parent_discovery(assignment.rhs) {
+                    starts_from_parent = true;
+                } else if !is_additive_decorator(assignment.rhs) {
+                    discovery.sets_discovery = true;
+                }
+            }
+            Node::Return(statement) if is_get_discovery => {
+                if !statement.value.is_some_and(is_this_discovery) {
+                    discovery.sets_discovery = true;
+                }
+            }
+            Node::MethodCall(call)
+                if matches!(&call.method, ClassLikeMemberSelector::Identifier(name)
+                    if bytes_to_str(name.value).eq_ignore_ascii_case("setDefinition")) =>
+            {
+                let mut arguments = call.argument_list.arguments.iter();
+                let id = arguments
+                    .next()
+                    .and_then(|first| resolved_string_literal(first.value(), ctx.content))
+                    .filter(|(id, _, _)| !id.is_empty());
+                // A plugin is its ID and its class: one whose either is
+                // unreadable leaves what the manager finds unknown.
+                let class = arguments
+                    .next()
+                    .and_then(|definition| {
+                        crate::parser::array_literal_elements(definition.value())
+                    })
+                    .and_then(|entries| {
+                        entries.iter().find_map(|entry| match entry {
+                            ArrayElement::KeyValue(entry)
+                                if resolved_string_literal(entry.key, ctx.content)
+                                    .is_some_and(|(key, _, _)| key == "class") =>
+                            {
+                                message_class(entry.value, ctx)
+                            }
+                            _ => None,
+                        })
+                    });
+                match (id, class) {
+                    (Some((id, _, _)), Some(class)) => {
+                        discovery.static_plugins.push(StaticPluginSite {
+                            id: id.to_string(),
+                            class: crate::atom::atom(&class),
+                        });
+                    }
+                    _ => discovery.sets_discovery = true,
+                }
+            }
+            _ => {}
+        });
+    });
+    if declares_get_discovery && !starts_from_parent {
+        discovery.sets_discovery = true;
+    }
+    discovery.decorates = declares_get_discovery && !discovery.sets_discovery;
+    if discovery.sets_discovery {
+        // What the class finds is unknown anyway.
+        discovery.static_plugins.clear();
+    }
+    discovery
 }
 
 /// Record the plugin IDs a method call names by its arguments rather than
@@ -3823,5 +3960,122 @@ $build['more']['#theme'] = 'item_list';
             )]
         );
         assert!(map_of(php, false).twig_contexts.is_empty());
+    }
+}
+
+/// The code `program` runs only when a module is installed (see
+/// [`ModuleGuard`]): the branch an `if` takes when a `moduleExists('m')`
+/// it requires holds, and the rest of a block after an `if` that leaves
+/// it when one is false.
+pub(in crate::symbol_map::extraction) fn module_guards(
+    program: &Program<'_>,
+    content: &str,
+) -> Vec<ModuleGuard> {
+    use mago_syntax::cst::Node;
+    let mut guards = Vec::new();
+    let guard_list = |statements: &[Statement<'_>], end: u32, guards: &mut Vec<ModuleGuard>| {
+        for statement in statements {
+            let Statement::If(if_stmt) = statement else {
+                continue;
+            };
+            let then: Vec<&Statement<'_>> = if_stmt.body.statements().iter().collect();
+            let (Some(first), Some(last)) = (then.first(), then.last()) else {
+                continue;
+            };
+            let mut required = Vec::new();
+            collect_required_modules(if_stmt.condition, true, content, &mut required);
+            for module in required {
+                guards.push(ModuleGuard {
+                    start: first.span().start.offset,
+                    end: last.span().end.offset,
+                    module,
+                });
+            }
+            // `if (!moduleExists('m')) { return; }` with nothing else to
+            // run guards what follows it.
+            let has_else = !if_stmt.body.else_if_statements().is_empty()
+                || if_stmt.body.else_statements().is_some();
+            let leaves = then.iter().any(|statement| {
+                crate::type_engine::type_ops::condition_facts::statement_leaves_block(
+                    statement,
+                    &|_| false,
+                )
+            });
+            if !has_else && leaves {
+                let mut missing = Vec::new();
+                collect_required_modules(if_stmt.condition, false, content, &mut missing);
+                let start = if_stmt.span().end.offset;
+                for module in missing {
+                    guards.push(ModuleGuard { start, end, module });
+                }
+            }
+        }
+    };
+    guard_list(
+        program.statements.as_slice(),
+        program.span().end.offset,
+        &mut guards,
+    );
+    crate::parser::for_each_node_with_ancestors(Node::Program(program), |node, _| {
+        if let Node::Block(block) = node {
+            guard_list(
+                block.statements.as_slice(),
+                block.span().end.offset,
+                &mut guards,
+            );
+        }
+    });
+    guards
+}
+
+/// Add to `modules` each module whose `moduleExists('m')` must be `holds`
+/// for `condition` to be true: the call itself, or under a `!`, an `&&`,
+/// or, for a call that must be false, an `||`.
+fn collect_required_modules(
+    condition: &Expression<'_>,
+    holds: bool,
+    content: &str,
+    modules: &mut Vec<String>,
+) {
+    match condition {
+        Expression::Parenthesized(inner) => {
+            collect_required_modules(inner.expression, holds, content, modules)
+        }
+        Expression::UnaryPrefix(unary) if matches!(unary.operator, UnaryPrefixOperator::Not(_)) => {
+            collect_required_modules(unary.operand, !holds, content, modules)
+        }
+        Expression::Binary(binary)
+            if (holds
+                && matches!(
+                    binary.operator,
+                    BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
+                ))
+                || (!holds
+                    && matches!(
+                        binary.operator,
+                        BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+                    )) =>
+        {
+            collect_required_modules(binary.lhs, holds, content, modules);
+            collect_required_modules(binary.rhs, holds, content, modules);
+        }
+        Expression::Call(Call::Method(call)) if holds => {
+            let ClassLikeMemberSelector::Identifier(name) = &call.method else {
+                return;
+            };
+            if !bytes_to_str(name.value).eq_ignore_ascii_case("moduleExists") {
+                return;
+            }
+            if let Some((module, _, _)) = call
+                .argument_list
+                .arguments
+                .first()
+                .and_then(|argument| resolved_string_literal(argument.value(), content))
+                && !module.is_empty()
+            {
+                modules.push(module.to_string());
+            }
+        }
+        _ => {}
     }
 }

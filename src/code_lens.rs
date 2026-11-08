@@ -160,7 +160,13 @@ impl Backend {
 
             let descendants = self.implementation_lens_descendants(class, &class_loader);
             if let Some(descendants) = &descendants {
-                let count = descendants.iter().filter(|d| !d.is_abstract).count();
+                let plugins =
+                    self.drupal_plugin_lens_classes(&class_fqn, descendants, &class_loader);
+                let count = descendants
+                    .iter()
+                    .chain(&plugins)
+                    .filter(|d| !d.is_abstract)
+                    .count();
                 lenses.extend(Self::build_implementation_lens(
                     uri,
                     &index,
@@ -605,6 +611,31 @@ impl Backend {
         Some(self.implementation_descendants(class, &class.fqn(), class_loader, true))
     }
 
+    /// The plugins of the Drupal plugin manager `class_fqn` stands for that
+    /// are not among `descendants`: the implementation lens of the class
+    /// itself lists them, as go to implementation does.  A plugin
+    /// implements none of the manager's methods, so a method's lens counts
+    /// the descendants alone.
+    fn drupal_plugin_lens_classes(
+        &self,
+        class_fqn: &str,
+        descendants: &[Arc<ClassInfo>],
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Vec<Arc<ClassInfo>> {
+        let mut plugins: Vec<Arc<ClassInfo>> = Vec::new();
+        for plugin in self.drupal_plugin_implementations(class_fqn) {
+            if !descendants
+                .iter()
+                .chain(&plugins)
+                .any(|known| known.fqn().eq_ignore_ascii_case(&plugin))
+                && let Some(info) = class_loader(Fqn::new(&plugin))
+            {
+                plugins.push(info);
+            }
+        }
+        plugins
+    }
+
     /// Build the implementation lens for a class, or for one of its
     /// methods when `member` is given.
     ///
@@ -664,9 +695,15 @@ impl Backend {
     ) -> Option<Vec<Location>> {
         let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let class = class_loader(Fqn::new(class_fqn))?;
-        let descendants = self.implementation_descendants(&class, class_fqn, &class_loader, true);
+        let mut descendants =
+            self.implementation_descendants(&class, class_fqn, &class_loader, true);
         Some(match member {
-            None => self.class_implementation_locations(uri, content, &class, &descendants),
+            None => {
+                let plugins =
+                    self.drupal_plugin_lens_classes(class_fqn, &descendants, &class_loader);
+                descendants.extend(plugins);
+                self.class_implementation_locations(uri, content, &class, &descendants)
+            }
             Some(member) => {
                 let providers = member_implementation_providers(
                     class_fqn,

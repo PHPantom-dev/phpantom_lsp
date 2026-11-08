@@ -36,6 +36,7 @@ contributor even though it's short.
 | TM6 | [`query(Book::class)` builds a query for `Book`](todo/tempest.md#tm6-querybookclass-builds-a-query-for-book) | Medium | Low |
 | Y12 | [The route arguments a URL generator call passes navigate](todo/yii.md#y12-the-route-arguments-a-url-generator-call-passes-navigate) | Low-Medium | Low |
 | Y11 | [The config groups a project declares in PHP](todo/yii.md#y11-the-config-groups-a-project-declares-in-php) | Medium | Medium |
+| DR29 | [Controller methods of a service](todo/drupal.md#dr29-controller-methods-of-a-service) | Low-Medium | Low |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -123,6 +124,7 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | F59 | [Send Twig, YAML, and XML documents to the server from Zed](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed) (Zed PR) | Medium | Low |
 | DR11 | [Form and render callbacks](todo/drupal.md#dr11-form-and-render-callbacks) | Low-Medium | Low-Medium |
+| DR29 | [Controller methods of a service](todo/drupal.md#dr29-controller-methods-of-a-service) | Low-Medium | Low |
 | DR12 | [Translation placeholders](todo/drupal.md#dr12-translation-placeholders) | Low-Medium | Low-Medium |
 | DR13 | [Module names and `*.info.yml`](todo/drupal.md#dr13-module-names-and-infoyml) | Low-Medium | Low-Medium |
 | DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |

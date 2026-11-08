@@ -128,3 +128,39 @@ async fn a_refreshed_index_leaves_dormant_files_asleep() {
     assert!(backend.symbol_map_for(&widget).is_none());
     assert!(backend.dormant_files.read().contains(&widget));
 }
+
+/// What a test module's entity class declares outlives its parse: test code
+/// sees the entity type before anything wakes the file.
+#[tokio::test]
+async fn a_dormant_test_module_still_declares_its_entity_types() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    write(
+        &dir.path().join("web/core/lib/Drupal.php"),
+        "<?php\nclass Drupal {}\n",
+    );
+    let entity = "web/core/modules/config/tests/config_test/src/Entity/ConfigTest.php";
+    write(
+        &dir.path().join(entity),
+        "<?php\nnamespace Drupal\\config_test\\Entity;\n/**\n * @ConfigEntityType(\n *   id = \"config_test\",\n * )\n */\nclass ConfigTest {}\n",
+    );
+    let backend = indexed(dir.path()).await;
+    let entity = uri(dir.path(), entity);
+    assert!(backend.dormant_files.read().contains(&entity));
+
+    let test = uri(
+        dir.path(),
+        "web/core/modules/config/tests/src/Functional/ConfigTest.php",
+    );
+    let found = backend.drupal_entity_types_seen_from("config_test", Some(&test));
+    assert_eq!(
+        found.first().map(|(class, _)| class.as_str()),
+        Some("Drupal\\config_test\\Entity\\ConfigTest"),
+        "{found:?}"
+    );
+    assert!(
+        backend
+            .drupal_entity_types_seen_from("config_test", Some(&uri(dir.path(), "src/Page.php")))
+            .is_empty()
+    );
+}

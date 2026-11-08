@@ -698,6 +698,11 @@ fn extract_symbol_map_inner(
     }
     apply_lookup_guards(&mut ctx);
     finish_dql(&mut ctx);
+    let drupal_module_guards = if ctx.drupal {
+        drupal::module_guards(program, content)
+    } else {
+        Vec::new()
+    };
 
     // ── Sweep all docblock trivia for floating references ───────────
     // Docblocks attached to classes, functions, methods, properties, and
@@ -868,6 +873,7 @@ fn extract_symbol_map_inner(
         drupal_plugin_classes: ctx.drupal_plugin_classes,
         drupal_plugin_managers: ctx.drupal_plugin_managers,
         drupal_plugins: ctx.drupal_plugins,
+        drupal_module_guards,
         drupal_route_patterns: ctx.drupal_route_patterns,
         drupal_route_aliases: ctx.drupal_route_aliases,
         drupal_routes: ctx.drupal_routes,

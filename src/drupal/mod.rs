@@ -37,6 +37,10 @@ use crate::Backend;
 use crate::atom::Atom;
 use crate::symbol_map::{ReceiverClass, StringKeyKind, SymbolKind, SymbolMap};
 
+/// An entity type ID with the class and storage handler of its
+/// declaration (see [`crate::symbol_map::EntityTypeSite`]).
+type EntityTypeDeclaration = (String, Atom, Option<Atom>);
+
 /// The web roots of the workspace's Drupal projects, and the declaration
 /// files found under them.
 #[derive(Default)]
@@ -78,14 +82,16 @@ pub(crate) struct DrupalState {
     /// Counts the changes to files the plugin index reads, so an index read
     /// while one landed is not kept.
     plugin_generation: std::sync::atomic::AtomicU64,
-    /// The closed test modules' files that declare plugins, by URI: what
-    /// they declare is kept apart from the index's plugins (see
-    /// [`plugins::PluginIndex::declares`]).
-    plugin_test_sources: RwLock<std::collections::HashSet<String>>,
-    /// The closed test modules' files that declare entity types, by URI:
-    /// only test code sees what they declare (see
-    /// [`Backend::drupal_entity_types_seen_from`]).
-    entity_type_test_sources: RwLock<std::collections::HashSet<String>>,
+    /// The plugins each closed test module's file declares, by URI: they
+    /// are kept apart from the index's plugins (see
+    /// [`plugins::PluginIndex::declares`]).  Copied out of the symbol map,
+    /// since an installed package's file lets go of it once indexed (see
+    /// [`Backend::put_to_sleep`]).
+    plugin_test_sources: RwLock<BTreeMap<String, Vec<crate::symbol_map::PluginDeclarationSite>>>,
+    /// The entity types each closed test module's file declares, by URI,
+    /// copied out of its symbol map the same way: only test code sees them
+    /// (see [`Backend::drupal_entity_types_seen_from`]).
+    entity_type_test_sources: RwLock<BTreeMap<String, Vec<EntityTypeDeclaration>>>,
     /// The default configuration files and configuration schema files of
     /// every extension, and the configuration names read from them.
     config: config::ConfigSources,
@@ -343,30 +349,36 @@ pub(crate) fn is_hook_php_file(path: &Path, web_root: &Path) -> bool {
     (by_name || in_hook_dir) && !is_test_fixture(path, web_root) && !is_unloaded(path, web_root)
 }
 
-/// Add the entity class and storage handler of each declaration of the
-/// entity type `id` in `map` to `found`, once each.
-fn collect_entity_types(map: &SymbolMap, id: &str, found: &mut Vec<(Atom, Option<Atom>)>) {
-    for site in &map.entity_types {
+/// The entity types `map` declares: each ID, with the class and storage
+/// handler of its declaration.
+fn entity_type_sites(map: &SymbolMap) -> impl Iterator<Item = (&str, Atom, Option<Atom>)> + '_ {
+    map.entity_types.iter().filter_map(|site| {
         let at = map.spans.partition_point(|span| span.start < site.start);
-        let declares_id = map.spans[at..]
+        map.spans[at..]
             .iter()
             .take_while(|span| span.start == site.start)
-            .any(|span| {
-                matches!(
-                    &span.kind,
-                    SymbolKind::StringKey {
-                        kind: StringKeyKind::DrupalEntityType,
-                        key,
-                        ..
-                    } if key == id
-                )
-            });
-        if declares_id
-            && !found
-                .iter()
-                .any(|(class, storage)| *class == site.class && *storage == site.storage)
-        {
-            found.push((site.class, site.storage));
+            .find_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalEntityType,
+                    key,
+                    ..
+                } => Some((key.as_str(), site.class, site.storage)),
+                _ => None,
+            })
+    })
+}
+
+/// Add the entity class and storage handler of each of `sites` (see
+/// [`entity_type_sites`]) that declares the entity type `id` to `found`,
+/// once each.
+fn collect_entity_types<'a>(
+    sites: impl IntoIterator<Item = (&'a str, Atom, Option<Atom>)>,
+    id: &str,
+    found: &mut Vec<(Atom, Option<Atom>)>,
+) {
+    for (declared, class, storage) in sites {
+        if declared == id && !found.contains(&(class, storage)) {
+            found.push((class, storage));
         }
     }
 }
@@ -507,7 +519,9 @@ impl Backend {
     /// none and has no default.
     pub(crate) fn drupal_entity_types(&self, id: &str) -> Vec<(Atom, Option<Atom>)> {
         let mut found: Vec<(Atom, Option<Atom>)> = Vec::new();
-        self.visit_declaring_symbol_maps(|_, map| collect_entity_types(map, id, &mut found));
+        self.visit_declaring_symbol_maps(|_, map| {
+            collect_entity_types(entity_type_sites(map), id, &mut found);
+        });
         found
     }
 
@@ -528,19 +542,13 @@ impl Backend {
                 .and_then(crate::util::uri_to_path)
                 .is_some_and(|path| self.is_drupal_test_path(&path))
         {
-            let mut uris: Vec<String> = self
-                .drupal
-                .entity_type_test_sources
-                .read()
-                .iter()
-                .cloned()
-                .collect();
-            uris.sort_unstable();
-            for uri in uris {
-                if let Some(map) = self.symbol_map_for(&uri) {
-                    collect_entity_types(&map, id, &mut found);
-                }
-            }
+            let sources = self.drupal.entity_type_test_sources.read();
+            let sites = sources.values().flatten();
+            collect_entity_types(
+                sites.map(|(id, class, storage)| (id.as_str(), *class, *storage)),
+                id,
+                &mut found,
+            );
         }
         found
     }
@@ -549,15 +557,31 @@ impl Backend {
     /// step with the symbol map of the file at `uri` (`None` once it is
     /// gone).
     pub(crate) fn note_drupal_entity_type_test_sources(&self, uri: &str, map: Option<&SymbolMap>) {
-        let test_source = map.is_some_and(|map| !map.entity_types.is_empty())
-            && self.is_closed_drupal_test_fixture(uri);
-        if test_source != self.drupal.entity_type_test_sources.read().contains(uri) {
-            let mut sources = self.drupal.entity_type_test_sources.write();
-            if test_source {
-                sources.insert(uri.to_string());
-            } else {
-                sources.remove(uri);
+        let declarations: Vec<EntityTypeDeclaration> = match map {
+            Some(map)
+                if !map.entity_types.is_empty() && self.is_closed_drupal_test_fixture(uri) =>
+            {
+                entity_type_sites(map)
+                    .map(|(id, class, storage)| (id.to_string(), class, storage))
+                    .collect()
             }
+            _ => Vec::new(),
+        };
+        if self
+            .drupal
+            .entity_type_test_sources
+            .read()
+            .get(uri)
+            .map_or(&[][..], Vec::as_slice)
+            == declarations.as_slice()
+        {
+            return;
+        }
+        let mut sources = self.drupal.entity_type_test_sources.write();
+        if declarations.is_empty() {
+            sources.remove(uri);
+        } else {
+            sources.insert(uri.to_string(), declarations);
         }
     }
 

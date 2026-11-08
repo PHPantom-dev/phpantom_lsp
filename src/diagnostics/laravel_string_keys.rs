@@ -1147,6 +1147,18 @@ impl Backend {
         } else {
             Vec::new()
         };
+        // Code that runs only when a module the site lacks is installed
+        // may look up the services that module declares.
+        let absent_module_code: Vec<(u32, u32)> = if drupal {
+            symbol_map
+                .drupal_module_guards
+                .iter()
+                .filter(|guard| !self.has_drupal_module(&guard.module))
+                .map(|guard| (guard.start, guard.end))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let key_spans: Vec<CheckedKeySpan> = symbol_map
             .spans
             .iter()
@@ -1183,7 +1195,11 @@ impl Backend {
                     return None;
                 }
                 if *kind == crate::symbol_map::StringKeyKind::ServiceId
-                    && (catches_missing_service || checked_ids.contains(&key.as_str()))
+                    && (catches_missing_service
+                        || checked_ids.contains(&key.as_str())
+                        || absent_module_code
+                            .iter()
+                            .any(|(start, end)| (*start..*end).contains(&span.start)))
                 {
                     return None;
                 }

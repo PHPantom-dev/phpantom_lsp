@@ -909,6 +909,54 @@ async fn a_lookup_that_may_catch_a_missing_service_is_not_checked() {
     assert!(unknown_services(&backend, &dir, LOOKUPS_PATH, &lookups).is_empty());
 }
 
+/// Code that runs only when a module is installed may look up its
+/// services: a module the site lacks declares none it can see, and one it
+/// has declares them all.
+#[tokio::test]
+async fn a_lookup_a_missing_module_guards_is_not_checked() {
+    const GUARDED: &str = r#"<?php
+namespace Drupal\acme;
+
+final class Optional {
+    public function inside(): void {
+        if (\Drupal::moduleHandler()->moduleExists('absent_module')) {
+            \Drupal::service('absent_module.helper');
+        }
+        \Drupal::service('absent_module.unguarded');
+    }
+
+    public function after(): void {
+        if (!\Drupal::moduleHandler()->moduleExists('absent_module')) {
+            return;
+        }
+        \Drupal::service('absent_module.after');
+    }
+
+    public function present(): void {
+        if (\Drupal::moduleHandler()->moduleExists('acme')) {
+            \Drupal::service('acme.typo_guarded');
+        }
+    }
+}
+"#;
+    const GUARDED_PATH: &str = "web/modules/custom/acme/src/Optional.php";
+    let (backend, dir) = unknown_service_site(&[
+        (
+            "web/modules/custom/acme/acme.info.yml",
+            "name: Acme\ntype: module\n",
+        ),
+        (GUARDED_PATH, GUARDED),
+    ])
+    .await;
+    assert_eq!(
+        unknown_services(&backend, &dir, GUARDED_PATH, GUARDED),
+        vec![
+            "Unknown service 'absent_module.unguarded'".to_string(),
+            "Unknown service 'acme.typo_guarded'".to_string(),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn test_code_is_not_checked() {
     let path = "web/modules/custom/acme/tests/src/Kernel/LookupsTest.php";

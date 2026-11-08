@@ -873,8 +873,32 @@ pub(crate) struct PluginManagerSite {
     /// The class named sixth: the annotation, beside an attribute.
     pub sixth: Option<crate::atom::Atom>,
     /// Whether the class sets its discovery itself, and so may find
-    /// plugins no attribute or annotation declares.
+    /// plugins no attribute, annotation, or `setDefinition()` call declares.
     pub sets_discovery: bool,
+    /// Whether the class declares a `getDiscovery()` that only decorates
+    /// its parent's, adding derivatives and [`Self::static_plugins`].
+    pub decorates_discovery: bool,
+    /// The plugins the class declares itself by `setDefinition()`.
+    pub static_plugins: Vec<StaticPluginSite>,
+}
+
+/// A byte range a Drupal file runs only when the module `module` is
+/// installed: the branch of an `if (…moduleExists('m'))`, or the rest of a
+/// block after `if (!…moduleExists('m')) { return; }`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ModuleGuard {
+    pub start: u32,
+    pub end: u32,
+    pub module: String,
+}
+
+/// A plugin a manager declares by `setDefinition('id', ['class' => …])`
+/// on its discovery.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StaticPluginSite {
+    pub id: String,
+    /// The definition's `class`.
+    pub class: crate::atom::Atom,
 }
 
 /// An attribute or annotation on a class in a `Drupal\` namespace that

@@ -57,7 +57,7 @@ const CORE: &[(&str, &str)] = &[
     ),
     (
         "web/core/lib/Drupal/Core/Validation/ConstraintManager.php",
-        "<?php\nnamespace Drupal\\Core\\Validation;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass ConstraintManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Validation/Constraint', $namespaces, $module_handler, NULL, 'Drupal\\Core\\Validation\\Annotation\\Constraint');\n    }\n}\n",
+        "<?php\nnamespace Drupal\\Core\\Validation;\nuse Drupal\\Component\\Plugin\\Discovery\\StaticDiscoveryDecorator;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nuse Symfony\\Component\\Validator\\Constraints\\NotBlank;\nclass ConstraintManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Validation/Constraint', $namespaces, $module_handler, NULL, 'Drupal\\Core\\Validation\\Annotation\\Constraint');\n    }\n    protected function getDiscovery() {\n        if (!isset($this->discovery)) {\n            $this->discovery = parent::getDiscovery();\n            $this->discovery = new StaticDiscoveryDecorator($this->discovery, [$this, 'registerDefinitions']);\n        }\n        return $this->discovery;\n    }\n    public function registerDefinitions() {\n        $this->getDiscovery()->setDefinition('NotBlank', [\n            'class' => NotBlank::class,\n        ]);\n    }\n}\n",
     ),
     (
         "web/core/lib/Drupal/Core/TypedData/DataDefinitionInterface.php",
@@ -259,6 +259,42 @@ async fn a_manager_interface_lists_the_plugins_as_implementations() {
     assert!(!uris.contains(&uri_for(&dir, STRAY_PATH)), "{uris:?}");
 }
 
+/// The implementation lens on a manager interface counts and lists what go
+/// to implementation does: the manager and its plugins.
+#[tokio::test]
+async fn a_manager_interfaces_lens_counts_the_plugins() {
+    const INTERFACE_PATH: &str = "web/core/lib/Drupal/Core/Block/BlockManagerInterface.php";
+    let (backend, dir) = site(&[(CONSUMER_PATH, CONSUMER)]).await;
+    let uri = uri_for(&dir, INTERFACE_PATH);
+    let content = std::fs::read_to_string(dir.path().join(INTERFACE_PATH)).unwrap();
+    let lens = backend
+        .handle_code_lens(uri.as_str(), &content)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|lens| lens.range.start.line == 3)
+        .map(|lens| backend.resolve_code_lens_item(lens))
+        .find_map(|lens| {
+            lens.command
+                .filter(|command| command.title.contains("implementation"))
+        })
+        .expect("an implementation lens");
+    let locations: Vec<Location> = lens
+        .arguments
+        .as_ref()
+        .and_then(|arguments| arguments.get(2))
+        .and_then(|locations| serde_json::from_value(locations.clone()).ok())
+        .unwrap_or_default();
+    let uris: Vec<Uri> = locations.into_iter().map(|location| location.uri).collect();
+    for path in [HELLO_PATH, LEGACY_PATH] {
+        assert!(uris.contains(&uri_for(&dir, path)), "{path}: {uris:?}");
+    }
+    assert_eq!(
+        lens.title,
+        format!("{} implementations", uris.len()),
+        "{uris:?}"
+    );
+}
+
 const BLOCK_ANNOTATION_PATH: &str = "web/core/lib/Drupal/Core/Block/Annotation/Block.php";
 const TRANSLATION_PATH: &str = "web/core/lib/Drupal/Core/Annotation/Translation.php";
 /// A class named like an annotation in a plugin's own namespace, which
@@ -389,6 +425,10 @@ const UNKNOWN_PLUGIN_SITE: &[(&str, &str)] = &[
         "<?php\nnamespace Drupal\\acme;\nuse Drupal\\Component\\Plugin\\Attribute\\Plugin;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass OwnWayManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/OwnWay', $namespaces, $module_handler, NULL, Plugin::class);\n    }\n    public function getDefinitions() { return []; }\n}\n",
     ),
     (
+        "web/modules/custom/acme/src/YamlManager.php",
+        "<?php\nnamespace Drupal\\acme;\nuse Drupal\\Component\\Plugin\\Attribute\\Plugin;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nuse Drupal\\Core\\Plugin\\Discovery\\YamlDiscovery;\nclass YamlManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Yaml', $namespaces, $module_handler, NULL, Plugin::class);\n    }\n    protected function getDiscovery() {\n        if (!isset($this->discovery)) {\n            $this->discovery = new YamlDiscovery('acme', []);\n        }\n        return $this->discovery;\n    }\n}\n",
+    ),
+    (
         "web/modules/custom/acme/src/CreatorManager.php",
         "<?php\nnamespace Drupal\\acme;\nuse Drupal\\Component\\Plugin\\Attribute\\Plugin;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass CreatorManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Creator', $namespaces, $module_handler, NULL, Plugin::class);\n    }\n    public function createInstance($plugin_id, array $configuration = []) {}\n}\n",
     ),
@@ -410,7 +450,7 @@ use Drupal\Core\Block\BlockManagerInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
 
 final class Lookups {
-    public function run(BlockManagerInterface $blocks, OwnWayManager $own, CreatorManager $creator, ConstantManager $constant): void {
+    public function run(BlockManagerInterface $blocks, OwnWayManager $own, YamlManager $yaml, CreatorManager $creator, ConstantManager $constant): void {
         $blocks->createInstance('acme_hello');
         $blocks->createInstance('acme_helo');
         $blocks->createInstance('acme_hello:main');
@@ -424,8 +464,10 @@ final class Lookups {
         }
         BaseFieldDefinition::create('strin')
             ->setDisplayOptions('form', ['type' => 'string_textfeld'])
-            ->addConstraint('UniqueFeld');
+            ->addConstraint('UniqueFeld')
+            ->addConstraint('NotBlank');
         $own->createInstance('acme_anything');
+        $yaml->createInstance('acme_from_yaml');
         $creator->createInstance('acme_created');
         $creator->getDefinition('acme_defined');
         $constant->createInstance('acme_whatever');
