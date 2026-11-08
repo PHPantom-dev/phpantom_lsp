@@ -35,6 +35,17 @@ contributor even though it's short.
 | TM8 | [The data `view()` passes completes and navigates](todo/tempest.md#tm8-the-data-view-passes-completes-and-navigates) | Low-Medium | Low-Medium |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
+## Sprint 9 — Startup performance
+
+| #   | Item                                                                                                                                                            | Impact      | Complexity  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+|     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
+| T61 | [A regression that changes where a call resolves goes unnoticed](todo/type-inference.md#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed) | Medium      | Medium      |
+| P92 | [Startup's file walks and resource indexing run on one core](todo/performance.md#p92-startups-file-walks-and-resource-indexing-run-on-one-core) | Medium | Medium |
+| P86 | [A Symfony app's generated `config/reference.php` is slow to parse](todo/performance.md#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse) | Medium | Medium |
+| P91 | [Parsing and merging of the full index take turns](todo/performance.md#p91-parsing-and-merging-of-the-full-index-take-turns) | Medium-High | Medium-High |
+|     | **Release 1.1.0**                                                                                                                                               |             |             |
+
 # Feature Sets
 
 A feature set is the work toward one goal: making PHPantom fully usable

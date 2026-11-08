@@ -20,6 +20,86 @@ against that bar.
 
 ---
 
+## P91. Parsing and merging of the full index take turns
+
+**Impact: Medium-High · Complexity: Medium-High**
+
+On `projects/drupal` (15,900 PHP files, 32 cores, release build,
+2026-11-09) the server takes 2.4 s from `initialize` to idle, 1.7 s of it
+in the full index. PHPlumb parses every file of the same checkout fully,
+with its member index, in 0.49 s. Our parse is heavier per file, but that
+is not what decides the wall time: the parse workers keep only 4 to 6 of
+the 32 cores busy, while one tokio thread runs at 100% from the start of
+the full index to its end.
+
+Drupal core counts as installed-package code, so `parse_batch_parallel`
+parses it `DORMANT_CHUNK` (1,024) files at a time and publishes each chunk
+through `apply_ast_index_parse_results_batch` before the next one starts.
+That merge is serial, and the workers wait for it. Inside it,
+`reindex_references_for_symbol_maps_batch` builds every file's reference
+entries (`reference_entries_for_symbol_map`) on the merging thread, then
+inserts them into `std` `HashMap`s, so about a quarter of that thread's
+samples are SipHash (`hash_one::<&ReferenceIndexKey>`, `Arc<str>` keys).
+The debug build shows the same shape: 10.2 s of full index, 7.0 s of it
+for the 10,893 core files.
+
+Three changes, measured one at a time:
+
+- Build each file's reference entries in the parse worker, next to its
+  symbol map, so the merge only inserts.
+- Give the reference index (`by_key`, `uri_keys`, the per-key URI maps) a
+  fast non-cryptographic hasher.
+- Parse the next chunk while the previous one merges, keeping at most two
+  chunks of parses alive so the memory bound `DORMANT_CHUNK` exists for
+  still holds.
+
+The serial tail should shrink to the inserts alone, which would put the
+full index under 1 s on this checkout. Every project with installed
+packages under the workspace walk (Drupal core, WordPress core) goes
+through the same chunks, and every project's own files go through the same
+merge. Record a frame-pointer profile first (see the appendix) to confirm
+how the rest of the merging thread's time splits, since the flat profile
+spreads it thinly.
+
+**Where to look:** `parse_batch_parallel` and `parse_and_publish` in
+`src/indexing/preload.rs`, `apply_ast_index_parse_results_batch` in
+`src/parser/ast_update.rs`, `reindex_references_for_symbol_maps_batch` in
+`src/reference_index.rs`.
+
+---
+
+## P92. Startup's file walks and resource indexing run on one core
+
+**Impact: Medium · Complexity: Medium**
+
+On the same checkout and build as P91, about 0.5 s of the 2.4 s to idle
+runs on a single core while the other 31 wait:
+
+- `scan_drupal_directories` walks the web root with a sequential `ignore`
+  walker and a `path.is_file()` stat per entry, before the classmap
+  scanner's parallel lexing starts.
+- `visit_workspace_files_gitignore`, the full index's discovery walk, is
+  sequential too and stats every entry. It takes 214 ms in release and
+  737 ms in debug, and it walks most of the web root a second time.
+- `index_resource_paths_batch` reads and scans the 4,494 YAML and Twig
+  files the walk found one after another.
+
+The classmap scanner already has a parallel walk (`walk_roots`:
+`build_parallel`, work stealing, sorted output for a deterministic
+first-wins merge). Move both walks onto that pattern and use the entry's
+own file type rather than a fresh stat. The full index could also take the
+files the Drupal walk found instead of walking them again. Read and scan the
+resource files on parallel workers and publish them in one merge, as the PHP
+files are. PHPlumb's discovery is a single parallel walk that canonicalizes
+only paths reached through a symlink, which is what its 0.49 s includes.
+
+**Where to look:** `scan_drupal_directories` in
+`src/classmap_scanner/discovery.rs`, `visit_workspace_files_gitignore` and
+`walk_roots` in `src/classmap_scanner/walk.rs`,
+`index_resource_paths_batch` in `src/resource_navigation.rs`.
+
+---
+
 ## P86. A Symfony app's generated `config/reference.php` is slow to parse
 
 **Impact: Medium · Complexity: Medium**
