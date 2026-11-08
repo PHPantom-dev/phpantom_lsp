@@ -69,7 +69,11 @@ elif config["mode"] == "unreported":
 elif config["mode"] == "unnamed":
     print("bench: 1,000,000 ns/iter (+/- 1,000)")
 for name in names:
-    print("test " + name + " ... bench: 1,234,567 ns/iter (+/- 10,000)")
+    if config["mode"] == "split":
+        print("\x1b[32mtest " + name + " ... \x1b[0mwarning: extra output", flush=True)
+        print("bench: 1,234,567 ns/iter (+/- 10,000)", flush=True)
+    else:
+        print("test " + name + " ... bench: 1,234,567 ns/iter (+/- 10,000)", flush=True)
 if config["mode"] == "run_failure":
     sys.exit(3)
 '''
@@ -105,10 +109,10 @@ class BenchmarkShardingTests(unittest.TestCase):
             "executable": str(path),
         }
 
-    def prepare(self, records, shards=2, baseline_dir=None):
+    def prepare(self, records, shards=2, baseline_dir=None, timings_path=None):
         stream = io.StringIO("".join(json.dumps(record) + "\n" for record in records))
         with contextlib.redirect_stdout(self.stdout), contextlib.redirect_stderr(self.stderr):
-            ci.prepare(self.build, shards, stream, baseline_dir=baseline_dir)
+            ci.prepare(self.build, shards, stream, baseline_dir=baseline_dir, timings_path=timings_path)
         return json.loads((self.build / "manifest.json").read_text())
 
     def run_shard(self, shard, baseline_source=None):
@@ -172,6 +176,7 @@ class BenchmarkShardingTests(unittest.TestCase):
         self.assertEqual([result["name"] for result in merged], [case["name"] for case in cases])
         self.assertEqual(len(merged), 6)
         for result in merged:
+            self.assertNotIn("duration_seconds", result)
             self.assertEqual(result["unit"], "ms")
             self.assertEqual(result["value"], 1.235)
             self.assertEqual(result["range"], "± 0.010")
@@ -192,6 +197,71 @@ class BenchmarkShardingTests(unittest.TestCase):
         with contextlib.redirect_stdout(self.stdout), contextlib.redirect_stderr(self.stderr):
             ci.prepare(self.build, 1, stream)
         self.assertEqual(len(json.loads((self.build / "manifest.json").read_text())["cases"]), 1)
+
+    def test_duration_balancing_separates_expensive_cases_and_preserves_every_case(self):
+        names = ["a", "b", "c", "d", "e", "f"]
+        weights = {name: 20 if name in ("a", "c") else 2 for name in names}
+        timings = self.root / "timings.json"
+        timings.write_text(json.dumps(weights))
+        record = self.binary("bench", names)
+        manifest = self.prepare([record], timings_path=timings)
+        self.assertEqual([case["name"] for case in manifest["cases"]], names)
+        loads = [sum(weights[case["name"]] for case in manifest["cases"] if case["shard"] == shard)
+                 for shard in (1, 2)]
+        self.assertEqual(loads, [24, 24])
+        self.assertEqual(manifest, self.prepare([record], timings_path=timings))
+        for shard in (1, 2):
+            self.run_shard(shard)
+        self.assertEqual([result["name"] for result in self.merge()], names)
+
+    def test_unknown_cases_use_median_duration_and_missing_history_uses_round_robin(self):
+        record = self.binary("bench", ["a", "b", "new", "other"])
+        timings = self.root / "timings.json"
+        first = self.prepare([record], timings_path=timings)
+        self.assertEqual([case["shard"] for case in first["cases"]], [1, 2, 1, 2])
+        timings.write_text(json.dumps({"a": 10, "b": 2}))
+        weighted = self.prepare([record], timings_path=timings)
+        # Unknown cases cost the median (6): loads finish at 12 and 12.
+        self.assertEqual([case["shard"] for case in weighted["cases"]], [1, 1, 2, 2])
+
+    def test_prepare_rejects_invalid_scheduling_history(self):
+        record = self.binary("bench", ["case"])
+        timings = self.root / "timings.json"
+        for value in ([], None, {"": 1}, {"case": 0}, {"case": -1}, {"case": True},
+                      {"case": "2"}, {"case": float("nan")}, {"case": float("inf")}):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                timings.write_text(json.dumps(value))
+                self.prepare([record], shards=1, timings_path=timings)
+
+    def test_run_records_wall_time_separately_from_benchmark_values(self):
+        self.prepare([self.binary("bench", ["one", "two"], mode="split")], shards=1)
+        with mock.patch.object(ci.time, "monotonic", side_effect=[10, 14, 21]):
+            results = self.run_shard(1)
+        self.assertEqual([result["duration_seconds"] for result in results], [4, 7])
+        self.assertEqual([result["value"] for result in results], [1.235, 1.235])
+
+    def test_scheduling_history_requires_complete_results_and_keeps_slower_revision(self):
+        self.prepare_pair(
+            [self.binary("bench", ["a", "b"], revision="base")],
+            [self.binary("bench", ["a", "b"], revision="head")],
+        )
+        timings = self.root / "timings.json"
+        first = self.run_shard(1, self.baseline_source)
+        with self.assertRaises(ValueError):
+            ci.merge(self.build, self.reports, self.output, timings)
+        self.assertFalse(timings.exists())
+        second = self.run_shard(2, self.baseline_source)
+        for shard, report, durations in [(1, first, (5, 3)), (2, second, (2, 8))]:
+            for revision, seconds in zip(("base", "head"), durations):
+                report[revision][0]["duration_seconds"] = seconds
+            (self.reports / f"shard-{shard}.json").write_text(json.dumps(report))
+        ci.merge(self.build, self.reports, self.output, timings)
+        self.assertEqual(json.loads(timings.read_text()), {"a": 5, "b": 8})
+        del second["head"][0]["duration_seconds"]
+        (self.reports / "shard-2.json").write_text(json.dumps(second))
+        with self.assertRaises(ValueError):
+            ci.merge(self.build, self.reports, self.output, timings)
+        self.assertEqual(json.loads(timings.read_text()), {"a": 5, "b": 8})
 
     def test_prepare_rejects_invalid_shard_counts(self):
         record = self.binary("bench", ["case"])
@@ -299,9 +369,10 @@ class BenchmarkShardingTests(unittest.TestCase):
         ])
         self.invoke([
             "merge", "--build-dir", str(self.build), "--reports-dir", str(self.reports),
-            "--output", str(self.output),
+            "--output", str(self.output), "--timings-output", str(self.root / "timings.json"),
         ])
         self.assertEqual(json.loads(self.output.read_text())[0]["name"], "one")
+        self.assertGreater(json.loads((self.root / "timings.json").read_text())["one"], 0)
 
     def test_cli_reports_invalid_input_and_execution_errors(self):
         cases = [
@@ -362,6 +433,97 @@ class BenchmarkShardingTests(unittest.TestCase):
         self.assertEqual([result["name"] for result in merged["head"]], ["a", "b", "c", "d"])
         self.assertEqual([result["name"] for result in merged["base"]], ["b", "c", "d"])
         self.assertEqual(merged["removed"], ["removed"])
+
+    def test_independent_builds_pair_after_artifact_transfer(self):
+        base_build = self.root / "base-builder"
+        base = self.binary("original", ["shared", "removed"], revision="base", fixture="base")
+        ci.prepare(base_build, 1, io.StringIO(json.dumps(base)))
+        head = self.binary("moved", ["new", "shared"], revision="head", fixture="head")
+        self.prepare([head])
+
+        # The runners get only archives and manifests, at different paths
+        # from the machines that built them.
+        runner = self.root / "runner"
+        head_build = runner / "head"
+        baseline_build = runner / "base"
+        for source, destination in ((self.build, head_build), (base_build, baseline_build)):
+            destination.mkdir(parents=True)
+            shutil.copy2(source / "manifest.json", destination / "manifest.json")
+            with tarfile.open(source / "binaries.tar") as archive:
+                archive.extractall(destination)
+            shutil.rmtree(source)
+        self.build = head_build
+        before = json.loads((head_build / "manifest.json").read_text())
+        self.invoke([
+            "pair", "--build-dir", str(head_build), "--baseline-dir", str(baseline_build),
+        ])
+        manifest = json.loads((head_build / "manifest.json").read_text())
+        self.assertEqual(manifest["shards"], before["shards"])
+        self.assertEqual(
+            [(case["name"], case["shard"]) for case in manifest["cases"]],
+            [(case["name"], case["shard"]) for case in before["cases"]],
+        )
+        self.assertEqual(manifest["cases"][1]["baseline_target"], "original")
+        self.assertEqual(manifest["removed"], ["removed"])
+        executable = head_build / manifest["baseline_executables"]["original"]
+        self.assertEqual(executable.resolve(), (baseline_build / "bin/original").resolve())
+
+        base_source = runner / "base-source"
+        base_source.mkdir()
+        (base_source / "fixture.txt").write_text("base")
+        (runner / "fixture.txt").write_text("head")
+        previous_directory = Path.cwd()
+        try:
+            os.chdir(runner)
+            first = self.run_shard(1, base_source)
+            second = self.run_shard(2, base_source)
+        finally:
+            os.chdir(previous_directory)
+        self.assertEqual(first["base"], [])
+        self.assertEqual([result["name"] for result in second["base"]], ["shared"])
+
+        # The collector reconstructs the same plan from manifests alone.
+        shutil.rmtree(head_build / "bin")
+        shutil.rmtree(baseline_build / "bin")
+        (head_build / "manifest.json").write_text(json.dumps(before))
+        ci.pair(head_build, baseline_build)
+        self.assertEqual(json.loads((head_build / "manifest.json").read_text()), manifest)
+        self.assertIn("Regressions: 0", self.compare(self.merge()))
+
+    def test_pair_rejects_self_pairing_and_already_paired_builds(self):
+        self.prepare_pair(
+            [self.binary("bench", ["shared"], revision="base")],
+            [self.binary("bench", ["shared"], revision="head")],
+            shards=1,
+        )
+        original = (self.build / "manifest.json").read_bytes()
+        for head, base in (
+            (self.build, self.build / "."),
+            (self.build, self.baseline_build),
+            (self.baseline_build, self.build),
+        ):
+            with self.subTest(head=head, base=base), self.assertRaises(ValueError):
+                ci.pair(head, base)
+        self.assertEqual((self.build / "manifest.json").read_bytes(), original)
+
+    def test_pair_rejects_invalid_baseline_without_changing_head(self):
+        self.prepare([self.binary("head", ["one", "two"])])
+        baseline_build = self.root / "base"
+        baseline_build.mkdir()
+        original = (self.build / "manifest.json").read_bytes()
+        case = {"name": "one", "target": "base", "shard": 1}
+        for cases, executables in (
+            ([case, case], {"base": "bin/base"}),
+            ([{**case, "name": ""}], {"base": "bin/base"}),
+            ([case], {}),
+        ):
+            with self.subTest(cases=cases, executables=executables):
+                (baseline_build / "manifest.json").write_text(json.dumps({
+                    "cases": cases, "executables": executables, "shards": 1,
+                }))
+                with self.assertRaises(ValueError):
+                    ci.pair(self.build, baseline_build)
+                self.assertEqual((self.build / "manifest.json").read_bytes(), original)
 
     def test_paired_shard_with_only_new_cases_needs_no_base_measurements(self):
         self.prepare_pair(

@@ -123,7 +123,8 @@ async fn workspace(open: &[&str]) -> (Backend, tempfile::TempDir) {
         std::fs::write(&full, content).unwrap();
     }
     let backend = Backend::new_test();
-    initialize_with_options(&backend, dir.path(), None).await;
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    initialize_with_options(&backend, &root, None).await;
     for path in open {
         open_document(&backend, &uri_for(&dir, path), "php", content_of(path)).await;
     }

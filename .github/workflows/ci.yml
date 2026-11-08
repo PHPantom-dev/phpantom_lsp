@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Superseded PR revisions need no runner slots. Keep every main revision
+# so the benchmark history still records each push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   # The Linux binaries we ship are static musl builds (see
@@ -20,12 +26,17 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
-  lint:
-    name: Lint
+  lint-config:
+    name: Lint (${{ matrix.features }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [default, semantic-export]
     steps:
       - uses: actions/checkout@v4
       - name: Test benchmark helpers
+        if: matrix.features == 'default'
         run: python3 -m unittest discover -s benches -p 'test_*.py'
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -34,6 +45,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build
+          save-if: ${{ matrix.features == 'default' }}
       - name: Set up musl build
         run: |
           sudo apt-get update
@@ -41,24 +53,40 @@ jobs:
           mkdir -p .cargo
           printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - run: cargo fmt --check
+        if: matrix.features == 'default'
       - run: cargo clippy --all-targets -- -D warnings
-      # `semantic-export` is off by default, so nothing above compiles it.
-      # Without these steps a refactor of an internal API breaks the module
-      # and no job notices until someone builds with the feature on. They
-      # run here rather than in the test job so that job keeps measuring
-      # exactly the feature set the released binary is built with.
+        if: matrix.features == 'default'
+      # Check the optional API independently, preserving coverage of both
+      # feature configurations without making one wait for the other.
       - run: cargo clippy --all-targets --features semantic-export -- -D warnings
+        if: matrix.features == 'semantic-export'
       # Only the lib and the integration binary hold these tests; building
       # every other test target as well would only cost disk.
       - run: cargo test --features semantic-export --lib --test integration semantic_export
+        if: matrix.features == 'semantic-export'
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: lint-config
+    if: always()
+    steps:
+      - name: Check both feature configurations passed
+        env:
+          LINT_RESULT: ${{ needs.lint-config.result }}
+        run: test "$LINT_RESULT" = success
 
   # Path handling differs on Windows (drive letters, `\` separators,
   # `\\?\` canonical paths), and nothing else in CI runs there. It does not
   # block until the suite passes there.
   test-windows:
-    name: Test (Windows)
+    name: Test (Windows ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: windows-latest
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     env:
       CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
     steps:
@@ -70,10 +98,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: windows
+          save-if: ${{ matrix.shard == 1 }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
-      - run: cargo nextest run --no-fail-fast
+      - run: cargo nextest run --no-fail-fast --partition hash:${{ matrix.shard }}/${{ strategy.job-total }}
 
   test-shard:
     name: Test (shard ${{ matrix.shard }}/${{ strategy.job-total }})
@@ -83,14 +112,16 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
-      # Every shard builds the full instrumented test suite, the largest
-      # build in this workflow. Drop preinstalled toolchains we never use
-      # to give it headroom.
-      - name: Free disk space
+      # Older runner images needed the space, but deleting their tools
+      # costs minutes even when the current image already has ample room.
+      - name: Free disk space when needed
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
-          df -h /
+          available_kib=$(df -Pk / | awk 'NR == 2 { print $4 }')
+          if (( available_kib < 30 * 1024 * 1024 )); then
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+            df -h /
+          fi
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -204,86 +235,21 @@ jobs:
       - run: find examples/drupal/web/modules/custom examples/drupal/web/themes/custom -type f \( -name '*.php' -o -name '*.module' -o -name '*.theme' \) -print0 | xargs -0 -n1 php -l
       - run: find examples/tempest/app examples/tempest/resources examples/tempest/ui -name '*.php' -print0 | xargs -0 -n1 php -l
 
-  benchmark:
-    name: Benchmark
+  benchmark-build:
+    name: Benchmark (build ${{ matrix.revision }})
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    # Both jobs push their results to gh-pages. Two pushes to main in
-    # quick succession would otherwise race, and the later push is
-    # rejected as a non-fast-forward.
-    concurrency:
-      group: gh-pages
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ env.CARGO_BUILD_TARGET }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: build
-      - name: Set up musl build
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools mold
-          mkdir -p .cargo
-          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
-      - name: Ensure gh-pages branch exists
-        run: |
-          if ! git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            empty_tree="$(git hash-object -t tree /dev/null)"
-            commit="$(git commit-tree "$empty_tree" -m 'Initial gh-pages branch')"
-            git push origin "$commit:refs/heads/gh-pages"
-          fi
-      - name: Run benchmarks
-        shell: bash
-        run: |
-          # History lives on gh-pages, so Criterion's own baseline is
-          # unused -- and the restored target cache leaves a partial one
-          # behind that it then errors on for every benchmark.
-          rm -rf target/criterion
-          cargo bench --bench completion --bench references \
-            --bench laravel_completion --bench custom_builder \
-            --bench symfony_completion --bench yii_completion \
-            --bench wordpress_completion --bench drupal_completion \
-            --bench tempest \
-            -- --output-format bencher | tee raw_output.txt
-      - name: Convert to milliseconds
-        shell: bash
-        run: |
-          python3 benches/format_bench_output.py < raw_output.txt > output.json || {
-            echo "::group::raw_output.txt"
-            cat raw_output.txt
-            echo "::endgroup::"
-            exit 1
-          }
-      - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          name: PHPantom Benchmarks
-          tool: customSmallerIsBetter
-          output-file-path: output.json
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/bench
-          auto-push: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  benchmark-build-pr:
-    name: Benchmark (build)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: ${{ fromJSON(github.event_name == 'pull_request' && '["base", "head"]' || '["head"]') }}
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: -C link-arg=-fuse-ld=mold
     outputs:
+      # Both matrix entries read the same test merge and report the same parent.
       base-revision: ${{ steps.base.outputs.revision }}
-      shards: ${{ steps.prepare.outputs.shards }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -291,8 +257,8 @@ jobs:
           persist-credentials: false
       # The checkout is GitHub's test merge of the PR into its base, so its
       # first parent is exactly the base the measured head was built on.
-      # `pull_request.base.sha` is not guaranteed to be that parent.
       - name: Find base revision
+        if: github.event_name == 'pull_request'
         id: base
         run: |
           git rev-parse --verify --quiet HEAD^2 > /dev/null
@@ -300,91 +266,150 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ env.CARGO_BUILD_TARGET }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: build
       - name: Set up musl build
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools mold
-      - name: Build both revisions and partition benchmarks
-        id: prepare
+      - name: Identify reusable benchmark build
+        id: build-key
+        shell: bash
         env:
-          SHARD_COUNT: 4
+          REVISION: ${{ matrix.revision == 'base' && steps.base.outputs.revision || github.sha }}
+        run: |
+          build_environment=$(
+            {
+              rustc -vV
+              cargo -V
+              printf '%s\n' "$CARGO_BUILD_TARGET" "$CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS" "$CARGO_PROFILE_DEV_DEBUG"
+              dpkg-query -W -f='${Package}=${Version}\n' musl musl-dev musl-tools mold gcc binutils
+            } | sha256sum | cut -d ' ' -f 1
+          )
+          echo "key=benchmark-build-v1-${RUNNER_OS}-${RUNNER_ARCH}-${REVISION}-${build_environment}" >> "$GITHUB_OUTPUT"
+      # Only exact revision/environment matches can replace compilation.
+      # Main publishes its head; PRs can reuse it as their baseline.
+      - uses: actions/cache/restore@v4
+        id: executables
+        with:
+          path: |
+            benchmark-build/binaries.tar
+            benchmark-build/manifest.json
+          key: ${{ steps.build-key.outputs.key }}
+      - uses: Swatinem/rust-cache@v2
+        if: steps.executables.outputs.cache-hit != 'true'
+        with:
+          shared-key: build
+          save-if: ${{ matrix.revision == 'head' }}
+      - name: Restore benchmark scheduling history
+        if: matrix.revision == 'head'
+        uses: actions/cache/restore@v4
+        with:
+          path: benchmark-timings.json
+          key: benchmark-timings-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: benchmark-timings-v1-${{ runner.os }}-
+      - name: Build and package benchmarks
+        if: steps.executables.outputs.cache-hit != 'true'
+        env:
+          REVISION_KIND: ${{ matrix.revision }}
           BASE_REVISION: ${{ steps.base.outputs.revision }}
+          SHARD_COUNT: ${{ matrix.revision == 'head' && 16 || 1 }}
         shell: bash
         run: |
           benchmark_root="$PWD"
-          base_source="$RUNNER_TEMP/benchmark-base"
-          git worktree add --detach "$base_source" "$BASE_REVISION"
-          cargo bench --locked --manifest-path "$base_source/Cargo.toml" \
-            --bench '*' --no-run --message-format=json > baseline-build.jsonl
+          benchmark_source="$PWD"
+          if [ "$REVISION_KIND" = base ]; then
+            benchmark_source="$RUNNER_TEMP/benchmark-base"
+            git worktree add --detach "$benchmark_source" "$BASE_REVISION"
+          fi
+          cargo bench --locked --manifest-path "$benchmark_source/Cargo.toml" \
+            --bench '*' --no-run --message-format=json > benchmark-build.jsonl
           (
-            cd "$base_source"
+            cd "$benchmark_source"
             python3 "$benchmark_root/benches/ci_benchmarks.py" prepare \
-              --build-dir "$benchmark_root/baseline-build" --shards 1 \
-              < "$benchmark_root/baseline-build.jsonl"
+              --build-dir "$benchmark_root/benchmark-build" --shards "$SHARD_COUNT" \
+              --timings "$benchmark_root/benchmark-timings.json" \
+              < "$benchmark_root/benchmark-build.jsonl"
           )
-          cargo bench --locked --bench '*' --no-run --message-format=json \
-            > benchmark-build.jsonl
-          python3 benches/ci_benchmarks.py prepare \
-            --build-dir benchmark-build --shards "$SHARD_COUNT" \
-            --baseline-dir baseline-build < benchmark-build.jsonl
-          python3 -c 'import json, os; print("shards=" + json.dumps(list(range(1, int(os.environ["SHARD_COUNT"]) + 1))))' >> "$GITHUB_OUTPUT"
+      - name: Cache reusable benchmark build
+        if: steps.executables.outputs.cache-hit != 'true' && (matrix.revision == 'base' || github.event_name == 'push')
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            benchmark-build/binaries.tar
+            benchmark-build/manifest.json
+          key: ${{ steps.build-key.outputs.key }}
       - name: Save benchmark executables
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-executables
+          name: benchmark-executables-${{ matrix.revision }}
           path: benchmark-build/binaries.tar
           if-no-files-found: error
           retention-days: 1
       - name: Save benchmark manifest
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-manifest
+          name: benchmark-manifest-${{ matrix.revision }}
           path: benchmark-build/manifest.json
           if-no-files-found: error
           retention-days: 1
 
-  benchmark-shard-pr:
+  benchmark-shard:
     name: Benchmark (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    needs: benchmark-build-pr
-    if: github.event_name == 'pull_request' && needs.benchmark-build-pr.result == 'success'
+    needs: benchmark-build
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.benchmark-build-pr.outputs.shards) }}
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
           persist-credentials: false
       - name: Check out baseline fixtures
+        if: github.event_name == 'pull_request'
         env:
-          BASE_REVISION: ${{ needs.benchmark-build-pr.outputs.base-revision }}
+          BASE_REVISION: ${{ needs.benchmark-build.outputs.base-revision }}
         run: git worktree add --detach "$RUNNER_TEMP/benchmark-base" "$BASE_REVISION"
       - uses: actions/download-artifact@v4
         with:
-          name: benchmark-executables
+          name: benchmark-executables-head
           path: benchmark-build
       - uses: actions/download-artifact@v4
         with:
-          name: benchmark-manifest
+          name: benchmark-manifest-head
           path: benchmark-build
+      - uses: actions/download-artifact@v4
+        if: github.event_name == 'pull_request'
+        with:
+          name: benchmark-executables-base
+          path: baseline-build
+      - uses: actions/download-artifact@v4
+        if: github.event_name == 'pull_request'
+        with:
+          name: benchmark-manifest-base
+          path: baseline-build
       - name: Record benchmark runner
         run: lscpu
-      # Both static musl revisions run on this machine with their own fixtures.
-      # Tar preserves executable permissions; no toolchain is needed here.
-      - name: Run paired benchmark shard
+      # PR pairs run sequentially on this machine with their own fixtures.
+      # Main uses the same partitioning and normal Criterion sampling.
+      - name: Run benchmark shard
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          SHARD: ${{ matrix.shard }}
         run: |
           tar -xf benchmark-build/binaries.tar -C benchmark-build
+          baseline_args=()
+          if [ "$CI_EVENT" = pull_request ]; then
+            tar -xf baseline-build/binaries.tar -C baseline-build
+            python3 benches/ci_benchmarks.py pair \
+              --build-dir benchmark-build --baseline-dir baseline-build
+            baseline_args=(--baseline-source "$RUNNER_TEMP/benchmark-base")
+          fi
           python3 benches/ci_benchmarks.py run \
-            --build-dir benchmark-build --shard "${{ matrix.shard }}" \
-            --baseline-source "$RUNNER_TEMP/benchmark-base" \
-            --output "shard-${{ matrix.shard }}.json"
+            --build-dir benchmark-build --shard "$SHARD" \
+            "${baseline_args[@]}" --output "shard-$SHARD.json"
       - name: Save benchmark results
         uses: actions/upload-artifact@v4
         with:
@@ -393,19 +418,18 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Preserve the required check and compare only a complete set of results.
-  benchmark-pr:
-    name: Benchmark (PR comparison)
+  benchmark:
+    name: Benchmark
     runs-on: ubuntu-latest
+    needs: [benchmark-build, benchmark-shard]
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     permissions:
       contents: read
-    needs: [benchmark-build-pr, benchmark-shard-pr]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     steps:
       - name: Check benchmark jobs passed
         env:
-          BUILD_RESULT: ${{ needs.benchmark-build-pr.result }}
-          SHARD_RESULT: ${{ needs.benchmark-shard-pr.result }}
+          BUILD_RESULT: ${{ needs.benchmark-build.result }}
+          SHARD_RESULT: ${{ needs.benchmark-shard.result }}
         run: |
           test "$BUILD_RESULT" = success
           test "$SHARD_RESULT" = success
@@ -414,7 +438,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: benchmark-manifest
+          name: benchmark-manifest-head
           path: benchmark-build
       - uses: actions/download-artifact@v4
         with:
@@ -425,15 +449,72 @@ jobs:
         run: >-
           python3 benches/ci_benchmarks.py merge --build-dir benchmark-build
           --reports-dir benchmark-results --output output.json
+          --timings-output benchmark-timings.json
+      - name: Save benchmark scheduling history
+        uses: actions/cache/save@v4
+        with:
+          path: benchmark-timings.json
+          key: benchmark-timings-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: latency-benchmark-results
+          path: output.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # Preserve the required check and compare only a complete set of results.
+  benchmark-pr:
+    name: Benchmark (PR comparison)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: [benchmark-build, benchmark-shard]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    steps:
+      - name: Check benchmark jobs passed
+        env:
+          BUILD_RESULT: ${{ needs.benchmark-build.result }}
+          SHARD_RESULT: ${{ needs.benchmark-shard.result }}
+        run: |
+          test "$BUILD_RESULT" = success
+          test "$SHARD_RESULT" = success
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark-manifest-head
+          path: benchmark-build
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark-manifest-base
+          path: baseline-build
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: benchmark-results-*
+          path: benchmark-results
+          merge-multiple: true
+      - name: Check and combine benchmark results
+        run: |
+          python3 benches/ci_benchmarks.py pair \
+            --build-dir benchmark-build --baseline-dir baseline-build
+          python3 benches/ci_benchmarks.py merge --build-dir benchmark-build \
+            --reports-dir benchmark-results --output output.json \
+            --timings-output benchmark-timings.json
       - name: Compare paired measurements
         env:
-          BASE_REVISION: ${{ needs.benchmark-build-pr.outputs.base-revision }}
+          BASE_REVISION: ${{ needs.benchmark-build.outputs.base-revision }}
           HEAD_REVISION: ${{ github.sha }}
         run: |
           python3 benches/ci_benchmarks.py compare --build-dir benchmark-build \
             --results output.json --summary "$GITHUB_STEP_SUMMARY" \
             --base-revision "$BASE_REVISION" --head-revision "$HEAD_REVISION" \
             --threshold 1.30
+      - name: Save benchmark scheduling history
+        uses: actions/cache/save@v4
+        with:
+          path: benchmark-timings.json
+          key: benchmark-timings-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   scaling:
     name: Scaling
@@ -462,14 +543,9 @@ jobs:
   memory-benchmark:
     name: Memory Benchmark
     runs-on: ubuntu-latest
-    needs: benchmark
     permissions:
-      contents: write
+      contents: read
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    # Shares the gh-pages lock with the Benchmark job.
-    concurrency:
-      group: gh-pages
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -497,6 +573,52 @@ jobs:
           # `always` mode); log it so the numbers are interpretable.
           cat /sys/kernel/mm/transparent_hugepage/enabled || true
           python3 benches/memory_usage.py --binary "target/$CARGO_BUILD_TARGET/release/phpantom_lsp" | tee memory_output.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memory-benchmark-results
+          path: memory_output.json
+          if-no-files-found: error
+          retention-days: 1
+
+  benchmark-publish:
+    name: Publish benchmark history
+    runs-on: ubuntu-latest
+    needs: [benchmark, memory-benchmark]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    # Only publishing holds the shared branch lock. Measurements and
+    # compilation can run alongside each other and other main revisions.
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: latency-benchmark-results
+      - uses: actions/download-artifact@v4
+        with:
+          name: memory-benchmark-results
+      - name: Ensure gh-pages branch exists
+        run: |
+          if ! git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            empty_tree="$(git hash-object -t tree /dev/null)"
+            commit="$(git commit-tree "$empty_tree" -m 'Initial gh-pages branch')"
+            git push origin "$commit:refs/heads/gh-pages"
+          fi
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: PHPantom Benchmarks
+          tool: customSmallerIsBetter
+          output-file-path: output.json
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          auto-push: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Store memory benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:

@@ -48,6 +48,10 @@ Note that clippy runs twice, once for library code and once including test code.
 
 ## Testing
 
+CI checks the default and `semantic-export` feature configurations in
+parallel. The required `Lint` check waits for both, including the
+`semantic-export` tests.
+
 CI runs the test suite with coverage across six parallel Nextest shards.
 The `Test` check passes only after every shard succeeds and their coverage
 reports are uploaded together to Codecov. To reproduce one shard locally
@@ -57,15 +61,38 @@ reports are uploaded together to Codecov. To reproduce one shard locally
 cargo llvm-cov nextest --partition hash:1/6 --lcov --output-path lcov.info
 ```
 
-PR latency benchmarks build the base and PR revisions with the same toolchain
-and settings, then distribute the cases across four runners. Each runner
-runs both revisions sequentially with Criterion's usual sampling settings
-and each revision's own fixtures. One shared assignment
+Windows runs the full suite across three Nextest shards without coverage.
+Those jobs remain advisory while Windows support is being verified. A new
+push to a PR cancels its superseded CI run; main revisions keep their runs
+so each can contribute to benchmark history.
+
+PR latency benchmarks reuse the base revision's compiled executables when
+an exact cache match exists. The key includes the source revision, compiler,
+target, build flags, and native build tool versions. Main caches its head
+build for later PRs; a PR that builds a missing baseline also caches it for
+its own subsequent runs. A miss builds the base and PR revisions in parallel
+with the same toolchain and settings, then distributes the cases across
+sixteen runners.
+Each runner runs both revisions sequentially with Criterion's usual sampling
+settings and each revision's own fixtures. One shared assignment
 keeps matching cases on the same runner even when a PR adds benchmarks.
 The `Benchmark (PR comparison)` check compares the paired results only after
 every shard passes and every case is accounted for. New cases are reported
-without a baseline; removed cases are listed explicitly. Main-branch
-measurements continue to populate the historical dashboard.
+without a baseline; removed cases are listed explicitly. Main uses the same
+sixteen shards without a comparison revision. Memory measurements run in
+parallel with latency benchmarks; only the short job publishing both results
+to the historical dashboard holds the shared `gh-pages` lock.
+
+The runner records each case's elapsed warm-up, sampling, and analysis time
+separately from its measured latency. Complete successful runs cache these
+durations for later scheduling: expensive cases are assigned first to the
+least-loaded shard. New cases use the median known duration; without history,
+assignment is round-robin. Both revisions always follow the head's assignment.
+
+CI uses standard GitHub-hosted runners. Linux test jobs free disk space only
+when less than 30 GiB is available. Build time, queueing, cache misses, and
+benchmark costs determine the total duration; no time limit skips unfinished
+checks.
 
 To reproduce a paired shard locally from the repository root, replace
 `BASE_COMMIT` with the PR's base revision:
@@ -82,7 +109,9 @@ cargo bench --locked --manifest-path /tmp/phpantom-bench-base/Cargo.toml \
 )
 cargo bench --locked --bench '*' --no-run --message-format=json > /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py prepare --build-dir /tmp/phpantom-benchmarks \
-  --shards 4 --baseline-dir /tmp/phpantom-baseline < /tmp/benchmark-build.jsonl
+  --shards 16 < /tmp/benchmark-build.jsonl
+python3 benches/ci_benchmarks.py pair --build-dir /tmp/phpantom-benchmarks \
+  --baseline-dir /tmp/phpantom-baseline
 python3 benches/ci_benchmarks.py run --build-dir /tmp/phpantom-benchmarks \
   --baseline-source /tmp/phpantom-bench-base --shard 1 --output /tmp/shard-1.json
 ```
@@ -90,6 +119,10 @@ python3 benches/ci_benchmarks.py run --build-dir /tmp/phpantom-benchmarks \
 CI uses static musl binaries; these commands use your local Cargo target.
 Run the benchmark helpers' tests with
 `python3 -m unittest discover -s benches -p 'test_*.py'`.
+
+To reuse scheduling history locally, add `--timings-output timings.json` to
+`merge`, then pass `--timings timings.json` to the next `prepare` command.
+History only influences assignment; it never replaces fresh measurements.
 
 Latency and memory benchmark comparisons appear in the job summaries.
 A regression over 30% fails the comparison check. Latency compares the raw

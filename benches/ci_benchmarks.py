@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Prepare, run, and combine balanced Criterion shards for PR comparisons.
+"""Prepare, run, and combine balanced Criterion shards for CI.
 
 Build with ``cargo bench --no-run --message-format=json`` and pipe its output
 to ``prepare``. A prepared baseline can be included so each shard measures
-both revisions on the same runner. Each revision uses its own fixtures;
-only complete results reach the comparison.
+both revisions on the same runner, or ``pair`` can join manifests from
+independent builds. Each revision uses its own fixtures; only complete
+results reach the comparison or historical dashboard.
 """
 
 from __future__ import annotations
@@ -16,11 +17,15 @@ import os
 from pathlib import Path
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from typing import TextIO
+
+from format_bench_output import _ANSI_RE, _BENCH_RE, _NAME_RE
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -28,11 +33,49 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def _pair_manifest(manifest: dict, baseline: dict, executables: dict) -> None:
+    if "baseline_executables" in manifest or "baseline_executables" in baseline:
+        raise ValueError("pairing requires two unpaired benchmark manifests")
+    baseline_cases = {}
+    for case in baseline["cases"]:
+        name = case["name"]
+        if not name or name in baseline_cases:
+            raise ValueError(f"empty or duplicate baseline benchmark name: {name!r}")
+        if case["target"] not in baseline["executables"]:
+            raise ValueError(f"missing baseline executable for {name!r}")
+        baseline_cases[name] = case["target"]
+    manifest["baseline_executables"] = executables
+    for case in manifest["cases"]:
+        if case["name"] in baseline_cases:
+            case["baseline_target"] = baseline_cases[case["name"]]
+    manifest["removed"] = sorted(set(baseline_cases) - {case["name"] for case in manifest["cases"]})
+
+
+def pair(build_dir: Path, baseline_dir: Path) -> None:
+    """Join independent builds without copying or repackaging their binaries.
+
+    Only manifests are needed, so the result collector can reconstruct the
+    same assignment without downloading executables. Measurement runners
+    extract both archives into their respective build directories first.
+    """
+    if baseline_dir.resolve() == build_dir.resolve():
+        raise ValueError("baseline and head build directories must be distinct")
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    baseline = json.loads((baseline_dir / "manifest.json").read_text(encoding="utf-8"))
+    executables = {
+        target: Path(os.path.relpath(baseline_dir / source, build_dir)).as_posix()
+        for target, source in baseline["executables"].items()
+    }
+    _pair_manifest(manifest, baseline, executables)
+    _write_json(build_dir / "manifest.json", manifest)
+
+
 def prepare(
     build_dir: Path,
     shards: int,
     stream: TextIO,
     baseline_dir: Path | None = None,
+    timings_path: Path | None = None,
 ) -> None:
     """Package Cargo's benchmark executables and assign every case once."""
     if shards < 1:
@@ -85,33 +128,43 @@ def prepare(
                 {
                     "target": target,
                     "name": name,
-                    "shard": len(manifest["cases"]) % shards + 1,
                 }
             )
     if shards > len(manifest["cases"]):
         raise ValueError("shard count exceeds the number of benchmark cases")
 
+    # Timings are scheduling hints, not benchmark iteration times. Unknown
+    # cases use the median cost; without history this is round-robin.
+    timings = {}
+    if timings_path is not None and timings_path.exists():
+        timings = json.loads(timings_path.read_text(encoding="utf-8"))
+        if not isinstance(timings, dict) or any(
+            not isinstance(name, str) or not name
+            or type(seconds) not in (int, float)
+            or not math.isfinite(seconds) or seconds <= 0
+            for name, seconds in timings.items()
+        ):
+            raise ValueError("benchmark timings must map names to finite positive seconds")
+    default_cost = statistics.median(timings.values()) if timings else 1
+    loads = [0.0] * shards
+    counts = [0] * shards
+    for case in sorted(
+        manifest["cases"], key=lambda case: -timings.get(case["name"], default_cost)
+    ):
+        shard = min(range(shards), key=lambda index: (loads[index], counts[index], index))
+        case["shard"] = shard + 1
+        loads[shard] += timings.get(case["name"], default_cost)
+        counts[shard] += 1
+
     if baseline_dir is not None:
         baseline = json.loads((baseline_dir / "manifest.json").read_text(encoding="utf-8"))
-        baseline_cases = {}
-        for case in baseline["cases"]:
-            name = case["name"]
-            if not name or name in baseline_cases:
-                raise ValueError(f"empty or duplicate baseline benchmark name: {name!r}")
-            if case["target"] not in baseline["executables"]:
-                raise ValueError(f"missing baseline executable for {name!r}")
-            baseline_cases[name] = case["target"]
-
+        _pair_manifest(manifest, baseline, {
+            target: f"baseline-bin/{target}" for target in baseline["executables"]
+        })
         (build_dir / "baseline-bin").mkdir(parents=True, exist_ok=True)
-        manifest["baseline_executables"] = {}
         for target, source in baseline["executables"].items():
-            relative = f"baseline-bin/{target}"
+            relative = manifest["baseline_executables"][target]
             shutil.copy2(baseline_dir / source, build_dir / relative)
-            manifest["baseline_executables"][target] = relative
-        for case in manifest["cases"]:
-            if case["name"] in baseline_cases:
-                case["baseline_target"] = baseline_cases[case["name"]]
-        manifest["removed"] = sorted(set(baseline_cases) - seen)
 
     _write_json(build_dir / "manifest.json", manifest)
     with tarfile.open(build_dir / "binaries.tar", "w") as archive:
@@ -137,8 +190,11 @@ def _validate_results(results: object, expected: list[str], source: str) -> None
 
 def _measure(binary: Path, names: list[str], source: Path, label: str) -> list[dict]:
     pattern = "^(?:" + "|".join(re.escape(name) for name in names) + ")$"
+    lines = []
+    durations = {}
     with tempfile.TemporaryDirectory(prefix="phpantom-bench-") as criterion_home:
-        process = subprocess.run(
+        previous = time.monotonic()
+        with subprocess.Popen(
             [
                 str(binary.resolve()),
                 "--bench",
@@ -151,19 +207,35 @@ def _measure(binary: Path, names: list[str], source: Path, label: str) -> list[d
             stdout=subprocess.PIPE,
             text=True,
             env=dict(os.environ, CRITERION_HOME=criterion_home),
-        )
-    # Keep partial output visible when a benchmark crashes.
-    print(process.stdout, end="", flush=True)
-    process.check_returncode()
+        ) as process:
+            pending = None
+            for line in process.stdout:
+                # Include warm-up, sampling and analysis without restarting
+                # the executable for each case or changing its sampling.
+                print(line, end="", flush=True)
+                lines.append(line)
+                cleaned = _ANSI_RE.sub("", line).replace("\r", "")
+                name = _NAME_RE.search(cleaned)
+                if name:
+                    pending = name.group("name")
+                if pending is not None and _BENCH_RE.search(cleaned):
+                    now = time.monotonic()
+                    durations[pending] = now - previous
+                    previous = now
+                    pending = None
+            if process.wait():
+                raise subprocess.CalledProcessError(process.returncode, process.args)
     formatted = subprocess.run(
         [sys.executable, str(Path(__file__).resolve().with_name("format_bench_output.py"))],
-        input=process.stdout,
+        input="".join(lines),
         check=True,
         stdout=subprocess.PIPE,
         text=True,
     )
     measured = json.loads(formatted.stdout)
     _validate_results(measured, names, label)
+    for result in measured:
+        result["duration_seconds"] = durations[result["name"]]
     return measured
 
 
@@ -233,7 +305,23 @@ def run_shard(
     _write_json(output, results)
 
 
-def merge(build_dir: Path, reports_dir: Path, output: Path) -> None:
+def _write_timings(path: Path | None, results: list[dict]) -> None:
+    if path is None:
+        return
+    timings = {}
+    for result in results:
+        seconds = result.get("duration_seconds")
+        if type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError(f"missing or invalid duration for {result['name']!r}")
+        # PR history estimates one revision's cost, as main does. Keep the
+        # slower measurement so expensive cases separate early.
+        timings[result["name"]] = max(timings.get(result["name"], 0), seconds)
+    _write_json(path, timings)
+
+
+def merge(
+    build_dir: Path, reports_dir: Path, output: Path, timings_output: Path | None = None,
+) -> None:
     """Require every planned measurement before producing one comparison."""
     manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
     expected_files = {
@@ -266,12 +354,18 @@ def merge(build_dir: Path, reports_dir: Path, output: Path) -> None:
                 by_name[case["name"]] for case in manifest["cases"] if case["name"] in by_name
             ]
         results["removed"] = manifest["removed"]
+        _write_timings(timings_output, results["base"] + results["head"])
+        for result in results["base"] + results["head"]:
+            result.pop("duration_seconds", None)
         _write_json(output, results)
         return
     _validate_results(
         results, [case["name"] for case in manifest["cases"]], "combined results"
     )
     by_name = {result["name"]: result for result in results}
+    _write_timings(timings_output, results)
+    for result in results:
+        result.pop("duration_seconds", None)
     _write_json(output, [by_name[case["name"]] for case in manifest["cases"]])
 
 
@@ -359,6 +453,10 @@ def main() -> None:
     prepare_parser.add_argument("--build-dir", type=Path, required=True)
     prepare_parser.add_argument("--shards", type=int, required=True)
     prepare_parser.add_argument("--baseline-dir", type=Path)
+    prepare_parser.add_argument("--timings", type=Path)
+    pair_parser = commands.add_parser("pair")
+    pair_parser.add_argument("--build-dir", type=Path, required=True)
+    pair_parser.add_argument("--baseline-dir", type=Path, required=True)
     run_parser = commands.add_parser("run")
     run_parser.add_argument("--build-dir", type=Path, required=True)
     run_parser.add_argument("--shard", type=int, required=True)
@@ -368,6 +466,7 @@ def main() -> None:
     merge_parser.add_argument("--build-dir", type=Path, required=True)
     merge_parser.add_argument("--reports-dir", type=Path, required=True)
     merge_parser.add_argument("--output", type=Path, required=True)
+    merge_parser.add_argument("--timings-output", type=Path)
     compare_parser = commands.add_parser("compare")
     compare_parser.add_argument("--build-dir", type=Path, required=True)
     compare_parser.add_argument("--results", type=Path, required=True)
@@ -378,11 +477,13 @@ def main() -> None:
     args = parser.parse_args()
     try:
         if args.command == "prepare":
-            prepare(args.build_dir, args.shards, sys.stdin, args.baseline_dir)
+            prepare(args.build_dir, args.shards, sys.stdin, args.baseline_dir, args.timings)
+        elif args.command == "pair":
+            pair(args.build_dir, args.baseline_dir)
         elif args.command == "run":
             run_shard(args.build_dir, args.shard, args.output, args.baseline_source)
         elif args.command == "merge":
-            merge(args.build_dir, args.reports_dir, args.output)
+            merge(args.build_dir, args.reports_dir, args.output, args.timings_output)
         else:
             compare(
                 args.build_dir,
