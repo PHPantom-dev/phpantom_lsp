@@ -78,6 +78,12 @@ pub struct TemplateContext<'a> {
     /// through to the else branch even when their real type would satisfy the
     /// condition.
     pub arg_type_resolver: ArgTypeResolver<'a>,
+    /// Resolves the source text of an omitted argument's default, which
+    /// was written in the callee's declaration rather than at the call
+    /// site, given the namespace it was written in
+    /// ([`ConditionalClassContext::namespace`]).  `None` leaves a default
+    /// that is not a literal undecided.
+    pub default_type_resolver: DefaultTypeResolver<'a>,
     /// The receiver's own resolved type, with its class-level `@template`
     /// parameters already substituted (e.g. `Builder<true, false>`).
     ///
@@ -102,6 +108,14 @@ pub struct TemplateContext<'a> {
 /// to its [`PhpType`], or `None` when the type cannot be determined.
 pub type ArgTypeResolver<'a> = Option<&'a dyn Fn(&str) -> Option<PhpType>>;
 
+/// Callback that resolves source text written in another file's namespace
+/// (the first argument's), such as a parameter default, to its
+/// [`PhpType`].  The parser already spelled the classes and the constants
+/// with one meaning in it fully qualified, so only an unqualified constant
+/// depends on the namespace: that namespace's constant when one is
+/// declared, the global one otherwise.
+pub type DefaultTypeResolver<'a> = Option<&'a dyn Fn(&str, Option<&str>) -> Option<PhpType>>;
+
 impl<'a> TemplateContext<'a> {
     pub fn with_params(params: &'a [crate::atom::Atom]) -> Self {
         Self {
@@ -109,6 +123,7 @@ impl<'a> TemplateContext<'a> {
             params,
             bindings: &[],
             arg_type_resolver: None,
+            default_type_resolver: None,
             this_type: None,
             subs: None,
         }
@@ -140,11 +155,16 @@ pub(crate) type VarClassStringResolver<'a> = Option<&'a dyn Fn(&str) -> Vec<Stri
 /// holds) is already resolved, and the class loader it is handed looks
 /// names up as such.  Without it, a written name goes through that loader
 /// too.
+///
+/// `namespace` is the one the callee's parameter defaults were written in,
+/// which an omitted argument's default is read in (see
+/// [`TemplateContext::default_type_resolver`]).
 #[derive(Clone, Copy, Default)]
 pub struct ConditionalClassContext<'a> {
     pub calling: Option<&'a str>,
     pub declaring: Option<&'a str>,
     pub written_class: Option<&'a dyn Fn(&str) -> String>,
+    pub namespace: Option<&'a str>,
 }
 
 impl ConditionalClassContext<'_> {

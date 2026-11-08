@@ -58,11 +58,7 @@ pub(crate) fn build_function_template_subs(
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> HashMap<String, PhpType> {
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
-    let callee = crate::type_engine::call_resolution::TemplateCallee {
-        parameters: &func_info.parameters,
-        template_bindings: &func_info.template_bindings,
-        template_param_bounds: &func_info.template_param_bounds,
-    };
+    let callee = crate::type_engine::call_resolution::TemplateCallee::of_function(func_info);
     let mut subs = crate::type_engine::call_resolution::bind_template_args(
         &callee,
         &arg_refs,

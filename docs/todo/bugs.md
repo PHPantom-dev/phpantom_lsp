@@ -65,44 +65,7 @@ No outstanding items.
 
 ## Name resolution
 
-### B741. A parameter default's unqualified constant is read in the caller's namespace
-
-**Impact: Low · Complexity: Medium**
-
-```php
-// src/Lib/pick.php
-namespace Lib;
-
-const MODE = 1;
-
-/** @return ($mode is 1 ? int : string) */
-function pick(int $mode = MODE): int|string { … }
-
-// src/App/run.php
-namespace App;
-
-const MODE = 2;
-$picked = \Lib\pick();          // int, but read as string
-```
-
-A parameter default is source text read at each call site. The parser
-spells the constants in it that have one meaning fully qualified (a
-`use const` import, a qualified name), but an unqualified name inside a
-namespace means that namespace's constant when one is declared and the
-global constant otherwise, which only an index of the declared constants
-can say. A class constant's initializer is read in its class's namespace,
-and a namespaced constant's value is resolved where it is looked up
-(`Backend::lookup_global_constant_candidates`), but a default reaches its
-readers without the callee's namespace: the conditional return type of an
-omitted argument reads it through the call site's argument resolver
-(`type_ops/conditional/text_args.rs`), which tries the call site's
-namespace, and template binding (`call_resolution/template_binding.rs`)
-reads it as global.
-
-Either reader needs the callee's namespace: `ConditionalClassContext` and
-`TemplateCallee` could carry it, with each default's bare names looked up
-there before the global constant, as `FileCtx::namespace` does for a class
-constant's initializer.
+No outstanding items.
 
 ## Code actions
 
@@ -110,4 +73,44 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B742. A global constant holding `Foo::class` or an enum case has no type
+
+**Impact: Low · Complexity: Low**
+
+```php
+namespace Lib;
+
+class Widget {}
+enum Suit { case Hearts; }
+
+const WIDGET = Widget::class;
+const SUIT = Suit::Hearts;
+
+$w = WIDGET;                    // class-string<Widget>, but untyped
+$s = SUIT;                      // Suit::Hearts, but untyped
+
+/**
+ * @template T of object
+ * @param class-string<T> $class
+ * @return T
+ */
+function make(string $class = WIDGET): object { … }
+
+$made = make();                 // Widget, but mixed
+$made = make(WIDGET);           // the same
+```
+
+A class constant initialized to `Foo::class` or `Suit::Hearts` reads as
+that class name or case (`class_constants.rs` falls back to
+`class_name_literal_type` and `resolve_static_access_type` after the
+literal fold), but a global or namespaced constant does not: both the AST
+path (`global_constant_type` in `rhs_resolution/constant_access.rs`) and
+the text path (`Backend::resolve_arg_text_to_type`) stop at
+`infer_type_from_constant_value` and `folded_constant_type`, which only
+read literals. Both need the same fallback.
+
+Once fixed, cover the template case with a callee and a caller in
+different namespaces that each declare a constant of the same name: an
+omitted argument's default is read in the callee's namespace
+(`TemplateCallee::namespace`), which nothing can observe until such a
+constant has a type.

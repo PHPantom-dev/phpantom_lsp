@@ -26,7 +26,7 @@ use crate::types::*;
 
 use crate::text_scan::split_top_level_commas;
 use crate::type_engine::conditional_resolution::{
-    ArgTypeResolver, TemplateContext, ThisContext, VarClassStringResolver,
+    ArgTypeResolver, DefaultTypeResolver, TemplateContext, ThisContext, VarClassStringResolver,
     receiver_type_for_condition, resolve_conditional_with_text_args_and_defaults,
     resolve_conditional_without_args, resolve_conditional_without_args_and_defaults,
 };
@@ -69,6 +69,10 @@ pub(crate) struct MethodReturnCtx<'a> {
     /// return decided by the type of an argument whose text alone does not
     /// settle it (`$id is list<int>` against `[7, 8]` or `$ids`).
     pub arg_type_resolver: ArgTypeResolver<'a>,
+    /// Resolves an omitted argument's default where the method declares
+    /// it; see
+    /// [`TemplateContext::default_type_resolver`](crate::type_engine::conditional_resolution::TemplateContext::default_type_resolver).
+    pub default_type_resolver: DefaultTypeResolver<'a>,
     /// Shared resolved-class cache (when available).
     pub cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
     /// The class at the call site (where `self::class` / `static::class`
@@ -107,6 +111,7 @@ impl<'a> MethodReturnCtx<'a> {
         template_subs: &'a HashMap<String, PhpType>,
         var_resolver: &'a dyn Fn(&str) -> Vec<String>,
         arg_type_resolver: &'a dyn Fn(&str) -> Option<PhpType>,
+        default_type_resolver: &'a dyn Fn(&str, Option<&str>) -> Option<PhpType>,
         written_class: &'a dyn Fn(&str) -> String,
         is_static: bool,
     ) -> Self {
@@ -117,6 +122,7 @@ impl<'a> MethodReturnCtx<'a> {
             template_subs,
             var_resolver: Some(var_resolver),
             arg_type_resolver: Some(arg_type_resolver),
+            default_type_resolver: Some(default_type_resolver),
             cache: ctx.resolved_class_cache,
             calling_class_name: ctx.current_class.map(|c| c.fqn().as_str()),
             written_class: Some(written_class),
@@ -230,6 +236,7 @@ fn resolve_conditional_return_hint(
         params: method.template_params(),
         bindings: method.template_bindings(),
         arg_type_resolver: mr_ctx.arg_type_resolver,
+        default_type_resolver: mr_ctx.default_type_resolver,
         this_type: Some(&this_type),
         subs: None,
     };
@@ -243,6 +250,7 @@ fn resolve_conditional_return_hint(
                 calling: mr_ctx.calling_class_name,
                 declaring: Some(declaring_fqn.as_str()),
                 written_class: mr_ctx.written_class,
+                namespace: method.default_namespace(),
             },
             class_loader,
             &tpl,
@@ -512,6 +520,7 @@ impl Backend {
                 params: method.template_params(),
                 bindings: method.template_bindings(),
                 arg_type_resolver: mr_ctx.arg_type_resolver,
+                default_type_resolver: mr_ctx.default_type_resolver,
                 this_type: None,
                 subs: None,
             };
@@ -524,6 +533,7 @@ impl Backend {
                     calling: mr_ctx.calling_class_name,
                     declaring: Some(class_info.fqn().as_str()),
                     written_class: mr_ctx.written_class,
+                    namespace: method.default_namespace(),
                 },
                 class_loader,
                 &tpl,

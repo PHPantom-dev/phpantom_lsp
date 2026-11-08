@@ -41,6 +41,7 @@ pub(super) fn resolve_conditional_return_for_call(
     class_loader: &ResolvedClassLoader<'_>,
     template_subs: &HashMap<String, PhpType>,
     arg_type_resolver: crate::type_engine::conditional_resolution::ArgTypeResolver<'_>,
+    default_type_resolver: crate::type_engine::conditional_resolution::DefaultTypeResolver<'_>,
     replace_self: impl Fn(&PhpType) -> PhpType,
 ) -> Option<PhpType> {
     let method = method_ref?;
@@ -54,6 +55,7 @@ pub(super) fn resolve_conditional_return_for_call(
     let declaring_fqn = owner.fqn();
     let class_ctx = crate::type_engine::conditional_resolution::ConditionalClassContext {
         declaring: Some(declaring_fqn.as_str()),
+        namespace: method.default_namespace(),
         ..call_site
     };
     let class_values =
@@ -68,6 +70,7 @@ pub(super) fn resolve_conditional_return_for_call(
         params: method.template_params(),
         bindings: method.template_bindings(),
         arg_type_resolver,
+        default_type_resolver,
         this_type: Some(&this_type),
         subs: None,
     };
@@ -98,6 +101,7 @@ pub(super) fn resolve_conditional_return_for_call(
             params: method.template_params(),
             bindings: method.template_bindings(),
             arg_type_resolver,
+            default_type_resolver,
             this_type: Some(&this_type),
             subs: None,
         };
@@ -337,6 +341,9 @@ pub(super) fn resolve_owner_method_call(
     // `is <Type>` conditions whose argument is an expression (a method-call
     // chain, property access, …) rather than a literal.
     let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
+    let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+        Backend::resolve_arg_text_to_type(t, &rctx.written_in(namespace))
+    };
 
     // Resolve the PHPStan conditional return type against the call-site
     // arguments, if the method declares one.  When it yields an informative
@@ -354,11 +361,13 @@ pub(super) fn resolve_owner_method_call(
             calling: Some(current_class_name),
             declaring: None,
             written_class: Some(&written),
+            namespace: None,
         },
         owner,
         ctx.file.class_loader,
         template_subs,
         Some(&arg_ty_resolver),
+        Some(&default_ty_resolver),
         self_replace,
     );
 
@@ -376,6 +385,7 @@ pub(super) fn resolve_owner_method_call(
                 params: method_ref.map(|m| m.template_params()).unwrap_or(&[]),
                 bindings: method_ref.map(|m| m.template_bindings()).unwrap_or(&[]),
                 arg_type_resolver: Some(&arg_ty_resolver),
+                default_type_resolver: Some(&default_ty_resolver),
                 this_type: None,
                 subs: None,
             };
@@ -388,6 +398,7 @@ pub(super) fn resolve_owner_method_call(
                     calling: Some(current_class_name),
                     declaring: Some(owner.fqn().as_str()),
                     written_class: Some(&written),
+                    namespace: method_ref.and_then(|m| m.default_namespace()),
                 },
                 ctx.file.class_loader,
                 &tpl,
@@ -430,6 +441,7 @@ pub(super) fn resolve_owner_method_call(
         template_subs,
         var_resolver: Some(&var_resolver),
         arg_type_resolver: Some(&arg_ty_resolver),
+        default_type_resolver: Some(&default_ty_resolver),
         cache: ctx.resolved_class_cache,
         calling_class_name: Some(ctx.current_class.fqn().as_str()),
         written_class: Some(&written),

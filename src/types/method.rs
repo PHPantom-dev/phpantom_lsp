@@ -247,6 +247,11 @@ pub struct MethodExtras {
     /// The table a Yii Active Record's `tableName()` names, when it
     /// returns a string literal (see [`crate::yii::active_record`]).
     pub record_table: Option<Atom>,
+    /// The namespace the method is declared in, kept only when a
+    /// parameter's default names a constant by an unqualified name: that
+    /// is the namespace's constant when one is declared and the global one
+    /// otherwise, which is decided where the default is read.
+    pub default_namespace: Option<Atom>,
 }
 
 /// A relation a Yii Active Record's `relationQuery()` declares with an arm
@@ -284,6 +289,7 @@ impl MethodExtras {
             && self.self_out.is_none()
             && self.record_relations.is_none()
             && self.record_table.is_none()
+            && self.default_namespace.is_none()
     }
 
     /// Box `self` for [`MethodInfo::extras`], or `None` when it is empty.
@@ -347,6 +353,13 @@ impl MethodInfo {
     /// avoided.
     pub fn extras_mut(&mut self) -> &mut MethodExtras {
         self.extras.get_or_insert_with(Default::default)
+    }
+
+    /// The namespace the parameters' defaults were written in, when one
+    /// of them names a constant by an unqualified name (see
+    /// [`MethodExtras::default_namespace`]).
+    pub fn default_namespace(&self) -> Option<&str> {
+        self.extras.as_ref()?.default_namespace.as_deref()
     }
 
     /// The `@return` tag's description text.

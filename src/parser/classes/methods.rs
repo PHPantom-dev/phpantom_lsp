@@ -194,6 +194,8 @@ pub(super) fn extract_method<'a>(
             self_out: info.and_then(docblock::extract_self_out_type_from_info),
             record_relations: crate::yii::active_record::declared_relations(method, doc_ctx),
             record_table: crate::yii::active_record::declared_table(method),
+            // Set when the names are qualified, which knows the namespace.
+            default_namespace: None,
         }
         .into_option(),
     })

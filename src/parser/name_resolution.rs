@@ -751,6 +751,20 @@ impl Backend {
             crate::parser::qualify_param_default_keyword(param, self_fqn, parent_fqn);
             qualify_param(param, resolver, scope, true);
         }
+        // An unqualified constant left in a default is the namespace's when
+        // it declares one and the global one otherwise, which only an index
+        // of the declared constants can say, so the default is read with
+        // the namespace it was written in.
+        if let Some(namespace) = scope.namespace.as_deref()
+            && method.parameters.iter().any(|param| {
+                param
+                    .default_value
+                    .as_deref()
+                    .is_some_and(super::initializers::names_unqualified_constant)
+            })
+        {
+            method.extras_mut().default_namespace = Some(atom(namespace));
+        }
         Self::record_unverified_method_types(
             method,
             class_skip,

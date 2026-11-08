@@ -12815,6 +12815,89 @@ function test(): void {
     );
 }
 
+/// An unqualified constant in a parameter default means the callee's
+/// namespace's constant when it declares one, and the global one otherwise,
+/// whatever the call site declares of that name.
+#[test]
+fn hover_omitted_argument_reads_an_unqualified_constant_default_in_the_callees_namespace() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///globals.php", "<?php\nconst FALLBACK_MODE = 1;\n");
+    backend.update_ast(
+        "file:///lib.php",
+        r#"<?php
+namespace Lib;
+
+const MODE = 1;
+
+/**
+ * @return ($mode is 1 ? int : string)
+ */
+function pick(int $mode = MODE): int|string
+{
+    return $mode === 1 ? 1 : 'one';
+}
+
+/**
+ * @return ($mode is 1 ? int : string)
+ */
+function fallback(int $mode = FALLBACK_MODE): int|string
+{
+    return $mode === 1 ? 1 : 'one';
+}
+
+class Picker
+{
+    /**
+     * @return ($mode is 1 ? int : string)
+     */
+    public function pick(int $mode = MODE): int|string
+    {
+        return $mode === 1 ? 1 : 'one';
+    }
+
+    /**
+     * @return ($mode is 1 ? int : string)
+     */
+    public static function make(int $mode = MODE): int|string
+    {
+        return $mode === 1 ? 1 : 'one';
+    }
+}
+"#,
+    );
+    let uri = "file:///run.php";
+    let content = r#"<?php
+namespace App;
+
+const MODE = 2;
+const FALLBACK_MODE = 2;
+
+function test(\Lib\Picker $picker): void {
+    $picked = \Lib\pick();
+    $picked;
+    $fellBack = \Lib\fallback();
+    $fellBack;
+    $method = $picker->pick();
+    $method;
+    $static = \Lib\Picker::make();
+    $static;
+}
+"#;
+    for (line, name) in [
+        (8, "$picked"),
+        (10, "$fellBack"),
+        (12, "$method"),
+        (14, "$static"),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, 6).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(
+            text.contains("int") && !text.contains("string"),
+            "{name}: the default is the callee's constant, which is 1, got: {text}"
+        );
+    }
+}
+
 /// A constant initialized to `Foo::class` holds that class's name, as
 /// `$x = Foo::class;` does in code, however the class is named.
 #[test]

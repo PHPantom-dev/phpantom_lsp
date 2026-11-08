@@ -537,7 +537,11 @@ Rules for code that touches names:
    when one is declared and the global constant otherwise, which only the
    index can say, so it is looked up when read: a class constant's
    initializer through `FileCtx::namespace`, a namespaced constant's value by
-   `Backend::lookup_global_constant_candidates` from `DefineInfo::namespace`.
+   `Backend::lookup_global_constant_candidates` from `DefineInfo::namespace`,
+   and a parameter default through `ResolutionCtx::written_in` with the
+   callee's namespace (`FunctionInfo::namespace`, or
+   `MethodInfo::default_namespace`, kept only for a method whose defaults
+   need it).
 4. **Identify classes by FQN.** `ClassInfo::name` is the short name, and
    `class_lookup::find_class_by_name` matches a bare name against the
    classes of every namespace block in the file. Use `ClassInfo::fqn()` and

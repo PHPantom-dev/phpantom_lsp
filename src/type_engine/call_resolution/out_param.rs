@@ -123,6 +123,14 @@ impl OutParamCallee {
         }
     }
 
+    /// The namespace the callee's parameter defaults were written in.
+    fn default_namespace(&self) -> Option<&str> {
+        match self {
+            Self::Function(fi) => fi.namespace.as_deref(),
+            Self::Method(cls, name) => cls.get_method_ci(name)?.default_namespace(),
+        }
+    }
+
     /// The memo key identifying one parameter of this callee.
     ///
     /// Built from interned names the symbol tables already hold, so it
@@ -285,11 +293,15 @@ pub(crate) fn resolve_out_type_for_call(
     )
     .join(", ");
     let arg_type_resolver = |text: &str| Backend::resolve_arg_text_to_type(text, resolution_ctx);
+    let default_type_resolver = |text: &str, namespace: Option<&str>| {
+        Backend::resolve_arg_text_to_type(text, &resolution_ctx.written_in(namespace))
+    };
     let tpl = TemplateContext {
         defaults: None,
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&arg_type_resolver),
+        default_type_resolver: Some(&default_type_resolver),
         this_type: None,
         subs: None,
     };
@@ -303,6 +315,7 @@ pub(crate) fn resolve_out_type_for_call(
             calling: resolution_ctx.current_class.map(|c| c.fqn().as_str()),
             declaring: declaring_fqn.as_deref(),
             written_class: Some(&|name: &str| resolution_ctx.written_names().resolve_class(name)),
+            namespace: callee.default_namespace(),
         },
         resolution_ctx.file.class_loader,
         &tpl,

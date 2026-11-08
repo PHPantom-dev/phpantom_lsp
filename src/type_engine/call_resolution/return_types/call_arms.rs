@@ -457,11 +457,15 @@ impl Backend {
                 }
             }
             let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+            let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+                Self::resolve_arg_text_to_type(t, &ctx.written_in(namespace))
+            };
             let mr_ctx = MethodReturnCtx::for_call(
                 ctx,
                 &template_subs,
                 &var_resolver,
                 &arg_ty_resolver,
+                &default_ty_resolver,
                 &written,
                 false,
             );
@@ -525,11 +529,15 @@ impl Backend {
                     Self::build_method_template_subs(owner, method_name, &arg_refs, ctx);
                 let var_resolver = build_var_resolver(ctx);
                 let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+                let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+                    Self::resolve_arg_text_to_type(t, &ctx.written_in(namespace))
+                };
                 let mr_ctx = MethodReturnCtx::for_call(
                     ctx,
                     &template_subs,
                     &var_resolver,
                     &arg_ty_resolver,
+                    &default_ty_resolver,
                     &written,
                     true,
                 );
@@ -738,11 +746,15 @@ impl Backend {
 
             let var_resolver = build_var_resolver(ctx);
             let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+            let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+                Self::resolve_arg_text_to_type(t, &ctx.written_in(namespace))
+            };
             let mr_ctx = MethodReturnCtx::for_call(
                 ctx,
                 &template_subs,
                 &var_resolver,
                 &arg_ty_resolver,
+                &default_ty_resolver,
                 &written,
                 true,
             );
@@ -876,6 +888,9 @@ impl Backend {
                 // decided by the argument's resolved type, so the
                 // branch a call takes matches what it was handed.
                 let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+                let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+                    Self::resolve_arg_text_to_type(t, &ctx.written_in(namespace))
+                };
                 // A function whose arguments decide its result
                 // (`json_encode(…, JSON_THROW_ON_ERROR)` never returning
                 // `false`, `filter_var()` returning what its filter
@@ -918,6 +933,7 @@ impl Backend {
                             params: &func_info.template_params,
                             bindings: &func_info.template_bindings,
                             arg_type_resolver: Some(&arg_ty_resolver),
+                            default_type_resolver: Some(&default_ty_resolver),
                             this_type: None,
                             subs: subs.as_ref(),
                         };
@@ -930,6 +946,7 @@ impl Backend {
                                 calling: ctx.current_class.map(|c| c.fqn().as_str()),
                                 declaring: None,
                                 written_class: Some(&written),
+                                namespace: func_info.namespace.as_deref(),
                             },
                             ctx.file.class_loader,
                             &tpl,
@@ -1410,11 +1427,15 @@ fn method_call_return_hint(
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, ctx);
+    let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+        Backend::resolve_arg_text_to_type(t, &ctx.written_in(namespace))
+    };
     let mr_ctx = MethodReturnCtx::for_call(
         ctx,
         template_subs,
         var_resolver,
         &arg_ty_resolver,
+        &default_ty_resolver,
         written,
         false,
     );
@@ -1439,6 +1460,7 @@ fn method_call_return_hint(
         params: m.template_params(),
         bindings: m.template_bindings(),
         arg_type_resolver: Some(&arg_ty_resolver),
+        default_type_resolver: Some(&default_ty_resolver),
         this_type: None,
         subs: None,
     };
@@ -1452,6 +1474,7 @@ fn method_call_return_hint(
                 calling: ctx.current_class.map(|c| c.fqn().as_str()),
                 declaring: Some(owner.fqn().as_str()),
                 written_class: Some(written),
+                namespace: m.default_namespace(),
             },
             ctx.file.class_loader,
             &tpl,

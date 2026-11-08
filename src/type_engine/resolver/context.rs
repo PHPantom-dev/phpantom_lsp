@@ -517,6 +517,27 @@ impl<'a> ResolutionCtx<'a> {
         }
     }
 
+    /// This context for reading text written in `namespace` of another
+    /// file, such as a callee's parameter default.  The parser spelled the
+    /// classes and the constants with one meaning in it fully qualified, so
+    /// this file's imports and namespace must not resolve what is left: an
+    /// unqualified constant is `namespace`'s when it declares one and the
+    /// global one otherwise.
+    pub(crate) fn written_in<'n>(&self, namespace: Option<&'n str>) -> ResolutionCtx<'n>
+    where
+        'a: 'n,
+    {
+        let ctx: &ResolutionCtx<'n> = self;
+        ResolutionCtx {
+            file: ctx
+                .file
+                .with_imports(None)
+                .with_uri(None)
+                .with_namespace(namespace),
+            ..*ctx
+        }
+    }
+
     /// How a class name written at the cursor reads.  Outside a class the
     /// namespace is the one in force at the cursor.
     pub(in crate::type_engine) fn written_names(&self) -> WrittenNames<'a> {
