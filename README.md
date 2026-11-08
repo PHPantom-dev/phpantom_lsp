@@ -34,7 +34,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Symfony & Twig                           | ✅       | ❌           | ❌         | 🚧          | 🧩         |
 | WordPress                                | ✅       | 🚧           | 🚧         | ❌          | ✅          |
 | Drupal                                   | ✅       | ❌           | ❌         | ❌          | ✅🧩          |
-| Yii 3                                    | 🚧       | ❌           | ❌         | ❌          | 🚧🧩🔒        |
+| Yii 3                                    | ✅       | ❌           | ❌         | ❌          | 🚧🧩🔒        |
 | Tempest                                  | 🚧       | ❌           | ❌         | ❌          | 🧩          |
 | PHPUnit & Pest                           | ✅       | ❌           | 🚧         | 🚧          | ✅          |
 | Other frameworks                         | ❌       | 🚧           | 🚧         | 🚧          | 🧩        |
