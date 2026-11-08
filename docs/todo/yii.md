@@ -81,40 +81,6 @@ and use it as the base wherever the class gives none.
 
 ---
 
-## Y11. Check what a DI definition passes, not only what it names
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-// config/common/di/logger.php
-LoggerInterface::class => [
-    'class' => Logger::class,
-    'alert' => '',                             // neither 'alert()' nor '$alert'
-    '$targets' => [],                          // Logger::$targets is private
-    'setFlushInterval()' => ['not-an-int'],    // takes an int
-],
-```
-
-A definition's `'name()'` and `'$name'` keys navigate and are reported
-when the class has no such member, but nothing else about them is
-checked. `analyze` on the playground with the lines above reports
-nothing, while `yiisoft/definitions` throws for each of them when the
-container builds the object. Report:
-
-- a key that is not `class`, `__construct()`, or one of the two member
-  forms, with a quick fix that adds the `()` or `$` the member it
-  matches needs;
-- a `'$name'` key whose property is not public, and a `'name()'` key
-  whose method is not public;
-- a value whose type does not match the property, or an argument whose
-  type does not match the parameter it is passed to, positionally or by
-  name. The argument check is the one a call gets, so feed the
-  definition's arguments through it rather than writing a second one.
-  A `Reference`, `DynamicReference`, or `ReferencesArray` value is typed
-  as the class or classes it names.
-
----
-
 ## Y13. Translation message IDs
 
 **Impact: Medium · Complexity: Medium**

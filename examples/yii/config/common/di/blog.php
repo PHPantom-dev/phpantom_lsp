@@ -16,7 +16,9 @@ return [
     // the public $pageSize property. Go to the definition of 'posts',
     // 'setLogger()', or '$pageSize', rename setLogger() in
     // InMemoryPostRepository and watch the key follow, clear a key to
-    // complete it, or misspell one to see it reported.
+    // complete it, or misspell one to see it reported. Drop the $ from
+    // '$pageSize' to see the key reported with a fix that puts it back, or
+    // set it to '5' to see the value reported: the property takes an int.
     PostRepositoryInterface::class => [
         'class' => InMemoryPostRepository::class,
         '__construct()' => [

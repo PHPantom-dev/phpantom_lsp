@@ -59,6 +59,32 @@ struct ResolvedArg {
     enumerates_all_keys: bool,
 }
 
+/// An argument passed other than by a call expression, such as one a DI
+/// definition lists for the container to pass (see
+/// [`Backend::check_passed_arguments`]).
+pub(crate) struct PassedArgument {
+    /// The type of the value passed.
+    pub(crate) ty: PhpType,
+    /// Byte offset of the value's start (inclusive).
+    pub(crate) start: usize,
+    /// Byte offset of the value's end (exclusive).
+    pub(crate) end: usize,
+    /// The parameter it is passed to by name, without the `$`.
+    pub(crate) name: Option<String>,
+}
+
+/// A call something other than a call expression makes (see
+/// [`Backend::check_passed_arguments`]).
+pub(crate) struct PassedCall<'a> {
+    /// What is called.
+    pub(crate) target: &'a ResolvedCallableTarget,
+    /// What is passed to it.
+    pub(crate) args: Vec<PassedArgument>,
+    /// Whether the code that makes the call declares `strict_types`, which
+    /// need not be the file the arguments are written in.
+    pub(crate) strict_types: bool,
+}
+
 /// All resolved argument types for a single call site.
 struct ResolvedCallArgs {
     args: Vec<ResolvedArg>,
@@ -307,18 +333,13 @@ impl Backend {
         let loaders = self.file_loaders(file_ctx);
         let (resolved_map, strict_types) =
             self.resolve_call_arguments(content, &call_site_starts, file_ctx, &loaders);
-        let check = ArgumentCheck {
-            backend: self,
+        let check = ArgumentCheck::new(
+            self,
             uri,
             content,
-            class_loader: loaders.resolved_class_loader(),
+            loaders.resolved_class_loader(),
             strict_types,
-            // Read once for the whole file, so the flag cannot change
-            // mid-pass.
-            report_possibly_empty: self.possibly_empty_mismatches_enabled(),
-            report_partial_union: self.partial_union_mismatches_enabled(),
-            docblock_types: self.docblock_type_mismatches_enabled(),
-        };
+        );
 
         // Call-expression resolution cache: avoids re-resolving the
         // same call expression (e.g. `ClassName::method`) at every
@@ -468,6 +489,51 @@ impl Backend {
         })
     }
 
+    /// Check the arguments of `call`, which something other than a call
+    /// expression makes, the way the arguments of a call are checked.
+    pub(crate) fn check_passed_arguments(
+        &self,
+        uri: &str,
+        content: &str,
+        class_loader: &ResolvedClassLoader<'_>,
+        call: PassedCall<'_>,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let PassedCall {
+            target,
+            args,
+            strict_types,
+        } = call;
+        let check = ArgumentCheck::new(self, uri, content, class_loader, strict_types);
+        let mut names = Vec::with_capacity(args.len());
+        let resolved = ResolvedCallArgs {
+            args: args
+                .into_iter()
+                .map(|arg| {
+                    names.push(arg.name);
+                    ResolvedArg {
+                        ty: arg.ty,
+                        start: arg.start,
+                        end: arg.end,
+                        array_string_literals: Vec::new(),
+                        enumerates_all_keys: false,
+                    }
+                })
+                .collect(),
+            template_bounds: HashMap::new(),
+        };
+        let call = CheckedCall::new(target, &resolved, class_loader);
+        let mut positional_idx = 0;
+        for (arg_idx, (arg, name)) in resolved.args.iter().zip(&names).enumerate() {
+            let Some(param) =
+                param_for_argument(name.as_deref(), &target.parameters, &mut positional_idx)
+            else {
+                continue;
+            };
+            check.check_argument(&call, arg, arg_idx, positional_idx, param, out);
+        }
+    }
+
     /// Resolve the callable a call site invokes.
     ///
     /// Class-level template substitution happens inside
@@ -514,32 +580,35 @@ fn is_checked_site(call_site: &CallSite) -> bool {
     !call_site.has_unpacking && super::super::incremental::reports_site(call_site.args_start)
 }
 
-/// The parameter argument `arg_idx` fills: by name for a named argument,
-/// else the next positional one, counted by `positional_idx`.  A trailing
-/// variadic parameter collects the positional arguments past it and the
-/// named ones no other parameter answers to.
+/// The parameter an argument fills: the one called `name` for a named
+/// argument, else the next positional one, counted by `positional_idx`.  A
+/// trailing variadic parameter collects the positional arguments past it and
+/// the named ones no other parameter answers to.
 fn param_for_argument<'p>(
-    call_site: &CallSite,
+    name: Option<&str>,
     params: &'p [ParameterInfo],
-    arg_idx: usize,
     positional_idx: &mut usize,
 ) -> Option<&'p ParameterInfo> {
     let variadic = || params.last().filter(|p| p.is_variadic);
-    let index = arg_idx as u32;
-    if call_site.named_arg_indices.contains(&index) {
-        let name_pos = call_site
-            .named_arg_indices
-            .iter()
-            .position(|&i| i == index)?;
-        let param_name = call_site.named_arg_names.get(name_pos);
+    if let Some(name) = name {
         return params
             .iter()
-            .find(|p| Some(p.name.trim_start_matches('$')) == param_name)
+            .find(|p| p.name.trim_start_matches('$') == name)
             .or_else(variadic);
     }
     let param = params.get(*positional_idx).or_else(variadic);
     *positional_idx += 1;
     param
+}
+
+/// The name a call site passes argument `arg_idx` by, when it does.
+fn named_argument<'c>(call_site: &CallSite<'c>, arg_idx: usize) -> Option<&'c str> {
+    let index = arg_idx as u32;
+    let position = call_site
+        .named_arg_indices
+        .iter()
+        .position(|&i| i == index)?;
+    call_site.named_arg_names.get(position)
 }
 
 /// The type each argument to an untyped variadic must have, given the
@@ -623,7 +692,28 @@ impl<'a> CheckedCall<'a> {
     }
 }
 
-impl ArgumentCheck<'_> {
+impl<'a> ArgumentCheck<'a> {
+    fn new(
+        backend: &'a Backend,
+        uri: &'a str,
+        content: &'a str,
+        class_loader: &'a ResolvedClassLoader<'a>,
+        strict_types: bool,
+    ) -> Self {
+        Self {
+            backend,
+            uri,
+            content,
+            class_loader,
+            strict_types,
+            // Read once for the whole pass, so the flags cannot change
+            // mid-pass.
+            report_possibly_empty: backend.possibly_empty_mismatches_enabled(),
+            report_partial_union: backend.partial_union_mismatches_enabled(),
+            docblock_types: backend.docblock_type_mismatches_enabled(),
+        }
+    }
+
     pub(super) fn range(&self, start: usize, end: usize) -> Option<Range> {
         self.backend
             .offset_range_to_lsp_range(self.uri, self.content, start, end)
@@ -642,9 +732,8 @@ impl ArgumentCheck<'_> {
             // An argument beyond the declared parameters has none to
             // be checked against.
             let Some(param) = param_for_argument(
-                call_site,
+                named_argument(call_site, arg_idx),
                 &call.target.parameters,
-                arg_idx,
                 &mut positional_idx,
             ) else {
                 continue;

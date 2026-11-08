@@ -301,7 +301,7 @@ fn check_property_write(member_offset: u32, rhs: &Expression<'_>, ctx: &mut Prop
 /// framework attributes: magic `__set` decides what those accept), or
 /// when it carries no type worth checking. Only the native type counts
 /// when `docblock_types` is off.
-fn declared_property_type(
+pub(crate) fn declared_property_type(
     receiver: &Arc<ClassInfo>,
     name: &str,
     is_static: bool,
@@ -336,6 +336,33 @@ fn declared_property_type(
     }
     let ty = type_hint.filter(|t| !t.is_untyped() && !t.is_mixed())?;
     Some(ty.resolve_self_refs(receiver.fqn().as_str(), receiver.parent_class.as_deref()))
+}
+
+/// Whether writing a `value` to a property declared `declared` is reported:
+/// the two are incompatible, and the mismatch is not one the
+/// `possibly-empty-mismatches` or `partial-union-mismatches` settings leave
+/// out.
+pub(crate) fn property_value_mismatches(
+    value: &PhpType,
+    declared: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+    strict_types: bool,
+    report_possibly_empty: bool,
+    report_partial_union: bool,
+) -> bool {
+    !is_type_compatible(value, declared, class_loader, strict_types)
+        && (report_possibly_empty
+            || !fails_only_on_empty(value, declared, class_loader, strict_types))
+        && (report_partial_union || !fits_partially(value, declared, class_loader, strict_types))
+}
+
+/// The message for a value of type `value` written to `property`.
+pub(crate) fn property_mismatch_message(
+    property: &str,
+    declared: &PhpType,
+    value: &PhpType,
+) -> String {
+    format!("Property {property} expects {declared}, got {value}")
 }
 
 // ── Main diagnostic collection ──────────────────────────────────────────────
@@ -400,39 +427,22 @@ impl Backend {
                 })
             },
             |assignment, ctx| {
-                if is_type_compatible(
+                if !property_value_mismatches(
                     &assignment.rhs_type,
                     &assignment.declared_type,
                     ctx.loaders.resolved_class_loader(),
                     ctx.strict_types,
+                    report_possibly_empty,
+                    report_partial_union,
                 ) {
-                    return None;
-                }
-                if !report_possibly_empty
-                    && fails_only_on_empty(
-                        &assignment.rhs_type,
-                        &assignment.declared_type,
-                        ctx.loaders.resolved_class_loader(),
-                        ctx.strict_types,
-                    )
-                {
-                    return None;
-                }
-                if !report_partial_union
-                    && fits_partially(
-                        &assignment.rhs_type,
-                        &assignment.declared_type,
-                        ctx.loaders.resolved_class_loader(),
-                        ctx.strict_types,
-                    )
-                {
                     return None;
                 }
                 Some((
                     (assignment.start, assignment.end),
-                    format!(
-                        "Property {} expects {}, got {}",
-                        assignment.property_name, assignment.declared_type, assignment.rhs_type,
+                    property_mismatch_message(
+                        &assignment.property_name,
+                        &assignment.declared_type,
+                        &assignment.rhs_type,
                     ),
                 ))
             },

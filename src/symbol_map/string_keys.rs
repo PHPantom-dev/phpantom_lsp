@@ -928,6 +928,17 @@ pub(crate) struct YiiDefinitionSite {
     pub class: Atom,
 }
 
+/// A Yii DI definition array whose keys configure the class it builds,
+/// kept so its keys and values can be checked against that class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct YiiDefinitionBody {
+    /// Where the array literal starts.
+    pub start: u32,
+    /// The class the definition builds, fully qualified, without the
+    /// leading `\`.
+    pub class: Atom,
+}
+
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
 /// A route a file declares, with what its name alone does not say: the path

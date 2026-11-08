@@ -20,7 +20,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
 
 use super::*;
-use crate::symbol_map::{StringKeyKind, YiiDefinitionSite};
+use crate::symbol_map::{StringKeyKind, YiiDefinitionBody, YiiDefinitionSite};
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 use crate::yii::definitions::{definition_argument_key, definition_key};
 
@@ -36,16 +36,17 @@ struct DefinedClass {
 /// has a `class` entry, and each entry keyed by a class whose value is one.
 ///
 /// A definition nested in this one's values is an array of its own, which
-/// the walk reads when it gets there.
+/// the walk reads when it gets there.  `start` is where the array starts.
 pub(in crate::symbol_map::extraction) fn emit_yii_definition_spans(
     elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    start: u32,
     ctx: &mut ExtractionCtx<'_>,
 ) {
     if !ctx.yii {
         return;
     }
     if let Some(class) = class_entry(elements, ctx) {
-        emit_definition_keys(elements, &class, ctx);
+        emit_definition_keys(elements, start, &class, ctx);
     }
     for element in elements.iter() {
         let ArrayElement::KeyValue(entry) = element else {
@@ -54,9 +55,10 @@ pub(in crate::symbol_map::extraction) fn emit_yii_definition_spans(
         let Some(id) = defined_class(entry.key, ctx) else {
             continue;
         };
+        let start = entry.value.span().start.offset;
         let binds = match entry.value {
-            Expression::Array(array) => definition_array(&array.elements, &id, ctx),
-            Expression::LegacyArray(array) => definition_array(&array.elements, &id, ctx),
+            Expression::Array(array) => definition_array(&array.elements, start, &id, ctx),
+            Expression::LegacyArray(array) => definition_array(&array.elements, start, &id, ctx),
             value => is_definition_value(value),
         };
         if binds {
@@ -74,6 +76,7 @@ pub(in crate::symbol_map::extraction) fn emit_yii_definition_spans(
 /// listeners of the `events` group.
 fn definition_array(
     elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    start: u32,
     id: &DefinedClass,
     ctx: &mut ExtractionCtx<'_>,
 ) -> bool {
@@ -86,7 +89,7 @@ fn definition_array(
     {
         return false;
     }
-    emit_definition_keys(elements, id, ctx);
+    emit_definition_keys(elements, start, id, ctx);
     true
 }
 
@@ -215,12 +218,20 @@ fn definition_key_name<'a>(element: &ArrayElement<'a>, content: &str) -> Option<
 }
 
 /// Emit the members the keys of a definition of `class` name, and the
-/// arguments its method keys pass by name.
+/// arguments its method keys pass by name, and record the definition, which
+/// starts at `start`, for its keys and values to be checked.
 fn emit_definition_keys(
     elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    start: u32,
     class: &DefinedClass,
     ctx: &mut ExtractionCtx<'_>,
 ) {
+    if let Some(fqn) = &class.fqn {
+        ctx.yii_definition_bodies.push(YiiDefinitionBody {
+            start,
+            class: crate::atom::atom(fqn),
+        });
+    }
     for element in elements.iter() {
         let Some(key) = definition_key_name(element, ctx.content) else {
             continue;

@@ -172,6 +172,7 @@ static COLLECTORS: &[Collector] = &[
     skip_in_template(QUICKFIX, Backend::collect_fix_namespace_actions),
     skip_in_template(QUICKFIX, Backend::collect_fix_class_name_actions),
     offer(QUICKFIX, Backend::collect_fix_class_case_actions),
+    offer(QUICKFIX, Backend::collect_yii_definition_key_actions),
     offer(EXTRACT, Backend::collect_extract_interface_actions),
     skip_in_template(REFACTOR, Backend::collect_create_test_actions),
     offer_in_resource(QUICKFIX, Backend::collect_create_missing_view_actions),

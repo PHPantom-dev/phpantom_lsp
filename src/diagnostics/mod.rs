@@ -337,6 +337,7 @@ pub(crate) mod use_statements;
 mod validation_strings;
 mod void_results;
 pub(crate) mod workspace;
+pub(crate) mod yii_definitions;
 
 use tower_lsp_server::gen_lsp_types::*;
 

@@ -150,6 +150,7 @@ mod simplify_null;
 mod sort_use_statements;
 mod update_docblock;
 mod use_line_deletion;
+mod yii_definition_keys;
 pub(crate) use use_line_deletion::{
     build_line_deletion_edit, build_use_directive_deletion_edit, range_touches_use_import,
 };

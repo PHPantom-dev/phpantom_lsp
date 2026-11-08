@@ -4,8 +4,8 @@
 use crate::common::message_text;
 
 use crate::common::{
-    completion_response, create_psr4_workspace, edits_for_uri, markup_hover_at, offset_position,
-    open_document, rename, response_labels,
+    completion_response, create_psr4_workspace, edits_for_uri, get_code_actions_at,
+    markup_hover_at, offset_position, open_document, rename, response_labels,
 };
 use phpantom_lsp::Backend;
 use tower_lsp_server::LanguageServer;
@@ -19,10 +19,24 @@ const COMPOSER: &str = r#"{
     } }
 }"#;
 
-const STUBS: &[(&str, &str)] = &[(
-    "stubs/definitions/Reference.php",
-    "<?php\nnamespace Yiisoft\\Definitions;\nfinal class Reference {\n    public static function to(mixed $id): self {}\n}\n",
-)];
+const STUBS: &[(&str, &str)] = &[
+    (
+        "stubs/definitions/Contract/DefinitionInterface.php",
+        "<?php\nnamespace Yiisoft\\Definitions\\Contract;\ninterface DefinitionInterface {}\n",
+    ),
+    (
+        "stubs/definitions/Reference.php",
+        "<?php\nnamespace Yiisoft\\Definitions;\nfinal class Reference implements Contract\\DefinitionInterface {\n    public static function to(mixed $id): self {}\n}\n",
+    ),
+    (
+        "stubs/definitions/DynamicReference.php",
+        "<?php\nnamespace Yiisoft\\Definitions;\nfinal class DynamicReference implements Contract\\DefinitionInterface {\n    public static function to(mixed $id): self {}\n}\n",
+    ),
+    (
+        "stubs/definitions/ReferencesArray.php",
+        "<?php\nnamespace Yiisoft\\Definitions;\nfinal class ReferencesArray {\n    /** @return Reference[] */\n    public static function from(array $ids): array {}\n}\n",
+    ),
+];
 
 const INTERFACE_PHP: &str = r#"<?php
 namespace App\Blog;
@@ -100,6 +114,73 @@ return [
 ];
 "#;
 
+const MAILER_PHP: &str = r#"<?php
+namespace App\Blog;
+
+final class Mailer
+{
+    public int $retries = 3;
+    public readonly string $from;
+    protected string $secret = '';
+    private int $sent = 0;
+
+    public function __construct(private Logger $logger, string ...$headers) {}
+
+    public function setTimeout(int $seconds): void {}
+
+    /** @param list<Logger> $loggers */
+    public function setLoggers(array $loggers): void {}
+
+    protected function reset(): void {}
+}
+"#;
+
+/// Definitions that name the members of the class they build wrongly.
+const CHECKED_PHP: &str = r#"<?php
+use App\Blog\InMemoryPostRepository;
+use App\Blog\Logger;
+use App\Blog\Mailer;
+use Yiisoft\Definitions\DynamicReference;
+use Yiisoft\Definitions\Reference;
+use Yiisoft\Definitions\ReferencesArray;
+
+return [
+    'mailer' => [
+        'class' => Mailer::class,
+        '__construct()' => [Reference::to(Logger::class)],
+        'setTimeout' => [5],
+        'retries' => 1,
+        "retries" => 2,
+        'logger' => 1,
+        'tags' => ['mail'],
+        'reset' => static function (): void {},
+        'setTimeout()-again' => [6],
+        '$secret' => 'x',
+        '$sent' => 1,
+        'reset()' => [],
+        '$from' => 'me',
+        '$retries' => 'three',
+        'setTimeout()' => ['soon'],
+        'setLoggers()' => [ReferencesArray::from([Logger::class])],
+    ],
+    'mailer-by-name' => [
+        'class' => Mailer::class,
+        '__construct()' => [
+            'logger' => Reference::to(InMemoryPostRepository::class),
+            'headers' => ['a'],
+        ],
+    ],
+    'mailer-fine' => [
+        'class' => Mailer::class,
+        '__construct()' => [
+            'logger' => PHP_SAPI === 'cli' ? DynamicReference::to(Logger::class) : Reference::to(Logger::class),
+        ],
+        'setTimeout()' => ['5'],
+        '$retries' => 5,
+    ],
+];
+"#;
+
 /// The `events` group is keyed by classes too, but names listeners.
 const EVENTS_PHP: &str = r#"<?php
 use App\Blog\Logger;
@@ -117,7 +198,9 @@ async fn workspace() -> (Backend, tempfile::TempDir) {
         ("src/Blog/InMemoryPostRepository.php", REPOSITORY_PHP),
         ("src/Blog/Logger.php", LOGGER_PHP),
         ("src/Blog/Card.php", WIDGET_PHP),
+        ("src/Blog/Mailer.php", MAILER_PHP),
         ("config/di/blog.php", DI_PHP),
+        ("config/di/mailer.php", CHECKED_PHP),
         ("config/events.php", EVENTS_PHP),
     ];
     let all: Vec<(&str, &str)> = STUBS.iter().chain(files).copied().collect();
@@ -341,6 +424,110 @@ async fn names_the_class_does_not_have_are_reported() {
         )
         .is_empty()
     );
+}
+
+#[tokio::test]
+async fn keys_a_definition_does_not_take_are_reported() {
+    let (backend, dir) = workspace().await;
+    let report = |code| reported(&backend, &dir, "config/di/mailer.php", CHECKED_PHP, code);
+
+    assert_eq!(
+        report("invalid_yii_definition_key"),
+        vec![
+            "Unknown definition key 'setTimeout'; call the method as 'setTimeout()'".to_string(),
+            "Unknown definition key 'retries'; set the property as '$retries'".to_string(),
+            "Unknown definition key 'retries'; set the property as '$retries'".to_string(),
+            "Unknown definition key 'logger'".to_string(),
+        ]
+    );
+    assert_eq!(
+        report("inaccessible_member"),
+        vec![
+            "Cannot set protected property App\\Blog\\Mailer::$secret from a definition"
+                .to_string(),
+            "Cannot set private property App\\Blog\\Mailer::$sent from a definition".to_string(),
+            "Cannot call protected method App\\Blog\\Mailer::reset() from a definition".to_string(),
+        ]
+    );
+    assert_eq!(
+        report("invalid_readonly_write"),
+        vec![
+            "Cannot modify readonly property App\\Blog\\Mailer::$from from a definition"
+                .to_string()
+        ]
+    );
+}
+
+#[tokio::test]
+async fn values_a_member_does_not_accept_are_reported() {
+    let (backend, dir) = workspace().await;
+    let report = |code| reported(&backend, &dir, "config/di/mailer.php", CHECKED_PHP, code);
+
+    // A method is called without `strict_types`, so `'5'` passes for an
+    // `int`; a property is set and a constructor called with it.  A
+    // reference is the object of the class it names, and one that cannot
+    // be told apart from another is not judged.
+    assert_eq!(
+        report("type_mismatch_property"),
+        vec!["Property App\\Blog\\Mailer::$retries expects int, got 'three'".to_string()]
+    );
+    assert_eq!(
+        report("type_mismatch_argument"),
+        vec![
+            "Argument 1 ($seconds) expects int, got 'soon'".to_string(),
+            "Argument 1 ($logger) expects App\\Blog\\Logger, got App\\Blog\\InMemoryPostRepository"
+                .to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_key_naming_a_member_without_its_kind_is_fixed() {
+    let (backend, dir) = workspace().await;
+    let uri = uri_for(&dir, "config/di/mailer.php");
+
+    let fixes = |needle: &str, inside: usize| {
+        let at = position_in(CHECKED_PHP, needle, inside);
+        let actions =
+            get_code_actions_at(&backend, uri.as_str(), CHECKED_PHP, at.line, at.character);
+        actions
+            .iter()
+            .filter_map(|action| match action {
+                CodeActionResponse::CodeAction(action)
+                    if action.title.starts_with("Change key") =>
+                {
+                    let edit = action.edit.as_ref()?;
+                    let edits = edits_for_uri(edit, &uri);
+                    Some((action.title.clone(), edits[0].new_text.clone()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        fixes("'setTimeout' =>", 1),
+        vec![(
+            "Change key to 'setTimeout()'".to_string(),
+            "setTimeout()".to_string()
+        )]
+    );
+    assert_eq!(
+        fixes("'retries' =>", 1),
+        vec![(
+            "Change key to '$retries'".to_string(),
+            "$retries".to_string()
+        )]
+    );
+    // `$` starts a variable in a double-quoted string.
+    assert_eq!(
+        fixes("\"retries\" =>", 1),
+        vec![(
+            "Change key to '$retries'".to_string(),
+            "\\$retries".to_string()
+        )]
+    );
+    assert!(fixes("'logger' =>", 1).is_empty());
 }
 
 #[tokio::test]

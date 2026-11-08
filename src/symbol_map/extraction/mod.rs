@@ -246,6 +246,8 @@ struct ExtractionCtx<'a> {
     routes: Vec<crate::symbol_map::RouteSite>,
     /// The classes the file's DI definitions bind and build.
     yii_definitions: Vec<crate::symbol_map::YiiDefinitionSite>,
+    /// The file's DI definition arrays that build a known class.
+    yii_definition_bodies: Vec<crate::symbol_map::YiiDefinitionBody>,
     /// Whether the file is handed the Yii `$params` (see
     /// [`Frameworks::yii_params`]).
     yii_params: bool,
@@ -636,6 +638,7 @@ fn extract_symbol_map_inner(
         yii_read_chains: Vec::new(),
         routes: Vec::new(),
         yii_definitions: Vec::new(),
+        yii_definition_bodies: Vec::new(),
         yii_params,
         doctrine,
         dql: Default::default(),
@@ -829,6 +832,7 @@ fn extract_symbol_map_inner(
         drupal_computed_hooks: ctx.drupal_computed_hooks,
         routes: ctx.routes,
         yii_definitions: ctx.yii_definitions,
+        yii_definition_bodies: ctx.yii_definition_bodies,
         dql_aliases: ctx.dql_aliases,
         dql_syntax_errors: ctx.dql_syntax_errors,
         dql_builder_methods: ctx.dql_builder_methods,

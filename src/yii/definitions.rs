@@ -34,9 +34,13 @@ use crate::types::{ClassInfo, MethodInfo};
 
 /// The member a definition key names: the method of a `'name()'` key, as
 /// `(name, true)`, or the property of a `'$name'` key, as `(name, false)`.
+///
+/// What follows a method key's `()` is not read, so one method can be
+/// called twice under two keys (`'addItem()-first'`, `'addItem()-second'`).
 pub(crate) fn definition_key(key: &str) -> Option<(&str, bool)> {
-    let (name, is_method) = match key.strip_suffix("()") {
-        Some(name) => (name, true),
+    let (name, is_method) = match key.split_once("()") {
+        Some((_, rest)) if rest.contains("()") => return None,
+        Some((name, _)) => (name, true),
         None => (key.strip_prefix('$')?, false),
     };
     let mut chars = name.chars();
@@ -426,6 +430,8 @@ mod tests {
         assert_eq!(definition_key("$"), None);
         assert_eq!(definition_key("set logger()"), None);
         assert_eq!(definition_key("1st()"), None);
+        assert_eq!(definition_key("addItem()-theme"), Some(("addItem", true)));
+        assert_eq!(definition_key("a()b()"), None);
     }
 
     #[test]

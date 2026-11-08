@@ -206,6 +206,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_form_option_diagnostics,
     ),
     always(
+        "Yii definitions",
+        Backend::collect_yii_definition_diagnostics,
+    ),
+    always(
         "invalid_dql_syntax",
         Backend::collect_dql_syntax_diagnostics,
     ),

@@ -119,6 +119,20 @@ check('config/common/di/logger.php binds LoggerInterface', $container->get(Logge
 check("'setLogger()' is a method the class declares", method_exists(InMemoryPostRepository::class, 'setLogger'));
 check("'setLogger()' hands it the container's logger", privateProperty($repository, 'logger') === $container->get(LoggerInterface::class));
 check("'\$pageSize' sets the public property", $repository instanceof InMemoryPostRepository && $repository->pageSize === 5);
+$withoutKind = null;
+try {
+    \Yiisoft\Definitions\Helpers\DefinitionValidator::validate(['class' => InMemoryPostRepository::class, 'pageSize' => 5]);
+} catch (\Yiisoft\Definitions\Exception\InvalidConfigException $e) {
+    $withoutKind = $e->getMessage();
+}
+check("A 'pageSize' key is rejected, and '\$pageSize' is the key it means", $withoutKind !== null && str_contains($withoutKind, 'Did you mean "$pageSize"?'));
+$stringPageSize = false;
+try {
+    \Yiisoft\Definitions\ArrayDefinition::fromConfig(['class' => InMemoryPostRepository::class, '__construct()' => ['posts' => []], '$pageSize' => '5'])->resolve($container);
+} catch (TypeError) {
+    $stringPageSize = true;
+}
+check("'\$pageSize' => '5' fails: the property takes an int", $stringPageSize);
 check('findBySlug() returns a Post', $repository->findBySlug('hello-yii') instanceof Post);
 check('latest() returns a list of Post', array_is_list($repository->latest()) && $repository->latest()[0] instanceof Post);
 

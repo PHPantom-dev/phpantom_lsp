@@ -25,7 +25,9 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `'posts'` goes to the constructor's `$posts`, `'setLogger()'` to the method,
   and `'$pageSize'` to the property. Rename `setLogger()` in
   `src/Blog/InMemoryPostRepository.php` and the key follows. Clear a key to
-  complete it, or misspell one to see it reported.
+  complete it, or misspell one to see it reported. Drop the `$` from
+  `'$pageSize'` to see the key reported with a fix that puts it back, or set
+  it to `'5'` to see the value reported, since the property takes an `int`.
 - Open `src/Blog/PostRepositoryInterface.php`. The lens above the interface,
   and go-to-implementation on its name, lead to the definition that binds it.
   Go-to-implementation on `LoggerInterface` in `Reference::to()` does the same
