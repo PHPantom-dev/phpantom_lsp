@@ -105,6 +105,9 @@ pub(super) fn record_route_attributes(class: &Class<'_>, ctx: &mut ExtractionCtx
                         .map(|(from, to)| (start as u32 + from as u32, start as u32 + to as u32)),
                 );
             }
+            if !route_path.starts_with('/') {
+                route_path.insert(0, '/');
+            }
             ctx.tempest_routes.push(RouteAttribute {
                 attribute: crate::atom::atom(attribute_name),
                 class: crate::atom::atom(class_name),

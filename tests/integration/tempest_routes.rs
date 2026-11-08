@@ -408,7 +408,7 @@ async fn tempest_routes_include_class_and_method_prefixes() {
     let edited = CONTROLLER
         .replace(
             "class Books {",
-            "#[\\Tempest\\Router\\Prefix('/api')]\nclass Books {",
+            "#[\\Tempest\\Router\\Prefix('api')]\nclass Books {",
         )
         .replace(
             "#[Read('/books/{book}')]",

@@ -59,8 +59,8 @@ $container->singleton(Tempest\Router\UriGenerator::class, $generator);
 if (new App\RouteLinks()->links() !== [
     'https://books.example/books/php',
     'https://books.example/books/php',
-    'https://books.example/home/en',
-    'https://books.example/home/en',
+    'https://books.example/api/home/en',
+    'https://books.example/api/home/en',
 ]) {
     throw new RuntimeException('Route discovery or URI arguments did not match the route demos.');
 }
