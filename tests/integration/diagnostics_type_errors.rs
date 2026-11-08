@@ -283,6 +283,65 @@ function test(): void {
     );
 }
 
+// ─── Argument whose class does not load ─────────────────────────────────────
+
+#[test]
+fn no_diagnostic_for_unloadable_class_passed_to_interface() {
+    // Nothing is known of the missing class's interfaces, so whether it
+    // implements the parameter's cannot be decided.
+    let php = r#"<?php
+namespace App;
+
+use Vendor\Missing\TestLogger;
+
+interface LoggerInterface {}
+
+class Factory {
+    public function addLogger(LoggerInterface $logger): void {}
+    public function addNullable(?LoggerInterface $logger): void {}
+}
+
+function test(Factory $factory): void {
+    $logger = new TestLogger();
+    $factory->addLogger($logger);
+    $factory->addNullable($logger);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "An unloadable class should leave the subtype check undecided, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_unloadable_class_where_it_cannot_fit() {
+    // A final class has no subclasses, and an object is never an int, so
+    // these stay mismatches however the missing class is declared.
+    let php = r#"<?php
+namespace App;
+
+use Vendor\Missing\TestLogger;
+
+final class Sealed {}
+
+function takes_sealed(Sealed $s): void {}
+function takes_int(int $n): void {}
+
+function test(): void {
+    $logger = new TestLogger();
+    takes_sealed($logger);
+    takes_int($logger);
+}
+"#;
+    let diags = collect(php);
+    assert_eq!(
+        type_error_count(&diags),
+        2,
+        "Expected mismatches for the final class and int parameters, got: {diags:?}"
+    );
+}
+
 // ─── No diagnostic: mixed parameter accepts anything ────────────────────────
 
 #[test]
@@ -1325,6 +1384,10 @@ fn message_always_shows_fqn() {
     // namespace which is the very information needed to resolve a
     // mismatch.
     let php = r#"<?php
+namespace Vendor { class Foo {} }
+namespace App { class Foo {} }
+
+namespace {
 /** @param \Vendor\Foo $f */
 function takes_vendor(\Vendor\Foo $f): void {}
 
@@ -1332,6 +1395,7 @@ function test(): void {
     /** @var \App\Foo $f */
     $f = null;
     takes_vendor($f);
+}
 }
 "#;
     let diags = collect(php);
@@ -4395,7 +4459,7 @@ function test(): void {
     takes_user($o);
 }
 "#;
-    let diags = collect(php);
+    let diags = collect_with_full_stubs(php);
     assert!(
         has_type_error(&diags),
         "Should flag stdClass passed to unrelated class param, got: {diags:?}"

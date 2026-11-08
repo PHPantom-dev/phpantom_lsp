@@ -498,6 +498,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Writing to a `global` variable is no longer reported as unused.** The same goes for a write through a reference, such as `$first = &$items[0]; $first = 5;`.
 - **A class with `__toString()` is accepted as `Stringable`.** Passing one where `Stringable` or `string|Stringable` is expected no longer reports a false type mismatch, whether the method is declared on the class, a parent, or a trait.
 - **Abstract methods a parent gets from a trait.** A class extending an abstract class whose trait declares an abstract method is now reported when it does not implement it, and "Implement missing methods" adds a stub for it. The diagnostic also names the interface a method comes from when that interface extends another with the same short name.
+- **Objects of a missing class are no longer reported as type mismatches.** Passing, returning or assigning an object whose class cannot be found, such as one from a package that is not installed, no longer reports a mismatch beside the missing class itself, since whether it extends or implements the expected type cannot be known. A final class or a scalar type is still reported.
 - **Member chains from `$this` inside traits are checked.** `$this->manager->missing()` in a trait is now reported when the classes using the trait type `$manager`, the same as it is through a variable. A member read directly on `$this`, `self` or `static` is still left to the classes using the trait.
 
 #### Laravel
