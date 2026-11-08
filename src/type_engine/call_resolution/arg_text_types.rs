@@ -191,7 +191,16 @@ impl Backend {
                     crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
                         &value,
                     )
-                    .or_else(|| super::folded_global_constant_type(trimmed, &value, ctx))
+                    .or_else(|| {
+                        // The initializer was written where the constant is
+                        // declared, so this file's namespace and imports
+                        // must not resolve the names it uses.
+                        let declared = ResolutionCtx {
+                            file: ctx.file.with_uri(None),
+                            ..*ctx
+                        };
+                        super::folded_global_constant_type(trimmed, &value, &declared)
+                    })
                 }
                 Some(None) => crate::resolution::unversioned_php_version_constant_type(trimmed),
             }

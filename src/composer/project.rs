@@ -235,9 +235,9 @@ pub(crate) fn is_yii_project(package: &ComposerPackage) -> bool {
         })
 }
 
-/// The packages that render Tempest views: the standalone view renderer and
-/// the framework that bundles it.
-const TEMPEST_PACKAGES: [&str; 2] = ["tempest/view", "tempest/framework"];
+/// The packages that render Tempest views: the standalone view renderer, the
+/// router that depends on it, and the framework that bundles both.
+const TEMPEST_PACKAGES: [&str; 3] = ["tempest/view", "tempest/router", "tempest/framework"];
 
 /// Detect whether the project renders Tempest views, whose `.view.php`
 /// files are templates rather than plain PHP.

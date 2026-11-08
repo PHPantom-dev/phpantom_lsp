@@ -1483,7 +1483,8 @@ This runs on every name a `ClassInfo` extracted from a file carries: its parents
 
 ## Tempest routes
 
-Tempest route attributes are collected alongside classes in the symbol map.
+In a Tempest project, route attributes are collected alongside classes in the
+symbol map.
 Only attribute classes implementing `Tempest\Router\Route` contribute routes;
 the declaring-file index keeps requests from rescanning unrelated attributes.
 URI action types come from the shared PHP engine. Completion, navigation, and

@@ -43,6 +43,7 @@ fn route_extraction_requires_semantic_class_names() {
 #[test]
 fn route_navigation_rejects_missing_and_stale_maps() {
     let backend = make_backend();
+    backend.set_is_tempest(true);
     let dir = tempfile::tempdir().unwrap();
     let uri = crate::util::path_to_uri(&dir.path().join("routes.php"));
     let source = "<?php \\Tempest\\Router\\uri('/books');";
@@ -65,6 +66,7 @@ fn route_navigation_rejects_missing_and_stale_maps() {
 #[test]
 fn route_string_completion_tolerates_a_buffer_not_yet_indexed() {
     let backend = make_backend();
+    backend.set_is_tempest(true);
     let dir = tempfile::tempdir().unwrap();
     let uri = crate::util::path_to_uri(&dir.path().join("routes.php"));
     let content = "<?php \\Tempest\\Router\\uri('');";
@@ -86,6 +88,7 @@ fn route_string_completion_tolerates_a_buffer_not_yet_indexed() {
 #[test]
 fn parameter_references_tolerate_deleted_callers_and_changed_buffers() {
     let backend = make_backend();
+    backend.set_is_tempest(true);
     let dir = tempfile::tempdir().unwrap();
     let controller_uri = crate::util::path_to_uri(&dir.path().join("Books.php"));
     let controller = "<?php namespace Tempest\\Router; interface Route {} class Get implements Route {} namespace App; class Books { #[\\Tempest\\Router\\Get('/books/{book}')] public function show(string $book): void {} }";
@@ -121,4 +124,27 @@ fn parameter_references_tolerate_deleted_callers_and_changed_buffers() {
     );
     assert_eq!(locations.len(), 1);
     assert_eq!(locations[0].uri.as_str(), controller_uri);
+}
+
+#[test]
+fn route_attributes_are_not_recorded_outside_a_tempest_project() {
+    let backend = make_backend();
+    let dir = tempfile::tempdir().unwrap();
+    let uri = crate::util::path_to_uri(&dir.path().join("BooksTest.php"));
+    let source = "<?php namespace App; class BooksTest { #[\\PHPUnit\\Framework\\Attributes\\DataProvider('books')] public function testShow(string $book): void {} }";
+    backend.set_is_tempest(false);
+    backend.update_ast(&uri, source);
+    assert!(
+        backend
+            .symbol_map_for(&uri)
+            .unwrap()
+            .tempest_routes
+            .is_empty()
+    );
+    backend.set_is_tempest(true);
+    backend.update_ast(&uri, source);
+    assert_eq!(
+        backend.symbol_map_for(&uri).unwrap().tempest_routes.len(),
+        1
+    );
 }

@@ -101,7 +101,45 @@ No outstanding items.
 
 ## Name resolution
 
-No outstanding items.
+### B740. A constant named in another file's initializer has no type
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+// src/Lib/Box.php
+namespace Lib;
+use const Vendor\DEFAULT_LIMIT;
+
+const LIMIT = 5;
+class Box {
+    const MAX = LIMIT;          // 5
+    const FLOOR = DEFAULT_LIMIT;
+}
+
+// src/App/run.php
+namespace App;
+$max = \Lib\Box::MAX;           // should be 5, has no type
+```
+
+A class constant's initializer, a namespaced constant's initializer and a
+parameter default are source text that the reader resolves later, in a
+different file. The parser qualifies the class names and `__DIR__` in that
+text against the declaring file, but not constant names. The reader can't
+look them up through its own namespace and `use const` imports, since those
+belong to a different file, so only a global constant of that name is
+found. A namespaced or imported constant in such an initializer comes out
+untyped.
+
+One path still hands such text to the reader's lookup. A conditional return
+type decided by an omitted argument reads the parameter's default through
+the call site's argument resolver
+(`type_ops/conditional/text_args.rs`), so a default naming a namespaced
+constant finds the call site's constant of that name, if it has one.
+
+The parser could qualify constant names too. An imported name has one
+answer. An unqualified name in a namespace falls back to the global
+constant at runtime, so it needs both candidates kept, or the declaring
+file's location recorded so the reader can look it up there.
 
 ## Code actions
 

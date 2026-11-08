@@ -216,6 +216,7 @@ fn read_routing_file(path: &Path, content: &str) -> Option<SymbolMap> {
                 twig: false,
                 doctrine: false,
                 yii_params: false,
+                tempest: false,
             },
             None,
             crate::drupal::hooks::DrupalFile::Other,
