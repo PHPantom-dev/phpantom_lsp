@@ -79,6 +79,16 @@ if (!str_contains($empty, 'No books yet.')) {
     throw new RuntimeException('The empty loop did not render its forelse branch.');
 }
 
+foreach ([true, false] as $showTitle) {
+    $card = $renderer->render(view(
+        '<x-card title="Attribute navigation" :show-title="$showTitle" />',
+        showTitle: $showTitle,
+    ));
+    if (str_contains($card, '<h2>Attribute navigation</h2>') !== $showTitle) {
+        throw new RuntimeException('The show-title attribute did not reach the component as $showTitle.');
+    }
+}
+
 $branches = $renderer->render(view(
     __DIR__ . '/app/branches.view.php',
     books: [new Book('Named'), new Book('')],
