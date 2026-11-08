@@ -502,6 +502,11 @@ impl Backend {
                 ("Render element", self.drupal_render_element_detail(key))
             }
             StringKeyKind::DrupalThemeHook => ("Theme hook", self.drupal_theme_hook_detail(key)),
+            // Shown by its ID, under the manager it belongs to.
+            StringKeyKind::DrupalPlugin => {
+                shown = crate::drupal::plugins::split_plugin_key(key).1;
+                ("Plugin", self.drupal_plugin_detail(key))
+            }
             // A variable is shown by its key, under the hook it belongs to;
             // any other `#` key of the array is a property of the render API.
             StringKeyKind::DrupalThemeHookVariable => {

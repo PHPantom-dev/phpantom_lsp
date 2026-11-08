@@ -126,10 +126,12 @@ impl CheckedStringKind {
             // read, and a render array may pass anything besides a hook's
             // variables.  A Yii alias can be set at runtime with
             // `Aliases::set()`, and an `@` starts plenty of strings that
-            // name no path.
+            // name no path.  A plugin manager can find plugins its own way,
+            // and a deriver makes plugins at run time.
             StringKeyKind::YiiAlias
             | StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
+            | StringKeyKind::DrupalPlugin
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalHook
             | StringKeyKind::DrupalPermission

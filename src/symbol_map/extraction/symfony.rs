@@ -151,6 +151,8 @@ pub(crate) fn symfony_receiver_method(
             Some((ReceiverClass::EntityTypeManager, false))
         }
         0 if is("hasPermission") => Some((ReceiverClass::PermissionCheck, false)),
+        0 if is("createInstance") => Some((ReceiverClass::PluginManager, false)),
+        0 if is("addConstraint") => Some((ReceiverClass::ConstraintTarget, false)),
         0 if is("getEditable") || is("loadMultiple") => Some((ReceiverClass::ConfigFactory, false)),
         0 if is("config") => Some((ReceiverClass::ConfigShortcut, false)),
         0 if is("grantPermission") || is("revokePermission") => {

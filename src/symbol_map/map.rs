@@ -317,6 +317,13 @@ pub(crate) struct SymbolMap {
     /// The classes the file's Drupal plugin declarations are written on,
     /// sorted by `start`.  Empty for every file that declares none.
     pub drupal_plugin_classes: Vec<PluginClassSite>,
+    /// The plugin types the file's plugin managers declare.  Empty for
+    /// every file that declares none.
+    pub drupal_plugin_managers: Vec<PluginManagerSite>,
+    /// The IDs the attributes and annotations of the file's classes in a
+    /// `Drupal\` namespace give them, sorted by `start`: the plugins among
+    /// them are told apart by the plugin types (see `drupal::plugins`).
+    pub drupal_plugins: Vec<PluginDeclarationSite>,
     /// The shapes of the Drupal route names the file's route builders give
     /// routes they build from parts, `*` for each part that is not
     /// written out (`search.view_*`).  Empty for every file that builds

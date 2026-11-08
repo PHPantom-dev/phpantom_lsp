@@ -67,6 +67,29 @@ pub(super) fn try_resolve_entity_storage_type(
     )
 }
 
+/// What `createInstance('id')` on a plugin manager returns: the classes of
+/// the plugin the ID names.
+pub(super) fn try_resolve_plugin_instance_type(
+    owner: &ClassInfo,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if !method_name.eq_ignore_ascii_case("createInstance") {
+        return None;
+    }
+    let backend = ctx.file.backend?;
+    let id = literal_first(argument_list, "plugin_id", ctx.file.content)?;
+    let classes = crate::drupal::plugins::instance_classes(
+        backend,
+        owner,
+        method_name,
+        id,
+        ctx.file.class_loader,
+    )?;
+    Some(ResolvedType::from_classes(classes))
+}
+
 /// What a call that reads a configuration object by a literal name
 /// returns: its declared type tagged with the name.
 pub(super) fn try_resolve_config_object_type(

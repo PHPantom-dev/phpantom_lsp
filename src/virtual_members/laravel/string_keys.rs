@@ -96,6 +96,7 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::DrupalConfigName => backend.drupal_config_locations(key),
         StringKeyKind::DrupalConfigKey => backend.drupal_config_key_locations(key),
         StringKeyKind::DrupalRenderElement => backend.drupal_render_element_definitions(key),
+        StringKeyKind::DrupalPlugin => backend.drupal_plugin_definitions(key),
         StringKeyKind::DrupalThemeHook => backend.drupal_theme_hook_definitions(key),
         StringKeyKind::DrupalThemeHookVariable => backend.drupal_theme_variable_definitions(key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
@@ -358,6 +359,7 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::DrupalRouteParameter
         | StringKeyKind::DrupalPermission
         | StringKeyKind::DrupalRenderElement
+        | StringKeyKind::DrupalPlugin
         | StringKeyKind::DrupalLibrary => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }

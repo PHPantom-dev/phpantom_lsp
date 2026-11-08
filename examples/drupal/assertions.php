@@ -20,10 +20,20 @@ use Drupal\acme\Entity\Note;
 use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
 use Drupal\acme\Hook\AcmeHooks;
+use Drupal\acme\Plugin\Block\GreetingBlock;
 use Drupal\acme\NoteCounter;
 use Drupal\Component\FileCache\FileCacheFactory;
 use Drupal\Component\Serialization\Yaml;
 use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Block\Attribute\Block;
+use Drupal\Core\Block\BlockBase;
+use Drupal\Core\Block\BlockManager;
+use Drupal\Core\Field\Attribute\FieldType;
+use Drupal\Core\Field\Attribute\FieldWidget;
+use Drupal\Core\Field\Plugin\Field\FieldType\StringItem;
+use Drupal\Core\Field\Plugin\Field\FieldWidget\StringTextfieldWidget;
+use Drupal\Core\Validation\Attribute\Constraint;
+use Drupal\Core\Validation\Plugin\Validation\Constraint\UniqueFieldConstraint;
 use Drupal\Core\Config\ConfigBase;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
@@ -316,6 +326,27 @@ foreach (glob("$web/core/lib/Drupal/Core/Render/Element/*.php") ?: [] as $file) 
 preg_match_all("/'#type'(?:\\] =| =>) '([^']+)'/", $controllerSource, $namedElements);
 check('GreetingController names the custom and a core element in a literal and an assignment', $namedElements[1] === ['acme_greeting_card', 'details']);
 check('every element GreetingController names is declared', array_diff($namedElements[1], $declaredElements) === []);
+
+// ─── Plugins ────────────────────────────────────────────────────────────────
+
+// A plugin manager's constructor names its plugins' subdirectory and
+// attribute, which is how PHPantom finds the plugin types.
+$blockManagerSource = (string) file_get_contents("$web/core/lib/Drupal/Core/Block/BlockManager.php");
+check("core's BlockManager reads blocks from Plugin/Block by the Block attribute", str_contains($blockManagerSource, "parent::__construct('Plugin/Block', \$namespaces, \$module_handler, BlockPluginInterface::class, Block::class,"));
+check('core declares plugin.manager.block as BlockManager', (Yaml::decode((string) file_get_contents("$web/core/core.services.yml"))['services']['plugin.manager.block']['class'] ?? null) === BlockManager::class);
+
+$greetingBlock = new ReflectionClass(GreetingBlock::class);
+check('GreetingBlock declares the acme_greeting_block block by attribute', (attributeArguments($greetingBlock, Block::class)['id'] ?? null) === 'acme_greeting_block');
+check('GreetingBlock is in the Plugin\\Block namespace discovery reads', $greetingBlock->getNamespaceName() === 'Drupal\\acme\\Plugin\\Block');
+check('GreetingBlock is a block with the greeting() the controller calls', $greetingBlock->isSubclassOf(BlockBase::class) && $greetingBlock->hasMethod('greeting'));
+check("GreetingController creates the acme_greeting_block block", str_contains($controllerSource, "->createInstance('acme_greeting_block')"));
+
+// The plugins Note's base field names are core's.
+check("core's StringItem declares the string field type", (attributeArguments(new ReflectionClass(StringItem::class), FieldType::class)['id'] ?? null) === 'string');
+check("core's StringTextfieldWidget declares the string_textfield widget", (attributeArguments(new ReflectionClass(StringTextfieldWidget::class), FieldWidget::class)['id'] ?? null) === 'string_textfield');
+check("core's UniqueFieldConstraint declares the UniqueField constraint", (attributeArguments(new ReflectionClass(UniqueFieldConstraint::class), Constraint::class)['id'] ?? null) === 'UniqueField');
+$noteSource = (string) file_get_contents("$module/src/Entity/Note.php");
+check("Note names the string field type, its widget, and the UniqueField constraint", str_contains($noteSource, "BaseFieldDefinition::create('string')") && str_contains($noteSource, "['type' => 'string_textfield']") && str_contains($noteSource, "->addConstraint('UniqueField')"));
 
 // ─── Libraries ──────────────────────────────────────────────────────────────
 

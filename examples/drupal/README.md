@@ -3,7 +3,7 @@
 A standalone editor playground for PHPantom on Drupal 11. It is a
 `drupal/recommended-project` site with one custom module, `acme`, and one
 theme, `acme_theme`, declaring a service, a route, a content entity type,
-a render element, hooks, a theme hook, permissions, and configuration the
+a render element, a block plugin, hooks, a theme hook, permissions, and configuration the
 way a real Drupal module declares them.
 
 Run `composer install` here first. Composer puts core and contrib into
@@ -142,6 +142,19 @@ Run `composer install` here first. Composer puts core and contrib into
   `Details` class. Complete a name inside `'#type' => ''` or
   `$build['more']['#type'] = ''`; core's elements are offered too. A name
   no element class declares is reported.
+- Plugin IDs navigate to the plugin class that declares them, for every
+  plugin type a plugin manager declares, core's and contributed modules'
+  included. In `block()` in
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the
+  definition of `'acme_greeting_block'`, which lands on
+  `src/Plugin/Block/GreetingBlock.php`, or complete a block ID inside
+  `createInstance('')`. The block it creates is a `GreetingBlock`, so
+  `greeting()` goes to its method. In
+  `web/modules/custom/acme/src/Entity/Note.php`, the field type
+  `BaseFieldDefinition::create()` takes, the widget the form display
+  options name, and the constraint `addConstraint()` takes navigate to
+  core's plugin classes and complete. Go to the implementations of
+  `BlockManagerInterface` to list every block.
 
 ## What the Symfony support already reads
 

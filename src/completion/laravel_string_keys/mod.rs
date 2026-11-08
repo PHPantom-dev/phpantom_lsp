@@ -54,9 +54,9 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::GateAbility => CompletionItemKind::Method,
         StringKeyKind::Env => CompletionItemKind::Constant,
         StringKeyKind::ServiceId => CompletionItemKind::Reference,
-        StringKeyKind::DrupalEntityType | StringKeyKind::DrupalRenderElement => {
-            CompletionItemKind::Class
-        }
+        StringKeyKind::DrupalEntityType
+        | StringKeyKind::DrupalRenderElement
+        | StringKeyKind::DrupalPlugin => CompletionItemKind::Class,
         StringKeyKind::ContainerParameter => CompletionItemKind::Property,
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
         StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook | StringKeyKind::DrupalHook => {
@@ -232,7 +232,8 @@ impl Backend {
             // the routes of the handler it is written in, and a Drupal route
             // parameter from the route its call names, and a theme hook's
             // variable from the `#theme` of its render array, and a DI
-            // definition's argument from the method it is passed to.  A hook name is
+            // definition's argument from the method it is passed to, and a
+            // plugin ID from the manager its receiver is.  A hook name is
             // completed with its patterns as snippets, which only the
             // WordPress completion builds.
             StringKeyKind::SymfonyTranslation
@@ -243,6 +244,7 @@ impl Backend {
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalConfigKey
             | StringKeyKind::DrupalThemeHookVariable
+            | StringKeyKind::DrupalPlugin
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::TwigBlock

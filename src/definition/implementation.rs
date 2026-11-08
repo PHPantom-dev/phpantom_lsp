@@ -177,6 +177,13 @@ impl Backend {
         } else {
             Vec::new()
         };
+        // A Drupal plugin manager's plugins implement what it hands out,
+        // and so do those of the one manager an interface stands for.
+        locations.extend(
+            self.drupal_plugin_implementations(target.fqn().as_str())
+                .iter()
+                .filter_map(|class| self.class_declaration_location(class)),
+        );
         if let Some(implementations) =
             self.class_implementation(uri, content, target, &resolved_class_loader)
         {

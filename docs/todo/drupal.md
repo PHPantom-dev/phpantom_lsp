@@ -7,7 +7,8 @@ module, theme, and profile, with the Drupal file extensions (`.module`,
 the services the `*.services.yml` files declare, the entity types
 entity classes declare, the routes the routing files, route attributes,
 and route builders declare, the hooks the `*.api.php` files document
-and the extensions implement, the permissions the `*.permissions.yml`
+and the extensions implement, the plugin types plugin managers declare and
+the plugins of each, the permissions the `*.permissions.yml`
 files declare, the configuration objects and keys the default
 configuration and the configuration schema declare, the theme hooks
 `hook_theme()` implementations declare, the render elements element
@@ -30,8 +31,8 @@ is what they expect from an editor.
 installs core into `web/core` through Composer (`memory_drupal_module`),
 next to the other framework scenarios. `benches/drupal_completion.rs`
 measures completion of service IDs, route names, entity type IDs,
-permission names, configuration names, render element names, hook names,
-theme hook names, library names, and hook implementations over a
+permission names, configuration names, render element names, plugin IDs,
+hook names, theme hook names, library names, and hook implementations over a
 generated site with many custom modules. Every item that adds a name
 Drupal declares adds its case to it.
 
@@ -66,29 +67,6 @@ PHPStan's Drupal extension types any magic property on a fieldable
 entity as `FieldItemListInterface` without checking the name. That is
 the floor; reading the configuration is what lets an editor complete
 names and report a misspelt one.
-
----
-
-## DR10. Plugin IDs
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-#[Block(id: 'acme_order_summary', admin_label: new TranslatableMarkup('Order summary'))]
-final class OrderSummaryBlock extends BlockBase { … }
-
-$block = $this->blockManager->createInstance('acme_order_summary');
-```
-
-Blocks, field types, formatters, widgets, queue workers, and the other
-plugin types declare an ID in an attribute (or, in older code, a
-docblock annotation). Complete and navigate plugin IDs where a plugin
-manager takes one (`createInstance()`, `getDefinition()`,
-`hasDefinition()`), and in the YAML that names them, and type
-`createInstance()` as the plugin class. Render elements, the plugins a
-render array's `'#type'` names, already complete and navigate, and the
-reader that finds their attributes and annotations takes the attribute
-class as a parameter, so the other plugin types can reuse it.
 
 ---
 
@@ -369,11 +347,11 @@ $block = $this->blockManager->createInstance('acme_order_sumary');
 A plugin ID that no plugin of its type declares is a typo or a module the
 site lacks. The plugin manager throws for it, except for widgets and
 formatters, which silently fall back to the field type's default. Report
-one wherever [DR10](#dr10-plugin-ids) reads plugin IDs: field types,
+one wherever plugin IDs are read (see `src/drupal/plugins.rs`): field types,
 widgets and formatters, constraints, and a plugin manager's
 `createInstance()`. A derivative ID (`system_menu_block:main`) is known
 only at run time, so an ID whose base plugin has a deriver must not
-warn. This depends on DR10.
+warn.
 
 ---
 
@@ -400,3 +378,52 @@ file. Annotations are read through the imports already; resolve a name
 the imports don't cover through the namespaces of the plugin type the
 class is discovered for, so that go-to-definition, hover, and references
 reach the class.
+
+---
+
+## DR27. Plugin IDs in YAML
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```yaml
+# config/install/core.entity_form_display.node.article.default.yml
+content:
+  title:
+    type: string_textfield
+# config/install/block.block.acme_theme_greeting.yml
+plugin: acme_greeting_block
+```
+
+Plugin IDs complete and navigate in PHP: a plugin manager's lookups, the
+field type `BaseFieldDefinition::create()` takes, the widget or formatter
+of a field's display options, and the constraint `addConstraint()` takes.
+The YAML that names them does not yet: a form or view display's `type`
+(a widget or formatter), a field storage's `type` (a field type), a
+block's `plugin`, and a migration's `source`, `process`, and
+`destination` plugins. Default configuration files are not parsed today
+(see `drupal::config`), so this needs a reader for the keys that name a
+plugin and the manager each one belongs to.
+
+---
+
+## DR28. Plugin types a manager builds at run time
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+class ViewsPluginManager extends DefaultPluginManager {
+  public function __construct($type, \Traversable $namespaces, …) {
+    parent::__construct("Plugin/views/$type", $namespaces, …);
+  }
+}
+```
+
+A plugin type is read from the literals a manager's constructor passes to
+`DefaultPluginManager`'s. Views and Migrate serve many plugin types from
+one manager class whose subdirectory is built from a constructor
+argument, which each service in `views.services.yml` and
+`migrate.services.yml` passes (`plugin.manager.views.field` passes
+`field`), so their plugins (Views fields, filters, and displays, Migrate
+sources and processes) neither complete nor navigate. Read the argument
+each such service passes, and type the service by the plugin type it
+builds.

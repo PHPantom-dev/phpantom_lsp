@@ -162,6 +162,27 @@ impl Backend {
             }
         }
 
+        // Drupal: `createInstance('id')` on a plugin manager gives the
+        // plugin's class.
+        if method_name.eq_ignore_ascii_case("createInstance")
+            && let Some(backend) = in_drupal
+            && let Some(id) = first_literal_text_arg(text_args, "plugin_id")
+            && let Some(classes) = lhs_resolved
+                .iter()
+                .filter_map(|r| r.class_info.as_deref())
+                .find_map(|owner| {
+                    crate::drupal::plugins::instance_classes(
+                        backend,
+                        owner,
+                        method_name,
+                        id,
+                        ctx.file.class_loader,
+                    )
+                })
+        {
+            return classes;
+        }
+
         // Doctrine: a query typed by its DQL, and its results.
         if let Some(ty) = crate::type_engine::call_resolution::query_at_call(
             method_name,

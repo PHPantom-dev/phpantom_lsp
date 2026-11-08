@@ -36,11 +36,16 @@ final class Note extends ContentEntityBase
         $fields = parent::baseFieldDefinitions($entity_type);
 
         // Try: complete after `BaseFieldDefinition::create('string')->`. Each
-        // setter returns the definition, so the chain keeps completing.
+        // setter returns the definition, so the chain keeps completing. Go to
+        // the definition of 'string', the field type, of 'string_textfield',
+        // the widget, or of 'UniqueField', the constraint, which land on
+        // core's plugin classes, or complete one inside its quotes.
         $fields['title'] = BaseFieldDefinition::create('string')
             ->setLabel(new TranslatableMarkup('Title'))
             ->setRequired(true)
-            ->setSetting('max_length', 255);
+            ->setSetting('max_length', 255)
+            ->setDisplayOptions('form', ['type' => 'string_textfield'])
+            ->addConstraint('UniqueField');
 
         return $fields;
     }

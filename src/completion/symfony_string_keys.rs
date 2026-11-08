@@ -103,6 +103,33 @@ impl Backend {
             );
             return self.drupal_config_key_response(&names, content, prefix_start, position);
         }
+        // A plugin ID: the manager's, which the receiver's type is, or the
+        // one the call always looks it up in.
+        if kind == StringKeyKind::DrupalPlugin {
+            let call = detect_string_call_context(content, cursor, code)?;
+            let manager = if call.is_static {
+                let class = ctx.resolve_name_at(call.subject.as_deref()?, cursor as u32);
+                crate::atom::atom(crate::drupal::plugins::static_call_manager(
+                    &class,
+                    &call.method_name,
+                )?)
+            } else if call.method_name.eq_ignore_ascii_case("addConstraint") {
+                crate::atom::atom(crate::drupal::plugins::CONSTRAINTS)
+            } else {
+                self.drupal_plugin_manager_of(
+                    &receiver_type.as_ref()?.top_level_class_names(),
+                    self.file_loaders(ctx).resolved_class_loader(),
+                )?
+            };
+            return self.symfony_names_response(
+                kind,
+                self.drupal_plugin_ids(&manager),
+                content,
+                prefix_start,
+                cursor,
+                position,
+            );
+        }
         if kind == StringKeyKind::YiiRouteArgument {
             let arguments = handler_at(ctx, literal_start as u32)
                 .and_then(|handler| self.yii_handler_arguments(&handler))
@@ -410,6 +437,10 @@ impl Backend {
                 }
                 if crate::drupal::is_config_lookup(&class, &call.method_name) {
                     return Some(StringKeyKind::DrupalConfigName);
+                }
+                if crate::drupal::plugins::static_call_manager(&class, &call.method_name).is_some()
+                {
+                    return Some(StringKeyKind::DrupalPlugin);
                 }
             }
             return (crate::drupal::static_route_argument(&class, &call.method_name)

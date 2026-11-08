@@ -224,6 +224,7 @@ mod drupal_hooks;
 mod drupal_libraries;
 mod drupal_mixed_workspace;
 mod drupal_permissions;
+mod drupal_plugins;
 mod drupal_render_elements;
 mod drupal_routes;
 mod drupal_services;

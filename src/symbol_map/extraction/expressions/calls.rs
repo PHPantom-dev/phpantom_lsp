@@ -516,6 +516,7 @@ fn extract_method_call<'a>(
         emit_drupal_requirement_permission_spans(&member_name, argument_list, ctx);
         record_drupal_config_list_sites(&member_name, argument_list, ctx);
         record_drupal_config_key_sites(&member_name, argument_list, ctx);
+        record_drupal_plugin_sites(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
         emit_entity_field_spans(object, &member_name, argument_list, ctx);
@@ -681,6 +682,12 @@ fn extract_static_method_call<'a>(
         {
             emit_drupal_route_span(index, &static_call.argument_list, ctx);
         }
+        emit_drupal_static_plugin_span(
+            semantic_subject,
+            &member_name,
+            &static_call.argument_list,
+            ctx,
+        );
         emit_drupal_static_permission_spans(
             semantic_subject,
             &member_name,

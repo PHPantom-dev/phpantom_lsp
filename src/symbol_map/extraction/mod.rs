@@ -111,6 +111,8 @@ struct ExtractionCtx<'a> {
     entity_types: Vec<crate::symbol_map::EntityTypeSite>,
     /// The classes the file's Drupal plugin declarations are written on.
     drupal_plugin_classes: Vec<crate::symbol_map::PluginClassSite>,
+    drupal_plugin_managers: Vec<crate::symbol_map::PluginManagerSite>,
+    drupal_plugins: Vec<crate::symbol_map::PluginDeclarationSite>,
     /// Whether the file is a Drupal site's and says `#type`, the key a
     /// render array names its element under.  Spares every other file's
     /// arrays and assignments the look.
@@ -584,6 +586,8 @@ fn extract_symbol_map_inner(
         container_values: Vec::new(),
         entity_types: Vec::new(),
         drupal_plugin_classes: Vec::new(),
+        drupal_plugin_managers: Vec::new(),
+        drupal_plugins: Vec::new(),
         drupal_type_keys: drupal && memchr::memmem::find(content.as_bytes(), b"#type").is_some(),
         drupal_theme_keys: drupal && memchr::memmem::find(content.as_bytes(), b"#theme").is_some(),
         drupal_route_patterns: Vec::new(),
@@ -759,6 +763,7 @@ fn extract_symbol_map_inner(
     ctx.container_values.sort_by_key(|s| s.start);
     ctx.entity_types.sort_by_key(|s| s.start);
     ctx.drupal_plugin_classes.sort_by_key(|s| s.start);
+    ctx.drupal_plugins.sort_by_key(|s| s.start);
     ctx.drupal_hooks.sort_by_key(|s| s.start);
     ctx.drupal_hooks.dedup_by_key(|s| s.start);
     ctx.routes.shrink_to_fit();
@@ -804,6 +809,8 @@ fn extract_symbol_map_inner(
         container_values: ctx.container_values,
         entity_types: ctx.entity_types,
         drupal_plugin_classes: ctx.drupal_plugin_classes,
+        drupal_plugin_managers: ctx.drupal_plugin_managers,
+        drupal_plugins: ctx.drupal_plugins,
         drupal_route_patterns: ctx.drupal_route_patterns,
         drupal_route_aliases: ctx.drupal_route_aliases,
         drupal_routes: ctx.drupal_routes,

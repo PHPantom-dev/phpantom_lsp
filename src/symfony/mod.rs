@@ -161,6 +161,8 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         || (map.declares_twig_loader && enabled(StringKeyKind::TwigTemplate))
         || ((!map.drupal_route_patterns.is_empty() || !map.drupal_route_aliases.is_empty())
             && enabled(StringKeyKind::DrupalRoute))
+        || ((!map.drupal_plugins.is_empty() || !map.drupal_plugin_managers.is_empty())
+            && enabled(StringKeyKind::DrupalPlugin))
         || map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
@@ -227,6 +229,7 @@ impl Backend {
         self.note_drupal_hook_declarations(uri, Some(map));
         self.note_drupal_theme_hook_sources(uri, Some(map));
         self.note_drupal_library_builder_sources(uri, Some(map));
+        self.note_drupal_plugin_sources(uri, Some(map));
         self.note_drupal_theme_suggestions(map);
         let was_declaring = self.symfony.declaring_uris.read().contains(uri);
         // Only take the write lock when the answer changes.
@@ -247,6 +250,7 @@ impl Backend {
         self.note_drupal_hook_declarations(uri, None);
         self.note_drupal_theme_hook_sources(uri, None);
         self.note_drupal_library_builder_sources(uri, None);
+        self.note_drupal_plugin_sources(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
         }

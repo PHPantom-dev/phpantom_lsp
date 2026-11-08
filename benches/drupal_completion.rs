@@ -9,9 +9,10 @@ use tower_lsp_server::gen_lsp_types::*;
 /// Custom modules in the generated site, each declaring `SERVICES`
 /// services, `ROUTES` routes, `ENTITY_TYPES` entity types, `PERMISSIONS`
 /// permissions, `CONFIGS` configuration objects, with their default
-/// configuration and schema, `ELEMENTS` render elements, `THEME_HOOKS`
-/// theme hooks, and `LIBRARIES` libraries, documenting `HOOKS` hooks, and
-/// implementing the hooks the module before it documents.
+/// configuration and schema, `ELEMENTS` render elements, `BLOCKS` block
+/// plugins, `THEME_HOOKS` theme hooks, and `LIBRARIES` libraries,
+/// documenting `HOOKS` hooks, and implementing the hooks the module before
+/// it documents.
 const MODULES: usize = 30;
 const SERVICES: usize = 10;
 const ROUTES: usize = 10;
@@ -19,6 +20,7 @@ const ENTITY_TYPES: usize = 3;
 const PERMISSIONS: usize = 10;
 const CONFIGS: usize = 10;
 const ELEMENTS: usize = 3;
+const BLOCKS: usize = 3;
 const HOOKS: usize = 10;
 const THEME_HOOKS: usize = 5;
 const LIBRARIES: usize = 10;
@@ -30,8 +32,32 @@ const COMPOSER: &str = r#"{
 
 /// Just enough of core, where Composer puts it, for the type engine to
 /// tell a container, the entity type manager, the module handler, an
-/// account, and a URL from any other receiver.
+/// account, a URL, and the block manager from any other receiver.
 const STUBS: &[(&str, &str)] = &[
+    (
+        "web/core/lib/Drupal/Component/Plugin/PluginManagerInterface.php",
+        "<?php\nnamespace Drupal\\Component\\Plugin;\ninterface PluginManagerInterface {\n    public function createInstance($plugin_id, array $configuration = []);\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Component/Plugin/Attribute/AttributeInterface.php",
+        "<?php\nnamespace Drupal\\Component\\Plugin\\Attribute;\ninterface AttributeInterface {}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Plugin/DefaultPluginManager.php",
+        "<?php\nnamespace Drupal\\Core\\Plugin;\nclass DefaultPluginManager implements \\Drupal\\Component\\Plugin\\PluginManagerInterface {\n    public function __construct($subdir, $namespaces, $module_handler, $plugin_interface = NULL, $plugin_definition_attribute_name = NULL, $plugin_definition_annotation_name = NULL) {}\n    public function createInstance($plugin_id, array $configuration = []) {}\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Block/Attribute/Block.php",
+        "<?php\nnamespace Drupal\\Core\\Block\\Attribute;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass Block implements \\Drupal\\Component\\Plugin\\Attribute\\AttributeInterface {\n    public function __construct(public readonly string $id) {}\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Block/BlockManagerInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Block;\ninterface BlockManagerInterface extends \\Drupal\\Component\\Plugin\\PluginManagerInterface {}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Block/BlockManager.php",
+        "<?php\nnamespace Drupal\\Core\\Block;\nuse Drupal\\Core\\Block\\Attribute\\Block;\nclass BlockManager extends \\Drupal\\Core\\Plugin\\DefaultPluginManager implements BlockManagerInterface {\n    public function __construct($namespaces, $module_handler) {\n        parent::__construct('Plugin/Block', $namespaces, $module_handler, NULL, Block::class, 'Drupal\\Core\\Block\\Annotation\\Block');\n    }\n}\n",
+    ),
     (
         "web/core/lib/Drupal.php",
         "<?php\nclass Drupal {\n    public static function service(string $id): object {}\n    public static function hasService(string $id): bool {}\n    public static function config($name) {}\n}\n",
@@ -71,6 +97,7 @@ const CONSUMER_PATH: &str = "web/modules/custom/acme/src/Consumer.php";
 const CONSUMER_PHP: &str = r#"<?php
 namespace Drupal\acme;
 
+use Drupal\Core\Block\BlockManagerInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Hook\Attribute\Hook;
@@ -83,6 +110,7 @@ final class Consumer
         private EntityTypeManagerInterface $manager,
         private ModuleHandlerInterface $modules,
         private AccountInterface $account,
+        private BlockManagerInterface $blocks,
     ) {}
 
     #[Hook('mod1_')]
@@ -95,6 +123,7 @@ final class Consumer
         $this->account->hasPermission('administer mod1 ');
         \Drupal::config('mod1.');
         $build = ['#type' => 'mod1_'];
+        $this->blocks->createInstance('mod1_');
         $themed = ['#theme' => 'mod1_'];
         $build = ['#attached' => ['library' => ['mod1/']]];
     }
@@ -189,6 +218,15 @@ fn generate_site() -> Vec<(String, String)> {
                 format!("{dir}/src/Element/Element{e}.php"),
                 format!(
                     "<?php\nnamespace Drupal\\mod{m}\\Element;\n\nuse Drupal\\Core\\Render\\Attribute\\RenderElement;\n\n#[RenderElement('mod{m}_element{e}')]\nclass Element{e} {{}}\n"
+                ),
+            ));
+        }
+
+        for b in 0..BLOCKS {
+            files.push((
+                format!("{dir}/src/Plugin/Block/Block{b}.php"),
+                format!(
+                    "<?php\nnamespace Drupal\\mod{m}\\Plugin\\Block;\n\nuse Drupal\\Core\\Block\\Attribute\\Block;\n\n#[Block(id: 'mod{m}_block{b}')]\nclass Block{b} {{}}\n"
                 ),
             ));
         }
@@ -371,6 +409,13 @@ fn bench_drupal_name_completion(c: &mut Criterion) {
             CONSUMER_PHP,
             "'#type' => 'mod1_'",
             "mod1_element2",
+        ),
+        (
+            "plugin_id",
+            &consumer,
+            CONSUMER_PHP,
+            "createInstance('mod1_'",
+            "mod1_block2",
         ),
         (
             "hook_name_invoke_all",

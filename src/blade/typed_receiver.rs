@@ -189,6 +189,28 @@ impl Backend {
                             }
                             continue;
                         }
+                        if kind == StringKeyKind::DrupalPlugin && site.receiver.bare_plugin_key() {
+                            // The ID is one of the manager's the receiver
+                            // is, or the one the call always looks it up in.
+                            let manager = if site.receiver == ReceiverClass::ConstraintTarget {
+                                Some(crate::atom::atom(crate::drupal::plugins::CONSTRAINTS))
+                            } else {
+                                self.drupal_plugin_manager_of(
+                                    &ty.top_level_class_names(),
+                                    loaders.resolved_class_loader(),
+                                )
+                            };
+                            if let Some(manager) = manager {
+                                let mut span = site.to_span(kind);
+                                if let crate::symbol_map::SymbolKind::StringKey { key, .. } =
+                                    &mut span.kind
+                                {
+                                    *key = crate::drupal::plugins::plugin_key(&manager, &site.key);
+                                }
+                                confirmed.push(span);
+                            }
+                            continue;
+                        }
                         confirmed.push(site.to_span(kind));
                     }
                 }

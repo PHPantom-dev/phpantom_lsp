@@ -83,6 +83,11 @@ pub(crate) fn string_key_reference_key(kind: StringKeyKind, key: &str) -> Refere
                 .1
                 .to_string(),
         },
+        // Likewise a plugin manager's lookup holds the plugin ID alone.
+        StringKeyKind::DrupalPlugin => ReferenceIndexKey::StringKey {
+            kind,
+            key: crate::drupal::plugins::split_plugin_key(key).1.to_string(),
+        },
         _ => ReferenceIndexKey::StringKey {
             kind,
             key: key.to_string(),

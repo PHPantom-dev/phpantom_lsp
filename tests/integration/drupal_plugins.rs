@@ -1,0 +1,295 @@
+//! Drupal's plugins: the plugin types the project's plugin managers declare
+//! by their constructors, and the plugin IDs their classes declare, read by
+//! a manager's lookups and by the field API's calls that name a plugin.
+
+use crate::common::{completion_response, response_labels};
+use crate::drupal_services::{definitions_at, position_in, uri_for, workspace_in};
+use phpantom_lsp::Backend;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
+
+/// Core's plugin API, the managers, and core's plugins, where Composer
+/// would put core.
+const CORE: &[(&str, &str)] = &[
+    (
+        "web/core/lib/Drupal/Component/Plugin/PluginManagerInterface.php",
+        "<?php\nnamespace Drupal\\Component\\Plugin;\ninterface PluginManagerInterface {\n    public function createInstance($plugin_id, array $configuration = []);\n    public function getDefinition($plugin_id, $exception_on_invalid = TRUE);\n    public function hasDefinition($plugin_id);\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Component/Plugin/Attribute/AttributeInterface.php",
+        "<?php\nnamespace Drupal\\Component\\Plugin\\Attribute;\ninterface AttributeInterface {}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Component/Plugin/Attribute/Plugin.php",
+        "<?php\nnamespace Drupal\\Component\\Plugin\\Attribute;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass Plugin implements AttributeInterface {\n    public function __construct(public readonly string $id) {}\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Plugin/DefaultPluginManager.php",
+        "<?php\nnamespace Drupal\\Core\\Plugin;\nuse Drupal\\Component\\Plugin\\PluginManagerInterface;\nclass DefaultPluginManager implements PluginManagerInterface {\n    public function __construct($subdir, \\Traversable $namespaces, $module_handler, $plugin_interface = NULL, ?string $plugin_definition_attribute_name = NULL, $plugin_definition_annotation_name = NULL) {}\n    public function createInstance($plugin_id, array $configuration = []) {}\n    public function getDefinition($plugin_id, $exception_on_invalid = TRUE) {}\n    public function hasDefinition($plugin_id) {}\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Block/Attribute/Block.php",
+        "<?php\nnamespace Drupal\\Core\\Block\\Attribute;\nuse Drupal\\Component\\Plugin\\Attribute\\Plugin;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass Block extends Plugin {\n    public function __construct(public readonly string $id, public readonly ?string $admin_label = NULL) {}\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Block/BlockManagerInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Block;\nuse Drupal\\Component\\Plugin\\PluginManagerInterface;\ninterface BlockManagerInterface extends PluginManagerInterface {}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Block/BlockManager.php",
+        "<?php\nnamespace Drupal\\Core\\Block;\nuse Drupal\\Core\\Block\\Attribute\\Block;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass BlockManager extends DefaultPluginManager implements BlockManagerInterface {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Block', $namespaces, $module_handler, BlockPluginInterface::class, Block::class, 'Drupal\\Core\\Block\\Annotation\\Block');\n    }\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Field/Attribute/FieldType.php",
+        "<?php\nnamespace Drupal\\Core\\Field\\Attribute;\nuse Drupal\\Component\\Plugin\\Attribute\\Plugin;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass FieldType extends Plugin {}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Field/Attribute/FieldWidget.php",
+        "<?php\nnamespace Drupal\\Core\\Field\\Attribute;\nuse Drupal\\Component\\Plugin\\Attribute\\Plugin;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass FieldWidget extends Plugin {}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Field/FieldTypePluginManager.php",
+        "<?php\nnamespace Drupal\\Core\\Field;\nuse Drupal\\Core\\Field\\Attribute\\FieldType;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass FieldTypePluginManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Field/FieldType', $namespaces, $module_handler, FieldItemInterface::class, FieldType::class, 'Drupal\\Core\\Field\\Annotation\\FieldType');\n    }\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Field/WidgetPluginManager.php",
+        "<?php\nnamespace Drupal\\Core\\Field;\nuse Drupal\\Core\\Field\\Attribute\\FieldWidget;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass WidgetPluginManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Field/FieldWidget', $namespaces, $module_handler, WidgetInterface::class, FieldWidget::class, 'Drupal\\Core\\Field\\Annotation\\FieldWidget');\n    }\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Validation/ConstraintManager.php",
+        "<?php\nnamespace Drupal\\Core\\Validation;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass ConstraintManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Validation/Constraint', $namespaces, $module_handler, NULL, 'Drupal\\Core\\Validation\\Annotation\\Constraint');\n    }\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/TypedData/DataDefinitionInterface.php",
+        "<?php\nnamespace Drupal\\Core\\TypedData;\ninterface DataDefinitionInterface {}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Field/FieldDefinitionInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Field;\nuse Drupal\\Core\\TypedData\\DataDefinitionInterface;\ninterface FieldDefinitionInterface extends DataDefinitionInterface {}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Field/BaseFieldDefinition.php",
+        "<?php\nnamespace Drupal\\Core\\Field;\nclass BaseFieldDefinition implements FieldDefinitionInterface {\n    public static function create($type): static { return new static(); }\n    public function setDisplayOptions($display_context, array $options): static { return $this; }\n    public function addConstraint($constraint_name, $options = NULL): static { return $this; }\n}\n",
+    ),
+    (STRING_ITEM_PATH, STRING_ITEM),
+    (
+        WIDGET_PATH,
+        "<?php\nnamespace Drupal\\Core\\Field\\Plugin\\Field\\FieldWidget;\nuse Drupal\\Core\\Field\\Attribute\\FieldWidget;\n#[FieldWidget(id: 'string_textfield')]\nclass StringTextfieldWidget {}\n",
+    ),
+    (
+        CONSTRAINT_PATH,
+        "<?php\nnamespace Drupal\\Core\\Validation\\Plugin\\Validation\\Constraint;\n\n/**\n * Checks that a field is unique.\n *\n * @Constraint(\n *   id = \"UniqueField\",\n *   label = @Translation(\"Unique field\")\n * )\n */\nclass UniqueFieldConstraint {}\n",
+    ),
+];
+
+const STRING_ITEM_PATH: &str =
+    "web/core/lib/Drupal/Core/Field/Plugin/Field/FieldType/StringItem.php";
+const STRING_ITEM: &str = "<?php\nnamespace Drupal\\Core\\Field\\Plugin\\Field\\FieldType;\nuse Drupal\\Core\\Field\\Attribute\\FieldType;\n#[FieldType(id: \"string\")]\nclass StringItem {}\n";
+const WIDGET_PATH: &str =
+    "web/core/lib/Drupal/Core/Field/Plugin/Field/FieldWidget/StringTextfieldWidget.php";
+const CONSTRAINT_PATH: &str =
+    "web/core/lib/Drupal/Core/Validation/Plugin/Validation/Constraint/UniqueFieldConstraint.php";
+
+const HELLO_PATH: &str = "web/modules/custom/acme/src/Plugin/Block/HelloBlock.php";
+const HELLO: &str = "<?php\nnamespace Drupal\\acme\\Plugin\\Block;\n\nuse Drupal\\Core\\Block\\Attribute\\Block;\n\n#[Block(id: 'acme_hello', admin_label: 'Hello')]\nfinal class HelloBlock {\n    public function greeting(): string { return ''; }\n}\n";
+
+const LEGACY_PATH: &str = "web/modules/custom/acme/src/Plugin/Block/LegacyBlock.php";
+const LEGACY: &str = "<?php\nnamespace Drupal\\acme\\Plugin\\Block;\n\n/**\n * A block, declared the way older code does.\n *\n * @Block(\n *   id = \"acme_legacy\",\n *   admin_label = @Translation(\"Legacy\")\n * )\n */\nfinal class LegacyBlock {}\n";
+
+/// A block attribute outside the plugin subdirectory, which discovery
+/// never reads.
+const STRAY_PATH: &str = "web/modules/custom/acme/src/Other/StrayBlock.php";
+const STRAY: &str = "<?php\nnamespace Drupal\\acme\\Other;\n\nuse Drupal\\Core\\Block\\Attribute\\Block;\n\n#[Block('acme_stray')]\nfinal class StrayBlock {}\n";
+
+const CONSUMER_PATH: &str = "web/modules/custom/acme/src/Consumer.php";
+const CONSUMER: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Block\BlockManagerInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+
+final class Consumer {
+    public function __construct(private BlockManagerInterface $blocks) {}
+
+    public function build(): void {
+        $block = $this->blocks->createInstance('acme_hello');
+        $block->greeting();
+        $this->blocks->hasDefinition('acme_legacy');
+        $this->blocks->createInstance('acme_hello:main');
+        $this->blocks->getDefinition('');
+        $field = BaseFieldDefinition::create('string')
+            ->setDisplayOptions('form', ['type' => 'string_textfield'])
+            ->addConstraint('UniqueField');
+        BaseFieldDefinition::create('');
+        $field->setDisplayOptions('form', ['type' => '']);
+    }
+}
+"#;
+
+async fn site(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in CORE.iter().chain(&[
+        (".git/HEAD", "ref: refs/heads/main\n"),
+        (".gitignore", "/web/core/\n"),
+        (HELLO_PATH, HELLO),
+        (LEGACY_PATH, LEGACY),
+        (STRAY_PATH, STRAY),
+    ]) {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let (backend, dir) = workspace_in(dir, files).await;
+    backend.ensure_workspace_indexed();
+    (backend, dir)
+}
+
+async fn labels_at(backend: &Backend, uri: &Uri, needle: &str, inside: usize) -> Vec<String> {
+    let position = position_in(CONSUMER, needle, inside);
+    response_labels(
+        completion_response(backend, uri, position.line, position.character, None).await,
+    )
+}
+
+#[tokio::test]
+async fn plugin_ids_complete_from_the_receivers_manager() {
+    let (backend, dir) = site(&[(CONSUMER_PATH, CONSUMER)]).await;
+    let php = uri_for(&dir, CONSUMER_PATH);
+    assert_eq!(
+        labels_at(&backend, &php, "getDefinition('')", 15).await,
+        ["acme_hello", "acme_legacy"]
+    );
+    assert_eq!(
+        labels_at(&backend, &php, "BaseFieldDefinition::create('')", 29).await,
+        ["string"]
+    );
+    assert_eq!(
+        labels_at(&backend, &php, "['type' => '']", 12).await,
+        ["string_textfield"]
+    );
+}
+
+#[tokio::test]
+async fn a_plugin_id_goes_to_its_class() {
+    let (backend, dir) = site(&[(CONSUMER_PATH, CONSUMER)]).await;
+    let php = uri_for(&dir, CONSUMER_PATH);
+    for (needle, target, line) in [
+        ("'acme_hello')", HELLO_PATH, 6),
+        ("'acme_legacy'", LEGACY_PATH, 11),
+        ("'acme_hello:main'", HELLO_PATH, 6),
+        ("'string')", STRING_ITEM_PATH, 4),
+        ("'string_textfield'", WIDGET_PATH, 4),
+        ("'UniqueField'", CONSTRAINT_PATH, 11),
+    ] {
+        let found = definitions_at(&backend, &php, position_in(CONSUMER, needle, 2)).await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!(
+            (&found[0].uri, found[0].range.start.line),
+            (&uri_for(&dir, target), line),
+            "{needle}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn create_instance_is_typed_as_the_plugin_class() {
+    let (backend, dir) = site(&[(CONSUMER_PATH, CONSUMER)]).await;
+    let php = uri_for(&dir, CONSUMER_PATH);
+    let found = definitions_at(&backend, &php, position_in(CONSUMER, "greeting()", 2)).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        (&found[0].uri, found[0].range.start.line),
+        (&uri_for(&dir, HELLO_PATH), 7)
+    );
+}
+
+#[tokio::test]
+async fn a_plugin_id_hovers_its_manager_and_class() {
+    let (backend, dir) = site(&[(CONSUMER_PATH, CONSUMER)]).await;
+    let php = uri_for(&dir, CONSUMER_PATH);
+    let position = position_in(CONSUMER, "'acme_hello')", 2);
+    let hover = crate::common::hover_text_at(&backend, &php, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(hover.contains("Plugin"), "{hover}");
+    assert!(
+        hover.contains("Drupal\\Core\\Block\\BlockManager"),
+        "{hover}"
+    );
+    assert!(
+        hover.contains("Drupal\\acme\\Plugin\\Block\\HelloBlock"),
+        "{hover}"
+    );
+}
+
+#[tokio::test]
+async fn a_manager_interface_lists_the_plugins_as_implementations() {
+    let (backend, dir) = site(&[(CONSUMER_PATH, CONSUMER)]).await;
+    let php = uri_for(&dir, CONSUMER_PATH);
+    let response = backend
+        .goto_implementation(ImplementationParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: php },
+                position: position_in(CONSUMER, "BlockManagerInterface $blocks", 3),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+    let locations = match response {
+        None => Vec::new(),
+        Some(ImplementationResponse::Definition(Definition::Location(location))) => vec![location],
+        Some(ImplementationResponse::Definition(Definition::LocationList(locations))) => locations,
+        Some(ImplementationResponse::DefinitionLinkList(_)) => panic!("unexpected location links"),
+    };
+    let uris: Vec<Uri> = locations.into_iter().map(|location| location.uri).collect();
+    for path in [HELLO_PATH, LEGACY_PATH] {
+        assert!(uris.contains(&uri_for(&dir, path)), "{path}: {uris:?}");
+    }
+    assert!(!uris.contains(&uri_for(&dir, STRAY_PATH)), "{uris:?}");
+}
+
+fn watched(path: &std::path::Path, kind: FileChangeType) -> DidChangeWatchedFilesParams {
+    DidChangeWatchedFilesParams {
+        changes: vec![FileEvent {
+            uri: Uri::from_file_path(path).unwrap(),
+            kind,
+        }],
+    }
+}
+
+#[tokio::test]
+async fn adding_editing_and_deleting_a_plugin_class_refreshes_the_ids() {
+    let (backend, dir) = site(&[(CONSUMER_PATH, CONSUMER)]).await;
+    let php = uri_for(&dir, CONSUMER_PATH);
+    let offered = || labels_at(&backend, &php, "getDefinition('')", 15);
+    let path = dir
+        .path()
+        .join("web/modules/custom/acme/src/Plugin/Block/FreshBlock.php");
+    let fresh = |id: &str| {
+        format!(
+            "<?php\nnamespace Drupal\\acme\\Plugin\\Block;\n\nuse Drupal\\Core\\Block\\Attribute\\Block;\n\n#[Block(id: '{id}')]\nclass FreshBlock {{}}\n"
+        )
+    };
+
+    std::fs::write(&path, fresh("acme_fresh")).unwrap();
+    backend
+        .did_change_watched_files(watched(&path, FileChangeType::Created))
+        .await;
+    assert!(offered().await.contains(&"acme_fresh".to_string()));
+
+    std::fs::write(&path, fresh("acme_renamed")).unwrap();
+    backend
+        .did_change_watched_files(watched(&path, FileChangeType::Changed))
+        .await;
+    let labels = offered().await;
+    assert!(labels.contains(&"acme_renamed".to_string()), "{labels:?}");
+    assert!(!labels.contains(&"acme_fresh".to_string()), "{labels:?}");
+
+    std::fs::remove_file(&path).unwrap();
+    backend
+        .did_change_watched_files(watched(&path, FileChangeType::Deleted))
+        .await;
+    assert!(!offered().await.contains(&"acme_renamed".to_string()));
+}

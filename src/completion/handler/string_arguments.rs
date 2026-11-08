@@ -148,8 +148,9 @@ impl Backend {
         if matches!(string_ctx, StringContext::InStringLiteral)
             && self.is_drupal_project()
             && let Some(code) = code_ctx.as_ref()
-            && let Some(response) =
-                self.try_drupal_render_element_completion(uri, content, position, code)
+            && let Some(response) = self
+                .try_drupal_render_element_completion(uri, content, position, code)
+                .or_else(|| self.try_drupal_display_type_completion(content, position, code))
         {
             return Some(response);
         }

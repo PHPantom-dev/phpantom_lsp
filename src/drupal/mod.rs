@@ -24,6 +24,7 @@ pub(crate) mod hooks;
 pub(crate) mod libraries;
 pub(crate) mod links;
 pub(crate) mod permissions;
+pub(crate) mod plugins;
 pub(crate) mod routing;
 pub(crate) mod service_providers;
 pub(crate) mod template_variables;
@@ -70,6 +71,12 @@ pub(crate) struct DrupalState {
     /// The services each service provider's `alter()` gives another class,
     /// keyed by the provider's URI; see [`service_providers`].
     service_replacements: RwLock<BTreeMap<String, Vec<(Atom, Atom)>>>,
+    /// The plugin types and the plugins of each, until a file that declares
+    /// a plugin manager or a plugin changes; see [`plugins`].
+    plugin_index: RwLock<Option<std::sync::Arc<plugins::PluginIndex>>>,
+    /// Counts the changes to files the plugin index reads, so an index read
+    /// while one landed is not kept.
+    plugin_generation: std::sync::atomic::AtomicU64,
     /// The default configuration files and configuration schema files of
     /// every extension, and the configuration names read from them.
     config: config::ConfigSources,
@@ -356,6 +363,7 @@ impl Backend {
         *self.drupal.theme_hook_index.write() = None;
         *self.drupal.library_builders.write() = None;
         *self.drupal.theme_suggestions.write() = None;
+        *self.drupal.plugin_index.write() = None;
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
         self.drupal.config.clear();

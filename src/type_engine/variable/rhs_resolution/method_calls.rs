@@ -325,6 +325,14 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             ) {
                 return result;
             }
+            if let Some(result) = super::drupal_calls::try_resolve_plugin_instance_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
+                return result;
+            }
             if let Some(result) = super::drupal_calls::try_resolve_config_object_type(
                 owner,
                 &method_name,

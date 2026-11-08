@@ -8,8 +8,8 @@ use crate::symbol_map::extraction::symfony::{
     RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
 use crate::symbol_map::{
-    DeclaredParameter, DrupalRouteSite, EntityTypeSite, PluginClassSite, ReceiverClass,
-    StringKeyKind, TypedReceiverSite,
+    DeclaredParameter, DrupalRouteSite, EntityTypeSite, PluginClassSite, PluginDeclarationSite,
+    PluginManagerSite, ReceiverClass, StringKeyKind, TypedReceiverSite,
 };
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
@@ -244,6 +244,261 @@ fn annotation_plugin_id(doc: &str, from: usize) -> Option<(usize, usize)> {
         .into_iter()
         .find(|entry| entry.path.is_empty() && entry.key == "id")
         .map(|entry| (entry.value_start, entry.value_end))
+}
+
+/// Record the ID each attribute of `class`, and the first annotation of its
+/// docblock, give it, when the class is in a `Drupal\` namespace: the
+/// plugins among them are told apart later, by the plugin types the
+/// project's plugin managers declare (see [`crate::drupal::plugins`]).
+pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some(fqn) = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .map(|fqn| fqn.trim_start_matches('\\'))
+        .filter(|fqn| fqn.starts_with("Drupal\\"))
+        .map(crate::atom::atom)
+    else {
+        return;
+    };
+    for attribute in class
+        .attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+    {
+        // Plugin attributes take the ID first, by name or by place.
+        let Some((id, start, end)) = attribute_arguments(attribute, &["id"])
+            .into_iter()
+            .find(|(parameter, _)| *parameter == "id")
+            .and_then(|(_, value)| resolved_string_literal(value, ctx.content))
+            .filter(|(id, _, _)| !id.is_empty())
+        else {
+            continue;
+        };
+        let written = bytes_to_str(attribute.name.value());
+        let marker = ctx
+            .resolved_name_at(attribute.name.span().start.offset)
+            .unwrap_or(written)
+            .trim_start_matches('\\');
+        ctx.drupal_plugins.push(PluginDeclarationSite {
+            start: start as u32,
+            end: end as u32,
+            id: id.to_string(),
+            class: fqn,
+            marker: crate::atom::atom(marker),
+            is_annotation: false,
+        });
+    }
+    let Some((doc, offset)) = get_docblock_text_with_offset(ctx.trivias, ctx.content, class) else {
+        return;
+    };
+    if let Some((name, (start, end))) = doc_annotations(doc)
+        .find_map(|(name, from)| Some((name, annotation_plugin_id(doc, from)?)))
+        .filter(|(_, (start, end))| start < end)
+    {
+        ctx.drupal_plugins.push(PluginDeclarationSite {
+            start: offset + start as u32,
+            end: offset + end as u32,
+            id: doc[start..end].to_string(),
+            class: fqn,
+            marker: crate::atom::atom(name),
+            is_annotation: true,
+        });
+    }
+}
+
+/// The annotations that open a line of the docblock `doc`: each one's name
+/// as written, and the offset just past its `(`.
+fn doc_annotations(doc: &str) -> impl Iterator<Item = (&str, usize)> {
+    doc.match_indices('@').filter_map(move |(at, _)| {
+        let line_start = doc[..at].rfind('\n').map_or(0, |newline| newline + 1);
+        if !doc[line_start..at]
+            .chars()
+            .all(|c| c.is_whitespace() || c == '*' || c == '/')
+        {
+            return None;
+        }
+        let rest = &doc[at + 1..];
+        let length = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '\\'))
+            .unwrap_or(rest.len());
+        let name = &rest[..length];
+        let opens = rest[length..].starts_with('(');
+        let capitalised = name
+            .trim_start_matches('\\')
+            .starts_with(|c: char| c.is_ascii_uppercase());
+        (opens && capitalised).then_some((name, at + 1 + length + 1))
+    })
+}
+
+/// Record the plugin type a plugin manager's constructor declares by the
+/// call it makes to its parent's: `parent::__construct('Plugin/Block',
+/// $namespaces, $module_handler, BlockPluginInterface::class, Block::class,
+/// 'Drupal\Core\Block\Annotation\Block')`.  Whether the parent is
+/// `DefaultPluginManager` is told later, when the types are read.
+pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_manager(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some(body) = class.members.iter().find_map(|member| match member {
+        ClassLikeMember::Method(method)
+            if bytes_to_str(method.name.value).eq_ignore_ascii_case("__construct") =>
+        {
+            match &method.body {
+                MethodBody::Concrete(body) => Some(body),
+                MethodBody::Abstract(_) => None,
+            }
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+    const PARAMETERS: [&str; 6] = [
+        "subdir",
+        "namespaces",
+        "module_handler",
+        "plugin_interface",
+        "plugin_definition_attribute_name",
+        "plugin_definition_annotation_name",
+    ];
+    let Some(arguments) = body.statements.iter().find_map(|statement| {
+        let Statement::Expression(statement) = statement else {
+            return None;
+        };
+        let Expression::Call(Call::StaticMethod(call)) = statement.expression else {
+            return None;
+        };
+        let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+            return None;
+        };
+        (matches!(call.class, Expression::Parent(_))
+            && bytes_to_str(method.value).eq_ignore_ascii_case("__construct"))
+        .then_some(&call.argument_list)
+    }) else {
+        return;
+    };
+    let argument = |wanted: usize| {
+        arguments
+            .arguments
+            .iter()
+            .enumerate()
+            .find_map(|(index, argument)| match argument {
+                Argument::Positional(positional) if index == wanted => Some(positional.value),
+                Argument::Named(named) if bytes_to_str(named.name.value) == PARAMETERS[wanted] => {
+                    Some(named.value)
+                }
+                _ => None,
+            })
+    };
+    let Some((subdir, _, _)) = argument(0)
+        .and_then(|value| resolved_string_literal(value, ctx.content))
+        .filter(|(subdir, _, _)| !subdir.is_empty())
+    else {
+        return;
+    };
+    let Some(fqn) = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
+    else {
+        return;
+    };
+    let class_at = |index: usize| {
+        argument(index)
+            .and_then(|value| message_class(value, ctx))
+            .map(|name| crate::atom::atom(&name))
+    };
+    let site = PluginManagerSite {
+        class: fqn,
+        subdir: subdir.to_string(),
+        fifth: class_at(4),
+        sixth: class_at(5),
+    };
+    ctx.drupal_plugin_managers.push(site);
+}
+
+/// Record the plugin IDs a method call names by its arguments rather than
+/// by its receiver alone: the widget or formatter the `type` of
+/// `setDisplayOptions('form' | 'view', [...])` names, for the type engine to
+/// confirm the receiver is a field definition.
+pub(in crate::symbol_map::extraction) fn record_drupal_plugin_sites(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || !member_name.eq_ignore_ascii_case("setDisplayOptions") {
+        return;
+    }
+    let mut arguments = argument_list.arguments.iter();
+    let (Some(Argument::Positional(display)), Some(Argument::Positional(options))) =
+        (arguments.next(), arguments.next())
+    else {
+        return;
+    };
+    let Some(manager) = resolved_string_literal(display.value, ctx.content)
+        .and_then(|(display, _, _)| crate::drupal::plugins::display_manager(display))
+    else {
+        return;
+    };
+    let Some(entries) = crate::parser::array_literal_elements(options.value) else {
+        return;
+    };
+    for entry in entries.iter() {
+        let ArrayElement::KeyValue(entry) = entry else {
+            continue;
+        };
+        if !resolved_string_literal(entry.key, ctx.content).is_some_and(|(key, _, _)| key == "type")
+        {
+            continue;
+        }
+        if let Some((id, start, end)) = resolved_string_literal(entry.value, ctx.content) {
+            ctx.typed_receiver_sites.push(TypedReceiverSite {
+                start: start as u32,
+                end: end as u32,
+                key: crate::drupal::plugins::plugin_key(manager, id),
+                is_write: false,
+                is_optional: false,
+                guards: 0,
+                receiver: ReceiverClass::FieldDisplayOptions,
+            });
+        }
+    }
+}
+
+/// Record the field type `BaseFieldDefinition::create('string')` names.
+pub(in crate::symbol_map::extraction) fn emit_drupal_static_plugin_span(
+    class: &str,
+    method: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some(manager) = crate::drupal::plugins::static_call_manager(class, method) else {
+        return;
+    };
+    let Some((id, start, end)) = crate::call_args::first_param_arg(argument_list, "type")
+        .and_then(|argument| resolved_string_literal(argument.value(), ctx.content))
+    else {
+        return;
+    };
+    ctx.spans.push(SymbolSpan {
+        start: start as u32,
+        end: end as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalPlugin,
+            key: crate::drupal::plugins::plugin_key(manager, id),
+            is_write: false,
+            is_optional: false,
+        },
+    });
 }
 
 /// Record the render element name a `'#type' => 'x'` entry of an array

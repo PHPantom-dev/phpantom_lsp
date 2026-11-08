@@ -259,6 +259,14 @@ pub(crate) enum StringKeyKind {
     /// `dependencies` of a library, and the `libraries` of a theme's info
     /// file (see `drupal::libraries`).
     DrupalLibrary,
+    /// A Drupal plugin ID, keyed by the plugin manager as well as the ID
+    /// (see `drupal::plugins::plugin_key`): `'string'` is a field type to
+    /// one manager and a widget to another.  Declared by the attribute or
+    /// annotation of a plugin class, and read by a plugin manager's
+    /// `createInstance()`, `getDefinition()`, and `hasDefinition()`,
+    /// `BaseFieldDefinition::create()`, the `type` of a field's display
+    /// options, and `addConstraint()`.
+    DrupalPlugin,
 }
 
 impl StringKeyKind {
@@ -327,7 +335,8 @@ impl StringKeyKind {
             | Self::DrupalRenderElement
             | Self::DrupalThemeHook
             | Self::DrupalThemeHookVariable
-            | Self::DrupalLibrary => KeyFramework::Drupal,
+            | Self::DrupalLibrary
+            | Self::DrupalPlugin => KeyFramework::Drupal,
         }
     }
 
@@ -827,6 +836,38 @@ pub(crate) struct PluginClassSite {
     pub class: crate::atom::Atom,
 }
 
+/// What a class's constructor passes to `DefaultPluginManager`'s, which is
+/// what makes the class a plugin manager with a type of its own (see
+/// `drupal::plugins`).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PluginManagerSite {
+    /// The class whose constructor it is.
+    pub class: crate::atom::Atom,
+    /// The plugin subdirectory, `Plugin/Block`, as written.
+    pub subdir: String,
+    /// The class named fifth: the attribute plugins declare themselves
+    /// with, or, in older managers, the annotation.
+    pub fifth: Option<crate::atom::Atom>,
+    /// The class named sixth: the annotation, beside an attribute.
+    pub sixth: Option<crate::atom::Atom>,
+}
+
+/// An attribute or annotation on a class in a `Drupal\` namespace that
+/// gives it an ID, which makes the class a plugin when the marker is a
+/// plugin type's (see `drupal::plugins`).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PluginDeclarationSite {
+    /// Byte range of the ID's contents.
+    pub start: u32,
+    pub end: u32,
+    pub id: String,
+    /// The class the marker is written on.
+    pub class: crate::atom::Atom,
+    /// An attribute's resolved class, or an annotation's name as written.
+    pub marker: crate::atom::Atom,
+    pub is_annotation: bool,
+}
+
 /// The value a container declaration gives, read by the kind of name it
 /// turns out to declare.
 #[derive(Debug, Clone, PartialEq)]
@@ -1019,6 +1060,11 @@ const YII_LEGACY_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\ViewRenderer";
 const YII_VIEW: &str = "Yiisoft\\View\\ViewInterface";
 pub(crate) const DRUPAL_ENTITY_TYPE_MANAGER: &str =
     "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
+pub(crate) const DRUPAL_PLUGIN_MANAGER: &str = "Drupal\\Component\\Plugin\\PluginManagerInterface";
+const DRUPAL_FIELD_DEFINITION: &str = "Drupal\\Core\\Field\\FieldDefinitionInterface";
+const DRUPAL_ENTITY_TYPE: &str = "Drupal\\Core\\Entity\\EntityTypeInterface";
+const DRUPAL_DATA_DEFINITION: &str = "Drupal\\Core\\TypedData\\DataDefinitionInterface";
+const DRUPAL_FIELD_CONFIG: &str = "Drupal\\Core\\Field\\FieldConfigInterface";
 const DRUPAL_URL_GENERATOR: &str = "Drupal\\Core\\Routing\\UrlGeneratorInterface";
 const DRUPAL_FORM_STATE: &str = "Drupal\\Core\\Form\\FormStateInterface";
 const DRUPAL_CONTROLLER_BASE: &str = "Drupal\\Core\\Controller\\ControllerBase";
@@ -1139,9 +1185,21 @@ pub(crate) enum ReceiverClass {
     /// `hasDefinition()` through [`Self::DefinitionLookup`].
     EntityTypeManager,
     /// The definition lookups, `getDefinition()` and `hasDefinition()`, that
-    /// both Symfony's container builder and Drupal's entity type manager
-    /// have: the one takes a service ID, the other an entity type ID.
+    /// Symfony's container builder, Drupal's entity type manager, and every
+    /// other Drupal plugin manager have: a service ID, an entity type ID,
+    /// or a plugin ID.
     DefinitionLookup,
+    /// A Drupal plugin manager, whose `createInstance()` takes a plugin ID.
+    /// The manager the ID belongs to comes from the receiver's type (see
+    /// `drupal::plugins`).
+    PluginManager,
+    /// A field definition, whose `setDisplayOptions('form' | 'view', …)`
+    /// names a widget or a formatter by its options' `type`.  The site's key
+    /// holds the manager already, read from the first argument.
+    FieldDisplayOptions,
+    /// What `addConstraint()` takes a validation constraint plugin ID on:
+    /// an entity type, a data definition, and a field's configuration.
+    ConstraintTarget,
     /// A Drupal form state, whose `setRedirect()` takes a route name.
     FormRedirect,
     /// What has Drupal's `redirect()` shortcut, which takes a route name: a
@@ -1289,9 +1347,19 @@ impl ReceiverClass {
             Self::EntityTypeManager => {
                 &[(DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType)]
             }
+            // The entity type manager is a plugin manager too, so it has to
+            // be asked about first.
             Self::DefinitionLookup => &[
                 (SYMFONY_CONTAINER_BUILDER, ServiceId),
                 (DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType),
+                (DRUPAL_PLUGIN_MANAGER, StringKeyKind::DrupalPlugin),
+            ],
+            Self::PluginManager => &[(DRUPAL_PLUGIN_MANAGER, StringKeyKind::DrupalPlugin)],
+            Self::FieldDisplayOptions => &[(DRUPAL_FIELD_DEFINITION, StringKeyKind::DrupalPlugin)],
+            Self::ConstraintTarget => &[
+                (DRUPAL_ENTITY_TYPE, StringKeyKind::DrupalPlugin),
+                (DRUPAL_DATA_DEFINITION, StringKeyKind::DrupalPlugin),
+                (DRUPAL_FIELD_CONFIG, StringKeyKind::DrupalPlugin),
             ],
             Self::FormRedirect => &[(DRUPAL_FORM_STATE, StringKeyKind::DrupalRoute)],
             Self::RouteRedirect => &[
@@ -1382,6 +1450,16 @@ impl ReceiverClass {
         self == Self::UrlGenerator
     }
 
+    /// Whether a plugin ID the call names is recorded alone, the manager
+    /// it belongs to coming with the receiver's type or with the call
+    /// itself, rather than read from the call's other arguments.
+    pub(crate) fn bare_plugin_key(self) -> bool {
+        matches!(
+            self,
+            Self::PluginManager | Self::DefinitionLookup | Self::ConstraintTarget
+        )
+    }
+
     /// Whether the call names a template.
     pub(crate) fn names_views(self) -> bool {
         matches!(
@@ -1441,6 +1519,8 @@ impl TypedReceiverSite {
         // name comes with its receiver's type.
         let key = if kind == StringKeyKind::DrupalConfigKey {
             crate::drupal::config_keys::split_config_key(key).1
+        } else if kind == StringKeyKind::DrupalPlugin && self.receiver.bare_plugin_key() {
+            crate::drupal::plugins::split_plugin_key(key).1
         } else {
             key
         };

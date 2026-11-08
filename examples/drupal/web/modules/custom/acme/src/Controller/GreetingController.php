@@ -103,4 +103,20 @@ final class GreetingController extends ControllerBase
 
         return $build;
     }
+
+    /**
+     * The greeting block, built outside any region.
+     *
+     * @return array<string, mixed>
+     */
+    public function block(): array
+    {
+        // Try: go to the definition of 'acme_greeting_block', which lands on
+        // the GreetingBlock class, or complete a block ID inside
+        // createInstance(''); core's blocks are offered too. createInstance()
+        // gives a GreetingBlock, so greeting() goes to its method.
+        $block = \Drupal::service('plugin.manager.block')->createInstance('acme_greeting_block');
+
+        return ['#markup' => $block->greeting()];
+    }
 }
