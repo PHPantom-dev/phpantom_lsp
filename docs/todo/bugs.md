@@ -25,25 +25,7 @@ No outstanding items.
 
 ## Type comparison
 
-### B735. A class that does not load fails every parameter type it is passed to
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-use ColinODell\PsrTestLogger\TestLogger; // package not installed
-
-$logger = new TestLogger();
-$factory->addLogger($logger); // expects Psr\Log\LoggerInterface, got TestLogger
-```
-
-When the argument's class cannot be loaded, nothing is known about its
-parents or interfaces, so whether it satisfies `LoggerInterface` cannot be
-decided. It is still reported as a mismatch, beside the `unknown_class`
-already reported for the name itself, so one missing package gives two
-errors per use. Drupal core's tests hit it wherever a dev-only package is
-absent (about a dozen `addLogger()` calls in `projects/drupal`). An
-argument whose class does not load should leave the subtype check
-undecided rather than failed.
+No outstanding items.
 
 ## Conditional return types
 

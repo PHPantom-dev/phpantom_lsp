@@ -25,6 +25,10 @@ use tower_lsp_server::gen_lsp_types::{
 
 use crate::Backend;
 
+/// Sequence number appended to every created progress token, so that
+/// concurrent operations of one kind never share a token.
+static NEXT_PROGRESS_TOKEN: AtomicU64 = AtomicU64::new(0);
+
 /// Thread-safe progress state for one long-running operation.
 ///
 /// Two reporting modes cooperate on the same state:
@@ -326,6 +330,10 @@ impl Backend {
     /// Create a server-initiated work-done progress token and send the
     /// `window/workDoneProgress/create` request to the client.
     ///
+    /// The token is `token_name` followed by a sequence number: the spec
+    /// requires a token to identify one progress while it runs, and
+    /// requests of one kind run concurrently.
+    ///
     /// Returns `Some(token)` on success, `None` when there is no client
     /// or the client rejects the request.  The caller should pass the
     /// returned token to [`progress_begin`], [`progress_report`], and
@@ -339,7 +347,8 @@ impl Backend {
         }
 
         let client = self.client.as_ref()?;
-        let token = ProgressToken::String(token_name.to_string());
+        let sequence = NEXT_PROGRESS_TOKEN.fetch_add(1, Ordering::Relaxed);
+        let token = ProgressToken::String(format!("{token_name}/{sequence}"));
         let params = WorkDoneProgressCreateParams {
             token: token.clone(),
         };
