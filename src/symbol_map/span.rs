@@ -1,5 +1,8 @@
 //! The navigable symbol occurrences a [`SymbolMap`] records and their kinds.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use crate::atom::Atom;
 use crate::php_type::PhpType;
 
@@ -250,14 +253,26 @@ impl<'a> MappedSource<'a> {
 /// Foo($x))->bar()` lowers to `"Foo"` (dropping `new` and the constructor
 /// arguments), whitespace around `->`/`::` is normalised away, and
 /// expressions the lowering can't represent collapse to `""`.
+///
+/// An `Owned` subject is a slice of a text other spans may share.  The
+/// links of a method chain do: each link's subject is the chain written up
+/// to that link, a prefix of the next one's, so they slice one rendering
+/// instead of each holding a copy of everything before it.  Extraction
+/// then gathers a file's synthesised subjects into one text
+/// ([`SubjectText::pool`]).  The thin `Arc<Box<str>>` keeps the type at two
+/// words, the size of every span in every file.
 #[derive(Debug, Clone)]
 pub(crate) enum SubjectText {
     /// Byte range `[start, end)` into the file content whose raw slice is
     /// exactly the synthesised subject text.
     Range { start: u32, end: u32 },
-    /// The synthesised subject text, stored because it diverges from (or
-    /// has no corresponding) raw source span.
-    Owned(Box<str>),
+    /// The `len` bytes at `start` of a synthesised text, stored because the
+    /// subject diverges from (or has no corresponding) raw source span.
+    Owned {
+        text: Arc<Box<str>>,
+        start: u32,
+        len: u32,
+    },
 }
 
 impl SubjectText {
@@ -267,7 +282,7 @@ impl SubjectText {
     pub(crate) fn new(text: String, start: u32, end: u32, content: &str) -> Self {
         match content.get(start as usize..end as usize) {
             Some(raw) if raw == text => Self::Range { start, end },
-            _ => Self::Owned(text.into_boxed_str()),
+            _ => Self::owned(text),
         }
     }
 
@@ -275,7 +290,17 @@ impl SubjectText {
     /// source span (e.g. a literal `"self"` fallback, or text resolved
     /// from elsewhere in a chain).
     pub(crate) fn owned(text: String) -> Self {
-        Self::Owned(text.into_boxed_str())
+        let len = text.len() as u32;
+        Self::prefix(Arc::new(text.into_boxed_str()), len)
+    }
+
+    /// The first `len` bytes of `text`.
+    pub(crate) fn prefix(text: Arc<Box<str>>, len: u32) -> Self {
+        Self::Owned {
+            text,
+            start: 0,
+            len,
+        }
     }
 
     /// The subject text, slicing the source the owning map was extracted
@@ -286,7 +311,61 @@ impl SubjectText {
     pub(crate) fn as_str<'a>(&'a self, source: MappedSource<'a>) -> &'a str {
         match self {
             Self::Range { start, end } => &source.text()[*start as usize..*end as usize],
-            Self::Owned(s) => s,
+            Self::Owned { .. } => self.synthesised().unwrap_or_default(),
+        }
+    }
+
+    /// The subject text when it is stored rather than read from the source.
+    pub(crate) fn synthesised(&self) -> Option<&str> {
+        match self {
+            Self::Range { .. } => None,
+            Self::Owned { text, start, len } => {
+                Some(&text[*start as usize..(*start + *len) as usize])
+            }
+        }
+    }
+
+    /// Gather the synthesised subjects of `spans` into one text, each
+    /// distinct one stored once, so that a file holds one allocation for
+    /// them all rather than one or two per subject.
+    pub(crate) fn pool(spans: &mut [SymbolSpan]) {
+        fn owned(span: &SymbolSpan) -> Option<(&Arc<Box<str>>, u32)> {
+            match &span.kind {
+                SymbolKind::MemberAccess {
+                    subject_text: SubjectText::Owned { text, start, .. },
+                    ..
+                } => Some((text, *start)),
+                _ => None,
+            }
+        }
+
+        let mut pool = String::new();
+        let mut placed: HashMap<&str, u32> = HashMap::new();
+        let mut moves: Vec<(usize, u32)> = Vec::new();
+        for (index, span) in spans.iter().enumerate() {
+            let Some((text, start)) = owned(span) else {
+                continue;
+            };
+            let at = *placed.entry(&***text).or_insert_with(|| {
+                let at = pool.len() as u32;
+                pool.push_str(text);
+                at
+            });
+            moves.push((index, at + start));
+        }
+        if moves.is_empty() {
+            return;
+        }
+        let pool = Arc::new(pool.into_boxed_str());
+        for (index, at) in moves {
+            if let SymbolKind::MemberAccess {
+                subject_text: SubjectText::Owned { text, start, .. },
+                ..
+            } = &mut spans[index].kind
+            {
+                *text = Arc::clone(&pool);
+                *start = at;
+            }
         }
     }
 
@@ -295,7 +374,8 @@ impl SubjectText {
     pub(crate) fn heap_bytes(&self) -> usize {
         match self {
             Self::Range { .. } => 0,
-            Self::Owned(s) => s.len(),
+            // Split between the spans sharing the text.
+            Self::Owned { text, .. } => text.len() / Arc::strong_count(text),
         }
     }
 }

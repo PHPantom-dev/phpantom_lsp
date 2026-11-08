@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use mago_span::HasSpan;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
 
@@ -31,6 +33,271 @@ pub(super) fn subject_text_of(expr: &Expression<'_>, content: &str) -> SubjectTe
         span.end.offset,
         content,
     )
+}
+
+/// The receiver texts of the method chains extracted so far.
+///
+/// Each link of a chain has the chain written up to that link as its
+/// subject, so rendering every link on its own costs the square of the
+/// chain's length, in time and, once the texts are stored, in memory too.
+/// Generated code (database dumps written as one `insert()` chain with a
+/// `values([...])` link per row) runs to thousands of links.  Instead the
+/// chain is rendered once, from its outermost link, and each link's
+/// subject is a prefix of that one text.
+#[derive(Default)]
+pub(super) struct SpineTexts {
+    spines: Vec<RenderedSpine>,
+    /// What each rendered expression spells, keyed by its span.  Every
+    /// link of a chain starts where its base does, so the end offset is
+    /// what tells them apart.
+    links: std::collections::HashMap<(u32, u32), SpineLinkText>,
+}
+
+struct RenderedSpine {
+    text: String,
+    /// The text, once a span needed it shared.  Most chains are written
+    /// the way they render, so their spans slice the source instead.
+    shared: Option<Arc<Box<str>>>,
+    /// Where the text was copied into the file's call-site arena, once a
+    /// call site needed it.
+    call_text_start: Option<u32>,
+}
+
+#[derive(Clone, Copy)]
+struct SpineLinkText {
+    /// The spine whose text this expression's is a prefix of, or `None`
+    /// when the expression has no representation.
+    spine: Option<u32>,
+    /// The length of the prefix of the spine's text this expression spells.
+    len: u32,
+    /// Whether that prefix is exactly the source text of the expression.
+    raw: bool,
+}
+
+/// What the call expression of an instance method call is, for
+/// [`CallSites`](crate::symbol_map::CallSites).
+pub(super) enum CallText {
+    Owned(String),
+    /// The first `len` bytes of the text at `start` in the call-site arena.
+    Arena {
+        start: u32,
+        len: u32,
+    },
+}
+
+impl SpineTexts {
+    /// Render the chain `expr` heads, unless it was rendered as part of a
+    /// longer one already.  Expressions that are not a property or method
+    /// link have nothing to share and are left alone.
+    pub(super) fn prime(&mut self, expr: &Expression<'_>, content: &str) {
+        // A link straight on its base has no link before it to share with.
+        if !spine_receiver(expr).is_some_and(|receiver| spine_receiver(receiver).is_some())
+            || self.links.contains_key(&span_key(expr))
+        {
+            return;
+        }
+        let spine = self.spines.len() as u32;
+        let links = &mut self.links;
+        let text = render_spine(expr, content, |key, rendered| {
+            let (len, raw) = rendered.unwrap_or_default();
+            let spine = rendered.map(|_| spine);
+            links.insert(key, SpineLinkText { spine, len, raw });
+        });
+        if let Some(text) = text {
+            self.spines.push(RenderedSpine {
+                text,
+                shared: None,
+                call_text_start: None,
+            });
+        }
+    }
+
+    fn link(&mut self, expr: &Expression<'_>, content: &str) -> Option<SpineLinkText> {
+        self.prime(expr, content);
+        self.links.get(&span_key(expr)).copied()
+    }
+
+    fn text(&self, link: SpineLinkText) -> &str {
+        link.spine.map_or("", |spine| {
+            &self.spines[spine as usize].text[..link.len as usize]
+        })
+    }
+
+    /// The [`SubjectText`] of a member access whose subject is `expr`.
+    pub(super) fn subject_text_of(&mut self, expr: &Expression<'_>, content: &str) -> SubjectText {
+        let Some(link) = self.link(expr, content) else {
+            return subject_text_of(expr, content);
+        };
+        match link.spine {
+            Some(_) if link.raw => {
+                let (start, end) = span_key(expr);
+                SubjectText::Range { start, end }
+            }
+            Some(spine) => {
+                let spine = &mut self.spines[spine as usize];
+                let text = spine
+                    .shared
+                    .get_or_insert_with(|| Arc::new(spine.text.as_str().into()));
+                SubjectText::prefix(Arc::clone(text), link.len)
+            }
+            None => SubjectText::owned(String::new()),
+        }
+    }
+
+    /// The call expression of `object->member(…)`, a call ending at
+    /// `call_end`.  When the call is a link of a rendered chain, it points
+    /// into the copy of the chain's text in `call_sites`, so that the links
+    /// of a chain do not each copy everything before them there.
+    pub(super) fn method_call_text(
+        &mut self,
+        object: &Expression<'_>,
+        call_end: u32,
+        member: &str,
+        content: &str,
+        call_sites: &mut CallSites,
+    ) -> CallText {
+        let Some(object_link) = self.link(object, content) else {
+            return CallText::Owned(format!("{}->{}", expr_to_subject_text(object), member));
+        };
+        let call_link = self.links.get(&(span_key(object).0, call_end)).copied();
+        match (object_link.spine, call_link.and_then(|link| link.spine)) {
+            (Some(spine), Some(call_spine)) if spine == call_spine => {
+                let spine = &mut self.spines[spine as usize];
+                let start = *spine
+                    .call_text_start
+                    .get_or_insert_with(|| call_sites.push_text(&spine.text));
+                CallText::Arena {
+                    start,
+                    len: object_link.len + 2 + member.len() as u32,
+                }
+            }
+            _ => CallText::Owned(format!("{}->{}", self.text(object_link), member)),
+        }
+    }
+}
+
+fn span_key(expr: &Expression<'_>) -> (u32, u32) {
+    let span = expr.span();
+    (span.start.offset, span.end.offset)
+}
+
+/// The receiver of a property or method link, or `None` when `expr` is
+/// not one.
+fn spine_receiver<'a>(expr: &'a Expression<'a>) -> Option<&'a Expression<'a>> {
+    match expr {
+        Expression::Access(Access::Property(pa)) => Some(pa.object),
+        Expression::Access(Access::NullSafeProperty(pa)) => Some(pa.object),
+        Expression::Call(Call::Method(mc)) => Some(mc.object),
+        Expression::Call(Call::NullSafeMethod(mc)) => Some(mc.object),
+        _ => None,
+    }
+}
+
+/// Render the receiver spine `expr` heads in one pass, calling `mark` for
+/// the base and for each link after it with its span and, when it has a
+/// representation, the length of the text up to it and whether that text
+/// is the expression's source verbatim.
+///
+/// Returns the text of the longest prefix of the spine that has a
+/// representation, which renders each link the way [`expr_to_subject_text`]
+/// does.  Once a link has none, no link after it has one either.
+fn render_spine(
+    expr: &Expression<'_>,
+    content: &str,
+    mut mark: impl FnMut((u32, u32), Option<(u32, bool)>),
+) -> Option<String> {
+    let mut links: Vec<(SpineLink<'_>, u32)> = Vec::new();
+    let mut current = expr;
+    loop {
+        let end = current.span().end.offset;
+        match current {
+            Expression::Access(Access::Property(pa)) => {
+                links.push((SpineLink::Property(&pa.property), end));
+                current = pa.object;
+            }
+            Expression::Access(Access::NullSafeProperty(pa)) => {
+                links.push((SpineLink::Property(&pa.property), end));
+                current = pa.object;
+            }
+            Expression::Call(Call::Method(mc)) => {
+                links.push((
+                    SpineLink::Method(&mc.method, &mc.argument_list.arguments),
+                    end,
+                ));
+                current = mc.object;
+            }
+            Expression::Call(Call::NullSafeMethod(mc)) => {
+                links.push((
+                    SpineLink::Method(&mc.method, &mc.argument_list.arguments),
+                    end,
+                ));
+                current = mc.object;
+            }
+            _ => break,
+        }
+    }
+
+    let base_span = current.span();
+    let start = base_span.start.offset;
+    let mut end = base_span.end.offset;
+    let mut rendered = lower_spine_base(current).map(|base| {
+        let text = base.to_subject_text();
+        let raw = content.get(start as usize..end as usize) == Some(text.as_str());
+        (text, raw)
+    });
+    mark(
+        (start, end),
+        rendered
+            .as_ref()
+            .map(|(text, raw)| (text.len() as u32, *raw)),
+    );
+    let mut complete = rendered.is_some();
+    for (link, link_end) in links.iter().rev() {
+        if let Some((text, raw)) = rendered.as_mut().filter(|_| complete) {
+            let before = text.len();
+            // What `SubjectExpr::to_subject_text` writes for a
+            // `PropertyChain`, and for a `CallExpr` calling a `MethodCall`.
+            match link {
+                SpineLink::Property(property) => match selector_member_name(property) {
+                    Some(name) => {
+                        text.push_str("->");
+                        text.push_str(&name);
+                    }
+                    None => complete = false,
+                },
+                SpineLink::Method(method, args) => {
+                    text.push_str("->");
+                    match selector_member_name(method) {
+                        Some(name) => {
+                            text.push_str(&name);
+                            text.push('(');
+                            text.push_str(&format_all_call_args(args));
+                            text.push(')');
+                        }
+                        None => text.push_str("?()"),
+                    }
+                }
+            }
+            if complete {
+                *raw =
+                    *raw && content.get(end as usize..*link_end as usize) == Some(&text[before..]);
+            }
+        }
+        end = *link_end;
+        mark(
+            (start, end),
+            rendered
+                .as_ref()
+                .filter(|_| complete)
+                .map(|(text, raw)| (text.len() as u32, *raw)),
+        );
+    }
+    debug_assert!(
+        !complete
+            || rendered.as_ref().map(|(text, _)| text.as_str())
+                == Some(expr_to_subject_text(expr).as_str())
+    );
+    rendered.map(|(text, _)| text)
 }
 
 /// Render the callee of a function-call expression (`callee(…)`) as the

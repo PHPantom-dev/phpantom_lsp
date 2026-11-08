@@ -102,6 +102,19 @@ pub(crate) enum CallArgKind<'s> {
     Named(&'s str),
 }
 
+/// The call expression handed to [`CallSites::push`].
+#[derive(Clone, Copy)]
+pub(crate) enum CallExpression<'s> {
+    Text(&'s str),
+    /// The first `len` bytes of the text [`CallSites::push_text`] stored at
+    /// `start`, which the links of a method chain share: each one's call
+    /// expression is a prefix of the chain's.
+    Stored {
+        start: u32,
+        len: u32,
+    },
+}
+
 /// Where one call site's data lives in its [`CallSites`] arenas.
 ///
 /// `nums[nums_start..]` holds, in order, the comma offsets, the argument
@@ -137,17 +150,44 @@ pub(crate) struct CallSites {
 }
 
 impl CallSites {
+    /// Store `text` for call sites to name a prefix of as their
+    /// [`CallExpression::Stored`], returning where it starts.
+    pub(crate) fn push_text(&mut self, text: &str) -> u32 {
+        let start = self.text.len() as u32;
+        self.text.push_str(text);
+        start
+    }
+
+    /// The first `len` bytes of the text [`Self::push_text`] stored at
+    /// `start`.
+    pub(crate) fn stored_text(&self, start: u32, len: u32) -> &str {
+        &self.text[start as usize..(start + len) as usize]
+    }
+
     /// Record a call site.  `args` is walked once per list it feeds.
     pub(crate) fn push<'s>(
         &mut self,
         args_start: u32,
         args_end: u32,
-        call_expression: &str,
+        call_expression: CallExpression<'_>,
         comma_offsets: impl Iterator<Item = u32>,
         args: impl Iterator<Item = CallArg<'s>> + Clone,
     ) {
-        let text_start = self.text.len() as u32;
-        self.text.push_str(call_expression);
+        let has_names = args
+            .clone()
+            .any(|arg| matches!(arg.kind, CallArgKind::Named(_)));
+        let (text_start, expression_len) = match call_expression {
+            CallExpression::Text(text) => (self.push_text(text), text.len() as u32),
+            // The names follow the expression, so a stored expression they
+            // would not follow is copied for them.
+            CallExpression::Stored { start, len } if has_names => {
+                let copy = self.text.len() as u32;
+                self.text
+                    .extend_from_within(start as usize..(start + len) as usize);
+                (copy, len)
+            }
+            CallExpression::Stored { start, len } => (start, len),
+        };
         let nums_start = self.nums.len();
         self.nums.extend(comma_offsets);
         let comma_count = (self.nums.len() - nums_start) as u32;
@@ -178,7 +218,7 @@ impl CallSites {
             args_start,
             args_end,
             text_start,
-            expression_len: call_expression.len() as u32,
+            expression_len,
             nums_start: nums_start as u32,
             comma_count,
             arg_count,

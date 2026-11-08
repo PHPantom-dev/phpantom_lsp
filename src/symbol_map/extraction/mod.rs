@@ -14,9 +14,10 @@ use super::docblock::{
 };
 use super::morph_columns::{record_morph_column_call, record_morph_column_comparison};
 use super::{
-    CallArg, CallArgKind, CallSites, ClassRefContext, DocblockMemberRef, MorphColumnSite,
-    NestedRanges, ReceiverClass, SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap,
-    SymbolSpan, TemplateParamDef, TypedReceiverSite, UntypedClosureSite, VarDefKind, VarDefSite,
+    CallArg, CallArgKind, CallExpression, CallSites, ClassRefContext, DocblockMemberRef,
+    MorphColumnSite, NestedRanges, ReceiverClass, SelfStaticParentKind, SubjectText, SymbolKind,
+    SymbolMap, SymbolSpan, TemplateParamDef, TypedReceiverSite, UntypedClosureSite, VarDefKind,
+    VarDefSite,
 };
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
@@ -263,6 +264,8 @@ struct ExtractionCtx<'a> {
     dql_bodies: Vec<crate::symbol_map::DqlBody>,
     /// The `getQuery()` calls made on builders other methods hand on.
     dql_runs: Vec<crate::symbol_map::DqlRun>,
+    /// The subject texts of the method chains read so far.
+    spine_texts: SpineTexts,
 }
 
 /// A variable token's name without its `$`.
@@ -641,6 +644,7 @@ fn extract_symbol_map_inner(
         dql_builder_methods: Vec::new(),
         dql_bodies: Vec::new(),
         dql_runs: Vec::new(),
+        spine_texts: SpineTexts::default(),
     };
 
     note_dql_body(0, program.statements.as_slice(), &mut ctx);
@@ -729,8 +733,10 @@ fn extract_symbol_map_inner(
         a.start == b.start && a.end == b.end && !crate::symbol_map::declares_another_name(a, b)
     });
     // Every workspace file keeps its map for the whole session, so drop
-    // the growth slack and the room the dedup freed.
+    // the growth slack and the room the dedup freed, and hold the
+    // synthesised subjects in one allocation.
     ctx.spans.shrink_to_fit();
+    SubjectText::pool(&mut ctx.spans);
     ctx.var_defs.shrink_to_fit();
 
     // Sort var_defs by (scope_start, offset) for efficient lookup.

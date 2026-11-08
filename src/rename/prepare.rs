@@ -625,7 +625,7 @@ impl Backend {
     ) -> Option<PrepareRenameResult> {
         let span = self.lookup_symbol_at_position(uri, content, position)?;
         let SymbolKind::MemberAccess {
-            subject_text: crate::symbol_map::SubjectText::Owned(_),
+            subject_text: crate::symbol_map::SubjectText::Owned { .. },
             member_name,
             is_method_call: false,
             ..

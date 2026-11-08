@@ -152,7 +152,7 @@ fn forms_validation_and_configuration_are_read_only_in_a_symfony_project() {
                 matches!(
                     &span.kind,
                     crate::symbol_map::SymbolKind::MemberAccess {
-                        subject_text: crate::symbol_map::SubjectText::Owned(_),
+                        subject_text: crate::symbol_map::SubjectText::Owned { .. },
                         ..
                     } | crate::symbol_map::SymbolKind::StringKey { .. }
                 )

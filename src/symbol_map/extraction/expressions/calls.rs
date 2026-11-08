@@ -50,7 +50,7 @@ pub(super) fn extract_instantiation_expr<'a>(
         record_dql_instantiation(inst.class, args, ctx, scope_start);
         if !class_text.is_empty() {
             emit_call_site(
-                format!("new {}", class_text),
+                CallText::Owned(format!("new {}", class_text)),
                 args,
                 &mut ctx.call_sites,
                 &mut ctx.untyped_closure_sites,
@@ -478,7 +478,7 @@ fn extract_function_call<'a>(
     let func_text = invoked_callee_text(func_call.function);
     if !func_text.is_empty() {
         emit_call_site(
-            func_text,
+            CallText::Owned(func_text),
             &func_call.argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
@@ -502,7 +502,6 @@ fn extract_method_call<'a>(
     scope_start: u32,
     visit_receiver: bool,
 ) {
-    let subject_text = expr_to_subject_text(object);
     if visit_receiver {
         extract_from_expression(object, ctx, scope_start);
     }
@@ -535,23 +534,24 @@ fn extract_method_call<'a>(
             object.span().start.offset,
             argument_list.left_parenthesis.end.offset,
         ));
+        let call_text = ctx.spine_texts.method_call_text(
+            object,
+            argument_list.right_parenthesis.end.offset,
+            &member_name,
+            ctx.content,
+            &mut ctx.call_sites,
+        );
         emit_call_site(
-            format!("{}->{}", subject_text, member_name),
+            call_text,
             argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
         );
-        let object_span = object.span();
         ctx.spans.push(SymbolSpan {
             start: ident.span.start.offset,
             end: ident.span.end.offset,
             kind: SymbolKind::MemberAccess {
-                subject_text: SubjectText::new(
-                    subject_text,
-                    object_span.start.offset,
-                    object_span.end.offset,
-                    ctx.content,
-                ),
+                subject_text: ctx.spine_texts.subject_text_of(object, ctx.content),
                 member_name,
                 is_static: false,
                 is_method_call: true,
@@ -617,7 +617,7 @@ fn extract_static_method_call<'a>(
             static_call.argument_list.left_parenthesis.end.offset,
         ));
         emit_call_site(
-            format!("{}::{}", subject_text, member_name),
+            CallText::Owned(format!("{}::{}", subject_text, member_name)),
             &static_call.argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,

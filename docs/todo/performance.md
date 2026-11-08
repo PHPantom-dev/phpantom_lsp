@@ -20,38 +20,6 @@ against that bar.
 
 ---
 
-## P89. A long method chain makes the symbol map quadratic in its length
-
-**Impact: Medium · Complexity: Medium**
-
-Drupal core ships database dumps as test fixtures
-(`core/modules/migrate_drupal/tests/fixtures/drupal7.php` and three like
-it, 0.7 to 1.9 MB each): `$connection->insert('table')->fields([...])`
-followed by up to 1,027 `->values([...])` calls in one statement. Every
-link of such a chain records its receiver as subject text that spells out
-the whole chain before it, arrays included, so the text built for one
-statement grows with the square of its length.
-
-Indexing the four files takes 0.3 to 0.6 s each (release build,
-2026-11-05), against about a millisecond for a typical core file. That is
-most of the second phase of a Drupal site's workspace index, and they are
-what lifts the `memory_drupal_module` scenario of
-`benches/memory_usage.py` to a peak of about 860 MiB on the way to
-settling under 300 MiB. Leaving out the fixtures and `.phpstan-baseline.php`
-brings that peak down to about 330 MiB.
-
-On a Drupal site the files go dormant once indexed, so the cost is only a
-spike. In a project where such a file is the project's own code, it stays
-resident: `drupal7.php` alone, as the only file of a workspace, settles at
-about 170 MiB above an empty server, some 90 times its size on disk
-(release build, 2026-11-07).
-
-**Where to look:** `src/symbol_map/extraction/subject_text.rs`
-(`lower_spine_base`, `format_arg_expr`) and `SubjectText` in
-`src/symbol_map/span.rs`.
-
----
-
 ## P86. A Symfony app's generated `config/reference.php` is slow to parse
 
 **Impact: Medium · Complexity: Medium**

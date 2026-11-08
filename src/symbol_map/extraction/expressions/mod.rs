@@ -118,6 +118,10 @@ pub(super) fn extract_from_expression<'a>(
     ) {
         // A route chain is read whole, from its outermost call.
         record_yii_route_chain(expr, ctx);
+        // So is the subject text of each link, which spells the chain
+        // before it: rendering the links one by one, innermost first,
+        // would render each from scratch.
+        ctx.spine_texts.prime(expr, ctx.content);
         let mut links: Vec<&'a Call<'a>> = Vec::new();
         let mut receiver = expr;
         while let Expression::Call(call) = receiver {

@@ -148,12 +148,16 @@ impl Backend {
                 crate::virtual_members::laravel::resolve_laravel_string_key(self, &kind, &key, uri)
             }
             SymbolKind::MemberAccess {
-                subject_text: SubjectText::Owned(class_fqn),
+                subject_text: ref subject @ SubjectText::Owned { .. },
                 member_name,
                 is_method_call,
                 ..
             } => self
-                .class_member_declaration_location(&class_fqn, &member_name, !is_method_call)
+                .class_member_declaration_location(
+                    subject.synthesised().unwrap_or_default(),
+                    &member_name,
+                    !is_method_call,
+                )
                 .into_iter()
                 .collect(),
             SymbolKind::ClassReference {

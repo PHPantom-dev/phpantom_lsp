@@ -485,6 +485,107 @@ fn chained_method_call_subject_text() {
     }
 }
 
+/// The member-access spans named `member`, in source order.
+fn member_subjects<'a>(map: &'a SymbolMap, member: &str) -> Vec<&'a SubjectText> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::MemberAccess {
+                subject_text,
+                member_name,
+                ..
+            } if member_name == member => Some(subject_text),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn chain_links_share_one_subject_text() {
+    let php = concat!(
+        "<?php\n",
+        "$db->insert('t')\n",
+        "    ->fields(['a', 'b'])\n",
+        "    ->values([1, 'x'])\n",
+        "    ->values(row: [2, 'y'])\n",
+        "    ->values([3, 'z']);\n",
+    );
+    let map = parse_and_extract(php);
+    let source = mapped(&map, php);
+    let base = "$db->insert('t')->fields(['a', 'b'])";
+    let subjects = member_subjects(&map, "values");
+    let texts: Vec<_> = subjects.iter().map(|s| s.as_str(source)).collect();
+    assert_eq!(
+        texts,
+        [
+            base.to_string(),
+            format!("{base}->values([1, 'x'])"),
+            format!("{base}->values([1, 'x'])->values(row: [2, 'y'])"),
+        ]
+    );
+    // Every link written across lines slices one rendering of the chain
+    // rather than holding its own copy of everything before it.
+    let shared: Vec<_> = subjects
+        .iter()
+        .map(|subject| match subject {
+            SubjectText::Owned { text, .. } => text,
+            other => panic!("expected a stored subject, got {other:?}"),
+        })
+        .collect();
+    assert!(
+        shared
+            .windows(2)
+            .all(|w| std::sync::Arc::ptr_eq(w[0], w[1]))
+    );
+    assert!(shared[0].len() < texts.iter().map(|text| text.len()).sum());
+
+    let calls: Vec<_> = map
+        .call_sites
+        .iter()
+        .filter(|site| site.call_expression.ends_with("->values"))
+        .map(|site| {
+            (
+                site.call_expression,
+                site.named_arg_names.iter().collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            (format!("{base}->values").as_str(), vec![]),
+            (
+                format!("{base}->values([1, 'x'])->values").as_str(),
+                vec!["row"]
+            ),
+            (
+                format!("{base}->values([1, 'x'])->values(row: [2, 'y'])->values").as_str(),
+                vec![]
+            ),
+        ]
+    );
+}
+
+#[test]
+fn chain_written_as_rendered_slices_the_source() {
+    let php = "<?php\n$a->b()->c->d($x)->e();\n";
+    let map = parse_and_extract(php);
+    let [subject] = member_subjects(&map, "e")[..] else {
+        panic!("expected one `e` access");
+    };
+    assert!(matches!(subject, SubjectText::Range { .. }), "{subject:?}");
+    assert_eq!(subject.as_str(mapped(&map, php)), "$a->b()->c->d($x)");
+}
+
+#[test]
+fn chain_links_past_a_dynamic_property_have_no_subject() {
+    let php = "<?php\n$a->b()->{$p . 'x'}->c()->d();\n";
+    let map = parse_and_extract(php);
+    let source = mapped(&map, php);
+    assert_eq!(member_subjects(&map, "c")[0].as_str(source), "");
+    assert_eq!(member_subjects(&map, "d")[0].as_str(source), "");
+}
+
 #[test]
 fn class_constant_access_produces_member_access() {
     let php = "<?php\nclass Foo { function test() { self::MY_CONST; } }\n";

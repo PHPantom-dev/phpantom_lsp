@@ -70,10 +70,11 @@ pub(super) fn settled_receiver_text(symbol_map: &SymbolMap, span_index: usize) -
         // A subject the extraction synthesised carries its own text, so
         // there is nothing to recover.  It is passed on as written rather
         // than trimmed, since that is what the scan would hand over.
-        SubjectText::Owned(text) => {
+        SubjectText::Range { start, end } => (*start, *end),
+        SubjectText::Owned { .. } => {
+            let text = subject_text.synthesised()?;
             return receiver_settles_without_content(text, *is_static).then(|| text.to_string());
         }
-        SubjectText::Range { start, end } => (*start, *end),
     };
     let width = end.checked_sub(start)?;
 
