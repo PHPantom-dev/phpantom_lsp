@@ -78,6 +78,10 @@ pub(crate) struct DrupalState {
     /// Counts the changes to files the plugin index reads, so an index read
     /// while one landed is not kept.
     plugin_generation: std::sync::atomic::AtomicU64,
+    /// The closed test modules' files that declare plugins, by URI: what
+    /// they declare is kept apart from the index's plugins (see
+    /// [`plugins::PluginIndex::declares`]).
+    plugin_test_sources: RwLock<std::collections::HashSet<String>>,
     /// The default configuration files and configuration schema files of
     /// every extension, and the configuration names read from them.
     config: config::ConfigSources,
@@ -370,6 +374,7 @@ impl Backend {
         *self.drupal.library_builders.write() = None;
         *self.drupal.theme_suggestions.write() = None;
         *self.drupal.plugin_index.write() = None;
+        self.drupal.plugin_test_sources.write().clear();
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
         self.drupal.service_definition_files.write().clear();

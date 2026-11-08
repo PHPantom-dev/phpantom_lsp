@@ -850,6 +850,9 @@ pub(crate) struct PluginManagerSite {
     pub fifth: Option<crate::atom::Atom>,
     /// The class named sixth: the annotation, beside an attribute.
     pub sixth: Option<crate::atom::Atom>,
+    /// Whether the class sets its discovery itself, and so may find
+    /// plugins no attribute or annotation declares.
+    pub sets_discovery: bool,
 }
 
 /// An attribute or annotation on a class in a `Drupal\` namespace that
@@ -860,6 +863,8 @@ pub(crate) struct PluginDeclarationSite {
     /// Byte range of the ID's contents.
     pub start: u32,
     pub end: u32,
+    /// Empty when the ID is not a string literal, such as a class constant,
+    /// and the range is then the argument's.
     pub id: String,
     /// The class the marker is written on.
     pub class: crate::atom::Atom,

@@ -19,6 +19,10 @@
 //! - The services files of test modules declare IDs, though nothing else
 //!   reads them (see [`crate::drupal::is_declaration_file`]).
 //!
+//! The same files are where plugin definitions are added in code: every
+//! string literal of a file that calls `setDefinition()` may be a plugin
+//! ID (see [`crate::drupal::plugins`]).
+//!
 //! The files are found by the web-root walk, which reads every PHP file
 //! anyway, and read once a lookup has to be judged.
 
@@ -113,17 +117,19 @@ pub(crate) fn is_test_services_file(path: &Path, web_root: &Path) -> bool {
         && !super::is_unloaded(path, web_root)
 }
 
-/// What one file may define: service IDs, and the shapes of the IDs it
-/// builds from parts, `*` for each part that is not written out.
+/// What one file may define: service IDs, the shapes of the IDs it builds
+/// from parts, `*` for each part that is not written out, and the plugin
+/// IDs it may add definitions for.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct FileServiceIds {
     pub(crate) ids: Vec<String>,
     pub(crate) patterns: Vec<String>,
+    pub(crate) plugin_ids: Vec<String>,
 }
 
 impl FileServiceIds {
     fn is_empty(&self) -> bool {
-        self.ids.is_empty() && self.patterns.is_empty()
+        self.ids.is_empty() && self.patterns.is_empty() && self.plugin_ids.is_empty()
     }
 }
 
@@ -140,7 +146,11 @@ pub(crate) fn defined_service_ids(content: &str) -> FileServiceIds {
             .any(|definer| definer.eq_ignore_ascii_case(name))
     });
     let mut found = Collected::default();
-    let walker = Collector { content, definer };
+    let walker = Collector {
+        content,
+        definer,
+        plugin_definer: content.contains("setDefinition("),
+    };
     for statement in program.statements.iter() {
         mago_syntax::walker::Walker::walk_statement(&walker, statement, &mut found);
     }
@@ -157,13 +167,21 @@ pub(crate) fn defined_service_ids(content: &str) -> FileServiceIds {
     let mut patterns = found.patterns;
     patterns.sort_unstable();
     patterns.dedup();
-    FileServiceIds { ids, patterns }
+    let mut plugin_ids = found.plugin_ids;
+    plugin_ids.sort_unstable();
+    plugin_ids.dedup();
+    FileServiceIds {
+        ids,
+        patterns,
+        plugin_ids,
+    }
 }
 
 #[derive(Default)]
 struct Collected {
     ids: Vec<String>,
     patterns: Vec<String>,
+    plugin_ids: Vec<String>,
     /// How many concatenations the walk is inside: only the outermost one
     /// spells a whole name.
     concatenations: u32,
@@ -199,6 +217,8 @@ struct Collector<'c> {
     content: &'c str,
     /// Whether every literal and name of the file may be a service ID.
     definer: bool,
+    /// Whether every literal of the file may be a plugin ID.
+    plugin_definer: bool,
 }
 
 impl Collector<'_> {
@@ -239,10 +259,15 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Collected> for Coll
     }
 
     fn walk_in_literal_string(&self, string: &'ast LiteralString<'arena>, found: &mut Collected) {
-        if self.definer
-            && let Some(value) = string.value
-        {
-            found.push_id(bytes_to_str(value));
+        let Some(value) = string.value else {
+            return;
+        };
+        let value = bytes_to_str(value);
+        if self.definer {
+            found.push_id(value);
+        }
+        if self.plugin_definer && !value.is_empty() {
+            found.plugin_ids.push(value.to_string());
         }
     }
 
@@ -284,6 +309,8 @@ pub(crate) struct PhpServiceIds {
     ids: Vec<String>,
     /// Every file's shapes, sorted.
     patterns: Vec<String>,
+    /// Every file's plugin IDs, sorted.
+    plugin_ids: Vec<String>,
 }
 
 impl PhpServiceIds {
@@ -299,16 +326,19 @@ impl PhpServiceIds {
     fn gather(&mut self) {
         let mut ids: Vec<String> = Vec::new();
         let mut patterns: Vec<String> = Vec::new();
+        let mut plugin_ids: Vec<String> = Vec::new();
         for file in self.by_uri.values() {
             ids.extend(file.ids.iter().cloned());
             patterns.extend(file.patterns.iter().cloned());
+            plugin_ids.extend(file.plugin_ids.iter().cloned());
         }
-        ids.sort_unstable();
-        ids.dedup();
-        patterns.sort_unstable();
-        patterns.dedup();
+        for list in [&mut ids, &mut patterns, &mut plugin_ids] {
+            list.sort_unstable();
+            list.dedup();
+        }
         self.ids = ids;
         self.patterns = patterns;
+        self.plugin_ids = plugin_ids;
     }
 
     /// Put what the file at `uri` now defines in place of what it did,
@@ -342,6 +372,19 @@ impl PhpServiceIds {
     }
 }
 
+impl PhpServiceIds {
+    /// Whether PHP code may add a definition for the plugin `id`, or for
+    /// the base of a derivative `id`.
+    pub(crate) fn declares_plugin(&self, id: &str) -> bool {
+        let listed = |id: &str| {
+            self.plugin_ids
+                .binary_search_by(|declared| declared.as_str().cmp(id))
+                .is_ok()
+        };
+        listed(id) || crate::drupal::plugins::derivative_bases(id).any(listed)
+    }
+}
+
 /// What a file the web-root walk found may define: a test module's
 /// services file declares the IDs it lists, a PHP file what
 /// [`defined_service_ids`] reads.
@@ -364,7 +407,7 @@ fn read_service_ids(uri: &str, content: &str) -> FileServiceIds {
         .collect();
     FileServiceIds {
         ids,
-        patterns: Vec::new(),
+        ..FileServiceIds::default()
     }
 }
 
@@ -539,6 +582,7 @@ function acme_setup($container, $config) {
             FileServiceIds {
                 ids: vec!["acme.one".to_string()],
                 patterns: vec!["acme.storage.*".to_string()],
+                plugin_ids: vec!["acme_block".to_string()],
             },
         );
         let ids = PhpServiceIds::from_files(by_uri);
@@ -551,6 +595,32 @@ function acme_setup($container, $config) {
             assert!(ids.declares(id), "{id}");
         }
         assert!(!ids.declares("acme.two"));
+        assert!(ids.declares_plugin("acme_block"));
+        assert!(ids.declares_plugin("acme_block:main"));
+        assert!(!ids.declares_plugin("acme_other"));
+    }
+
+    #[test]
+    fn a_file_that_sets_a_definition_may_declare_its_literals_as_plugins() {
+        let php = r#"<?php
+function acme_block_alter(array &$definitions, $manager) {
+    $manager->setDefinition('acme_runtime', ['label' => 'Runtime']);
+}
+"#;
+        let found = defined_service_ids(php);
+        assert_eq!(
+            found.plugin_ids,
+            vec![
+                "Runtime".to_string(),
+                "acme_runtime".to_string(),
+                "label".to_string()
+            ]
+        );
+        assert!(
+            defined_service_ids("<?php $a = 'acme';")
+                .plugin_ids
+                .is_empty()
+        );
     }
 
     #[test]

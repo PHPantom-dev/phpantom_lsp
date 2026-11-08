@@ -155,8 +155,9 @@ Run `composer install` here first. Composer puts core and contrib into
   `web/modules/custom/acme/src/Entity/Note.php`, the field type
   `BaseFieldDefinition::create()` takes, the widget the form display
   options name, and the constraint `addConstraint()` takes navigate to
-  core's plugin classes and complete. Go to the implementations of
-  `BlockManagerInterface` to list every block.
+  core's plugin classes and complete. Misspell `'string'` as `'strin'` and
+  the field type is reported, since no plugin declares it. Go to the
+  implementations of `BlockManagerInterface` to list every block.
 
 ## What the Symfony support already reads
 

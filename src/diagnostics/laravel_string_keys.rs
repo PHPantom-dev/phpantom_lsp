@@ -53,6 +53,7 @@ enum CheckedStringKind {
     DrupalRoute,
     DrupalRenderElement,
     DrupalLibrary,
+    DrupalPlugin,
     Asset,
     MixAsset,
     ViteAsset,
@@ -95,6 +96,7 @@ impl CheckedStringKind {
             StringKeyKind::DrupalRoute => Self::DrupalRoute,
             StringKeyKind::DrupalRenderElement => Self::DrupalRenderElement,
             StringKeyKind::DrupalLibrary => Self::DrupalLibrary,
+            StringKeyKind::DrupalPlugin => Self::DrupalPlugin,
             StringKeyKind::Asset => Self::Asset,
             StringKeyKind::MixAsset => Self::MixAsset,
             StringKeyKind::ViteAsset => Self::ViteAsset,
@@ -126,12 +128,10 @@ impl CheckedStringKind {
             // read, and a render array may pass anything besides a hook's
             // variables.  A Yii alias can be set at runtime with
             // `Aliases::set()`, and an `@` starts plenty of strings that
-            // name no path.  A plugin manager can find plugins its own way,
-            // and a deriver makes plugins at run time.
+            // name no path.
             StringKeyKind::YiiAlias
             | StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
-            | StringKeyKind::DrupalPlugin
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalHook
             | StringKeyKind::DrupalPermission
@@ -197,6 +197,12 @@ struct DeclaredKeys<'a> {
     /// The service IDs a Drupal site's services files declare, sorted, and
     /// those its PHP code may define.
     drupal_services: Option<(Vec<String>, Arc<crate::drupal::services::PhpServiceIds>)>,
+    /// The plugin types and their plugins, and the plugin IDs PHP code may
+    /// add definitions for.
+    drupal_plugins: Option<(
+        Arc<crate::drupal::plugins::PluginIndex>,
+        Arc<crate::drupal::services::PhpServiceIds>,
+    )>,
     /// The container parameters the project's configuration declares,
     /// sorted.
     parameters: Vec<String>,
@@ -409,6 +415,15 @@ impl<'a> DeclaredKeys<'a> {
                 backend.drupal_php_service_ids(),
             )
         });
+        // Core's and contributed modules' plugins are only read once the
+        // workspace index has walked them.
+        let drupal_plugins = names(|kind| kind == CheckedStringKind::DrupalPlugin).then(|| {
+            backend.ensure_workspace_index_ready_for_request();
+            (
+                backend.drupal_plugin_index(),
+                backend.drupal_php_service_ids(),
+            )
+        });
         let parameters = if has_parameter {
             backend.symfony_project_declared_names(
                 crate::symbol_map::StringKeyKind::ContainerParameter,
@@ -500,6 +515,7 @@ impl<'a> DeclaredKeys<'a> {
             middleware_known,
             services,
             drupal_services,
+            drupal_plugins,
             parameters,
             symfony_routes,
             symfony_route_world,
@@ -578,6 +594,7 @@ impl<'a> DeclaredKeys<'a> {
                 self.judge_drupal_service(key)
             }
             CheckedStringKind::ServiceId => self.judge_service(key),
+            CheckedStringKind::DrupalPlugin => self.judge_drupal_plugin(key),
             CheckedStringKind::ContainerParameter => self.judge_parameter(key),
             CheckedStringKind::SymfonyRoute => self.judge_symfony_route(key),
             CheckedStringKind::SymfonyTranslation => self.judge_symfony_translation(key),
@@ -728,6 +745,17 @@ impl<'a> DeclaredKeys<'a> {
                     .find_or_load_class(key.trim_start_matches('\\'))
                     .is_some());
         Some((valid, "service", "invalid_drupal_service"))
+    }
+
+    /// A Drupal plugin is declared by a plugin class of its manager's type,
+    /// a test module's included, or may be added by PHP code; see
+    /// [`crate::drupal::plugins::PluginIndex::declares`].  A manager the
+    /// project declares no plugin type for cannot be judged.
+    fn judge_drupal_plugin(&self, key: &str) -> Verdict {
+        let (index, php) = self.drupal_plugins.as_ref()?;
+        let (manager, id) = crate::drupal::plugins::split_plugin_key(key);
+        let valid = index.declares(manager, id)? || php.declares_plugin(id);
+        Some((valid, "plugin", "invalid_drupal_plugin"))
     }
 
     /// Every render element is a class with an element attribute or
@@ -1072,14 +1100,17 @@ impl Backend {
         let catches_missing_service = drupal
             && (content.contains("ServiceNotFoundException")
                 || content.contains("NotFoundExceptionInterface"));
-        let checked_service_ids: Vec<&str> = if drupal {
+        // So may a plugin ID it checks with `hasDefinition()`.
+        let checked_ids: Vec<&str> = if drupal {
             symbol_map
                 .spans
                 .iter()
                 .chain(extra.iter())
                 .filter_map(|span| match &span.kind {
                     SymbolKind::StringKey {
-                        kind: crate::symbol_map::StringKeyKind::ServiceId,
+                        kind:
+                            crate::symbol_map::StringKeyKind::ServiceId
+                            | crate::symbol_map::StringKeyKind::DrupalPlugin,
                         key,
                         is_optional: true,
                         ..
@@ -1126,7 +1157,12 @@ impl Backend {
                     return None;
                 }
                 if *kind == crate::symbol_map::StringKeyKind::ServiceId
-                    && (catches_missing_service || checked_service_ids.contains(&key.as_str()))
+                    && (catches_missing_service || checked_ids.contains(&key.as_str()))
+                {
+                    return None;
+                }
+                if *kind == crate::symbol_map::StringKeyKind::DrupalPlugin
+                    && checked_ids.contains(&key.as_str())
                 {
                     return None;
                 }
@@ -1136,6 +1172,7 @@ impl Backend {
                 if matches!(
                     kind,
                     crate::symbol_map::StringKeyKind::ServiceId
+                        | crate::symbol_map::StringKeyKind::DrupalPlugin
                         | crate::symbol_map::StringKeyKind::DrupalRoute
                         | crate::symbol_map::StringKeyKind::DrupalRenderElement
                         | crate::symbol_map::StringKeyKind::DrupalLibrary
@@ -1219,6 +1256,11 @@ impl Backend {
                         label,
                         crate::yii::params::param_key_display(key)
                     ),
+                    CheckedStringKind::DrupalPlugin => {
+                        let (manager, id) = crate::drupal::plugins::split_plugin_key(key);
+                        let manager = manager.rsplit('\\').next().unwrap_or(manager);
+                        format!("Unknown {label} '{id}' of {manager}")
+                    }
                     CheckedStringKind::SymfonyTranslation => {
                         let (domain, message) =
                             crate::symfony::translations::split_translation_key(key);

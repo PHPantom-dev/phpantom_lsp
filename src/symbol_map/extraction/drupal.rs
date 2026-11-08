@@ -270,14 +270,23 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
         .iter()
         .flat_map(|list| list.attributes.iter())
     {
-        // Plugin attributes take the ID first, by name or by place.
-        let Some((id, start, end)) = attribute_arguments(attribute, &["id"])
+        // Plugin attributes take the ID first, by name or by place.  One
+        // that is no string, such as a class constant, is recorded empty:
+        // its plugin type then has a plugin whose ID is not known.
+        let Some(value) = attribute_arguments(attribute, &["id"])
             .into_iter()
             .find(|(parameter, _)| *parameter == "id")
-            .and_then(|(_, value)| resolved_string_literal(value, ctx.content))
-            .filter(|(id, _, _)| !id.is_empty())
+            .map(|(_, value)| value)
         else {
             continue;
+        };
+        let (id, start, end) = match resolved_string_literal(value, ctx.content) {
+            Some((id, start, end)) if !id.is_empty() => (id, start, end),
+            Some(_) => continue,
+            None => {
+                let span = value.span();
+                ("", span.start.offset as usize, span.end.offset as usize)
+            }
         };
         let written = bytes_to_str(attribute.name.value());
         let marker = ctx
@@ -414,11 +423,17 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_manager(
             .and_then(|value| message_class(value, ctx))
             .map(|name| crate::atom::atom(&name))
     };
+    let span = class.span();
+    let sets_discovery = ctx
+        .content
+        .get(span.start.offset as usize..span.end.offset as usize)
+        .is_some_and(|text| text.contains("->discovery =") || text.contains("->discovery="));
     let site = PluginManagerSite {
         class: fqn,
         subdir: subdir.to_string(),
         fifth: class_at(4),
         sixth: class_at(5),
+        sets_discovery,
     };
     ctx.drupal_plugin_managers.push(site);
 }
@@ -496,7 +511,7 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_static_plugin_span(
             kind: StringKeyKind::DrupalPlugin,
             key: crate::drupal::plugins::plugin_key(manager, id),
             is_write: false,
-            is_optional: false,
+            is_optional: crate::drupal::plugins::may_catch_missing_plugin(ctx.content),
         },
     });
 }

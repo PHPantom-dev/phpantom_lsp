@@ -127,14 +127,23 @@ final class Consumer {
 "#;
 
 async fn site(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+    site_with(&[], files).await
+}
+
+/// [`site`], with `disk` written beside it without being opened.
+async fn site_with(disk: &[(&str, &str)], files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    for (path, content) in CORE.iter().chain(&[
-        (".git/HEAD", "ref: refs/heads/main\n"),
-        (".gitignore", "/web/core/\n"),
-        (HELLO_PATH, HELLO),
-        (LEGACY_PATH, LEGACY),
-        (STRAY_PATH, STRAY),
-    ]) {
+    for (path, content) in CORE
+        .iter()
+        .chain(&[
+            (".git/HEAD", "ref: refs/heads/main\n"),
+            (".gitignore", "/web/core/\n"),
+            (HELLO_PATH, HELLO),
+            (LEGACY_PATH, LEGACY),
+            (STRAY_PATH, STRAY),
+        ])
+        .chain(disk)
+    {
         let full = dir.path().join(path);
         std::fs::create_dir_all(full.parent().unwrap()).unwrap();
         std::fs::write(full, content).unwrap();
@@ -292,4 +301,118 @@ async fn adding_editing_and_deleting_a_plugin_class_refreshes_the_ids() {
         .did_change_watched_files(watched(&path, FileChangeType::Deleted))
         .await;
     assert!(!offered().await.contains(&"acme_renamed".to_string()));
+}
+
+/// A test module's block, a file that adds a block definition in code, and
+/// plugin managers that find plugins their own way.
+const UNKNOWN_PLUGIN_SITE: &[(&str, &str)] = &[
+    (
+        "web/modules/custom/acme/tests/modules/acme_test/src/Plugin/Block/TestBlock.php",
+        "<?php\nnamespace Drupal\\acme_test\\Plugin\\Block;\nuse Drupal\\Core\\Block\\Attribute\\Block;\n#[Block(id: 'acme_test_block')]\nclass TestBlock {}\n",
+    ),
+    (
+        "web/modules/custom/acme/src/RuntimeBlocks.php",
+        "<?php\nnamespace Drupal\\acme;\nfinal class RuntimeBlocks {\n    public function add($manager): void {\n        $manager->setDefinition('acme_runtime', ['class' => self::class]);\n    }\n}\n",
+    ),
+    (
+        "web/modules/custom/acme/src/OwnWayManager.php",
+        "<?php\nnamespace Drupal\\acme;\nuse Drupal\\Component\\Plugin\\Attribute\\Plugin;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass OwnWayManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/OwnWay', $namespaces, $module_handler, NULL, Plugin::class);\n    }\n    public function getDefinitions() { return []; }\n}\n",
+    ),
+    (
+        "web/modules/custom/acme/src/CreatorManager.php",
+        "<?php\nnamespace Drupal\\acme;\nuse Drupal\\Component\\Plugin\\Attribute\\Plugin;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass CreatorManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Creator', $namespaces, $module_handler, NULL, Plugin::class);\n    }\n    public function createInstance($plugin_id, array $configuration = []) {}\n}\n",
+    ),
+    (
+        "web/modules/custom/acme/src/ConstantManager.php",
+        "<?php\nnamespace Drupal\\acme;\nuse Drupal\\Component\\Plugin\\Attribute\\Plugin;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass ConstantManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Constant', $namespaces, $module_handler, NULL, Plugin::class);\n    }\n}\n",
+    ),
+    (
+        "web/modules/custom/acme/src/Plugin/Constant/Named.php",
+        "<?php\nnamespace Drupal\\acme\\Plugin\\Constant;\nuse Drupal\\Component\\Plugin\\Attribute\\Plugin;\n#[Plugin(id: self::ID)]\nclass Named {\n    const ID = 'acme_named';\n}\n",
+    ),
+];
+
+const LOOKUPS_PATH: &str = "web/modules/custom/acme/src/Lookups.php";
+const LOOKUPS: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Block\BlockManagerInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+
+final class Lookups {
+    public function run(BlockManagerInterface $blocks, OwnWayManager $own, CreatorManager $creator, ConstantManager $constant): void {
+        $blocks->createInstance('acme_hello');
+        $blocks->createInstance('acme_helo');
+        $blocks->createInstance('acme_hello:main');
+        $blocks->createInstance('acme_nothing:main');
+        $blocks->createInstance('acme_test_block');
+        $blocks->createInstance('acme_runtime:extra');
+        $blocks->hasDefinition('acme_maybe');
+        $blocks->getDefinition('acme_soft', FALSE);
+        if ($blocks->hasDefinition('acme_checked')) {
+            $blocks->createInstance('acme_checked');
+        }
+        BaseFieldDefinition::create('strin')
+            ->setDisplayOptions('form', ['type' => 'string_textfeld'])
+            ->addConstraint('UniqueFeld');
+        $own->createInstance('acme_anything');
+        $creator->createInstance('acme_created');
+        $creator->getDefinition('acme_defined');
+        $constant->createInstance('acme_whatever');
+    }
+}
+"#;
+
+/// The unknown-plugin messages the diagnostics of `content`, open at
+/// `path`, report.
+fn unknown_plugins(
+    backend: &Backend,
+    dir: &tempfile::TempDir,
+    path: &str,
+    content: &str,
+) -> Vec<String> {
+    crate::common::slow_diagnostic_messages(
+        backend,
+        uri_for(dir, path).as_str(),
+        content,
+        "invalid_drupal_plugin",
+    )
+}
+
+#[tokio::test]
+async fn a_plugin_id_no_plugin_declares_is_reported() {
+    let (backend, dir) = site_with(UNKNOWN_PLUGIN_SITE, &[(LOOKUPS_PATH, LOOKUPS)]).await;
+    let mut found = unknown_plugins(&backend, &dir, LOOKUPS_PATH, LOOKUPS);
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            "Unknown plugin 'UniqueFeld' of ConstraintManager",
+            "Unknown plugin 'acme_defined' of CreatorManager",
+            "Unknown plugin 'acme_helo' of BlockManager",
+            "Unknown plugin 'acme_nothing:main' of BlockManager",
+            "Unknown plugin 'strin' of FieldTypePluginManager",
+            "Unknown plugin 'string_textfeld' of WidgetPluginManager",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_file_that_may_catch_a_missing_plugin_checks_only_display_options() {
+    let caught = LOOKUPS.replace(
+        "use Drupal\\Core\\Field\\BaseFieldDefinition;",
+        "use Drupal\\Core\\Field\\BaseFieldDefinition;\nuse Drupal\\Component\\Plugin\\Exception\\PluginNotFoundException;",
+    );
+    let (backend, dir) = site_with(UNKNOWN_PLUGIN_SITE, &[(LOOKUPS_PATH, &caught)]).await;
+    assert_eq!(
+        unknown_plugins(&backend, &dir, LOOKUPS_PATH, &caught),
+        vec!["Unknown plugin 'string_textfeld' of WidgetPluginManager".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn test_code_is_not_checked_for_plugins() {
+    let path = "web/modules/custom/acme/tests/src/Kernel/LookupsTest.php";
+    let (backend, dir) = site_with(UNKNOWN_PLUGIN_SITE, &[(path, LOOKUPS)]).await;
+    assert!(unknown_plugins(&backend, &dir, path, LOOKUPS).is_empty());
 }

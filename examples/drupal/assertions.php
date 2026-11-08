@@ -346,6 +346,16 @@ check("GreetingController creates the acme_greeting_block block", str_contains($
 check("core's StringItem declares the string field type", (attributeArguments(new ReflectionClass(StringItem::class), FieldType::class)['id'] ?? null) === 'string');
 check("core's StringTextfieldWidget declares the string_textfield widget", (attributeArguments(new ReflectionClass(StringTextfieldWidget::class), FieldWidget::class)['id'] ?? null) === 'string_textfield');
 check("core's UniqueFieldConstraint declares the UniqueField constraint", (attributeArguments(new ReflectionClass(UniqueFieldConstraint::class), Constraint::class)['id'] ?? null) === 'UniqueField');
+$fieldTypeIds = [];
+foreach ([...glob("$web/core/lib/Drupal/Core/Field/Plugin/Field/FieldType/*.php"), ...glob("$web/core/modules/*/src/Plugin/Field/FieldType/*.php")] as $file) {
+    $class = (string) preg_replace('~^.*?/src/|^.*?/lib/~', '', substr($file, 0, -4));
+    $class = str_replace('/', '\\', str_contains($file, '/core/modules/') ? 'Drupal/' . basename(dirname($file, 5)) . '/' . $class : $class);
+    if (class_exists($class)) {
+        $fieldTypeIds[] = attributeArguments(new ReflectionClass($class), FieldType::class)['id'] ?? null;
+    }
+}
+check('Core declares field types, the string one among them', in_array('string', $fieldTypeIds, true));
+check('The misspelt strin is no field type of core', !in_array('strin', $fieldTypeIds, true));
 $noteSource = (string) file_get_contents("$module/src/Entity/Note.php");
 check("Note names the string field type, its widget, and the UniqueField constraint", str_contains($noteSource, "BaseFieldDefinition::create('string')") && str_contains($noteSource, "['type' => 'string_textfield']") && str_contains($noteSource, "->addConstraint('UniqueField')"));
 

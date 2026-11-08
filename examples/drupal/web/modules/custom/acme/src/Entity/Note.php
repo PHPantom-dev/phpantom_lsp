@@ -39,7 +39,9 @@ final class Note extends ContentEntityBase
         // setter returns the definition, so the chain keeps completing. Go to
         // the definition of 'string', the field type, of 'string_textfield',
         // the widget, or of 'UniqueField', the constraint, which land on
-        // core's plugin classes, or complete one inside its quotes.
+        // core's plugin classes, or complete one inside its quotes. Misspell
+        // 'string' as 'strin' and a warning reports a field type no plugin
+        // declares.
         $fields['title'] = BaseFieldDefinition::create('string')
             ->setLabel(new TranslatableMarkup('Title'))
             ->setRequired(true)

@@ -14,6 +14,12 @@
 //! A plugin ID is a [`StringKeyKind::DrupalPlugin`] key, keyed by its
 //! manager as well (see [`plugin_key`]): the same ID means a field type to
 //! one manager and a widget to another.
+//!
+//! An ID no plugin declares is reported, with the silence rules PHPlumb
+//! (MIT) ran against core and contributed modules: test modules' plugins
+//! count, a derivative counts when its base does, and a manager that may
+//! find plugins its own way, or has a plugin whose ID cannot be read, is
+//! not judged (see [`PluginIndex::declares`]).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -24,7 +30,7 @@ use tower_lsp_server::gen_lsp_types::Location;
 use crate::Backend;
 use crate::atom::Atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of};
-use crate::symbol_map::{DRUPAL_PLUGIN_MANAGER, SymbolMap};
+use crate::symbol_map::{DRUPAL_PLUGIN_MANAGER, PluginDeclarationSite, SymbolMap};
 use crate::types::ClassInfo;
 
 const DEFAULT_MANAGER: &str = "Drupal\\Core\\Plugin\\DefaultPluginManager";
@@ -76,6 +82,16 @@ pub(crate) fn derivative_bases(id: &str) -> impl Iterator<Item = &str> {
     id.rmatch_indices(':').map(move |(at, _)| &id[..at])
 }
 
+/// The methods a manager that declares one of finds plugins its own way,
+/// whatever it is asked through.
+const OWN_DISCOVERY: [&str; 3] = ["getDefinition", "getDefinitions", "getDiscovery"];
+
+/// Whether a PHP file holding `content` may catch the exception a missing
+/// plugin throws, by naming it.
+pub(crate) fn may_catch_missing_plugin(content: &str) -> bool {
+    content.contains("PluginNotFoundException") || content.contains("PluginException")
+}
+
 /// One plugin type: a manager, the subdirectory its plugins live in, and
 /// what they declare themselves with.
 #[derive(Debug, Clone)]
@@ -85,6 +101,12 @@ pub(crate) struct PluginType {
     namespace: String,
     attribute: Option<Atom>,
     annotation: Option<Atom>,
+    /// The manager sets its own discovery, or declares how definitions are
+    /// found, so it may know plugins no class declares.
+    finds_own_way: bool,
+    /// The manager declares its own `createInstance()`, which may take IDs
+    /// no plugin declares.
+    overrides_create_instance: bool,
 }
 
 /// One plugin of a type.
@@ -102,6 +124,12 @@ pub(crate) struct PluginIndex {
     /// The plugins of each manager, by the manager's lowercased name, in a
     /// stable order.
     by_manager: HashMap<String, Vec<Plugin>>,
+    /// The plugin IDs test modules declare, by the manager's lowercased
+    /// name.  No real site enables a test module, so nothing navigates to
+    /// them, but a site's own code may still name one.
+    test_ids: HashMap<String, HashSet<String>>,
+    /// The lowercased managers with a plugin whose ID cannot be read.
+    uncertain: HashSet<String>,
     /// The files whose plugin managers or plugin declarations were read,
     /// which a change to invalidates the index.
     sources: HashSet<String>,
@@ -131,6 +159,88 @@ impl PluginIndex {
             .unwrap_or_default()
     }
 
+    /// Whether `manager` has the plugin `id`, or a base of it for a
+    /// derivative, a test module's included.  Always, when the manager may
+    /// find plugins its own way or has one whose ID cannot be read; `None`
+    /// when `manager` declares no plugin type the project has.
+    pub(crate) fn declares(&self, manager: &str, id: &str) -> Option<bool> {
+        let plugin_type = self
+            .types
+            .iter()
+            .find(|plugin_type| plugin_type.manager.eq_ignore_ascii_case(manager))?;
+        let lower = manager.to_ascii_lowercase();
+        Some(
+            plugin_type.finds_own_way
+                || self.uncertain.contains(&lower)
+                || !self.named(manager, id).is_empty()
+                || self.test_ids.get(&lower).is_some_and(|ids| {
+                    ids.contains(id) || derivative_bases(id).any(|base| ids.contains(base))
+                }),
+        )
+    }
+
+    /// Whether `manager` looks plugins up its own way when asked through
+    /// `method`: it declares its own `createInstance()`.
+    pub(crate) fn looks_up_own_way(&self, manager: &str, method: &str) -> bool {
+        method.eq_ignore_ascii_case("createInstance")
+            && self.types.iter().any(|plugin_type| {
+                plugin_type.manager.eq_ignore_ascii_case(manager)
+                    && plugin_type.overrides_create_instance
+            })
+    }
+
+    /// Add the plugins the declarations `group`, all on one class, make it,
+    /// by the plugin types whose subdirectory it is in.  `attribute_matches`
+    /// tells whether an attribute written on it is a type's attribute.
+    fn add_plugins(
+        &mut self,
+        group: &[PluginDeclarationSite],
+        from_test: bool,
+        attribute_matches: &mut impl FnMut(Atom, Atom) -> bool,
+    ) {
+        let class = group[0].class;
+        let Some(relative) = discovery_relative_name(&class) else {
+            return;
+        };
+        for plugin_type in &self.types {
+            let in_subdir = relative
+                .strip_prefix(plugin_type.namespace.as_str())
+                .is_some_and(|below| below.starts_with('\\'));
+            if !in_subdir {
+                continue;
+            }
+            let by_attribute = plugin_type.attribute.and_then(|target| {
+                group
+                    .iter()
+                    .find(|site| !site.is_annotation && attribute_matches(site.marker, target))
+            });
+            let declared = by_attribute.or_else(|| {
+                let target = plugin_type.annotation?;
+                group.iter().find(|site| {
+                    site.is_annotation
+                        && short_name(&site.marker).eq_ignore_ascii_case(short_name(&target))
+                })
+            });
+            let Some(site) = declared else {
+                continue;
+            };
+            let manager = plugin_type.manager.to_ascii_lowercase();
+            if site.id.is_empty() {
+                self.uncertain.insert(manager);
+            } else if from_test {
+                self.test_ids
+                    .entry(manager)
+                    .or_default()
+                    .insert(site.id.clone());
+            } else {
+                self.by_manager.entry(manager).or_default().push(Plugin {
+                    id: site.id.clone(),
+                    class,
+                });
+            }
+        }
+    }
+
     /// Whether `manager` declares a plugin type.
     fn is_manager(&self, class: &str) -> Option<Atom> {
         self.types
@@ -143,6 +253,44 @@ impl PluginIndex {
 /// Whether the symbol map holds anything the plugin index reads.
 fn feeds_index(map: &SymbolMap) -> bool {
     !map.drupal_plugins.is_empty() || !map.drupal_plugin_managers.is_empty()
+}
+
+/// Whether `class`, or a class between it and the default plugin manager,
+/// declares `method` itself or through a trait it uses.
+fn declares_below_default(class: Atom, method: &str, loader: &ResolvedClassLoader<'_>) -> bool {
+    let mut seen: HashSet<Atom> = HashSet::new();
+    let mut next = Some(class);
+    while let Some(name) = next {
+        if name.eq_ignore_ascii_case(DEFAULT_MANAGER) || !seen.insert(name) {
+            return false;
+        }
+        let Some(info) = loader(Fqn::new(&name)) else {
+            return false;
+        };
+        if declares_with_traits(&info, method, loader, &mut seen) {
+            return true;
+        }
+        next = info.parent_class;
+    }
+    false
+}
+
+/// Whether `info` declares `method`, or a trait it uses, at any depth, does.
+/// An abstract declaration, as a trait that calls the method makes, does
+/// not count.
+fn declares_with_traits(
+    info: &ClassInfo,
+    method: &str,
+    loader: &ResolvedClassLoader<'_>,
+    seen: &mut HashSet<Atom>,
+) -> bool {
+    info.get_method_ci(method)
+        .is_some_and(|declared| !declared.is_abstract)
+        || info.used_traits.iter().any(|name| {
+            seen.insert(*name)
+                && loader(Fqn::new(name))
+                    .is_some_and(|used| declares_with_traits(&used, method, loader, seen))
+        })
 }
 
 /// The part of a plugin class's name below the namespace its extension
@@ -186,6 +334,16 @@ impl Backend {
     /// now `map` (`None` once it is gone), fed it or now would.
     pub(crate) fn note_drupal_plugin_sources(&self, uri: &str, map: Option<&SymbolMap>) {
         let feeds = map.is_none_or(feeds_index);
+        // A test module's file is no declaring file, so it is kept apart.
+        let test_source = map.is_some_and(feeds_index) && self.is_closed_drupal_test_fixture(uri);
+        if test_source != self.drupal.plugin_test_sources.read().contains(uri) {
+            let mut sources = self.drupal.plugin_test_sources.write();
+            if test_source {
+                sources.insert(uri.to_string());
+            } else {
+                sources.remove(uri);
+            }
+        }
         let stale = feeds
             || self
                 .drupal
@@ -216,6 +374,21 @@ impl Backend {
             managers.extend(map.drupal_plugin_managers.iter().cloned());
             declarations.extend(map.drupal_plugins.iter().cloned());
         });
+        let mut test_declarations = Vec::new();
+        let mut test_uris: Vec<String> = self
+            .drupal
+            .plugin_test_sources
+            .read()
+            .iter()
+            .cloned()
+            .collect();
+        test_uris.sort_unstable();
+        for uri in test_uris {
+            if let Some(map) = self.symbol_map_for(&uri) {
+                test_declarations.extend(map.drupal_plugins.iter().cloned());
+            }
+            index.sources.insert(uri);
+        }
         let loader = self.resolved_class_loader_with(&[]);
         let mut subtypes: HashMap<(Atom, &str), bool> = HashMap::new();
         let mut is_a = |class: Atom, ancestor: &'static str| {
@@ -240,6 +413,10 @@ impl Backend {
                     Some(fifth.unwrap_or_else(|| crate::atom::atom(DEFAULT_ANNOTATION))),
                 ),
             };
+            let finds_own_way = site.sets_discovery
+                || OWN_DISCOVERY
+                    .iter()
+                    .any(|method| declares_below_default(site.class, method, &loader));
             index.types.push(PluginType {
                 manager: site.class,
                 namespace: site
@@ -249,6 +426,12 @@ impl Backend {
                     .to_ascii_lowercase(),
                 attribute,
                 annotation,
+                finds_own_way,
+                overrides_create_instance: declares_below_default(
+                    site.class,
+                    "createInstance",
+                    &loader,
+                ),
             });
         }
         index.types.sort_by_key(|a| a.manager);
@@ -266,40 +449,10 @@ impl Backend {
                         .is_some_and(|info| is_subtype_of(&info, &target, &loader))
                 })
         };
-        for group in declarations.chunk_by(|a, b| a.class == b.class) {
-            let class = group[0].class;
-            let Some(relative) = discovery_relative_name(&class) else {
-                continue;
-            };
-            for plugin_type in &index.types {
-                let in_subdir = relative
-                    .strip_prefix(plugin_type.namespace.as_str())
-                    .is_some_and(|below| below.starts_with('\\'));
-                if !in_subdir {
-                    continue;
-                }
-                let by_attribute = plugin_type.attribute.and_then(|target| {
-                    group
-                        .iter()
-                        .find(|site| !site.is_annotation && attribute_matches(site.marker, target))
-                });
-                let declared = by_attribute.or_else(|| {
-                    let target = plugin_type.annotation?;
-                    group.iter().find(|site| {
-                        site.is_annotation
-                            && short_name(&site.marker).eq_ignore_ascii_case(short_name(&target))
-                    })
-                });
-                if let Some(site) = declared {
-                    index
-                        .by_manager
-                        .entry(plugin_type.manager.to_ascii_lowercase())
-                        .or_default()
-                        .push(Plugin {
-                            id: site.id.clone(),
-                            class,
-                        });
-                }
+        let sets = [(declarations, false), (test_declarations, true)];
+        for (declarations, from_test) in &sets {
+            for group in declarations.chunk_by(|a, b| a.class == b.class) {
+                index.add_plugins(group, *from_test, &mut attribute_matches);
             }
         }
         index

@@ -319,26 +319,6 @@ such an implementation can add. A suggestion such as
 
 ---
 
-## DR25. Warn on unknown plugin IDs
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-$fields['total'] = BaseFieldDefinition::create('decimel');
-$block = $this->blockManager->createInstance('acme_order_sumary');
-```
-
-A plugin ID that no plugin of its type declares is a typo or a module the
-site lacks. The plugin manager throws for it, except for widgets and
-formatters, which silently fall back to the field type's default. Report
-one wherever plugin IDs are read (see `src/drupal/plugins.rs`): field types,
-widgets and formatters, constraints, and a plugin manager's
-`createInstance()`. A derivative ID (`system_menu_block:main`) is known
-only at run time, so an ID whose base plugin has a deriver must not
-warn.
-
----
-
 ## DR26. Annotation class names
 
 **Impact: Low-Medium · Complexity: Low-Medium**

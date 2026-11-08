@@ -141,6 +141,8 @@ impl Backend {
         let loaders = self.file_loaders(&file_ctx);
         let _parse_guard = crate::parser::with_parse_cache(content);
         let in_drupal_site = self.is_in_drupal_web_root(uri);
+        let catches_missing_plugin =
+            in_drupal_site && crate::drupal::plugins::may_catch_missing_plugin(content);
 
         with_parsed_program(content, "blade_typed_receiver", |program, content| {
             let mut calls: Vec<ReceiverCall<'_, '_, '_>> = Vec::new();
@@ -203,10 +205,21 @@ impl Backend {
                             };
                             if let Some(manager) = manager {
                                 let mut span = site.to_span(kind);
-                                if let crate::symbol_map::SymbolKind::StringKey { key, .. } =
-                                    &mut span.kind
+                                if let crate::symbol_map::SymbolKind::StringKey {
+                                    key,
+                                    is_optional,
+                                    ..
+                                } = &mut span.kind
                                 {
                                     *key = crate::drupal::plugins::plugin_key(&manager, &site.key);
+                                    // A file that may catch a missing
+                                    // plugin's exception does without the
+                                    // plugin, and so does a manager that
+                                    // looks its plugins up its own way.
+                                    *is_optional |= catches_missing_plugin
+                                        || self
+                                            .drupal_plugin_index()
+                                            .looks_up_own_way(&manager, call.method);
                                 }
                                 confirmed.push(span);
                             }
