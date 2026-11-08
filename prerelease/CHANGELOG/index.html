@@ -6171,6 +6171,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h4 id="tempest">Tempest<a class="headerlink" href="#tempest" title="Permanent link">&para;</a></h4>
 <ul>
+<li><strong>Tempest model property names.</strong> Complete and navigate model properties in typed query builders and model helpers, including forwarded named arguments and array keys. Raw SQL strings keep their existing handling. Contributed by @shuvroroy.</li>
 <li><strong>Tempest routes and their parameters.</strong> Complete and navigate route actions and URI placeholders, including custom route attributes and paths without a leading slash. Renaming an action parameter updates its placeholders and named arguments to <code>uri()</code>. Contributed by @shuvroroy.</li>
 <li><strong>Tempest View completion and navigation.</strong> In a Tempest project, PHP expressions in <code>.view.php</code> templates use imports and <code>@var</code> annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to <code>Tempest\View\view()</code> also complete and navigate. Contributed by @shuvroroy.</li>
 <li><strong>Tempest view data inference.</strong> Templates infer data passed by callers and components, including custom View objects and slot scope. Explicit <code>@var</code> annotations can refine inferred types. Contributed by @shuvroroy.</li>

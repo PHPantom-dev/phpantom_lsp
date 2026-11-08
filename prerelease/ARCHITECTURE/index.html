@@ -1711,6 +1711,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#tempest-model-property-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tempest model property names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3397,6 +3408,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#tempest-model-property-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tempest model property names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3541,7 +3563,7 @@ sit next to.</p>
 <a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>│
 <a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>│   # Templates &amp; shared utilities
 <a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor)
-<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>├── tempest/                # Tempest View expressions, components, and view paths
+<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>├── tempest/                # Tempest templates, routes, and model property names
 <a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>├── template/               # Shared virtual PHP source maps and LSP coordinate translation
 <a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
 <a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>
@@ -4960,6 +4982,13 @@ loads selected targets as their names become known and removes contributions
 when a selector changes. The dynamic wrapper's scalar attributes become
 strings, while objects and arrays enter the inner view's data. Literal <code>:is</code>
 names navigate to components; variables and constants keep PHP navigation.</p>
+<h2 id="tempest-model-property-names">Tempest model property names<a class="headerlink" href="#tempest-model-property-names" title="Permanent link">&para;</a></h2>
+<p>Tempest database property arguments use the shared resolver to read the model
+from a query builder's generic type. Model helpers are recognized by their
+method's declaring trait, so an override keeps its own parameter handling.
+Completion and navigation share the same argument roles and property lookup.
+Composer classifies database support separately from view rendering; requiring
+only the database package does not lower <code>.view.php</code> files as templates.</p>
 
 
 
