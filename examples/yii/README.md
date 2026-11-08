@@ -54,6 +54,13 @@ way a real Yii 3 project declares them.
 - Open `resources/views/blog/index.php`. Hover `$post` inside the loop, or
   complete after `$post->`. The template declares the variables the
   controller passes it with `@var`.
+- In `PostController::index()`, go to the definition of `'posts'` in the
+  array `render()` passes, which lands on its `@var` in
+  `resources/views/blog/index.php`, or hover it for its type. Clear a key to
+  complete the parameters the template declares. A value the declaration does
+  not accept, a key the template has no use for, and a declared parameter
+  the call leaves out are reported. `$urlGenerator` is not one the call has
+  to pass: `config/common/params.php` gives it to every view.
 - In `PostController::index()`, go to the definition of `'index'`. The
   controller's `withViewPath('@views/blog')` and the `@views` alias in
   `config/common/aliases.php` make it `resources/views/blog/index.php`. Clear
@@ -110,6 +117,16 @@ way a real Yii 3 project declares them.
   completes, and is reported when misspelled. The migrator finds the
   migration through the `yiisoft/db-migration` params in
   `config/console/params.php`.
+  In `titlesBy()`, a `yiisoft/db` query names its tables and columns as
+  strings: `'author'` goes to the `createTable()` that creates it, and
+  `'b.title'` to the column of the table the alias `b` stands for, which
+  `Table::BOOK . ' b'` names through a constant the migration names it with
+  too. Hover a column for its type, clear one to complete the columns of the
+  query's tables, and misspell a table or a column to see it reported.
+  `titles()` builds its query over several statements, and the columns the
+  later ones name are read against the table the first one names: `'b.title'`
+  and `'b.author_id'` go to their columns, complete, and are reported when
+  misspelled.
 - In `BookCatalog::shelvedTitle()`, hover `$title`: `getValueByPath()`
   walks `'book.title'` through the entry and into its `Book`, so it is a
   `string`. Go to the definition of `'title'`, which lands on `Book::$title`.

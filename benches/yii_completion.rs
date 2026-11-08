@@ -22,6 +22,7 @@ const COMPOSER: &str = r#"{
     "autoload": { "psr-4": {
         "App\\": "src/",
         "Yiisoft\\ActiveRecord\\": "stubs/active-record/",
+        "Yiisoft\\Db\\": "stubs/db/",
         "Yiisoft\\FormModel\\": "stubs/form-model/",
         "Yiisoft\\Hydrator\\": "stubs/hydrator/",
         "Yiisoft\\Router\\": "stubs/router/",
@@ -50,7 +51,11 @@ const STUBS: &[(&str, &str)] = &[
     ),
     (
         "stubs/active-record/ActiveQueryInterface.php",
-        "<?php\nnamespace Yiisoft\\ActiveRecord;\ninterface ActiveQueryInterface {\n    public function with(array|string ...$with): static;\n    public function one(): array|ActiveRecordInterface|null;\n}\n",
+        "<?php\nnamespace Yiisoft\\ActiveRecord;\ninterface ActiveQueryInterface extends \\Yiisoft\\Db\\Query\\QueryInterface {\n    public function with(array|string ...$with): static;\n    public function one(): array|ActiveRecordInterface|null;\n}\n",
+    ),
+    (
+        "stubs/db/Query/QueryInterface.php",
+        "<?php\nnamespace Yiisoft\\Db\\Query;\ninterface QueryInterface {\n    public function from(array|string $tables): static;\n    public function where(array|string|null $condition, array $params = []): static;\n}\n",
     ),
     (
         "stubs/yii-view-renderer/WebViewRenderer.php",
@@ -149,6 +154,8 @@ final class Catalog
     public function review(Review $review): void
     {
         $review->get('');
+        Review::query()->from('')->one();
+        Review::query()->where(['' => 1])->one();
     }
 }
 "#;
@@ -172,6 +179,11 @@ final class ConsumerController
     {
         $this->viewRenderer->render(__DIR__ . '/');
         return $this->viewRenderer->render('');
+    }
+
+    public function parameters(): object
+    {
+        return $this->viewRenderer->render('action7', ['p']);
     }
 }
 "#;
@@ -297,7 +309,7 @@ fn generate_application() -> Vec<(String, String)> {
             );
             files.push((
                 format!("resources/views/section{c}/action{a}.php"),
-                "<?php\n/** @var \\Yiisoft\\View\\WebView $this */\necho $this->render('_partial');\n"
+                "<?php\n/**\n * @var \\Yiisoft\\View\\WebView $this\n * @var string $title\n * @var int $page\n */\necho $this->render('_partial');\n"
                     .to_string(),
             ));
         }
@@ -557,6 +569,13 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             "render(''",
             "_partial",
         ),
+        (
+            "view_parameter",
+            &view_uri,
+            VIEW_CONSUMER_PHP,
+            "render('action7', ['p'",
+            "page",
+        ),
         ("alias_name", &view_uri, VIEW_CONSUMER_PHP, "'@'", "@views"),
         (
             "asset_file",
@@ -633,6 +652,20 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             &record_uri,
             RECORD_CONSUMER_PHP,
             "$review->get(''",
+            "rating",
+        ),
+        (
+            "query_table",
+            &record_uri,
+            RECORD_CONSUMER_PHP,
+            "from(''",
+            "table3",
+        ),
+        (
+            "query_column",
+            &record_uri,
+            RECORD_CONSUMER_PHP,
+            "where([''",
             "rating",
         ),
         (

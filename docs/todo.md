@@ -35,8 +35,6 @@ contributor even though it's short.
 | TM1 | [Component attribute names navigate to the component's variable](todo/tempest.md#tm1-component-attribute-names-navigate-to-the-components-variable) | Low-Medium | Low |
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
-| Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
-| Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -145,8 +143,6 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | Y9  | [Views a template renders by name](todo/yii.md#y9-views-a-template-renders-by-name) | Medium      | Medium      |
 | Y10 | [The renderer's configured view path](todo/yii.md#y10-the-renderers-configured-view-path) | Medium      | Medium      |
-| Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
-| Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
 
 ## Tempest
 

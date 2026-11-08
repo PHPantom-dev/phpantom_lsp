@@ -18,6 +18,7 @@ use App\Catalog\Author;
 use App\Catalog\Book;
 use App\Catalog\BookCatalog;
 use App\Catalog\Review;
+use App\Catalog\Table;
 use App\Migration\M251108000000CreateCatalog;
 use App\Blog\Post;
 use App\Blog\PostRepositoryInterface;
@@ -166,6 +167,10 @@ check("The 'index' view is resources/views/blog/index.php", $renderer->getViewPa
 check("'_card' is the file beside index.php", is_file(__DIR__ . '/resources/views/blog/_card.php'));
 check("__DIR__ . '/template' is template.php beside the home page action", is_file(__DIR__ . '/src/Web/HomePage/template.php'));
 
+preg_match_all('/@var \S+ \$(\w+)/', (string) file_get_contents(__DIR__ . '/resources/views/blog/index.php'), $declared);
+$shared = array_keys($params['yiisoft/view']['parameters']);
+check("index.php declares 'posts' and 'title' besides \$this and what every view is given", array_values(array_diff($declared[1], ['this', ...$shared])) === ['posts', 'title']);
+
 $html = $renderer->renderPartialAsString('index', ['posts' => $repository->latest(), 'title' => 'Blog']);
 check("index.php renders '_card' for each post", substr_count($html, '<article>') === 2);
 check("index.php links each post through generate('blog/post', ...)", str_contains($html, 'href="/blog/hello-yii"'));
@@ -283,6 +288,11 @@ check("Review's attributes are the columns the migration creates", (new Review()
 $review = Review::query()->where(['id' => 1])->one();
 check("get('rating') reads the column of Review's table", $review instanceof Review && $review->get('rating') === 5);
 check('stars() reads the rating', $review instanceof Review && $catalog->stars($review) === '*****');
+
+check("Table::BOOK names the table the migration creates", $db->getTableSchema(Table::BOOK) !== null);
+check("Table::AUTHOR names the table the migration creates", $db->getTableSchema(Table::AUTHOR) !== null);
+check("titlesBy() reads 'b.title' of the books 'a.name' wrote, in order", $catalog->titlesBy($db, 'Ursula') === ['Earthsea', 'The Dispossessed']);
+check("titles() reads 'b.author_id' in a later statement against the alias the first gives", $catalog->titles($db, 1) === ['Earthsea', 'The Dispossessed'] && $catalog->titles($db, 2) === []);
 
 $authors = $catalog->authorsWithBooks();
 $author = $authors[0] ?? null;

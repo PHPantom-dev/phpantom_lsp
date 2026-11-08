@@ -406,6 +406,22 @@ impl Backend {
                 }
                 ("Route", detail)
             }
+            // A parameter is shown by its name, with the type the template
+            // declares it with.
+            StringKeyKind::YiiViewParameter => {
+                let (view, name) = crate::yii::view_parameters::split_parameter_key(key);
+                shown = name;
+                let detail = match self.yii_view_parameter_type(key) {
+                    Some(ty) => format!(
+                        "`{}` in `{}`",
+                        crate::diagnostics::helpers::shown_type(&ty),
+                        self.yii_view_display(view)
+                    ),
+                    None if view.is_empty() => "Shared by every view".to_string(),
+                    None => format!("Not declared by `{}`", self.yii_view_display(view)),
+                };
+                ("View parameter", detail)
+            }
             // An argument is shown by its name, under the paths that
             // declare it.
             StringKeyKind::YiiRouteArgument => {

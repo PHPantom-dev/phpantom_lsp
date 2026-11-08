@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Catalog;
 
 use Yiisoft\Arrays\ArrayHelper;
+use Yiisoft\Db\Connection\ConnectionInterface;
+use Yiisoft\Db\Query\Query;
 
 /**
  * Reads the catalog through the Active Records in this directory.
@@ -74,5 +76,46 @@ final class BookCatalog
     {
         $title = ArrayHelper::getValueByPath($entry, 'book.title');
         return $title . ' on shelf ' . $entry['shelf'];
+    }
+
+    /**
+     * Try: the query names its tables and columns as strings. Go to the
+     * definition of 'title' in 'b.title', which lands on its column in
+     * src/Migration/M251108000000CreateCatalog.php, or of 'author', which
+     * lands on the createTable() call. 'b' is the alias the query gives the
+     * table Table::BOOK names, which is read from the constant, and the
+     * migration names the table with the same constant. Hover a column for
+     * its type, clear one to complete the columns of the tables the query
+     * reads from, type 'a.' to complete those of author alone, or misspell
+     * one to see it reported.
+     *
+     * @return list<mixed>
+     */
+    public function titlesBy(ConnectionInterface $db, string $author): array
+    {
+        return (new Query($db))
+            ->select('b.title')
+            ->from(Table::BOOK . ' b')
+            ->innerJoin('author a', 'a.id = b.author_id')
+            ->where(['a.name' => $author])
+            ->orderBy(['b.title' => SORT_ASC])
+            ->column();
+    }
+
+    /**
+     * Try: the query is built up over several statements. 'b' is the alias
+     * the first one gives the table Table::BOOK names, so go to the
+     * definition of 'title' in 'b.title' inside the if, hover it, clear it
+     * to complete the columns of book, or misspell it to see it reported.
+     *
+     * @return list<mixed>
+     */
+    public function titles(ConnectionInterface $db, ?int $authorId = null): array
+    {
+        $query = (new Query($db))->select('b.title')->from(Table::BOOK . ' b');
+        if ($authorId !== null) {
+            $query->andWhere(['b.author_id' => $authorId]);
+        }
+        return $query->orderBy(['b.title' => SORT_ASC])->column();
     }
 }

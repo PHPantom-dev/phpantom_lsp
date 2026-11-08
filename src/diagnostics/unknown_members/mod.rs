@@ -29,7 +29,8 @@
 //!   trait method.  Traits are incomplete by nature — they expect to
 //!   be mixed into classes that provide the missing members.  Flagging
 //!   accesses that only exist on host classes produces a high rate of
-//!   false positives.
+//!   false positives.  A chain from them (`$this->manager->x()`) is
+//!   checked once it resolves to a class other than the trait.
 //!
 //! ## Performance: subject resolution cache
 //!
@@ -298,6 +299,9 @@ impl UnknownMemberPass<'_> {
         outcome: &SubjectOutcome,
         out: &mut Vec<Diagnostic>,
     ) -> MemberCheckResult {
+        if access.trait_self_chain && !self.trait_chain_is_known(access, outcome) {
+            return MemberCheckResult::Ok;
+        }
         if access.yii_attribute {
             if let SubjectOutcome::Resolved { classes, .. } = outcome {
                 self.report_unknown_yii_attribute(access, classes, out);
@@ -442,6 +446,25 @@ impl UnknownMemberPass<'_> {
                 branches,
                 types,
             } => self.report_on_resolved(access, classes, branches, types, out),
+        }
+    }
+
+    /// Whether a chain rooted at a trait's own `$this` / `self` /
+    /// `static` / `parent` resolved to something its members can be
+    /// judged on.  A chain that lands back on the trait (a fluent
+    /// `return $this`) only knows the members the trait declares, not
+    /// the ones its hosts provide, and one the type engine could not
+    /// answer for may rest on a host member it does not see.
+    fn trait_chain_is_known(&self, access: &MemberAccessSite, outcome: &SubjectOutcome) -> bool {
+        match outcome {
+            SubjectOutcome::Mixed | SubjectOutcome::Untyped => false,
+            SubjectOutcome::Resolved { classes, .. } => {
+                let Some(trait_fqn) = access.current_class.map(|c| c.fqn()) else {
+                    return true;
+                };
+                !classes.iter().any(|c| c.fqn() == trait_fqn)
+            }
+            SubjectOutcome::Scalar(_) | SubjectOutcome::UnresolvableClass(_) => true,
         }
     }
 

@@ -268,6 +268,18 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Yii view parameters ─────────────────────────────────
+        // `render('blog/post', ['|' => …])`, from the template's `@var`
+        // block.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_yii_view_parameter_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
         // ── CSS classes ─────────────────────────────────────────
         // `Html::div()->class('card |')`, a name at a time.
         if matches!(string_ctx, StringContext::InStringLiteral)
@@ -452,6 +464,17 @@ impl Backend {
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_yii_active_record_completion(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
+        // ── Yii query tables and columns ────────────────────────
+        // `$query->from('|')` names a table the migrations create, and
+        // `->where(['|' => …])` a column of the query's tables.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_query_completion(uri, content, position, ctx, code)
         {
             return Some(response);
         }

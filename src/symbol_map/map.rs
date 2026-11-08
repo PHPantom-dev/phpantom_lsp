@@ -363,6 +363,13 @@ pub(crate) struct SymbolMap {
     /// The relations the file's Yii Active Record calls name, in source
     /// order.  Empty for every file that names none.
     pub yii_relations: Vec<YiiRelationSite>,
+    /// The file's `yiisoft/db` query chains that name tables or columns,
+    /// each outer chain before the chains its arguments hold.  Empty for
+    /// every file that writes none.
+    pub yii_queries: Vec<YiiQuerySite>,
+    /// The table and column names those chains write, chain by chain in
+    /// the same order.
+    pub yii_query_names: Vec<YiiQueryName>,
     /// The DQL identification variables the file's queries and query
     /// builders declare, with what each stands for.  Empty for every file
     /// that declares none.
@@ -388,6 +395,10 @@ pub(crate) struct SymbolMap {
     /// class that is one, or a service tagged `twig.loader`.  Such a loader
     /// can serve any template name, so no name can be told missing.
     pub declares_twig_loader: bool,
+    /// Whether the file sets parameters every Yii view shares in a way that
+    /// cannot be read (`setParameters($parameters)`), so that any name could
+    /// be one of them.
+    pub sets_unread_yii_view_parameters: bool,
     /// The Symfony routes the file loads from elsewhere, and the ones it
     /// declares in a way that cannot be read, including every route of a
     /// kernel that loads them itself or a router configured to load them

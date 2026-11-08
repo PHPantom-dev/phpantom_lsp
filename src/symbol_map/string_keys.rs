@@ -162,6 +162,11 @@ pub(crate) enum StringKeyKind {
     /// The directory of views a Yii renderer's `withViewPath()` gives it,
     /// keyed by the path it names, alias and all.
     YiiViewPath,
+    /// A parameter a Yii render call passes its view, `'post'` in
+    /// `render('blog/post', ['post' => $post])`, keyed by the view as well
+    /// as the name (see `yii::view_parameters::parameter_key`).  Declared by
+    /// the `@var` block the template opens with.
+    YiiViewParameter,
     /// A file a Yii asset bundle's `$css` or `$js` lists, keyed by the path
     /// it names under the bundle's `$sourcePath` (or `$basePath`), alias
     /// and all (see `yii::assets`).
@@ -332,6 +337,7 @@ impl StringKeyKind {
             | Self::TwigVariable => KeyFramework::Twig,
             Self::YiiView
             | Self::YiiViewPath
+            | Self::YiiViewParameter
             | Self::YiiAssetFile
             | Self::YiiRoute
             | Self::YiiRouteArgument
@@ -968,6 +974,72 @@ pub(crate) struct YiiRelationSite {
     pub path: Atom,
 }
 
+/// A `yiisoft/db` query chain that names tables or columns (see
+/// [`crate::yii::queries`]): `$query->from('post p')->where(['p.id' => 1])`.
+#[derive(Debug, Clone)]
+pub(crate) struct YiiQuerySite {
+    /// The byte range of the whole chain, which completion finds the query
+    /// it is typing in by.
+    pub start: u32,
+    pub end: u32,
+    /// The receiver of the chain's first call that takes a table or a
+    /// column: a query, or an Active Record query for a record.
+    pub subject: crate::symbol_map::SubjectText,
+    /// The tables `from()` and the joins name, in the order they are named.
+    pub tables: Vec<YiiQueryTable>,
+    /// Whether the chain sets its `FROM`, which replaces the table of the
+    /// record an Active Record query is for.
+    pub sets_from: bool,
+    /// The alias an Active Record query's `alias()` gives the record's
+    /// table.
+    pub alias: Option<Atom>,
+    /// Whether the chain takes rows from a table it does not name (a
+    /// subquery, an expression, a relation `joinWith()` joins), so that a
+    /// column not qualified by a table may be one of its columns.
+    pub open: bool,
+}
+
+/// A table a `yiisoft/db` query reads from or joins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct YiiQueryTable {
+    pub name: YiiTableName,
+    /// The alias the query gives it (`p` in `'post p'`).
+    pub alias: Option<Atom>,
+}
+
+/// How a query writes a table's name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum YiiTableName {
+    /// As a string, without the `{{%…}}` that marks the table prefix.
+    Literal(Atom),
+    /// As a class constant that holds it (`Table::POST`): the class, fully
+    /// qualified, and the constant.
+    Constant { class: Atom, constant: Atom },
+}
+
+/// A table or column name a `yiisoft/db` query writes as a string.
+#[derive(Debug, Clone)]
+pub(crate) struct YiiQueryName {
+    /// The byte range of the name, without the table qualifying a column.
+    pub start: u32,
+    pub end: u32,
+    /// The query, as an index into [`SymbolMap::yii_queries`].
+    ///
+    /// [`SymbolMap::yii_queries`]: crate::symbol_map::SymbolMap::yii_queries
+    pub query: u32,
+    pub kind: YiiQueryNameKind,
+}
+
+/// What a [`YiiQueryName`] names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum YiiQueryNameKind {
+    /// A table, in `from()` or a join.
+    Table,
+    /// A column, with the alias or table qualifying it (`p` in
+    /// `'p.status'`).
+    Column { qualifier: Option<Atom> },
+}
+
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
 /// A route a file declares, with what its name alone does not say: the path
@@ -1255,6 +1327,9 @@ pub(crate) enum ReceiverClass {
     /// A Yii view renderer, whose `withViewPath()` takes the directory its
     /// views are named relative to.
     YiiViewPath,
+    /// What renders a Yii view again, for the parameters its render call
+    /// passes after the view's name.
+    YiiViewParameters,
     /// A Yii HTML tag, whose `class()` and `addClass()` take CSS class
     /// names.
     HtmlTag,
@@ -1417,6 +1492,12 @@ impl ReceiverClass {
                 (YII_VIEW_RENDERER, YiiView),
                 (YII_LEGACY_VIEW_RENDERER, YiiView),
                 (YII_VIEW, YiiView),
+            ],
+            Self::YiiViewParameters => &[
+                (YII_WEB_VIEW_RENDERER, StringKeyKind::YiiViewParameter),
+                (YII_VIEW_RENDERER, StringKeyKind::YiiViewParameter),
+                (YII_LEGACY_VIEW_RENDERER, StringKeyKind::YiiViewParameter),
+                (YII_VIEW, StringKeyKind::YiiViewParameter),
             ],
             Self::YiiViewPath => &[
                 (YII_WEB_VIEW_RENDERER, StringKeyKind::YiiViewPath),
