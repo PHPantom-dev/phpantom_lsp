@@ -1294,17 +1294,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#y7-render-parameters-against-the-templates-var-list" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y7. Render parameters against the template's <code>@var</code> list
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1346,8 +1335,10 @@ queries name navigate, complete, and are checked, the columns of a record
 without properties read from the project's migrations, and so do the
 properties form fields and hydration maps name, and the tables and
 columns <code>yiisoft/db</code> queries name, read against those migrations. The key
-paths <code>ArrayHelper</code> reads complete, navigate, and are typed. What is left
-is below.</p>
+paths <code>ArrayHelper</code> reads complete, navigate, and are typed, and the
+parameters a render call passes its view complete, navigate, and are
+checked against the <code>@var</code> block the template opens with. What is left is
+below.</p>
 <p>The items below are what the Yii team asked for in
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/discussions/505">discussion #505</a>.
 <code>examples/yii/</code> (generated from <code>yiisoft/app</code>) is the playground, with a
@@ -1413,31 +1404,6 @@ the DI configuration gives the renderer, from
 it, so a name such a class renders does not navigate, complete, or get
 reported. Read the value from the merged params (<code>src/yii/params.rs</code>),
 and use it as the base wherever the class gives none.</p>
-<hr />
-<h2 id="y7-render-parameters-against-the-templates-var-list">Y7. Render parameters against the template's <code>@var</code> list<a class="headerlink" href="#y7-render-parameters-against-the-templates-var-list" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// Action.php</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">return $this-&gt;viewRenderer-&gt;render(__DIR__ . '/template', ['form' =&gt; $form]);</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">// template.php</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">/**</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x"> * @var WebView $this</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x"> * @var UrlGenerator $urlGenerator</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x"> * @var Form $form</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x"> */</span>
-</code></pre></div>
-<p>Yii templates declare the variables they expect in a <code>@var</code> block at the
-top, and <code>yiisoft/demo-blog</code> does this in every template. That block is
-the template's signature, so the <code>render()</code> call can be checked against
-it: complete the parameter array's keys from it, navigate from a key to
-its <code>@var</code>, report a value whose type does not match, and report a key
-the template does not declare.</p>
-<p>A declared variable that the call does not pass is not always an error:
-the view's shared parameters (<code>WebView::setParameters()</code> in the DI
-config, or <code>parameters</code> under <code>params['yiisoft/view']</code>) and the
-renderer's injections (<code>CsrfViewInjection</code> gives <code>$csrf</code>) supply the
-rest, and the layout receives its own. Collect those before reporting a
-missing one.</p>
 
 
 

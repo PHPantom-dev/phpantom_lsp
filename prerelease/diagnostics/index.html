@@ -2204,6 +2204,21 @@ expects to be declared somewhere, but is not, is always <code>invalid_</code>.</
 <td>A view path directory that does not exist.</td>
 </tr>
 <tr>
+<td><code>invalid_yii_view_parameter</code></td>
+<td>Warning</td>
+<td>A parameter passed to a view whose template neither declares it in its <code>@var</code> block nor reads it.</td>
+</tr>
+<tr>
+<td><code>missing_yii_view_parameter</code></td>
+<td>Warning</td>
+<td>A parameter a template declares in its <code>@var</code> block that the render does not pass and no view is given otherwise.</td>
+</tr>
+<tr>
+<td><code>type_mismatch_yii_view_parameter</code></td>
+<td>Error</td>
+<td>A parameter passed to a view whose type the template's <code>@var</code> declaration does not accept.</td>
+</tr>
+<tr>
 <td><code>invalid_yii_asset</code></td>
 <td>Warning</td>
 <td>An asset bundle's <code>$css</code> or <code>$js</code> file that is not in the bundle's directory.</td>
