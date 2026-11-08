@@ -200,6 +200,16 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Yii params keys ─────────────────────────────────────
+        // `$params['application']['|']` in a configuration file.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_param_completion(uri, content, position, code)
+        {
+            return Some(response);
+        }
+
         // ── Symfony and Yii names ───────────────────────────────
         // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`,
         // `$translator->trans('|')`, in any project that uses Twig,

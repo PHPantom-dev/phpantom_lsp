@@ -969,6 +969,32 @@ pub(crate) fn seed_superglobals(scope: &mut ScopeState) {
     }
 }
 
+/// Seed what a file's top level starts with: the superglobals, and the
+/// variables whatever runs the file hands it (see
+/// [`handed_variable_type`]).
+pub(crate) fn seed_top_level(scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    seed_superglobals(scope);
+    if let Some(ty) = handed_variable_type(YII_PARAMS, ctx) {
+        scope.set(YII_PARAMS, vec![ResolvedType::from_type_string(ty)]);
+    }
+}
+
+/// The variable `yiisoft/config` hands a Yii configuration file the merged
+/// params in.
+const YII_PARAMS: &str = "$params";
+
+/// The type of the variable `name` that whatever runs the file being walked
+/// hands its top level, when that is known: the `$params` `yiisoft/config`
+/// hands a Yii configuration file.
+pub(crate) fn handed_variable_type(name: &str, ctx: &ForwardWalkCtx<'_>) -> Option<PhpType> {
+    if name != YII_PARAMS || memchr::memmem::find(ctx.file.content.as_bytes(), b"$params").is_none()
+    {
+        return None;
+    }
+    let backend = ctx.file.backend?;
+    backend.yii_params_type(ctx.file.uri?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

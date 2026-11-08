@@ -42,10 +42,9 @@ contributor even though it's short.
 | Y12 | [Missing layouts and view directories](todo/yii.md#y12-missing-layouts-and-view-directories) | Low-Medium  | Low-Medium  |
 | Y16 | [Asset bundle file paths](todo/yii.md#y16-asset-bundle-file-paths) | Low         | Low-Medium  |
 | Y19 | [Aliases in workspace symbols and folding](todo/yii.md#y19-aliases-in-workspace-symbols-and-folding) | Low         | Low-Medium  |
-| Y6  | [`$params` keys in configuration](todo/yii.md#y6-params-keys-in-configuration) | Medium      | Medium      |
 | Y11 | [Check what a DI definition passes, not only what it names](todo/yii.md#y11-check-what-a-di-definition-passes-not-only-what-it-names) | Medium      | Medium      |
 | Y13 | [Translation message IDs](todo/yii.md#y13-translation-message-ids) | Medium      | Medium      |
-| Y14 | [Event listeners in the events configuration](todo/yii.md#y14-event-listeners-in-the-events-configuration) (builds on Y6) | Medium      | Medium      |
+| Y14 | [Event listeners in the events configuration](todo/yii.md#y14-event-listeners-in-the-events-configuration) | Medium      | Medium      |
 | Y15 | [Property names in hydrator attributes and form fields](todo/yii.md#y15-property-names-in-hydrator-attributes-and-form-fields) | Low-Medium  | Medium      |
 | Y17 | [Key paths in `yiisoft/arrays`](todo/yii.md#y17-key-paths-in-yiisoftarrays) | Low         | Medium      |
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
@@ -163,12 +162,11 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| Y6  | [`$params` keys in configuration](todo/yii.md#y6-params-keys-in-configuration) | Medium      | Medium      |
 | Y9  | [Views a template renders by name](todo/yii.md#y9-views-a-template-renders-by-name) | Medium      | Medium      |
-| Y10 | [The renderer's configured view path](todo/yii.md#y10-the-renderers-configured-view-path) (builds on Y6) | Medium      | Medium      |
+| Y10 | [The renderer's configured view path](todo/yii.md#y10-the-renderers-configured-view-path) | Medium      | Medium      |
 | Y11 | [Check what a DI definition passes, not only what it names](todo/yii.md#y11-check-what-a-di-definition-passes-not-only-what-it-names) | Medium      | Medium      |
 | Y13 | [Translation message IDs](todo/yii.md#y13-translation-message-ids) | Medium      | Medium      |
-| Y14 | [Event listeners in the events configuration](todo/yii.md#y14-event-listeners-in-the-events-configuration) (builds on Y6) | Medium      | Medium      |
+| Y14 | [Event listeners in the events configuration](todo/yii.md#y14-event-listeners-in-the-events-configuration) | Medium      | Medium      |
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
 | Y12 | [Missing layouts and view directories](todo/yii.md#y12-missing-layouts-and-view-directories) | Low-Medium  | Low-Medium  |
 | Y15 | [Property names in hydrator attributes and form fields](todo/yii.md#y15-property-names-in-hydrator-attributes-and-form-fields) | Low-Medium  | Medium      |

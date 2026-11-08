@@ -478,6 +478,15 @@ impl Backend {
             // Strings start with an `@` for many reasons besides an alias,
             // so only a declared one is shown.
             StringKeyKind::YiiAlias => ("Alias", self.yii_alias_detail(key)?),
+            // A params key is keyed by the whole path the read names.
+            StringKeyKind::YiiParam => {
+                view_path = crate::yii::params::param_key_display(key);
+                shown = &view_path;
+                let detail = self
+                    .yii_param_detail(key)
+                    .unwrap_or_else(|| "No params file declares it".to_string());
+                ("Param", detail)
+            }
             StringKeyKind::WordPressHook => ("Hook", self.wordpress_hook_detail(key)),
             StringKeyKind::DrupalRenderElement => {
                 ("Render element", self.drupal_render_element_detail(key))

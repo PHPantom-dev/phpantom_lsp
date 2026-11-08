@@ -2650,6 +2650,7 @@ mod tests {
                 drupal: false,
                 twig: true,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         )
@@ -3370,6 +3371,7 @@ mod tests {
                 drupal: false,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );
@@ -3394,6 +3396,7 @@ mod tests {
                 drupal: false,
                 twig: true,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );
@@ -3424,6 +3427,7 @@ mod tests {
                 drupal: false,
                 twig: true,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );

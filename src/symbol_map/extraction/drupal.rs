@@ -2503,6 +2503,7 @@ class SettingsForm {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );
@@ -2567,6 +2568,7 @@ class SettingsForm {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );
@@ -2649,6 +2651,7 @@ class Note {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );
@@ -2702,6 +2705,7 @@ class Note {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );
@@ -2748,6 +2752,7 @@ class Note {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );
@@ -2837,6 +2842,7 @@ trait LayoutRoutes {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );
@@ -2924,6 +2930,7 @@ abstract class Base {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );
@@ -3066,6 +3073,7 @@ final class About {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         );
@@ -3163,6 +3171,7 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
                     drupal: true,
                     twig: false,
                     doctrine: false,
+                    yii_params: false,
                 },
                 None,
                 file,
@@ -3280,6 +3289,7 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
                 drupal,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             None,
         )

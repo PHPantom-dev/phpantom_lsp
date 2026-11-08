@@ -23,6 +23,11 @@ const COMPOSER: &str = r#"{
         "Yiisoft\\Router\\": "stubs/router/",
         "Yiisoft\\Yii\\View\\Renderer\\": "stubs/yii-view-renderer/",
         "Yiisoft\\View\\": "stubs/view/"
+    } },
+    "extra": { "config-plugin": {
+        "params": "config/common/params.php",
+        "di": "config/di/*.php",
+        "routes": "config/routes.php"
     } }
 }"#;
 
@@ -143,6 +148,7 @@ return [
         '__construct()' => ['g' => 1],
         'gen' => [],
     ],
+    'aliases' => $params['yiisoft/aliases']['a'],
 ];
 "#;
 
@@ -377,6 +383,13 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             DI_CONSUMER_PHP,
             "['g'",
             "generator",
+        ),
+        (
+            "params_key",
+            &di_uri,
+            DI_CONSUMER_PHP,
+            "['yiisoft/aliases']['a'",
+            "aliases",
         ),
     ];
 

@@ -186,7 +186,11 @@ pub(super) fn extract_from_expression<'a>(
         // ── Binary operations ──
         Expression::Binary(bin) => {
             record_morph_column_comparison(bin, ctx.content, &mut ctx.morph_column_sites);
+            let lhs_spans = ctx.spans.len();
             extract_from_expression(bin.lhs, ctx, scope_start);
+            if ctx.yii_params && bin.operator.is_null_coalesce() {
+                mark_yii_param_reads_optional(lhs_spans, ctx);
+            }
             // Tag the RHS of `instanceof` with the Instanceof context.
             if bin.operator.is_instanceof()
                 && let Expression::Identifier(ident) = bin.rhs
@@ -264,6 +268,9 @@ pub(super) fn extract_from_expression<'a>(
 
         // ── Array access ──
         Expression::ArrayAccess(access) => {
+            if ctx.yii_params {
+                record_yii_param_read(access, ctx);
+            }
             extract_from_expression(access.array, ctx, scope_start);
             // An index that is still a bare `Identifier` can only have come
             // from the unquoted offset of a simple interpolation

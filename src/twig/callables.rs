@@ -150,6 +150,7 @@ fn read_extension_file(uri: &str, content: &str) -> Vec<TwigCallable> {
             drupal: false,
             twig: true,
             doctrine: false,
+            yii_params: false,
         },
         None,
         crate::drupal::hooks::DrupalFile::Other,

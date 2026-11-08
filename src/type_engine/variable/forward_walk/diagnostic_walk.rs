@@ -235,8 +235,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
 
     let mut top_level_scope = ScopeState::new();
 
-    // Seed superglobals for top-level code.
-    seed_superglobals(&mut top_level_scope);
+    seed_top_level(&mut top_level_scope, &ctx);
 
     walk_top_level_block(statements, default_class, diag_ctx, &mut top_level_scope);
 }

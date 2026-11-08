@@ -190,6 +190,7 @@ fn read_php_file(uri: &str, content: &str) -> SymbolMap {
             drupal: false,
             twig: false,
             doctrine: false,
+            yii_params: false,
         },
         None,
         crate::drupal::hooks::DrupalFile::Other,

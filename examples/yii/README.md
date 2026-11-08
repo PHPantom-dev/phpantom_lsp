@@ -48,6 +48,11 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `config/common/aliases.php`, or hover it for the path it stands for. The
   rest of the string, `/main`, links to the `assets/main` directory, and an
   `@` typed in any string completes the declared aliases.
+- Open `config/common/di/application.php`. Go to the definition of `'name'` in
+  `$params['application']['name']`, which lands on its entry in
+  `config/common/application.php`, or hover it for the type of its value.
+  Clear a key to complete the ones the params files declare beside it, and
+  misspell one to see it reported.
 
 ## Getting started
 

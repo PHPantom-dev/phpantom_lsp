@@ -4,11 +4,12 @@ Known gaps and missing features in PHPantom's Yii support. Yii 3 is
 built from small, typed components with little magic, so the generic
 engine already types most of it. On top of that, route names, route
 arguments, view names, and the members and arguments DI definitions name
-complete, navigate, and are checked, and path aliases navigate to their
-declarations. What is still missing is the navigation between the rest
-of the names Yii keeps in configuration (`$params` keys, events,
-translations) and the code and files they point to, and checking the
-values a DI definition passes rather than only the names it uses.
+complete, navigate, and are checked, path aliases navigate to their
+declarations, and the `$params` keys a configuration file reads complete,
+navigate, are checked, and are typed. What is still missing is the
+navigation between the rest of the names Yii keeps in configuration
+(events, translations) and the code and files they point to, and checking
+the values a DI definition passes rather than only the names it uses.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).
@@ -32,30 +33,6 @@ within the same impact tier.
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
-
----
-
-## Y6. `$params` keys in configuration
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-// config/common/di/application.php
-'name' => $params['application']['name'],
-```
-
-`yiisoft/config` hands every config file a `$params` array merged from
-the `params` group (`config/common/params.php`, the web or console
-file, and the environment's override). Every app generated from
-`yiisoft/app` reads it in its DI files. Complete the keys at each level,
-navigate from a key to the entry that declares it (the last file in
-merge order wins), type the read as the declared value rather than
-`mixed`, and report a key no params file declares. The merge order
-comes from `yiisoft/config`: the project's `configuration.php` lists the
-groups and the files in each, and packages contribute their own through
-the `config-plugin` of their `composer.json`, which `installed.json`
-repeats (`src/yii/definitions.rs` reads the `di` groups from there
-already). Read that statically rather than running the merge.
 
 ---
 
@@ -85,7 +62,7 @@ template makes, and fall back to its directory when nothing renders it.
 
 ## Y10. The renderer's configured view path
 
-**Impact: Medium · Complexity: Medium** (builds on Y6)
+**Impact: Medium · Complexity: Medium**
 
 ```php
 // config/common/params.php
@@ -98,8 +75,8 @@ A class that never calls `withViewPath()` renders against the view path
 the DI configuration gives the renderer, from
 `params['yiisoft/yii-view-renderer']['viewPath']`. PHPantom does not read
 it, so a name such a class renders does not navigate, complete, or get
-reported. Read the value from the params the same way Y6 does, and use
-it as the base wherever the class gives none.
+reported. Read the value from the merged params (`src/yii/params.rs`),
+and use it as the base wherever the class gives none.
 
 ---
 
@@ -183,7 +160,7 @@ none of that name, or when its first parameter cannot take the event.
 Go-to-implementation and a CodeLens on an event class should list the
 listeners the configuration attaches to it, the installed packages'
 included. The groups come from `configuration.php` and the packages'
-`config-plugin`, the same merge plan Y6 reads.
+`config-plugin`, the same merge plan `src/yii/params.rs` reads.
 
 ---
 

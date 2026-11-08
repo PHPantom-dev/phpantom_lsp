@@ -401,6 +401,7 @@ mod tests {
                 drupal: false,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             Some(std::path::Path::new("/p")),
         )

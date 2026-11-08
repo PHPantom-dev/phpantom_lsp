@@ -439,7 +439,7 @@ pub(crate) fn top_level_scope_for_globals<'b>(
     );
     walked_scope(ctx, span, || {
         let mut scope = ScopeState::new();
-        seed_superglobals(&mut scope);
+        seed_top_level(&mut scope, ctx);
         walk_top_level(&statements, &mut scope, ctx);
         scope
     })

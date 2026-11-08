@@ -119,6 +119,7 @@ pub(crate) fn hook_firings(content: &str) -> Vec<Firing> {
             drupal: false,
             twig: false,
             doctrine: false,
+            yii_params: false,
         },
         None,
         crate::drupal::hooks::DrupalFile::Other,

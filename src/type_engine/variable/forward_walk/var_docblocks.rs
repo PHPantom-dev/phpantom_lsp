@@ -170,7 +170,7 @@ pub(crate) fn try_process_inline_var_override<'b>(
             if skip_var.as_deref() == Some(var_name.as_str()) {
                 continue;
             }
-            let resolved = resolve_type_to_resolved_types(php_type, ctx);
+            let resolved = declared_var_types(var_name, php_type, scope, ctx);
             scope.set(var_name, resolved);
         }
 
@@ -316,13 +316,37 @@ fn apply_var_docblock_stack(
             if !applies(var_name) || declared.iter().any(|seen| seen == var_name) {
                 continue;
             }
-            let resolved = resolve_type_to_resolved_types(php_type, ctx);
+            let resolved = declared_var_types(var_name, php_type, scope, ctx);
             scope.set(var_name, resolved);
             declared.push(var_name.clone());
             applied = true;
         }
     }
     applied
+}
+
+/// The types a `@var` tag declaring `var_name` as `php_type` gives it.
+///
+/// A variable whatever runs the file hands it (see
+/// [`handed_variable_type`](super::assignment::handed_variable_type)) is
+/// declared by the type the file expects of it, which is usually broader
+/// than what it is handed: a Yii configuration file declares its
+/// `@var array $params`.  While it still holds what it was handed, that is
+/// kept when the tag allows it.
+fn declared_var_types(
+    var_name: &str,
+    php_type: &PhpType,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ResolvedType> {
+    if let [held] = scope.get(var_name)
+        && let Some(handed) = super::assignment::handed_variable_type(var_name, ctx)
+        && held.type_string == handed
+        && handed.is_subtype_of(php_type)
+    {
+        return vec![held.clone()];
+    }
+    resolve_type_to_resolved_types(php_type, ctx)
 }
 
 /// Apply `/** @var Type $var */` docblocks that precede a statement

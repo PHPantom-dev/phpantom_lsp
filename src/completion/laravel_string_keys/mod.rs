@@ -33,7 +33,9 @@ pub(crate) use context::{ArgumentSlot, attribute_class_start, scalar_argument_at
 /// names is what it should look like.
 pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
-        StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::Property,
+        StringKeyKind::Config | StringKeyKind::ConfigResource(_) | StringKeyKind::YiiParam => {
+            CompletionItemKind::Property
+        }
         StringKeyKind::View
         | StringKeyKind::TempestView { .. }
         | StringKeyKind::TwigTemplate
@@ -250,6 +252,9 @@ impl Backend {
             // Any string can start with an alias, so the names are offered
             // wherever one is typed (`crate::completion::yii_aliases`).
             StringKeyKind::YiiAlias => Arc::new([]),
+            // The keys of a params read are offered a level at a time, under
+            // the keys read before it (`crate::completion::yii_params`).
+            StringKeyKind::YiiParam => Arc::new([]),
             // A path is completed a directory at a time from the files on
             // disk (see `try_laravel_string_key_completion_inner`).
             StringKeyKind::Asset | StringKeyKind::ViteAsset => Arc::new([]),

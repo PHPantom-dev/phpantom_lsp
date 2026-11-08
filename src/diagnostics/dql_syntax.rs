@@ -641,6 +641,7 @@ fn read_dql_builder_methods(uri: &str, content: &str) -> SymbolMap {
             drupal: false,
             twig: false,
             doctrine: true,
+            yii_params: false,
         },
         None,
         crate::drupal::hooks::DrupalFile::Other,

@@ -90,30 +90,41 @@ fn package_definition_files(package: &serde_json::Value, root: &Path) -> Vec<Pat
     let dir = root.join(source);
     let mut files = Vec::new();
     for (group, entries) in groups {
-        if !is_definition_group(group) {
-            continue;
-        }
-        let entries: Vec<&str> = match entries {
-            serde_json::Value::String(file) => vec![file.as_str()],
-            serde_json::Value::Array(list) => list.iter().filter_map(|e| e.as_str()).collect(),
-            _ => continue,
-        };
-        for entry in entries {
-            // `?` marks a file that may be missing, which is read when it
-            // is there.
-            let entry = entry.trim_start_matches('?');
-            if entry.starts_with('$') {
-                continue;
-            }
-            match entry.rsplit_once('/').unwrap_or(("", entry)) {
-                (sub, pattern) if pattern.contains('*') => {
-                    glob_files(&dir.join(sub), pattern, &mut files);
-                }
-                _ => files.push(dir.join(entry)),
-            }
+        if is_definition_group(group) {
+            group_files(entries, &dir, &mut files);
         }
     }
     files
+}
+
+/// The files the entries of one `config-plugin` group list, a file or a
+/// list of them, relative to `dir`.  A pattern (`di/*.php`) lists the files
+/// it matches, and an entry that names another group (`'$di'`) adds no file
+/// of its own.
+pub(crate) fn group_files(entries: &serde_json::Value, dir: &Path, out: &mut Vec<PathBuf>) {
+    let entries: Vec<&str> = match entries {
+        serde_json::Value::String(file) => vec![file.as_str()],
+        serde_json::Value::Array(list) => list.iter().filter_map(|e| e.as_str()).collect(),
+        _ => return,
+    };
+    for entry in entries {
+        // `?` marks a file that may be missing, which is read when it is
+        // there.
+        let entry = entry.trim_start_matches('?');
+        if entry.starts_with('$') {
+            continue;
+        }
+        match entry.rsplit_once('/').unwrap_or(("", entry)) {
+            (sub, pattern) if pattern.contains('*') => {
+                let mut matched = Vec::new();
+                glob_files(&dir.join(sub), pattern, &mut matched);
+                // yiisoft/config reads a pattern's files in name order.
+                matched.sort_unstable();
+                out.extend(matched);
+            }
+            _ => out.push(dir.join(entry)),
+        }
+    }
 }
 
 /// The files in `dir` whose names match `pattern`, a name with `*`s in it.
@@ -187,6 +198,7 @@ fn read_package_definition_files(paths: &[PathBuf]) -> Vec<PackageDefinitionFile
                 drupal: false,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
             },
             path.parent(),
             crate::drupal::hooks::DrupalFile::Other,

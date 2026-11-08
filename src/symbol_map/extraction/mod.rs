@@ -241,6 +241,9 @@ struct ExtractionCtx<'a> {
     routes: Vec<crate::symbol_map::RouteSite>,
     /// The classes the file's DI definitions bind and build.
     yii_definitions: Vec<crate::symbol_map::YiiDefinitionSite>,
+    /// Whether the file is handed the Yii `$params` (see
+    /// [`Frameworks::yii_params`]).
+    yii_params: bool,
     /// Whether the project uses Doctrine, which gates reading DQL.
     doctrine: bool,
     /// The DQL variables and fields read so far (see [`doctrine_dql`]).
@@ -437,6 +440,9 @@ pub(crate) struct Frameworks {
     pub twig: bool,
     /// The project uses Doctrine.
     pub doctrine: bool,
+    /// The file is a Yii configuration file `yiisoft/config` hands the
+    /// `$params`, whose reads of it are recorded.
+    pub yii_params: bool,
 }
 
 #[cfg(test)]
@@ -448,6 +454,7 @@ impl Frameworks {
         drupal: true,
         twig: true,
         doctrine: true,
+        yii_params: false,
     };
 }
 
@@ -543,6 +550,7 @@ fn extract_symbol_map_inner(
         drupal,
         twig,
         doctrine,
+        yii_params,
     } = frameworks;
     let mut ctx = ExtractionCtx {
         spans: Vec::new(),
@@ -617,6 +625,7 @@ fn extract_symbol_map_inner(
         yii_read_chains: Vec::new(),
         routes: Vec::new(),
         yii_definitions: Vec::new(),
+        yii_params,
         doctrine,
         dql: Default::default(),
         dql_aliases: Vec::new(),

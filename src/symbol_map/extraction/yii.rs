@@ -100,6 +100,72 @@ pub(in crate::symbol_map::extraction) fn record_yii_alias(
     });
 }
 
+/// Record the key a read of the Yii `$params` names last,
+/// `'name'` in `$params['application']['name']`, keyed by the whole path
+/// of keys the read names.  Each access of a chain records its own key, so
+/// `$params['application']` is recorded by the access inside this one.
+pub(in crate::symbol_map::extraction) fn record_yii_param_read(
+    access: &ArrayAccess<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Expression::Literal(Literal::String(last)) = access.index else {
+        return;
+    };
+    let Some(last_key) = last.value.and_then(crate::atom::literal_bytes_to_str) else {
+        return;
+    };
+    let mut keys = vec![last_key];
+    let mut array = access.array;
+    loop {
+        match array {
+            Expression::ArrayAccess(inner) => {
+                let Expression::Literal(Literal::String(key)) = inner.index else {
+                    return;
+                };
+                let Some(key) = key.value.and_then(crate::atom::literal_bytes_to_str) else {
+                    return;
+                };
+                keys.push(key);
+                array = inner.array;
+            }
+            Expression::Variable(Variable::Direct(variable)) if variable.name == b"$params" => {
+                break;
+            }
+            _ => return,
+        }
+    }
+    keys.reverse();
+    ctx.spans.push(SymbolSpan {
+        start: last.span.start.offset + 1,
+        end: last.span.end.offset.saturating_sub(1),
+        kind: SymbolKind::StringKey {
+            key: crate::yii::params::param_key(&keys),
+            kind: StringKeyKind::YiiParam,
+            is_write: false,
+            is_optional: false,
+        },
+    });
+}
+
+/// Mark the `$params` reads recorded from `from` on as ones the code is
+/// written to do without, as the reads an `isset()` or the left side of a
+/// `??` makes are.
+pub(in crate::symbol_map::extraction) fn mark_yii_param_reads_optional(
+    from: usize,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    for span in ctx.spans.iter_mut().skip(from) {
+        if let SymbolKind::StringKey {
+            kind: StringKeyKind::YiiParam,
+            is_optional,
+            ..
+        } = &mut span.kind
+        {
+            *is_optional = true;
+        }
+    }
+}
+
 /// Record the view the first argument of a render call names.
 pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
     object: &Expression<'_>,

@@ -53,6 +53,17 @@ function privateProperty(object $object, string $name): mixed
 $runner = new HttpApplicationRunner(rootPath: __DIR__, environment: 'dev');
 $container = $runner->getContainer();
 
+// ─── Params ─────────────────────────────────────────────────────────────────
+
+// config/common/di/application.php reads $params['application'][...], which
+// config/common/params.php requires from config/common/application.php.
+$params = $runner->getConfig()->get('params-web');
+$application = require __DIR__ . '/config/common/application.php';
+check("\$params['application'] is what config/common/application.php returns", $params['application'] === $application);
+check("\$params['application'] declares 'name', 'charset', and 'locale'", array_keys($application) === ['charset', 'locale', 'name']);
+check("\$params['application']['name'] is a string", is_string($params['application']['name']));
+check("\$params['blog']['posts'] reaches the repository's constructor", array_keys($params['blog']['posts']) === ['hello-yii', 'config-is-code']);
+
 // ─── Aliases ────────────────────────────────────────────────────────────────
 
 $aliases = $container->get(Aliases::class);

@@ -181,6 +181,7 @@ impl Backend {
             self.forget_vendor_twig_callables();
             self.forget_symfony_bundle_declarations();
             self.forget_yii_package_definitions();
+            self.forget_yii_params();
             self.forget_vendor_form_classes();
             self.forget_wordpress_dependency_hooks();
         }

@@ -5,7 +5,7 @@
 //! against what the project actually registers (routes, config keys,
 //! views, translation keys, console commands, morph aliases, middleware, gate
 //! abilities, Symfony service IDs, container parameters, routes, translation
-//! keys and Twig templates, Yii views, routes, and the route arguments a handler reads,
+//! keys and Twig templates, Yii views, routes, the route arguments a handler reads, and params keys,
 //! asset paths, and Inertia pages), and report the ones nothing declares.
 
 use std::sync::Arc;
@@ -48,6 +48,7 @@ enum CheckedStringKind {
     YiiRoute,
     YiiRouteArgument,
     YiiDefinitionArgument,
+    YiiParam,
     DrupalRoute,
     DrupalRenderElement,
     DrupalLibrary,
@@ -88,6 +89,7 @@ impl CheckedStringKind {
             StringKeyKind::YiiRoute => Self::YiiRoute,
             StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
             StringKeyKind::YiiDefinitionArgument => Self::YiiDefinitionArgument,
+            StringKeyKind::YiiParam => Self::YiiParam,
             StringKeyKind::DrupalRoute => Self::DrupalRoute,
             StringKeyKind::DrupalRenderElement => Self::DrupalRenderElement,
             StringKeyKind::DrupalLibrary => Self::DrupalLibrary,
@@ -576,6 +578,11 @@ impl<'a> DeclaredKeys<'a> {
             CheckedStringKind::YiiRoute => self.judge_yii_route(key),
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
             CheckedStringKind::YiiDefinitionArgument => self.judge_yii_definition_argument(key),
+            CheckedStringKind::YiiParam => self
+                .backend
+                .yii_params()
+                .declares(key)
+                .map(|declared| (declared, "params key", "invalid_yii_param")),
             CheckedStringKind::DrupalRoute => self.judge_drupal_route(key),
             CheckedStringKind::DrupalRenderElement => self.judge_drupal_render_element(key),
             CheckedStringKind::DrupalLibrary => crate::drupal::libraries::judge_library(
@@ -1124,6 +1131,11 @@ impl Backend {
                             class.trim_start_matches('\\')
                         )
                     }
+                    CheckedStringKind::YiiParam => format!(
+                        "Unknown {} {}",
+                        label,
+                        crate::yii::params::param_key_display(key)
+                    ),
                     CheckedStringKind::SymfonyTranslation => {
                         let (domain, message) =
                             crate::symfony::translations::split_translation_key(key);

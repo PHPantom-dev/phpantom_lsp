@@ -100,6 +100,7 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::DrupalThemeHookVariable => backend.drupal_theme_variable_definitions(key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
         StringKeyKind::YiiAlias => backend.yii_alias_definitions(key),
+        StringKeyKind::YiiParam => backend.yii_param_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
         StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
@@ -370,6 +371,7 @@ pub(crate) fn find_laravel_string_key_references(
         StringKeyKind::TranslationDomain
         | StringKeyKind::YiiRouteArgument
         | StringKeyKind::YiiDefinitionArgument
+        | StringKeyKind::YiiParam
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::DrupalConfigName
         | StringKeyKind::DrupalConfigKey

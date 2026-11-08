@@ -604,11 +604,19 @@ impl Backend {
         let mut symbol_map = if from_stub_path && !is_open {
             SymbolMap::default()
         } else {
-            let yii_dir = if self.is_yii_project() {
-                crate::util::uri_to_path(uri).and_then(|path| path.parent().map(Path::to_path_buf))
+            let yii_path = if self.is_yii_project() {
+                crate::util::uri_to_path(uri)
             } else {
                 None
             };
+            let yii_dir = yii_path
+                .as_deref()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf);
+            let yii_params = yii_path.as_deref().is_some_and(|path| {
+                memchr::memmem::find(content.as_bytes(), b"$params").is_some()
+                    && self.yii_receives_params(path)
+            });
             crate::symbol_map::extraction::extract_symbol_map_for_file(
                 program,
                 content,
@@ -619,6 +627,7 @@ impl Backend {
                     drupal: self.is_drupal_project(),
                     twig: self.is_twig_project(),
                     doctrine: self.is_doctrine_project(),
+                    yii_params,
                 },
                 yii_dir.as_deref(),
                 self.drupal_file(uri),

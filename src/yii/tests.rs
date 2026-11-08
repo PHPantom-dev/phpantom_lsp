@@ -108,3 +108,123 @@ fn an_alias_is_the_name_a_string_starts_with() {
     assert_eq!(alias_prefix("@ x"), None);
     assert_eq!(alias_prefix("user@example.com"), None);
 }
+
+/// A project whose merge plan lists params files that override and add to
+/// each other.
+fn params_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let write = |path: &str, content: &str| {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    };
+    write(
+        "composer.json",
+        r#"{"extra": {"config-plugin-file": "config/configuration.php"}}"#,
+    );
+    write(
+        "config/configuration.php",
+        r#"<?php
+return [
+    'config-plugin' => [
+        'params' => ['common/params.php', '?common/missing.php'],
+        'params-web' => ['$params', 'web/params.php'],
+        'di' => 'common/di/*.php',
+        'routes' => 'common/routes.php',
+    ],
+    'config-plugin-environments' => [
+        Environment::DEV => ['params' => ['dev/params.php']],
+    ],
+    'config-plugin-options' => ['source-directory' => 'config'],
+];
+"#,
+    );
+    write(
+        "config/common/params.php",
+        r#"<?php
+return [
+    'app' => ['name' => 'Demo', 'debug' => false, 'tags' => ['a', 'b']],
+    'mailer' => ['from' => 'a@example.com'],
+    'spread' => [...$other, 'known' => 1],
+    'list' => [],
+];
+"#,
+    );
+    write(
+        "config/web/params.php",
+        r#"<?php
+return [
+    'app' => ['debug' => true, 'theme' => 'dark'],
+    'mailer' => null,
+];
+"#,
+    );
+    write(
+        "config/dev/params.php",
+        r#"<?php
+return ['app' => ['name' => 'Demo (dev)'], 'traceLink' => 'x'];
+"#,
+    );
+    write("config/common/di/a.php", "<?php return [];");
+    write("config/common/routes.php", "<?php return [];");
+    dir
+}
+
+#[test]
+fn the_merge_plan_lists_the_files_handed_params() {
+    use super::params::ConfigPlan;
+    let dir = params_project();
+    let plan = ConfigPlan::load(dir.path());
+    let config = dir.path().join("config");
+    assert!(plan.receives_params(&config.join("common/di/a.php")));
+    assert!(plan.receives_params(&config.join("common/routes.php")));
+    assert!(!plan.receives_params(&config.join("common/params.php")));
+    assert!(!plan.receives_params(&config.join("configuration.php")));
+}
+
+#[test]
+fn params_merge_by_rank() {
+    use super::params::{ConfigPlan, Params, param_key};
+    let dir = params_project();
+    let params = Params::from_plan(&ConfigPlan::load(dir.path()));
+    let declares = |keys: &[&str]| params.declares(&param_key(keys));
+    let declared_in = |keys: &[&str]| -> Vec<String> {
+        params
+            .get(&param_key(keys))
+            .unwrap()
+            .declarations()
+            .iter()
+            .map(|d| {
+                d.file
+                    .strip_prefix(dir.path().join("config"))
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect()
+    };
+
+    // Arrays merge, and every file that adds to one declares it.
+    assert_eq!(declares(&["app", "theme"]), Some(true));
+    assert_eq!(declares(&["app", "name"]), Some(true));
+    assert_eq!(
+        declared_in(&["app"]),
+        ["common/params.php", "web/params.php", "dev/params.php"]
+    );
+    // A later value replaces an earlier one.
+    assert_eq!(declared_in(&["app", "debug"]), ["web/params.php"]);
+    assert_eq!(declared_in(&["app", "name"]), ["dev/params.php"]);
+    assert_eq!(declares(&["mailer", "from"]), None);
+    // An unknown key is told only where every key beside it is known.
+    assert_eq!(declares(&["nope"]), Some(false));
+    assert_eq!(declares(&["app", "nope"]), Some(false));
+    assert_eq!(declares(&["spread", "anything"]), None);
+    assert_eq!(declares(&["list", "anything"]), None);
+    assert_eq!(declares(&["nope", "deeper"]), None);
+
+    assert_eq!(
+        params.php_type().unwrap().to_string(),
+        "array{app: array{name: string, debug: bool, tags: list<string>, theme: string}, \
+         mailer: null, spread: array{known: int}, list: array, traceLink?: string}"
+    );
+}

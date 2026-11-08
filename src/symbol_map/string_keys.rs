@@ -174,6 +174,12 @@ pub(crate) enum StringKeyKind {
     /// names `@runtime`), in any string of a Yii project.  Declared under
     /// `params['yiisoft/aliases']['aliases']` (see `yii::aliases`).
     YiiAlias,
+    /// A key a Yii configuration file reads from the `$params` it is
+    /// handed, keyed by the whole path of keys it reads
+    /// (`$params['application']['name']`, see `yii::params::param_key`),
+    /// on the string of the last one.  Declared by the params files the
+    /// merge plan lists.
+    YiiParam,
     /// An argument a Yii DI definition passes by name, `'transport'` in
     /// `'__construct()' => ['transport' => …]` or in the arguments of a
     /// `'setLogger()'` key, keyed by the class and the method as well as the
@@ -303,6 +309,7 @@ impl StringKeyKind {
             | Self::YiiRoute
             | Self::YiiRouteArgument
             | Self::YiiAlias
+            | Self::YiiParam
             | Self::YiiDefinitionArgument => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
             Self::DrupalEntityType

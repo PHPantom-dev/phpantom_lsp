@@ -21,9 +21,14 @@
 //!
 //! A DI definition is recognised by its shape wherever it is written, and
 //! its keys are spans on the class it builds (see [`definitions`]).
+//!
+//! The `$params` a configuration file is handed are merged from the params
+//! files the merge plan lists, and the keys a file reads from them are
+//! spans keyed by their path (see [`params`]).
 
 pub(crate) mod aliases;
 pub(crate) mod definitions;
+pub(crate) mod params;
 pub(crate) mod routes;
 pub(crate) mod views;
 
@@ -45,6 +50,12 @@ pub(crate) struct YiiState {
     /// The DI definitions the installed packages contribute, read on first
     /// use and dropped when the dependencies change.
     package_definitions: parking_lot::Mutex<Option<Arc<Vec<definitions::PackageDefinitionFile>>>>,
+    /// The project's merge plan, read on first use and dropped when a
+    /// configuration file changes.
+    config_plan: RwLock<Option<Arc<params::ConfigPlan>>>,
+    /// The merged params, read on first use and dropped when a
+    /// configuration file or the dependencies change.
+    params: parking_lot::Mutex<Option<Arc<params::Params>>>,
 }
 
 impl Backend {
@@ -74,11 +85,12 @@ impl Backend {
         aliases
     }
 
-    /// Forget the aliases when the file at `uri` may declare some, so the
-    /// next lookup reads them again.
+    /// Forget the aliases and the params when the file at `uri` may
+    /// declare some, so the next lookup reads them again.
     pub(crate) fn note_yii_config_change(&self, uri: &str) {
         if self.is_yii_project() && uri.contains("/config/") && uri.ends_with(".php") {
             *self.yii.aliases.write() = None;
+            self.forget_yii_params();
         }
     }
 }

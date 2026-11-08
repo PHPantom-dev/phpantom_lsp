@@ -359,5 +359,6 @@ mod wordpress_hooks;
 mod workspace_symbols;
 mod yii_aliases;
 mod yii_definitions;
+mod yii_params;
 mod yii_routes;
 mod yii_views;
