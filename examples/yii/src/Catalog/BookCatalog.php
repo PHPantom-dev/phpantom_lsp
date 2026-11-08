@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Catalog;
 
+use Yiisoft\Arrays\ArrayHelper;
+
 /**
  * Reads the catalog through the Active Records in this directory.
  */
@@ -58,5 +60,19 @@ final class BookCatalog
     {
         $rating = $review->get('rating');
         return str_repeat('*', is_int($rating) ? $rating : 0);
+    }
+
+    /**
+     * Try: hover $title. getValueByPath() walks 'book.title' into the entry's
+     * Book, so it is a string. Go to the definition of 'title', which lands
+     * on Book::$title, or clear the path to complete the entry's keys, and
+     * type a dot after 'book' to complete Book's properties.
+     *
+     * @param array{book: Book, shelf: string} $entry
+     */
+    public function shelvedTitle(array $entry): string
+    {
+        $title = ArrayHelper::getValueByPath($entry, 'book.title');
+        return $title . ' on shelf ' . $entry['shelf'];
     }
 }

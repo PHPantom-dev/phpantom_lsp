@@ -76,6 +76,7 @@ mod doctrine_calls;
 mod drupal_calls;
 mod function_calls;
 mod instantiation;
+mod key_path_calls;
 mod laravel_calls;
 mod literal_text;
 mod magic_constants;

@@ -110,6 +110,11 @@ way a real Yii 3 project declares them.
   completes, and is reported when misspelled. The migrator finds the
   migration through the `yiisoft/db-migration` params in
   `config/console/params.php`.
+- In `BookCatalog::shelvedTitle()`, hover `$title`: `getValueByPath()`
+  walks `'book.title'` through the entry and into its `Book`, so it is a
+  `string`. Go to the definition of `'title'`, which lands on `Book::$title`.
+  Clear the path to complete the entry's keys, and type a dot after `book`
+  to complete the properties of `Book`.
 - Open `vendor/yiisoft/router/composer.json` once the dependencies are
   installed. Its `config-plugin` lists the files the package adds to each
   config group: go to the definition of `"di.php"` for `config/di.php`, clear

@@ -548,6 +548,29 @@ impl Backend {
         }
         let owner_class = all_owners.into_iter().next();
 
+        // `ArrayHelper::getValueByPath($user, 'profile')` is typed by the
+        // value the path reaches (see `crate::yii::array_helper`).
+        if let Some(ref owner) = owner_class
+            && let Some(method) = crate::yii::array_helper::path_method(&owner.fqn(), method_name)
+            && let Some(ty) = crate::yii::array_helper::call_return_type(
+                method,
+                &split_top_level_commas(text_args),
+                &|text| Self::resolve_arg_text_to_type(text, ctx),
+                ctx,
+            )
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
+
         // `\Drupal::service('id')` is typed by the class the ID is built
         // from (see `crate::drupal::types`).
         if method_name.eq_ignore_ascii_case("service")
