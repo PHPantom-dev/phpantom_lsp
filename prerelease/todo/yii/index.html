@@ -1383,17 +1383,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#y20-config-plugin-entries-in-composerjson" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y20. <code>config-plugin</code> entries in <code>composer.json</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#y16-asset-bundle-file-paths" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1694,28 +1683,13 @@ and the attribute names against the record's properties, or, for a
 record without properties, against the table's columns (Y8). Wait for a
 user to ask: no project in our test set uses it.</p>
 <hr />
-<h2 id="y20-config-plugin-entries-in-composerjson">Y20. <code>config-plugin</code> entries in <code>composer.json</code><a class="headerlink" href="#y20-config-plugin-entries-in-composerjson" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">"extra"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">    </span><span class="nt">"config-plugin"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">        </span><span class="nt">"params"</span><span class="p">:</span><span class="w"> </span><span class="s2">"config/params.php"</span><span class="p">,</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">        </span><span class="nt">"di-web"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"config/di-web.php"</span><span class="p">,</span><span class="w"> </span><span class="s2">"$di"</span><span class="p">]</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">}</span>
-</code></pre></div>
-<p>A package's or the project's <code>config-plugin</code> maps each config group to
-its files. Complete the group names <code>configuration.php</code> and the
-installed packages already use, and the paths to the project's files,
-navigate from a path to its file and from a <code>$group</code> reference to that
-group's entries, and report a path with no file.</p>
-<hr />
 <h2 id="y16-asset-bundle-file-paths">Y16. Asset bundle file paths<a class="headerlink" href="#y16-asset-bundle-file-paths" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">final class MainAsset extends AssetBundle</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">{</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    public ?string $sourcePath = '@assetsSource/main';</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    public array $css = ['site.css'];</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">final class MainAsset extends AssetBundle</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">{</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    public ?string $sourcePath = '@assetsSource/main';</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    public array $css = ['site.css'];</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>The aliases in <code>$basePath</code>, <code>$baseUrl</code>, and <code>$sourcePath</code> already
 navigate. The entries of <code>$css</code> and <code>$js</code> are relative to <code>$sourcePath</code>
@@ -1733,7 +1707,7 @@ an aliased path whose collapsed text is the path it resolves to.</p>
 <hr />
 <h2 id="y17-key-paths-in-yiisoftarrays">Y17. Key paths in <code>yiisoft/arrays</code><a class="headerlink" href="#y17-key-paths-in-yiisoftarrays" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
 </code></pre></div>
 <p><code>ArrayHelper::getValue()</code>, <code>setValue()</code>, <code>keyExists()</code>, and <code>remove()</code>
 take a key or a dotted path into the array or object they are given.
@@ -1746,7 +1720,7 @@ resolution path rather than for Yii alone.</p>
 <hr />
 <h2 id="y21-css-class-names-in-html-helpers">Y21. CSS class names in HTML helpers<a class="headerlink" href="#y21-css-class-names-in-html-helpers" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">Html::div('...')-&gt;class('card-body');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">Html::div('...')-&gt;class('card-body');</span>
 </code></pre></div>
 <p><code>yiisoft/html</code> builds tags with <code>class()</code> and <code>addClass()</code>. Completing
 and navigating class names there needs an index of the project's
