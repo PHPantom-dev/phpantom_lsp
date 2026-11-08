@@ -43,7 +43,9 @@ pub(crate) mod error_format;
 mod file_declarations;
 mod functions;
 mod initializers;
-pub(crate) use initializers::{expand_class_file_constants, skip_heredoc};
+pub(crate) use initializers::{
+    expand_class_file_constants, qualify_unqualified_constant_names, skip_heredoc,
+};
 mod name_resolution;
 mod namespace_recovery;
 mod params;

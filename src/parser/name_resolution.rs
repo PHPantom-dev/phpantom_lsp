@@ -89,7 +89,27 @@ fn qualify_see_refs(
     }
 }
 
-/// Qualify the class names a parameter's default and types spell.
+/// `value`, initializer text written in a block whose namespace is
+/// `namespace` and whose imports are `use_map` and `constant_imports`, with
+/// the classes and the constants with one meaning that it names spelled
+/// fully qualified, or `None` when nothing in it needs that.
+pub(super) fn qualify_initializer(
+    value: &str,
+    use_map: &HashMap<String, String>,
+    constant_imports: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> Option<String> {
+    let constants =
+        super::initializers::qualify_constant_names(value, namespace, use_map, constant_imports);
+    let value = constants.as_deref().unwrap_or(value);
+    super::initializers::qualify_class_names(value, namespace.as_deref(), &|name| {
+        resolve_to_fqn(name, use_map, namespace)
+    })
+    .or(constants)
+}
+
+/// Qualify the names a parameter's default and the classes its types
+/// spell.
 ///
 /// `qualify_native` says whether the native hint is qualified too: a
 /// method's is, while a function's is kept as written (see "Source Names
@@ -101,6 +121,16 @@ fn qualify_param(
     qualify_native: bool,
 ) {
     crate::parser::qualify_param_default(param, scope.use_map, scope.namespace);
+    if let Some(qualified) = param.default_value.as_deref().and_then(|value| {
+        super::initializers::qualify_constant_names(
+            value,
+            scope.namespace,
+            scope.use_map,
+            scope.constant_imports,
+        )
+    }) {
+        param.default_value = Some(qualified);
+    }
     let native_was_effective = qualify_native && param.native_type_hint == param.type_hint;
     qualify_in_place(&mut param.type_hint, resolver);
     if native_was_effective {
@@ -797,22 +827,23 @@ impl Backend {
         }
     }
 
-    /// Qualify the classes each constant's initializer and declared type
-    /// (`const Foo C = …`) name.  The initializer stays source text, and the
-    /// file that reads the constant has none of this file's imports.
+    /// Qualify the classes and constants each constant's initializer and
+    /// the classes its declared type (`const Foo C = …`) name.  The
+    /// initializer stays source text, and the file that reads the constant
+    /// has none of this file's imports.
     fn qualify_constant_names(
         class: &mut ClassInfo,
         scope: NameScope<'_>,
         resolver: &dyn Fn(&str) -> String,
     ) {
-        let NameScope {
-            use_map, namespace, ..
-        } = scope;
         for i in 0..class.constants.len() {
             let qualified = class.constants[i].value.as_deref().and_then(|value| {
-                super::initializers::qualify_class_names(value, namespace.as_deref(), &|name| {
-                    resolve_to_fqn(name, use_map, namespace)
-                })
+                qualify_initializer(
+                    value,
+                    scope.use_map,
+                    scope.constant_imports,
+                    scope.namespace,
+                )
             });
             let typed = class.constants[i]
                 .type_hint

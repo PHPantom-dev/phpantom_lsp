@@ -65,45 +65,44 @@ No outstanding items.
 
 ## Name resolution
 
-### B740. A constant named in another file's initializer has no type
+### B741. A parameter default's unqualified constant is read in the caller's namespace
 
-**Impact: Low-Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
 ```php
-// src/Lib/Box.php
+// src/Lib/pick.php
 namespace Lib;
-use const Vendor\DEFAULT_LIMIT;
 
-const LIMIT = 5;
-class Box {
-    const MAX = LIMIT;          // 5
-    const FLOOR = DEFAULT_LIMIT;
-}
+const MODE = 1;
+
+/** @return ($mode is 1 ? int : string) */
+function pick(int $mode = MODE): int|string { … }
 
 // src/App/run.php
 namespace App;
-$max = \Lib\Box::MAX;           // should be 5, has no type
+
+const MODE = 2;
+$picked = \Lib\pick();          // int, but read as string
 ```
 
-A class constant's initializer, a namespaced constant's initializer and a
-parameter default are source text that the reader resolves later, in a
-different file. The parser qualifies the class names and `__DIR__` in that
-text against the declaring file, but not constant names. The reader can't
-look them up through its own namespace and `use const` imports, since those
-belong to a different file, so only a global constant of that name is
-found. A namespaced or imported constant in such an initializer comes out
-untyped.
+A parameter default is source text read at each call site. The parser
+spells the constants in it that have one meaning fully qualified (a
+`use const` import, a qualified name), but an unqualified name inside a
+namespace means that namespace's constant when one is declared and the
+global constant otherwise, which only an index of the declared constants
+can say. A class constant's initializer is read in its class's namespace,
+and a namespaced constant's value is resolved where it is looked up
+(`Backend::lookup_global_constant_candidates`), but a default reaches its
+readers without the callee's namespace: the conditional return type of an
+omitted argument reads it through the call site's argument resolver
+(`type_ops/conditional/text_args.rs`), which tries the call site's
+namespace, and template binding (`call_resolution/template_binding.rs`)
+reads it as global.
 
-One path still hands such text to the reader's lookup. A conditional return
-type decided by an omitted argument reads the parameter's default through
-the call site's argument resolver
-(`type_ops/conditional/text_args.rs`), so a default naming a namespaced
-constant finds the call site's constant of that name, if it has one.
-
-The parser could qualify constant names too. An imported name has one
-answer. An unqualified name in a namespace falls back to the global
-constant at runtime, so it needs both candidates kept, or the declaring
-file's location recorded so the reader can look it up there.
+Either reader needs the callee's namespace: `ConditionalClassContext` and
+`TemplateCallee` could carry it, with each default's bare names looked up
+there before the global constant, as `FileCtx::namespace` does for a class
+constant's initializer.
 
 ## Code actions
 

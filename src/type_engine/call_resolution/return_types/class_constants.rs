@@ -150,16 +150,21 @@ pub(crate) fn class_constant_type(
         // `self`/`parent` are read against the class that declares the
         // constant. Only an initialiser naming a class constant can depend
         // on which class that is, so the hierarchy is searched for no other.
-        // Constant names are not qualified at parse time, so the reader's
-        // URI is dropped too: it would look them up through the reader's
-        // namespace and `use const` imports.
+        // The constants it names with one meaning were qualified at parse
+        // time too.  An unqualified one is the declaring namespace's
+        // constant when there is one and the global one otherwise, so the
+        // reader's URI, whose namespace would be tried instead, is dropped.
         let declaring = val
             .contains("::")
             .then(|| constant_declaring_class(merged, constant, ctx.file.class_loader))
             .flatten();
         let owner = declaring.as_deref().unwrap_or(merged);
         let ctx = &ResolutionCtx {
-            file: ctx.file.with_imports(None).with_uri(None),
+            file: ctx
+                .file
+                .with_imports(None)
+                .with_uri(None)
+                .with_namespace(owner.file_namespace.as_deref()),
             current_class: Some(owner),
             ..*ctx
         };

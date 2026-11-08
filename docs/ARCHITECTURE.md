@@ -531,7 +531,13 @@ Rules for code that touches names:
    A callee's parameter defaults, a constant's initializer and a parent's
    docblock were written against their own file's imports. Qualify them when
    that file is parsed, or resolve them as resolved names, never through the
-   call site's source loader.
+   call site's source loader. Constant names in such text are qualified at
+   parse time too where they have one meaning (`use const`, qualified
+   names). An unqualified one inside a namespace is that namespace's constant
+   when one is declared and the global constant otherwise, which only the
+   index can say, so it is looked up when read: a class constant's
+   initializer through `FileCtx::namespace`, a namespaced constant's value by
+   `Backend::lookup_global_constant_candidates` from `DefineInfo::namespace`.
 4. **Identify classes by FQN.** `ClassInfo::name` is the short name, and
    `class_lookup::find_class_by_name` matches a bare name against the
    classes of every namespace block in the file. Use `ClassInfo::fqn()` and

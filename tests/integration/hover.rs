@@ -6152,6 +6152,7 @@ fn hover_define_constant_no_value_still_works() {
                 file_uri: "file:///legacy.php".to_string(),
                 name_offset: 0,
                 value: None,
+                namespace: None,
             },
         );
     }
@@ -12581,6 +12582,236 @@ function test(): void {
     assert!(
         text.contains("'lib'") && !text.contains("'app'"),
         "`Labels` in `Lib\\Base` is `Lib\\Labels`, got: {text}"
+    );
+}
+
+/// Indexes the constants the initializer tests below read: some in `Lib`
+/// and `Vendor`, some global, and a few that `Lib` and the global
+/// namespace both declare.
+fn backend_with_initializer_constants() -> phpantom_lsp::Backend {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///vendor.php",
+        "<?php\nnamespace Vendor;\n\nconst DEFAULT_LIMIT = 'vendor';\n",
+    );
+    backend.update_ast(
+        "file:///other.php",
+        "<?php\nnamespace Other;\n\nconst DEFAULT_LIMIT = 'other';\n",
+    );
+    backend.update_ast(
+        "file:///lib_shared.php",
+        "<?php\nnamespace Lib;\n\nconst SHARED = 'lib-shared';\nconst BOTH = 'lib-both';\n",
+    );
+    backend.update_ast(
+        "file:///lib_sub.php",
+        "<?php\nnamespace Lib\\Sub;\n\nconst DEPTH = 'lib-deep';\n",
+    );
+    backend.update_ast(
+        "file:///globals.php",
+        "<?php\nconst GLOBAL_ONLY = 'global-only';\nconst BOTH = 'global-both';\nconst LIMIT = 'global-limit';\nconst SHARED = 'global-shared';\n",
+    );
+    backend
+}
+
+/// A reader in a namespace that declares and imports constants of the same
+/// names as the ones the initializers read, which must not stand in for
+/// them.
+const INITIALIZER_READER_PRELUDE: &str = r#"<?php
+namespace App;
+
+use const Other\DEFAULT_LIMIT;
+
+const LIMIT = 'app-limit';
+const SHARED = 'app-shared';
+const BOTH = 'app-both';
+"#;
+
+/// A constant named in a class constant's initializer is the one the
+/// declaring file names: through its `use const` imports, relative to its
+/// namespace, and for an unqualified name, its namespace's constant when
+/// there is one and the global constant otherwise.
+#[test]
+fn hover_class_constant_initializer_names_constants_as_the_declaring_file_does() {
+    let backend = backend_with_initializer_constants();
+    backend.update_ast(
+        "file:///box.php",
+        r#"<?php
+namespace Lib;
+
+use const Vendor\DEFAULT_LIMIT;
+
+const LIMIT = 'lib-limit';
+
+class Box
+{
+    const MAX = LIMIT;
+    const FLOOR = DEFAULT_LIMIT;
+    const FROM_ANOTHER_FILE = SHARED;
+    const ONLY_GLOBAL = GLOBAL_ONLY;
+    const PREFERS_NAMESPACE = BOTH;
+    const DEEP = Sub\DEPTH;
+    const RELATIVE = namespace\SHARED;
+    const PAIR = [LIMIT, DEFAULT_LIMIT];
+}
+"#,
+    );
+    let uri = "file:///run.php";
+    let content = format!(
+        "{INITIALIZER_READER_PRELUDE}
+function test(): void {{
+    $a = \\Lib\\Box::MAX;
+    $a;
+    $b = \\Lib\\Box::FLOOR;
+    $b;
+    $c = \\Lib\\Box::FROM_ANOTHER_FILE;
+    $c;
+    $d = \\Lib\\Box::ONLY_GLOBAL;
+    $d;
+    $e = \\Lib\\Box::PREFERS_NAMESPACE;
+    $e;
+    $f = \\Lib\\Box::DEEP;
+    $f;
+    $g = \\Lib\\Box::RELATIVE;
+    $g;
+    $h = \\Lib\\Box::PAIR;
+    $h;
+}}
+"
+    );
+    let expectations = [
+        (11, "'lib-limit'"),
+        (13, "'vendor'"),
+        (15, "'lib-shared'"),
+        (17, "'global-only'"),
+        (19, "'lib-both'"),
+        (21, "'lib-deep'"),
+        (23, "'lib-shared'"),
+        (25, "'lib-limit'"),
+    ];
+    for (line, expected) in expectations {
+        let hover = hover_at(&backend, uri, &content, line, 5).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(
+            text.contains(expected) && !text.contains("app-") && !text.contains("'other'"),
+            "line {line} should read {expected}, got: {text}"
+        );
+    }
+    let hover = hover_at(&backend, uri, &content, 25, 5).expect("expected hover on $h");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("'vendor'"),
+        "the imported constant in the array is `Vendor`'s, got: {text}"
+    );
+
+    // The constant itself shows which constant an import names.
+    let hover = hover_at(&backend, uri, &content, 12, 21).expect("expected hover on FLOOR");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains(r"const FLOOR = \Vendor\DEFAULT_LIMIT;"),
+        "the initializer names the imported constant fully qualified, got: {text}"
+    );
+}
+
+/// A namespaced constant's initializer is read in the namespace and with
+/// the imports of the file that declares it, wherever it is read from.
+#[test]
+fn hover_namespaced_constant_initializer_names_constants_as_the_declaring_file_does() {
+    let backend = backend_with_initializer_constants();
+    backend.update_ast(
+        "file:///lib_consts.php",
+        r#"<?php
+namespace Lib;
+
+use const Vendor\DEFAULT_LIMIT;
+
+const LIMIT = 'lib-limit';
+const ALIAS = LIMIT;
+const FLOOR = DEFAULT_LIMIT;
+const FROM_ANOTHER_FILE = SHARED;
+const ONLY_GLOBAL = GLOBAL_ONLY;
+const PREFERS_NAMESPACE = BOTH;
+const JOINED = LIMIT . '/' . DEFAULT_LIMIT;
+"#,
+    );
+    let uri = "file:///run.php";
+    let content = format!(
+        "{INITIALIZER_READER_PRELUDE}
+function test(): void {{
+    $a = \\Lib\\ALIAS;
+    $a;
+    $b = \\Lib\\FLOOR;
+    $b;
+    $c = \\Lib\\FROM_ANOTHER_FILE;
+    $c;
+    $d = \\Lib\\ONLY_GLOBAL;
+    $d;
+    $e = \\Lib\\PREFERS_NAMESPACE;
+    $e;
+    $f = \\Lib\\JOINED;
+    $f;
+}}
+"
+    );
+    let expectations = [
+        (11, "'lib-limit'"),
+        (13, "'vendor'"),
+        (15, "'lib-shared'"),
+        (17, "'global-only'"),
+        (19, "'lib-both'"),
+        (21, "'lib-limit/vendor'"),
+    ];
+    for (line, expected) in expectations {
+        let hover = hover_at(&backend, uri, &content, line, 5).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(
+            text.contains(expected) && !text.contains("app-") && !text.contains("'other'"),
+            "line {line} should read {expected}, got: {text}"
+        );
+    }
+}
+
+/// An omitted argument takes its parameter's default, and a constant the
+/// default names through the callee's `use const` imports is the imported
+/// one, not one the call site has of that name.
+#[test]
+fn hover_omitted_argument_reads_an_imported_constant_default_in_the_callees_file() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///vendor.php",
+        "<?php\nnamespace Vendor;\n\nconst DEFAULT_MODE = 1;\n",
+    );
+    backend.update_ast(
+        "file:///lib.php",
+        r#"<?php
+namespace Lib;
+
+use const Vendor\DEFAULT_MODE;
+
+/**
+ * @return ($mode is 1 ? int : string)
+ */
+function pick(int $mode = DEFAULT_MODE): int|string
+{
+    return $mode === 1 ? 1 : 'one';
+}
+"#,
+    );
+    let uri = "file:///run.php";
+    let content = r#"<?php
+namespace App;
+
+const DEFAULT_MODE = 2;
+
+function test(): void {
+    $picked = \Lib\pick();
+    $picked;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 7, 6).expect("expected hover on $picked");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int") && !text.contains("string"),
+        "the default is `Vendor\\DEFAULT_MODE`, which is 1, got: {text}"
     );
 }
 

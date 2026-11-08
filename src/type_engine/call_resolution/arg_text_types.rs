@@ -168,7 +168,7 @@ impl Backend {
                 .uri
                 .and_then(|uri| backend.file_state(uri))
                 .map_or_else(
-                    || backend.lookup_global_constant(trimmed),
+                    || backend.lookup_constant_written_in(trimmed, ctx.file.namespace),
                     |state| {
                         let span = crate::types::NamespaceSpan::containing(
                             &state.namespaces,
@@ -194,9 +194,10 @@ impl Backend {
                     .or_else(|| {
                         // The initializer was written where the constant is
                         // declared, so this file's namespace and imports
-                        // must not resolve the names it uses.
+                        // must not resolve the names it uses.  The lookup
+                        // spelled out the constants it names already.
                         let declared = ResolutionCtx {
-                            file: ctx.file.with_uri(None),
+                            file: ctx.file.with_uri(None).with_namespace(None),
                             ..*ctx
                         };
                         super::folded_global_constant_type(trimmed, &value, &declared)

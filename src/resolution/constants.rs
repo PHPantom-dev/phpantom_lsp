@@ -123,6 +123,24 @@ impl Backend {
         self.lookup_global_constant_candidates(&[name.strip_prefix('\\').unwrap_or(name)])
     }
 
+    /// [`Self::lookup_global_constant`] for `name` written in `namespace`
+    /// with no imports in force, as in a class constant's initializer read
+    /// from another file: an unqualified name is that namespace's constant
+    /// when one is declared and the global one otherwise.
+    pub(crate) fn lookup_constant_written_in(
+        &self,
+        name: &str,
+        namespace: Option<&str>,
+    ) -> Option<Option<String>> {
+        match namespace {
+            Some(namespace) if !name.contains('\\') => {
+                let namespaced = format!("{namespace}\\{name}");
+                self.lookup_global_constant_candidates(&[&namespaced, name])
+            }
+            _ => self.lookup_global_constant(name),
+        }
+    }
+
     /// [`Self::lookup_global_constant`] over a list of candidate names, in
     /// the order PHP would try them.
     ///
@@ -151,12 +169,17 @@ impl Backend {
             }
         }
 
-        if let Some(value) =
+        if let Some((value, namespace)) =
             self.find_or_load_define(candidates, DefineSearch::Exhaustive, |info| {
-                info.value.clone()
+                (info.value.clone(), info.namespace)
             })
         {
-            return Some(value);
+            return Some(match (value, namespace) {
+                (Some(value), Some(namespace)) => {
+                    Some(self.qualify_value_constants(value, &namespace))
+                }
+                (value, _) => value,
+            });
         }
 
         // Built-in PHP constants from embedded stubs.  Parse the stub via
@@ -186,6 +209,49 @@ impl Backend {
         None
     }
 
+    /// `value`, a constant's initializer written in `namespace`, with each
+    /// unqualified constant it names spelled fully qualified as the one PHP
+    /// reads: the namespace's own when it is declared, the global one
+    /// otherwise.
+    ///
+    /// Whoever reads the value has a namespace of its own, or none, so the
+    /// choice is made here, where the one it was written in is known.
+    fn qualify_value_constants(&self, value: String, namespace: &str) -> String {
+        crate::parser::qualify_unqualified_constant_names(&value, |name| {
+            let namespaced = format!("{namespace}\\{name}");
+            self.declared_constant_name(&[&namespaced, name])
+                .map(str::to_owned)
+        })
+        .unwrap_or(value)
+    }
+
+    /// The first of `candidates` that names a declared constant, searched
+    /// the way [`Self::lookup_global_constant_candidates`] searches, but
+    /// without reading its value.  Reading it could qualify the names in it
+    /// in turn, and two constants naming each other would never finish.
+    fn declared_constant_name<'c>(&self, candidates: &[&'c str]) -> Option<&'c str> {
+        if let Some(&name) = candidates
+            .iter()
+            .find(|name| self.php_version_constant(name).is_some())
+        {
+            return Some(name);
+        }
+        if self
+            .find_or_load_define(candidates, DefineSearch::Exhaustive, |_| ())
+            .is_some()
+        {
+            let defines = self.symbols.global_defines.read();
+            if let Some(&name) = candidates.iter().find(|name| defines.contains_key(**name)) {
+                return Some(name);
+            }
+        }
+        let stubs = self.stub_constant_index.read();
+        candidates
+            .iter()
+            .copied()
+            .find(|name| stubs.contains_key(name))
+    }
+
     /// The value of a constant that describes the running PHP version, or
     /// `None` when `name` is not one.
     ///
@@ -213,7 +279,15 @@ impl Backend {
     /// (`key-of<X>`, `X[K]`), where `X` is usually a template parameter and
     /// every miss would charge the whole autoload set.
     pub(crate) fn lookup_indexed_global_constant(&self, name: &str) -> Option<String> {
-        self.find_or_load_define(&[name], DefineSearch::Indexed, |info| info.value.clone())?
+        let (value, namespace) =
+            self.find_or_load_define(&[name], DefineSearch::Indexed, |info| {
+                (info.value.clone(), info.namespace)
+            })?;
+        let value = value?;
+        Some(match namespace {
+            Some(namespace) => self.qualify_value_constants(value, &namespace),
+            None => value,
+        })
     }
 }
 

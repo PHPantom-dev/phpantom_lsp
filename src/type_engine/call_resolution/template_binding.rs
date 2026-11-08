@@ -88,7 +88,11 @@ pub(crate) fn bind_template_args(
     // A default was written in the callee's file, so the call site's imports
     // and namespace must not resolve the names in it.
     let declared_ctx = ResolutionCtx {
-        file: ctx.file.with_imports(None).with_uri(None),
+        file: ctx
+            .file
+            .with_imports(None)
+            .with_uri(None)
+            .with_namespace(None),
         ..*ctx
     };
 

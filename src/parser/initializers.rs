@@ -216,6 +216,189 @@ pub(crate) fn qualify_class_names(
     Some(out)
 }
 
+/// `expression` with every constant name in it that has one meaning
+/// spelled fully qualified, with a leading `\`, or `None` when no name in it
+/// needs that.
+///
+/// Those are the names a `use const` imports, qualified names (`Sub\LIMIT`,
+/// whose first segment the class imports resolve) and `namespace\LIMIT`,
+/// written in a block whose namespace is `namespace`, with `use_map` and
+/// `constant_imports` its class and `use const` imports.  An unqualified
+/// name no import claims is kept: inside a namespace, PHP reads it as that
+/// namespace's constant when there is one and the global one otherwise, so
+/// whoever reads the expression looks it up that way (see
+/// [`qualify_unqualified_constant_names`]).
+pub(crate) fn qualify_constant_names(
+    expression: &str,
+    namespace: &Option<String>,
+    use_map: &std::collections::HashMap<String, String>,
+    constant_imports: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    // Every name this can change is qualified or one of the imports, which
+    // keeps the parse off nearly every initializer.
+    if !names_outside_literals(expression).any(|name| {
+        (!name.starts_with('\\') && name.contains('\\')) || constant_imports.contains_key(name)
+    }) {
+        return None;
+    }
+    rewrite_constant_names(expression, |name, qualified| {
+        if qualified {
+            Some(crate::names::resolve_to_fqn(name, use_map, namespace))
+        } else {
+            constant_imports.get(name).cloned()
+        }
+    })
+}
+
+/// `expression` with each unqualified constant name `resolve` answers for
+/// replaced by the fully qualified name it returns, or `None` when it
+/// answers for none.
+///
+/// For text written inside a namespace and read elsewhere, after
+/// [`qualify_constant_names`] has spelled out the names that have one
+/// meaning: `resolve` picks between the namespace's constant and the global
+/// one, which only an index of the declared constants can say.
+pub(crate) fn qualify_unqualified_constant_names(
+    expression: &str,
+    resolve: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    if !mentions_name(expression) {
+        return None;
+    }
+    rewrite_constant_names(expression, |name, qualified| {
+        (!qualified).then(|| resolve(name)).flatten()
+    })
+}
+
+/// Whether `expression` reads a constant by an unqualified name, which
+/// [`qualify_unqualified_constant_names`] would have to look up.
+pub(crate) fn names_unqualified_constant(expression: &str) -> bool {
+    mentions_name(expression)
+        && constant_names(expression)
+            .iter()
+            .any(|&(_, _, qualified)| !qualified)
+}
+
+/// Whether `expression` spells an unqualified name outside its string
+/// literals and comments, other than `true`, `false` and `null`: a cheap
+/// test that it may name such a constant, before parsing it to find out.
+fn mentions_name(expression: &str) -> bool {
+    names_outside_literals(expression).any(|name| {
+        !name.contains('\\')
+            && !["true", "false", "null"]
+                .iter()
+                .any(|literal| name.eq_ignore_ascii_case(literal))
+    })
+}
+
+/// Each name `expression` spells outside its string literals, comments and
+/// heredocs, qualified ones whole and with any leading `\`.  The letters of
+/// a variable or of a number are not one.
+fn names_outside_literals(expression: &str) -> impl Iterator<Item = &str> {
+    let bytes = expression.as_bytes();
+    let mut i = 0;
+    std::iter::from_fn(move || {
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b == b'\'' || b == b'"' {
+                i = text_scan::skip_string_forward(bytes, i);
+            } else if let Some(end) = text_scan::skip_php_comment(bytes, i) {
+                i = end;
+            } else if bytes[i..].starts_with(b"<<<") {
+                i = skip_heredoc(bytes, i);
+            } else if b == b'$' || b.is_ascii_digit() {
+                i += 1;
+                while bytes.get(i).is_some_and(|&b| is_name_byte(b)) {
+                    i += 1;
+                }
+            } else if is_name_start(b) || (b == b'\\' && starts_name(bytes, i + 1)) {
+                let start = i;
+                i += 1;
+                while bytes
+                    .get(i)
+                    .is_some_and(|&b| is_name_byte(b) || (b == b'\\' && starts_name(bytes, i + 1)))
+                {
+                    i += 1;
+                }
+                return Some(&expression[start..i]);
+            } else {
+                i += 1;
+            }
+        }
+        None
+    })
+}
+
+/// `expression` with each constant name it reads (not a class, function or
+/// member name) replaced by `\` and what `qualify` returns for it, or `None`
+/// when `qualify` returns nothing for any.
+///
+/// `qualify` is handed the name as written and whether it is qualified
+/// (`Sub\LIMIT`, `namespace\LIMIT`).  A name written fully qualified is
+/// never handed over.
+fn rewrite_constant_names(
+    expression: &str,
+    qualify: impl Fn(&str, bool) -> Option<String>,
+) -> Option<String> {
+    // `qualify` may look constants up, which can parse other files, so it
+    // runs once the parse is done with.
+    let mut output: Option<String> = None;
+    for (start, end, qualified) in constant_names(expression).into_iter().rev() {
+        let Some(fqn) = expression
+            .get(start..end)
+            .and_then(|name| qualify(name, qualified))
+        else {
+            continue;
+        };
+        output
+            .get_or_insert_with(|| expression.to_owned())
+            .replace_range(start..end, &format!("\\{}", fqn.trim_start_matches('\\')));
+    }
+    output
+}
+
+/// The byte range in `expression` of each constant name it reads that is
+/// not written fully qualified, in source order, with whether the name is
+/// qualified.
+fn constant_names(expression: &str) -> Vec<(usize, usize, bool)> {
+    use mago_span::HasSpan;
+    use mago_syntax::{
+        cst::{ConstantAccess, Identifier},
+        walker::Walker,
+    };
+    struct Names;
+    impl<'ast, 'arena> Walker<'ast, 'arena, Vec<(usize, usize, bool)>> for Names {
+        fn walk_in_constant_access(
+            &self,
+            access: &'ast ConstantAccess<'arena>,
+            names: &mut Vec<(usize, usize, bool)>,
+        ) {
+            let qualified = match access.name {
+                Identifier::Local(_) => false,
+                Identifier::Qualified(_) => true,
+                Identifier::FullyQualified(_) => return,
+            };
+            let span = access.name.span();
+            names.push((
+                span.start.offset as usize,
+                span.end.offset as usize,
+                qualified,
+            ));
+        }
+    }
+    const PREFIX: usize = "<?php ".len();
+    let source = format!("<?php {expression};");
+    crate::parser::with_parsed_program(&source, "constant_initializer", |program, _| {
+        let mut names = Vec::new();
+        Names.walk_program(program, &mut names);
+        for (start, end, _) in &mut names {
+            *start -= PREFIX;
+            *end -= PREFIX;
+        }
+        names
+    })
+}
+
 /// The fully qualified name, without a leading `\`, of the class written as
 /// `name` in a block whose namespace is `namespace`, or `None` when `name`
 /// is kept as written.
@@ -309,7 +492,12 @@ fn is_name_byte(b: u8) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{expand_file_constants, qualify_class_names};
+    use std::collections::HashMap;
+
+    use super::{
+        expand_file_constants, names_unqualified_constant, qualify_class_names,
+        qualify_constant_names, qualify_unqualified_constant_names,
+    };
 
     #[test]
     fn file_constants_expand_only_actual_tokens() {
@@ -433,6 +621,81 @@ mod tests {
                 .as_deref(),
             Some("\\Defaults::MODE")
         );
+    }
+
+    /// Qualifies constants the way a file in `namespace Lib;` with
+    /// `use Vendor\Sub;` and `use const Vendor\DEFAULT_LIMIT;` would.
+    fn qualify_constants(expression: &str) -> Option<String> {
+        let use_map = HashMap::from([("Sub".to_string(), "Vendor\\Sub".to_string())]);
+        let constant_imports = HashMap::from([(
+            "DEFAULT_LIMIT".to_string(),
+            "Vendor\\DEFAULT_LIMIT".to_string(),
+        )]);
+        qualify_constant_names(
+            expression,
+            &Some("Lib".to_string()),
+            &use_map,
+            &constant_imports,
+        )
+    }
+
+    #[test]
+    fn qualifies_constants_with_one_meaning() {
+        assert_eq!(
+            qualify_constants("DEFAULT_LIMIT").as_deref(),
+            Some("\\Vendor\\DEFAULT_LIMIT")
+        );
+        assert_eq!(
+            qualify_constants("Sub\\DEPTH").as_deref(),
+            Some("\\Vendor\\Sub\\DEPTH")
+        );
+        assert_eq!(
+            qualify_constants("Other\\DEPTH").as_deref(),
+            Some("\\Lib\\Other\\DEPTH")
+        );
+        assert_eq!(
+            qualify_constants("namespace\\LIMIT").as_deref(),
+            Some("\\Lib\\LIMIT")
+        );
+        assert_eq!(
+            qualify_constants("[DEFAULT_LIMIT => LIMIT, 'k' => Sub\\DEPTH * 2]").as_deref(),
+            Some("[\\Vendor\\DEFAULT_LIMIT => LIMIT, 'k' => \\Vendor\\Sub\\DEPTH * 2]")
+        );
+    }
+
+    #[test]
+    fn keeps_names_that_are_not_a_constant_to_qualify() {
+        // An unqualified name no import claims is read in either namespace.
+        assert_eq!(qualify_constants("LIMIT | PHP_INT_SIZE"), None);
+        // Already fully qualified.
+        assert_eq!(qualify_constants("\\Vendor\\DEFAULT_LIMIT"), None);
+        // A class, a member and a function, however they are named.
+        assert_eq!(qualify_constants("DEFAULT_LIMIT::A"), None);
+        assert_eq!(qualify_constants("self::DEFAULT_LIMIT"), None);
+        assert_eq!(qualify_constants("new DEFAULT_LIMIT()"), None);
+        assert_eq!(qualify_constants("DEFAULT_LIMIT()"), None);
+        // Text that only spells the name.
+        assert_eq!(qualify_constants("'DEFAULT_LIMIT \\\\ Sub\\\\DEPTH'"), None);
+        assert_eq!(qualify_constants("1 /* DEFAULT_LIMIT */"), None);
+    }
+
+    #[test]
+    fn qualifies_unqualified_constants_the_resolver_answers_for() {
+        let resolve = |name: &str| (name == "LIMIT").then(|| "Lib\\LIMIT".to_string());
+        assert_eq!(
+            qualify_unqualified_constant_names("LIMIT * 2 + OTHER", resolve).as_deref(),
+            Some("\\Lib\\LIMIT * 2 + OTHER")
+        );
+        assert_eq!(
+            qualify_unqualified_constant_names("Sub\\LIMIT", resolve),
+            None,
+            "a qualified name has one meaning already"
+        );
+        assert!(!names_unqualified_constant("'text' . 42"));
+        assert!(!names_unqualified_constant("[true, null, FALSE]"));
+        assert!(!names_unqualified_constant("\\Lib\\LIMIT"));
+        assert!(!names_unqualified_constant("self::LIMIT"));
+        assert!(names_unqualified_constant("[LIMIT]"));
     }
 
     #[test]

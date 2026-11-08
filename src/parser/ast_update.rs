@@ -546,17 +546,51 @@ impl Backend {
             None,
             Some(&doc_ctx),
         );
+        // A value is read wherever the constant is, so the names in it are
+        // qualified against the block that wrote it, as a class constant's
+        // are.
+        let multi_block = decls.namespace_spans.len() > 1;
         let defines: Vec<(String, DefineInfo)> = define_entries
             .into_iter()
             .map(|(name, offset, value)| {
+                let block = NamespaceSpan::containing(&decls.namespace_spans, offset)
+                    .filter(|_| multi_block);
+                let (use_map, constant_imports, namespace) = match block {
+                    Some(span) => (
+                        &span.use_map,
+                        &span.symbol_imports.constants,
+                        &span.namespace,
+                    ),
+                    None => (
+                        &decls.use_map,
+                        &decls.symbol_imports.constants,
+                        &decls.namespace,
+                    ),
+                };
                 let value = value.map(|value| {
-                    super::initializers::expand_file_constants(&value, uri).unwrap_or(value)
+                    let value =
+                        super::initializers::expand_file_constants(&value, uri).unwrap_or(value);
+                    super::name_resolution::qualify_initializer(
+                        &value,
+                        use_map,
+                        constant_imports,
+                        namespace,
+                    )
+                    .unwrap_or(value)
                 });
                 (
                     name,
                     DefineInfo {
                         file_uri: uri.to_string(),
                         name_offset: offset,
+                        namespace: namespace
+                            .as_deref()
+                            .filter(|_| {
+                                value
+                                    .as_deref()
+                                    .is_some_and(super::initializers::names_unqualified_constant)
+                            })
+                            .map(atom),
                         value,
                     },
                 )

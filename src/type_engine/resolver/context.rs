@@ -354,6 +354,12 @@ pub(crate) struct FileCtx<'a> {
     /// `__FILE__` resolve against.  `None` where it is not known, in which
     /// case no include is followed.
     pub uri: Option<&'a str>,
+    /// The namespace text read without a [`uri`](Self::uri) was written
+    /// in, such as a class constant's initializer read from another file.
+    /// An unqualified constant name in it means that namespace's constant
+    /// when one is declared and the global one otherwise.  `None` reads
+    /// such a name as the global constant.
+    pub namespace: Option<&'a str>,
 }
 
 impl<'a> FileCtx<'a> {
@@ -372,6 +378,7 @@ impl<'a> FileCtx<'a> {
             source_imports: None,
             backend: None,
             uri: None,
+            namespace: None,
         }
     }
 
@@ -391,6 +398,12 @@ impl<'a> FileCtx<'a> {
     /// The same file with `uri` as its URI.
     pub(crate) fn with_uri(self, uri: Option<&'a str>) -> Self {
         Self { uri, ..self }
+    }
+
+    /// The same file with `namespace` as the one text read without a URI
+    /// was written in (see [`Self::namespace`]).
+    pub(crate) fn with_namespace(self, namespace: Option<&'a str>) -> Self {
+        Self { namespace, ..self }
     }
 
     /// The same file with another source text and set of classes, as when
@@ -716,12 +729,15 @@ impl<'a> VarResolutionCtx<'a> {
     /// (which carries no constant loader) would otherwise report every
     /// global constant unknown, so a variable assigned one would resolve to
     /// nothing on that path while resolving fine on others.  That fallback
-    /// has no file to resolve `name` against, so it only finds the constant
-    /// under the name as written.
+    /// has no imports to resolve `name` against, only the file's
+    /// [`namespace`](FileCtx::namespace).
     pub(crate) fn lookup_constant(&self, name: &str, offset: u32) -> Option<Option<String>> {
         match self.loaders.constant_loader {
             Some(loader) => loader(name, offset),
-            None => self.file.backend?.lookup_global_constant(name),
+            None => self
+                .file
+                .backend?
+                .lookup_constant_written_in(name, self.file.namespace),
         }
     }
 

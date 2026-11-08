@@ -288,6 +288,7 @@ async fn test_constant_completion_prioritizes_project_core_explicit_then_transit
             file_uri: "file:///workspace/src/constants.php".to_string(),
             name_offset: 0,
             value: Some("'project'".to_string()),
+            namespace: None,
         },
     );
     backend.stub_constant_index_mut().insert(
@@ -2834,6 +2835,7 @@ async fn test_use_const_semicolon_termination() {
                 file_uri: "file:///defs.php".to_string(),
                 name_offset: 0,
                 value: None,
+                namespace: None,
             },
         );
     }
