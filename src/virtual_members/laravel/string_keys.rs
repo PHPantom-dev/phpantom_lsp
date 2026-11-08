@@ -99,6 +99,8 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::DrupalThemeHook => backend.drupal_theme_hook_definitions(key),
         StringKeyKind::DrupalThemeHookVariable => backend.drupal_theme_variable_definitions(key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
+        // A directory is no place an editor can open.
+        StringKeyKind::YiiViewPath => Vec::new(),
         StringKeyKind::YiiAlias => backend.yii_alias_definitions(key),
         StringKeyKind::YiiParam => backend.yii_param_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
@@ -336,7 +338,8 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::Asset
         | StringKeyKind::MixAsset
         | StringKeyKind::ViteAsset
-        | StringKeyKind::InertiaPage => find_string_key_usages(kind, key, backend, snapshot, true),
+        | StringKeyKind::InertiaPage
+        | StringKeyKind::YiiViewPath => find_string_key_usages(kind, key, backend, snapshot, true),
         // A Symfony declaration is a span in a configuration file's (or a
         // template's) map like any use, so the usages already hold it.
         StringKeyKind::ServiceId

@@ -43,6 +43,10 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `__DIR__ . '/template'` instead, and `index.php` renders `'_card'` from
   beside itself. Open `resources/views/blog/_card.php` for the lens listing
   the calls that render it.
+- In `PostController::view()`, go to the definition of the
+  `withLayout()` argument, which opens `src/Web/Shared/Layout/Main/layout.php`.
+  It completes like a view name, and a layout with no file is reported, as is
+  a `withViewPath()` directory that does not exist.
 - Open `src/Web/Shared/Layout/Main/MainAsset.php`. Go to the definition of
   `'@assetsSource'` in `$sourcePath`, which lands on its declaration in
   `config/common/aliases.php`, or hover it for the path it stands for. The

@@ -46,6 +46,11 @@ final readonly class PostController
             return $this->responseFactory->createResponse(Status::NOT_FOUND);
         }
 
-        return $this->viewRenderer->render('post', ['post' => $post]);
+        // Try: go to the definition of the layout, which opens
+        // src/Web/Shared/Layout/Main/layout.php, or misspell it, or the
+        // 'blog' in withViewPath() above, to see it reported.
+        return $this->viewRenderer
+            ->withLayout('@src/Web/Shared/Layout/Main/layout')
+            ->render('post', ['post' => $post]);
     }
 }

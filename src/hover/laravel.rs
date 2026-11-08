@@ -475,6 +475,16 @@ impl Backend {
                     );
                 ("View", detail)
             }
+            StringKeyKind::YiiViewPath => {
+                view_path = self.yii_view_display(key);
+                shown = &view_path;
+                let detail = if self.yii_view_dir_exists(key) == Some(true) {
+                    "Views are named relative to this directory"
+                } else {
+                    "No directory is there"
+                };
+                ("View directory", detail.to_string())
+            }
             // Strings start with an `@` for many reasons besides an alias,
             // so only a declared one is shown.
             StringKeyKind::YiiAlias => ("Alias", self.yii_alias_detail(key)?),

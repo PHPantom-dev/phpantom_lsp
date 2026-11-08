@@ -21,7 +21,8 @@ use crate::document_links::try_evaluate_path_expr;
 use crate::symbol_map::{ReceiverClass, StringKeyKind};
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 use crate::yii::views::{
-    controller_name, is_absolute_view_path, is_view_render_method, normalize_view_path, view_key,
+    controller_name, is_absolute_view_path, is_layout_method, is_view_render_method, layout_key,
+    normalize_view_path, view_key,
 };
 
 /// Where the render calls being extracted are written, which says what a
@@ -166,7 +167,8 @@ pub(in crate::symbol_map::extraction) fn mark_yii_param_reads_optional(
     }
 }
 
-/// Record the view the first argument of a render call names.
+/// Record the view the first argument of a render call or of a
+/// `withLayout()` names, and the directory a `withViewPath()` names.
 pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
     object: &Expression<'_>,
     member_name: &str,
@@ -176,7 +178,12 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
     let Some(dir) = ctx.yii_dir else {
         return;
     };
-    if !is_view_render_method(member_name) {
+    if member_name.eq_ignore_ascii_case("withViewPath") {
+        record_yii_view_path_site(argument_list, dir, ctx);
+        return;
+    }
+    let is_layout = is_layout_method(member_name);
+    if !is_layout && !is_view_render_method(member_name) {
         return;
     }
     let Some(Argument::Positional(argument)) = argument_list.arguments.first() else {
@@ -218,6 +225,9 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
         return;
     }
     let key = match &ctx.yii_view_scope {
+        // A template has no renderer whose view path a layout could be
+        // relative to.
+        YiiViewScope::Template if is_layout => layout_key(name, None),
         YiiViewScope::Template => {
             let dir = dir.to_string_lossy();
             view_key(name, Some(&dir), Some(&dir))
@@ -226,9 +236,12 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
             let class_fqn = ctx
                 .class_name_offset
                 .and_then(|offset| ctx.resolved_name_at(offset));
-            match chain_view_base(object, dir, class_fqn) {
-                Some(base) => view_key(name, base.as_deref(), None),
-                None => view_key(name, base.as_deref(), None),
+            let chain_base = chain_view_base(object, dir, class_fqn);
+            let base = chain_base.as_ref().unwrap_or(base).as_deref();
+            if is_layout {
+                layout_key(name, base)
+            } else {
+                view_key(name, base, None)
             }
         }
     };
@@ -243,6 +256,37 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
         is_optional: false,
         guards: 0,
         receiver: ReceiverClass::YiiViewRenderer,
+    });
+}
+
+/// Record the directory the argument of a `withViewPath()` names, for the
+/// type engine to confirm the receiver is a view renderer.
+fn record_yii_view_path_site(
+    argument_list: &ArgumentList<'_>,
+    dir: &Path,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some(Argument::Positional(argument)) = argument_list.arguments.first() else {
+        return;
+    };
+    let Some(key) = view_path_value(argument.value, dir) else {
+        return;
+    };
+    let literal = match argument.value {
+        Expression::Binary(binary) if binary.operator.is_concatenation() => binary.rhs,
+        value => value,
+    };
+    let Some((_, start, end)) = resolved_string_literal(literal, ctx.content) else {
+        return;
+    };
+    ctx.typed_receiver_sites.push(TypedReceiverSite {
+        start: start as u32,
+        end: end as u32,
+        key,
+        is_write: false,
+        is_optional: false,
+        guards: 0,
+        receiver: ReceiverClass::YiiViewPath,
     });
 }
 

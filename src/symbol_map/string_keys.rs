@@ -155,9 +155,13 @@ pub(crate) enum StringKeyKind {
     /// context (see `symfony::serializer`).
     SerializerGroup,
     /// A Yii view: the template a view renderer's `render()` family or a
-    /// view's own `render()` loads, keyed by the path it names (see
+    /// view's own `render()` loads, or the layout a renderer's
+    /// `withLayout()` wraps them in, keyed by the path it names (see
     /// `yii::views`).
     YiiView,
+    /// The directory of views a Yii renderer's `withViewPath()` gives it,
+    /// keyed by the path it names, alias and all.
+    YiiViewPath,
     /// A Yii route name: declared by a `Route` definition's `->name()`,
     /// after the name prefixes of the groups around it, and read by a URL
     /// generator's `generate()`, `generateAbsolute()`, and
@@ -306,6 +310,7 @@ impl StringKeyKind {
             | Self::TwigFunction
             | Self::TwigVariable => KeyFramework::Twig,
             Self::YiiView
+            | Self::YiiViewPath
             | Self::YiiRoute
             | Self::YiiRouteArgument
             | Self::YiiAlias
@@ -1123,8 +1128,12 @@ pub(crate) enum ReceiverClass {
     /// look listeners up by it.
     EventListeners,
     /// What renders a Yii view by its first argument: a view renderer's
-    /// `render()` family, and a view's own `render()` inside a template.
+    /// `render()` family and `withLayout()`, and a view's own `render()`
+    /// inside a template.
     YiiViewRenderer,
+    /// A Yii view renderer, whose `withViewPath()` takes the directory its
+    /// views are named relative to.
+    YiiViewPath,
     /// Drupal's entity type manager, whose `getStorage()` and the other
     /// handler getters take an entity type ID first, `getDefinition()` and
     /// `hasDefinition()` through [`Self::DefinitionLookup`].
@@ -1271,6 +1280,11 @@ impl ReceiverClass {
                 (YII_VIEW_RENDERER, YiiView),
                 (YII_LEGACY_VIEW_RENDERER, YiiView),
                 (YII_VIEW, YiiView),
+            ],
+            Self::YiiViewPath => &[
+                (YII_WEB_VIEW_RENDERER, StringKeyKind::YiiViewPath),
+                (YII_VIEW_RENDERER, StringKeyKind::YiiViewPath),
+                (YII_LEGACY_VIEW_RENDERER, StringKeyKind::YiiViewPath),
             ],
             Self::EntityTypeManager => {
                 &[(DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType)]

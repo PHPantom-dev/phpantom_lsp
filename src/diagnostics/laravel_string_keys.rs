@@ -45,6 +45,7 @@ enum CheckedStringKind {
     TwigFunction,
     MessengerBus,
     YiiView,
+    YiiViewPath,
     YiiRoute,
     YiiRouteArgument,
     YiiDefinitionArgument,
@@ -86,6 +87,7 @@ impl CheckedStringKind {
             StringKeyKind::TwigFunction => Self::TwigFunction,
             StringKeyKind::MessengerBus => Self::MessengerBus,
             StringKeyKind::YiiView => Self::YiiView,
+            StringKeyKind::YiiViewPath => Self::YiiViewPath,
             StringKeyKind::YiiRoute => Self::YiiRoute,
             StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
             StringKeyKind::YiiDefinitionArgument => Self::YiiDefinitionArgument,
@@ -575,6 +577,10 @@ impl<'a> DeclaredKeys<'a> {
                 .backend
                 .yii_view_exists(key)
                 .map(|exists| (exists, "view", "invalid_yii_view")),
+            CheckedStringKind::YiiViewPath => self
+                .backend
+                .yii_view_dir_exists(key)
+                .map(|exists| (exists, "view directory", "invalid_yii_view_path")),
             CheckedStringKind::YiiRoute => self.judge_yii_route(key),
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
             CheckedStringKind::YiiDefinitionArgument => self.judge_yii_definition_argument(key),
@@ -1109,7 +1115,7 @@ impl Backend {
                 // key names its handler too, and a translation key its
                 // domain.
                 let message = match kind {
-                    CheckedStringKind::YiiView => {
+                    CheckedStringKind::YiiView | CheckedStringKind::YiiViewPath => {
                         format!("Unknown {} '{}'", label, self.yii_view_display(key))
                     }
                     CheckedStringKind::YiiRouteArgument => format!(

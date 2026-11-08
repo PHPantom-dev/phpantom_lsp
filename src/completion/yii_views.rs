@@ -22,10 +22,11 @@ use crate::completion::source::code_context::CodeContext;
 use crate::symbol_map::{ReceiverClass, StringKeyKind};
 use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, FileContext};
-use crate::yii::views::{is_view_render_method, view_candidates};
+use crate::yii::views::{is_layout_method, is_view_render_method, view_candidates};
 
 impl Backend {
-    /// Complete the view a render call's string is being typed as.
+    /// Complete the view a render call's or a `withLayout()`'s string is
+    /// being typed as.
     pub(crate) fn try_yii_view_completion(
         &self,
         uri: &str,
@@ -43,7 +44,12 @@ impl Backend {
             return None;
         }
         let method = content.get(paren.callee_name_start?..paren.code_before)?;
-        if !is_view_render_method(method) {
+        let is_layout = is_layout_method(method);
+        if !is_layout && !is_view_render_method(method) {
+            return None;
+        }
+        // Only the renderer resolves an alias, and only in a layout.
+        if !is_layout && typed.starts_with('@') {
             return None;
         }
         let file = crate::util::uri_to_path(uri)?;
@@ -54,7 +60,11 @@ impl Backend {
             if !self.is_yii_view_receiver(content, cursor, code, ctx) {
                 return None;
             }
-            view_base_at(content, dir, quote as u32, ctx)?
+            if is_layout && typed.starts_with('@') {
+                String::new()
+            } else {
+                view_base_at(content, dir, quote as u32, ctx, is_layout)?
+            }
         } else if is_dir_concatenation(between) && typed.starts_with('/') {
             dir.to_string_lossy().into_owned()
         } else {
@@ -110,8 +120,15 @@ fn is_dir_concatenation(between: &str) -> bool {
 
 /// The view path a name passed at `quote` is relative to: the one the
 /// call's own receiver chain or the class around it gives its renderer, or
-/// outside a class, the template's own directory.
-fn view_base_at(content: &str, dir: &Path, quote: u32, ctx: &FileContext) -> Option<String> {
+/// outside a class, the template's own directory, which a layout is never
+/// relative to.
+fn view_base_at(
+    content: &str,
+    dir: &Path,
+    quote: u32,
+    ctx: &FileContext,
+    is_layout: bool,
+) -> Option<String> {
     crate::parser::with_parsed_program(content, "yii_view_completion", |program, content| {
         let mut found = ViewBaseFinder::default();
         let finder = ViewBaseWalker { quote };
@@ -119,7 +136,7 @@ fn view_base_at(content: &str, dir: &Path, quote: u32, ctx: &FileContext) -> Opt
             mago_syntax::walker::Walker::walk_statement(&finder, statement, &mut found);
         }
         let Some(class) = found.class else {
-            return Some(dir.to_string_lossy().into_owned());
+            return (!is_layout).then(|| dir.to_string_lossy().into_owned());
         };
         let class_fqn = {
             let short = crate::atom::bytes_to_str(class.name.value);

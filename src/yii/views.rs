@@ -36,6 +36,13 @@ pub(crate) fn is_view_render_method(method: &str) -> bool {
     .any(|name| method.eq_ignore_ascii_case(name))
 }
 
+/// Whether `method` is a view renderer's `withLayout()`, whose argument
+/// names a view the way a render call's does: relative to the renderer's
+/// view path unless it is an alias or an absolute path.
+pub(crate) fn is_layout_method(method: &str) -> bool {
+    method.eq_ignore_ascii_case("withLayout")
+}
+
 /// The directory a renderer's `withController()` adds to its view path
 /// for the controller class `fqn`, as `ViewRenderer` derives it: the
 /// namespace after a `Controller\` or `Controllers\` segment and the class
@@ -142,9 +149,23 @@ pub(crate) fn view_key(
     Some(normalize_view_path(&path))
 }
 
+/// The key a `withLayout()` argument names: the renderer resolves an alias
+/// in it before rendering it as a view, and a view renderer has no
+/// template of its own for `./` to be relative to.
+pub(crate) fn layout_key(name: &str, base: Option<&str>) -> Option<String> {
+    if name.starts_with('@') {
+        return Some(normalize_view_path(name));
+    }
+    if name.starts_with("./") || name.starts_with("../") {
+        return None;
+    }
+    view_key(name, base, None)
+}
+
 /// The completion candidates for a view whose key so far is `typed`,
 /// relative to the directory `base` names: the views and the directories
 /// in the directory `typed` has reached, spelled as `typed` spells it.
+/// A `typed` that starts with an alias is not relative to `base`.
 /// `exclude` is the file the completion is in, which is no view of its
 /// own.
 pub(crate) fn view_candidates(
@@ -154,7 +175,9 @@ pub(crate) fn view_candidates(
     exclude: Option<&Path>,
 ) -> Vec<String> {
     let typed_dir = typed.rfind('/').map_or("", |slash| &typed[..=slash]);
-    let joined = if typed_dir.starts_with('/') {
+    let joined = if typed_dir.starts_with('@') {
+        typed_dir.to_string()
+    } else if typed_dir.starts_with('/') {
         format!("{base}{typed_dir}")
     } else {
         format!("{base}/{typed_dir}")
@@ -211,6 +234,12 @@ impl Backend {
     pub(crate) fn yii_view_exists(&self, key: &str) -> Option<bool> {
         let path = self.yii_view_path(key)?;
         Some(view_file(&path).is_some())
+    }
+
+    /// Whether the directory a view path key names exists, or `None` when
+    /// the key cannot be resolved.
+    pub(crate) fn yii_view_dir_exists(&self, key: &str) -> Option<bool> {
+        Some(self.yii_view_path(key)?.is_dir())
     }
 
     /// The file a view key names, or the `.php` file the renderer would

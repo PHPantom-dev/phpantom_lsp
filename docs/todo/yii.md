@@ -196,25 +196,6 @@ missing one.
 
 ---
 
-## Y12. Missing layouts and view directories
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-$this->viewRenderer
-    ->withViewPath('@views/blogg')     // no such directory
-    ->withLayout('@layout/mainn');     // no such file
-```
-
-A view a class renders by name is reported when no template matches it,
-but the layout and the view path the name is resolved against are not.
-Navigate from a `withLayout()` argument to its template and complete it
-the way a view name completes, and report a layout with no file and a
-`withViewPath()` directory that does not exist. The aliases resolve
-through the configuration's declarations, as view names already do.
-
----
-
 ## Y15. Property names in hydrator attributes and form fields
 
 **Impact: Low-Medium · Complexity: Medium**

@@ -135,6 +135,8 @@ check("index.php links each post through generate('blog/post', ...)", str_contai
 $html = $renderer->renderPartialAsString('post', ['post' => $repository->findBySlug('config-is-code')]);
 check("post.php links back through generate('blog/index')", str_contains($html, 'href="/blog"'));
 
+check("withLayout('@src/Web/Shared/Layout/Main/layout') is layout.php", is_file(__DIR__ . '/src/Web/Shared/Layout/Main/layout.php'));
+
 $html = $container->get(WebViewRenderer::class)->renderPartialAsString(__DIR__ . '/src/Web/HomePage/template');
 check("The home page links to generate('blog/index')", str_contains($html, 'href="/blog"'));
 

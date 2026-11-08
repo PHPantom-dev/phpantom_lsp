@@ -82,6 +82,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         | StringKeyKind::Stack
         | StringKeyKind::TwigBlock
         | StringKeyKind::ContainerBinding => CompletionItemKind::Value,
+        StringKeyKind::YiiViewPath => CompletionItemKind::Folder,
     }
 }
 
@@ -248,6 +249,7 @@ impl Backend {
             | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
             | StringKeyKind::YiiView
+            | StringKeyKind::YiiViewPath
             | StringKeyKind::TempestView { .. } => Arc::new([]),
             // Any string can start with an alias, so the names are offered
             // wherever one is typed (`crate::completion::yii_aliases`).

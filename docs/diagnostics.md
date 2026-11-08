@@ -161,7 +161,8 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | --- | --- | --- |
 | `invalid_yii_route` | Warning | A route name no route declares. |
 | `invalid_yii_route_argument` | Warning | A route argument the route's path does not have. |
-| `invalid_yii_view` | Warning | A view path with no view file. |
+| `invalid_yii_view` | Warning | A view or layout with no view file. |
+| `invalid_yii_view_path` | Warning | A view path directory that does not exist. |
 | `invalid_yii_definition_argument` | Warning | A DI definition argument that names no parameter of the method. |
 | `invalid_yii_param` | Warning | A `$params` key no params file declares. |
 | `invalid_yii_config_file` | Warning | A file a `config-plugin` in `composer.json` lists that does not exist. |

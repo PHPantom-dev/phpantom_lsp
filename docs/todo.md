@@ -38,7 +38,6 @@ contributor even though it's short.
 | DR17 | [Warn on unknown service IDs](todo/drupal.md#dr17-warn-on-unknown-service-ids) | Medium | Low-Medium |
 | T70 | [A decorated service is typed as the class it decorates](todo/type-inference.md#t70-a-decorated-service-is-typed-as-the-class-it-decorates) | Low-Medium | Low |
 | F68 | [Method names under `calls:` in a services file](todo/lsp-features.md#f68-method-names-under-calls-in-a-services-file) | Low | Low |
-| Y12 | [Missing layouts and view directories](todo/yii.md#y12-missing-layouts-and-view-directories) | Low-Medium  | Low-Medium  |
 | Y16 | [Asset bundle file paths](todo/yii.md#y16-asset-bundle-file-paths) | Low         | Low-Medium  |
 | Y19 | [Aliases in workspace symbols and folding](todo/yii.md#y19-aliases-in-workspace-symbols-and-folding) | Low         | Low-Medium  |
 | Y11 | [Check what a DI definition passes, not only what it names](todo/yii.md#y11-check-what-a-di-definition-passes-not-only-what-it-names) | Medium      | Medium      |
@@ -167,7 +166,6 @@ ships, remove every row that names it.
 | Y13 | [Translation message IDs](todo/yii.md#y13-translation-message-ids) | Medium      | Medium      |
 | Y14 | [Event listeners in the events configuration](todo/yii.md#y14-event-listeners-in-the-events-configuration) | Medium      | Medium      |
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
-| Y12 | [Missing layouts and view directories](todo/yii.md#y12-missing-layouts-and-view-directories) | Low-Medium  | Low-Medium  |
 | Y15 | [Property names in hydrator attributes and form fields](todo/yii.md#y15-property-names-in-hydrator-attributes-and-form-fields) | Low-Medium  | Medium      |
 | Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
 | Y18 | [Active Record attributes and relations](todo/yii.md#y18-active-record-attributes-and-relations) (builds on Y8) | Low-Medium  | Medium-High |
