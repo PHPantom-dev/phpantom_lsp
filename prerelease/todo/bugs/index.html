@@ -1005,6 +1005,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Name resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b740-a-constant-named-in-another-files-initializer-has-no-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B740. A constant named in another file's initializer has no type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1645,6 +1662,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Name resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b740-a-constant-named-in-another-files-initializer-has-no-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B740. A constant named in another file's initializer has no type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1748,7 +1782,39 @@ undecided rather than failed.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b740-a-constant-named-in-another-files-initializer-has-no-type">B740. A constant named in another file's initializer has no type<a class="headerlink" href="#b740-a-constant-named-in-another-files-initializer-has-no-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// src/Lib/Box.php</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">namespace Lib;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">use const Vendor\DEFAULT_LIMIT;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">const LIMIT = 5;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">class Box {</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    const MAX = LIMIT;          // 5</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    const FLOOR = DEFAULT_LIMIT;</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">}</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">// src/App/run.php</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">namespace App;</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">$max = \Lib\Box::MAX;           // should be 5, has no type</span>
+</code></pre></div>
+<p>A class constant's initializer, a namespaced constant's initializer and a
+parameter default are source text that the reader resolves later, in a
+different file. The parser qualifies the class names and <code>__DIR__</code> in that
+text against the declaring file, but not constant names. The reader can't
+look them up through its own namespace and <code>use const</code> imports, since those
+belong to a different file, so only a global constant of that name is
+found. A namespaced or imported constant in such an initializer comes out
+untyped.</p>
+<p>One path still hands such text to the reader's lookup. A conditional return
+type decided by an omitted argument reads the parameter's default through
+the call site's argument resolver
+(<code>type_ops/conditional/text_args.rs</code>), so a default naming a namespaced
+constant finds the call site's constant of that name, if it has one.</p>
+<p>The parser could qualify constant names too. An imported name has one
+answer. An unqualified name in a namespace falls back to the global
+constant at runtime, so it needs both candidates kept, or the declaring
+file's location recorded so the reader can look it up there.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
