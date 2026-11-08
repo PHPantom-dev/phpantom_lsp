@@ -3,6 +3,7 @@
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::symbol_map::SymbolKind;
 use crate::text_position::{byte_range_to_lsp_range, position_to_offset};
 
 use super::syntax::{Tag, Token, tokens};
@@ -12,13 +13,172 @@ const DIRECTIVES: [&str; 8] = [
 ];
 const BUILTINS: [&str; 3] = ["x-slot", "x-template", "x-component"];
 
+struct AttributeTarget {
+    location: Location,
+    php_position: Position,
+}
+
 impl Backend {
-    /// Resolve either end of a component tag to the discovered view file.
+    fn tempest_selected_components(&self, uri: &str, source: &str, tag: &Tag<'_>) -> Vec<String> {
+        if tag.name != "x-component" {
+            return vec![tag.name.to_owned()];
+        }
+        tag.attributes
+            .iter()
+            .find(|attr| matches!(attr.name, "is" | ":is"))
+            .and_then(|attr| {
+                let value = attr.value.as_ref()?;
+                if attr.name == ":is" {
+                    super::component_context::attribute_type(self, uri, source, value, false)
+                } else {
+                    Some(crate::php_type::PhpType::literal_string_value(
+                        &source[value.clone()],
+                    ))
+                }
+            })
+            .as_ref()
+            .map(|ty| {
+                super::component_context::component_names(ty)
+                    .into_iter()
+                    .map(|name| name.into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn tempest_component_attribute_targets(
+        &self,
+        uri: &str,
+        source: &str,
+        tag: &Tag<'_>,
+        offset: usize,
+    ) -> Option<(Range, Vec<AttributeTarget>)> {
+        if tag.closing {
+            return None;
+        }
+        let attr = tag.attributes.iter().find(|attr| {
+            attr.span.start <= offset && offset <= attr.span.start + attr.name.len()
+        })?;
+        if attr.name.starts_with("::")
+            || DIRECTIVES.contains(&attr.name)
+            || (tag.name == "x-component" && matches!(attr.name, "is" | ":is"))
+        {
+            return None;
+        }
+        let name = attr.name.trim_start_matches(':');
+        if matches!(name, "this" | "attributes" | "slots") {
+            return None;
+        }
+        let range =
+            byte_range_to_lsp_range(source, attr.span.start, attr.span.start + attr.name.len());
+        let components = self.tempest_components();
+        let mut targets = Vec::new();
+        for path in self
+            .tempest_selected_components(uri, source, tag)
+            .iter()
+            .filter_map(|name| components.get(name))
+        {
+            let target_uri = crate::util::path_to_uri(path);
+            let target = self.with_file_content(
+                "tempest_component_attribute",
+                &target_uri,
+                None,
+                |php, _| {
+                    let map = self.symbol_map_for(&target_uri)?;
+                    let php = map.source(php)?.text();
+                    // Keep source-backed reads, skipping generated bindings,
+                    // annotations and assignment targets.
+                    let (range, php_position) = map
+                        .spans
+                        .iter()
+                        .filter_map(|span| {
+                            let SymbolKind::Variable { name: variable } = &span.kind else {
+                                return None;
+                            };
+                            if crate::blade::component_tags::kebab_case(variable) != name
+                                || map.is_at_var_definition(variable, span.start)
+                            {
+                                return None;
+                            }
+                            let php_range = byte_range_to_lsp_range(
+                                php,
+                                span.start as usize,
+                                span.end as usize,
+                            );
+                            Some((
+                                self.try_translate_template_range(&target_uri, php_range)?,
+                                php_range.start,
+                            ))
+                        })
+                        .min_by_key(|(range, _)| (range.start.line, range.start.character))?;
+                    Some(AttributeTarget {
+                        location: Location {
+                            uri: crate::util::parse_url(&target_uri)?,
+                            range,
+                        },
+                        php_position,
+                    })
+                },
+            );
+            if let Some(Some(target)) = target
+                && !targets
+                    .iter()
+                    .any(|known: &AttributeTarget| known.location == target.location)
+            {
+                targets.push(target);
+            }
+        }
+        Some((range, targets))
+    }
+
+    /// Show the variable's PHP hover at the component attribute's source range.
+    pub(crate) fn tempest_component_attribute_hover(
+        &self,
+        uri: &str,
+        position: Position,
+    ) -> Option<Hover> {
+        if !self.is_tempest_view(uri) {
+            return None;
+        }
+        if self
+            .template_source_map(uri)
+            .and_then(|map| map.copied.as_ref().and_then(|spans| spans.to_php(position)))
+            .is_some()
+        {
+            return None;
+        }
+        let source = self.get_file_content_arc(uri)?;
+        let offset = position_to_offset(&source, position) as usize;
+        let tag = tag_at(&source, offset)?;
+        let (range, targets) =
+            self.tempest_component_attribute_targets(uri, &source, &tag, offset)?;
+        let mut hovers = targets.into_iter().filter_map(|target| {
+            let uri = target.location.uri.as_str();
+            self.with_file_content("tempest_component_attribute_hover", uri, None, |php, _| {
+                self.handle_hover(uri, php, target.php_position)
+            })
+            .flatten()
+        });
+        let mut hover = hovers.next()?;
+        for other in hovers {
+            if let (Contents::MarkupContent(left), Contents::MarkupContent(right)) =
+                (&mut hover.contents, other.contents)
+                && left.value != right.value
+            {
+                left.value.push_str("\n\n---\n\n");
+                left.value.push_str(&right.value);
+            }
+        }
+        hover.range = Some(range);
+        Some(hover)
+    }
+
+    /// Resolve a component tag to its view, or an attribute to its variable read.
     pub(crate) fn tempest_component_definition(
         &self,
         uri: &str,
         position: Position,
-    ) -> Option<Location> {
+    ) -> Option<Definition> {
         if !self.is_tempest_view(uri) {
             return None;
         }
@@ -28,7 +188,19 @@ impl Backend {
         let resolved;
         let name = if tag.name_span.start <= offset && offset <= tag.name_span.end {
             tag.name
-        } else if tag.name == "x-component" {
+        } else {
+            if let Some((_, targets)) =
+                self.tempest_component_attribute_targets(uri, &source, &tag, offset)
+            {
+                return (!targets.is_empty()).then(|| {
+                    Definition::LocationList(
+                        targets.into_iter().map(|target| target.location).collect(),
+                    )
+                });
+            }
+            if tag.name != "x-component" {
+                return None;
+            }
             let attr = tag
                 .attributes
                 .iter()
@@ -47,15 +219,13 @@ impl Backend {
             } else {
                 &source[value.clone()]
             }
-        } else {
-            return None;
         };
         let components = self.tempest_components();
         let path = components.get(name)?;
-        Some(Location {
+        Some(Definition::Location(Location {
             uri: crate::util::parse_url(&crate::util::path_to_uri(path))?,
             range: Range::default(),
-        })
+        }))
     }
 
     /// Complete component and directive names before entering virtual PHP.
@@ -173,33 +343,7 @@ impl Backend {
         }
         {
             let components = self.tempest_components();
-            let names = if tag.name == "x-component" {
-                tag.attributes
-                    .iter()
-                    .find(|attr| matches!(attr.name, "is" | ":is"))
-                    .and_then(|attr| {
-                        let value = attr.value.as_ref()?;
-                        if attr.name == ":is" {
-                            super::component_context::attribute_type(
-                                self, uri, &source, value, false,
-                            )
-                        } else {
-                            Some(crate::php_type::PhpType::literal_string_value(
-                                &source[value.clone()],
-                            ))
-                        }
-                    })
-                    .as_ref()
-                    .map(|ty| {
-                        super::component_context::component_names(ty)
-                            .into_iter()
-                            .map(|name| name.into_owned())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default()
-            } else {
-                vec![tag.name.to_owned()]
-            };
+            let names = self.tempest_selected_components(uri, &source, &tag);
             for path in names.iter().filter_map(|name| components.get(name)) {
                 let Some(component) = self.get_file_content_arc(&crate::util::path_to_uri(path))
                 else {

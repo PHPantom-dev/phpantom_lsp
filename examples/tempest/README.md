@@ -13,6 +13,8 @@ The `.view.php` files use the editor's PHP language-server connection.
   prefixes work too.
 - In `app/books.view.php`, complete directives and component tags, follow
   `<x-card>` to its file, and complete or navigate `$book`'s members.
+  Follow `:title` and `:show-title` to their first variable reads in the
+  component, or hover their names to inspect the component's types.
 - In `app/dynamic.view.php`, follow a dynamic component name, complete its
   attributes, and inspect the inferred data in the selected component and slot.
 - In `app/branches.view.php`, inspect the loop variable across sibling branches.

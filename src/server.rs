@@ -403,10 +403,8 @@ impl LanguageServer for Backend {
                 // A component tag is HTML, so it has no position in the virtual
                 // PHP `handle_with_position` would swap in below; it is resolved
                 // from the template's own source instead.
-                if let Some(location) = backend.tempest_component_definition(uri, position) {
-                    return Ok(Some(DefinitionResponse::Definition(Definition::Location(
-                        location,
-                    ))));
+                if let Some(definition) = backend.tempest_component_definition(uri, position) {
+                    return Ok(Some(DefinitionResponse::Definition(definition)));
                 }
                 if backend.is_blade_file(uri)
                     && let Some(location) = crate::util::catch_panic_unwind_safe(
@@ -577,6 +575,9 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
 
         self.run_position_request("hover", uri, position, |backend, uri, position| {
+            if let Some(hover) = backend.tempest_component_attribute_hover(uri, position) {
+                return Ok(Some(hover));
+            }
             // For Blade files, check if the cursor is on an echo delimiter
             // (`{{`/`}}` or `{!!`/`!!}`). If so, return hover for `e()`
             // (escaped echo) or a raw-echo explanation, rather than falling

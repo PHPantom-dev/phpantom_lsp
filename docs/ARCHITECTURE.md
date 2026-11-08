@@ -1541,6 +1541,10 @@ attributes override global view data without inheriting arbitrary caller
 locals. A work queue propagates changed scopes through component calls;
 recursive component inference is bounded.
 
+Component attribute navigation maps the first variable read in the receiving
+view back to its source. Attribute hover uses that read's normal PHP hover,
+so declared and inferred types follow the same rules as the component body.
+
 Dynamic component selectors use the same expression engine. The work queue
 loads selected targets as their names become known and removes contributions
 when a selector changes. The dynamic wrapper's scalar attributes become

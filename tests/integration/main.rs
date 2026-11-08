@@ -347,6 +347,7 @@ mod symfony_service_calls;
 mod symfony_templates;
 mod symfony_translations;
 mod tempest;
+mod tempest_component_attributes;
 mod tempest_context;
 mod tempest_context_edges;
 mod tempest_discovery;

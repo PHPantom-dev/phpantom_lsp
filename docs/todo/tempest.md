@@ -48,25 +48,6 @@ binds `TModel` to the class, and offer the docblock fix upstream.
 
 ---
 
-## TM1. Component attribute names navigate to the component's variable
-
-**Impact: Low-Medium · Complexity: Low**
-
-```html
-<x-book-card :book="$book" show-author />
-```
-
-Attribute names on a component tag already complete from the variables
-the component's view reads (`src/tempest/components.rs`), but
-go-to-definition on `show-author` or `:book` finds nothing. Navigate
-from an attribute name to the first read of `$showAuthor` (or `$book`)
-in the component's view, matching the kebab-case conversion completion
-uses, and hover the attribute with the type the component sees.
-Built-in directives (`:if`, `:foreach`, …) and `:is` on
-`<x-component>` keep their current handling.
-
----
-
 ## TM2. Documentation for built-in components and directives
 
 **Impact: Low · Complexity: Low**
