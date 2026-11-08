@@ -181,6 +181,43 @@ return [
 ];
 "#;
 
+const NOTIFIER_PHP: &str = r#"<?php
+namespace App\Blog;
+
+abstract class Notifier
+{
+    public function __construct(protected Logger $logger) {}
+}
+"#;
+
+const CLOCK_PHP: &str = r#"<?php
+namespace App\Blog;
+
+final class Clock {}
+"#;
+
+const SMS_NOTIFIER_PHP: &str = r#"<?php
+namespace App\Blog;
+
+final class SmsNotifier extends Notifier {}
+"#;
+
+/// Definitions passing arguments to a constructor that is declared, one
+/// that is inherited, and one that is not there at all.
+const CONSTRUCTORS_PHP: &str = r#"<?php
+use App\Blog\Clock;
+use App\Blog\Logger;
+use App\Blog\Mailer;
+use App\Blog\SmsNotifier;
+use Yiisoft\Definitions\Reference;
+
+return [
+    Mailer::class => ['__construct()' => [Reference::to(Logger::class)]],
+    SmsNotifier::class => ['__construct()' => [Reference::to(Logger::class)]],
+    Clock::class => ['__construct()' => []],
+];
+"#;
+
 /// The `events` group is keyed by classes too, but names listeners.
 const EVENTS_PHP: &str = r#"<?php
 use App\Blog\Logger;
@@ -199,7 +236,11 @@ async fn workspace() -> (Backend, tempfile::TempDir) {
         ("src/Blog/Logger.php", LOGGER_PHP),
         ("src/Blog/Card.php", WIDGET_PHP),
         ("src/Blog/Mailer.php", MAILER_PHP),
+        ("src/Blog/Notifier.php", NOTIFIER_PHP),
+        ("src/Blog/SmsNotifier.php", SMS_NOTIFIER_PHP),
+        ("src/Blog/Clock.php", CLOCK_PHP),
         ("config/di/blog.php", DI_PHP),
+        ("config/di/constructors.php", CONSTRUCTORS_PHP),
         ("config/di/mailer.php", CHECKED_PHP),
         ("config/events.php", EVENTS_PHP),
     ];
@@ -329,6 +370,50 @@ async fn definition_keys_go_to_the_members_and_parameters_they_name() {
     )
     .await;
     assert!(hover.contains("Parameter `array $posts`"), "{hover}");
+}
+
+#[tokio::test]
+async fn a_constructor_key_goes_to_the_constructor_when_there_is_one() {
+    let (backend, dir) = workspace().await;
+    let config = uri_for(&dir, "config/di/constructors.php");
+
+    let declared = position_in(CONSTRUCTORS_PHP, "Mailer::class => ['__construct()'", 19);
+    assert_eq!(
+        definitions(&backend, &config, declared).await,
+        vec![(
+            uri_for(&dir, "src/Blog/Mailer.php"),
+            position_in(MAILER_PHP, "__construct(", 0)
+        )]
+    );
+    let hover = markup_hover_at(&backend, &config, declared.line, declared.character).await;
+    assert!(hover.contains("__construct"), "{hover}");
+
+    let inherited = position_in(
+        CONSTRUCTORS_PHP,
+        "SmsNotifier::class => ['__construct()'",
+        24,
+    );
+    assert_eq!(
+        definitions(&backend, &config, inherited).await,
+        vec![(
+            uri_for(&dir, "src/Blog/Notifier.php"),
+            position_in(NOTIFIER_PHP, "__construct(", 0)
+        )]
+    );
+
+    let missing = position_in(CONSTRUCTORS_PHP, "Clock::class => ['__construct()'", 18);
+    assert!(definitions(&backend, &config, missing).await.is_empty());
+    // A class without a constructor still takes the key.
+    assert!(
+        reported(
+            &backend,
+            &dir,
+            "config/di/constructors.php",
+            CONSTRUCTORS_PHP,
+            "unknown_member"
+        )
+        .is_empty()
+    );
 }
 
 #[tokio::test]

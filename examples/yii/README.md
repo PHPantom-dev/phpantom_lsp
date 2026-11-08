@@ -23,7 +23,7 @@ way a real Yii 3 project declares them.
 - Open `config/common/di/blog.php`. Go to the definition of
   `InMemoryPostRepository`, the class the container builds for
   `PostRepositoryInterface`. The definition's keys name what they configure:
-  `'posts'` goes to the constructor's `$posts`, `'setLogger()'` to the method,
+  `'__construct()'` goes to the constructor and `'posts'` to its `$posts`, `'setLogger()'` to the method,
   and `'$pageSize'` to the property. Rename `setLogger()` in
   `src/Blog/InMemoryPostRepository.php` and the key follows. Clear a key to
   complete it, or misspell one to see it reported. Drop the `$` from

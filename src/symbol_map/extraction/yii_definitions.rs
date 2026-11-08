@@ -240,24 +240,24 @@ fn emit_definition_keys(
             DefinitionKey::Method(name, start, end) => (name, start, end, true),
             DefinitionKey::Property(name, start, end) => (name, start, end, false),
         };
-        // The constructor is not a member the class need declare: one
-        // without passes its arguments to nothing.  Its arguments are still
-        // named after its parameters.
-        if !(is_method && name.eq_ignore_ascii_case("__construct")) {
-            ctx.spans.push(SymbolSpan {
-                start,
-                end,
-                kind: SymbolKind::MemberAccess {
-                    subject_text: class.subject.clone(),
-                    member_name: crate::atom::atom(name),
-                    is_static: true,
-                    is_method_call: is_method,
-                    docblock_ref: DocblockMemberRef::YiiDefinition,
-                    is_array_callable: false,
-                    is_nullsafe: false,
-                },
-            });
-        }
+        let docblock_ref = if is_method && name.eq_ignore_ascii_case("__construct") {
+            DocblockMemberRef::YiiConstructor
+        } else {
+            DocblockMemberRef::YiiDefinition
+        };
+        ctx.spans.push(SymbolSpan {
+            start,
+            end,
+            kind: SymbolKind::MemberAccess {
+                subject_text: class.subject.clone(),
+                member_name: crate::atom::atom(name),
+                is_static: true,
+                is_method_call: is_method,
+                docblock_ref,
+                is_array_callable: false,
+                is_nullsafe: false,
+            },
+        });
         if is_method && let ArrayElement::KeyValue(entry) = element {
             if let Some(first) = crate::parser::array_literal_elements(entry.value)
                 .and_then(|arguments| arguments.iter().next())

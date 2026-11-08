@@ -196,6 +196,14 @@ pub(crate) enum DocblockMemberRef {
     /// it builds, and throws for one the class does not have, so it is
     /// checked.
     YiiDefinition,
+    /// The constructor a Yii DI definition passes arguments to by its
+    /// `'__construct()'` key, with the class the definition builds as the
+    /// subject.
+    ///
+    /// A class that declares no constructor, nor inherits one, still takes
+    /// the key (PHP passes the arguments to nothing), so a target that
+    /// resolves to nothing is not an error.
+    YiiConstructor,
     /// An attribute a Yii Active Record's `get()`, `set()`, or the rest of
     /// its attribute API names, `$post->get('title')`, with the call's
     /// receiver as the subject (see [`crate::yii::active_record`]).
@@ -237,7 +245,7 @@ impl DocblockMemberRef {
     pub(crate) fn tolerates_missing_target(self) -> bool {
         matches!(
             self,
-            Self::See | Self::PropertyPath | Self::AttributeNamedArg
+            Self::See | Self::PropertyPath | Self::AttributeNamedArg | Self::YiiConstructor
         )
     }
 }

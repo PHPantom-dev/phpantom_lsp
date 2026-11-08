@@ -133,24 +133,3 @@ to its `{slug}` in the route's path, the way `#[RouteArgument('slug')]`
 already does (`yii_route_argument_locations` in `src/yii/routes.rs`), and
 hover it with the path. A key the path does not declare could be
 reported the same way an unknown `RouteArgument` is.
-
----
-
-## Y13. A definition's `'__construct()'` key goes to the constructor
-
-**Impact: Low · Complexity: Low**
-
-```php
-Mailer::class => [
-    '__construct()' => ['transport' => Reference::to(TransportInterface::class)],
-],
-```
-
-Every other `'name()'` key of a definition goes to its method, but
-`'__construct()'` goes nowhere. It is left out of the member spans
-deliberately (`emit_definition_keys` in
-`src/symbol_map/extraction/yii_definitions.rs`), because a class without
-a constructor still accepts the key and must not be reported. Navigate
-and hover it when the class (or an ancestor) declares a constructor,
-without reporting it when none does. Its argument keys already go to the
-constructor's parameters.
