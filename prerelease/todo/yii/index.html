@@ -1372,17 +1372,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#y16-asset-bundle-file-paths" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y16. Asset bundle file paths
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#y19-aliases-in-workspace-symbols-and-folding" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1435,7 +1424,8 @@ built from small, typed components with little magic, so the generic
 engine already types most of it. On top of that, route names, route
 arguments, view names, and the members and arguments DI definitions name
 complete, navigate, and are checked, path aliases navigate to their
-declarations, and the <code>$params</code> keys a configuration file reads complete,
+declarations, the files an asset bundle lists navigate, complete, and are
+checked, and the <code>$params</code> keys a configuration file reads complete,
 navigate, are checked, and are typed. What is still missing is the
 navigation between the rest of the names Yii keeps in configuration
 (events, translations) and the code and files they point to, and checking
@@ -1648,20 +1638,6 @@ and the attribute names against the record's properties, or, for a
 record without properties, against the table's columns (Y8). Wait for a
 user to ask: no project in our test set uses it.</p>
 <hr />
-<h2 id="y16-asset-bundle-file-paths">Y16. Asset bundle file paths<a class="headerlink" href="#y16-asset-bundle-file-paths" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">final class MainAsset extends AssetBundle</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">{</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    public ?string $sourcePath = '@assetsSource/main';</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    public array $css = ['site.css'];</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">}</span>
-</code></pre></div>
-<p>The aliases in <code>$basePath</code>, <code>$baseUrl</code>, and <code>$sourcePath</code> already
-navigate. The entries of <code>$css</code> and <code>$js</code> are relative to <code>$sourcePath</code>
-(or <code>$basePath</code> when it is unset) and do not. Navigate from an entry to
-its file, complete from the files under that directory, and report an
-entry with no file. An entry that is a URL is left alone.</p>
-<hr />
 <h2 id="y19-aliases-in-workspace-symbols-and-folding">Y19. Aliases in workspace symbols and folding<a class="headerlink" href="#y19-aliases-in-workspace-symbols-and-folding" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
 <p>The aliases the configuration declares navigate, complete, and show
@@ -1672,7 +1648,7 @@ an aliased path whose collapsed text is the path it resolves to.</p>
 <hr />
 <h2 id="y17-key-paths-in-yiisoftarrays">Y17. Key paths in <code>yiisoft/arrays</code><a class="headerlink" href="#y17-key-paths-in-yiisoftarrays" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">ArrayHelper::getValue($user, 'profile.address.city');</span>
 </code></pre></div>
 <p><code>ArrayHelper::getValue()</code>, <code>setValue()</code>, <code>keyExists()</code>, and <code>remove()</code>
 take a key or a dotted path into the array or object they are given.
