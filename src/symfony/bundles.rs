@@ -191,6 +191,7 @@ fn read_php_file(uri: &str, content: &str) -> SymbolMap {
             twig: false,
             doctrine: false,
             yii_params: false,
+            tempest: false,
         },
         None,
         crate::drupal::hooks::DrupalFile::Other,

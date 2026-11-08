@@ -85,6 +85,12 @@ pub(crate) fn bind_template_args(
     let ordered = callable_bindings_last(callee.template_bindings, callee.parameters);
     let (written, omitted): (Vec<&(Atom, Atom)>, Vec<_>) = ordered.partition(is_written);
     let mut variadic_tail: Option<Vec<&str>> = None;
+    // A default was written in the callee's file, so the call site's imports
+    // and namespace must not resolve the names in it.
+    let declared_ctx = ResolutionCtx {
+        file: ctx.file.with_imports(None).with_uri(None),
+        ..*ctx
+    };
 
     for (tpl_name, param_name) in written.into_iter().chain(omitted) {
         let Some(param_idx) = param_index(param_name) else {
@@ -100,8 +106,8 @@ pub(crate) fn bind_template_args(
         let param_hint = via_bound.as_ref().or(param.type_hint.as_ref());
         let tpl_bound = callee.template_param_bounds.get(&atom(tpl_name));
 
-        let arg_text = match bound.get(param_idx).and_then(|o| o.as_deref()) {
-            Some(text) => text,
+        let (arg_text, ctx) = match bound.get(param_idx).and_then(|o| o.as_deref()) {
+            Some(text) => (text, ctx),
             None => match omitted_arg_default(
                 param.default_value.as_deref(),
                 tpl_name,
@@ -109,7 +115,7 @@ pub(crate) fn bind_template_args(
                 param_hint,
                 &subs,
             ) {
-                Some(default) => default,
+                Some(default) => (default, &declared_ctx),
                 None => continue,
             },
         };

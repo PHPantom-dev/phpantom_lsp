@@ -142,7 +142,7 @@ pub(crate) struct SymfonyState {
 /// key, an event listener, a Messenger bus, a Drupal entity type, a Drupal
 /// route, or a Drupal hook, outright or through a configurator call still
 /// to be confirmed, or registers a Messenger handler, or imports routes, or
-/// declares a Twig loader.
+/// declares a Twig loader, or carries a Tempest route attribute.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that
 /// uses Twig declares its templates, filters, and functions and nothing
@@ -225,8 +225,7 @@ impl Backend {
         if !self.reads_service_container()
             && !self.is_twig_project()
             && !self.is_yii_project()
-            && map.tempest_routes.is_empty()
-            && !self.is_declaring_uri(uri)
+            && !self.is_tempest_project()
         {
             return;
         }

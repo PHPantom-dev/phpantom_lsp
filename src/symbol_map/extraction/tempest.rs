@@ -9,6 +9,9 @@ use crate::virtual_members::laravel::helpers::resolved_string_literal_including_
 pub(super) fn record_route_attributes(class: &Class<'_>, ctx: &mut ExtractionCtx<'_>) {
     use crate::tempest::routes::{RouteAttribute, RouteParameter, placeholders};
 
+    if !ctx.tempest {
+        return;
+    }
     for member in class.members.iter() {
         let ClassLikeMember::Method(method) = member else {
             continue;

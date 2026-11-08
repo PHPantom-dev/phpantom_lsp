@@ -13,10 +13,9 @@ Work out each behaviour from the framework's own source
 (`tempest/view`, `tempest/router`, `tempest/database`,
 `tempest/container`) and the [view spec](https://tempestphp.com/3.x/internals/view-spec).
 
-`examples/tempest/` is the playground. It installs only the view layer
-and what it depends on today, so the router and database items add
-`tempest/router` and `tempest/database` to its `composer.json` along
-with their demos.
+`examples/tempest/` is the playground. It installs the view and router
+layers. The database items add `tempest/database` to its `composer.json`
+along with their demos.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
@@ -45,12 +44,9 @@ builder's own constructor says what is meant
 (`@param class-string<TModel>|TModel|string $model`), and
 `Book::select()` already gives `SelectQueryBuilder<Book>`. Read
 `query()`'s parameter the way the constructor declares it, so a class name
-binds `TModel` to the class, and offer the docblock fix upstream. This is
-the builder type TM4 reads the model from, so it comes first.
+binds `TModel` to the class, and offer the docblock fix upstream.
 
 ---
-
-
 
 ## TM1. Component attribute names navigate to the component's variable
 
@@ -103,3 +99,36 @@ from the callable's parameters and navigate from one to its parameter.
 Laravel's `app()->call([Foo::class, 'bar'], ['param' => …])` forwards
 the same way through an array, so build the callable lookup once and
 let both use it.
+
+---
+
+## TM7. A project's own route decorators change the route's URI
+
+**Impact: Low · Complexity: Medium**
+
+```php
+#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]
+final class Admin implements RouteDecorator
+{
+    public function decorate(Route $route): Route
+    {
+        return new Prefix('/admin')->decorate($route);
+    }
+}
+
+#[Admin]
+final class BookController
+{
+    #[Get('/books/{book}')] // the route is /admin/books/{book}
+    public function show(Book $book): View { /* ... */ }
+}
+```
+
+Route discovery applies every attribute that implements
+`Tempest\Router\RouteDecorator`, method ones before class ones, but only
+`Tempest\Router\Prefix` is read for the URI it adds. A project's own
+decorator that rewrites the URI is skipped, so its routes are recorded
+without the prefix, and a `uri()` literal that includes it finds no
+route. Read a decorator whose `decorate()` hands the route to a `Prefix`
+it builds from a literal, or assigns `$route->uri` from a literal joined
+with the old URI, as that prefix.

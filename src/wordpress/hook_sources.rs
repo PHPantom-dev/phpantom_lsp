@@ -120,6 +120,7 @@ pub(crate) fn hook_firings(content: &str) -> Vec<Firing> {
             twig: false,
             doctrine: false,
             yii_params: false,
+            tempest: false,
         },
         None,
         crate::drupal::hooks::DrupalFile::Other,

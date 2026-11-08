@@ -5217,6 +5217,48 @@ function test(): void {
     );
 }
 
+/// An array read on a subclass of a generic class goes through the
+/// subclass's own `offsetGet()`, even when the subclass never binds the
+/// parent's template parameters with `@extends`.
+#[test]
+fn array_object_subclass_offset_get_override_types_array_read() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class InstalledPackage {
+    public string $path = '';
+}
+
+final class InstalledPackagesList extends \ArrayObject {
+    public function offsetGet(mixed $key): ?InstalledPackage { return null; }
+}
+
+function test(InstalledPackagesList $list): void {
+    echo $list['drupal/sub-module']->path;
+    $direct = $list->offsetGet('drupal/sub-module');
+    echo $direct;
+    $package = $list['drupal/sub-module'];
+    echo $package;
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
+        "the subclass's `offsetGet()` must type the array read, got: {diags:?}",
+    );
+    for variable in ["$direct", "$package"] {
+        let hover = crate::common::hover_last(&backend, text, variable);
+        assert!(
+            hover.contains("InstalledPackage|null") || hover.contains("?InstalledPackage"),
+            "{variable} must resolve to ?InstalledPackage, got: {hover}",
+        );
+    }
+}
+
 /// A variable holding a `::class` literal that is assigned *inside a braced
 /// block* (e.g. a `foreach (...) { $cls = Wanted::class; ... }` body) must
 /// still resolve for `assertInstanceOf` narrowing.  This is the PHPUnit

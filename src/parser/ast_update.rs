@@ -630,6 +630,7 @@ impl Backend {
                     twig: self.is_twig_project(),
                     doctrine: self.is_doctrine_project(),
                     yii_params,
+                    tempest: self.is_tempest_project(),
                 },
                 yii_dir.as_deref(),
                 self.drupal_file(uri),

@@ -175,7 +175,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Tempest
 
 - **Tempest model property names.** Complete and navigate model properties in typed query builders and model helpers, including forwarded named arguments and array keys. Raw SQL strings keep their existing handling. Contributed by @shuvroroy.
-
 - **Tempest routes and their parameters.** Complete and navigate route actions and URI placeholders, including custom route attributes and paths without a leading slash. Renaming an action parameter updates its placeholders and named arguments to `uri()`. Contributed by @shuvroroy.
 - **Tempest View completion and navigation.** In a Tempest project, PHP expressions in `.view.php` templates use imports and `@var` annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to `Tempest\View\view()` also complete and navigate. Contributed by @shuvroroy.
 - **Tempest view data inference.** Templates infer data passed by callers and components, including custom View objects and slot scope. Explicit `@var` annotations can refine inferred types. Contributed by @shuvroroy.
@@ -233,12 +232,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster go-to-implementation on library classes.** Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.
 
 ### Fixed
-
-#### Yii
-
-- **Asset paths through symlinked directories.** Asset entries navigate to the canonical file, and missing-file diagnostics keep their paths relative to the project. Contributed by @shuvroroy.
-- **Translation files through symlinked directories.** Message IDs navigate to the canonical file and refresh when that file changes. Contributed by @shuvroroy.
-- **View paths through symlinked directories.** View names and parameters navigate to the canonical template, and hover and diagnostics keep paths relative to the project. Contributed by @shuvroroy.
 
 #### Type inference
 
@@ -367,6 +360,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Quotes and brackets inside call arguments.** An argument such as `'a' === 'b'`, a string holding a `|`, `]` or `->`, or a nested index like `$a[$b['x']]['y']` is read as written when a call's generic or conditional return type is worked out. A call chained off `new Box(…)` no longer takes `Box`'s template types from its constructor.
 - **Conditional return types decided by a default constant.** A method whose conditional return type depends on an argument left out of the call is now decided when the parameter's default is a class constant imported in the declaring file, as Symfony's `ContainerBuilder::get()` does. `$this->container->get(EntityTypeManagerInterface::class)->getStorage('node')` in a Drupal kernel test now resolves.
 - **Methods returning `self` keep the instance's type arguments.** A method declared `: self` in a trait that a generic class uses, or in a generic parent a class extends with `@extends`, now returns the class with the instance's type arguments, so `Book::select()->where('title', $title)->all()` in Tempest is still a list of `Book`s.
+- **Subclasses of generic classes that leave the templates unbound.** A class extending `\ArrayObject` with no `@extends` tag now keeps the return types its own overrides declare, so `$list['key']` and `$list->offsetGet('key')` give what its `offsetGet()` returns instead of an unresolvable `TValue`.
 
 #### Closures and callables
 

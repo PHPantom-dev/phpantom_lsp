@@ -213,6 +213,7 @@ fn read_package_definition_files(paths: &[PathBuf]) -> Vec<PackageDefinitionFile
                 twig: false,
                 doctrine: false,
                 yii_params: false,
+                tempest: false,
             },
             path.parent(),
             crate::drupal::hooks::DrupalFile::Other,

@@ -17827,3 +17827,40 @@ function unchecked(string $delay): void {
         .collect();
     assert_eq!(lines, vec![20], "got: {diags:?}");
 }
+
+/// A constant named in a class constant's initializer is never looked up
+/// through the reading file's namespace.
+#[test]
+fn constant_initializer_does_not_read_constants_through_the_readers_namespace() {
+    use crate::common::create_psr4_workspace;
+
+    let caller = r#"<?php
+namespace App;
+
+const LIMIT = 'text';
+
+function takes(array $a): void {}
+
+function test(): void {
+    takes(\Lib\Box::MAX);
+}
+"#;
+    let files = vec![
+        (
+            "src/Lib/Box.php",
+            "<?php\nnamespace Lib;\n\nconst LIMIT = 5;\n\nclass Box\n{\n    const MAX = LIMIT;\n}\n",
+        ),
+        ("src/App/run.php", caller),
+    ];
+    let composer = r#"{"autoload":{"psr-4":{"Lib\\":"src/Lib/","App\\":"src/App/"}}}"#;
+    let (backend, dir) = create_psr4_workspace(composer, &files);
+    let uri = crate::common::file_uri(&dir.path().join("src/App/run.php"));
+    backend.update_ast(&uri, caller);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(&uri, caller, &mut diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        msgs.iter().all(|m| !m.contains("'text'")),
+        "`Lib\\Box`'s initializers are not read in `App`'s namespace, got: {msgs:?}"
+    );
+}
