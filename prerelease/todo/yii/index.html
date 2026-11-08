@@ -1404,17 +1404,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#y21-css-class-names-in-html-helpers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y21. CSS class names in HTML helpers
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1693,15 +1682,6 @@ type <code>getValue()</code> as the value the path reaches instead of <code>mixe
 dotted-path helper (Laravel's <code>data_get()</code> and <code>Arr::get()</code> take the
 same kind of path) would share the walk, so build it in the shared
 resolution path rather than for Yii alone.</p>
-<hr />
-<h2 id="y21-css-class-names-in-html-helpers">Y21. CSS class names in HTML helpers<a class="headerlink" href="#y21-css-class-names-in-html-helpers" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">Html::div('...')-&gt;class('card-body');</span>
-</code></pre></div>
-<p><code>yiisoft/html</code> builds tags with <code>class()</code> and <code>addClass()</code>. Completing
-and navigating class names there needs an index of the project's
-stylesheets, which PHPantom does not have for any framework. File the
-stylesheet index as its own item first if this is ever taken up.</p>
 
 
 
