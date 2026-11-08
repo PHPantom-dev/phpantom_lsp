@@ -1547,6 +1547,8 @@ when a selector changes. The dynamic wrapper's scalar attributes become
 strings, while objects and arrays enter the inner view's data. Literal `:is`
 names navigate to components; variables and constants keep PHP navigation.
 
+## Tempest model property names
+
 Tempest database property arguments use the shared resolver to read the model
 from a query builder's generic type. Model helpers are recognized by their
 method's declaring trait, so an override keeps its own parameter handling.

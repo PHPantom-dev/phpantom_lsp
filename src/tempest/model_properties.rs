@@ -239,10 +239,7 @@ impl Backend {
         ctx: &FileContext,
         code: &CodeContext<'_>,
     ) -> Option<CompletionResponse> {
-        if !self
-            .is_tempest_database
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if !self.is_tempest_database_project() {
             return None;
         }
         let cursor = position_to_offset(content, position) as usize;
@@ -321,10 +318,7 @@ impl Backend {
         position: Position,
         ctx: &FileContext,
     ) -> Option<Vec<CompletionItem>> {
-        if !self
-            .is_tempest_database
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if !self.is_tempest_database_project() {
             return None;
         }
         let (method, _) = extract_identifier_backwards(&context.call_expression)?;
@@ -382,10 +376,7 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<Vec<Location>> {
-        if !self
-            .is_tempest_database
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if !self.is_tempest_database_project() {
             return None;
         }
         let offset = position_to_offset(content, position);
@@ -437,5 +428,48 @@ impl Backend {
             }
         }
         Some(locations)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_fixtures::make_backend;
+    use tower_lsp_server::gen_lsp_types::Position;
+
+    #[test]
+    fn property_names_need_the_database_package() {
+        let backend = make_backend();
+        let dir = tempfile::tempdir().unwrap();
+        let open = |name: &str, source: &str| {
+            let uri = crate::util::path_to_uri(&dir.path().join(name));
+            backend
+                .open_files
+                .write()
+                .insert(uri.clone(), std::sync::Arc::new(source.to_string()));
+            backend.update_ast(&uri, source);
+            uri
+        };
+        open(
+            "Book.php",
+            "<?php namespace Tempest\\Database; trait IsDatabaseModel { public static function create(mixed ...$params): static {} }
+namespace App; class Book { use \\Tempest\\Database\\IsDatabaseModel; public string $title; }",
+        );
+        let source = "<?php \\App\\Book::create(title: 'x');";
+        let uri = open("caller.php", source);
+        let position = Position::new(0, source.find("title:").unwrap() as u32 + 1);
+
+        backend.set_is_tempest_database(true);
+        assert_eq!(
+            backend
+                .tempest_model_property_definition(&uri, source, position)
+                .len(),
+            1
+        );
+        backend.set_is_tempest_database(false);
+        assert!(
+            backend
+                .tempest_model_property_definition(&uri, source, position)
+                .is_empty()
+        );
     }
 }

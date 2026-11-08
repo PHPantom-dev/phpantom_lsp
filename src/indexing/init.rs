@@ -185,10 +185,7 @@ impl Backend {
         self.set_is_twig(tool_packages().any(composer::is_twig_project));
         self.set_is_yii(tool_packages().any(composer::is_yii_project));
         self.set_is_tempest(tool_packages().any(composer::is_tempest_project));
-        self.is_tempest_database.store(
-            tool_packages().any(composer::is_tempest_database_project),
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        self.set_is_tempest_database(tool_packages().any(composer::is_tempest_database_project));
         // PHPUnit is often one of the tools a bin namespace installs.
         self.set_phpunit_major(
             std::iter::once(root)
@@ -713,8 +710,7 @@ impl Backend {
         self.set_is_twig(any_twig);
         self.set_is_yii(any_yii);
         self.set_is_tempest(any_tempest);
-        self.is_tempest_database
-            .store(any_tempest_database, std::sync::atomic::Ordering::Relaxed);
+        self.set_is_tempest_database(any_tempest_database);
         self.set_phpunit_major(phpunit_major);
         self.laravel
             .gates

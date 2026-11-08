@@ -36,6 +36,20 @@ impl crate::Backend {
             .store(is_tempest, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Whether the project uses Tempest's database layer; see
+    /// [`Backend::is_tempest_database`](crate::Backend::is_tempest_database).
+    pub(crate) fn is_tempest_database_project(&self) -> bool {
+        self.is_tempest_database
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Record whether the project uses Tempest's database layer, once the
+    /// workspace's `composer.json` files have been read.
+    pub(crate) fn set_is_tempest_database(&self, is_tempest_database: bool) {
+        self.is_tempest_database
+            .store(is_tempest_database, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Whether `uri` is a Tempest view.  Outside a Tempest project a
     /// `.view.php` file is ordinary PHP: other renderers use the suffix
     /// too, and their markup (an Alpine `:class` binding, say) is not PHP.
