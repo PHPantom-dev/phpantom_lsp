@@ -1294,6 +1294,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#y11-the-config-groups-a-project-declares-in-php" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Y11. The config groups a project declares in PHP
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#y12-the-route-arguments-a-url-generator-call-passes-navigate" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Y12. The route arguments a URL generator call passes navigate
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#y13-a-definitions-__construct-key-goes-to-the-constructor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Y13. A definition's <code>'__construct()'</code> key goes to the constructor
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1404,6 +1437,56 @@ the DI configuration gives the renderer, from
 it, so a name such a class renders does not navigate, complete, or get
 reported. Read the value from the merged params (<code>src/yii/params.rs</code>),
 and use it as the base wherever the class gives none.</p>
+<hr />
+<h2 id="y11-the-config-groups-a-project-declares-in-php">Y11. The config groups a project declares in PHP<a class="headerlink" href="#y11-the-config-groups-a-project-declares-in-php" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// composer.json: "config-plugin-file": "config/configuration.php"</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">return [</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    'config-plugin' =&gt; [</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">        'params-site' =&gt; ['$params', 'site/params.php'],</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        'di' =&gt; 'common/di/*.php',</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    ],</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    'config-plugin-environments' =&gt; [</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">        Environment::DEV =&gt; ['params' =&gt; ['environments/dev/params.php']],</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    ],</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">];</span>
+</code></pre></div>
+<p>A project generated from <code>yiisoft/app</code> declares its config groups in the
+PHP file <code>config-plugin-file</code> names, not in its <code>composer.json</code>. The
+same entries in a <code>composer.json</code>'s <code>config-plugin</code> go to their files,
+complete, and are reported when no file matches (<code>src/yii/config_plugin.rs</code>),
+but in this file the file names and the <code>$group</code> references do nothing.
+PHPantom already reads the file to merge params (<code>src/yii/params.rs</code>),
+so it knows which file it is. Give its string entries the same
+navigation, completion, and checks, relative to the file's directory,
+with the group names the installed packages declare offered after <code>$</code>.</p>
+<hr />
+<h2 id="y12-the-route-arguments-a-url-generator-call-passes-navigate">Y12. The route arguments a URL generator call passes navigate<a class="headerlink" href="#y12-the-route-arguments-a-url-generator-call-passes-navigate" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$urlGenerator-&gt;generate('blog/post/view', ['slug' =&gt; $post-&gt;slug]);</span>
+</code></pre></div>
+<p>The keys of the arguments array complete from the placeholders of the
+named route's path (<code>src/completion/yii_route_params.rs</code>), but
+go-to-definition and hover on <code>'slug'</code> find nothing. Navigate from a key
+to its <code>{slug}</code> in the route's path, the way <code>#[RouteArgument('slug')]</code>
+already does (<code>yii_route_argument_locations</code> in <code>src/yii/routes.rs</code>), and
+hover it with the path. A key the path does not declare could be
+reported the same way an unknown <code>RouteArgument</code> is.</p>
+<hr />
+<h2 id="y13-a-definitions-__construct-key-goes-to-the-constructor">Y13. A definition's <code>'__construct()'</code> key goes to the constructor<a class="headerlink" href="#y13-a-definitions-__construct-key-goes-to-the-constructor" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">Mailer::class =&gt; [</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    '__construct()' =&gt; ['transport' =&gt; Reference::to(TransportInterface::class)],</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">],</span>
+</code></pre></div>
+<p>Every other <code>'name()'</code> key of a definition goes to its method, but
+<code>'__construct()'</code> goes nowhere. It is left out of the member spans
+deliberately (<code>emit_definition_keys</code> in
+<code>src/symbol_map/extraction/yii_definitions.rs</code>), because a class without
+a constructor still accepts the key and must not be reported. Navigate
+and hover it when the class (or an ancestor) declares a constructor,
+without reporting it when none does. Its argument keys already go to the
+constructor's parameters.</p>
 
 
 

@@ -964,6 +964,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b739-keys-written-from-a-literal-lists-values-come-out-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B739. Keys written from a literal list's values come out optional
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1638,6 +1649,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b739-keys-written-from-a-literal-lists-values-come-out-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B739. Keys written from a literal list's values come out optional
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1821,6 +1843,20 @@ and the unbound template name leaks into the diagnostic. Read the
 element type from the <code>offsetGet()</code> the class resolves to, the way a
 direct <code>$list-&gt;offsetGet('x')</code> call is, before falling back to the
 template arguments. Seen in Drupal's package_manager tests.</p>
+<h3 id="b739-keys-written-from-a-literal-lists-values-come-out-optional">B739. Keys written from a literal list's values come out optional<a class="headerlink" href="#b739-keys-written-from-a-literal-lists-values-come-out-optional" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$labels = [];</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">foreach ([1, 2, 3] as $node) {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    $labels[$node] = self::WHITE;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">// $labels is array{1?: 0, 2?: 0, 3?: 0}, should be array{1: 0, 2: 0, 3: 0}</span>
+</code></pre></div>
+<p>A loop over a literal list runs once for each of its values, so every
+key the body writes from the value is set when the loop ends. The keys
+come out optional, as if the loop might have skipped some, so reading
+<code>$labels[1]</code> afterwards adds <code>null</code>. Looping over a shape by key already
+keeps the keys it requires; a list's values used as keys should be
+treated the same way.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
@@ -1830,10 +1866,10 @@ template arguments. Seen in Drupal's package_manager tests.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
 <h3 id="b737-test-code-does-not-see-the-entity-types-its-test-modules-declare">B737. Test code does not see the entity types its test modules declare<a class="headerlink" href="#b737-test-code-does-not-see-the-entity-types-its-test-modules-declare" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// web/core/modules/config/tests/config_test/src/Entity/ConfigTest.php</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">// declares `config_test`</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$storage = \Drupal::entityTypeManager()-&gt;getStorage('config_test');</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$storage-&gt;load('foo')-&gt;status(); // Method EntityInterface::status() not found</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// web/core/modules/config/tests/config_test/src/Entity/ConfigTest.php</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">// declares `config_test`</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">$storage = \Drupal::entityTypeManager()-&gt;getStorage('config_test');</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$storage-&gt;load('foo')-&gt;status(); // Method EntityInterface::status() not found</span>
 </code></pre></div>
 <p>Declarations under a <code>tests</code> folder are skipped (<code>is_test_fixture</code> in
 <code>src/drupal/mod.rs</code>), because no real site enables a test module. The
