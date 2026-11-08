@@ -175,7 +175,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Tempest
 
 - **Built-in view documentation.** Completion and hover explain Tempest's built-in components and directives, with links to the view specification. Contributed by @shuvroroy.
-
 - **Component attribute navigation and hover.** Follow an attribute name to the variable its component reads, and hover it to see the type in that view. Dynamic components use their selected views. Contributed by @shuvroroy.
 - **Tempest model property names.** Complete and navigate model properties in typed query builders and model helpers, including forwarded named arguments and array keys. Raw SQL strings keep their existing handling. Contributed by @shuvroroy.
 - **Tempest routes and their parameters.** Complete and navigate route actions and URI placeholders, including custom route attributes and paths without a leading slash. Renaming an action parameter updates its placeholders and named arguments to `uri()`. Contributed by @shuvroroy.

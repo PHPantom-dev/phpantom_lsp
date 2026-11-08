@@ -5,9 +5,9 @@ templates already get completion, hover, go-to-definition, and
 diagnostics through virtual PHP, the data a view is rendered with is
 typed from the calls and View objects that render it, and component
 tags, their attributes, and the paths passed to `view()` complete and
-navigate. What is still missing is navigating from a component
-attribute, documentation for the built-in tags and directives, routes,
-and the names Tempest's database and container layers take as strings.
+navigate. What is still missing is the model a `query()` call builds,
+the named arguments the container forwards, and route URIs that a
+project's own decorators change.
 
 Work out each behaviour from the framework's own source
 (`tempest/view`, `tempest/router`, `tempest/database`,
