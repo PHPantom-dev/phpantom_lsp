@@ -358,37 +358,61 @@ configured. Maintainer's call on the semantics; whichever way it
 goes, the chosen behaviour needs a test and a sentence in
 [`configuration.md`](../configuration.md).
 
-<<<<<<< HEAD
-## X21. Keep `config-schema.json` in step with the config structs
+## X22. Read the remaining YAML files with the shared parser
 
-**Impact: Low-Medium · Complexity: Low**
+**Impact: Low-Medium · Complexity: Medium-High**
 
-`config-schema.json` is maintained by hand and only a checkbox in the
-pull request template keeps it current. It has drifted before: the
-`[inlay_hints]` section shipped without a schema entry, so editors
-offered no completion or hover for it. Add a test that walks the schema
-and the config structs and fails when a section or key exists in one
-but not the other. Either generate the schema from the structs (e.g.
-`schemars`, keeping the hand-written descriptions as doc comments), or
-deserialize a TOML document built from every schema key and assert
-that `load_config_with_warnings` reports no unknown key, and that
-every `Config` field has a schema key.
-=======
-## X20. Warn about unknown configuration keys
+The refactoring gate gives the project a YAML parser that keeps where
+each scalar is written, and moves the services files onto it. Every
+other YAML file is still read by its own line scan, each with its own
+idea of indentation, comments, quoting, and flow collections:
 
-**Impact: Medium · Complexity: Low**
+- Symfony: `src/symfony/routes.rs`, `translations.rs`, `validation.rs`,
+  `serializer.rs`, `tags.rs`, `config_tree.rs`, `bundles.rs`,
+  `messenger.rs`, and `src/completion/symfony_string_keys.rs`.
+- Doctrine: `src/doctrine/connection.rs`, `mapping_files.rs`, and the
+  repository mappings in `src/framework.rs`.
+- Drupal: `src/drupal/routing.rs`, `links.rs`, `libraries.rs`,
+  `permissions.rs`, `config.rs`, and `config_keys.rs`.
+- Yii: `src/yii/definitions.rs`.
 
-`.phpantom.toml` is deserialized with serde's default behaviour, so a
-key PHPantom does not know is dropped without a word: a typo such as
-`unused-parameter = true` or a key from a newer release silently does
-nothing. Collect the unknown keys while deserializing (the
-`serde_ignored` crate wraps the deserializer for exactly this) and
-report each one, with its file and dotted path, as a warning in the
-editor (`window/showMessage` once per config load, plus the log) and
-on stderr from `analyze`, `fix`, and `format`. Keep it a warning, never
-an error, so a config written for a newer release still loads.
+Move them one file per change, each against its existing tests, and
+delete the helpers the last one leaves unused (`yaml_mapping_key`,
+`yaml_content_before_comment`, `strip_yaml_quotes`). What a file
+declares is read from the tree; what the cursor is typing still comes
+from the tolerant scan, since a file being edited often does not parse.
+[T55](type-inference.md#t55-symfony-array-parameters-are-typed-as-plain-array)
+(nested parameter values) should be built on the parser rather than
+taught to the line scan. Measure indexing time and memory on
+`benches/memory_usage.py`'s Symfony and Drupal scenarios after each
+move.
 
-The renamed-key table in `src/config/mod.rs` already rewrites old
-spellings and warns about them on stderr; route that warning through
-the same reporting so an editor user sees it too.
->>>>>>> cecbcdb93 (Update config schema)
+## X23. Read XML files with a parser
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```xml
+<route id="search" path="/search" condition="request.query.get('page') > 1"/>
+<trans-unit id="terms" resname="Terms &amp; conditions">
+```
+
+XML is read by ten hand-written tag scanners (`scan_xml` in
+`src/symfony/resources.rs`, `routes.rs`, `tags.rs`, `messenger.rs`,
+`serializer.rs`, `validation.rs`, `src/doctrine/mapping_files.rs`, and
+`src/framework.rs`, `scan_xliff` in `src/symfony/translations.rs`), all
+built on `xml_attr_value` in `src/framework.rs`. A tag ends at the first
+`>`, so one inside an attribute value cuts the tag short. Character
+references are never decoded, so an attribute holding `&amp;` is read
+with the entity in it, and an XLIFF `<source>` holding one is skipped
+(`first_source`), so the message is never declared. CDATA sections and
+namespace prefixes are not understood either.
+
+Read XML with an event parser that reports byte positions (`quick-xml`
+does, and keeps going up to the first error, which suits a document
+being edited), behind one shared module, and move the scanners onto it
+one file per change.
+
+Symfony 7.4 deprecated XML for service and route configuration, so those
+two scanners matter less with every release. XLIFF catalogues and
+Doctrine, validation, and serializer mappings are not deprecated, and
+they gain the most. Start with them.

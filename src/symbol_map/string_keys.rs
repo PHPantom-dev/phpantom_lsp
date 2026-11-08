@@ -871,6 +871,11 @@ pub(crate) struct PluginDeclarationSite {
     /// An attribute's resolved class, or an annotation's name as written.
     pub marker: crate::atom::Atom,
     pub is_annotation: bool,
+    /// Byte range of the docblock an annotation is written in, which the
+    /// annotations nested in its arguments share; the ID's for an
+    /// attribute.
+    pub doc_start: u32,
+    pub doc_end: u32,
 }
 
 /// The value a container declaration gives, read by the kind of name it

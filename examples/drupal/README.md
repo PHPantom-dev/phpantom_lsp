@@ -158,6 +158,11 @@ Run `composer install` here first. Composer puts core and contrib into
   core's plugin classes and complete. Misspell `'string'` as `'strin'` and
   the field type is reported, since no plugin declares it. Go to the
   implementations of `BlockManagerInterface` to list every block.
+- Annotations on a plugin class find their class the way plugin discovery
+  does, without a `use` import. In
+  `web/modules/custom/acme/src/Plugin/Block/FarewellBlock.php`, go to the
+  definition of `@Block`, which lands on core's block annotation class, or
+  of `@Translation`, which lands on core's `Translation` annotation.
 
 ## What the Symfony support already reads
 

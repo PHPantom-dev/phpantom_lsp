@@ -30,13 +30,16 @@ use tower_lsp_server::gen_lsp_types::Location;
 use crate::Backend;
 use crate::atom::Atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of};
-use crate::symbol_map::{DRUPAL_PLUGIN_MANAGER, PluginDeclarationSite, SymbolMap};
+use crate::symbol_map::{ClassRefContext, DRUPAL_PLUGIN_MANAGER, PluginDeclarationSite, SymbolMap};
 use crate::types::ClassInfo;
 
 const DEFAULT_MANAGER: &str = "Drupal\\Core\\Plugin\\DefaultPluginManager";
 const ATTRIBUTE_INTERFACE: &str = "Drupal\\Component\\Plugin\\Attribute\\AttributeInterface";
 /// The annotation a manager whose constructor names none reads.
 const DEFAULT_ANNOTATION: &str = "Drupal\\Component\\Annotation\\Plugin";
+/// The namespace annotated discovery reads annotations from for every
+/// plugin type, `@Translation`'s.
+const CORE_ANNOTATIONS: &str = "Drupal\\Core\\Annotation";
 const FIELD_TYPES: &str = "Drupal\\Core\\Field\\FieldTypePluginManager";
 const WIDGETS: &str = "Drupal\\Core\\Field\\WidgetPluginManager";
 const FORMATTERS: &str = "Drupal\\Core\\Field\\FormatterPluginManager";
@@ -130,6 +133,9 @@ pub(crate) struct PluginIndex {
     test_ids: HashMap<String, HashSet<String>>,
     /// The lowercased managers with a plugin whose ID cannot be read.
     uncertain: HashSet<String>,
+    /// The annotation classes of the plugin types each class is a plugin
+    /// of by its annotation.
+    annotations_of: HashMap<Atom, Vec<Atom>>,
     /// The files whose plugin managers or plugin declarations were read,
     /// which a change to invalidates the index.
     sources: HashSet<String>,
@@ -224,6 +230,14 @@ impl PluginIndex {
             let Some(site) = declared else {
                 continue;
             };
+            if site.is_annotation
+                && let Some(annotation) = plugin_type.annotation
+            {
+                let annotations = self.annotations_of.entry(class).or_default();
+                if !annotations.contains(&annotation) {
+                    annotations.push(annotation);
+                }
+            }
             let manager = plugin_type.manager.to_ascii_lowercase();
             if site.id.is_empty() {
                 self.uncertain.insert(manager);
@@ -239,6 +253,19 @@ impl PluginIndex {
                 });
             }
         }
+    }
+
+    /// The namespaces an annotation on the plugin class `class` is looked
+    /// up in when no import names it: each of its plugin types' annotation
+    /// class's, then the core annotations', as plugin discovery reads it.
+    fn annotation_namespaces(&self, class: Atom) -> Option<Vec<&str>> {
+        let annotations = self.annotations_of.get(&class)?;
+        let mut namespaces: Vec<&str> = annotations
+            .iter()
+            .filter_map(|annotation| annotation.rsplit_once('\\').map(|(namespace, _)| namespace))
+            .collect();
+        namespaces.push(CORE_ANNOTATIONS);
+        Some(namespaces)
     }
 
     /// Whether `manager` declares a plugin type.
@@ -313,6 +340,68 @@ fn short_name(name: &str) -> &str {
 }
 
 impl Backend {
+    /// The class the annotation `name`, written at `offset` in `uri`, names
+    /// when it is on the docblock of a plugin class discovered by its
+    /// annotation and no import names it: plugin discovery finds it in the
+    /// namespace of the plugin type's annotation class, or in the core
+    /// annotations', never in the plugin's own.  `None` when an import
+    /// names it (`imported` tells whether one names a first segment), or
+    /// when the class is no such plugin, so the name resolves as written.
+    pub(crate) fn drupal_annotation_class(
+        &self,
+        uri: &str,
+        name: &str,
+        offset: u32,
+        imported: impl FnOnce(&str) -> bool,
+    ) -> Option<String> {
+        if name.starts_with('\\') || !self.is_drupal_project() {
+            return None;
+        }
+        let map = self.symbol_map_for(uri)?;
+        let class = map
+            .drupal_plugins
+            .iter()
+            .find(|site| site.is_annotation && (site.doc_start..site.doc_end).contains(&offset))?
+            .class;
+        let first = name.split('\\').next().unwrap_or(name);
+        if imported(first) {
+            return None;
+        }
+        let index = self.drupal_plugin_index();
+        let namespaces = index.annotation_namespaces(class)?;
+        let loader = self.resolved_class_loader_with(&[]);
+        namespaces
+            .into_iter()
+            .map(|namespace| format!("{namespace}\\{name}"))
+            .find(|fqn| loader(Fqn::new(fqn)).is_some())
+    }
+
+    /// [`Self::drupal_annotation_class`] for a class reference written
+    /// `name` at `offset` in `uri`, read with the imports of the namespace
+    /// block that holds it.  `None` for any reference but an annotation's.
+    pub(crate) fn drupal_annotation_class_at(
+        &self,
+        uri: &str,
+        name: &str,
+        is_fqn: bool,
+        context: ClassRefContext,
+        offset: u32,
+    ) -> Option<String> {
+        if context != ClassRefContext::Annotation || is_fqn {
+            return None;
+        }
+        self.drupal_annotation_class(uri, name, offset, |first| {
+            self.file_state(uri).is_some_and(|state| {
+                let imports =
+                    match crate::types::NamespaceSpan::containing(&state.namespaces, offset) {
+                        Some(block) if state.namespaces.len() > 1 => &block.use_map,
+                        _ => &state.use_map,
+                    };
+                crate::names::lookup_import(imports, first).is_some()
+            })
+        })
+    }
+
     /// The plugin types and their plugins, read once and kept until a file
     /// that declares a manager or a plugin changes.
     pub(crate) fn drupal_plugin_index(&self) -> Arc<PluginIndex> {

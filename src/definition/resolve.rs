@@ -352,9 +352,20 @@ impl Backend {
                 self.resolve_self_static_parent(uri, content, position, *ssp_kind)
             }
 
-            SymbolKind::ClassReference { name, is_fqn, .. } => self
-                .resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
-                .map(|loc| vec![loc]),
+            SymbolKind::ClassReference {
+                name,
+                is_fqn,
+                context,
+            } => {
+                let discovered =
+                    self.drupal_annotation_class_at(uri, name, *is_fqn, *context, symbol.start);
+                let (name, is_fqn) = match &discovered {
+                    Some(fqn) => (fqn.as_str(), true),
+                    None => (name.as_str(), *is_fqn),
+                };
+                self.resolve_class_reference(uri, content, name, is_fqn, cursor_offset)
+                    .map(|loc| vec![loc])
+            }
 
             SymbolKind::MemberDeclaration { name, .. } => {
                 // Return self-location so editors detect "definition ==

@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| DR26 | [Annotation class names](todo/drupal.md#dr26-annotation-class-names) | Low-Medium | Low-Medium |
 | T70 | [A decorated service is typed as the class it decorates](todo/type-inference.md#t70-a-decorated-service-is-typed-as-the-class-it-decorates) | Low-Medium | Low |
 | F68 | [Method names under `calls:` in a services file](todo/lsp-features.md#f68-method-names-under-calls-in-a-services-file) | Low | Low |
 | TM1 | [Component attribute names navigate to the component's variable](todo/tempest.md#tm1-component-attribute-names-navigate-to-the-components-variable) | Low-Medium | Low |
@@ -153,7 +152,6 @@ ships, remove every row that names it.
 | DR22 | [Complete permissions built in code](todo/drupal.md#dr22-complete-permissions-built-in-code) | Low-Medium | Medium |
 | DR23 | [Warn on unknown permission names](todo/drupal.md#dr23-warn-on-unknown-permission-names) | Medium | Low-Medium |
 | DR24 | [Warn on unknown theme hook names](todo/drupal.md#dr24-warn-on-unknown-theme-hook-names) | Low-Medium | Medium-High |
-| DR26 | [Annotation class names](todo/drupal.md#dr26-annotation-class-names) | Low-Medium | Low-Medium |
 | DR28 | [Plugin types a manager builds at run time](todo/drupal.md#dr28-plugin-types-a-manager-builds-at-run-time) | Medium | Medium |
 | DR27 | [Plugin IDs in YAML](todo/drupal.md#dr27-plugin-ids-in-yaml) | Low-Medium | Medium |
 
@@ -327,5 +325,7 @@ ships, remove every row that names it.
 | X14 | [Forward Zed's `file_scan_exclusions` and `file_types`](todo/indexing.md#x14-forward-zeds-file_scan_exclusions-and-file_types) (waiting on [zed#66121](https://github.com/zed-industries/zed/pull/66121)) | Low         | Low         |
 | X18 | [Watch `[indexing] include` and stub paths outside the workspace](todo/indexing.md#x18-watch-indexing-include-and-stub-paths-outside-the-workspace)                                         | Low-Medium  | Medium      |
 | X13 | [Decide how workspace-wide edits treat excluded files](todo/indexing.md#x13-decide-how-workspace-wide-edits-treat-excluded-files)                                           | Low-Medium  | Medium      |
+| X22 | [Read the remaining YAML files with the shared parser](todo/indexing.md#x22-read-the-remaining-yaml-files-with-the-shared-parser) | Low-Medium  | Medium-High |
+| X23 | [Read XML files with a parser](todo/indexing.md#x23-read-xml-files-with-a-parser) | Low-Medium  | Medium-High |
 | X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium-High |
 | X12 | [Say when an exclude hid the class a diagnostic names](todo/indexing.md#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names)                                           | Low-Medium  | Medium-High |

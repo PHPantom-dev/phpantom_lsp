@@ -300,6 +300,8 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
             class: fqn,
             marker: crate::atom::atom(marker),
             is_annotation: false,
+            doc_start: start as u32,
+            doc_end: end as u32,
         });
     }
     let Some((doc, offset)) = get_docblock_text_with_offset(ctx.trivias, ctx.content, class) else {
@@ -316,6 +318,8 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
             class: fqn,
             marker: crate::atom::atom(name),
             is_annotation: true,
+            doc_start: offset,
+            doc_end: offset + doc.len() as u32,
         });
     }
 }

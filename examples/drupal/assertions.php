@@ -20,6 +20,7 @@ use Drupal\acme\Entity\Note;
 use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
 use Drupal\acme\Hook\AcmeHooks;
+use Drupal\acme\Plugin\Block\FarewellBlock;
 use Drupal\acme\Plugin\Block\GreetingBlock;
 use Drupal\acme\NoteCounter;
 use Drupal\Component\FileCache\FileCacheFactory;
@@ -52,7 +53,9 @@ use Drupal\Core\Form\ConfigTarget;
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Language\LanguageManager;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Link;
+use Drupal\Core\Plugin\Discovery\AnnotatedClassDiscovery;
 use Drupal\Core\Render\Attribute\FormElement;
 use Drupal\Core\Render\Attribute\RenderElement;
 use Drupal\Core\Render\Element\Details;
@@ -341,6 +344,15 @@ check('GreetingBlock declares the acme_greeting_block block by attribute', (attr
 check('GreetingBlock is in the Plugin\\Block namespace discovery reads', $greetingBlock->getNamespaceName() === 'Drupal\\acme\\Plugin\\Block');
 check('GreetingBlock is a block with the greeting() the controller calls', $greetingBlock->isSubclassOf(BlockBase::class) && $greetingBlock->hasMethod('greeting'));
 check("GreetingController creates the acme_greeting_block block", str_contains($controllerSource, "->createInstance('acme_greeting_block')"));
+
+// An annotated plugin names its annotations without importing them;
+// annotated discovery reads them from the namespace of the plugin type's
+// annotation class and from core's annotations.
+$farewellBlock = new ReflectionClass(FarewellBlock::class);
+check('FarewellBlock imports neither Block nor Translation', !preg_match('/^use .*\\\\(Block|Translation);$/m', (string) file_get_contents((string) $farewellBlock->getFileName())));
+$annotatedBlocks = (new AnnotatedClassDiscovery('Plugin/Block', new ArrayObject(['Drupal\\acme' => ["$module/src"]]), 'Drupal\\Core\\Block\\Annotation\\Block'))->getDefinitions();
+check("core's block discovery finds FarewellBlock by its @Block annotation", ($annotatedBlocks['acme_farewell_block']['class'] ?? null) === FarewellBlock::class);
+check("core's block discovery reads its @Translation as core's Translation annotation", ($annotatedBlocks['acme_farewell_block']['admin_label'] ?? null) instanceof TranslatableMarkup);
 
 // The plugins Note's base field names are core's.
 check("core's StringItem declares the string field type", (attributeArguments(new ReflectionClass(StringItem::class), FieldType::class)['id'] ?? null) === 'string');

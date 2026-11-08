@@ -278,6 +278,38 @@ impl<'a> SpanFqnResolver<'a> {
             .map_or(GLOBAL, |span| &span.namespace)
     }
 
+    /// The fully-qualified name the class reference span at `span_start`
+    /// refers to: [`Self::fqn`], except that a Drupal plugin's annotation
+    /// no import names is found the way plugin discovery finds it.
+    pub(super) fn class_fqn(
+        &self,
+        name: &str,
+        is_fqn: bool,
+        context: crate::symbol_map::ClassRefContext,
+        span_start: u32,
+    ) -> String {
+        if context == crate::symbol_map::ClassRefContext::Annotation
+            && !is_fqn
+            && let Some(fqn) =
+                self.backend
+                    .drupal_annotation_class(self.file_uri, name, span_start, |first| {
+                        let imports = match crate::types::NamespaceSpan::containing(
+                            &self.spans,
+                            span_start,
+                        ) {
+                            Some(block) if self.spans.len() > 1 => &block.use_map,
+                            _ => self
+                                .use_map
+                                .get_or_init(|| self.backend.file_use_map(self.file_uri)),
+                        };
+                        crate::names::lookup_import(imports, first).is_some()
+                    })
+        {
+            return fqn;
+        }
+        self.fqn(name, is_fqn, span_start)
+    }
+
     /// The fully-qualified name the span at `span_start` refers to.
     ///
     /// A name written fully qualified already is one; otherwise the name

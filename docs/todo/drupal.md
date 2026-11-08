@@ -319,32 +319,6 @@ such an implementation can add. A suggestion such as
 
 ---
 
-## DR26. Annotation class names
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-/**
- * @Block(
- *   id = "acme_order_summary",
- *   admin_label = @Translation("Order summary"),
- * )
- */
-final class OrderSummaryBlock extends BlockBase { … }
-```
-
-Plugins written before Drupal 10.2 declare themselves in a docblock
-annotation, and many contributed modules still do. `@Block` and
-`@Translation` name annotation classes, but Drupal's annotated plugin
-discovery finds them without a `use` import: it reads a plugin type's
-annotation class and namespaces from its plugin manager, not from the
-file. Annotations are read through the imports already; resolve a name
-the imports don't cover through the namespaces of the plugin type the
-class is discovered for, so that go-to-definition, hover, and references
-reach the class.
-
----
-
 ## DR27. Plugin IDs in YAML
 
 **Impact: Low-Medium · Complexity: Medium**

@@ -157,10 +157,20 @@ impl Backend {
                     .unwrap_or_default(),
             },
 
-            SymbolKind::ClassReference { name, is_fqn, .. } => {
+            SymbolKind::ClassReference {
+                name,
+                is_fqn,
+                context,
+            } => {
                 // The type *is* the class itself, named as written.
+                let discovered =
+                    self.drupal_annotation_class_at(uri, name, *is_fqn, *context, symbol.start);
+                let (name, is_fqn) = match &discovered {
+                    Some(fqn) => (fqn.as_str(), true),
+                    None => (name.as_str(), *is_fqn),
+                };
                 return self
-                    .resolve_class_reference(uri, content, name, *is_fqn, offset)
+                    .resolve_class_reference(uri, content, name, is_fqn, offset)
                     .map(|loc| vec![loc]);
             }
 

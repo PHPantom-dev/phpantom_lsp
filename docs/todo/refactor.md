@@ -211,4 +211,38 @@ Each item must include:
 
 # Outstanding items
 
-No outstanding items.
+## Blocks a Sprint 8 task
+
+### Read the services files with a YAML parser
+
+T70 (decorated services) and F68 (method names under `calls:`) both
+read services files, and F68 needs the key path down to a sequence
+item, which the line scan in `scan_yaml` (`src/symfony/resources.rs`)
+does not give. PHPantom has no YAML parser: about 50 functions across
+18 files read YAML line by line, each handling indentation, comments,
+quotes, and flow collections its own way.
+
+Add `yaml-rust2`, the parser PHPlumb uses, so code ported from it fits,
+and a shared module, `src/yaml.rs`, that builds a tree in which every
+scalar keeps its byte range and can give the key path to an offset
+(PHPlumb's `crates/phplumb-index/src/frameworks/yaml.rs` is a 220-line
+model). The parser's markers count characters, not bytes, so convert
+them through a table of line starts, and allow for CRLF. An escaped
+quoted scalar's value differs from its source text. Where a project's
+files are indexed, read the parser's events directly rather than
+building a tree per file, so Drupal core's thousand-plus YAML files do
+not each allocate one.
+
+A real parser rejects the whole document at its first error, and a file
+being typed into often has one. Keep the last tree that parsed for an
+open document, and keep the tolerant line scan for working out what the
+cursor is typing (`@` service IDs and the other YAML completions).
+
+Then move `scan_yaml` in `src/symfony/resources.rs` onto the module,
+which reads both Symfony's and Drupal's services files, against its
+existing tests. Measure `benches/memory_usage.py`'s Symfony and Drupal
+scenarios before and after. The other YAML scanners move in X22, outside
+the gate.
+
+Files: `Cargo.toml`, `src/yaml.rs` (new), `src/lib.rs`,
+`src/symfony/resources.rs`.

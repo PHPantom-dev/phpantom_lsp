@@ -228,12 +228,17 @@ impl Backend {
                 }
                 self.find_variable_references(uri, content, name, span_start, include_declaration)
             }
-            SymbolKind::ClassReference { name, is_fqn, .. } => {
-                let ctx = self.file_context(uri);
-                let fqn = if *is_fqn {
-                    name.to_string()
-                } else {
-                    ctx.resolve_name_at(name, span_start)
+            SymbolKind::ClassReference {
+                name,
+                is_fqn,
+                context,
+            } => {
+                let discovered =
+                    self.drupal_annotation_class_at(uri, name, *is_fqn, *context, span_start);
+                let fqn = match discovered {
+                    Some(fqn) => fqn,
+                    None if *is_fqn => name.to_string(),
+                    None => self.file_context(uri).resolve_name_at(name, span_start),
                 };
                 self.find_class_references(&fqn, include_declaration)
             }

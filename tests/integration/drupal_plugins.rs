@@ -3,7 +3,7 @@
 //! a manager's lookups and by the field API's calls that name a plugin.
 
 use crate::common::{completion_response, response_labels};
-use crate::drupal_services::{definitions_at, position_in, uri_for, workspace_in};
+use crate::drupal_services::{definitions_at, position_in, references_at, uri_for, workspace_in};
 use phpantom_lsp::Backend;
 use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
@@ -257,6 +257,76 @@ async fn a_manager_interface_lists_the_plugins_as_implementations() {
         assert!(uris.contains(&uri_for(&dir, path)), "{path}: {uris:?}");
     }
     assert!(!uris.contains(&uri_for(&dir, STRAY_PATH)), "{uris:?}");
+}
+
+const BLOCK_ANNOTATION_PATH: &str = "web/core/lib/Drupal/Core/Block/Annotation/Block.php";
+const TRANSLATION_PATH: &str = "web/core/lib/Drupal/Core/Annotation/Translation.php";
+/// A class named like an annotation in a plugin's own namespace, which
+/// annotated discovery never reads an annotation from.
+const DECOY_PATH: &str = "web/modules/custom/acme/src/Plugin/Block/Translation.php";
+const IMPORTED_PATH: &str = "web/modules/custom/acme/src/Plugin/Block/ImportedBlock.php";
+const IMPORTED: &str = "<?php\nnamespace Drupal\\acme\\Plugin\\Block;\n\nuse Drupal\\acme\\Plugin\\Block\\Translation;\n\n/**\n * @Block(\n *   id = \"acme_imported\",\n *   admin_label = @Translation(\"Imported\")\n * )\n */\nfinal class ImportedBlock {}\n";
+
+/// The annotation classes, written beside the site.
+const ANNOTATIONS: &[(&str, &str)] = &[
+    (
+        BLOCK_ANNOTATION_PATH,
+        "<?php\nnamespace Drupal\\Core\\Block\\Annotation;\n\n/** @Annotation */\nclass Block {}\n",
+    ),
+    (
+        TRANSLATION_PATH,
+        "<?php\nnamespace Drupal\\Core\\Annotation;\n\n/** @Annotation */\nclass Translation {}\n",
+    ),
+    (
+        DECOY_PATH,
+        "<?php\nnamespace Drupal\\acme\\Plugin\\Block;\n\nclass Translation {}\n",
+    ),
+];
+
+#[tokio::test]
+async fn an_unimported_annotation_goes_where_plugin_discovery_finds_it() {
+    let (backend, dir) = site_with(ANNOTATIONS, &[(LEGACY_PATH, LEGACY)]).await;
+    let php = uri_for(&dir, LEGACY_PATH);
+    for (needle, target) in [
+        ("@Block(", BLOCK_ANNOTATION_PATH),
+        ("@Translation(", TRANSLATION_PATH),
+    ] {
+        let found = definitions_at(&backend, &php, position_in(LEGACY, needle, 2)).await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!(
+            (&found[0].uri, found[0].range.start.line),
+            (&uri_for(&dir, target), 4),
+            "{needle}"
+        );
+    }
+
+    let position = position_in(LEGACY, "@Translation(", 2);
+    let hover = crate::common::hover_text_at(&backend, &php, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(hover.contains("Drupal\\Core\\Annotation"), "{hover}");
+
+    let found = references_at(&backend, &php, position).await;
+    assert!(found.contains(&(php.clone(), 8)), "{found:?}");
+    assert!(
+        found.contains(&(uri_for(&dir, TRANSLATION_PATH), 4)),
+        "{found:?}"
+    );
+    assert!(
+        !found
+            .iter()
+            .any(|(uri, _)| *uri == uri_for(&dir, DECOY_PATH)),
+        "{found:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_imported_annotation_goes_to_its_import() {
+    let (backend, dir) = site_with(ANNOTATIONS, &[(IMPORTED_PATH, IMPORTED)]).await;
+    let php = uri_for(&dir, IMPORTED_PATH);
+    let found = definitions_at(&backend, &php, position_in(IMPORTED, "@Translation(", 2)).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].uri, uri_for(&dir, DECOY_PATH));
 }
 
 fn watched(path: &std::path::Path, kind: FileChangeType) -> DidChangeWatchedFilesParams {
