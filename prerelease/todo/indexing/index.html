@@ -1182,10 +1182,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x21-keep-config-schemajson-in-step-with-the-config-structs" class="md-nav__link">
+  <a href="#x22-read-the-remaining-yaml-files-with-the-shared-parser" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        X21. Keep <code>config-schema.json</code> in step with the config structs
+        X22. Read the remaining YAML files with the shared parser
       </span>
     </span>
   </a>
@@ -1193,10 +1193,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x20-warn-about-unknown-configuration-keys" class="md-nav__link">
+  <a href="#x23-read-xml-files-with-a-parser" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        X20. Warn about unknown configuration keys
+        X23. Read XML files with a parser
       </span>
     </span>
   </a>
@@ -1726,10 +1726,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x21-keep-config-schemajson-in-step-with-the-config-structs" class="md-nav__link">
+  <a href="#x22-read-the-remaining-yaml-files-with-the-shared-parser" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        X21. Keep <code>config-schema.json</code> in step with the config structs
+        X22. Read the remaining YAML files with the shared parser
       </span>
     </span>
   </a>
@@ -1737,10 +1737,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x20-warn-about-unknown-configuration-keys" class="md-nav__link">
+  <a href="#x23-read-xml-files-with-a-parser" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        X20. Warn about unknown configuration keys
+        X23. Read XML files with a parser
       </span>
     </span>
   </a>
@@ -2117,49 +2117,55 @@ but include a warning in the rename response when excludes are
 configured. Maintainer's call on the semantics; whichever way it
 goes, the chosen behaviour needs a test and a sentence in
 <a href="../../configuration/"><code>configuration.md</code></a>.</p>
-<p>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD</p>
-<h2 id="x21-keep-config-schemajson-in-step-with-the-config-structs">X21. Keep <code>config-schema.json</code> in step with the config structs<a class="headerlink" href="#x21-keep-config-schemajson-in-step-with-the-config-structs" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p><code>config-schema.json</code> is maintained by hand and only a checkbox in the
-pull request template keeps it current. It has drifted before: the
-<code>[inlay_hints]</code> section shipped without a schema entry, so editors
-offered no completion or hover for it. Add a test that walks the schema
-and the config structs and fails when a section or key exists in one
-but not the other. Either generate the schema from the structs (e.g.
-<code>schemars</code>, keeping the hand-written descriptions as doc comments), or
-deserialize a TOML document built from every schema key and assert
-that <code>load_config_with_warnings</code> reports no unknown key, and that
-every <code>Config</code> field has a schema key.
-=======</p>
-<h2 id="x20-warn-about-unknown-configuration-keys">X20. Warn about unknown configuration keys<a class="headerlink" href="#x20-warn-about-unknown-configuration-keys" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<p><code>.phpantom.toml</code> is deserialized with serde's default behaviour, so a
-key PHPantom does not know is dropped without a word: a typo such as
-<code>unused-parameter = true</code> or a key from a newer release silently does
-nothing. Collect the unknown keys while deserializing (the
-<code>serde_ignored</code> crate wraps the deserializer for exactly this) and
-report each one, with its file and dotted path, as a warning in the
-editor (<code>window/showMessage</code> once per config load, plus the log) and
-on stderr from <code>analyze</code>, <code>fix</code>, and <code>format</code>. Keep it a warning, never
-an error, so a config written for a newer release still loads.</p>
-<p>The renamed-key table in <code>src/config/mod.rs</code> already rewrites old
-spellings and warns about them on stderr; route that warning through
-the same reporting so an editor user sees it too.</p>
-<blockquote>
-<blockquote>
-<blockquote>
-<blockquote>
-<blockquote>
-<blockquote>
-<blockquote>
-<p>cecbcdb93 (Update config schema)</p>
-</blockquote>
-</blockquote>
-</blockquote>
-</blockquote>
-</blockquote>
-</blockquote>
-</blockquote>
+<h2 id="x22-read-the-remaining-yaml-files-with-the-shared-parser">X22. Read the remaining YAML files with the shared parser<a class="headerlink" href="#x22-read-the-remaining-yaml-files-with-the-shared-parser" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>The refactoring gate gives the project a YAML parser that keeps where
+each scalar is written, and moves the services files onto it. Every
+other YAML file is still read by its own line scan, each with its own
+idea of indentation, comments, quoting, and flow collections:</p>
+<ul>
+<li>Symfony: <code>src/symfony/routes.rs</code>, <code>translations.rs</code>, <code>validation.rs</code>,
+  <code>serializer.rs</code>, <code>tags.rs</code>, <code>config_tree.rs</code>, <code>bundles.rs</code>,
+  <code>messenger.rs</code>, and <code>src/completion/symfony_string_keys.rs</code>.</li>
+<li>Doctrine: <code>src/doctrine/connection.rs</code>, <code>mapping_files.rs</code>, and the
+  repository mappings in <code>src/framework.rs</code>.</li>
+<li>Drupal: <code>src/drupal/routing.rs</code>, <code>links.rs</code>, <code>libraries.rs</code>,
+  <code>permissions.rs</code>, <code>config.rs</code>, and <code>config_keys.rs</code>.</li>
+<li>Yii: <code>src/yii/definitions.rs</code>.</li>
+</ul>
+<p>Move them one file per change, each against its existing tests, and
+delete the helpers the last one leaves unused (<code>yaml_mapping_key</code>,
+<code>yaml_content_before_comment</code>, <code>strip_yaml_quotes</code>). What a file
+declares is read from the tree; what the cursor is typing still comes
+from the tolerant scan, since a file being edited often does not parse.
+<a href="../type-inference/#t55-symfony-array-parameters-are-typed-as-plain-array">T55</a>
+(nested parameter values) should be built on the parser rather than
+taught to the line scan. Measure indexing time and memory on
+<code>benches/memory_usage.py</code>'s Symfony and Drupal scenarios after each
+move.</p>
+<h2 id="x23-read-xml-files-with-a-parser">X23. Read XML files with a parser<a class="headerlink" href="#x23-read-xml-files-with-a-parser" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">&lt;route</span><span class="w"> </span><span class="na">id=</span><span class="s">"search"</span><span class="w"> </span><span class="na">path=</span><span class="s">"/search"</span><span class="w"> </span><span class="na">condition=</span><span class="s">"request.query.get('page') &gt; 1"</span><span class="nt">/&gt;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">&lt;trans-unit</span><span class="w"> </span><span class="na">id=</span><span class="s">"terms"</span><span class="w"> </span><span class="na">resname=</span><span class="s">"Terms &amp;amp; conditions"</span><span class="nt">&gt;</span>
+</code></pre></div>
+<p>XML is read by ten hand-written tag scanners (<code>scan_xml</code> in
+<code>src/symfony/resources.rs</code>, <code>routes.rs</code>, <code>tags.rs</code>, <code>messenger.rs</code>,
+<code>serializer.rs</code>, <code>validation.rs</code>, <code>src/doctrine/mapping_files.rs</code>, and
+<code>src/framework.rs</code>, <code>scan_xliff</code> in <code>src/symfony/translations.rs</code>), all
+built on <code>xml_attr_value</code> in <code>src/framework.rs</code>. A tag ends at the first
+<code>&gt;</code>, so one inside an attribute value cuts the tag short. Character
+references are never decoded, so an attribute holding <code>&amp;amp;</code> is read
+with the entity in it, and an XLIFF <code>&lt;source&gt;</code> holding one is skipped
+(<code>first_source</code>), so the message is never declared. CDATA sections and
+namespace prefixes are not understood either.</p>
+<p>Read XML with an event parser that reports byte positions (<code>quick-xml</code>
+does, and keeps going up to the first error, which suits a document
+being edited), behind one shared module, and move the scanners onto it
+one file per change.</p>
+<p>Symfony 7.4 deprecated XML for service and route configuration, so those
+two scanners matter less with every release. XLIFF catalogues and
+Doctrine, validation, and serializer mappings are not deprecated, and
+they gain the most. Start with them.</p>
 
 
 

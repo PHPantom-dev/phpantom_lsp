@@ -1843,7 +1843,35 @@ feature area.    </p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>No outstanding items.</p>
+<h2 id="blocks-a-sprint-8-task">Blocks a Sprint 8 task<a class="headerlink" href="#blocks-a-sprint-8-task" title="Permanent link">&para;</a></h2>
+<h3 id="read-the-services-files-with-a-yaml-parser">Read the services files with a YAML parser<a class="headerlink" href="#read-the-services-files-with-a-yaml-parser" title="Permanent link">&para;</a></h3>
+<p>T70 (decorated services) and F68 (method names under <code>calls:</code>) both
+read services files, and F68 needs the key path down to a sequence
+item, which the line scan in <code>scan_yaml</code> (<code>src/symfony/resources.rs</code>)
+does not give. PHPantom has no YAML parser: about 50 functions across
+18 files read YAML line by line, each handling indentation, comments,
+quotes, and flow collections its own way.</p>
+<p>Add <code>yaml-rust2</code>, the parser PHPlumb uses, so code ported from it fits,
+and a shared module, <code>src/yaml.rs</code>, that builds a tree in which every
+scalar keeps its byte range and can give the key path to an offset
+(PHPlumb's <code>crates/phplumb-index/src/frameworks/yaml.rs</code> is a 220-line
+model). The parser's markers count characters, not bytes, so convert
+them through a table of line starts, and allow for CRLF. An escaped
+quoted scalar's value differs from its source text. Where a project's
+files are indexed, read the parser's events directly rather than
+building a tree per file, so Drupal core's thousand-plus YAML files do
+not each allocate one.</p>
+<p>A real parser rejects the whole document at its first error, and a file
+being typed into often has one. Keep the last tree that parsed for an
+open document, and keep the tolerant line scan for working out what the
+cursor is typing (<code>@</code> service IDs and the other YAML completions).</p>
+<p>Then move <code>scan_yaml</code> in <code>src/symfony/resources.rs</code> onto the module,
+which reads both Symfony's and Drupal's services files, against its
+existing tests. Measure <code>benches/memory_usage.py</code>'s Symfony and Drupal
+scenarios before and after. The other YAML scanners move in X22, outside
+the gate.</p>
+<p>Files: <code>Cargo.toml</code>, <code>src/yaml.rs</code> (new), <code>src/lib.rs</code>,
+<code>src/symfony/resources.rs</code>.</p>
 
 
 
