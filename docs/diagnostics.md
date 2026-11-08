@@ -172,7 +172,7 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_yii_event_listener` | Error | An event listener with a required parameter that has no class type, which neither the event nor the container can fill. |
 | `invalid_yii_param` | Warning | A `$params` key no params file declares. |
 | `invalid_yii_translation` | Warning | A message ID, spelled like a key (`menu.blog`), that no message file of its category declares. |
-| `invalid_yii_config_file` | Warning | A file a `config-plugin` in `composer.json` lists that does not exist. |
+| `invalid_yii_config_file` | Warning | A file a `config-plugin` lists, in `composer.json` or the file its `config-plugin-file` names, that does not exist. |
 | `invalid_yii_attribute` | Warning | An Active Record attribute the record declares no property for. On a record that declares no properties, whose attributes are its table's columns, a column no migration creates. |
 | `invalid_yii_relation` | Warning | An Active Record relation the record does not declare. |
 | `invalid_yii_table` | Warning | A table a `yiisoft/db` query reads from or joins that no migration creates. |

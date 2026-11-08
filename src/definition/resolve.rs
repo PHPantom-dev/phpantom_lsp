@@ -53,6 +53,12 @@ impl Backend {
         if !properties.is_empty() {
             return properties;
         }
+        if self.is_yii_config_plugin_file(uri)
+            && let Some(locations) =
+                self.resolve_yii_config_plugin_definition(uri, content, position)
+        {
+            return locations;
+        }
         // Consult precomputed symbol map (retries one byte earlier for
         // end-of-token edge cases).
         let symbol = self.lookup_symbol_at_position(uri, content, position);

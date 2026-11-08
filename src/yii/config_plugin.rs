@@ -19,10 +19,17 @@
 //! The document is read by a scanner that keeps each string's place, and
 //! that reads a document still being typed as far as it goes, so the
 //! cursor's string is known before the document is valid JSON again.
+//!
+//! A project can declare the same keys in the PHP file its
+//! `config-plugin-file` names instead (`config/configuration.php` in
+//! `yiisoft/app`), whose returned array is read the same way.  Its entries
+//! are relative to the `source-directory` under the project's root, as
+//! `composer.json`'s are, not to the file's own directory.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use mago_syntax::cst::*;
 use tower_lsp_server::gen_lsp_types::{
     CompletionItemKind, CompletionResponse, Diagnostic, DiagnosticSeverity, Location, Position,
     Range,
@@ -49,7 +56,7 @@ enum Segment {
 /// A string of the document: where its text is, inside the quotes, what it
 /// says, and where it sits.
 #[derive(Debug)]
-struct JsonString {
+struct PluginString {
     /// The offset of its first byte after the opening quote.
     start: usize,
     /// The offset of its closing quote, or of the end of the line when it
@@ -57,8 +64,8 @@ struct JsonString {
     end: usize,
     value: String,
     is_key: bool,
-    /// The keys and list items leading to it: to the object it is a key
-    /// of, or to the value it is.
+    /// The keys and list items leading to it from the `extra`: to the
+    /// object it is a key of, or to the value it is.
     path: Vec<Segment>,
 }
 
@@ -83,7 +90,7 @@ fn frames_path(frames: &[Frame]) -> Vec<Segment> {
 
 /// Every string of `content`, in order.  A string with no closing quote ends
 /// at the end of its line.
-fn scan_strings(content: &str) -> Vec<JsonString> {
+fn scan_json_strings(content: &str) -> Vec<PluginString> {
     let bytes = content.as_bytes();
     let mut frames: Vec<Frame> = Vec::new();
     let mut strings = Vec::new();
@@ -147,7 +154,7 @@ fn scan_strings(content: &str) -> Vec<JsonString> {
                 if is_key && let Some(Frame::Object { key, .. }) = frames.last_mut() {
                     *key = Some(value.clone());
                 }
-                strings.push(JsonString {
+                strings.push(PluginString {
                     start,
                     end,
                     value,
@@ -189,15 +196,22 @@ fn key(segment: &Segment) -> Option<&str> {
     }
 }
 
-fn role(string: &JsonString) -> Option<Role> {
+/// What a string of a `composer.json` is to its `config-plugin`.
+fn composer_role(string: &PluginString) -> Option<Role> {
     let [first, rest @ ..] = string.path.as_slice() else {
         return None;
     };
     if key(first)? != "extra" {
         return None;
     }
-    let keys: Vec<Option<&str>> = rest.iter().map(key).collect();
-    if string.is_key {
+    role(rest, string.is_key)
+}
+
+/// What a string is to the `config-plugin`, given the way to it from the
+/// `extra` the keys are read from.
+fn role(path: &[Segment], is_key: bool) -> Option<Role> {
+    let keys: Vec<Option<&str>> = path.iter().map(key).collect();
+    if is_key {
         return match keys.as_slice() {
             [Some("config-plugin")] => Some(Role::Group(Scope::Base)),
             [Some("config-plugin-environments"), Some(environment)] => {
@@ -206,8 +220,18 @@ fn role(string: &JsonString) -> Option<Role> {
             _ => None,
         };
     }
-    if let [Some("config-plugin-options"), Some("source-directory")] = keys.as_slice() {
-        return Some(Role::SourceDirectory);
+    match keys.as_slice() {
+        [Some("config-plugin-options"), Some("source-directory")] => {
+            return Some(Role::SourceDirectory);
+        }
+        // A string written among the groups with no `=>` yet is the name of
+        // a group being typed: the groups are keys, so nothing else is
+        // written there.
+        [Some("config-plugin"), None] => return Some(Role::Group(Scope::Base)),
+        [Some("config-plugin-environments"), Some(environment), None] => {
+            return Some(Role::Group(Scope::Environment(environment.to_string())));
+        }
+        _ => {}
     }
     // A group's entries are a string or a list of them.
     let group_path = match keys.as_slice() {
@@ -228,9 +252,104 @@ fn role(string: &JsonString) -> Option<Role> {
     }
 }
 
+/// Every string literal of the array a PHP configuration file returns, the
+/// keys included, in order.  A key that is not a literal (`Environment::DEV`)
+/// leads to its value by its source text.
+fn php_strings(content: &str) -> Vec<PluginString> {
+    crate::parser::with_parsed_program(content, "yii_config_plugin_file", |program, content| {
+        let mut strings = Vec::new();
+        if let Some(returned) =
+            crate::virtual_members::laravel::array_file::returned_exprs(program).first()
+        {
+            let mut path = Vec::new();
+            collect_php_strings(returned, content, &mut path, &mut strings);
+        }
+        strings
+    })
+}
+
+/// The text of a string literal, and where it is inside its quotes.
+fn php_string(literal: &LiteralString<'_>) -> Option<(usize, usize, String)> {
+    use mago_span::HasSpan;
+
+    let value = crate::atom::literal_bytes_to_str(literal.value?)?;
+    let span = literal.span();
+    let start = span.start.offset as usize + 1;
+    let end = (span.end.offset as usize).saturating_sub(1).max(start);
+    Some((start, end, value.to_string()))
+}
+
+fn collect_php_strings(
+    expr: &Expression<'_>,
+    content: &str,
+    path: &mut Vec<Segment>,
+    out: &mut Vec<PluginString>,
+) {
+    use mago_span::HasSpan;
+
+    let elements = match expr {
+        Expression::Parenthesized(p) => {
+            return collect_php_strings(p.expression, content, path, out);
+        }
+        Expression::Literal(Literal::String(literal)) => {
+            if let Some((start, end, value)) = php_string(literal) {
+                out.push(PluginString {
+                    start,
+                    end,
+                    value,
+                    is_key: false,
+                    path: path.clone(),
+                });
+            }
+            return;
+        }
+        Expression::Array(array) => &array.elements,
+        Expression::LegacyArray(array) => &array.elements,
+        _ => return,
+    };
+    for element in elements.iter() {
+        match element {
+            ArrayElement::KeyValue(entry) => {
+                let key = match entry.key {
+                    Expression::Literal(Literal::String(literal)) => {
+                        php_string(literal).map(|(start, end, value)| {
+                            out.push(PluginString {
+                                start,
+                                end,
+                                value: value.clone(),
+                                is_key: true,
+                                path: path.clone(),
+                            });
+                            value
+                        })
+                    }
+                    key => {
+                        let span = key.span();
+                        content
+                            .get(span.start.offset as usize..span.end.offset as usize)
+                            .map(str::to_string)
+                    }
+                };
+                let Some(key) = key else {
+                    continue;
+                };
+                path.push(Segment::Key(key));
+                collect_php_strings(entry.value, content, path, out);
+                path.pop();
+            }
+            ArrayElement::Value(entry) => {
+                path.push(Segment::Index);
+                collect_php_strings(entry.value, content, path, out);
+                path.pop();
+            }
+            _ => {}
+        }
+    }
+}
+
 /// A string of the document that means something to the `config-plugin`.
 struct Site {
-    string: JsonString,
+    string: PluginString,
     role: Role,
 }
 
@@ -244,15 +363,34 @@ struct ConfigPlugin {
 }
 
 impl ConfigPlugin {
-    fn read(path: &Path, content: &str) -> Self {
-        let sites: Vec<Site> = scan_strings(content)
+    /// The `config-plugin` of the `composer.json` at `path`.
+    fn read_composer(path: &Path, content: &str) -> Self {
+        let sites = scan_json_strings(content)
             .into_iter()
             .filter_map(|string| {
-                let role = role(&string)?;
+                let role = composer_role(&string)?;
                 Some(Site { string, role })
             })
             .collect();
         let package_dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        Self::new(sites, package_dir)
+    }
+
+    /// The `config-plugin` of the PHP file a project's `config-plugin-file`
+    /// names, with `package_dir` the directory of the project's
+    /// `composer.json`.
+    fn read_php(content: &str, package_dir: PathBuf) -> Self {
+        let sites = php_strings(content)
+            .into_iter()
+            .filter_map(|string| {
+                let role = role(&string.path, string.is_key)?;
+                Some(Site { string, role })
+            })
+            .collect();
+        Self::new(sites, package_dir)
+    }
+
+    fn new(sites: Vec<Site>, package_dir: PathBuf) -> Self {
         let source = sites
             .iter()
             .find(|site| site.role == Role::SourceDirectory)
@@ -313,6 +451,27 @@ impl Backend {
         self.is_yii_project() && is_composer_json_uri(uri)
     }
 
+    /// Whether `uri` is the PHP file the project's `config-plugin-file`
+    /// names.
+    pub(crate) fn is_yii_config_plugin_file(&self, uri: &str) -> bool {
+        self.is_yii_project()
+            && uri.ends_with(".php")
+            && crate::util::uri_to_path(uri)
+                .is_some_and(|path| self.yii_config_plan().is_plugin_file(&path))
+    }
+
+    /// The `config-plugin` the document at `uri` holds: a `composer.json`'s,
+    /// or the one of the file the project's `config-plugin-file` names.
+    fn yii_config_plugin(&self, uri: &str, content: &str) -> Option<ConfigPlugin> {
+        let path = crate::util::uri_to_path(uri)?;
+        if is_composer_json_uri(uri) {
+            return Some(ConfigPlugin::read_composer(&path, content));
+        }
+        let plan = self.yii_config_plan();
+        let root = plan.plugin_file_root(&path)?;
+        Some(ConfigPlugin::read_php(content, root.to_path_buf()))
+    }
+
     /// The names of the groups the installed packages declare, read on
     /// first use.
     fn yii_package_group_names(&self) -> Arc<Vec<String>> {
@@ -362,8 +521,7 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<CompletionResponse> {
-        let path = crate::util::uri_to_path(uri)?;
-        let plugin = ConfigPlugin::read(&path, content);
+        let plugin = self.yii_config_plugin(uri, content)?;
         let cursor = position_to_offset(content, position) as usize;
         let site = plugin.site_at(cursor)?;
         let typed = content.get(site.string.start..cursor)?;
@@ -431,8 +589,7 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<Vec<Location>> {
-        let path = crate::util::uri_to_path(uri)?;
-        let plugin = ConfigPlugin::read(&path, content);
+        let plugin = self.yii_config_plugin(uri, content)?;
         let site = plugin.site_at(position_to_offset(content, position) as usize)?;
         let Role::Entry(scope, own) = &site.role else {
             return None;
@@ -484,10 +641,9 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(path) = crate::util::uri_to_path(uri) else {
+        let Some(plugin) = self.yii_config_plugin(uri, content) else {
             return;
         };
-        let plugin = ConfigPlugin::read(&path, content);
         let lines = LineIndex::new(content);
         for site in &plugin.sites {
             if !matches!(site.role, Role::Entry(..)) {
@@ -529,10 +685,10 @@ mod tests {
     use super::*;
 
     fn roles(content: &str) -> Vec<(String, Role)> {
-        scan_strings(content)
+        scan_json_strings(content)
             .into_iter()
             .filter_map(|string| {
-                let role = role(&string)?;
+                let role = composer_role(&string)?;
                 Some((string.value, role))
             })
             .collect()
@@ -586,16 +742,19 @@ mod tests {
     #[test]
     fn a_string_still_being_typed_is_read() {
         let content = "{\"extra\": {\"config-plugin\": {\"di\": [\"$p\n";
-        let strings = scan_strings(content);
+        let strings = scan_json_strings(content);
         let last = strings.last().unwrap();
         assert_eq!(last.value, "$p");
         assert_eq!(last.end, content.len() - 1);
-        assert_eq!(role(last), Some(Role::Entry(Scope::Base, "di".to_string())));
+        assert_eq!(
+            composer_role(last),
+            Some(Role::Entry(Scope::Base, "di".to_string()))
+        );
     }
 
     #[test]
     fn escapes_do_not_end_a_string() {
-        let strings = scan_strings(r#"{"a\"b": "c\\"}"#);
+        let strings = scan_json_strings(r#"{"a\"b": "c\\"}"#);
         assert_eq!(strings[0].value, "a\"b");
         assert!(strings[0].is_key);
         assert_eq!(strings[1].value, "c\\");

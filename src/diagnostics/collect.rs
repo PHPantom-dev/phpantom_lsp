@@ -364,7 +364,7 @@ impl Backend {
     /// imports/variables, namespace/class-name mismatches, and
     /// docblock/native type-hint contradictions.  These are cheap — no type
     /// resolution.
-    pub(crate) fn collect_fast_diagnostics(
+    pub fn collect_fast_diagnostics(
         &self,
         uri_str: &str,
         content: &str,
@@ -384,6 +384,9 @@ impl Backend {
         self.collect_class_name_mismatch_diagnostics(uri_str, content, out);
         self.collect_docblock_native_mismatch_diagnostics(uri_str, content, out);
         self.collect_unreachable_code_diagnostics(uri_str, content, out);
+        if self.is_yii_config_plugin_file(uri_str) {
+            self.collect_yii_config_plugin_diagnostics(uri_str, content, out);
+        }
     }
 
     /// Collect Phase 2 (slow) diagnostics: unknown class/member/function,

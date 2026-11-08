@@ -92,6 +92,27 @@ $router = json_decode(file_get_contents(__DIR__ . '/vendor/yiisoft/router/compos
 $routerConfig = __DIR__ . '/vendor/yiisoft/router/' . $router['extra']['config-plugin-options']['source-directory'];
 check("yiisoft/router's config-plugin lists 'di' and 'params'", array_keys($router['extra']['config-plugin']) === ['di', 'params']);
 check("Every file yiisoft/router's config-plugin lists is under its source directory", array_filter($router['extra']['config-plugin'], fn (string $file) => !is_file("$routerConfig/$file")) === []);
+// config/configuration.php lists its files under the source directory it
+// names, relative to the project's root, and each '$group' names a group.
+$configuration = require __DIR__ . '/config/configuration.php';
+$configSource = __DIR__ . '/' . $configuration['config-plugin-options']['source-directory'];
+$configEntries = array_merge(
+    ...array_map(fn (string|array $entries) => (array) $entries, array_values($configuration['config-plugin'])),
+);
+check(
+    "Every file config/configuration.php lists names a file under its source directory",
+    array_filter(
+        $configEntries,
+        fn (string $entry) => !str_starts_with($entry, '$') && glob("$configSource/" . ltrim($entry, '?')) === [],
+    ) === [],
+);
+check(
+    "Every '\$group' config/configuration.php lists names one of its groups",
+    array_filter(
+        $configEntries,
+        fn (string $entry) => str_starts_with($entry, '$') && !array_key_exists(substr($entry, 1), $configuration['config-plugin']),
+    ) === [],
+);
 check("The container builds what yiisoft/router's 'di.php' binds", $container->get(\Yiisoft\Router\RouteCollectorInterface::class) instanceof \Yiisoft\Router\RouteCollector);
 
 // ─── Aliases ────────────────────────────────────────────────────────────────
