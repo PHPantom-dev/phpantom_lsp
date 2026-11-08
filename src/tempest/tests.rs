@@ -238,6 +238,15 @@ fn edits_reuse_inference_with_the_same_result_as_a_full_refresh() {
             "app/page.view.php",
             "<x-card :entry=\"$book->title\"><x-panel :item=\"$entry\" /></x-card>",
         ),
+        // A dynamic component's selected target changes.
+        (
+            "app/page.view.php",
+            "<x-component is=\"x-card\" :entry=\"$book\"><x-slot name=\"header\">{{ $local->title }}</x-slot>{{ $entry }}</x-component>",
+        ),
+        (
+            "app/page.view.php",
+            "<?php $kind = 'x-panel'; ?><x-component :is=\"$kind\" :item=\"$book\">{{ $item }}</x-component>",
+        ),
         // The component's outlets and the locals they expose change.
         (
             "app/x-card.view.php",
@@ -252,8 +261,12 @@ fn edits_reuse_inference_with_the_same_result_as_a_full_refresh() {
             "<?php namespace App; function page() {}",
         ),
     ];
+    let panel = &uri("app/x-panel.view.php");
     for (name, text) in edits {
-        edit(name, text);
+        let scopes = edit(name, text);
+        if text.contains(":is=") {
+            assert!(scopes[panel].vars.contains_key("item"), "{text}");
+        }
     }
 
     // Closing a view discards its buffer for the text on disk.
@@ -264,4 +277,30 @@ fn edits_reuse_inference_with_the_same_result_as_a_full_refresh() {
     let incremental = snapshot();
     backend.refresh_tempest_inference();
     assert_eq!(incremental, snapshot());
+}
+
+#[test]
+fn nullable_component_names_keep_known_targets_without_guessing_strings() {
+    use crate::php_type::PhpType;
+
+    for (ty, expected) in [
+        (
+            PhpType::nullable(PhpType::literal_string_value("x-card")),
+            vec!["x-card"],
+        ),
+        (
+            PhpType::nullable(PhpType::union(vec![
+                PhpType::literal_string_value("x-card"),
+                PhpType::literal_string_value("x-panel"),
+            ])),
+            vec!["x-card", "x-panel"],
+        ),
+        (PhpType::nullable(PhpType::string()), Vec::new()),
+    ] {
+        let names = super::component_context::component_names(&ty);
+        assert_eq!(
+            names.iter().map(|name| name.as_ref()).collect::<Vec<_>>(),
+            expected,
+        );
+    }
 }

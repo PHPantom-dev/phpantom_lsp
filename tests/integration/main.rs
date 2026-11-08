@@ -348,6 +348,7 @@ mod tempest;
 mod tempest_context;
 mod tempest_context_edges;
 mod tempest_discovery;
+mod tempest_dynamic_components;
 mod tempest_paths;
 mod twig_blocks;
 mod twig_callables;
