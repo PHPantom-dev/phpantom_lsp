@@ -1485,6 +1485,12 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for site in &sm.yii_relations {
                 sym.add(site.subject.heap_bytes());
             }
+            sym.add(sm.yii_queries.capacity() * size_of::<crate::symbol_map::YiiQuerySite>());
+            for site in &sm.yii_queries {
+                sym.add(site.subject.heap_bytes());
+                sym.add(site.tables.capacity() * size_of::<crate::symbol_map::YiiQueryTable>());
+            }
+            sym.add(sm.yii_query_names.capacity() * size_of::<crate::symbol_map::YiiQueryName>());
         }
     }
     eprintln!(

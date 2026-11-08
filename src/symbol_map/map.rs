@@ -358,6 +358,13 @@ pub(crate) struct SymbolMap {
     /// The relations the file's Yii Active Record calls name, in source
     /// order.  Empty for every file that names none.
     pub yii_relations: Vec<YiiRelationSite>,
+    /// The file's `yiisoft/db` query chains that name tables or columns,
+    /// each outer chain before the chains its arguments hold.  Empty for
+    /// every file that writes none.
+    pub yii_queries: Vec<YiiQuerySite>,
+    /// The table and column names those chains write, chain by chain in
+    /// the same order.
+    pub yii_query_names: Vec<YiiQueryName>,
     /// The DQL identification variables the file's queries and query
     /// builders declare, with what each stands for.  Empty for every file
     /// that declares none.

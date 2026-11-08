@@ -110,6 +110,12 @@ way a real Yii 3 project declares them.
   completes, and is reported when misspelled. The migrator finds the
   migration through the `yiisoft/db-migration` params in
   `config/console/params.php`.
+  In `titlesBy()`, a `yiisoft/db` query names its tables and columns as
+  strings: `'author'` goes to the `createTable()` that creates it, and
+  `'b.title'` to the column of the table the alias `b` stands for, which
+  `Table::BOOK . ' b'` names through a constant the migration names it with
+  too. Hover a column for its type, clear one to complete the columns of the
+  query's tables, and misspell a table or a column to see it reported.
 - In `BookCatalog::shelvedTitle()`, hover `$title`: `getValueByPath()`
   walks `'book.title'` through the entry and into its `Book`, so it is a
   `string`. Go to the definition of `'title'`, which lands on `Book::$title`.

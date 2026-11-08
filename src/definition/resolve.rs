@@ -58,6 +58,14 @@ impl Backend {
             return vec![location];
         }
 
+        // A table or column a `yiisoft/db` query names is created by a
+        // migration.
+        if let Some(location) =
+            self.yii_query_definition(uri, content, position_to_offset(content, position))
+        {
+            return vec![location];
+        }
+
         // A segment of a key path an `ArrayHelper` call reads names a
         // property or a method of the value the keys before it reach.
         if let Some(location) = self.yii_array_path_definition(uri, content, position) {

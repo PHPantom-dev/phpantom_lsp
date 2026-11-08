@@ -22,15 +22,18 @@
 //! names, which start with the time each was created, so a column a later
 //! migration renames or drops is renamed or dropped.
 //!
-//! A table a call names with anything but a string literal could be any
-//! table, so after one the columns of every table may be incomplete, and a
-//! table whose columns a call gives that way may have more.  Neither is
+//! A table is named by a string literal, or by a class constant that holds
+//! one (`$b->createTable(Table::POST, …)`), which is read from the class
+//! wherever it is declared.  A table a call names any other way could be
+//! any table, so after one the columns of every table may be incomplete, and
+//! a table whose columns a call gives that way may have more.  Neither is
 //! read as wrong: their columns still complete, and no name is reported.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use tower_lsp_server::gen_lsp_types::{Location, Range};
 
@@ -62,12 +65,38 @@ impl Column {
             range: self.range,
         })
     }
+
+    /// The hover of the column, a column of `table`: its type, and the
+    /// migration that names it, relative to `root`.
+    pub(crate) fn detail(&self, table: &str, root: Option<&Path>) -> String {
+        let mut detail = format!("Column `{}` of table `{table}`", self.name);
+        if let Some(kind) = &self.kind {
+            detail.push_str(&format!(": `{kind}`"));
+        }
+        detail.push_str(&format!(
+            "\n\nDeclared in `{}`",
+            display_path(&self.file, root)
+        ));
+        detail
+    }
+}
+
+/// `file` relative to `root`, with `/` between its parts.
+pub(crate) fn display_path(file: &Path, root: Option<&Path>) -> String {
+    root.and_then(|root| file.strip_prefix(root).ok())
+        .unwrap_or(file)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// A table the migrations create or change.
 #[derive(Debug, Default)]
 pub(crate) struct Table {
     columns: Vec<Column>,
+    /// The migration that gives the table its name, and where it writes the
+    /// name: inside the quotes of a string, or the class constant that
+    /// holds it.
+    named_at: Option<(Arc<Path>, Range)>,
     /// Whether a migration creates it.  A table the migrations only change
     /// was created some other way, with columns they do not say.
     created: bool,
@@ -87,6 +116,20 @@ impl Table {
         self.columns.iter().find(|column| column.name == name)
     }
 
+    /// Where the migration that creates the table names it.
+    pub(crate) fn location(&self) -> Option<Location> {
+        let (file, range) = self.named_at.as_ref()?;
+        Some(Location {
+            uri: crate::util::path_to_url(file)?,
+            range: *range,
+        })
+    }
+
+    /// The migration that creates the table.
+    pub(crate) fn file(&self) -> Option<&Path> {
+        self.named_at.as_ref().map(|(file, _)| &**file)
+    }
+
     fn remove(&mut self, name: &str) -> Option<Column> {
         let at = self.columns.iter().position(|column| column.name == name)?;
         Some(self.columns.remove(at))
@@ -101,14 +144,43 @@ pub(crate) struct Schema {
     /// By name, without the `{{%…}}` that marks the table prefix.
     tables: HashMap<String, Table>,
     /// Whether a migration names a table with anything but a string
-    /// literal, so that any table may have columns not listed here.
+    /// literal or a class constant that holds one, so that any table may
+    /// have columns not listed here.
     open: bool,
+    /// The files of the classes whose constants name tables.
+    constant_files: Vec<PathBuf>,
 }
+
+/// The string a class constant holds, and the file of the class that
+/// declares it, for a migration that names a table with one.
+pub(crate) struct ConstantValue {
+    pub(crate) value: String,
+    pub(crate) file: Option<PathBuf>,
+}
+
+/// Look up the string the constant `name` of the class `class` (fully
+/// qualified) holds.
+pub(crate) type ConstantLookup<'a> = dyn Fn(&str, &str) -> Option<ConstantValue> + 'a;
 
 impl Schema {
     /// The table `name` (with or without the `{{%…}}` around it).
     pub(crate) fn table(&self, name: &str) -> Option<&Table> {
         self.tables.get(bare_table_name(name))
+    }
+
+    /// The table `name` (with or without the `{{%…}}` around it), with its
+    /// name as the schema holds it.
+    pub(crate) fn table_entry(&self, name: &str) -> Option<(&str, &Table)> {
+        self.tables
+            .get_key_value(bare_table_name(name))
+            .map(|(name, table)| (name.as_str(), table))
+    }
+
+    /// The tables, by name.
+    pub(crate) fn tables(&self) -> impl Iterator<Item = (&str, &Table)> {
+        self.tables
+            .iter()
+            .map(|(name, table)| (name.as_str(), table))
     }
 
     /// Whether the columns of `table` are all known, so a name that is not
@@ -117,14 +189,24 @@ impl Schema {
         !self.open && !table.open && table.created
     }
 
-    /// Whether the file at `path` is one of the migrations.
+    /// Whether the tables are all known, so a name that is not one of them
+    /// can be told to name nothing: there are migrations, and each names
+    /// its tables in a way that can be read.
+    pub(crate) fn tables_known(&self) -> bool {
+        !self.open && !self.tables.is_empty()
+    }
+
+    /// Whether the file at `path` is one of the migrations, or declares a
+    /// class whose constants name their tables.
     fn reads(&self, path: &Path) -> bool {
         path.parent()
             .is_some_and(|dir| self.dirs.iter().any(|known| known == dir))
+            || self.constant_files.iter().any(|file| file == path)
     }
 
-    /// Read the migrations in `dirs`.
-    pub(crate) fn load(dirs: Vec<PathBuf>) -> Self {
+    /// Read the migrations in `dirs`, with `constants` for the class
+    /// constants they name tables with.
+    pub(crate) fn load(dirs: Vec<PathBuf>, constants: &ConstantLookup<'_>) -> Self {
         let mut files: Vec<PathBuf> = Vec::new();
         for dir in &dirs {
             let Ok(entries) = std::fs::read_dir(dir) else {
@@ -147,19 +229,34 @@ impl Schema {
         };
         for file in files {
             if let Ok(content) = std::fs::read_to_string(&file) {
-                schema.apply_file(Arc::from(file.as_path()), &content);
+                schema.apply_file(Arc::from(file.as_path()), &content, constants);
             }
         }
         schema
     }
 
     /// Apply the `up()` methods of the migration `content` holds.
-    pub(crate) fn apply_file(&mut self, file: Arc<Path>, content: &str) {
+    pub(crate) fn apply_file(
+        &mut self,
+        file: Arc<Path>,
+        content: &str,
+        constants: &ConstantLookup<'_>,
+    ) {
         crate::parser::with_parsed_program(content, "yii_migration", |program, content| {
+            let mut uses = HashMap::new();
+            Backend::extract_use_statements_from_statements(
+                program.statements.iter(),
+                &mut uses,
+                None,
+            );
             let mut migration = Migration {
                 schema: self,
                 file,
                 lines: LineIndex::new(content),
+                namespace: Backend::extract_namespace_from_statements(program.statements.iter()),
+                uses,
+                class: None,
+                constants,
             };
             for statement in program.statements.iter() {
                 migration.statement_at_top(statement);
@@ -173,6 +270,13 @@ struct Migration<'a, 'c> {
     schema: &'a mut Schema,
     file: Arc<Path>,
     lines: LineIndex<'c>,
+    /// The file's namespace and imports, which the class of a constant
+    /// naming a table is written against.
+    namespace: Option<String>,
+    uses: HashMap<String, String>,
+    /// The migration class, fully qualified, which `self::` names.
+    class: Option<String>,
+    constants: &'a ConstantLookup<'a>,
 }
 
 impl Migration<'_, '_> {
@@ -184,6 +288,11 @@ impl Migration<'_, '_> {
                 }
             }
             Statement::Class(class) => {
+                self.class = Some(crate::names::resolve_to_fqn(
+                    bytes_to_str(class.name.value),
+                    &HashMap::new(),
+                    &self.namespace,
+                ));
                 for member in class.members.iter() {
                     let ClassLikeMember::Method(method) = member else {
                         continue;
@@ -239,14 +348,15 @@ impl Migration<'_, '_> {
         if !CHANGES.iter().any(|name| is(name)) {
             return;
         }
-        let Some(table) = argument(args, 0, "table").and_then(string_literal) else {
+        let Some((table, named_at)) = argument(args, 0, "table").and_then(|t| self.table_name(t))
+        else {
             self.schema.open = true;
             return;
         };
-        let table = bare_table_name(table).to_string();
         if is("createTable") {
             let mut created = Table {
                 created: true,
+                named_at: Some((Arc::clone(&self.file), named_at)),
                 ..Table::default()
             };
             self.create_columns(&mut created, argument(args, 1, "columns"));
@@ -254,14 +364,15 @@ impl Migration<'_, '_> {
         } else if is("dropTable") {
             self.schema.tables.remove(&table);
         } else if is("renameTable") {
-            let Some(new_name) = argument(args, 1, "newName").and_then(string_literal) else {
+            let Some((new_name, named_at)) =
+                argument(args, 1, "newName").and_then(|t| self.table_name(t))
+            else {
                 self.schema.open = true;
                 return;
             };
-            if let Some(renamed) = self.schema.tables.remove(&table) {
-                self.schema
-                    .tables
-                    .insert(bare_table_name(new_name).to_string(), renamed);
+            if let Some(mut renamed) = self.schema.tables.remove(&table) {
+                renamed.named_at = Some((Arc::clone(&self.file), named_at));
+                self.schema.tables.insert(new_name, renamed);
             }
         } else {
             let lines = &self.lines;
@@ -303,6 +414,44 @@ impl Migration<'_, '_> {
                 column.kind = argument(args, 2, "type").and_then(column_kind);
             }
         }
+    }
+
+    /// The table `expression` names, without the prefix marker, and where
+    /// it is written: a string literal, or a class constant that holds one.
+    fn table_name(&mut self, expression: &Expression<'_>) -> Option<(String, Range)> {
+        if let Some((name, offset)) = string_literal_at(expression) {
+            return Some((
+                bare_table_name(name).to_string(),
+                range(&self.lines, offset, name),
+            ));
+        }
+        let Expression::Access(Access::ClassConstant(access)) = expression else {
+            return None;
+        };
+        let class = match access.class {
+            Expression::Identifier(class) => crate::names::resolve_to_fqn(
+                bytes_to_str(class.value()),
+                &self.uses,
+                &self.namespace,
+            ),
+            Expression::Self_(_) | Expression::Static(_) => self.class.clone()?,
+            _ => return None,
+        };
+        let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
+            return None;
+        };
+        let found = (self.constants)(&class, bytes_to_str(constant.value))?;
+        if let Some(file) = found.file
+            && !self.schema.constant_files.contains(&file)
+        {
+            self.schema.constant_files.push(file);
+        }
+        let span = expression.span();
+        let range = Range::new(
+            self.lines.position(span.start.offset as usize),
+            self.lines.position(span.end.offset as usize),
+        );
+        Some((bare_table_name(&found.value).to_string(), range))
     }
 
     /// Give `table` the columns `columns` lists: one per string key, whose
@@ -351,10 +500,6 @@ fn argument<'a>(
             _ => None,
         })
         .map(|arg| arg.value())
-}
-
-fn string_literal<'a>(expression: &'a Expression<'a>) -> Option<&'a str> {
-    string_literal_at(expression).map(|(text, _)| text)
 }
 
 /// A string literal's text and the offset it starts at, inside the quotes.
@@ -420,9 +565,29 @@ impl Backend {
         if let Some(schema) = known.as_ref() {
             return Arc::clone(schema);
         }
-        let schema = Arc::new(Schema::load(self.yii_migration_dirs()));
+        let constants = |class: &str, name: &str| self.yii_constant_string(class, name);
+        let schema = Arc::new(Schema::load(self.yii_migration_dirs(), &constants));
         *known = Some(Arc::clone(&schema));
         schema
+    }
+
+    /// The string the constant `name` of the class `class` (fully
+    /// qualified) holds, when it is declared as a plain string literal,
+    /// with the file of the class.
+    pub(crate) fn yii_constant_string(&self, class: &str, name: &str) -> Option<ConstantValue> {
+        let declaring = self.find_or_load_class(class)?;
+        let constant = declaring.constants.iter().find(|c| c.name == name)?;
+        let value = crate::text_scan::unquote_php_string(constant.value.as_deref()?)?;
+        if value.contains(['\\', '$']) {
+            return None;
+        }
+        let file = self
+            .find_class_file_uri(&declaring.fqn(), "")
+            .and_then(|uri| crate::util::uri_to_path(&uri));
+        Some(ConstantValue {
+            value: value.to_string(),
+            file,
+        })
     }
 
     /// The directories the migrator reads migrations from.
@@ -490,7 +655,8 @@ impl Backend {
         *self.yii.schema.lock() = None;
     }
 
-    /// Forget the tables when the file at `path` is one of the migrations.
+    /// Forget the tables when the file at `path` is one of the migrations,
+    /// or declares a class whose constants name their tables.
     pub(crate) fn note_yii_migration_change(&self, path: &Path) {
         let mut known = self.yii.schema.lock();
         if known.as_ref().is_some_and(|schema| schema.reads(path)) {
@@ -505,8 +671,14 @@ mod tests {
 
     fn schema(migrations: &[&str]) -> Schema {
         let mut schema = Schema::default();
+        let constants = |class: &str, name: &str| {
+            (class == "App\\Db\\Table" && name == "REVIEW").then(|| ConstantValue {
+                value: "{{%review}}".to_string(),
+                file: None,
+            })
+        };
         for content in migrations {
-            schema.apply_file(Arc::from(Path::new("/m.php")), content);
+            schema.apply_file(Arc::from(Path::new("/m.php")), content, &constants);
         }
         schema
     }
@@ -606,6 +778,28 @@ final class M2
         let schema = schema(&[CREATE, dynamic]);
         let table = schema.table("review").expect("table");
         assert!(!schema.columns_known(table));
+    }
+
+    #[test]
+    fn a_table_named_by_a_class_constant_is_read() {
+        let by_constant = r#"<?php
+namespace App\Migration;
+use App\Db\Table;
+final class M1
+{
+    public function up(MigrationBuilder $b): void
+    {
+        $b->createTable(Table::REVIEW, ['id' => 'pk']);
+        $b->addColumn(Table::REVIEW, 'rating', 'integer');
+    }
+}
+"#;
+        let schema = schema(&[by_constant]);
+        let table = schema.table("review").expect("table");
+        assert!(schema.columns_known(table));
+        assert!(schema.tables_known());
+        assert_eq!(names(&schema, "review").len(), 2);
+        assert_eq!(table.named_at.as_ref().map(|(_, r)| r.start.line), Some(7));
     }
 
     #[test]

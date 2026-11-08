@@ -45,7 +45,9 @@
 //! The attributes and relations an Active Record names as strings are read
 //! against the record (see [`active_record`]), and the attributes of a
 //! record that declares no properties against the columns the project's
-//! migrations give its table (see [`migrations`]).
+//! migrations give its table (see [`migrations`]).  The tables and columns
+//! a `yiisoft/db` query names are read against the same tables (see
+//! [`queries`]).
 //!
 //! The properties a form field and a hydration map name are member
 //! accesses on the object they are given (see [`forms`]).
@@ -63,6 +65,7 @@ pub(crate) mod events;
 pub(crate) mod forms;
 pub(crate) mod migrations;
 pub(crate) mod params;
+pub(crate) mod queries;
 pub(crate) mod relations;
 pub(crate) mod routes;
 pub(crate) mod translations;

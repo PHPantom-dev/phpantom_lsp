@@ -18,6 +18,7 @@ use App\Catalog\Author;
 use App\Catalog\Book;
 use App\Catalog\BookCatalog;
 use App\Catalog\Review;
+use App\Catalog\Table;
 use App\Migration\M251108000000CreateCatalog;
 use App\Blog\Post;
 use App\Blog\PostRepositoryInterface;
@@ -283,6 +284,10 @@ check("Review's attributes are the columns the migration creates", (new Review()
 $review = Review::query()->where(['id' => 1])->one();
 check("get('rating') reads the column of Review's table", $review instanceof Review && $review->get('rating') === 5);
 check('stars() reads the rating', $review instanceof Review && $catalog->stars($review) === '*****');
+
+check("Table::BOOK names the table the migration creates", $db->getTableSchema(Table::BOOK) !== null);
+check("Table::AUTHOR names the table the migration creates", $db->getTableSchema(Table::AUTHOR) !== null);
+check("titlesBy() reads 'b.title' of the books 'a.name' wrote, in order", $catalog->titlesBy($db, 'Ursula') === ['Earthsea', 'The Dispossessed']);
 
 $authors = $catalog->authorsWithBooks();
 $author = $authors[0] ?? null;

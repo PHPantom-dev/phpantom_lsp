@@ -562,18 +562,7 @@ impl Backend {
         let columns = self.yii_record_columns(record, class_loader)?;
         let column = columns.column(name)?;
         let root = self.workspace.workspace_root.read().clone();
-        let file = root
-            .as_ref()
-            .and_then(|root| column.file.strip_prefix(root).ok())
-            .unwrap_or(&column.file)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let mut detail = format!("Column `{name}` of table `{}`", columns.table_name());
-        if let Some(kind) = &column.kind {
-            detail.push_str(&format!(": `{kind}`"));
-        }
-        detail.push_str(&format!("\n\nDeclared in `{file}`"));
-        Some(detail)
+        Some(column.detail(columns.table_name(), root.as_deref()))
     }
 }
 

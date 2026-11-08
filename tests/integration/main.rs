@@ -371,6 +371,7 @@ mod yii_definitions;
 mod yii_events;
 mod yii_forms;
 mod yii_params;
+mod yii_queries;
 mod yii_routes;
 mod yii_translations;
 mod yii_views;

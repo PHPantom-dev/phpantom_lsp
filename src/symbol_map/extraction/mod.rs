@@ -253,6 +253,10 @@ struct ExtractionCtx<'a> {
     yii_definition_bodies: Vec<crate::symbol_map::YiiDefinitionBody>,
     /// The relations the file's Active Record calls name.
     yii_relations: Vec<crate::symbol_map::YiiRelationSite>,
+    /// The `yiisoft/db` query chains the file writes, and the table and
+    /// column names they write.
+    yii_queries: Vec<crate::symbol_map::YiiQuerySite>,
+    yii_query_names: Vec<crate::symbol_map::YiiQueryName>,
     /// Whether the file is handed the Yii `$params` (see
     /// [`Frameworks::yii_params`]).
     yii_params: bool,
@@ -392,6 +396,7 @@ mod yii;
 mod yii_active_record;
 mod yii_definitions;
 mod yii_forms;
+mod yii_queries;
 mod yii_routes;
 mod yii_translations;
 
@@ -416,6 +421,7 @@ use yii::*;
 use yii_active_record::*;
 use yii_definitions::*;
 use yii_forms::*;
+use yii_queries::*;
 use yii_routes::*;
 use yii_translations::*;
 
@@ -652,6 +658,8 @@ fn extract_symbol_map_inner(
         yii_definitions: Vec::new(),
         yii_definition_bodies: Vec::new(),
         yii_relations: Vec::new(),
+        yii_queries: Vec::new(),
+        yii_query_names: Vec::new(),
         yii_params,
         doctrine,
         dql: Default::default(),
@@ -847,6 +855,8 @@ fn extract_symbol_map_inner(
         yii_definitions: ctx.yii_definitions,
         yii_definition_bodies: ctx.yii_definition_bodies,
         yii_relations: ctx.yii_relations,
+        yii_queries: ctx.yii_queries,
+        yii_query_names: ctx.yii_query_names,
         dql_aliases: ctx.dql_aliases,
         dql_syntax_errors: ctx.dql_syntax_errors,
         dql_builder_methods: ctx.dql_builder_methods,

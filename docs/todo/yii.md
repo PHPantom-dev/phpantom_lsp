@@ -13,9 +13,10 @@ the events configuration attaches. Active Record queries are typed by the
 record they are for, and the attributes and relations a record and its
 queries name navigate, complete, and are checked, the columns of a record
 without properties read from the project's migrations, and so do the
-properties form fields and hydration maps name. The key paths
-`ArrayHelper` reads complete, navigate, and are typed. What is left is
-below.
+properties form fields and hydration maps name, and the tables and
+columns `yiisoft/db` queries name, read against those migrations. The key
+paths `ArrayHelper` reads complete, navigate, and are typed. What is left
+is below.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).
@@ -118,26 +119,22 @@ missing one.
 
 ---
 
-## Y8. Column names in query arrays
+## Y18. Tables a query names in an earlier statement
 
-**Impact: Low-Medium · Complexity: High**
+**Impact: Low-Medium · Complexity: Medium**
 
 ```php
-$query->from(Table::POST . ' p')
-    ->where(['p.status' => PostStatus::Published])
-    ->orderBy(['p.publication_date' => SORT_DESC]);
+$query = (new Query($db))->from(Table::POST . ' p');
+if ($published) {
+    $query->andWhere(['p.status' => PostStatus::Published]);
+}
 ```
 
-`yiisoft/db` queries name tables and columns as strings, and columns as
-array keys, often
-qualified by a table alias the same query declares, and the table
-itself is often a class constant with the alias appended (`'post p'`,
-or `['p' => 'post']`). The columns come
-from the project's migrations (`yiisoft/db-migration`'s
-`createTable()` and `addColumn()`), which `src/yii/migrations.rs`
-already reads for the attributes of a record without properties. It
-reads a table named by a string literal only, and a table named any other
-way leaves the columns of every table open, so the class constants the
-demo names its tables with need resolving first. Complete and navigate table and column names, and report one no
-migration creates. Wait for a user to ask: the demo is the only project
-known to query this way.
+The tables and columns a `yiisoft/db` query names are read against the
+tables its own chain of calls names, plus the record's table for an
+Active Record query. A query built up over several statements on the same
+variable names its tables in one and its columns in another, so the later
+ones are read against no tables: they complete nothing, navigate nowhere
+unless the qualifier is a table's own name, and are never reported. Follow
+the tables a variable's earlier chains name, through assignments in the
+same function.

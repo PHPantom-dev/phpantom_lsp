@@ -444,6 +444,17 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Yii query tables and columns ────────────────────────
+        // `$query->from('|')` names a table the migrations create, and
+        // `->where(['|' => …])` a column of the query's tables.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_query_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
         // ── Doctrine repository field names ─────────────────────
         // `$repository->findBy(['|' => …])` and its siblings key their
         // criteria and order by the entity's mapped fields.

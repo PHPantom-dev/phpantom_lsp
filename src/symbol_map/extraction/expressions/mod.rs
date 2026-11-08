@@ -118,6 +118,9 @@ pub(super) fn extract_from_expression<'a>(
     ) {
         // A route chain is read whole, from its outermost call.
         record_yii_route_chain(expr, ctx);
+        // And so is a query chain, whose names are read against the tables
+        // the whole chain names.
+        record_yii_query_chain(expr, ctx);
         // So is the subject text of each link, which spells the chain
         // before it: rendering the links one by one, innermost first,
         // would render each from scratch.
