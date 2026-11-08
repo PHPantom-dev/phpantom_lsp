@@ -84,7 +84,20 @@ impl Backend {
                     else {
                         continue;
                     };
-                    for (name, ty) in attribute_names(&record, class_loader) {
+                    let attributes = attribute_names(&record, class_loader);
+                    if attributes.is_empty() {
+                        let Some(columns) = self.yii_record_columns(&record, class_loader) else {
+                            continue;
+                        };
+                        for column in columns.columns() {
+                            push(
+                                column.name.clone(),
+                                column.kind.clone(),
+                                CompletionItemKind::Field,
+                            );
+                        }
+                    }
+                    for (name, ty) in attributes {
                         push(
                             name.to_string(),
                             ty.map(|ty| ty.to_string()),

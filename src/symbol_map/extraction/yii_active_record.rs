@@ -69,7 +69,7 @@ pub(super) fn emit_yii_active_record_spans(
 
 /// The range inside the quotes of a string literal written as it reads,
 /// with no escape or interpolation.
-fn literal_range(expr: &Expression<'_>, content: &str) -> Option<(u32, u32)> {
+pub(super) fn literal_range(expr: &Expression<'_>, content: &str) -> Option<(u32, u32)> {
     let (value, start, end) =
         crate::virtual_members::laravel::helpers::resolved_string_literal(expr, content)?;
     (content.get(start..end)? == value).then_some((start as u32, end as u32))

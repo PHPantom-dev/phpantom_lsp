@@ -129,30 +129,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B738. A member chain rooted at `$this` inside a trait is never checked
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-trait SwitchesWorkspace {
-    protected function switchTo(int $id): void {
-        $this->manager->missing();   // not reported
-        $m = $this->manager;
-        $m->missing();               // Method Manager::missing() not found
-    }
-}
-class FirstTest { use SwitchesWorkspace; protected Manager $manager; }
-```
-
-Inside a trait, `unknown_member` skips every access whose subject starts
-at `$this`, `self`, `static` or `parent`
-(`subject_text_is_rooted_in_self` in
-`src/diagnostics/unknown_members/access.rs`), whatever the subject
-resolves to. That made sense when `$this` was only the trait, but it is
-now also what the trait's users are all guaranteed to be, and a property
-they declare is typed from their declarations, so the chain above
-resolves to `Manager` and the same call is reported once it goes through
-a variable. Only an access whose subject is nothing more than the trait
-itself (a member the host is expected to provide) is still unknowable;
-a chain whose subject resolves to a class should be checked like any
-other.
+No outstanding items.

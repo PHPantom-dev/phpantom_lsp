@@ -168,6 +168,14 @@ fn static_call_on_class(
                 ctx,
             );
         }
+        if let Some(result) = super::key_path_calls::try_resolve_array_helper_type(
+            &owner.fqn(),
+            method_name,
+            argument_list,
+            ctx,
+        ) {
+            return result;
+        }
         if let Some(result) =
             try_resolve_config_method_type(&owner.fqn(), method_name, argument_list, ctx)
         {

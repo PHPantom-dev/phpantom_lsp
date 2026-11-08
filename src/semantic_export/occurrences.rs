@@ -170,7 +170,9 @@ pub(super) fn export_span(
                 OccurrenceKind::Property
             } else if matches!(
                 docblock_ref,
-                DocblockMemberRef::EntityField | DocblockMemberRef::YiiAttribute
+                DocblockMemberRef::EntityField
+                    | DocblockMemberRef::YiiAttribute
+                    | DocblockMemberRef::YiiProperty { .. }
             ) {
                 OccurrenceKind::Property
             } else {
@@ -194,13 +196,15 @@ pub(super) fn export_span(
             // (`$gate->allows('update')`), not an occurrence of anything,
             // and so is a key of an array passed to something other than a
             // repository, or a name passed to the `get()` of something
-            // other than a record.
+            // other than a record, or a field helper's string given
+            // something other than a form model.
             if target.is_none()
                 && matches!(
                     docblock_ref,
                     DocblockMemberRef::MockedMethod
                         | DocblockMemberRef::EntityField
                         | DocblockMemberRef::YiiAttribute
+                        | DocblockMemberRef::YiiProperty { form_model: true }
                 )
             {
                 return;

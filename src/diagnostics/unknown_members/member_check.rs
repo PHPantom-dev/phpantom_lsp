@@ -317,7 +317,7 @@ impl UnknownMemberPass<'_> {
         // through to the merged classes below.
         if base_classes.iter().any(|c| {
             member_is_public(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name))
+                || (access.relaxed_lookup && member_exists_relaxed(c, member_name))
         }) {
             return (MemberCheckResult::Ok, diagnostics);
         }
@@ -358,7 +358,7 @@ impl UnknownMemberPass<'_> {
         // ── Check whether the member exists on ANY branch ───────────
         if resolved_classes.iter().any(|c| {
             member_exists(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name))
+                || (access.relaxed_lookup && member_exists_relaxed(c, member_name))
         }) {
             self.push_inaccessible_member(access, &resolved_classes, &mut diagnostics);
             return (MemberCheckResult::Ok, diagnostics);

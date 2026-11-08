@@ -207,6 +207,20 @@ pub(crate) enum DocblockMemberRef {
     /// properties reads its attributes from its table's columns, so on one
     /// of those a name that names nothing is not reported.
     YiiAttribute,
+
+    /// A property a Yii form field or hydration map names by a string,
+    /// `Field::text($form, 'title')` or `map: ['title' => 'post_title']`,
+    /// with the object it is given as the subject (see
+    /// [`crate::yii::forms`]).
+    ///
+    /// The form model and the hydrator reach the property by reflection,
+    /// whatever its visibility, and a field throws for one the model does
+    /// not have, so it is checked.  With `form_model`, the call is one the
+    /// extractor cannot tell from any other method of the same name, so a
+    /// consumer that resolves the subject keeps only the form models among
+    /// its classes (see [`crate::yii::forms::form_model_classes`]), and
+    /// drops the span otherwise.
+    YiiProperty { form_model: bool },
 }
 
 impl DocblockMemberRef {

@@ -7,6 +7,8 @@ namespace App\Web\Blog;
 use App\Blog\PostRepositoryInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Yiisoft\FormModel\FormHydrator;
 use Yiisoft\Http\Status;
 use Yiisoft\Router\HydratorAttribute\RouteArgument;
 use Yiisoft\Translator\TranslatorInterface;
@@ -39,6 +41,13 @@ final readonly class PostController
         // entries in resources/messages/*/blog.php. The constructor's
         // withDefaultCategory('blog') makes 'blog' the category this class
         // translates in.
+        // Try: go to the definition of 'posts', which lands on its @var in
+        // index.php, or hover it for the type the template declares. Clear a
+        // key to complete the template's parameters, pass 'title' a number,
+        // or add a key the template has no use for, to see it reported.
+        // Leave 'title' out and it is reported missing, while $urlGenerator,
+        // which index.php declares too, is every view's: config/common/
+        // params.php sets it under 'yiisoft/view' => 'parameters'.
         return $this->viewRenderer->render('index', [
             'posts' => $this->posts->latest(),
             'title' => $this->translator->translate('blog.title'),
@@ -63,6 +72,30 @@ final readonly class PostController
         // 'blog' in withViewPath() above, to see it reported.
         return $this->viewRenderer
             ->withLayout('@src/Web/Shared/Layout/Main/layout')
-            ->render('post', ['post' => $post]);
+            ->render('post', ['post' => $post, 'comment' => new CommentForm()]);
+    }
+
+    public function comment(
+        ServerRequestInterface $request,
+        FormHydrator $formHydrator,
+        #[RouteArgument('slug')] string $slug,
+    ): ResponseInterface {
+        $post = $this->posts->findBySlug($slug);
+        if ($post === null) {
+            return $this->responseFactory->createResponse(Status::NOT_FOUND);
+        }
+
+        // Try: go to the definition of 'message', which lands on the
+        // property in CommentForm.php. The form hydrator fills only the
+        // properties a validation rule or the map names, and CommentForm
+        // has no rules, so the map lists each property with the posted key
+        // it is read from. Clear a key to complete the form's properties,
+        // or misspell one to see it reported.
+        $comment = new CommentForm();
+        $formHydrator->populateFromPost($comment, $request, map: ['author' => 'author', 'message' => 'message']);
+
+        return $this->viewRenderer
+            ->withLayout('@src/Web/Shared/Layout/Main/layout')
+            ->render('post', ['post' => $post, 'comment' => $comment]);
     }
 }

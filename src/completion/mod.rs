@@ -104,10 +104,13 @@ pub(crate) mod target;
 pub(crate) mod use_edit;
 pub(crate) mod yii_active_record;
 pub(crate) mod yii_aliases;
+pub(crate) mod yii_array_paths;
 pub(crate) mod yii_assets;
 pub(crate) mod yii_css_classes;
 pub(crate) mod yii_definitions;
+pub(crate) mod yii_forms;
 pub(crate) mod yii_params;
+pub(crate) mod yii_queries;
 pub(crate) mod yii_route_params;
 pub(crate) mod yii_views;
 

@@ -150,6 +150,11 @@ impl Backend {
             return Some(hover);
         }
 
+        // A table or column a `yiisoft/db` query names.
+        if let Some(hover) = self.yii_query_hover(uri, content, offset) {
+            return Some(hover);
+        }
+
         // ── model-property<Model> string hover ─────────────────
         // When the cursor is inside a string argument whose parameter
         // is typed as model-property<Model>, show the property's type

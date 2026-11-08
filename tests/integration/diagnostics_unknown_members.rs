@@ -8433,6 +8433,79 @@ class Product extends \Illuminate\Database\Eloquent\Model {
     );
 }
 
+/// A chain from `$this` inside a trait whose subject resolves to a class
+/// (here through a property the trait's user declares) is checked like
+/// the same chain through a variable.
+#[test]
+fn chain_rooted_at_this_inside_trait_is_checked_once_resolved() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Manager {
+    public function known(): void {}
+}
+trait SwitchesWorkspace {
+    protected function switchTo(int $id): void {
+        $this->manager->known();
+        $this->manager->missing();
+        $m = $this->manager;
+        $m->alsoMissing();
+    }
+}
+class FirstTest {
+    use SwitchesWorkspace;
+    protected Manager $manager;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Manager::missing()") && m.contains("not found")),
+        "expected the chain from $this to be checked, got: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Manager::alsoMissing()")),
+        "expected the variable to be checked, got: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("known")),
+        "a member Manager declares must not be flagged, got: {messages:?}"
+    );
+}
+
+/// A fluent chain inside a trait that comes back to the trait itself
+/// only knows the trait's own members, not the host's, so it stays
+/// unchecked like a bare `$this`.
+#[test]
+fn no_diagnostic_for_fluent_chain_back_to_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait Fluent {
+    /** @return $this */
+    public function with(): static { return $this; }
+    public function run(): void {
+        $this->with()->hostMethod();
+        static::make()->hostMethod();
+    }
+    public static function make(): static { return new static(); }
+}
+class Host {
+    use Fluent;
+    public function hostMethod(): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for a chain back to the trait, got: {diags:?}"
+    );
+}
+
 /// Non-self-referencing subjects inside a trait must still be diagnosed;
 /// the `$this`/`self`/`static`/`parent` suppression must not swallow them.
 #[test]

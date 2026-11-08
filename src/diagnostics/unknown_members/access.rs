@@ -2,7 +2,8 @@
 //! leaves alone: array callables, `@see` targets, `::class`, accesses a
 //! `method_exists()` / `class_exists()` guard or `isset()` / `empty()`
 //! protects, and a trait's accesses through its own `$this` / `self` /
-//! `static` / `parent`.
+//! `static` / `parent`, or through a chain from them that leads back to
+//! the trait or to nothing known.
 
 use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{DocblockMemberRef, MappedSource, SymbolKind, SymbolSpan};
@@ -36,6 +37,9 @@ pub(super) struct MemberAccessSite<'a> {
     /// than a constant (`Foo::BAR`).
     pub(super) is_static_property: bool,
     pub(super) is_docblock_ref: bool,
+    /// Whether any member of the name will do, as for a docblock
+    /// reference, rather than only one of the kind the access asks for.
+    pub(super) relaxed_lookup: bool,
     pub(super) is_nullsafe: bool,
     /// Whether the member is the method a mock expectation names, which
     /// is checked on the mocked class (see [`crate::mock_methods`]).
@@ -48,8 +52,17 @@ pub(super) struct MemberAccessSite<'a> {
     /// which is checked on the records among the subject's classes only
     /// (see [`crate::yii::active_record`]).
     pub(super) yii_attribute: bool,
+    /// Whether the member is a property a Yii form field or form hydrator
+    /// names, which is checked only on a form model (see
+    /// [`crate::yii::forms`]).
+    pub(super) form_model_property: bool,
     /// The class the access is written in.
     pub(super) current_class: Option<&'a ClassInfo>,
+    /// Whether the access is in a trait and its subject is a chain rooted
+    /// at `$this`, `self`, `static` or `parent`.  Such a chain is checked
+    /// only when it resolves to something other than the trait: a member
+    /// the chain lands back on the trait for is one the host provides.
+    pub(super) trait_self_chain: bool,
 }
 
 impl<'a> MemberAccessSite<'a> {
@@ -138,18 +151,14 @@ impl<'a> MemberAccessSite<'a> {
         // these produces false positives for every trait that relies
         // on the host class's members.
         //
-        // This also covers chain expressions rooted at these keywords,
-        // e.g. `static::where('x', 'y')->update(...)` has subject_text
-        // `"static::where('x', 'y')"` and `$this->relation()->first()`
-        // has subject_text `"$this->relation()"`.  The root of the
-        // chain is still the trait's self-reference, so the entire
-        // chain is unsuppressable without knowing the host class.
-        if let Some(cc) = current_class
-            && cc.kind == ClassLikeKind::Trait
-            && subject_text_is_rooted_in_self(subject_text)
-        {
+        // A chain rooted at one of them (`$this->manager->x()`) is
+        // different: its subject is whatever the chain resolved to, so
+        // it is judged once that is known (see [`Self::trait_self_chain`]).
+        let in_trait = current_class.is_some_and(|cc| cc.kind == ClassLikeKind::Trait);
+        if in_trait && matches!(subject_text, "$this" | "self" | "static" | "parent") {
             return None;
         }
+        let trait_self_chain = in_trait && subject_text_is_rooted_in_self(subject_text);
 
         Some(Self {
             start: span.start,
@@ -170,11 +179,19 @@ impl<'a> MemberAccessSite<'a> {
                     .get(span.start.saturating_sub(1) as usize..=span.start as usize)
                     .is_some_and(|bytes| bytes.contains(&b'$')),
             is_docblock_ref: docblock_ref.is_reference(),
+            // A Yii form field or hydration map reads or writes a property
+            // by reflection, which a method or a constant cannot stand in
+            // for, though its visibility does not matter.
+            relaxed_lookup: docblock_ref.is_reference()
+                && !matches!(docblock_ref, DocblockMemberRef::YiiProperty { .. }),
             is_nullsafe: *is_nullsafe,
             mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
             entity_field: *docblock_ref == DocblockMemberRef::EntityField,
             yii_attribute: *docblock_ref == DocblockMemberRef::YiiAttribute,
+            form_model_property: *docblock_ref
+                == DocblockMemberRef::YiiProperty { form_model: true },
             current_class,
+            trait_self_chain,
         })
     }
 
@@ -238,16 +255,10 @@ impl<'a> MemberAccessSite<'a> {
     }
 }
 
-/// Check whether a subject text is rooted in `$this`, `self`, `static`,
-/// or `parent`.  This matches both bare keywords (`"$this"`, `"static"`)
-/// and chain expressions that start with one of them
-/// (`"$this->relation()"`, `"static::where('x', 'y')"`, `"self::$prop"`).
+/// Check whether a subject text is a chain rooted in `$this`, `self`,
+/// `static`, or `parent` (`"$this->relation()"`,
+/// `"static::where('x', 'y')"`, `"self::$prop"`).
 fn subject_text_is_rooted_in_self(subject_text: &str) -> bool {
-    // Bare keyword match (most common case).
-    if matches!(subject_text, "$this" | "self" | "static" | "parent") {
-        return true;
-    }
-
     // Chain rooted at `$this->` or `$this?->`
     if subject_text.starts_with("$this->") || subject_text.starts_with("$this?->") {
         return true;

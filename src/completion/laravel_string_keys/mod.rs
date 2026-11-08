@@ -68,6 +68,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
         StringKeyKind::SerializerGroup => CompletionItemKind::EnumMember,
         StringKeyKind::YiiRouteArgument
+        | StringKeyKind::YiiViewParameter
         | StringKeyKind::DrupalRouteParameter
         | StringKeyKind::DrupalThemeHookVariable => CompletionItemKind::Field,
         StringKeyKind::YiiDefinitionArgument => CompletionItemKind::Variable,
@@ -237,7 +238,9 @@ impl Backend {
             // parameter from the route its call names, and a theme hook's
             // variable from the `#theme` of its render array, and a DI
             // definition's argument from the method it is passed to, and a
-            // plugin ID from the manager its receiver is.  A hook name is
+            // plugin ID from the manager its receiver is, and a Yii view's
+            // parameter from the template its render names
+            // (`crate::completion::yii_views`).  A hook name is
             // completed with its patterns as snippets, which only the
             // WordPress completion builds.
             StringKeyKind::SymfonyTranslation
@@ -245,6 +248,7 @@ impl Backend {
             | StringKeyKind::WordPressHook
             | StringKeyKind::SymfonyConfigKey
             | StringKeyKind::YiiRouteArgument
+            | StringKeyKind::YiiViewParameter
             | StringKeyKind::YiiDefinitionArgument
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalConfigKey

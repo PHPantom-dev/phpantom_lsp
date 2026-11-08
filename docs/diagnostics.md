@@ -163,6 +163,9 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_yii_route_argument` | Warning | A route argument the route's path does not have. |
 | `invalid_yii_view` | Warning | A view or layout with no view file. |
 | `invalid_yii_view_path` | Warning | A view path directory that does not exist. |
+| `invalid_yii_view_parameter` | Warning | A parameter passed to a view whose template neither declares it in its `@var` block nor reads it. |
+| `missing_yii_view_parameter` | Warning | A parameter a template declares in its `@var` block that the render does not pass and no view is given otherwise. |
+| `type_mismatch_yii_view_parameter` | Error | A parameter passed to a view whose type the template's `@var` declaration does not accept. |
 | `invalid_yii_asset` | Warning | An asset bundle's `$css` or `$js` file that is not in the bundle's directory. |
 | `invalid_yii_definition_argument` | Warning | A DI definition argument that names no parameter of the method. |
 | `invalid_yii_definition_key` | Error | A DI definition key that is not `class`, `__construct()`, a method call (`'name()'`), or a property (`'$name'`). |
@@ -170,8 +173,10 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_yii_param` | Warning | A `$params` key no params file declares. |
 | `invalid_yii_translation` | Warning | A message ID, spelled like a key (`menu.blog`), that no message file of its category declares. |
 | `invalid_yii_config_file` | Warning | A file a `config-plugin` in `composer.json` lists that does not exist. |
-| `invalid_yii_attribute` | Warning | An Active Record attribute the record declares no property for. Not reported on a record that declares no properties, whose attributes are its table's columns. |
+| `invalid_yii_attribute` | Warning | An Active Record attribute the record declares no property for. On a record that declares no properties, whose attributes are its table's columns, a column no migration creates. |
 | `invalid_yii_relation` | Warning | An Active Record relation the record does not declare. |
+| `invalid_yii_table` | Warning | A table a `yiisoft/db` query reads from or joins that no migration creates. |
+| `invalid_yii_column` | Warning | A column a `yiisoft/db` query names that none of the tables it may belong to has, as the migrations create them. |
 
 ## Drupal
 

@@ -17,22 +17,31 @@ use App\Blog\InMemoryPostRepository;
 use App\Catalog\Author;
 use App\Catalog\Book;
 use App\Catalog\BookCatalog;
+use App\Catalog\Review;
+use App\Catalog\Table;
+use App\Migration\M251108000000CreateCatalog;
 use App\Blog\Post;
 use App\Blog\PostRepositoryInterface;
 use App\Blog\PostViewed;
 use App\Blog\ViewCounter;
+use App\Web\Blog\CommentForm;
 use App\Web\Blog\PostController;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
 use Yiisoft\Aliases\Aliases;
 use Yiisoft\Db\Connection\ConnectionInterface;
+use Yiisoft\FormModel\Field;
+use Yiisoft\FormModel\FormHydrator;
+use Yiisoft\Db\Migration\Informer\NullMigrationInformer;
+use Yiisoft\Db\Migration\MigrationBuilder;
 use Yiisoft\Injector\Injector;
 use Yiisoft\Injector\MissingRequiredArgumentException;
 use Yiisoft\Router\HydratorAttribute\RouteArgument;
 use Yiisoft\Router\RouteCollectionInterface;
 use Yiisoft\Router\UrlGeneratorInterface;
 use Yiisoft\Translator\TranslatorInterface;
+use Yiisoft\Yii\Runner\Console\ConsoleApplicationRunner;
 use Yiisoft\Yii\Runner\Http\HttpApplicationRunner;
 use Yiisoft\Yii\View\Renderer\WebViewRenderer;
 
@@ -110,6 +119,8 @@ check('PostController declares index()', method_exists(PostController::class, 'i
 $slugArgument = (new ReflectionMethod(PostController::class, 'view'))->getParameters()[0]->getAttributes(RouteArgument::class);
 check("view()'s #[RouteArgument('slug')] reads a placeholder blog/post's path declares", count($slugArgument) === 1 && $slugArgument[0]->newInstance()->getName() === 'slug' && str_contains($post->getData('pattern'), '{slug}'));
 check('PostController declares view()', method_exists(PostController::class, 'view'));
+$commentRoute = $routes->getRoute('blog/comment');
+check('blog/comment is handled by PostController::comment() at /blog/{slug}/comment', $commentRoute->getData('pattern') === '/blog/{slug}/comment' && $commentRoute->getData('enabledMiddlewares') === [[PostController::class, 'comment']]);
 check('The home route is still declared', $routes->getRoute('home')->getData('pattern') === '/');
 
 $urls = $container->get(UrlGeneratorInterface::class);
@@ -156,15 +167,30 @@ check("The 'index' view is resources/views/blog/index.php", $renderer->getViewPa
 check("'_card' is the file beside index.php", is_file(__DIR__ . '/resources/views/blog/_card.php'));
 check("__DIR__ . '/template' is template.php beside the home page action", is_file(__DIR__ . '/src/Web/HomePage/template.php'));
 
+preg_match_all('/@var \S+ \$(\w+)/', (string) file_get_contents(__DIR__ . '/resources/views/blog/index.php'), $declared);
+$shared = array_keys($params['yiisoft/view']['parameters']);
+check("index.php declares 'posts' and 'title' besides \$this and what every view is given", array_values(array_diff($declared[1], ['this', ...$shared])) === ['posts', 'title']);
+
 $html = $renderer->renderPartialAsString('index', ['posts' => $repository->latest(), 'title' => 'Blog']);
 check("index.php renders '_card' for each post", substr_count($html, '<article>') === 2);
 check("index.php links each post through generate('blog/post', ...)", str_contains($html, 'href="/blog/hello-yii"'));
 
-$html = $renderer->renderPartialAsString('post', ['post' => $repository->findBySlug('config-is-code')]);
+$html = $renderer->renderPartialAsString('post', ['post' => $repository->findBySlug('config-is-code'), 'comment' => new CommentForm()]);
 check("post.php links back through generate('blog/index')", str_contains($html, 'href="/blog"'));
 check("post.php gives the link the class 'back-link'", str_contains($html, 'class="back-link"'));
 check("post.php translates 'blog.all_posts' in the 'blog' category", str_contains($html, '>All posts</a>'));
 check("assets/main/site.css declares .back-link", preg_match('/^\.back-link\s*\{/m', (string) file_get_contents(__DIR__ . '/assets/main/site.css')) === 1);
+
+check("post.php renders Field::text(\$comment, 'author') for CommentForm's \$author", str_contains($html, 'name="CommentForm[author]"'));
+check("post.php renders Field::textarea(\$comment, 'message') for CommentForm's \$message", str_contains($html, 'name="CommentForm[message]"'));
+check("post.php posts the comment form to generate('blog/comment', ...)", str_contains($html, 'action="/blog/config-is-code/comment"'));
+$threw = false;
+try {
+    Field::text(new CommentForm(), 'auther')->render();
+} catch (Throwable) {
+    $threw = true;
+}
+check('A field naming no property of the form throws', $threw);
 
 check("withLayout('@src/Web/Shared/Layout/Main/layout') is layout.php", is_file(__DIR__ . '/src/Web/Shared/Layout/Main/layout.php'));
 
@@ -229,8 +255,12 @@ foreach ($runner->getConfig()->get('bootstrap-web') as $bootstrap) {
     $bootstrap($container);
 }
 $db = $container->get(ConnectionInterface::class);
-$db->createCommand('CREATE TABLE author (id INTEGER PRIMARY KEY, name TEXT NOT NULL)')->execute();
-$db->createCommand('CREATE TABLE book (id INTEGER PRIMARY KEY, title TEXT NOT NULL, author_id INTEGER NOT NULL)')->execute();
+// The console runner is the one the migrator runs under, so it is the one
+// that reads the console params.
+$consoleRunner = new ConsoleApplicationRunner(rootPath: __DIR__, environment: 'dev');
+$migrations = $consoleRunner->getConfig()->get('params-console')['yiisoft/db-migration'];
+check('The console params point the migrator at App\\Migration', $migrations['sourceNamespaces'] === ['App\\Migration']);
+(new M251108000000CreateCatalog())->up(new MigrationBuilder($db, new NullMigrationInformer()));
 $db->createCommand("INSERT INTO author (id, name) VALUES (1, 'Ursula')")->execute();
 $db->createCommand("INSERT INTO book (id, title, author_id) VALUES (1, 'Earthsea', 1), (2, 'The Dispossessed', 1)")->execute();
 
@@ -250,6 +280,19 @@ check("with('author') loads the author", $book?->isRelationPopulated('author') =
 check("relation('author') is an Author", $book?->relation('author') instanceof Author);
 check("get('title') reads Book::\$title", $book?->get('title') === 'Earthsea');
 check('describe() reads the title and the author', $book !== null && $catalog->describe($book) === 'Earthsea by Ursula (Earthsea)');
+check("getValueByPath('book.title') reads the entry's Book::\$title", $book !== null && $catalog->shelvedTitle(['book' => $book, 'shelf' => 'A']) === 'Earthsea on shelf A');
+
+$db->createCommand("INSERT INTO review (id, book_id, rating, body) VALUES (1, 1, 5, 'A classic.')")->execute();
+check("Review's table is 'review'", (new Review())->tableName() === '{{%review}}');
+check("Review's attributes are the columns the migration creates", (new Review())->propertyNames() === ['id', 'book_id', 'rating', 'body']);
+$review = Review::query()->where(['id' => 1])->one();
+check("get('rating') reads the column of Review's table", $review instanceof Review && $review->get('rating') === 5);
+check('stars() reads the rating', $review instanceof Review && $catalog->stars($review) === '*****');
+
+check("Table::BOOK names the table the migration creates", $db->getTableSchema(Table::BOOK) !== null);
+check("Table::AUTHOR names the table the migration creates", $db->getTableSchema(Table::AUTHOR) !== null);
+check("titlesBy() reads 'b.title' of the books 'a.name' wrote, in order", $catalog->titlesBy($db, 'Ursula') === ['Earthsea', 'The Dispossessed']);
+check("titles() reads 'b.author_id' in a later statement against the alias the first gives", $catalog->titles($db, 1) === ['Earthsea', 'The Dispossessed'] && $catalog->titles($db, 2) === []);
 
 $authors = $catalog->authorsWithBooks();
 $author = $authors[0] ?? null;
@@ -257,6 +300,20 @@ check("Author::query()->with('books.author')->all() returns Authors", $author in
 check("with('books.author') loads each author's books", $author instanceof Author && count($author->relation('books')) === 2);
 $first = $author instanceof Author ? ($author->relation('books')[0] ?? null) : null;
 check("with('books.author') loads the author of each book", $first instanceof Book && $first->isRelationPopulated('author'));
+
+// ─── Forms ──────────────────────────────────────────────────────────────────
+
+// PostController::comment() fills CommentForm through the form hydrator. The
+// form has no validation rules, so only the properties its map names are
+// filled.
+$formHydrator = $container->get(FormHydrator::class);
+$posted = ['CommentForm' => ['author' => 'Ann', 'message' => 'Hello']];
+$comment = new CommentForm();
+$formHydrator->populate($comment, $posted, map: ['author' => 'author', 'message' => 'message']);
+check("The map's keys name the CommentForm properties it fills", $comment->author === 'Ann' && $comment->message === 'Hello');
+$unmapped = new CommentForm();
+$formHydrator->populate($unmapped, $posted);
+check('Without a map, a form with no rules is not filled', $unmapped->author === '' && $unmapped->message === '');
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

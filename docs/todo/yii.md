@@ -11,7 +11,14 @@ navigate, are checked, and are typed, and the message IDs a translator
 looks up complete, navigate, and are checked, and so do the listeners
 the events configuration attaches. Active Record queries are typed by the
 record they are for, and the attributes and relations a record and its
-queries name navigate, complete, and are checked. What is left is below.
+queries name navigate, complete, and are checked, the columns of a record
+without properties read from the project's migrations, and so do the
+properties form fields and hydration maps name, and the tables and
+columns `yiisoft/db` queries name, read against those migrations. The key
+paths `ArrayHelper` reads complete, navigate, and are typed, and the
+parameters a render call passes its view complete, navigate, and are
+checked against the `@var` block the template opens with. What is left is
+below.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).
@@ -79,127 +86,3 @@ the DI configuration gives the renderer, from
 it, so a name such a class renders does not navigate, complete, or get
 reported. Read the value from the merged params (`src/yii/params.rs`),
 and use it as the base wherever the class gives none.
-
----
-
-## Y7. Render parameters against the template's `@var` list
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-// Action.php
-return $this->viewRenderer->render(__DIR__ . '/template', ['form' => $form]);
-
-// template.php
-/**
- * @var WebView $this
- * @var UrlGenerator $urlGenerator
- * @var Form $form
- */
-```
-
-Yii templates declare the variables they expect in a `@var` block at the
-top, and `yiisoft/demo-blog` does this in every template. That block is
-the template's signature, so the `render()` call can be checked against
-it: complete the parameter array's keys from it, navigate from a key to
-its `@var`, report a value whose type does not match, and report a key
-the template does not declare.
-
-A declared variable that the call does not pass is not always an error:
-the view's shared parameters (`WebView::setParameters()` in the DI
-config, or `parameters` under `params['yiisoft/view']`) and the
-renderer's injections (`CsrfViewInjection` gives `$csrf`) supply the
-rest, and the layout receives its own. Collect those before reporting a
-missing one.
-
----
-
-## Y15. Property names in hydrator attributes and form fields
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-final class PostForm extends FormModel
-{
-    public function __construct(
-        #[Data('post_title')] public string $title = '',
-    ) {}
-}
-
-Field::text($form, 'title');
-```
-
-`yiisoft/hydrator`'s `#[Data]` and `#[Map]` name the keys of the data
-array a property is filled from, and `yiisoft/form-model`'s field
-helpers name a property of the form model they are given. A form field
-name should navigate to the property, complete from the model's
-properties, rename with it, and be reported when the model has no such
-property. A `#[Map]` entry is the same check in the other direction, on
-its property side.
-
----
-
-## Y8. Column names in query arrays
-
-**Impact: Low-Medium · Complexity: High**
-
-```php
-$query->from(Table::POST . ' p')
-    ->where(['p.status' => PostStatus::Published])
-    ->orderBy(['p.publication_date' => SORT_DESC]);
-```
-
-`yiisoft/db` queries name tables and columns as strings, and columns as
-array keys, often
-qualified by a table alias the same query declares, and the table
-itself is often a class constant with the alias appended (`'post p'`,
-or `['p' => 'post']`). The columns come
-from the project's migrations (`yiisoft/db-migration`'s
-`createTable()` and `addColumn()`). Complete and navigate table and
-column names, and report one no migration creates. Laravel's migration
-scanning (`src/virtual_members/laravel/database_schema/`) is the
-precedent for reading the schema statically. Wait for a user to ask: the
-demo is the only project known to query this way.
-
----
-
-## Y19. Attributes of an Active Record without properties
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-#[\AllowDynamicProperties]
-final class Post extends ActiveRecord {}
-
-$post->get('title');
-```
-
-An Active Record's `get()`, `set()`, and the rest of its attribute API
-name an attribute, which navigates, completes, and is checked against
-the record's properties (`src/yii/active_record.rs`). A record that
-declares no properties, real or `@property` ones, reads its attributes
-from its table's columns instead, so on one of those nothing completes
-and every name passes. Once Y8 reads the schema from the project's
-migrations, complete those names from the columns of the record's table
-(`tableName()`, or the name `AbstractActiveRecord::tableName()` derives
-from the class), navigate to the migration that creates each one, and
-report one no migration creates.
-
----
-
-## Y17. Key paths in `yiisoft/arrays`
-
-**Impact: Low · Complexity: Medium**
-
-```php
-ArrayHelper::getValue($user, 'profile.address.city');
-```
-
-`ArrayHelper::getValue()`, `setValue()`, `keyExists()`, and `remove()`
-take a key or a dotted path into the array or object they are given.
-When the shape of that value is known, complete each segment from its
-keys and properties, navigate from a segment to its declaration, and
-type `getValue()` as the value the path reaches instead of `mixed`. Any
-dotted-path helper (Laravel's `data_get()` and `Arr::get()` take the
-same kind of path) would share the walk, so build it in the shared
-resolution path rather than for Yii alone.

@@ -31,5 +31,8 @@ return [
             Route::get('/{slug}')
                 ->action([PostController::class, 'view'])
                 ->name('post'),
+            Route::post('/{slug}/comment')
+                ->action([PostController::class, 'comment'])
+                ->name('comment'),
         ),
 ];

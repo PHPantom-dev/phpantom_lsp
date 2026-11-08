@@ -20,6 +20,9 @@ use super::*;
 use crate::document_links::try_evaluate_path_expr;
 use crate::symbol_map::{ReceiverClass, StringKeyKind};
 use crate::virtual_members::laravel::helpers::{extract_string_literal, resolved_string_literal};
+use crate::yii::view_parameters::{
+    is_shared_parameter_method, is_shared_parameters_method, parameter_key,
+};
 use crate::yii::views::{
     controller_name, is_absolute_view_path, is_layout_method, is_view_render_method, layout_key,
     normalize_view_path, path_value, view_key,
@@ -223,6 +226,16 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
         record_yii_view_path_site(argument_list, dir, ctx);
         return;
     }
+    let first = argument_list
+        .arguments
+        .first()
+        .map(|argument| argument.value());
+    if is_shared_parameter_method(member_name) || is_shared_parameters_method(member_name) {
+        if let Some(first) = first {
+            emit_yii_shared_view_parameters(member_name, first, ctx);
+        }
+        return;
+    }
     let is_layout = is_layout_method(member_name);
     if !is_layout && !is_view_render_method(member_name) {
         return;
@@ -242,11 +255,15 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
         let Some((_, start, end)) = resolved_string_literal(binary.rhs, ctx.content) else {
             return;
         };
+        let key = normalize_view_path(&path);
+        if !is_layout {
+            record_yii_view_parameters(argument_list, &key, None, ctx);
+        }
         ctx.spans.push(SymbolSpan {
             start: start as u32,
             end: end as u32,
             kind: SymbolKind::StringKey {
-                key: normalize_view_path(&path),
+                key,
                 kind: StringKeyKind::YiiView,
                 is_write: false,
                 is_optional: false,
@@ -289,6 +306,8 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
     let Some(key) = key else {
         return;
     };
+    let parameters =
+        (!is_layout && yii_view_parameters_argument(argument_list).is_some()).then(|| key.clone());
     ctx.typed_receiver_sites.push(TypedReceiverSite {
         start: start as u32,
         end: end as u32,
@@ -298,6 +317,145 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
         guards: 0,
         receiver: ReceiverClass::YiiViewRenderer,
     });
+    if let Some(view) = parameters {
+        record_yii_view_parameters(
+            argument_list,
+            &view,
+            Some(ReceiverClass::YiiViewParameters),
+            ctx,
+        );
+    }
+}
+
+/// The parameters argument of a render call: its second, or the one named
+/// `parameters`.
+pub(crate) fn yii_view_parameters_argument<'e, 'a>(
+    argument_list: &'e ArgumentList<'a>,
+) -> Option<&'e Expression<'a>> {
+    argument_list
+        .arguments
+        .iter()
+        .enumerate()
+        .find_map(|(index, argument)| match argument {
+            Argument::Positional(positional) if index == 1 => Some(positional.value),
+            Argument::Named(named) if named.name.value.eq_ignore_ascii_case(b"parameters") => {
+                Some(named.value)
+            }
+            _ => None,
+        })
+}
+
+/// Record the keys of the parameters a render of the view `view` passes,
+/// each keyed by the view and the name: a span when the view is named on
+/// sight, or a site the type engine confirms with `receiver`, the way it
+/// confirms the view's name.
+fn record_yii_view_parameters(
+    argument_list: &ArgumentList<'_>,
+    view: &str,
+    receiver: Option<ReceiverClass>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some(elements) =
+        yii_view_parameters_argument(argument_list).and_then(crate::parser::array_literal_elements)
+    else {
+        return;
+    };
+    for element in elements.iter() {
+        let ArrayElement::KeyValue(entry) = element else {
+            continue;
+        };
+        let Some((name, start, end)) = resolved_string_literal(entry.key, ctx.content) else {
+            continue;
+        };
+        let key = parameter_key(view, name);
+        match receiver {
+            Some(receiver) => ctx.typed_receiver_sites.push(TypedReceiverSite {
+                start: start as u32,
+                end: end as u32,
+                key,
+                is_write: false,
+                is_optional: false,
+                guards: 0,
+                receiver,
+            }),
+            None => ctx.spans.push(SymbolSpan {
+                start: start as u32,
+                end: end as u32,
+                kind: SymbolKind::StringKey {
+                    key,
+                    kind: StringKeyKind::YiiViewParameter,
+                    is_write: false,
+                    is_optional: false,
+                },
+            }),
+        }
+    }
+}
+
+/// Record the parameters a call of `method`, or a DI definition's key for
+/// it, sets for every view to share, from `first`, its first argument: the
+/// name it gives, or for `setParameters()` the keys of the array it gives.
+/// Any receiver counts, since a name that is not a view's only leaves a
+/// missing parameter unreported.
+pub(in crate::symbol_map::extraction) fn emit_yii_shared_view_parameters(
+    method: &str,
+    first: &Expression<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let mut push = |name: &str, start: usize, end: usize| {
+        ctx.spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                key: parameter_key("", name),
+                kind: StringKeyKind::YiiViewParameter,
+                is_write: true,
+                is_optional: false,
+            },
+        });
+    };
+    let mut unread = false;
+    if is_shared_parameters_method(method) {
+        match crate::parser::array_literal_elements(first) {
+            Some(elements) => {
+                for element in elements.iter() {
+                    match element {
+                        ArrayElement::KeyValue(entry) => {
+                            match resolved_string_literal(entry.key, ctx.content) {
+                                Some((name, start, end)) => push(name, start, end),
+                                None => unread = true,
+                            }
+                        }
+                        _ => unread = true,
+                    }
+                }
+            }
+            // The view's own package sets the params' parameters, which are
+            // read from the params.
+            None => unread = !is_view_params_parameters(first, ctx.content),
+        }
+    } else if is_shared_parameter_method(method) {
+        match resolved_string_literal(first, ctx.content) {
+            Some((name, start, end)) => push(name, start, end),
+            None => unread = true,
+        }
+    }
+    ctx.sets_unread_yii_view_parameters |= unread;
+}
+
+/// Whether `value` is `$params['yiisoft/view']['parameters']`.
+fn is_view_params_parameters(value: &Expression<'_>, content: &str) -> bool {
+    let Expression::ArrayAccess(outer) = value else {
+        return false;
+    };
+    let Expression::ArrayAccess(inner) = outer.array else {
+        return false;
+    };
+    matches!(inner.array, Expression::Variable(Variable::Direct(variable)) if variable.name == b"$params")
+        && resolved_string_literal(inner.index, content)
+            .is_some_and(|(key, _, _)| key == "yiisoft/view")
+        && resolved_string_literal(outer.index, content)
+            .is_some_and(|(key, _, _)| key == "parameters")
 }
 
 /// Record each class name the string arguments of a `class()` or an

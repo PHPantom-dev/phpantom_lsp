@@ -262,6 +262,18 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Yii view parameters ─────────────────────────────────
+        // `render('blog/post', ['|' => …])`, from the template's `@var`
+        // block.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_yii_view_parameter_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
         // ── CSS classes ─────────────────────────────────────────
         // `Html::div()->class('card |')`, a name at a time.
         if matches!(string_ctx, StringContext::InStringLiteral)
@@ -279,6 +291,28 @@ impl Backend {
             && matches!(string_ctx, StringContext::InStringLiteral)
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) = self.try_yii_definition_completion(content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── Key paths `ArrayHelper` reads ───────────────────────
+        // `ArrayHelper::getValueByPath($user, 'profile.|')` completes from
+        // the value the keys before the cursor reach.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_array_path_completion(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
+        // ── Yii form fields and hydration maps ──────────────────
+        // `Field::text($form, '|')` and the keys of a hydration map,
+        // `populate($form, $data, ['|' …`, name properties of the object.
+        if self.is_yii_project()
+            && matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_yii_form_property_completion(content, position, ctx, code)
         {
             return Some(response);
         }
@@ -424,6 +458,17 @@ impl Backend {
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_yii_active_record_completion(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
+        // ── Yii query tables and columns ────────────────────────
+        // `$query->from('|')` names a table the migrations create, and
+        // `->where(['|' => …])` a column of the query's tables.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_query_completion(uri, content, position, ctx, code)
         {
             return Some(response);
         }

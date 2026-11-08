@@ -518,6 +518,7 @@ fn extract_method_call<'a>(
         record_drupal_plugin_sites(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
         record_yii_css_class_sites(&member_name, argument_list, ctx);
+        emit_yii_form_property_spans(&member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
         emit_entity_field_spans(object, &member_name, argument_list, ctx);
         emit_yii_active_record_spans(object, &member_name, argument_list, ctx);
@@ -607,6 +608,7 @@ fn extract_static_method_call<'a>(
                 &mut ctx.spans,
             );
         }
+        emit_yii_form_property_spans(&member_name, &static_call.argument_list, ctx);
         emit_facade_mock_method_spans(
             static_call.class,
             &member_name,

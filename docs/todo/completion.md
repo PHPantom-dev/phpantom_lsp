@@ -63,6 +63,13 @@ array shapes would require detecting the array key context in the
 GTD path (similar to array shape completion) and searching for the
 key inside the matching `array{…}` annotation.
 
+The keys of a path `ArrayHelper` reads in a Yii project
+(`getValueByPath($data, 'user.settings')`) complete from the same shapes
+and jump to the properties they read, but a key that reads an array's
+element jumps nowhere for the same reason. Once a shape key has a
+declaration to land on, `Backend::yii_array_path_definition` should land
+there too, from the type the keys before it reach.
+
 ---
 
 ## C7. `class_alias()` support

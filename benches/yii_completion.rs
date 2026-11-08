@@ -22,6 +22,9 @@ const COMPOSER: &str = r#"{
     "autoload": { "psr-4": {
         "App\\": "src/",
         "Yiisoft\\ActiveRecord\\": "stubs/active-record/",
+        "Yiisoft\\Db\\": "stubs/db/",
+        "Yiisoft\\FormModel\\": "stubs/form-model/",
+        "Yiisoft\\Hydrator\\": "stubs/hydrator/",
         "Yiisoft\\Router\\": "stubs/router/",
         "Yiisoft\\Translator\\": "stubs/translator/",
         "Yiisoft\\Yii\\View\\Renderer\\": "stubs/yii-view-renderer/",
@@ -48,7 +51,11 @@ const STUBS: &[(&str, &str)] = &[
     ),
     (
         "stubs/active-record/ActiveQueryInterface.php",
-        "<?php\nnamespace Yiisoft\\ActiveRecord;\ninterface ActiveQueryInterface {\n    public function with(array|string ...$with): static;\n    public function one(): array|ActiveRecordInterface|null;\n}\n",
+        "<?php\nnamespace Yiisoft\\ActiveRecord;\ninterface ActiveQueryInterface extends \\Yiisoft\\Db\\Query\\QueryInterface {\n    public function with(array|string ...$with): static;\n    public function one(): array|ActiveRecordInterface|null;\n}\n",
+    ),
+    (
+        "stubs/db/Query/QueryInterface.php",
+        "<?php\nnamespace Yiisoft\\Db\\Query;\ninterface QueryInterface {\n    public function from(array|string $tables): static;\n    public function where(array|string|null $condition, array $params = []): static;\n}\n",
     ),
     (
         "stubs/yii-view-renderer/WebViewRenderer.php",
@@ -68,7 +75,7 @@ const STUBS: &[(&str, &str)] = &[
     ),
     (
         "config/common/params.php",
-        "<?php\nreturn [\n    'yiisoft/aliases' => ['aliases' => require __DIR__ . '/aliases.php'],\n];\n",
+        "<?php\nreturn [\n    'yiisoft/aliases' => ['aliases' => require __DIR__ . '/aliases.php'],\n    'yiisoft/db-migration' => ['sourceNamespaces' => ['App\\\\Migration']],\n];\n",
     ),
     (
         "stubs/router/Route.php",
@@ -91,6 +98,26 @@ const STUBS: &[(&str, &str)] = &[
         "<?php\nreturn [\n    'translation.app' => static fn () => new \\Yiisoft\\Translator\\Message\\Php\\MessageSource(dirname(__DIR__, 2) . '/resources/messages'),\n];\n",
     ),
     (
+        "stubs/form-model/FormModelInterface.php",
+        "<?php\nnamespace Yiisoft\\FormModel;\ninterface FormModelInterface {}\n",
+    ),
+    (
+        "stubs/form-model/FormModel.php",
+        "<?php\nnamespace Yiisoft\\FormModel;\nabstract class FormModel implements FormModelInterface {}\n",
+    ),
+    (
+        "stubs/form-model/Field.php",
+        "<?php\nnamespace Yiisoft\\FormModel;\nclass Field {\n    final public static function text(FormModelInterface $formModel, string $property, array $config = []): string {}\n}\n",
+    ),
+    (
+        "stubs/hydrator/Hydrator.php",
+        "<?php\nnamespace Yiisoft\\Hydrator;\nfinal class Hydrator {\n    public function hydrate(object $object, array|ArrayData $data = []): void {}\n}\n",
+    ),
+    (
+        "stubs/hydrator/ArrayData.php",
+        "<?php\nnamespace Yiisoft\\Hydrator;\nfinal class ArrayData {\n    public function __construct(array $data = [], array $map = [], bool $strict = false) {}\n}\n",
+    ),
+    (
         "stubs/router/HydratorAttribute/RouteArgument.php",
         "<?php\nnamespace Yiisoft\\Router\\HydratorAttribute;\n#[\\Attribute]\nfinal class RouteArgument {\n    public function __construct(private readonly ?string $name = null) {}\n}\n",
     ),
@@ -111,7 +138,7 @@ final class ConsumerAsset extends AssetBundle
 "#;
 
 /// The records' attributes and relations, named from a class of the
-/// application.
+/// application, and the columns of a record that declares no properties.
 const RECORD_CONSUMER_PHP: &str = r#"<?php
 namespace App\Catalog;
 
@@ -122,6 +149,13 @@ final class Catalog
         $record->get('');
         Record1::query()->with('')->one();
         Record1::query()->with('author.')->one();
+    }
+
+    public function review(Review $review): void
+    {
+        $review->get('');
+        Review::query()->from('')->one();
+        Review::query()->where(['' => 1])->one();
     }
 }
 "#;
@@ -145,6 +179,11 @@ final class ConsumerController
     {
         $this->viewRenderer->render(__DIR__ . '/');
         return $this->viewRenderer->render('');
+    }
+
+    public function parameters(): object
+    {
+        return $this->viewRenderer->render('action7', ['p']);
     }
 }
 "#;
@@ -224,6 +263,26 @@ final class ConsumerTitle
 }
 "#;
 
+/// A class rendering a field of a form model with `SECTIONS * ACTIONS`
+/// properties, and filling the model through a hydration map, whose
+/// property names are being typed.
+const FORM_CONSUMER_PHP: &str = r#"<?php
+namespace App\Web;
+
+use Yiisoft\FormModel\Field;
+use Yiisoft\Hydrator\ArrayData;
+use Yiisoft\Hydrator\Hydrator;
+
+final class ConsumerForm
+{
+    public function __invoke(Hydrator $hydrator, Form\LargeForm $form, array $data): string
+    {
+        $hydrator->hydrate($form, new ArrayData($data, ['section1' => 'name']));
+        return Field::text($form, 'section1');
+    }
+}
+"#;
+
 fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -250,7 +309,7 @@ fn generate_application() -> Vec<(String, String)> {
             );
             files.push((
                 format!("resources/views/section{c}/action{a}.php"),
-                "<?php\n/** @var \\Yiisoft\\View\\WebView $this */\necho $this->render('_partial');\n"
+                "<?php\n/**\n * @var \\Yiisoft\\View\\WebView $this\n * @var string $title\n * @var int $page\n */\necho $this->render('_partial');\n"
                     .to_string(),
             ));
         }
@@ -335,6 +394,52 @@ fn generate_application() -> Vec<(String, String)> {
         "src/Catalog/Catalog.php".to_string(),
         RECORD_CONSUMER_PHP.to_string(),
     ));
+    let mut form = String::from(
+        "<?php\nnamespace App\\Web\\Form;\n\nfinal class LargeForm extends \\Yiisoft\\FormModel\\FormModel\n{\n",
+    );
+    for section in 0..SECTIONS {
+        for action in 0..ACTIONS {
+            let _ = writeln!(
+                form,
+                "    public string $section{section}Action{action} = '';"
+            );
+        }
+    }
+    form.push_str("}\n");
+    files.push(("src/Web/Form/LargeForm.php".to_string(), form));
+    files.push((
+        "src/Web/ConsumerForm.php".to_string(),
+        FORM_CONSUMER_PHP.to_string(),
+    ));
+    // A migration per section, each creating a table, and a record that
+    // declares no properties, whose attributes are the columns of the table
+    // the first migration creates and the last one adds to.
+    files.push((
+        "src/Catalog/Review.php".to_string(),
+        "<?php\nnamespace App\\Catalog;\n\nuse Yiisoft\\ActiveRecord\\ActiveRecord;\n\n#[\\AllowDynamicProperties]\nfinal class Review extends ActiveRecord\n{\n}\n".to_string(),
+    ));
+    for s in 0..SECTIONS {
+        let table = if s == 0 {
+            "review".to_string()
+        } else {
+            format!("table{s}")
+        };
+        let mut php = format!(
+            "<?php\nnamespace App\\Migration;\n\nfinal class M2511080000{s:02}Create\n{{\n    public function up(\\Yiisoft\\Db\\Migration\\MigrationBuilder $b): void\n    {{\n        $column = $b->columnBuilder();\n        $b->createTable('{{{{%{table}}}}}', [\n            'id' => $column::primaryKey(),\n"
+        );
+        for a in 0..ACTIONS {
+            let _ = writeln!(
+                php,
+                "            'column{a}' => $column::string()->notNull(),"
+            );
+        }
+        php.push_str("        ]);\n");
+        if s == SECTIONS - 1 {
+            php.push_str("        $b->addColumn('{{%review}}', 'rating', $column::integer());\n");
+        }
+        php.push_str("    }\n}\n");
+        files.push((format!("src/Migration/M2511080000{s:02}Create.php"), php));
+    }
     files
 }
 
@@ -438,6 +543,7 @@ fn bench_yii_name_completion(c: &mut Criterion) {
     let translation_uri =
         Uri::from_file_path(dir.path().join("src/Web/ConsumerTitle.php")).unwrap();
     let record_uri = Uri::from_file_path(dir.path().join("src/Catalog/Catalog.php")).unwrap();
+    let form_uri = Uri::from_file_path(dir.path().join("src/Web/ConsumerForm.php")).unwrap();
 
     // (benchmark, document, its text, the literal to complete inside, a
     // name the completion must offer)
@@ -462,6 +568,13 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             CONSUMER_TEMPLATE,
             "render(''",
             "_partial",
+        ),
+        (
+            "view_parameter",
+            &view_uri,
+            VIEW_CONSUMER_PHP,
+            "render('action7', ['p'",
+            "page",
         ),
         ("alias_name", &view_uri, VIEW_CONSUMER_PHP, "'@'", "@views"),
         (
@@ -535,6 +648,27 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             "title",
         ),
         (
+            "record_column",
+            &record_uri,
+            RECORD_CONSUMER_PHP,
+            "$review->get(''",
+            "rating",
+        ),
+        (
+            "query_table",
+            &record_uri,
+            RECORD_CONSUMER_PHP,
+            "from(''",
+            "table3",
+        ),
+        (
+            "query_column",
+            &record_uri,
+            RECORD_CONSUMER_PHP,
+            "where([''",
+            "rating",
+        ),
+        (
             "record_relation",
             &record_uri,
             RECORD_CONSUMER_PHP,
@@ -547,6 +681,20 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             RECORD_CONSUMER_PHP,
             "with('author.'",
             "posts",
+        ),
+        (
+            "form_field",
+            &form_uri,
+            FORM_CONSUMER_PHP,
+            "text($form, 'section1'",
+            "section1Action7",
+        ),
+        (
+            "hydration_map_key",
+            &form_uri,
+            FORM_CONSUMER_PHP,
+            "['section1'",
+            "section1Action7",
         ),
     ];
 
