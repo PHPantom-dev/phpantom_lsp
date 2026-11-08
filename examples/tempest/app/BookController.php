@@ -19,7 +19,7 @@ final class BookController
     }
 
     // Try: complete inside {book}, or follow it to the parameter below.
-    #[ReadBook('/books/{book}')]
+    #[ReadBook('books/{book}')]
     public function show(string $book): string
     {
         return $book;

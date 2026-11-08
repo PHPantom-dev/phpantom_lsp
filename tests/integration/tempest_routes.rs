@@ -436,6 +436,43 @@ async fn tempest_routes_include_class_and_method_prefixes() {
 }
 
 #[tokio::test]
+async fn tempest_routes_normalize_relative_and_empty_attribute_paths() {
+    let source = r"<?php
+use function Tempest\Router\uri;
+uri('');
+uri('/books/{book}', book: 'php');
+uri([\Routes\Books::class, 'show'], );
+uri('/');
+";
+    let (backend, _dir, controller, uri) = project(source).await;
+    let edited = CONTROLLER
+        .replace("Read('/books/{book}')", "Read('books/{book}')")
+        .replace("Read('/home/{locale}')", "Read('')")
+        .replace("NotRoute('/fake/{book}')", "NotRoute('fake/{book}')");
+    open_php(&backend, &controller, &edited).await;
+    let offered = items(&backend, &uri, source, "uri('").await;
+    assert!(offered.iter().any(|item| item.label == "/books/{book}"));
+    assert!(offered.iter().any(|item| item.label == "/"));
+    assert!(!offered.iter().any(|item| item.label.contains("fake")));
+    let parameters = items(&backend, &uri, source, "'show'], ").await;
+    assert!(parameters.iter().any(|item| item.label == "book:"));
+    for (needle, target) in [
+        ("book: 'php'", "$book, string"),
+        ("/');", "__invoke(string"),
+    ] {
+        let locations = definitions(&backend, &uri, source, needle).await;
+        assert_eq!(locations.len(), 1, "{needle}: {locations:?}");
+        assert_eq!(locations[0].uri, controller);
+        assert_eq!(locations[0].range.start, position_of(&edited, target));
+    }
+    let locations = definitions(&backend, &controller, &edited, "book}')]").await;
+    assert_eq!(
+        locations[0].range.start,
+        position_of(&edited, "$book, string")
+    );
+}
+
+#[tokio::test]
 async fn tempest_routes_complete_partial_actions_without_claiming_values_or_patterns() {
     let source = r"<?php
 use function Tempest\Router\uri;

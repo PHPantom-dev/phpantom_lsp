@@ -6,7 +6,8 @@ The `.view.php` files use the editor's PHP language-server connection.
 - In `app/BookController.php`, complete or follow the view path.
 - In `app/RouteLinks.php`, complete and follow route URIs and their arguments.
   In `BookController.php`, follow route placeholders to parameters and rename them
-  together with their URI arguments. Custom route attributes and controller
+  together with their URI arguments. Routes without a leading slash complete
+  as absolute paths. Custom route attributes and controller
   prefixes work too.
 - In `app/books.view.php`, complete directives and component tags, follow
   `<x-card>` to its file, and complete or navigate `$book`'s members.

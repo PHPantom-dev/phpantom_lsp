@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::symbol_map::StringKeyKind;
-use crate::virtual_members::laravel::helpers::resolved_string_literal;
+use crate::virtual_members::laravel::helpers::resolved_string_literal_including_empty;
 
 /// Keep route-shaped attributes during the class walk. Their types are
 /// resolved later, when cross-file interfaces are available.
@@ -37,12 +37,11 @@ pub(super) fn record_route_attributes(class: &Class<'_>, ctx: &mut ExtractionCtx
             }) else {
                 continue;
             };
-            let Some((path, start, end)) = resolved_string_literal(value, ctx.content) else {
+            let Some((path, start, end)) =
+                resolved_string_literal_including_empty(value, ctx.content)
+            else {
                 continue;
             };
-            if !path.starts_with('/') {
-                continue;
-            }
             let Some(class_name) = ctx.resolved_name_at(class.name.span.start.offset) else {
                 continue;
             };
@@ -91,7 +90,9 @@ pub(super) fn record_route_attributes(class: &Class<'_>, ctx: &mut ExtractionCtx
                 }) else {
                     continue 'attributes;
                 };
-                let Some((prefix, start, end)) = resolved_string_literal(value, ctx.content) else {
+                let Some((prefix, start, end)) =
+                    resolved_string_literal_including_empty(value, ctx.content)
+                else {
                     continue 'attributes;
                 };
                 route_path = format!(
