@@ -322,6 +322,7 @@ impl Backend {
     /// Forget what the installed bundles declare, once they changed.
     pub(crate) fn forget_symfony_bundle_declarations(&self) {
         *self.symfony.bundle_declarations.lock() = None;
+        self.invalidate_container_index(false);
     }
 
     /// Visit every declaration of a `kind` name an installed bundle makes:

@@ -975,6 +975,7 @@ impl Backend {
         // workspace, so a signature change anywhere can turn a call that
         // was not a render into one, or the other way round.
         self.blade.typed_receiver_spans_cache.write().clear();
+        self.invalidate_container_index(true);
         self.laravel.morph_column_spans_cache.write().clear();
     }
 

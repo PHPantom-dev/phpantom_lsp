@@ -127,6 +127,8 @@ pub(crate) struct SymfonyState {
     /// Held while they are read, so the workers that ask at once read them
     /// once.
     bundle_declarations: parking_lot::Mutex<Option<std::sync::Arc<bundles::BundleDeclarations>>>,
+    /// Each service ID's and parameter's declarations, by name.
+    container_index: container::ContainerIndexState,
     /// The translation domains an undeclared key is reported in.
     judged_translation_domains: translations::JudgedDomains,
     /// The form types and type extensions the installed packages declare.
@@ -235,6 +237,7 @@ impl Backend {
         self.note_drupal_library_builder_sources(uri, Some(map));
         self.note_drupal_plugin_sources(uri, Some(map));
         self.note_drupal_theme_suggestions(map);
+        self.note_container_declarations(uri, declares.then_some(map));
         let was_declaring = self.symfony.declaring_uris.read().contains(uri);
         // Only take the write lock when the answer changes.
         if was_declaring == declares {
@@ -255,6 +258,7 @@ impl Backend {
         self.note_drupal_theme_hook_sources(uri, None);
         self.note_drupal_library_builder_sources(uri, None);
         self.note_drupal_plugin_sources(uri, None);
+        self.note_container_declarations(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
         }

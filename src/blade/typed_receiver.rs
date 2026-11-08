@@ -75,11 +75,13 @@ impl Backend {
         }
 
         let Some(content) = self.effective_content(uri) else {
+            note_partial_answer();
             return empty_spans();
         };
         // The recorded offsets index the text the map was built from; a
         // buffer that has grown or shrunk since is a different text.
         if !map.matches_source(&content) {
+            note_partial_answer();
             return empty_spans();
         }
 
@@ -89,6 +91,7 @@ impl Backend {
         // confirmed.  That file's declarations are not known yet: it reads
         // as declaring nothing, and the partial answer is not cached.
         let Some(_confirming) = ConfirmingGuard::enter(uri) else {
+            note_partial_answer();
             return empty_spans();
         };
         let spans =
@@ -488,6 +491,27 @@ thread_local! {
     /// The files whose sites are being confirmed on this thread.
     static CONFIRMING: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::default();
+}
+
+thread_local! {
+    /// How many times [`Backend::typed_receiver_spans_for`] has answered
+    /// on this thread with spans it could not work out, see
+    /// [`partial_answers`].
+    static PARTIAL_ANSWERS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn note_partial_answer() {
+    PARTIAL_ANSWERS.with(|count| count.set(count.get() + 1));
+}
+
+/// A count that moves whenever [`Backend::typed_receiver_spans_for`]
+/// answers on this thread with no spans for a file it could not confirm
+/// (one already being confirmed further up, or whose text no longer
+/// matches its map) rather than the file's actual spans.  Whatever is
+/// derived from the answers between two readings that differ is partial
+/// and must not be cached.
+pub(crate) fn partial_answers() -> u64 {
+    PARTIAL_ANSWERS.with(std::cell::Cell::get)
 }
 
 /// Marks one file as being confirmed for as long as it lives.

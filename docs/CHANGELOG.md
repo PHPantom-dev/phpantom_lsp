@@ -216,6 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster startup.** Hiding the standard library functions, classes, and constants that the project's PHP version no longer has takes a few milliseconds instead of about 50.
 - **Lower memory use on large projects.** Classes that inherit the same method or property now share one copy of it, and each method takes far less memory. On a large Laravel project this cuts peak memory by about 17%. What PHPantom keeps about each call in the project's files also takes much less memory, cutting a further 4%. Memory left behind by edited files is now reclaimed during a long editing session instead of accumulating.
 - **Less memory for indexed classes.** The methods, properties and constants of every indexed class now take only the memory they need. On a large Laravel project this cuts memory after startup by about 5%. Contributed by @vishnub1626.
+- **Faster startup on Symfony and Drupal projects.** Working out which class a service ID or the value of a container parameter refers to no longer reads through every service definition in the project each time. Starting up on a Drupal site takes about 12% less CPU time.
 - **Faster go-to-implementation on library classes.** Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.
 
 ### Fixed

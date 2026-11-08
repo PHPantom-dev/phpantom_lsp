@@ -3,6 +3,7 @@
 //! `HandleTrait::handle()` gets back from the message's handler.
 
 use crate::common::{create_psr4_workspace, hover_text_at, open_document, split_cursor};
+use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
@@ -196,6 +197,20 @@ final class MailController extends AbstractController
 /// configuration and `files` in place.
 async fn hover_in(files: &[(&str, &str)], path: &str, source: &str) -> String {
     let (stripped, position) = split_cursor(source);
+    let (backend, dir) = workspace(files, path, &stripped).await;
+    let uri = uri_for(&dir, path);
+    hover_text_at(&backend, &uri, position.line, position.character)
+        .await
+        .unwrap_or_default()
+}
+
+/// The project with its configuration, `files`, and `source` at `path`
+/// open.
+async fn workspace(
+    files: &[(&str, &str)],
+    path: &str,
+    source: &str,
+) -> (phpantom_lsp::Backend, tempfile::TempDir) {
     let mut all: Vec<(&str, &str)> = STUBS.to_vec();
     all.extend([
         ("config/services.yaml", SERVICES_YAML),
@@ -203,7 +218,7 @@ async fn hover_in(files: &[(&str, &str)], path: &str, source: &str) -> String {
         ("config/services.php", SERVICES_PHP),
     ]);
     all.extend(files);
-    all.push((path, stripped.as_str()));
+    all.push((path, source));
     let (backend, dir) = create_psr4_workspace(COMPOSER, &all);
     for (file, content) in [
         ("config/services.yaml", SERVICES_YAML),
@@ -216,11 +231,27 @@ async fn hover_in(files: &[(&str, &str)], path: &str, source: &str) -> String {
     for (file, content) in files {
         open_document(&backend, &uri_for(&dir, file), "php", content).await;
     }
-    let uri = uri_for(&dir, path);
-    open_document(&backend, &uri, "php", &stripped).await;
-    hover_text_at(&backend, &uri, position.line, position.character)
-        .await
-        .unwrap_or_default()
+    open_document(&backend, &uri_for(&dir, path), "php", source).await;
+    (backend, dir)
+}
+
+/// Replace the whole text of the open document at `uri`.
+async fn replace_text(backend: &phpantom_lsp::Backend, uri: &Uri, text: &str) {
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                text_document_identifier: TextDocumentIdentifier { uri: uri.clone() },
+                version: 2,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                    TextDocumentContentChangeWholeDocument {
+                        text: text.to_string(),
+                    },
+                ),
+            ],
+        })
+        .await;
 }
 
 fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
@@ -299,6 +330,69 @@ async fn a_decorated_service_is_also_typed_as_its_decorators() {
         hover("        $notifier = $container->get('app.logging_notifier');\n        $noti§fier;")
             .await;
     assert!(shows(&own, "LoggingNotifier"), "{own}");
+}
+
+#[tokio::test]
+async fn editing_a_declaration_retypes_the_lookup() {
+    let source = "<?php
+namespace App\\Controller;
+
+use Symfony\\Component\\DependencyInjection\\ContainerInterface;
+
+final class MailController
+{
+    public function send(ContainerInterface $container): void
+    {
+        $mailer = $container->get('app.mailer');
+        $newsletter = $container->get('app.newsletter');
+        $notifier = $container->get('app.notifier');
+        $mailer;
+        $newsletter;
+        $notifier;
+    }
+}
+";
+    let path = "src/Controller/MailController.php";
+    let (backend, dir) = workspace(&[], path, source).await;
+    let uri = uri_for(&dir, path);
+    let hover_on = |line: u32| {
+        let backend = &backend;
+        let uri = &uri;
+        async move {
+            hover_text_at(backend, uri, line, 10)
+                .await
+                .unwrap_or_default()
+        }
+    };
+    assert!(shows(&hover_on(12).await, "Mailer"));
+    assert!(shows(&hover_on(13).await, "Newsletter"));
+    assert!(hover_on(14).await.contains("LoggingNotifier"));
+
+    // A YAML definition naming another class.
+    let yaml = SERVICES_YAML.replacen(
+        "class: App\\Service\\Mailer",
+        "class: App\\Service\\Newsletter",
+        1,
+    );
+    replace_text(&backend, &uri_for(&dir, "config/services.yaml"), &yaml).await;
+    let mailer = hover_on(12).await;
+    assert!(shows(&mailer, "Newsletter"), "{mailer}");
+
+    // A configurator call, whose receiver the type engine confirms.
+    let php = SERVICES_PHP.replace(
+        "set('app.newsletter', Newsletter::class)",
+        "set('app.newsletter', SmtpMailer::class)",
+    );
+    replace_text(&backend, &uri_for(&dir, "config/services.php"), &php).await;
+    let newsletter = hover_on(13).await;
+    assert!(shows(&newsletter, "SmtpMailer"), "{newsletter}");
+
+    // A decoration dropped.
+    let yaml = yaml.replacen("        decorates: app.notifier\n", "", 1);
+    replace_text(&backend, &uri_for(&dir, "config/services.yaml"), &yaml).await;
+    let notifier = hover_on(14).await;
+    assert!(!notifier.contains("LoggingNotifier"), "{notifier}");
+    assert!(notifier.contains("QueuedNotifier"), "{notifier}");
 }
 
 #[tokio::test]
