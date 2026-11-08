@@ -14,6 +14,9 @@ use super::return_types::{
     resolve_static_access_type, split_cast,
 };
 
+#[cfg(test)]
+mod tests;
+
 impl Backend {
     /// Resolve an argument text string to a type name.
     ///
@@ -146,6 +149,8 @@ impl Backend {
         // `Expression::ConstantAccess` branch the AST-based RHS resolver
         // already has for a plain `$x = PHP_EOL;` assignment. The enclosing
         // file supplies the imports even when the expression has no AST offset.
+        // Read its import tables directly: linking the file's classes is unrelated
+        // to a constant lookup, and declaration files can contain many classes.
         if !trimmed.is_empty()
             && !trimmed.starts_with('$')
             && !trimmed.contains("::")
@@ -158,20 +163,29 @@ impl Backend {
             && !is_self_or_static(trimmed)
             && !trimmed.eq_ignore_ascii_case("parent")
             && let Some(backend) = ctx.file.backend
-            && let Some(ty) = match ctx.file.uri.map_or_else(
-                || backend.lookup_global_constant(trimmed),
-                |uri| {
-                    let file = backend.file_context_at(uri, ctx.cursor_offset);
-                    backend.resolve_constant_name_at(
-                        trimmed,
-                        None,
-                        0,
-                        &file.use_map,
-                        &file.symbol_imports.constants,
-                        &file.namespace,
-                    )
-                },
-            ) {
+            && let Some(ty) = match ctx
+                .file
+                .uri
+                .and_then(|uri| backend.file_state(uri))
+                .map_or_else(
+                    || backend.lookup_global_constant(trimmed),
+                    |state| {
+                        let span = crate::types::NamespaceSpan::containing(
+                            &state.namespaces,
+                            ctx.cursor_offset,
+                        );
+                        backend.resolve_constant_name_at(
+                            trimmed,
+                            None,
+                            0,
+                            span.map_or(&state.use_map, |span| &span.use_map),
+                            span.map_or(&state.symbol_imports.constants, |span| {
+                                &span.symbol_imports.constants
+                            }),
+                            span.map_or(&None, |span| &span.namespace),
+                        )
+                    },
+                ) {
                 None => None,
                 Some(Some(value)) => {
                     crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
