@@ -11,7 +11,8 @@ final class MainAsset extends AssetBundle
     // Try: go to the definition of '@assetsSource', declared in
     // config/common/aliases.php, or follow the link on '/main' to the
     // assets/main directory it names. Type '@' in a string to complete the
-    // aliases.
+    // aliases, or search workspace symbols for '@assetsSource'. An editor
+    // that shows folded text folds each string to the path it resolves to.
     public ?string $basePath = '@assets/main';
     public ?string $baseUrl = '@assetsUrl/main';
     public ?string $sourcePath = '@assetsSource/main';

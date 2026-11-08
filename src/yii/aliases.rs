@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use mago_syntax::cst::*;
-use tower_lsp_server::gen_lsp_types::{Location, Range};
+use tower_lsp_server::gen_lsp_types::{FoldingRange, Location, Range};
 
 use crate::Backend;
 
@@ -85,6 +85,13 @@ impl Aliases {
     /// The path the alias `name` was declared with, as written.
     pub(crate) fn declared_path(&self, name: &str) -> Option<&str> {
         self.entries.get(name).map(String::as_str)
+    }
+
+    /// Every declared alias, by name, with where it is declared.
+    pub(crate) fn declarations(&self) -> impl Iterator<Item = (&str, &AliasDeclaration)> {
+        self.declarations
+            .iter()
+            .map(|(name, declaration)| (name.as_str(), declaration))
     }
 
     /// Where the alias `name` is declared.
@@ -234,33 +241,26 @@ impl Backend {
     pub(crate) fn yii_alias_detail(&self, name: &str) -> Option<String> {
         let aliases = self.yii_aliases();
         let declared = aliases.declared_path(name)?;
-        let shown = |path: &str| {
-            let root = self.workspace.workspace_root.read().clone();
-            root.and_then(|root| {
-                Path::new(path)
-                    .strip_prefix(&root)
-                    .ok()
-                    .filter(|relative| !relative.as_os_str().is_empty())
-                    .map(|relative| relative.to_string_lossy().replace('\\', "/"))
-            })
-            .unwrap_or_else(|| path.to_string())
-        };
-        let mut detail = format!("`{}`", shown(declared));
+        let root = self.workspace.workspace_root.read().clone();
+        let mut detail = format!("`{}`", shown_path(declared, root.as_deref()));
         if declared.starts_with('@')
             && let Some(resolved) = aliases.resolve(declared)
         {
-            detail.push_str(&format!(", which is `{}`", shown(&resolved)));
+            detail.push_str(&format!(
+                ", which is `{}`",
+                shown_path(&resolved, root.as_deref())
+            ));
         }
         Some(detail)
     }
 }
 
 impl Backend {
-    /// The document links of the strings in `uri` that start with an alias
-    /// and go on to name a file or directory in the project: each covers
-    /// the part after the alias, which the alias itself leaves to
-    /// go-to-definition, and leads to what the whole string names.
-    pub(crate) fn yii_alias_links(&self, uri: &str, content: &str) -> Vec<(usize, usize, PathBuf)> {
+    /// The strings in `uri` that start with an alias, each as the byte
+    /// offsets of its text's start, of the alias's end, and of the text's
+    /// end.  A string with an escape or an interpolation, whose text is not
+    /// the path it names, is left out.
+    fn yii_alias_strings(&self, uri: &str, content: &str) -> Vec<(usize, usize, usize)> {
         if !self.is_yii_project() {
             return Vec::new();
         }
@@ -270,27 +270,41 @@ impl Backend {
         if !map.matches_source(content) {
             return Vec::new();
         }
+        map.spans
+            .iter()
+            .filter_map(|span| {
+                let crate::symbol_map::SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::YiiAlias,
+                    ..
+                } = &span.kind
+                else {
+                    return None;
+                };
+                let (start, alias_end) = (span.start as usize, span.end as usize);
+                let end = string_end(content, start, alias_end)?;
+                Some((start, alias_end, end))
+            })
+            .collect()
+    }
+
+    /// The document links of the strings in `uri` that start with an alias
+    /// and go on to name a file or directory in the project: each covers
+    /// the part after the alias, which the alias itself leaves to
+    /// go-to-definition, and leads to what the whole string names.
+    pub(crate) fn yii_alias_links(&self, uri: &str, content: &str) -> Vec<(usize, usize, PathBuf)> {
+        let strings = self.yii_alias_strings(uri, content);
+        if strings.is_empty() {
+            return Vec::new();
+        }
         let Some(root) = self.workspace.workspace_root.read().clone() else {
             return Vec::new();
         };
-        let mut aliases = None;
+        let aliases = self.yii_aliases();
         let mut links = Vec::new();
-        for span in map.spans.iter() {
-            let crate::symbol_map::SymbolKind::StringKey {
-                kind: crate::symbol_map::StringKeyKind::YiiAlias,
-                ..
-            } = &span.kind
-            else {
-                continue;
-            };
-            let (start, alias_end) = (span.start as usize, span.end as usize);
-            let Some(end) = string_end(content, start, alias_end) else {
-                continue;
-            };
+        for (start, alias_end, end) in strings {
             if end == alias_end {
                 continue;
             }
-            let aliases = aliases.get_or_insert_with(|| self.yii_aliases());
             let Some(resolved) = aliases.resolve(&content[start..end]) else {
                 continue;
             };
@@ -301,6 +315,49 @@ impl Backend {
         }
         links
     }
+
+    /// A folding range over the text of each string in `uri` that starts
+    /// with an alias the project declares, collapsing to the path the
+    /// string resolves to.  The range lies within one line, so it is only
+    /// of use to a client that folds part of a line and shows the
+    /// collapsed text.
+    pub(crate) fn yii_alias_folds(&self, uri: &str, content: &str) -> Vec<FoldingRange> {
+        let strings = self.yii_alias_strings(uri, content);
+        if strings.is_empty() {
+            return Vec::new();
+        }
+        let aliases = self.yii_aliases();
+        let root = self.workspace.workspace_root.read().clone();
+        let lines = crate::text_position::LineIndex::new(content);
+        strings
+            .into_iter()
+            .filter_map(|(start, _, end)| {
+                let resolved = aliases.resolve(&content[start..end])?;
+                let (start, end) = (lines.position(start), lines.position(end));
+                Some(FoldingRange {
+                    start_line: start.line,
+                    start_character: Some(start.character),
+                    end_line: end.line,
+                    end_character: Some(end.character),
+                    kind: None,
+                    collapsed_text: Some(shown_path(&resolved, root.as_deref())),
+                })
+            })
+            .collect()
+    }
+}
+
+/// `path` as it is shown to the user: relative to the workspace `root`
+/// when it lies inside it, as it is otherwise.
+fn shown_path(path: &str, root: Option<&Path>) -> String {
+    root.and_then(|root| {
+        Path::new(path)
+            .strip_prefix(root)
+            .ok()
+            .filter(|relative| !relative.as_os_str().is_empty())
+            .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+    })
+    .unwrap_or_else(|| path.to_string())
 }
 
 /// Where the string whose text starts at `start` ends, read on from

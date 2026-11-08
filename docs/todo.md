@@ -37,7 +37,6 @@ contributor even though it's short.
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
 | TM3 | [Route URIs and route parameters](todo/tempest.md#tm3-route-uris-and-route-parameters) | Medium | Medium |
 | TM4 | [Model property names in query builders and model helpers](todo/tempest.md#tm4-model-property-names-in-query-builders-and-model-helpers) | Medium | Medium |
-| Y19 | [Aliases in workspace symbols and folding](todo/yii.md#y19-aliases-in-workspace-symbols-and-folding) | Low         | Low-Medium  |
 | Y11 | [Check what a DI definition passes, not only what it names](todo/yii.md#y11-check-what-a-di-definition-passes-not-only-what-it-names) | Medium      | Medium      |
 | Y13 | [Translation message IDs](todo/yii.md#y13-translation-message-ids) | Medium      | Medium      |
 | Y14 | [Event listeners in the events configuration](todo/yii.md#y14-event-listeners-in-the-events-configuration) | Medium      | Medium      |
@@ -161,7 +160,6 @@ ships, remove every row that names it.
 | Y15 | [Property names in hydrator attributes and form fields](todo/yii.md#y15-property-names-in-hydrator-attributes-and-form-fields) | Low-Medium  | Medium      |
 | Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
 | Y18 | [Active Record attributes and relations](todo/yii.md#y18-active-record-attributes-and-relations) (builds on Y8) | Low-Medium  | Medium-High |
-| Y19 | [Aliases in workspace symbols and folding](todo/yii.md#y19-aliases-in-workspace-symbols-and-folding) | Low         | Low-Medium  |
 | Y17 | [Key paths in `yiisoft/arrays`](todo/yii.md#y17-key-paths-in-yiisoftarrays) | Low         | Medium      |
 
 ## Tempest
@@ -183,7 +181,6 @@ ships, remove every row that names it.
 | TS8 | [Port PHPStan's PHPUnit and Mockery extension tests](todo/testing.md#ts8-port-phpstans-phpunit-and-mockery-extension-tests) | Medium | Low-Medium |
 | TS9 | [PHPUnit and Pest demo project](todo/testing.md#ts9-phpunit-and-pest-demo-project) | Medium | Low-Medium |
 | TS11 | [Mock unions in property docblocks](todo/testing.md#ts11-mock-unions-in-property-docblocks) | Medium | Low-Medium |
-| TS7 | [Prophecy](todo/testing.md#ts7-prophecy) | Low         | Low-Medium  |
 
 ## Laravel & Blade
 
@@ -217,7 +214,6 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| T72 | [A property a trait assigns but does not declare is untyped](todo/type-inference.md#t72-a-property-a-trait-assigns-but-does-not-declare-is-untyped) | Low-Medium  | Medium      |
 | T41 | [A reading of the callee's body overrides a declared `@param-out`](todo/type-inference.md#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out)            | Low-Medium  | Low         |
 | T58 | [`new<T>` is not supported](todo/type-inference.md#t58-newt-is-not-supported) | Low-Medium  | Low-Medium  |
 | T62 | [A sealed hierarchy is not narrowed by ruling out its other members](todo/type-inference.md#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members) | Medium      | Medium      |

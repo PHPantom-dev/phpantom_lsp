@@ -645,6 +645,17 @@ fn this_property_owners(prop_name: &str, ctx: &VarResolutionCtx<'_>) -> Vec<Arc<
             owners.push(bound);
         }
     }
+    // Neither the trait nor what all its users are declares the property,
+    // so it can only be what each user declares on its own.
+    let hosts = crate::type_engine::trait_context::trait_hosts_declaring_property(
+        ctx.current_class,
+        owners.iter().map(Arc::as_ref),
+        prop_name,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
+        ctx.file.backend,
+    );
+    owners.extend(hosts);
     owners
 }
 

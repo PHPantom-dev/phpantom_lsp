@@ -650,7 +650,11 @@ impl Backend {
             return Some((effective_name.to_string(), cls, fqn));
         }
 
-        None
+        // A call on a Prophecy `ObjectProphecy<Foo>` names `Foo`'s method.
+        crate::prophecy::revealed_classes(target_class, class_loader)
+            .iter()
+            .find_map(|mocked| Self::find_declaring_class(mocked, effective_name, class_loader))
+            .map(|(cls, fqn)| (effective_name.to_string(), cls, fqn))
     }
 
     // ─── Member Access Context Extraction ───────────────────────────────────

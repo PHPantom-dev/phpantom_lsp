@@ -623,9 +623,28 @@ fn resolve_property_chain_subject(
     if names.is_empty() {
         return Vec::new();
     }
-    let base_arcs = resolved_to_arcs(
+    let mut base_arcs = resolved_to_arcs(
         receiver.unwrap_or_else(|| resolve_target_classes_expr(base, access_kind, ctx)),
     );
+    // Inside a trait, a property neither the trait nor what its users are
+    // all guaranteed to be declares is what each user declares on its own.
+    if let Some(current) = ctx.current_class {
+        let mut hosts: Vec<Arc<ClassInfo>> = Vec::new();
+        for name in &names {
+            ClassInfo::extend_unique_arc(
+                &mut hosts,
+                crate::type_engine::trait_context::trait_hosts_declaring_property(
+                    current,
+                    base_arcs.iter().map(Arc::as_ref),
+                    name,
+                    all_classes,
+                    class_loader,
+                    ctx.file.backend,
+                ),
+            );
+        }
+        ClassInfo::extend_unique_arc(&mut base_arcs, hosts);
+    }
     // Every property the name can pick, on every class the base can be.
     let property_hints = || {
         base_arcs.iter().flat_map(|cls| {

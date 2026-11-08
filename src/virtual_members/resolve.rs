@@ -641,6 +641,14 @@ pub fn resolve_class_for_type_hint(
     // through `Relation`) gets Builder's own methods from the mixin
     // expansion, but the model's scopes only once the model is known.
     laravel::try_inject_mixin_builder_scopes(&mut result, class, generic_args, class_loader);
+    // `ObjectProphecy<Foo>` answers `Foo`'s methods with a `MethodProphecy`.
+    crate::prophecy::apply_to_object_prophecy(
+        &mut result,
+        class,
+        generic_args,
+        class_loader,
+        cache,
+    );
     // `EntityRepository<User>` finds the entity its argument names.
     if !generic_args.is_empty() {
         let doctrine = cache
