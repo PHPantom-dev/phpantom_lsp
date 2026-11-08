@@ -84,6 +84,18 @@ impl PropertyArgument {
         }
     }
 
+    /// Whether a string with `inner` brackets open between it and the call's
+    /// parenthesis can be the argument this role reads.  Checked before
+    /// [`string_argument`], which re-parses the whole call: a large array
+    /// argument to an unrelated `whereIn` must not pay for that parse.
+    fn admits_depth(self, inner: usize) -> bool {
+        match self {
+            Self::Field(_) | Self::Fields => inner == 0,
+            Self::Keys => inner == 1,
+            Self::Named => false,
+        }
+    }
+
     fn matches_string(self, argument: &StringArgument) -> bool {
         match self {
             Self::Field(name) => {
@@ -244,13 +256,21 @@ impl Backend {
         }
         let cursor = position_to_offset(content, position) as usize;
         let (quote, quote_char) = code.open_string?;
-        let call = code.open_brackets.iter().rev().find(|bracket| {
-            bracket.byte == b'('
-                && !extract_identifier_backwards(&content[..bracket.code_before])
-                    .is_some_and(|(name, _)| name.eq_ignore_ascii_case("array"))
-        })?;
+        let (depth, call) = code
+            .open_brackets
+            .iter()
+            .rev()
+            .enumerate()
+            .find(|(_, bracket)| {
+                bracket.byte == b'('
+                    && !extract_identifier_backwards(&content[..bracket.code_before])
+                        .is_some_and(|(name, _)| name.eq_ignore_ascii_case("array"))
+            })?;
         let (method, _) = extract_identifier_backwards(&content[..call.code_before])?;
         let role = argument_role(method)?;
+        if !role.admits_depth(depth) {
+            return None;
+        }
         let operator = call.callee_operator.as_ref()?;
         let argument = string_argument(content, cursor, code, call)?;
         if !role.matches_string(&argument)
@@ -398,9 +418,17 @@ impl Backend {
         } else {
             let code = code_context_at(content, offset as usize)?;
             let (quote, _) = code.open_string?;
-            let paren = code.open_brackets.iter().find(|bracket| {
-                bracket.byte == b'(' && bracket.offset + 1 == call.args_start as usize
-            })?;
+            let (depth, paren) =
+                code.open_brackets
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .find(|(_, bracket)| {
+                        bracket.byte == b'(' && bracket.offset + 1 == call.args_start as usize
+                    })?;
+            if !role.admits_depth(depth) {
+                return None;
+            }
             let argument = string_argument(content, offset as usize, &code, paren)?;
             if !role.matches_string(&argument)
                 || argument.position == StringArgumentPosition::ArrayElement

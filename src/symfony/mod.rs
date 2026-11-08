@@ -169,8 +169,6 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         || (map.sets_unread_yii_view_parameters && enabled(StringKeyKind::YiiViewParameter))
         || ((!map.drupal_route_patterns.is_empty() || !map.drupal_route_aliases.is_empty())
             && enabled(StringKeyKind::DrupalRoute))
-        || ((!map.drupal_plugins.is_empty() || !map.drupal_plugin_managers.is_empty())
-            && enabled(StringKeyKind::DrupalPlugin))
         || map.spans.iter().any(|span| {
             matches!(
                 &span.kind,

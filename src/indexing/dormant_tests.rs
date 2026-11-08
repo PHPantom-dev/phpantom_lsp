@@ -129,6 +129,60 @@ async fn a_refreshed_index_leaves_dormant_files_asleep() {
     assert!(backend.dormant_files.read().contains(&widget));
 }
 
+/// Core's plugin managers and plugin classes go to sleep like the rest of
+/// core, and the plugin index still reads them.
+#[tokio::test]
+async fn dormant_plugin_classes_still_declare_their_plugins() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    let manager = "web/core/lib/Drupal/Core/Block/BlockManager.php";
+    let plugin = "web/core/modules/system/src/Plugin/Block/SystemBrandingBlock.php";
+    for (path, content) in [
+        ("web/core/lib/Drupal.php", "<?php\nclass Drupal {}\n"),
+        (
+            "web/core/lib/Drupal/Component/Plugin/PluginManagerInterface.php",
+            "<?php\nnamespace Drupal\\Component\\Plugin;\ninterface PluginManagerInterface {}\n",
+        ),
+        (
+            "web/core/lib/Drupal/Component/Plugin/Attribute/AttributeInterface.php",
+            "<?php\nnamespace Drupal\\Component\\Plugin\\Attribute;\ninterface AttributeInterface {}\n",
+        ),
+        (
+            "web/core/lib/Drupal/Core/Plugin/DefaultPluginManager.php",
+            "<?php\nnamespace Drupal\\Core\\Plugin;\nclass DefaultPluginManager implements \\Drupal\\Component\\Plugin\\PluginManagerInterface {}\n",
+        ),
+        (
+            "web/core/lib/Drupal/Core/Block/Attribute/Block.php",
+            "<?php\nnamespace Drupal\\Core\\Block\\Attribute;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass Block implements \\Drupal\\Component\\Plugin\\Attribute\\AttributeInterface {\n    public function __construct(public readonly string $id) {}\n}\n",
+        ),
+        (
+            manager,
+            "<?php\nnamespace Drupal\\Core\\Block;\nuse Drupal\\Core\\Block\\Attribute\\Block;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass BlockManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Block', $namespaces, $module_handler, BlockPluginInterface::class, Block::class, 'Drupal\\Core\\Block\\Annotation\\Block');\n    }\n}\n",
+        ),
+        (
+            plugin,
+            "<?php\nnamespace Drupal\\system\\Plugin\\Block;\nuse Drupal\\Core\\Block\\Attribute\\Block;\n#[Block(id: 'system_branding_block')]\nclass SystemBrandingBlock {}\n",
+        ),
+    ] {
+        write(&dir.path().join(path), content);
+    }
+    let backend = indexed(dir.path()).await;
+    for path in [manager, plugin] {
+        assert!(
+            backend
+                .dormant_files
+                .read()
+                .contains(&uri(dir.path(), path)),
+            "{path}"
+        );
+    }
+
+    assert_eq!(
+        backend.drupal_plugin_ids("Drupal\\Core\\Block\\BlockManager"),
+        ["system_branding_block"]
+    );
+}
+
 /// What a test module's entity class declares outlives its parse: test code
 /// sees the entity type before anything wakes the file.
 #[tokio::test]

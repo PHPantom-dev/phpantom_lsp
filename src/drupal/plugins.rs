@@ -30,7 +30,9 @@ use tower_lsp_server::gen_lsp_types::Location;
 use crate::Backend;
 use crate::atom::Atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of};
-use crate::symbol_map::{ClassRefContext, DRUPAL_PLUGIN_MANAGER, PluginDeclarationSite, SymbolMap};
+use crate::symbol_map::{
+    ClassRefContext, DRUPAL_PLUGIN_MANAGER, PluginDeclarationSite, PluginManagerSite, SymbolMap,
+};
 use crate::types::ClassInfo;
 
 const DEFAULT_MANAGER: &str = "Drupal\\Core\\Plugin\\DefaultPluginManager";
@@ -277,6 +279,17 @@ impl PluginIndex {
     }
 }
 
+/// What one file gives the plugin index, copied out of its symbol map.
+#[derive(PartialEq)]
+pub(crate) struct PluginSources {
+    managers: Vec<PluginManagerSite>,
+    plugins: Vec<PluginDeclarationSite>,
+    /// The file is a closed test module's, whose plugins only count as
+    /// IDs that exist (see [`PluginIndex::declares`]) and whose managers
+    /// declare no plugin type.
+    pub(super) from_test: bool,
+}
+
 /// Whether the symbol map holds anything the plugin index reads.
 fn feeds_index(map: &SymbolMap) -> bool {
     !map.drupal_plugins.is_empty() || !map.drupal_plugin_managers.is_empty()
@@ -423,22 +436,37 @@ impl Backend {
     /// now `map` (`None` once it is gone), fed it or now would.
     pub(crate) fn note_drupal_plugin_sources(&self, uri: &str, map: Option<&SymbolMap>) {
         let feeds = map.is_none_or(feeds_index);
-        // A test module's file is no declaring file, so it is kept apart.
-        let test_plugins = match map {
-            Some(map) if feeds_index(map) && self.is_closed_drupal_test_fixture(uri) => {
-                Some(&map.drupal_plugins)
-            }
-            _ => None,
-        };
-        let unchanged = self.drupal.plugin_test_sources.read().get(uri) == test_plugins;
+        let sources = map.filter(|map| feeds_index(map)).and_then(|map| {
+            // A test module's plugins are kept apart, and a dependency's are
+            // never part of the project's own.
+            let from_test = self.is_closed_drupal_test_fixture(uri);
+            let counts = from_test
+                || (self.is_drupal_project()
+                    && !self
+                        .workspace
+                        .vendor_uri_prefixes
+                        .lock()
+                        .iter()
+                        .any(|prefix| uri.starts_with(prefix.as_str())));
+            counts.then(|| PluginSources {
+                managers: if from_test {
+                    Vec::new()
+                } else {
+                    map.drupal_plugin_managers.clone()
+                },
+                plugins: map.drupal_plugins.clone(),
+                from_test,
+            })
+        });
+        let unchanged = self.drupal.plugin_sources.read().get(uri) == sources.as_ref();
         if !unchanged {
-            let mut sources = self.drupal.plugin_test_sources.write();
-            match test_plugins {
-                Some(plugins) => {
-                    sources.insert(uri.to_string(), plugins.clone());
+            let mut stored = self.drupal.plugin_sources.write();
+            match sources {
+                Some(sources) => {
+                    stored.insert(uri.to_string(), sources);
                 }
                 None => {
-                    sources.remove(uri);
+                    stored.remove(uri);
                 }
             }
         }
@@ -464,18 +492,15 @@ impl Backend {
         let mut index = PluginIndex::default();
         let mut managers = Vec::new();
         let mut declarations = Vec::new();
-        self.visit_declaring_symbol_maps(|uri, map| {
-            if !feeds_index(map) {
-                return;
-            }
-            index.sources.insert(uri.to_string());
-            managers.extend(map.drupal_plugin_managers.iter().cloned());
-            declarations.extend(map.drupal_plugins.iter().cloned());
-        });
         let mut test_declarations = Vec::new();
-        for (uri, plugins) in self.drupal.plugin_test_sources.read().iter() {
-            test_declarations.extend(plugins.iter().cloned());
+        for (uri, sources) in self.drupal.plugin_sources.read().iter() {
             index.sources.insert(uri.clone());
+            managers.extend(sources.managers.iter().cloned());
+            if sources.from_test {
+                test_declarations.extend(sources.plugins.iter().cloned());
+            } else {
+                declarations.extend(sources.plugins.iter().cloned());
+            }
         }
         let loader = self.resolved_class_loader_with(&[]);
         let mut subtypes: HashMap<(Atom, &str), bool> = HashMap::new();

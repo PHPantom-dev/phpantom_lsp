@@ -82,12 +82,12 @@ pub(crate) struct DrupalState {
     /// Counts the changes to files the plugin index reads, so an index read
     /// while one landed is not kept.
     plugin_generation: std::sync::atomic::AtomicU64,
-    /// The plugins each closed test module's file declares, by URI: they
-    /// are kept apart from the index's plugins (see
-    /// [`plugins::PluginIndex::declares`]).  Copied out of the symbol map,
-    /// since an installed package's file lets go of it once indexed (see
-    /// [`Backend::put_to_sleep`]).
-    plugin_test_sources: RwLock<BTreeMap<String, Vec<crate::symbol_map::PluginDeclarationSite>>>,
+    /// The plugin managers and plugins each file declares, by URI, which
+    /// the plugin index is read from.  Copied out of the symbol map, so
+    /// that a plugin class of an installed package can let go of its parse
+    /// once indexed (see [`Backend::put_to_sleep`]), as Drupal core's
+    /// thousands of them do.
+    plugin_sources: RwLock<BTreeMap<String, plugins::PluginSources>>,
     /// The entity types each closed test module's file declares, by URI,
     /// copied out of its symbol map the same way: only test code sees them
     /// (see [`Backend::drupal_entity_types_seen_from`]).
@@ -418,7 +418,12 @@ impl Backend {
         *self.drupal.library_builders.write() = None;
         *self.drupal.theme_suggestions.write() = None;
         *self.drupal.plugin_index.write() = None;
-        self.drupal.plugin_test_sources.write().clear();
+        // Which files are test modules' depends on the web roots, so those
+        // are noted again as the files are read.
+        self.drupal
+            .plugin_sources
+            .write()
+            .retain(|_, sources| !sources.from_test);
         self.drupal.entity_type_test_sources.write().clear();
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
