@@ -36,7 +36,6 @@ contributor even though it's short.
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
 | TM6 | [`query(Book::class)` builds a query for `Book`](todo/tempest.md#tm6-querybookclass-builds-a-query-for-book) | Medium | Low |
-| TM4 | [Model property names in query builders and model helpers](todo/tempest.md#tm4-model-property-names-in-query-builders-and-model-helpers) | Medium | Medium |
 | Y13 | [A definition's `'__construct()'` key goes to the constructor](todo/yii.md#y13-a-definitions-__construct-key-goes-to-the-constructor) | Low | Low |
 | Y12 | [The route arguments a URL generator call passes navigate](todo/yii.md#y12-the-route-arguments-a-url-generator-call-passes-navigate) | Low-Medium | Low |
 | Y11 | [The config groups a project declares in PHP](todo/yii.md#y11-the-config-groups-a-project-declares-in-php) | Medium | Medium |
@@ -160,7 +159,6 @@ ships, remove every row that names it.
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
 | TM6 | [`query(Book::class)` builds a query for `Book`](todo/tempest.md#tm6-querybookclass-builds-a-query-for-book) | Medium | Low |
-| TM4 | [Model property names in query builders and model helpers](todo/tempest.md#tm4-model-property-names-in-query-builders-and-model-helpers) | Medium | Medium |
 | TM7 | [A project's own route decorators change the route's URI](todo/tempest.md#tm7-a-projects-own-route-decorators-change-the-routes-uri) | Low | Medium |
 
 ## PHPUnit & Pest

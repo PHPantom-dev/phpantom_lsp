@@ -136,4 +136,39 @@ if (!str_contains($dynamicTypes, '<p>string</p>')) {
     throw new RuntimeException('Dynamic scalar attributes must reach the selected component as strings.');
 }
 
-echo "Tempest view assertions passed.\n";
+$databaseConfig = new Tempest\Database\Config\SQLiteConfig(path: ':memory:');
+$container->singleton(Tempest\Database\Config\DatabaseConfig::class, $databaseConfig);
+$container->singleton(Tempest\Intl\Pluralizer\Pluralizer::class, new Tempest\Intl\Pluralizer\InflectorPluralizer());
+$connection = new Tempest\Database\Connection\PDOConnection($databaseConfig);
+$connection->connect();
+$container->singleton(Tempest\Database\Connection\Connection::class, $connection);
+$container->singleton(Tempest\Mapper\MapperConfig::class, new Tempest\Mapper\MapperConfig(
+    mappers: [Tempest\Mapper\Mappers\ArrayToObjectMapper::class],
+));
+$casters = new Tempest\Mapper\CasterFactory($container);
+$casters->addCaster(Tempest\Database\Casters\PrimaryKeyCaster::class);
+$container->singleton(Tempest\Mapper\CasterFactory::class, $casters);
+$database = new Tempest\Database\GenericDatabase(
+    $connection,
+    new Tempest\Database\Transactions\GenericTransactionManager($connection),
+    new Tempest\Mapper\SerializerFactory($container),
+    new Tempest\EventBus\GenericEventBus($container, new Tempest\EventBus\EventBusConfig()),
+);
+$container->singleton(Tempest\Database\Database::class, $database);
+$database->execute(new Tempest\Database\Query(
+    'CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL, isbn TEXT NOT NULL, publishedAt TEXT)',
+));
+$queries = new App\DatabaseQueries();
+$created = $queries->create();
+$updated = $queries->update();
+$draft = $queries->draft();
+$books = $queries->books();
+if ($created->title !== 'The PHP Book' || $created->isbn !== 'php'
+    || $updated->title !== 'Updated PHP' || $updated->id->value !== $created->id->value
+    || $draft->title !== 'Draft PHP' || $draft->isbn !== 'draft' || isset($draft->id)
+    || count($books) !== 1 || $books[0]->id->value !== $created->id->value
+    || $books[0]->title !== 'Updated PHP' || $books[0]->publishedAt !== null) {
+    throw new RuntimeException('Model property names did not match the database demos.');
+}
+
+echo "Tempest assertions passed.\n";

@@ -43,6 +43,12 @@ impl Backend {
         );
         if let Some(code) = code_ctx.as_ref()
             && let Some(response) =
+                self.tempest_model_property_string_completion(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+        if let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
                 self.tempest_route_string_completion(uri, content, position, ctx, code)
         {
             return Some(response);

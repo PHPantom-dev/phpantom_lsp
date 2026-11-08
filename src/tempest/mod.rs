@@ -1,4 +1,4 @@
-//! Tempest View templates, lowered to PHP for the shared type engine.
+//! Tempest templates, routes, and database helpers backed by the shared type engine.
 
 mod component_context;
 mod components;
@@ -6,6 +6,7 @@ mod configuration;
 mod custom_views;
 mod discovery;
 pub(crate) mod inference;
+mod model_properties;
 mod paths;
 pub(crate) mod preprocessor;
 pub(crate) mod routes;
@@ -33,6 +34,20 @@ impl crate::Backend {
     pub(crate) fn set_is_tempest(&self, is_tempest: bool) {
         self.is_tempest
             .store(is_tempest, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether the project uses Tempest's database layer; see
+    /// [`Backend::is_tempest_database`](crate::Backend::is_tempest_database).
+    pub(crate) fn is_tempest_database_project(&self) -> bool {
+        self.is_tempest_database
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Record whether the project uses Tempest's database layer, once the
+    /// workspace's `composer.json` files have been read.
+    pub(crate) fn set_is_tempest_database(&self, is_tempest_database: bool) {
+        self.is_tempest_database
+            .store(is_tempest_database, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Whether `uri` is a Tempest view.  Outside a Tempest project a

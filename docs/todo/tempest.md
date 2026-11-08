@@ -44,37 +44,7 @@ builder's own constructor says what is meant
 (`@param class-string<TModel>|TModel|string $model`), and
 `Book::select()` already gives `SelectQueryBuilder<Book>`. Read
 `query()`'s parameter the way the constructor declares it, so a class name
-binds `TModel` to the class, and offer the docblock fix upstream. This is
-the builder type TM4 reads the model from, so it comes first.
-
----
-
-
-## TM4. Model property names in query builders and model helpers
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-query(Book::class)->select()->whereIn('isbn', $isbns)->where('title', $title);
-Book::updateOrCreate(['isbn' => $isbn], ['title' => $title]);
-Book::create(title: $title, isbn: $isbn);
-```
-
-Tempest's query builders take a model's property names as strings
-(`whereField()`, the `whereIn()`/`whereNull()`/`whereLike()` family and
-its date helpers, and `where()`/`andWhere()`/`orWhere()` when the string
-is a bare field), and the `IsDatabaseModel` helpers take them as array
-keys (`findOrNew()`, `updateOrCreate()`) or named arguments (`create()`,
-`new()`, `find()`). Complete those names from the model's properties
-and navigate from a name to the property. The model comes from the
-builder's generic type (`query()` returns `QueryBuilder<TModel>`, and
-`select()` a `SelectQueryBuilder<TModel>`), which the type engine
-already resolves, so read it from there rather than from the text of
-the `query()` call. `where()` treats a string containing a space or an
-operator as raw SQL and passes it to `whereRaw()`, so leave those, and
-the `*Raw()` methods, alone. Check `orderBy()`, `groupBy()`, and
-`having()` against `tempest/database` too, and include whichever take a
-field name.
+binds `TModel` to the class, and offer the docblock fix upstream.
 
 ---
 

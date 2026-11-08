@@ -617,6 +617,8 @@ function runDemoAssertions(): void
     $madePens = Scaffolding\TypedCollection::make([new Scaffolding\Pen('blue')]);
     assert($madePens instanceof Scaffolding\TypedCollection, 'Scaffolding\TypedCollection::make() must return a Scaffolding\TypedCollection');
     assert($madePens->first() instanceof Scaffolding\Pen, 'Scaffolding\TypedCollection::make([Scaffolding\Pen])->first() must return Scaffolding\Pen');
+    assert($madePens->same() === $madePens, 'A fluent trait returns the collection it was called on');
+    assert($madePens->same()->first() instanceof Scaffolding\Pen, 'The fluent trait preserves the collection element type');
     assert(Scaffolding\TypedCollection::make([new Scaffolding\Pen('red')])->first() instanceof Scaffolding\Pen, 'the same holds for a directly chained call');
 
     // ── Scaffolding\ObjectMapper::wrap() → Scaffolding\TypedCollection ──────────────────────────

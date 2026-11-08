@@ -1322,6 +1322,11 @@ trait Indexable
     public function key() {}
 }
 
+trait KeepsCollection
+{
+    public function same(): self { return $this; }
+}
+
 // ─── Enums ──────────────────────────────────────────────────────────────────
 
 enum Status: string
@@ -1754,6 +1759,7 @@ class ItemIterableCollection extends IterableCollection {}
  */
 class TypedCollection
 {
+    use KeepsCollection;
     /** @var array<TKey, TValue> */
     protected array $items;
 

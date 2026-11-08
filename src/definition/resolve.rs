@@ -46,6 +46,10 @@ impl Backend {
         if !routes.is_empty() {
             return routes;
         }
+        let properties = self.tempest_model_property_definition(uri, content, position);
+        if !properties.is_empty() {
+            return properties;
+        }
         // Consult precomputed symbol map (retries one byte earlier for
         // end-of-token edge cases).
         let symbol = self.lookup_symbol_at_position(uri, content, position);

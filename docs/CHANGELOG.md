@@ -174,6 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Tempest
 
+- **Tempest model property names.** Complete and navigate model properties in typed query builders and model helpers, including forwarded named arguments and array keys. Raw SQL strings keep their existing handling. Contributed by @shuvroroy.
 - **Tempest routes and their parameters.** Complete and navigate route actions and URI placeholders, including custom route attributes and paths without a leading slash. Renaming an action parameter updates its placeholders and named arguments to `uri()`. Contributed by @shuvroroy.
 - **Tempest View completion and navigation.** In a Tempest project, PHP expressions in `.view.php` templates use imports and `@var` annotations for completion, hover, navigation, and diagnostics. Component tags, their declared attributes, and paths passed to `Tempest\View\view()` also complete and navigate. Contributed by @shuvroroy.
 - **Tempest view data inference.** Templates infer data passed by callers and components, including custom View objects and slot scope. Explicit `@var` annotations can refine inferred types. Contributed by @shuvroroy.

@@ -575,6 +575,13 @@ pub struct BackendState {
     /// Starts `true` so a workspace with no `composer.json` to classify
     /// behaves as before.
     pub(crate) is_tempest: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project uses Tempest's database layer, which model
+    /// property names are read in.  See
+    /// [`crate::composer::is_tempest_database_project`].  Kept separate from
+    /// view detection: installing the database does not make PHP files with
+    /// a `.view.php` suffix Tempest templates.  Starts `true` so a workspace
+    /// with no `composer.json` to classify behaves as before.
+    pub(crate) is_tempest_database: Arc<std::sync::atomic::AtomicBool>,
     /// The major version of PHPUnit the project's `composer.lock` installs,
     /// `0` when it is not known.  In a workspace of several projects, the
     /// lowest of theirs.  Decides whether a data provider has to be static.

@@ -128,7 +128,7 @@ src/
 │
 │   # Templates & shared utilities
 ├── blade/                  # Laravel Blade template support (directives, preprocessor)
-├── tempest/                # Tempest View expressions, components, and view paths
+├── tempest/                # Tempest templates, routes, and model property names
 ├── template/               # Shared virtual PHP source maps and LSP coordinate translation
 └── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
 
@@ -1546,3 +1546,12 @@ loads selected targets as their names become known and removes contributions
 when a selector changes. The dynamic wrapper's scalar attributes become
 strings, while objects and arrays enter the inner view's data. Literal `:is`
 names navigate to components; variables and constants keep PHP navigation.
+
+## Tempest model property names
+
+Tempest database property arguments use the shared resolver to read the model
+from a query builder's generic type. Model helpers are recognized by their
+method's declaring trait, so an override keeps its own parameter handling.
+Completion and navigation share the same argument roles and property lookup.
+Composer classifies database support separately from view rendering; requiring
+only the database package does not lower `.view.php` files as templates.

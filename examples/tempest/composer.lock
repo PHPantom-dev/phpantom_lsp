@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3837ae58e9831aef9245d127f3c75d72",
+    "content-hash": "54b1dada5d50e1e4fcc328bee620f34c",
     "packages": [
         {
             "name": "dflydev/dot-access-data",
@@ -3076,6 +3076,48 @@
             "time": "2026-10-29T12:45:34+00:00"
         },
         {
+            "name": "tempest/database",
+            "version": "v3.21.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/tempestphp/tempest-database.git",
+                "reference": "409006b079fa1e8062d2302edc201c08a90035b3"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/tempestphp/tempest-database/zipball/409006b079fa1e8062d2302edc201c08a90035b3",
+                "reference": "409006b079fa1e8062d2302edc201c08a90035b3",
+                "shasum": ""
+            },
+            "require": {
+                "ext-pdo": "*",
+                "php": "^8.5",
+                "tempest/container": "3.21.0",
+                "tempest/event-bus": "3.21.0",
+                "tempest/intl": "3.21.0",
+                "tempest/mapper": "3.21.0",
+                "tempest/support": "3.21.0"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "src/functions.php"
+                ],
+                "psr-4": {
+                    "Tempest\\Database\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "The component responsible for database interaction in the Tempest framework.",
+            "support": {
+                "source": "https://github.com/tempestphp/tempest-database/tree/v3.21.0"
+            },
+            "time": "2026-10-29T12:45:34+00:00"
+        },
+        {
             "name": "tempest/datetime",
             "version": "v3.21.0",
             "source": {
@@ -3152,6 +3194,45 @@
             "description": "Discover PHP classes and files",
             "support": {
                 "source": "https://github.com/tempestphp/tempest-discovery/tree/v3.21.0"
+            },
+            "time": "2026-10-29T12:45:34+00:00"
+        },
+        {
+            "name": "tempest/event-bus",
+            "version": "v3.21.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/tempestphp/tempest-event-bus.git",
+                "reference": "8b35a899ce7855f3703705207b3b19a3781b1619"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/tempestphp/tempest-event-bus/zipball/8b35a899ce7855f3703705207b3b19a3781b1619",
+                "reference": "8b35a899ce7855f3703705207b3b19a3781b1619",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.5",
+                "tempest/container": "3.21.0",
+                "tempest/core": "3.21.0",
+                "tempest/reflection": "3.21.0"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "src/functions.php"
+                ],
+                "psr-4": {
+                    "Tempest\\EventBus\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "A lightweight event bus component designed to facilitate event-driven architecture and asynchronous message handling.",
+            "support": {
+                "source": "https://github.com/tempestphp/tempest-event-bus/tree/v3.21.0"
             },
             "time": "2026-10-29T12:45:34+00:00"
         },

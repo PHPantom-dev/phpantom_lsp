@@ -121,6 +121,7 @@ impl BackendState {
             is_twig: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             is_yii: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             is_tempest: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            is_tempest_database: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             phpunit_major: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             twig: crate::twig::TwigState::default(),
             yii: crate::yii::YiiState::default(),
