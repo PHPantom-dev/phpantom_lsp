@@ -1273,17 +1273,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#tm6-querybookclass-builds-a-query-for-book" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        TM6. <code>query(Book::class)</code> builds a query for <code>Book</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#tm7-a-projects-own-route-decorators-change-the-routes-uri" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1325,14 +1314,13 @@ templates already get completion, hover, go-to-definition, and
 diagnostics through virtual PHP, the data a view is rendered with is
 typed from the calls and View objects that render it, and component
 tags, their attributes, and the paths passed to <code>view()</code> complete and
-navigate. What is still missing is the model a <code>query()</code> call builds
-and route URIs that a project's own decorators change.</p>
+navigate. What is still missing is route URIs that a project's own
+decorators change.</p>
 <p>Work out each behaviour from the framework's own source
 (<code>tempest/view</code>, <code>tempest/router</code>, <code>tempest/database</code>,
 <code>tempest/container</code>) and the <a href="https://tempestphp.com/3.x/internals/view-spec">view spec</a>.</p>
-<p><code>examples/tempest/</code> is the playground. It installs the view and router
-layers. The database items add <code>tempest/database</code> to its <code>composer.json</code>
-along with their demos.</p>
+<p><code>examples/tempest/</code> is the playground. It installs the view, router, and
+database layers.</p>
 <p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
@@ -1354,38 +1342,23 @@ within the same impact tier.</p>
 </tbody>
 </table>
 <hr />
-<h2 id="tm6-querybookclass-builds-a-query-for-book">TM6. <code>query(Book::class)</code> builds a query for <code>Book</code><a class="headerlink" href="#tm6-querybookclass-builds-a-query-for-book" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$books = query(Book::class)-&gt;select()-&gt;where('title', $title)-&gt;all();</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">// array&lt;class-string&lt;Book&gt;&gt;, should be array&lt;Book&gt;</span>
-</code></pre></div>
-<p><code>Tempest\Database\query()</code> declares <code>@template TModel</code> and
-<code>@param TModel $model</code>, so a class name binds <code>TModel</code> to
-<code>class-string&lt;Book&gt;</code>, and every builder after it, and every record its
-<code>all()</code> and <code>first()</code> return, is a class name instead of a <code>Book</code>. The
-builder's own constructor says what is meant
-(<code>@param class-string&lt;TModel&gt;|TModel|string $model</code>), and
-<code>Book::select()</code> already gives <code>SelectQueryBuilder&lt;Book&gt;</code>. Read
-<code>query()</code>'s parameter the way the constructor declares it, so a class name
-binds <code>TModel</code> to the class, and offer the docblock fix upstream.</p>
-<hr />
 <h2 id="tm7-a-projects-own-route-decorators-change-the-routes-uri">TM7. A project's own route decorators change the route's URI<a class="headerlink" href="#tm7-a-projects-own-route-decorators-change-the-routes-uri" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">final class Admin implements RouteDecorator</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">{</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    public function decorate(Route $route): Route</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    {</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">        return new Prefix('/admin')-&gt;decorate($route);</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    }</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">}</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">#[Admin]</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">final class BookController</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">{</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">    #[Get('/books/{book}')] // the route is /admin/books/{book}</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">    public function show(Book $book): View { /* ... */ }</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">final class Admin implements RouteDecorator</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">{</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    public function decorate(Route $route): Route</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        return new Prefix('/admin')-&gt;decorate($route);</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    }</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">#[Admin]</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">final class BookController</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">{</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">    #[Get('/books/{book}')] // the route is /admin/books/{book}</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">    public function show(Book $book): View { /* ... */ }</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">}</span>
 </code></pre></div>
 <p>Route discovery applies every attribute that implements
 <code>Tempest\Router\RouteDecorator</code>, method ones before class ones, but only

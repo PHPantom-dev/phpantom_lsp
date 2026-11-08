@@ -6172,6 +6172,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h4 id="tempest">Tempest<a class="headerlink" href="#tempest" title="Permanent link">&para;</a></h4>
 <ul>
+<li><strong>Queries built from model class names.</strong> <code>query(Book::class)</code> keeps query results typed as <code>Book</code> objects through fluent calls. Contributed by @shuvroroy.</li>
 <li><strong>Container invocation arguments.</strong> The named arguments <code>Container::invoke()</code> and the <code>invoke()</code> helper forward complete from the callable's parameters and go to them. Contributed by @shuvroroy.</li>
 <li><strong>Built-in view documentation.</strong> Completion and hover explain Tempest's built-in components and directives, with links to the view specification. Contributed by @shuvroroy.</li>
 <li><strong>Component attribute navigation and hover.</strong> Follow an attribute name to the variable its component reads, and hover it to see the type in that view. Dynamic components use their selected views. Contributed by @shuvroroy.</li>
