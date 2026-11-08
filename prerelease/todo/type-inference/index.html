@@ -1429,6 +1429,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t72-a-property-a-trait-assigns-but-does-not-declare-is-untyped" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T72. A property a trait assigns but does not declare is untyped
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1761,6 +1772,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T71. A service <code>#[AsDecorator]</code> registers does not take over the ID
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t72-a-property-a-trait-assigns-but-does-not-declare-is-untyped" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T72. A property a trait assigns but does not declare is untyped
       </span>
     </span>
   </a>
@@ -2414,6 +2436,29 @@ attribute's <code>decorates</code> argument (a string or <code>Foo::class</code>
 class as the decorator, where <code>#[AsMessageHandler]</code> is read in
 <code>src/symbol_map/extraction/symfony.rs</code>, and count the file as one that
 declares in <code>declares_symfony_keys</code>.</p>
+<hr />
+<h2 id="t72-a-property-a-trait-assigns-but-does-not-declare-is-untyped">T72. A property a trait assigns but does not declare is untyped<a class="headerlink" href="#t72-a-property-a-trait-assigns-but-does-not-declare-is-untyped" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">trait WorkspaceTestTrait {</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">    protected function initializeWorkspacesModule(): void {</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="x">        $this-&gt;entityTypeManager = \Drupal::entityTypeManager();</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">    }</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="x">    protected function switchToWorkspace($workspace_id): void {</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="x">        $this-&gt;entityTypeManager-&gt;getStorage('workspace')-&gt;load($workspace_id); // untyped</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="x">    }</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="x">}</span>
+</code></pre></div>
+<p>Inside a trait, <code>$this-&gt;entityTypeManager</code> names a property only the
+classes using the trait declare (each of Drupal's workspaces kernel tests
+declares it <code>@var EntityTypeManagerInterface</code>). The trait never declares
+it, so the read is untyped, <code>getStorage()</code> is not a reference to the
+entity type manager's method, and nothing after it resolves. PHPlumb
+types it from the trait's own assignment. Either source would do: the
+type the using classes all declare for the property, or what the trait
+assigns to it. The using classes are the sounder of the two, since an
+assignment in one method says nothing about what another method reads
+if a user overwrites it.</p>
 
 
 
