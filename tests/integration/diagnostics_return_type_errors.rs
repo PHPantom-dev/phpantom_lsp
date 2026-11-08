@@ -5716,3 +5716,52 @@ final class Masks
         "{messages:?}"
     );
 }
+
+/// A property a trait leaves to its users to declare is narrowed by a type
+/// check the way a property the trait declares is.
+#[test]
+fn trait_reads_users_property_narrowed_by_type_check() {
+    let php = r#"<?php
+trait RendersContent
+{
+    /** @return string */
+    protected function rendered()
+    {
+        if (is_array($this->content)) {
+            return '';
+        }
+        return $this->content;
+    }
+
+    /** @return int */
+    protected function wrong()
+    {
+        return $this->content;
+    }
+}
+
+class First
+{
+    use RendersContent;
+    /** @var string|array */
+    protected $content;
+}
+
+class Second
+{
+    use RendersContent;
+    /** @var string|array */
+    protected $content;
+}
+"#;
+    let mismatches = messages_with_code(&collect(php), "type_mismatch_return");
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "only the unnarrowed read should be flagged, got: {mismatches:?}"
+    );
+    assert!(
+        mismatches[0].contains("string|array"),
+        "the read should be typed from the users' declarations, got: {mismatches:?}"
+    );
+}
