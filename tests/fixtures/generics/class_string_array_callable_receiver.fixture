@@ -1,0 +1,17 @@
+// test: a static array callable keeps the class-string's generic arguments
+// feature: hover
+// expect: $result = Book
+---
+<?php
+class Book {}
+/** @template T */
+class Box {
+    /** @return T */
+    public static function get() {}
+}
+/** @param class-string<Box<Book>> $class */
+function read(string $class): void {
+    $callback = [$class, 'get'];
+    $result = $callback();
+    $<>result;
+}

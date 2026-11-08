@@ -53,6 +53,9 @@ impl Backend {
         {
             return items;
         }
+        if let Some(items) = self.container_named_completions(&na_ctx, content, position, ctx) {
+            return items;
+        }
         let mut params = self.resolve_named_arg_params(&na_ctx, content, position, ctx);
 
         // If resolution failed, the parser may have choked on

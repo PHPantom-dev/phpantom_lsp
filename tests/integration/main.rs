@@ -137,6 +137,7 @@ mod completion_unset;
 mod completion_variable_names;
 mod completion_variables;
 mod composer_autoload_edge_cases;
+mod container_invocation;
 mod crash_sandbox;
 mod crlf_edits;
 mod declaration;

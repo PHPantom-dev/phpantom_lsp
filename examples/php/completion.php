@@ -1460,6 +1460,15 @@ class InArrayNarrowingDemo
 
 class GenericsDemo
 {
+    /** @param Scaffolding\Box<Scaffolding\Pen> $box */
+    public function callableBox(Scaffolding\Box $box): Scaffolding\Pen
+    {
+        $unwrap = [$box, 'unwrap'];
+        // Try completion after $unwrap()->: the result keeps the box's Pen type.
+        $unwrap()->write();
+        return $unwrap();
+    }
+
     /** @param Scaffolding\Box<Scaffolding\Pen>|Scaffolding\Box<Scaffolding\Pencil> $box */
     public function boxedAlternatives(Scaffolding\Box $box): string
     {

@@ -2433,6 +2433,11 @@ check(
         === [\App\Listeners\NotifyBlogAuthor::class . '@handle']
 );
 
+check(
+    'container call forwards parameter keys to the callable',
+    new \App\Demo()->containerInvocation() === '/books:2'
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

@@ -271,6 +271,7 @@ mod code_lens;
 pub mod completion;
 pub mod composer;
 pub mod config;
+mod container_calls;
 mod definition;
 pub mod diagnostics;
 pub mod docblock;

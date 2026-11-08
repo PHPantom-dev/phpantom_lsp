@@ -75,6 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Laravel
 
+- **Container call parameters.** The parameter keys passed to `app()->call()` complete from the callable's parameters and go to them. Contributed by @shuvroroy.
 - **Laravel asset paths and Inertia pages.** The paths `asset()`, `mix()`, `@vite` and `Vite::asset()` name, and the pages `Inertia::render()`, `inertia()` and `Route::inertia()` render, complete from the files on disk, jump to the file, and are reported when nothing is there. An unknown Inertia page gets a quick fix that creates it. Page directories and extensions are read from `config/inertia.php`.
 - **Laravel related classes.** Code lenses on an Eloquent model go to its factory, policy, observers, migrations, API resources, and custom collection, and a factory, policy, or observer gets one back to its model. An event lists the listeners that handle it, whether registered or discovered from their `handle()` type hint, and a listener links to the events it handles.
 - **Eloquent column attributes.** Columns a model lists in class attributes such as `#[Fillable(['name'])]` or `#[Hidden([...])]` now complete on the model and in queries like those in `$fillable` and `$hidden`, and `#[Fillable]` columns are offered first in `create([...])` and `fill([...])`. Attributes and properties combine and inherit the way Laravel applies them. Contributed by @shuvroroy.
@@ -174,6 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Tempest
 
+- **Container invocation arguments.** The named arguments `Container::invoke()` and the `invoke()` helper forward complete from the callable's parameters and go to them. Contributed by @shuvroroy.
 - **Built-in view documentation.** Completion and hover explain Tempest's built-in components and directives, with links to the view specification. Contributed by @shuvroroy.
 - **Component attribute navigation and hover.** Follow an attribute name to the variable its component reads, and hover it to see the type in that view. Dynamic components use their selected views. Contributed by @shuvroroy.
 - **Tempest model property names.** Complete and navigate model properties in typed query builders and model helpers, including forwarded named arguments and array keys. Raw SQL strings keep their existing handling. Contributed by @shuvroroy.
@@ -368,6 +370,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Closures and callables
 
+- **Generic array callable results.** Calling a method through an array callable preserves the receiver's generic return type, so completion and type checks see the concrete result. Contributed by @shuvroroy.
 - **Closures declared to return `float`.** A closure or arrow function declared `: float` is now shown returning `float` even when its body computes an integer, since PHP converts the value on return.
 - **Closures that capture by reference the variable they are assigned to.** In `$lock = new Lock(function () use (&$lock) { ... })`, `$lock` inside the closure is now what the assignment stores, `@var` included, instead of `null`.
 - **Union types in `@param-closure-this`.** A closure whose tag names several classes, such as `@param-closure-this WebContext|ApiContext`, now binds `$this`, `self::`, and `static::` to every one of them instead of falling back to the class around the closure, and an `instanceof` check narrows `$this` to the one it proves. Contributed by @ace-of-aces.
@@ -577,6 +580,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Completion, hover, and editor features
 
+- **Global class member navigation.** Following a member of a global class goes to its declaration even when another namespace contains a class with the same short name. Contributed by @shuvroroy.
 - **Classes that share a short name in one type.** Hover, completion, and signature help now show each class by its full name when a type names two classes with the same short name, such as `class-string<\App\C>|class-string<\Other\C>`, instead of printing them as one.
 - **Code examples in hover.** A multi-line `<code>` or `<pre>` example in a docblock, as in Doctrine's query builder, now shows as a code block instead of running together on one line.
 - **Hover on a `global` statement's variable.** Hovering the variable in `global $x;` now shows the type it imports, instead of nothing.

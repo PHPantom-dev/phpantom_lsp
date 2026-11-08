@@ -42,6 +42,9 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Vec<Location> {
+        if let Some(location) = self.container_argument_definition(uri, content, position) {
+            return vec![location];
+        }
         let routes = self.tempest_route_definition(uri, content, position);
         if !routes.is_empty() {
             return routes;

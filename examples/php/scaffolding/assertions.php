@@ -83,6 +83,7 @@ function runDemoAssertions(): void
     assert(!$selfOutBox->value instanceof Scaffolding\Pen, 'a Scaffolding\Pencil is not a Scaffolding\Pen — the template argument really changed');
 
     $genericDemo = new GenericsDemo();
+    assert($genericDemo->callableBox(new Scaffolding\Box(new Scaffolding\Pen())) instanceof Scaffolding\Pen, 'array callables retain the receiver generic return type');
     assert($genericDemo->boxedAlternatives(new Scaffolding\Box(new Scaffolding\Pen())) === 'pen', 'a Box<Pen> unwraps to a Pen');
     assert($genericDemo->boxedAlternatives(new Scaffolding\Box(new Scaffolding\Pencil())) === 'pencil', 'a Box<Pencil> retains the other generic alternative');
 

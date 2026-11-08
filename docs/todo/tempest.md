@@ -5,9 +5,8 @@ templates already get completion, hover, go-to-definition, and
 diagnostics through virtual PHP, the data a view is rendered with is
 typed from the calls and View objects that render it, and component
 tags, their attributes, and the paths passed to `view()` complete and
-navigate. What is still missing is the model a `query()` call builds,
-the named arguments the container forwards, and route URIs that a
-project's own decorators change.
+navigate. What is still missing is the model a `query()` call builds
+and route URIs that a project's own decorators change.
 
 Work out each behaviour from the framework's own source
 (`tempest/view`, `tempest/router`, `tempest/database`,
@@ -45,23 +44,6 @@ builder's own constructor says what is meant
 `Book::select()` already gives `SelectQueryBuilder<Book>`. Read
 `query()`'s parameter the way the constructor declares it, so a class name
 binds `TModel` to the class, and offer the docblock fix upstream.
-
----
-
-## TM5. Named arguments `Container::invoke()` forwards
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-$container->invoke([BookImporter::class, 'import'], path: $path);
-```
-
-`Tempest\Container\Container::invoke()` calls the callable it is given
-and forwards its remaining named arguments to it. Complete those names
-from the callable's parameters and navigate from one to its parameter.
-Laravel's `app()->call([Foo::class, 'bar'], ['param' => …])` forwards
-the same way through an array, so build the callable lookup once and
-let both use it.
 
 ---
 
