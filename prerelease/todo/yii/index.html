@@ -1306,10 +1306,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#y8-column-names-in-query-arrays" class="md-nav__link">
+  <a href="#y18-tables-a-query-names-in-an-earlier-statement" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Y8. Column names in query arrays
+        Y18. Tables a query names in an earlier statement
       </span>
     </span>
   </a>
@@ -1355,9 +1355,10 @@ the events configuration attaches. Active Record queries are typed by the
 record they are for, and the attributes and relations a record and its
 queries name navigate, complete, and are checked, the columns of a record
 without properties read from the project's migrations, and so do the
-properties form fields and hydration maps name. The key paths
-<code>ArrayHelper</code> reads complete, navigate, and are typed. What is left is
-below.</p>
+properties form fields and hydration maps name, and the tables and
+columns <code>yiisoft/db</code> queries name, read against those migrations. The key
+paths <code>ArrayHelper</code> reads complete, navigate, and are typed. What is left
+is below.</p>
 <p>The items below are what the Yii team asked for in
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/discussions/505">discussion #505</a>.
 <code>examples/yii/</code> (generated from <code>yiisoft/app</code>) is the playground, with a
@@ -1449,25 +1450,21 @@ renderer's injections (<code>CsrfViewInjection</code> gives <code>$csrf</code>) 
 rest, and the layout receives its own. Collect those before reporting a
 missing one.</p>
 <hr />
-<h2 id="y8-column-names-in-query-arrays">Y8. Column names in query arrays<a class="headerlink" href="#y8-column-names-in-query-arrays" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$query-&gt;from(Table::POST . ' p')</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    -&gt;where(['p.status' =&gt; PostStatus::Published])</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    -&gt;orderBy(['p.publication_date' =&gt; SORT_DESC]);</span>
+<h2 id="y18-tables-a-query-names-in-an-earlier-statement">Y18. Tables a query names in an earlier statement<a class="headerlink" href="#y18-tables-a-query-names-in-an-earlier-statement" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$query = (new Query($db))-&gt;from(Table::POST . ' p');</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">if ($published) {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    $query-&gt;andWhere(['p.status' =&gt; PostStatus::Published]);</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
 </code></pre></div>
-<p><code>yiisoft/db</code> queries name tables and columns as strings, and columns as
-array keys, often
-qualified by a table alias the same query declares, and the table
-itself is often a class constant with the alias appended (<code>'post p'</code>,
-or <code>['p' =&gt; 'post']</code>). The columns come
-from the project's migrations (<code>yiisoft/db-migration</code>'s
-<code>createTable()</code> and <code>addColumn()</code>), which <code>src/yii/migrations.rs</code>
-already reads for the attributes of a record without properties. It
-reads a table named by a string literal only, and a table named any other
-way leaves the columns of every table open, so the class constants the
-demo names its tables with need resolving first. Complete and navigate table and column names, and report one no
-migration creates. Wait for a user to ask: the demo is the only project
-known to query this way.</p>
+<p>The tables and columns a <code>yiisoft/db</code> query names are read against the
+tables its own chain of calls names, plus the record's table for an
+Active Record query. A query built up over several statements on the same
+variable names its tables in one and its columns in another, so the later
+ones are read against no tables: they complete nothing, navigate nowhere
+unless the qualifier is a table's own name, and are never reported. Follow
+the tables a variable's earlier chains name, through assignments in the
+same function.</p>
 
 
 

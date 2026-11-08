@@ -2248,6 +2248,16 @@ expects to be declared somewhere, but is not, is always <code>invalid_</code>.</
 <td>Warning</td>
 <td>An Active Record relation the record does not declare.</td>
 </tr>
+<tr>
+<td><code>invalid_yii_table</code></td>
+<td>Warning</td>
+<td>A table a <code>yiisoft/db</code> query reads from or joins that no migration creates.</td>
+</tr>
+<tr>
+<td><code>invalid_yii_column</code></td>
+<td>Warning</td>
+<td>A column a <code>yiisoft/db</code> query names that none of the tables it may belong to has, as the migrations create them.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="drupal">Drupal<a class="headerlink" href="#drupal" title="Permanent link">&para;</a></h2>
