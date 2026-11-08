@@ -63,25 +63,7 @@ No outstanding items.
 
 ## Array types
 
-### B736. `$list['key']` on an `ArrayObject` subclass ignores its `offsetGet()`
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-final class InstalledPackagesList extends \ArrayObject {
-    public function offsetGet(mixed $key): ?InstalledPackage { /* ... */ }
-}
-
-$list['drupal/sub-module']->path; // Cannot check property $path, because type TValue could not be resolved
-```
-
-An array read on an object goes through its `offsetGet()`, so it has the
-type the class's own override declares. The read takes `ArrayObject`'s
-`TValue` instead, which the subclass never binds (it has no `@extends`),
-and the unbound template name leaks into the diagnostic. Read the
-element type from the `offsetGet()` the class resolves to, the way a
-direct `$list->offsetGet('x')` call is, before falling back to the
-template arguments. Seen in Drupal's package_manager tests.
+No outstanding items.
 
 ## Laravel
 
