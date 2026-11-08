@@ -988,23 +988,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b741-a-parameter-defaults-unqualified-constant-is-read-in-the-callers-namespace" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B741. A parameter default's unqualified constant is read in the caller's namespace
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1026,6 +1009,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b742-a-global-constant-holding-fooclass-or-an-enum-case-has-no-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B742. A global constant holding <code>Foo::class</code> or an enum case has no type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1628,23 +1628,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b741-a-parameter-defaults-unqualified-constant-is-read-in-the-callers-namespace" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B741. A parameter default's unqualified constant is read in the caller's namespace
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1666,6 +1649,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b742-a-global-constant-holding-fooclass-or-an-enum-case-has-no-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B742. A global constant holding <code>Foo::class</code> or an enum case has no type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1734,43 +1734,46 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b741-a-parameter-defaults-unqualified-constant-is-read-in-the-callers-namespace">B741. A parameter default's unqualified constant is read in the caller's namespace<a class="headerlink" href="#b741-a-parameter-defaults-unqualified-constant-is-read-in-the-callers-namespace" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// src/Lib/pick.php</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">namespace Lib;</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">const MODE = 1;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">/** @return ($mode is 1 ? int : string) */</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">function pick(int $mode = MODE): int|string { … }</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">// src/App/run.php</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">namespace App;</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">const MODE = 2;</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">$picked = \Lib\pick();          // int, but read as string</span>
-</code></pre></div>
-<p>A parameter default is source text read at each call site. The parser
-spells the constants in it that have one meaning fully qualified (a
-<code>use const</code> import, a qualified name), but an unqualified name inside a
-namespace means that namespace's constant when one is declared and the
-global constant otherwise, which only an index of the declared constants
-can say. A class constant's initializer is read in its class's namespace,
-and a namespaced constant's value is resolved where it is looked up
-(<code>Backend::lookup_global_constant_candidates</code>), but a default reaches its
-readers without the callee's namespace: the conditional return type of an
-omitted argument reads it through the call site's argument resolver
-(<code>type_ops/conditional/text_args.rs</code>), which tries the call site's
-namespace, and template binding (<code>call_resolution/template_binding.rs</code>)
-reads it as global.</p>
-<p>Either reader needs the callee's namespace: <code>ConditionalClassContext</code> and
-<code>TemplateCallee</code> could carry it, with each default's bare names looked up
-there before the global constant, as <code>FileCtx::namespace</code> does for a class
-constant's initializer.</p>
+<p>No outstanding items.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b742-a-global-constant-holding-fooclass-or-an-enum-case-has-no-type">B742. A global constant holding <code>Foo::class</code> or an enum case has no type<a class="headerlink" href="#b742-a-global-constant-holding-fooclass-or-an-enum-case-has-no-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace Lib;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">class Widget {}</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">enum Suit { case Hearts; }</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">const WIDGET = Widget::class;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">const SUIT = Suit::Hearts;</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">$w = WIDGET;                    // class-string&lt;Widget&gt;, but untyped</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">$s = SUIT;                      // Suit::Hearts, but untyped</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">/**</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x"> * @template T of object</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x"> * @param class-string&lt;T&gt; $class</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x"> * @return T</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x"> */</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="x">function make(string $class = WIDGET): object { … }</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="x">$made = make();                 // Widget, but mixed</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="x">$made = make(WIDGET);           // the same</span>
+</code></pre></div>
+<p>A class constant initialized to <code>Foo::class</code> or <code>Suit::Hearts</code> reads as
+that class name or case (<code>class_constants.rs</code> falls back to
+<code>class_name_literal_type</code> and <code>resolve_static_access_type</code> after the
+literal fold), but a global or namespaced constant does not: both the AST
+path (<code>global_constant_type</code> in <code>rhs_resolution/constant_access.rs</code>) and
+the text path (<code>Backend::resolve_arg_text_to_type</code>) stop at
+<code>infer_type_from_constant_value</code> and <code>folded_constant_type</code>, which only
+read literals. Both need the same fallback.</p>
+<p>Once fixed, cover the template case with a callee and a caller in
+different namespaces that each declare a constant of the same name: an
+omitted argument's default is read in the callee's namespace
+(<code>TemplateCallee::namespace</code>), which nothing can observe until such a
+constant has a type.</p>
 
 
 

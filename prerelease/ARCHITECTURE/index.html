@@ -4042,7 +4042,11 @@ when.</p>
    when one is declared and the global constant otherwise, which only the
    index can say, so it is looked up when read: a class constant's
    initializer through <code>FileCtx::namespace</code>, a namespaced constant's value by
-   <code>Backend::lookup_global_constant_candidates</code> from <code>DefineInfo::namespace</code>.</li>
+   <code>Backend::lookup_global_constant_candidates</code> from <code>DefineInfo::namespace</code>,
+   and a parameter default through <code>ResolutionCtx::written_in</code> with the
+   callee's namespace (<code>FunctionInfo::namespace</code>, or
+   <code>MethodInfo::default_namespace</code>, kept only for a method whose defaults
+   need it).</li>
 <li><strong>Identify classes by FQN.</strong> <code>ClassInfo::name</code> is the short name, and
    <code>class_lookup::find_class_by_name</code> matches a bare name against the
    classes of every namespace block in the file. Use <code>ClassInfo::fqn()</code> and
