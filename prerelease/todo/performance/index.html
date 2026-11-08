@@ -1102,6 +1102,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#p91-parsing-and-merging-of-the-full-index-take-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P91. Parsing and merging of the full index take turns
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p92-startups-file-walks-and-resource-indexing-run-on-one-core" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P92. Startup's file walks and resource indexing run on one core
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1411,6 +1433,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#p91-parsing-and-merging-of-the-full-index-take-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P91. Parsing and merging of the full index take turns
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p92-startups-file-walks-and-resource-indexing-run-on-one-core" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P92. Startup's file walks and resource indexing run on one core
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1547,6 +1591,74 @@ against that bar.</p>
 </tr>
 </tbody>
 </table>
+<hr />
+<h2 id="p91-parsing-and-merging-of-the-full-index-take-turns">P91. Parsing and merging of the full index take turns<a class="headerlink" href="#p91-parsing-and-merging-of-the-full-index-take-turns" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
+<p>On <code>projects/drupal</code> (15,900 PHP files, 32 cores, release build,
+2026-11-09) the server takes 2.4 s from <code>initialize</code> to idle, 1.7 s of it
+in the full index. PHPlumb parses every file of the same checkout fully,
+with its member index, in 0.49 s. Our parse is heavier per file, but that
+is not what decides the wall time: the parse workers keep only 4 to 6 of
+the 32 cores busy, while one tokio thread runs at 100% from the start of
+the full index to its end.</p>
+<p>Drupal core counts as installed-package code, so <code>parse_batch_parallel</code>
+parses it <code>DORMANT_CHUNK</code> (1,024) files at a time and publishes each chunk
+through <code>apply_ast_index_parse_results_batch</code> before the next one starts.
+That merge is serial, and the workers wait for it. Inside it,
+<code>reindex_references_for_symbol_maps_batch</code> builds every file's reference
+entries (<code>reference_entries_for_symbol_map</code>) on the merging thread, then
+inserts them into <code>std</code> <code>HashMap</code>s, so about a quarter of that thread's
+samples are SipHash (<code>hash_one::&lt;&amp;ReferenceIndexKey&gt;</code>, <code>Arc&lt;str&gt;</code> keys).
+The debug build shows the same shape: 10.2 s of full index, 7.0 s of it
+for the 10,893 core files.</p>
+<p>Three changes, measured one at a time:</p>
+<ul>
+<li>Build each file's reference entries in the parse worker, next to its
+  symbol map, so the merge only inserts.</li>
+<li>Give the reference index (<code>by_key</code>, <code>uri_keys</code>, the per-key URI maps) a
+  fast non-cryptographic hasher.</li>
+<li>Parse the next chunk while the previous one merges, keeping at most two
+  chunks of parses alive so the memory bound <code>DORMANT_CHUNK</code> exists for
+  still holds.</li>
+</ul>
+<p>The serial tail should shrink to the inserts alone, which would put the
+full index under 1 s on this checkout. Every project with installed
+packages under the workspace walk (Drupal core, WordPress core) goes
+through the same chunks, and every project's own files go through the same
+merge. Record a frame-pointer profile first (see the appendix) to confirm
+how the rest of the merging thread's time splits, since the flat profile
+spreads it thinly.</p>
+<p><strong>Where to look:</strong> <code>parse_batch_parallel</code> and <code>parse_and_publish</code> in
+<code>src/indexing/preload.rs</code>, <code>apply_ast_index_parse_results_batch</code> in
+<code>src/parser/ast_update.rs</code>, <code>reindex_references_for_symbol_maps_batch</code> in
+<code>src/reference_index.rs</code>.</p>
+<hr />
+<h2 id="p92-startups-file-walks-and-resource-indexing-run-on-one-core">P92. Startup's file walks and resource indexing run on one core<a class="headerlink" href="#p92-startups-file-walks-and-resource-indexing-run-on-one-core" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>On the same checkout and build as P91, about 0.5 s of the 2.4 s to idle
+runs on a single core while the other 31 wait:</p>
+<ul>
+<li><code>scan_drupal_directories</code> walks the web root with a sequential <code>ignore</code>
+  walker and a <code>path.is_file()</code> stat per entry, before the classmap
+  scanner's parallel lexing starts.</li>
+<li><code>visit_workspace_files_gitignore</code>, the full index's discovery walk, is
+  sequential too and stats every entry. It takes 214 ms in release and
+  737 ms in debug, and it walks most of the web root a second time.</li>
+<li><code>index_resource_paths_batch</code> reads and scans the 4,494 YAML and Twig
+  files the walk found one after another.</li>
+</ul>
+<p>The classmap scanner already has a parallel walk (<code>walk_roots</code>:
+<code>build_parallel</code>, work stealing, sorted output for a deterministic
+first-wins merge). Move both walks onto that pattern and use the entry's
+own file type rather than a fresh stat. The full index could also take the
+files the Drupal walk found instead of walking them again. Read and scan the
+resource files on parallel workers and publish them in one merge, as the PHP
+files are. PHPlumb's discovery is a single parallel walk that canonicalizes
+only paths reached through a symlink, which is what its 0.49 s includes.</p>
+<p><strong>Where to look:</strong> <code>scan_drupal_directories</code> in
+<code>src/classmap_scanner/discovery.rs</code>, <code>visit_workspace_files_gitignore</code> and
+<code>walk_roots</code> in <code>src/classmap_scanner/walk.rs</code>,
+<code>index_resource_paths_batch</code> in <code>src/resource_navigation.rs</code>.</p>
 <hr />
 <h2 id="p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse">P86. A Symfony app's generated <code>config/reference.php</code> is slow to parse<a class="headerlink" href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
