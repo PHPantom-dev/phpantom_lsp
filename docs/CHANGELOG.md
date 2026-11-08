@@ -599,6 +599,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Completion below a `#` comment with an apostrophe.** A comment such as `# Don't call this twice` no longer stops completion in the code that follows it.
 - **Typing in a `namespace { }` block.** While a call in a braced `namespace` block is still missing its `)`, or the block its closing `}`, signature help and completion use the block's own namespace and imports instead of an earlier block's, and the classes and functions it declares stay available to other files.
 - **Completion shows member types next to the name.** Method and property suggestions show their return or property type right after the name (e.g. `findOneByEmail($email): ?User`) in editors such as PhpStorm and VS Code, where previously only the class name was visible. Contributed by @EranNL.
+- **Progress of concurrent requests ends.** Go to Implementation and Find References no longer leave progress stuck in the editor's task list when the editor sends several of them at once, as an implementation gutter does for the declarations in view. Contributed by @lleviathe.
 
 #### Code actions
 
