@@ -1022,23 +1022,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Framework names in strings">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b737-test-code-does-not-see-the-entity-types-its-test-modules-declare" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B737. Test code does not see the entity types its test modules declare
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1707,23 +1690,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Framework names in strings">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b737-test-code-does-not-see-the-entity-types-its-test-modules-declare" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B737. Test code does not see the entity types its test modules declare
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1864,23 +1830,7 @@ treated the same way.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
-<h3 id="b737-test-code-does-not-see-the-entity-types-its-test-modules-declare">B737. Test code does not see the entity types its test modules declare<a class="headerlink" href="#b737-test-code-does-not-see-the-entity-types-its-test-modules-declare" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// web/core/modules/config/tests/config_test/src/Entity/ConfigTest.php</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">// declares `config_test`</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">$storage = \Drupal::entityTypeManager()-&gt;getStorage('config_test');</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$storage-&gt;load('foo')-&gt;status(); // Method EntityInterface::status() not found</span>
-</code></pre></div>
-<p>Declarations under a <code>tests</code> folder are skipped (<code>is_test_fixture</code> in
-<code>src/drupal/mod.rs</code>), because no real site enables a test module. The
-tests that enable them do, though, so in test code an entity type a test
-module declares leaves <code>getStorage()</code> with the declared
-<code>EntityStorageInterface</code>, and what it loads is a bare <code>EntityInterface</code>.
-That accounts for most of the ~150 <code>EntityInterface::get()</code> and
-<code>::status()</code> reports in <code>projects/drupal</code>'s tests. Services already make
-this exception (<code>is_test_services_file</code> in <code>src/drupal/services.rs</code>):
-read test modules' entity types too, and let them type lookups made from
-test code only, so production code keeps ignoring them.</p>
+<p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
