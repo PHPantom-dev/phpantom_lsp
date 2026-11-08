@@ -391,6 +391,7 @@ mod wordpress;
 mod yii;
 mod yii_active_record;
 mod yii_definitions;
+mod yii_forms;
 mod yii_routes;
 mod yii_translations;
 
@@ -414,6 +415,7 @@ use wordpress::*;
 use yii::*;
 use yii_active_record::*;
 use yii_definitions::*;
+use yii_forms::*;
 use yii_routes::*;
 use yii_translations::*;
 

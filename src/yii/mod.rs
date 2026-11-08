@@ -1,7 +1,8 @@
 //! Yii 3: the views an application renders and the path aliases it names
 //! them through, the route names it declares and the arguments a handler
 //! takes from its route's path, the DI definitions it configures its
-//! container with, and the listeners it attaches to its events.
+//! container with, the listeners it attaches to its events, and the
+//! properties its form fields and hydration maps name.
 //!
 //! A view is named by a path (`__DIR__ . '/template'`) or by a name the
 //! renderer's view path prefixes (`render('index')` after
@@ -43,6 +44,9 @@
 //!
 //! The attributes and relations an Active Record names as strings are read
 //! against the record (see [`active_record`]).
+//!
+//! The properties a form field and a hydration map name are member
+//! accesses on the object they are given (see [`forms`]).
 
 pub(crate) mod active_record;
 pub(crate) mod aliases;
@@ -50,6 +54,7 @@ pub(crate) mod assets;
 pub(crate) mod config_plugin;
 pub(crate) mod definitions;
 pub(crate) mod events;
+pub(crate) mod forms;
 pub(crate) mod params;
 pub(crate) mod relations;
 pub(crate) mod routes;

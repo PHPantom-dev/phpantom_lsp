@@ -181,6 +181,9 @@ impl Backend {
                 });
                 fqns
             }
+            DocblockMemberRef::YiiProperty { form_model: true } => {
+                crate::yii::forms::form_model_class_names(fqns, &class_loader)
+            }
             _ => fqns,
         }
     }

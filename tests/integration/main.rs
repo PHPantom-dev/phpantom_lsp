@@ -368,6 +368,7 @@ mod yii_config_plugin;
 mod yii_css_classes;
 mod yii_definitions;
 mod yii_events;
+mod yii_forms;
 mod yii_params;
 mod yii_routes;
 mod yii_translations;

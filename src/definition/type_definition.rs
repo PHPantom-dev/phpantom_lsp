@@ -122,6 +122,12 @@ impl Backend {
                     DocblockMemberRef::YiiAttribute => candidates.retain(|class| {
                         crate::yii::active_record::is_record(class, &resolved_class_loader)
                     }),
+                    DocblockMemberRef::YiiProperty { form_model: true } => {
+                        candidates = crate::yii::forms::form_model_classes(
+                            candidates,
+                            &resolved_class_loader,
+                        );
+                    }
                     _ => {}
                 }
 

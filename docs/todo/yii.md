@@ -11,7 +11,8 @@ navigate, are checked, and are typed, and the message IDs a translator
 looks up complete, navigate, and are checked, and so do the listeners
 the events configuration attaches. Active Record queries are typed by the
 record they are for, and the attributes and relations a record and its
-queries name navigate, complete, and are checked. What is left is below.
+queries name navigate, complete, and are checked, and so do the properties
+form fields and hydration maps name. What is left is below.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).
@@ -111,31 +112,6 @@ config, or `parameters` under `params['yiisoft/view']`) and the
 renderer's injections (`CsrfViewInjection` gives `$csrf`) supply the
 rest, and the layout receives its own. Collect those before reporting a
 missing one.
-
----
-
-## Y15. Property names in hydrator attributes and form fields
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-final class PostForm extends FormModel
-{
-    public function __construct(
-        #[Data('post_title')] public string $title = '',
-    ) {}
-}
-
-Field::text($form, 'title');
-```
-
-`yiisoft/hydrator`'s `#[Data]` and `#[Map]` name the keys of the data
-array a property is filled from, and `yiisoft/form-model`'s field
-helpers name a property of the form model they are given. A form field
-name should navigate to the property, complete from the model's
-properties, rename with it, and be reported when the model has no such
-property. A `#[Map]` entry is the same check in the other direction, on
-its property side.
 
 ---
 

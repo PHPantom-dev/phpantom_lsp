@@ -247,6 +247,9 @@ impl Backend {
                 candidates
                     .retain(|class| crate::yii::active_record::is_record(class, class_loader));
             }
+            crate::symbol_map::DocblockMemberRef::YiiProperty { form_model: true } => {
+                candidates = crate::yii::forms::form_model_classes(candidates, class_loader);
+            }
             _ => {}
         }
         let first = candidates.first()?;

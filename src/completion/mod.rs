@@ -107,6 +107,7 @@ pub(crate) mod yii_aliases;
 pub(crate) mod yii_assets;
 pub(crate) mod yii_css_classes;
 pub(crate) mod yii_definitions;
+pub(crate) mod yii_forms;
 pub(crate) mod yii_params;
 pub(crate) mod yii_route_params;
 pub(crate) mod yii_views;

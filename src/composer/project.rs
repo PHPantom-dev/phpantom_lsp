@@ -203,8 +203,9 @@ pub(crate) fn is_twig_project(package: &ComposerPackage) -> bool {
 /// The packages that make a project a Yii application: the view layer
 /// itself and the renderer an application's actions use, under its current
 /// and its former name, the router, the translator, the package that
-/// attaches event listeners from configuration, and Active Record.
-const YII_PACKAGES: [&str; 7] = [
+/// attaches event listeners from configuration, Active Record, and the form
+/// models and the hydrator that fills objects from data.
+const YII_PACKAGES: [&str; 9] = [
     "yiisoft/view",
     "yiisoft/yii-view-renderer",
     "yiisoft/yii-view",
@@ -212,14 +213,16 @@ const YII_PACKAGES: [&str; 7] = [
     "yiisoft/translator",
     "yiisoft/yii-event",
     "yiisoft/active-record",
+    "yiisoft/form-model",
+    "yiisoft/hydrator",
 ];
 
 /// Detect whether the project is a Yii application, which view names, route
-/// names, route arguments, message IDs, event listeners, and Active Record
-/// attributes and relations are read in: it renders Yii views, routes
-/// requests with Yii's router, translates with Yii's translator, attaches
-/// listeners through `yiisoft/yii-event`, or keeps its data in Yii's Active
-/// Record.
+/// names, route arguments, message IDs, event listeners, Active Record
+/// attributes and relations, and form properties are read in: it renders
+/// Yii views, routes requests with Yii's router, translates with Yii's
+/// translator, attaches listeners through `yiisoft/yii-event`, keeps its
+/// data in Yii's Active Record, or fills form models and objects from data.
 pub(crate) fn is_yii_project(package: &ComposerPackage) -> bool {
     package
         .require

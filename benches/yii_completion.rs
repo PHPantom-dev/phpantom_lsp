@@ -22,6 +22,8 @@ const COMPOSER: &str = r#"{
     "autoload": { "psr-4": {
         "App\\": "src/",
         "Yiisoft\\ActiveRecord\\": "stubs/active-record/",
+        "Yiisoft\\FormModel\\": "stubs/form-model/",
+        "Yiisoft\\Hydrator\\": "stubs/hydrator/",
         "Yiisoft\\Router\\": "stubs/router/",
         "Yiisoft\\Translator\\": "stubs/translator/",
         "Yiisoft\\Yii\\View\\Renderer\\": "stubs/yii-view-renderer/",
@@ -89,6 +91,26 @@ const STUBS: &[(&str, &str)] = &[
     (
         "config/di/translation.php",
         "<?php\nreturn [\n    'translation.app' => static fn () => new \\Yiisoft\\Translator\\Message\\Php\\MessageSource(dirname(__DIR__, 2) . '/resources/messages'),\n];\n",
+    ),
+    (
+        "stubs/form-model/FormModelInterface.php",
+        "<?php\nnamespace Yiisoft\\FormModel;\ninterface FormModelInterface {}\n",
+    ),
+    (
+        "stubs/form-model/FormModel.php",
+        "<?php\nnamespace Yiisoft\\FormModel;\nabstract class FormModel implements FormModelInterface {}\n",
+    ),
+    (
+        "stubs/form-model/Field.php",
+        "<?php\nnamespace Yiisoft\\FormModel;\nclass Field {\n    final public static function text(FormModelInterface $formModel, string $property, array $config = []): string {}\n}\n",
+    ),
+    (
+        "stubs/hydrator/Hydrator.php",
+        "<?php\nnamespace Yiisoft\\Hydrator;\nfinal class Hydrator {\n    public function hydrate(object $object, array|ArrayData $data = []): void {}\n}\n",
+    ),
+    (
+        "stubs/hydrator/ArrayData.php",
+        "<?php\nnamespace Yiisoft\\Hydrator;\nfinal class ArrayData {\n    public function __construct(array $data = [], array $map = [], bool $strict = false) {}\n}\n",
     ),
     (
         "stubs/router/HydratorAttribute/RouteArgument.php",
@@ -224,6 +246,26 @@ final class ConsumerTitle
 }
 "#;
 
+/// A class rendering a field of a form model with `SECTIONS * ACTIONS`
+/// properties, and filling the model through a hydration map, whose
+/// property names are being typed.
+const FORM_CONSUMER_PHP: &str = r#"<?php
+namespace App\Web;
+
+use Yiisoft\FormModel\Field;
+use Yiisoft\Hydrator\ArrayData;
+use Yiisoft\Hydrator\Hydrator;
+
+final class ConsumerForm
+{
+    public function __invoke(Hydrator $hydrator, Form\LargeForm $form, array $data): string
+    {
+        $hydrator->hydrate($form, new ArrayData($data, ['section1' => 'name']));
+        return Field::text($form, 'section1');
+    }
+}
+"#;
+
 fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -335,6 +377,23 @@ fn generate_application() -> Vec<(String, String)> {
         "src/Catalog/Catalog.php".to_string(),
         RECORD_CONSUMER_PHP.to_string(),
     ));
+    let mut form = String::from(
+        "<?php\nnamespace App\\Web\\Form;\n\nfinal class LargeForm extends \\Yiisoft\\FormModel\\FormModel\n{\n",
+    );
+    for section in 0..SECTIONS {
+        for action in 0..ACTIONS {
+            let _ = writeln!(
+                form,
+                "    public string $section{section}Action{action} = '';"
+            );
+        }
+    }
+    form.push_str("}\n");
+    files.push(("src/Web/Form/LargeForm.php".to_string(), form));
+    files.push((
+        "src/Web/ConsumerForm.php".to_string(),
+        FORM_CONSUMER_PHP.to_string(),
+    ));
     files
 }
 
@@ -438,6 +497,7 @@ fn bench_yii_name_completion(c: &mut Criterion) {
     let translation_uri =
         Uri::from_file_path(dir.path().join("src/Web/ConsumerTitle.php")).unwrap();
     let record_uri = Uri::from_file_path(dir.path().join("src/Catalog/Catalog.php")).unwrap();
+    let form_uri = Uri::from_file_path(dir.path().join("src/Web/ConsumerForm.php")).unwrap();
 
     // (benchmark, document, its text, the literal to complete inside, a
     // name the completion must offer)
@@ -547,6 +607,20 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             RECORD_CONSUMER_PHP,
             "with('author.'",
             "posts",
+        ),
+        (
+            "form_field",
+            &form_uri,
+            FORM_CONSUMER_PHP,
+            "text($form, 'section1'",
+            "section1Action7",
+        ),
+        (
+            "hydration_map_key",
+            &form_uri,
+            FORM_CONSUMER_PHP,
+            "['section1'",
+            "section1Action7",
         ),
     ];
 

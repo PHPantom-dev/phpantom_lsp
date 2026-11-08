@@ -274,7 +274,9 @@ impl Backend {
                 // the name-only search an unresolved receiver falls back to
                 // would match every method of that name.  Likewise an
                 // attribute's named-argument label whose parameter the
-                // constructor does not promote names no property.
+                // constructor does not promote names no property, and a
+                // field helper's string given something other than a form
+                // model names none either.
                 if hierarchy.is_none()
                     && matches!(
                         docblock_ref,
@@ -282,6 +284,7 @@ impl Backend {
                             | DocblockMemberRef::AttributeNamedArg
                             | DocblockMemberRef::EntityField
                             | DocblockMemberRef::YiiAttribute
+                            | DocblockMemberRef::YiiProperty { form_model: true }
                     )
                 {
                     return Vec::new();
