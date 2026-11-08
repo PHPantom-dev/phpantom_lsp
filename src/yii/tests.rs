@@ -228,3 +228,23 @@ fn params_merge_by_rank() {
          mailer: null, spread: array{known: int}, list: array, traceLink?: string}"
     );
 }
+
+#[test]
+fn an_asset_entry_is_keyed_under_its_bundle_directory() {
+    use super::assets::{asset_file_key, split_asset_file_key};
+    let key = asset_file_key("@assetsSource/main", "css/site.css").unwrap();
+    assert_eq!(
+        split_asset_file_key(&key),
+        ("@assetsSource/main", "css/site.css")
+    );
+    assert_eq!(
+        asset_file_key("@assetsSource/main", "https://cdn.example.com/x.css"),
+        None
+    );
+    assert_eq!(
+        asset_file_key("@assetsSource/main", "//cdn.example.com/x.css"),
+        None
+    );
+    assert_eq!(asset_file_key("@assetsSource/main", "/favicon.css"), None);
+    assert_eq!(asset_file_key("@assetsSource/main", ""), None);
+}

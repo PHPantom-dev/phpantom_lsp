@@ -72,6 +72,20 @@ const STUBS: &[(&str, &str)] = &[
     ),
 ];
 
+/// An asset bundle whose `$css` entry is being typed, over a directory of
+/// `ACTIONS` stylesheets per section.
+const ASSET_CONSUMER_PHP: &str = r#"<?php
+namespace App\Asset;
+
+use Yiisoft\Assets\AssetBundle;
+
+final class ConsumerAsset extends AssetBundle
+{
+    public ?string $sourcePath = '@root/assets';
+    public array $css = ['section1/'];
+}
+"#;
+
 const VIEW_CONSUMER_PHP: &str = r#"<?php
 namespace App\Web\Consumer;
 
@@ -241,6 +255,10 @@ fn generate_application() -> Vec<(String, String)> {
         "config/di/consumer.php".to_string(),
         DI_CONSUMER_PHP.to_string(),
     ));
+    files.push((
+        "src/Asset/ConsumerAsset.php".to_string(),
+        ASSET_CONSUMER_PHP.to_string(),
+    ));
     files
 }
 
@@ -258,6 +276,14 @@ async fn setup_yii_backend() -> (Backend, tempfile::TempDir) {
         let full = dir.path().join(path);
         fs::create_dir_all(full.parent().unwrap()).unwrap();
         fs::write(&full, content).unwrap();
+    }
+    // The stylesheets the asset bundle lists, which are never opened.
+    for section in 0..SECTIONS {
+        let assets = dir.path().join(format!("assets/section{section}"));
+        fs::create_dir_all(&assets).unwrap();
+        for action in 0..ACTIONS {
+            fs::write(assets.join(format!("action{action}.css")), "body {}\n").unwrap();
+        }
     }
 
     let (mappings, _vendor_dir) = phpantom_lsp::composer::parse_composer_json(dir.path());
@@ -316,6 +342,7 @@ fn bench_yii_name_completion(c: &mut Criterion) {
         Uri::from_file_path(dir.path().join("resources/views/section1/consumer.php")).unwrap();
     let route_uri = Uri::from_file_path(dir.path().join("src/Web/ConsumerAction.php")).unwrap();
     let di_uri = Uri::from_file_path(dir.path().join("config/di/consumer.php")).unwrap();
+    let asset_uri = Uri::from_file_path(dir.path().join("src/Asset/ConsumerAsset.php")).unwrap();
 
     // (benchmark, document, its text, the literal to complete inside, a
     // name the completion must offer)
@@ -342,6 +369,13 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             "_partial",
         ),
         ("alias_name", &view_uri, VIEW_CONSUMER_PHP, "'@'", "@views"),
+        (
+            "asset_file",
+            &asset_uri,
+            ASSET_CONSUMER_PHP,
+            "['section1/'",
+            "action7.css",
+        ),
         (
             "route_name",
             &route_uri,

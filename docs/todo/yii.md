@@ -5,7 +5,8 @@ built from small, typed components with little magic, so the generic
 engine already types most of it. On top of that, route names, route
 arguments, view names, and the members and arguments DI definitions name
 complete, navigate, and are checked, path aliases navigate to their
-declarations, and the `$params` keys a configuration file reads complete,
+declarations, the files an asset bundle lists navigate, complete, and are
+checked, and the `$params` keys a configuration file reads complete,
 navigate, are checked, and are typed. What is still missing is the
 navigation between the rest of the names Yii keeps in configuration
 (events, translations) and the code and files they point to, and checking
@@ -261,26 +262,6 @@ Complete, navigate, and check the relation names against those methods,
 and the attribute names against the record's properties, or, for a
 record without properties, against the table's columns (Y8). Wait for a
 user to ask: no project in our test set uses it.
-
----
-
-## Y16. Asset bundle file paths
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-final class MainAsset extends AssetBundle
-{
-    public ?string $sourcePath = '@assetsSource/main';
-    public array $css = ['site.css'];
-}
-```
-
-The aliases in `$basePath`, `$baseUrl`, and `$sourcePath` already
-navigate. The entries of `$css` and `$js` are relative to `$sourcePath`
-(or `$basePath` when it is unset) and do not. Navigate from an entry to
-its file, complete from the files under that directory, and report an
-entry with no file. An entry that is a URL is left alone.
 
 ---
 

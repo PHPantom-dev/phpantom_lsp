@@ -82,6 +82,10 @@ check('@views is declared in config/common/aliases.php', $aliases->get('@views')
 check('@views/blog is a directory', is_dir($aliases->get('@views/blog')));
 check('@assetsSource is declared in config/common/aliases.php', $aliases->get('@assetsSource') === __DIR__ . '/assets');
 check("MainAsset's @assetsSource/main is a directory", is_dir($aliases->get('@assetsSource/main')));
+$mainAsset = new \App\Web\Shared\Layout\Main\MainAsset();
+foreach ($mainAsset->css as $entry) {
+    check("MainAsset's '$entry' is a file under its \$sourcePath", is_file($aliases->get($mainAsset->sourcePath) . '/' . $entry));
+}
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
 

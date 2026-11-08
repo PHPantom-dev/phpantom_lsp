@@ -51,7 +51,10 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `'@assetsSource'` in `$sourcePath`, which lands on its declaration in
   `config/common/aliases.php`, or hover it for the path it stands for. The
   rest of the string, `/main`, links to the `assets/main` directory, and an
-  `@` typed in any string completes the declared aliases.
+  `@` typed in any string completes the declared aliases. Go to the
+  definition of `'site.css'` in `$css`, which opens `assets/main/site.css`
+  under `$sourcePath`. Clear it to complete the files there, and misspell it
+  to see it reported.
 - Open `config/common/di/application.php`. Go to the definition of `'name'` in
   `$params['application']['name']`, which lands on its entry in
   `config/common/application.php`, or hover it for the type of its value.

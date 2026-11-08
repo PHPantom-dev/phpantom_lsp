@@ -102,6 +102,7 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
         // A directory is no place an editor can open.
         StringKeyKind::YiiViewPath => Vec::new(),
+        StringKeyKind::YiiAssetFile => backend.resolve_yii_asset_definitions(key),
         StringKeyKind::YiiAlias => backend.yii_alias_definitions(key),
         StringKeyKind::CssClass => backend.css_class_definitions(key),
         StringKeyKind::YiiParam => backend.yii_param_definitions(key),
@@ -342,6 +343,7 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::ViteAsset
         | StringKeyKind::InertiaPage
         | StringKeyKind::YiiViewPath
+        | StringKeyKind::YiiAssetFile
         | StringKeyKind::CssClass => find_string_key_usages(kind, key, backend, snapshot, true),
         // A Symfony declaration is a span in a configuration file's (or a
         // template's) map like any use, so the usages already hold it.

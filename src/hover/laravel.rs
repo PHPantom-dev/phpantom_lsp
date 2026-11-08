@@ -485,6 +485,16 @@ impl Backend {
                 };
                 ("View directory", detail.to_string())
             }
+            StringKeyKind::YiiAssetFile => {
+                view_path = self.yii_asset_display(key);
+                shown = &view_path;
+                let detail = if self.yii_asset_file(key).is_some() {
+                    "A file of the asset bundle"
+                } else {
+                    "No file is there"
+                };
+                ("Asset file", detail.to_string())
+            }
             // Strings start with an `@` for many reasons besides an alias,
             // so only a declared one is shown.
             StringKeyKind::YiiAlias => ("Alias", self.yii_alias_detail(key)?),

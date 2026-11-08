@@ -361,6 +361,7 @@ mod watched_files;
 mod wordpress_hooks;
 mod workspace_symbols;
 mod yii_aliases;
+mod yii_assets;
 mod yii_config_plugin;
 mod yii_css_classes;
 mod yii_definitions;

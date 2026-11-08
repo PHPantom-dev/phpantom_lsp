@@ -162,6 +162,10 @@ pub(crate) enum StringKeyKind {
     /// The directory of views a Yii renderer's `withViewPath()` gives it,
     /// keyed by the path it names, alias and all.
     YiiViewPath,
+    /// A file a Yii asset bundle's `$css` or `$js` lists, keyed by the path
+    /// it names under the bundle's `$sourcePath` (or `$basePath`), alias
+    /// and all (see `yii::assets`).
+    YiiAssetFile,
     /// A Yii route name: declared by a `Route` definition's `->name()`,
     /// after the name prefixes of the groups around it, and read by a URL
     /// generator's `generate()`, `generateAbsolute()`, and
@@ -323,6 +327,7 @@ impl StringKeyKind {
             | Self::TwigVariable => KeyFramework::Twig,
             Self::YiiView
             | Self::YiiViewPath
+            | Self::YiiAssetFile
             | Self::YiiRoute
             | Self::YiiRouteArgument
             | Self::YiiAlias

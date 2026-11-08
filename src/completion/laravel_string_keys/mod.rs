@@ -40,6 +40,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         | StringKeyKind::TempestView { .. }
         | StringKeyKind::TwigTemplate
         | StringKeyKind::YiiView
+        | StringKeyKind::YiiAssetFile
         | StringKeyKind::Asset
         | StringKeyKind::MixAsset
         | StringKeyKind::ViteAsset
@@ -266,6 +267,9 @@ impl Backend {
             // A path is completed a directory at a time from the files on
             // disk (see `try_laravel_string_key_completion_inner`).
             StringKeyKind::Asset | StringKeyKind::ViteAsset => Arc::new([]),
+            // So is a file an asset bundle lists, from the directory the
+            // bundle names (`crate::completion::yii_assets`).
+            StringKeyKind::YiiAssetFile => Arc::new([]),
         }
     }
 

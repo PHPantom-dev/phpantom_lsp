@@ -16,6 +16,9 @@ final class MainAsset extends AssetBundle
     public ?string $baseUrl = '@assetsUrl/main';
     public ?string $sourcePath = '@assetsSource/main';
 
+    // Try: go to the definition of 'site.css', which opens
+    // assets/main/site.css under $sourcePath. Clear it to complete the files
+    // there, or misspell it to see it reported.
     public array $css = [
         'site.css',
     ];

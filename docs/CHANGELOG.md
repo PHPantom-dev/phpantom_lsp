@@ -153,6 +153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Yii
 
+- **Yii asset bundle files.** In a Yii asset bundle, a file listed in `$css` or `$js` jumps to the file under the bundle's `$sourcePath` (or `$basePath`), completes from the files there, and is reported when no file is there. An entry that is a URL is left alone.
 - **Yii aliases.** In a Yii project, an alias such as `@runtime` at the start of any string jumps to the configuration that declares it, lists the strings that name it, and completes from the declared aliases. Hovering it shows the path it stands for, and the rest of the string links to the file or directory it names.
 - **Yii params.** In a Yii configuration file, a key read from `$params`, like `'name'` in `$params['application']['name']`, jumps to the params file that declares it, completes from the keys declared beside it, and is reported when no params file declares it. Hovering it shows the type of its value, and the read is typed as that value. The params are merged the way `yiisoft/config` merges them, the installed packages' included.
 - **Yii `config-plugin` in `composer.json`.** In a Yii project, the `config-plugin` of the project's or a package's `composer.json` completes group names from the ones the project and its installed packages use, and file paths from its source directory. A path jumps to its file and a `$group` entry to the group it names, and a path with no file is reported.

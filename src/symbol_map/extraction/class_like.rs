@@ -23,6 +23,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_twig_callable_attributes(class, ctx);
     emit_twig_global_declarations(class, ctx);
     emit_yii_route_argument_spans(class, ctx);
+    emit_yii_asset_bundle_spans(class, ctx);
     emit_drupal_entity_type_spans(class, ctx);
     emit_drupal_render_element_spans(class, ctx);
     emit_drupal_plugin_declarations(class, ctx);

@@ -22,7 +22,7 @@ use crate::symbol_map::{ReceiverClass, StringKeyKind};
 use crate::virtual_members::laravel::helpers::{extract_string_literal, resolved_string_literal};
 use crate::yii::views::{
     controller_name, is_absolute_view_path, is_layout_method, is_view_render_method, layout_key,
-    normalize_view_path, view_key,
+    normalize_view_path, path_value, view_key,
 };
 
 /// Where the render calls being extracted are written, which says what a
@@ -72,6 +72,47 @@ pub(crate) fn class_view_base(
         walker.walk_class_like_member(member, &mut calls);
     }
     calls.base(class_fqn)
+}
+
+/// Record the files an asset bundle's `$css` and `$js` list, each keyed by
+/// the directory the bundle names and the entry (see
+/// [`crate::yii::assets`]).
+pub(in crate::symbol_map::extraction) fn emit_yii_asset_bundle_spans(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some(file_dir) = ctx.yii_dir else {
+        return;
+    };
+    let is_bundle = crate::yii::assets::is_asset_bundle(class, |parent| {
+        ctx.resolved_name_at(parent.span().start.offset)
+            .unwrap_or_else(|| bytes_to_str(parent.value()))
+            .to_string()
+    });
+    if !is_bundle {
+        return;
+    }
+    let Some(dir) = crate::yii::assets::bundle_dir(class, file_dir) else {
+        return;
+    };
+    for entry in crate::yii::assets::bundle_entries(class) {
+        let Some((text, start, end)) = resolved_string_literal(entry, ctx.content) else {
+            continue;
+        };
+        let Some(key) = crate::yii::assets::asset_file_key(&dir, text) else {
+            continue;
+        };
+        ctx.spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                key,
+                kind: StringKeyKind::YiiAssetFile,
+                is_write: false,
+                is_optional: false,
+            },
+        });
+    }
 }
 
 /// Record the alias a string starts with, `@runtime` in `'@runtime/logs'`,
@@ -306,7 +347,7 @@ fn record_yii_view_path_site(
     let Some(Argument::Positional(argument)) = argument_list.arguments.first() else {
         return;
     };
-    let Some(key) = view_path_value(argument.value, dir) else {
+    let Some(key) = path_value(argument.value, dir) else {
         return;
     };
     let literal = match argument.value {
@@ -377,7 +418,7 @@ impl ViewPathCalls {
         };
         if method.eq_ignore_ascii_case("withViewPath") {
             self.paths
-                .push(first.and_then(|value| view_path_value(value, dir)));
+                .push(first.and_then(|value| path_value(value, dir)));
         } else if method.eq_ignore_ascii_case("withController") {
             let is_this = matches!(
                 first,
@@ -421,18 +462,6 @@ impl ViewPathCalls {
             Some(ControllerDir::Unknown) => None,
         }
     }
-}
-
-/// The view path a `withViewPath()` argument gives: an alias or an
-/// absolute path, written out or built from `__DIR__`.
-fn view_path_value(value: &Expression<'_>, dir: &Path) -> Option<String> {
-    if let Expression::Literal(Literal::String(literal)) = value {
-        let text = literal.value.and_then(crate::atom::literal_bytes_to_str)?;
-        return (text.starts_with('@') || is_absolute_view_path(text))
-            .then(|| normalize_view_path(text));
-    }
-    let path = try_evaluate_path_expr(value, dir)?;
-    is_absolute_view_path(&path).then(|| normalize_view_path(&path))
 }
 
 /// Finds the `with…()` calls that set up a class's renderer.

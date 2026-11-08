@@ -46,6 +46,7 @@ enum CheckedStringKind {
     MessengerBus,
     YiiView,
     YiiViewPath,
+    YiiAssetFile,
     YiiRoute,
     YiiRouteArgument,
     YiiDefinitionArgument,
@@ -89,6 +90,7 @@ impl CheckedStringKind {
             StringKeyKind::MessengerBus => Self::MessengerBus,
             StringKeyKind::YiiView => Self::YiiView,
             StringKeyKind::YiiViewPath => Self::YiiViewPath,
+            StringKeyKind::YiiAssetFile => Self::YiiAssetFile,
             StringKeyKind::YiiRoute => Self::YiiRoute,
             StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
             StringKeyKind::YiiDefinitionArgument => Self::YiiDefinitionArgument,
@@ -622,6 +624,10 @@ impl<'a> DeclaredKeys<'a> {
                 .backend
                 .yii_view_dir_exists(key)
                 .map(|exists| (exists, "view directory", "invalid_yii_view_path")),
+            CheckedStringKind::YiiAssetFile => self
+                .backend
+                .yii_asset_file_exists(key)
+                .map(|exists| (exists, "asset file", "invalid_yii_asset")),
             CheckedStringKind::YiiRoute => self.judge_yii_route(key),
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
             CheckedStringKind::YiiDefinitionArgument => self.judge_yii_definition_argument(key),
@@ -1233,6 +1239,9 @@ impl Backend {
                 let message = match kind {
                     CheckedStringKind::YiiView | CheckedStringKind::YiiViewPath => {
                         format!("Unknown {} '{}'", label, self.yii_view_display(key))
+                    }
+                    CheckedStringKind::YiiAssetFile => {
+                        format!("Unknown {} '{}'", label, self.yii_asset_display(key))
                     }
                     CheckedStringKind::YiiRouteArgument => format!(
                         "Unknown {} '{}'",

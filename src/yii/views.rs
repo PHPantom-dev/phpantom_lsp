@@ -125,6 +125,20 @@ pub(crate) fn normalize_view_path(path: &str) -> String {
     }
 }
 
+/// The directory a path value written in a file in `dir` names: an alias
+/// or an absolute path, written out or built from `__DIR__`, as a
+/// `withViewPath()` argument or an asset bundle's `$sourcePath` gives one.
+pub(crate) fn path_value(value: &mago_syntax::cst::Expression<'_>, dir: &Path) -> Option<String> {
+    if let mago_syntax::cst::Expression::Literal(mago_syntax::cst::Literal::String(literal)) = value
+    {
+        let text = literal.value.and_then(crate::atom::literal_bytes_to_str)?;
+        return (text.starts_with('@') || is_absolute_view_path(text))
+            .then(|| normalize_view_path(text));
+    }
+    let path = crate::document_links::try_evaluate_path_expr(value, dir)?;
+    is_absolute_view_path(&path).then(|| normalize_view_path(&path))
+}
+
 /// The key a view `name` passed to a render call names, as
 /// `ViewTrait::resolveViewFilePath()` builds the path: an absolute path is
 /// itself, one starting with `./` or `../` is relative to `current_dir`,

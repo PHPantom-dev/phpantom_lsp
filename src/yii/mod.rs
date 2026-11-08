@@ -26,10 +26,14 @@
 //! files the merge plan lists, and the keys a file reads from them are
 //! spans keyed by their path (see [`params`]).
 //!
+//! The files an asset bundle's `$css` and `$js` list are spans keyed by
+//! the directory the bundle names and the entry (see [`assets`]).
+//!
 //! The `config-plugin` of a `composer.json` names those groups and lists
 //! their files; it is read where it is written (see [`config_plugin`]).
 
 pub(crate) mod aliases;
+pub(crate) mod assets;
 pub(crate) mod config_plugin;
 pub(crate) mod definitions;
 pub(crate) mod params;
