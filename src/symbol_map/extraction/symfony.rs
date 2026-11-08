@@ -313,12 +313,16 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         } else {
             key.to_string()
         };
+        // `has()` asks whether a name exists, and a `get()` told what to do
+        // with an invalid reference may be told to do without one.
+        let is_optional = receiver == ReceiverClass::ContainerLookup
+            && (member_name.eq_ignore_ascii_case("has") || argument_list.arguments.len() > 1);
         ctx.typed_receiver_sites.push(TypedReceiverSite {
             start: start as u32,
             end: end as u32,
             key,
             is_write,
-            is_optional: false,
+            is_optional,
             guards: 0,
             receiver,
         });

@@ -1110,9 +1110,15 @@ fn built_name(expression: &Expression<'_>, content: &str) -> BuiltName {
     if let Some((key, start, end)) = resolved_string_literal(expression, content) {
         return BuiltName::Literal(key.to_string(), start as u32, end as u32);
     }
+    BuiltName::Pattern(name_shape(expression))
+}
+
+/// The shape of the name `expression` builds: its text where it is a
+/// string, `*` where it is anything else (`search.view_*`).
+pub(crate) fn name_shape(expression: &Expression<'_>) -> String {
     let mut pattern = String::new();
     push_name_parts(expression, &mut pattern);
-    BuiltName::Pattern(pattern)
+    pattern
 }
 
 /// Append the shape of `expression` to `pattern`: its text where it is a

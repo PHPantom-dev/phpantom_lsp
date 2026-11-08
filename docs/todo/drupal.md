@@ -167,22 +167,6 @@ the event names complete where Drupal's event dispatcher takes one.
 
 ---
 
-## DR17. Warn on unknown service IDs
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-$manager = \Drupal::service('acme.order_manger');
-```
-
-A service ID no `*.services.yml` declares is a typo or a module the site
-lacks, and the container throws for it at run time. Report one where
-`\Drupal::service()` and `$container->get()` take it. A module's
-`ServiceProvider` class can register services in PHP, which no YAML file
-lists, so an ID such a provider may register must not warn.
-
----
-
 ## DR18. Warn on unknown entity type IDs
 
 **Impact: Medium · Complexity: Low-Medium**

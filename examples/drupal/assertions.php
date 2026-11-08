@@ -124,6 +124,7 @@ $container = new ContainerBuilder();
 (new YamlFileLoader($container))->load("$module/acme.services.yml");
 
 check('acme.greeter is declared in acme.services.yml', $container->hasDefinition('acme.greeter'));
+check('The misspelt acme.greeterr is no service of the module', !$container->has('acme.greeterr'));
 check('acme.greeter is built from Greeter', $container->getDefinition('acme.greeter')->getClass() === Greeter::class);
 check('The class acme.services.yml names exists', class_exists((string) $container->getDefinition('acme.greeter')->getClass()));
 check('The Greeter class name is an alias of acme.greeter', $container->hasAlias(Greeter::class) && (string) $container->getAlias(Greeter::class) === 'acme.greeter');

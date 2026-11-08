@@ -151,6 +151,7 @@ impl Backend {
                 if *change_type == FileChangeType::Deleted {
                     self.forget_laravel_file_contributions(uri);
                     self.forget_drupal_service_provider(uri);
+                    self.forget_drupal_service_definitions(uri);
                 }
             }
             if *change_type == FileChangeType::Deleted {

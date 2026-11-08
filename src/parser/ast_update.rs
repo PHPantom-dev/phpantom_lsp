@@ -147,9 +147,11 @@ impl Backend {
         // to files that register a `Storage::extend()` driver.
         self.refresh_laravel_storage_drivers(uri, content);
 
-        // Keep the classes Drupal service providers give services coherent
-        // with edits to the providers.
+        // Keep the classes Drupal service providers give services, and the
+        // services PHP code may define, coherent with edits to the files
+        // that do.
         self.refresh_drupal_service_provider(uri, content);
+        self.refresh_drupal_service_definitions(uri, content);
 
         // Keep the reverse pivot index coherent with edits to files that
         // declare (or previously declared) a many-to-many relationship.

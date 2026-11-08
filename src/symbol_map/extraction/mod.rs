@@ -384,6 +384,7 @@ use class_like::*;
 use doctrine_dql::*;
 pub(crate) use doctrine_dql::{PathEvent, undeclared_on_some_path};
 use doctrine_fields::*;
+pub(crate) use drupal::name_shape;
 use drupal::*;
 use expressions::*;
 use keywords::*;

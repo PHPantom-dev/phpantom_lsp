@@ -713,3 +713,162 @@ async fn manager_hover(backend: &Backend, php: &Uri, position: Position) -> Stri
         .await
         .unwrap_or_default()
 }
+
+/// Core as a site holds it, with what PHP code adds to the container and a
+/// test module's services, and the custom module's services and hooks.
+const UNKNOWN_SERVICE_SITE: &[(&str, &str)] = &[
+    (".git/HEAD", "ref: refs/heads/main\n"),
+    (".gitignore", "/web/core/\n"),
+    (
+        "web/core/core.services.yml",
+        "services:\n  config.factory:\n    class: Drupal\\Core\\Config\\ConfigFactory\n",
+    ),
+    (
+        "web/core/modules/system/tests/modules/fixture/fixture.services.yml",
+        "services:\n  config.fixture:\n    class: Drupal\\Core\\Config\\ConfigFactory\n",
+    ),
+    (
+        "web/core/lib/Drupal/Component/DependencyInjection/ContainerInterface.php",
+        "<?php\nnamespace Drupal\\Component\\DependencyInjection;\ninterface ContainerInterface extends \\Symfony\\Component\\DependencyInjection\\ContainerInterface {}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/CoreServiceProvider.php",
+        r#"<?php
+namespace Drupal\Core;
+
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+
+class CoreServiceProvider {
+    public function register(ContainerBuilder $container) {
+        $container->register('core.registered', \stdClass::class);
+        $ids = ['core.listed'];
+        foreach (['render', 'data'] as $bin) {
+            $container->setAlias("cache.$bin", 'core.registered');
+        }
+    }
+}
+"#,
+    ),
+    (
+        "web/core/lib/Drupal/Core/Installer.php",
+        "<?php\nnamespace Drupal\\Core;\nclass Installer {\n    public function run($container) {\n        $container->set('core.set_elsewhere', new \\stdClass());\n        $message = 'core.not_a_service';\n    }\n}\n",
+    ),
+    (
+        "web/modules/custom/acme/src/Hook/AcmeHooks.php",
+        "<?php\nnamespace Drupal\\acme\\Hook;\nclass AcmeHooks {}\n",
+    ),
+    (SERVICES_PATH, SERVICES),
+];
+
+const LOOKUPS: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Component\DependencyInjection\ContainerInterface;
+use Psr\Container\ContainerInterface as AnyContainer;
+
+final class Lookups {
+    public function run(ContainerInterface $container, AnyContainer $any): void {
+        \Drupal::service('acme.greeter');
+        \Drupal::service('acme.greeterr');
+        $container->get('acme.typo');
+        $container->get('config.factory');
+        $container->get('config.fixture');
+        $container->get('core.registered');
+        $container->get('core.listed');
+        $container->get('cache.render');
+        $container->get('core.set_elsewhere');
+        $container->get('core.not_a_service');
+        $container->get('service_container');
+        $container->get('Drupal\acme\Hook\AcmeHooks');
+        $container->get('Drupal\acme\Missing');
+        $container->get('acme.soft', 2);
+        $any->get('acme.elsewhere');
+        \Drupal::hasService('acme.maybe');
+        $container->has('acme.maybe_too');
+        if ($container->has('acme.checked')) {
+            $container->get('acme.checked');
+        }
+    }
+}
+"#;
+
+const LOOKUPS_PATH: &str = "web/modules/custom/acme/src/Lookups.php";
+
+/// The unknown-service messages the diagnostics of `content`, open at
+/// `path`, report.
+fn unknown_services(
+    backend: &Backend,
+    dir: &tempfile::TempDir,
+    path: &str,
+    content: &str,
+) -> Vec<String> {
+    crate::common::slow_diagnostic_messages(
+        backend,
+        uri_for(dir, path).as_str(),
+        content,
+        "invalid_drupal_service",
+    )
+}
+
+/// [`workspace_in`] holding [`UNKNOWN_SERVICE_SITE`] and `files`.
+async fn unknown_service_site(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in UNKNOWN_SERVICE_SITE {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    workspace_in(dir, files).await
+}
+
+#[tokio::test]
+async fn a_service_id_nothing_may_define_is_reported() {
+    let (backend, dir) = unknown_service_site(&[(LOOKUPS_PATH, LOOKUPS)]).await;
+    assert_eq!(
+        unknown_services(&backend, &dir, LOOKUPS_PATH, LOOKUPS),
+        vec![
+            "Unknown service 'acme.greeterr'".to_string(),
+            "Unknown service 'acme.typo'".to_string(),
+            "Unknown service 'core.not_a_service'".to_string(),
+            "Unknown service 'Drupal\\acme\\Missing'".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_lookup_that_may_catch_a_missing_service_is_not_checked() {
+    let lookups = LOOKUPS.replace(
+        "final class Lookups {",
+        "use Symfony\\Component\\DependencyInjection\\Exception\\ServiceNotFoundException;\n\nfinal class Lookups {",
+    );
+    let (backend, dir) = unknown_service_site(&[(LOOKUPS_PATH, lookups.as_str())]).await;
+    assert!(unknown_services(&backend, &dir, LOOKUPS_PATH, &lookups).is_empty());
+}
+
+#[tokio::test]
+async fn test_code_is_not_checked() {
+    let path = "web/modules/custom/acme/tests/src/Kernel/LookupsTest.php";
+    let (backend, dir) = unknown_service_site(&[(path, LOOKUPS)]).await;
+    assert!(unknown_services(&backend, &dir, path, LOOKUPS).is_empty());
+}
+
+#[tokio::test]
+async fn a_service_provider_is_read_again_as_it_is_edited() {
+    let provider_path = "web/modules/custom/acme/src/AcmeServiceProvider.php";
+    let provider = "<?php\nnamespace Drupal\\acme;\nuse Drupal\\Core\\DependencyInjection\\ServiceProviderBase;\nclass AcmeServiceProvider extends ServiceProviderBase {\n    public function register($container) {\n        $container->register('acme.typo', Greeter::class);\n    }\n}\n";
+    let (backend, dir) =
+        unknown_service_site(&[(LOOKUPS_PATH, LOOKUPS), (provider_path, provider)]).await;
+    let reported = unknown_services(&backend, &dir, LOOKUPS_PATH, LOOKUPS);
+    assert!(
+        !reported.contains(&"Unknown service 'acme.typo'".to_string()),
+        "{reported:?}"
+    );
+
+    let edited = provider.replace("'acme.typo'", "'acme.other'");
+    backend.update_ast(uri_for(&dir, provider_path).as_str(), &edited);
+    let reported = unknown_services(&backend, &dir, LOOKUPS_PATH, LOOKUPS);
+    assert!(
+        reported.contains(&"Unknown service 'acme.typo'".to_string()),
+        "{reported:?}"
+    );
+}

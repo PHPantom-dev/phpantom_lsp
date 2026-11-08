@@ -652,10 +652,16 @@ fn extract_static_method_call<'a>(
             &static_call.argument_list,
             ctx,
         );
-        if ctx.drupal && crate::drupal::is_service_lookup(semantic_subject, &member_name) {
-            try_emit_laravel_string_span(
+        if ctx.drupal
+            && crate::drupal::is_service_lookup(semantic_subject, &member_name)
+            && let Some(id) = static_call.argument_list.arguments.first()
+        {
+            // `hasService()` asks whether a service exists.
+            push_laravel_string_span(
                 crate::symbol_map::StringKeyKind::ServiceId,
-                &static_call.argument_list,
+                false,
+                member_name.eq_ignore_ascii_case("hasService"),
+                id.value(),
                 ctx.content,
                 &mut ctx.spans,
             );

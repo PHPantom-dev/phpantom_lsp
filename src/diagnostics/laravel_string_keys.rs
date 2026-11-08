@@ -194,6 +194,9 @@ struct DeclaredKeys<'a> {
     middleware_known: bool,
     /// The service IDs the project's configuration declares, sorted.
     services: Vec<String>,
+    /// The service IDs a Drupal site's services files declare, sorted, and
+    /// those its PHP code may define.
+    drupal_services: Option<(Vec<String>, Arc<crate::drupal::services::PhpServiceIds>)>,
     /// The container parameters the project's configuration declares,
     /// sorted.
     parameters: Vec<String>,
@@ -243,7 +246,10 @@ impl<'a> DeclaredKeys<'a> {
     /// call `user_file_symbol_maps()` → `ensure_workspace_indexed()` →
     /// `parse_files_parallel()` → `update_ast()`, which acquires a WRITE
     /// lock on `Backend::files`.
-    fn enumerate(backend: &'a Backend, spans: &[CheckedKeySpan]) -> Self {
+    ///
+    /// `in_drupal_site` tells whether the file is a Drupal site's, whose
+    /// service IDs are judged as Drupal's.
+    fn enumerate(backend: &'a Backend, spans: &[CheckedKeySpan], in_drupal_site: bool) -> Self {
         let names = |wanted: fn(CheckedStringKind) -> bool| spans.iter().any(|span| wanted(span.0));
         let has_route = names(|kind| kind == CheckedStringKind::Route);
         let has_config_resource =
@@ -388,11 +394,21 @@ impl<'a> DeclaredKeys<'a> {
             !index.is_empty() && !index.is_incomplete()
         };
 
-        let services = if has_service {
+        let services = if has_service && !in_drupal_site {
             backend.symfony_project_declared_names(crate::symbol_map::StringKeyKind::ServiceId)
         } else {
             Vec::new()
         };
+        // Core's and contributed modules' services files are only read once
+        // the workspace index has walked the folders `.gitignore` leaves
+        // out.
+        let drupal_services = (has_service && in_drupal_site).then(|| {
+            backend.ensure_workspace_index_ready_for_request();
+            (
+                backend.symfony_declared_names(crate::symbol_map::StringKeyKind::ServiceId),
+                backend.drupal_php_service_ids(),
+            )
+        });
         let parameters = if has_parameter {
             backend.symfony_project_declared_names(
                 crate::symbol_map::StringKeyKind::ContainerParameter,
@@ -483,6 +499,7 @@ impl<'a> DeclaredKeys<'a> {
             gate_abilities,
             middleware_known,
             services,
+            drupal_services,
             parameters,
             symfony_routes,
             symfony_route_world,
@@ -557,6 +574,9 @@ impl<'a> DeclaredKeys<'a> {
                     "invalid_laravel_middleware",
                 )
             }),
+            CheckedStringKind::ServiceId if self.drupal_services.is_some() => {
+                self.judge_drupal_service(key)
+            }
             CheckedStringKind::ServiceId => self.judge_service(key),
             CheckedStringKind::ContainerParameter => self.judge_parameter(key),
             CheckedStringKind::SymfonyRoute => self.judge_symfony_route(key),
@@ -685,6 +705,29 @@ impl<'a> DeclaredKeys<'a> {
             return None;
         }
         Some((false, VERDICT.0, VERDICT.1))
+    }
+
+    /// A Drupal service is declared by a services file, or may be defined
+    /// by PHP code (see [`crate::drupal::services`]).  A service named after
+    /// its class, as an autowired one or a hook class is, is declared by a
+    /// key the services files' class reference stands for rather than by a
+    /// service ID, so only a class that does not exist is told missing.  A
+    /// site whose services files were not read declares none at all.
+    fn judge_drupal_service(&self, key: &str) -> Verdict {
+        let (declared, php) = self.drupal_services.as_ref()?;
+        if declared.is_empty() {
+            return None;
+        }
+        let valid = declared
+            .binary_search_by(|name| name.as_str().cmp(key))
+            .is_ok()
+            || php.declares(key)
+            || (key.contains('\\')
+                && self
+                    .backend
+                    .find_or_load_class(key.trim_start_matches('\\'))
+                    .is_some());
+        Some((valid, "service", "invalid_drupal_service"))
     }
 
     /// Every render element is a class with an element attribute or
@@ -1023,6 +1066,30 @@ impl Backend {
         let extra = self.typed_receiver_spans_for(uri, symbol_map);
         let morph_columns = self.morph_column_spans_for(uri, symbol_map);
         let is_drupal_test_code = self.is_drupal_example_or_test_code(uri);
+        let drupal = self.is_in_drupal_web_root(uri);
+        // A Drupal file that names the exception a missing service throws
+        // may catch it, and an ID it checks with `has()` may be missing.
+        let catches_missing_service = drupal
+            && (content.contains("ServiceNotFoundException")
+                || content.contains("NotFoundExceptionInterface"));
+        let checked_service_ids: Vec<&str> = if drupal {
+            symbol_map
+                .spans
+                .iter()
+                .chain(extra.iter())
+                .filter_map(|span| match &span.kind {
+                    SymbolKind::StringKey {
+                        kind: crate::symbol_map::StringKeyKind::ServiceId,
+                        key,
+                        is_optional: true,
+                        ..
+                    } => Some(key.as_str()),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let key_spans: Vec<CheckedKeySpan> = symbol_map
             .spans
             .iter()
@@ -1047,21 +1114,29 @@ impl Backend {
                 if *is_write || *is_optional || !self.string_key_kind_enabled(*kind) {
                     return None;
                 }
-                // Only Symfony's naming tells an application's own service
-                // IDs and parameters from the ones its bundles register;
-                // Drupal reads the same names with no such rule to judge
-                // them by.
+                // Only Symfony's naming tells an application's own
+                // parameters from the ones its bundles register; Drupal
+                // reads the same names with no such rule to judge them by.
+                // Its services are a closed world, but for what PHP code
+                // may add (see `crate::drupal::services`).
                 if kind.framework() == crate::symbol_map::KeyFramework::ServiceContainer
                     && !self.is_symfony_project()
+                    && !(drupal && *kind == crate::symbol_map::StringKeyKind::ServiceId)
                 {
                     return None;
                 }
-                // Test code passes invented route names to mocks and uses
-                // its test modules' elements and libraries, and an
-                // `*.api.php` file's examples name invented ones too.
+                if *kind == crate::symbol_map::StringKeyKind::ServiceId
+                    && (catches_missing_service || checked_service_ids.contains(&key.as_str()))
+                {
+                    return None;
+                }
+                // Test code passes invented route names and services to
+                // mocks and uses its test modules' elements and libraries,
+                // and an `*.api.php` file's examples name invented ones too.
                 if matches!(
                     kind,
-                    crate::symbol_map::StringKeyKind::DrupalRoute
+                    crate::symbol_map::StringKeyKind::ServiceId
+                        | crate::symbol_map::StringKeyKind::DrupalRoute
                         | crate::symbol_map::StringKeyKind::DrupalRenderElement
                         | crate::symbol_map::StringKeyKind::DrupalLibrary
                 ) && is_drupal_test_code
@@ -1080,7 +1155,7 @@ impl Backend {
             return;
         }
 
-        let declared = DeclaredKeys::enumerate(self, &key_spans);
+        let declared = DeclaredKeys::enumerate(self, &key_spans, drupal);
         let range = |start: u32, end: u32| {
             self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
         };

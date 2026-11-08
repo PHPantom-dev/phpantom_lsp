@@ -34,7 +34,6 @@ contributor even though it's short.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | DR26 | [Annotation class names](todo/drupal.md#dr26-annotation-class-names) | Low-Medium | Low-Medium |
 | DR25 | [Warn on unknown plugin IDs](todo/drupal.md#dr25-warn-on-unknown-plugin-ids) | Medium | Low-Medium |
-| DR17 | [Warn on unknown service IDs](todo/drupal.md#dr17-warn-on-unknown-service-ids) | Medium | Low-Medium |
 | T70 | [A decorated service is typed as the class it decorates](todo/type-inference.md#t70-a-decorated-service-is-typed-as-the-class-it-decorates) | Low-Medium | Low |
 | F68 | [Method names under `calls:` in a services file](todo/lsp-features.md#f68-method-names-under-calls-in-a-services-file) | Low | Low |
 | TM1 | [Component attribute names navigate to the component's variable](todo/tempest.md#tm1-component-attribute-names-navigate-to-the-components-variable) | Low-Medium | Low |
@@ -148,7 +147,6 @@ ships, remove every row that names it.
 | DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |
 | DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) | Medium-High | High        |
 | DR16 | [Event subscribers](todo/drupal.md#dr16-event-subscribers) | Medium | Low-Medium |
-| DR17 | [Warn on unknown service IDs](todo/drupal.md#dr17-warn-on-unknown-service-ids) | Medium | Low-Medium |
 | DR18 | [Warn on unknown entity type IDs](todo/drupal.md#dr18-warn-on-unknown-entity-type-ids) | Medium | Low-Medium |
 | DR19 | [Warn on unknown hook names](todo/drupal.md#dr19-warn-on-unknown-hook-names) | Low-Medium | Medium |
 | DR20 | [Complete route names built in code](todo/drupal.md#dr20-complete-route-names-built-in-code) | Low-Medium | Medium |

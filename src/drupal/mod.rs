@@ -27,6 +27,7 @@ pub(crate) mod permissions;
 pub(crate) mod plugins;
 pub(crate) mod routing;
 pub(crate) mod service_providers;
+pub(crate) mod services;
 pub(crate) mod template_variables;
 pub(crate) mod theme_hooks;
 pub(crate) mod types;
@@ -80,6 +81,11 @@ pub(crate) struct DrupalState {
     /// The default configuration files and configuration schema files of
     /// every extension, and the configuration names read from them.
     config: config::ConfigSources,
+    /// The PHP files that may define services and the services files of
+    /// test modules, by URI; see [`services`].
+    service_definition_files: RwLock<std::collections::HashSet<String>>,
+    /// What those files define, once read.
+    php_service_ids: RwLock<Option<std::sync::Arc<services::PhpServiceIds>>>,
 }
 
 /// A kind of file Drupal reads declarations from.
@@ -366,6 +372,8 @@ impl Backend {
         *self.drupal.plugin_index.write() = None;
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
+        self.drupal.service_definition_files.write().clear();
+        *self.drupal.php_service_ids.write() = None;
         self.drupal.config.clear();
     }
 

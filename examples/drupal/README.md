@@ -30,7 +30,9 @@ Run `composer install` here first. Composer puts core and contrib into
   the definition of `'entity_type.manager'`, which lands in core's
   `core.services.yml`. Complete an ID inside `\Drupal::service('')`,
   `$container->get('')`, or after `@` in `acme.services.yml`, and find the
-  references of a service from its declaration.
+  references of a service from its declaration. Misspell `'acme.greeter'` in
+  `acme.module` and the lookup is reported, since no services file declares
+  the ID and no service provider defines it.
 - Entity type IDs navigate between the entity class that declares them and
   the code that asks the entity type manager for them, and type what that
   code gets back. In `web/modules/custom/acme/src/NoteCounter.php`, hover

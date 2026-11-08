@@ -174,6 +174,7 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_drupal_route` | Warning | A route name nothing declares. |
 | `invalid_drupal_route_parameter` | Warning | A controller parameter named after an entity type but typed with an unrelated class, so it receives the raw ID. |
 | `invalid_drupal_library` | Warning | A library name nothing declares. |
+| `invalid_drupal_service` | Warning | A service ID no services file declares and no PHP code may define. |
 | `invalid_drupal_render_element` | Warning | A render element `#type` no element class declares. |
 
 ## External tools

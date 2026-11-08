@@ -140,6 +140,7 @@ impl Backend {
         let file_ctx = self.file_context(uri);
         let loaders = self.file_loaders(&file_ctx);
         let _parse_guard = crate::parser::with_parse_cache(content);
+        let in_drupal_site = self.is_in_drupal_web_root(uri);
 
         with_parsed_program(content, "blade_typed_receiver", |program, content| {
             let mut calls: Vec<ReceiverCall<'_, '_, '_>> = Vec::new();
@@ -211,7 +212,28 @@ impl Backend {
                             }
                             continue;
                         }
-                        confirmed.push(site.to_span(kind));
+                        let mut span = site.to_span(kind);
+                        // A Drupal lookup on a plain PSR container may ask
+                        // any other container, whose services are not the
+                        // site's.
+                        if kind == StringKeyKind::ServiceId
+                            && site.receiver == ReceiverClass::ContainerLookup
+                            && in_drupal_site
+                            && !crate::drupal::services::SERVICE_CONTAINERS.iter().any(
+                                |container| {
+                                    crate::class_lookup::is_subtype_of_named(
+                                        &ty,
+                                        container,
+                                        loaders.resolved_class_loader(),
+                                    )
+                                },
+                            )
+                            && let crate::symbol_map::SymbolKind::StringKey { is_optional, .. } =
+                                &mut span.kind
+                        {
+                            *is_optional = true;
+                        }
+                        confirmed.push(span);
                     }
                 }
             }
