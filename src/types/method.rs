@@ -244,6 +244,9 @@ pub struct MethodExtras {
     /// or whose `default` arm takes names of its own, so that the names it
     /// accepts are not known.
     pub record_relations: Option<Box<[RecordRelation]>>,
+    /// The table a Yii Active Record's `tableName()` names, when it
+    /// returns a string literal (see [`crate::yii::active_record`]).
+    pub record_table: Option<Atom>,
 }
 
 /// A relation a Yii Active Record's `relationQuery()` declares with an arm
@@ -280,6 +283,7 @@ impl MethodExtras {
             && self.if_this_is.is_none()
             && self.self_out.is_none()
             && self.record_relations.is_none()
+            && self.record_table.is_none()
     }
 
     /// Box `self` for [`MethodInfo::extras`], or `None` when it is empty.

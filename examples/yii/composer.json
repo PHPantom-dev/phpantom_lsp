@@ -18,6 +18,7 @@
         "yiisoft/assets": "^5.1.2",
         "yiisoft/config": "^1.6.2",
         "yiisoft/csrf": "^2.2.3",
+        "yiisoft/db-migration": "^2.2",
         "yiisoft/db-sqlite": "^2.0",
         "yiisoft/definitions": "^3.4.1",
         "yiisoft/di": "^1.4.1",

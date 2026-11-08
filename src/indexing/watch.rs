@@ -191,6 +191,7 @@ impl Backend {
             self.forget_yii_package_groups();
             self.forget_yii_params();
             self.forget_yii_messages();
+            self.forget_yii_schema();
             self.forget_vendor_form_classes();
             self.forget_wordpress_dependency_hooks();
         }

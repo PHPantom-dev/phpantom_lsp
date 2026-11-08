@@ -332,6 +332,9 @@ pub(crate) struct ParamNode {
     values: Vec<PhpType>,
     /// The values declared here that are string literals.
     strings: Vec<String>,
+    /// The strings the values declared here name: a string literal, a path
+    /// built from `__DIR__` and `dirname()`, and each of those in a list.
+    named: Vec<String>,
     /// Whether a value declared here holds keys that cannot be read: an
     /// array with a spread or a computed key, or a value that is no array
     /// literal.
@@ -365,6 +368,12 @@ impl ParamNode {
             && self.children.is_empty()
             && rest.iter().all(|other| other == first))
         .then_some(first.as_str())
+    }
+
+    /// The strings the values declared for the key name, alone or in a
+    /// list, with a path built from `__DIR__` or `dirname()` evaluated.
+    pub(crate) fn named_strings(&self) -> &[String] {
+        &self.named
     }
 
     /// Whether every key under this one is known, so that a read of any
@@ -427,6 +436,7 @@ impl ParamNode {
             }
             self.values.clear();
             self.strings.clear();
+            self.named.clear();
             self.open = false;
             self.rank = Some(rank);
         }
@@ -604,6 +614,19 @@ fn merge_value(
         {
             node.strings.push(text.to_string());
         }
+        let dir = source.file.parent().unwrap_or(Path::new(""));
+        match array_elements(value) {
+            Some(elements) => {
+                for element in elements.iter() {
+                    if let ArrayElement::Value(element) = element
+                        && let Some(named) = named_string(element.value, dir)
+                    {
+                        node.named.push(named);
+                    }
+                }
+            }
+            None => node.named.extend(named_string(value, dir)),
+        }
         return;
     }
     let Some(elements) = array_elements(value) else {
@@ -641,6 +664,20 @@ fn merge_value(
         child.declare(rank, declaration, merges(entry.value));
         merge_value(child, entry.value, source, rank, reading);
     }
+}
+
+/// The string `value` names: a string literal as written, or a path built
+/// from `__DIR__` and `dirname()` in a file in `dir`.
+fn named_string(value: &Expression<'_>, dir: &Path) -> Option<String> {
+    if let Expression::Literal(Literal::String(literal)) = value {
+        return literal
+            .value
+            .and_then(crate::atom::literal_bytes_to_str)
+            .map(str::to_string);
+    }
+    crate::document_links::try_evaluate_path_expr(value, dir)
+        .map(|path| crate::document_links::normalize_path(Path::new(&path)))
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 /// The type of a value that is not an array with keys.  An empty array is

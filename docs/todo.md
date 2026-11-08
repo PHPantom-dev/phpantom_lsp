@@ -40,7 +40,6 @@ contributor even though it's short.
 | Y17 | [Key paths in `yiisoft/arrays`](todo/yii.md#y17-key-paths-in-yiisoftarrays) | Low         | Medium      |
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
 | Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
-| Y19 | [Attributes of an Active Record without properties](todo/yii.md#y19-attributes-of-an-active-record-without-properties) (builds on Y8) | Low-Medium  | Low-Medium  |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -151,7 +150,6 @@ ships, remove every row that names it.
 | Y10 | [The renderer's configured view path](todo/yii.md#y10-the-renderers-configured-view-path) | Medium      | Medium      |
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
 | Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
-| Y19 | [Attributes of an Active Record without properties](todo/yii.md#y19-attributes-of-an-active-record-without-properties) (builds on Y8) | Low-Medium  | Low-Medium  |
 | Y17 | [Key paths in `yiisoft/arrays`](todo/yii.md#y17-key-paths-in-yiisoftarrays) | Low         | Medium      |
 
 ## Tempest

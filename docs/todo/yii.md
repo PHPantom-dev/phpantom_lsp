@@ -11,8 +11,9 @@ navigate, are checked, and are typed, and the message IDs a translator
 looks up complete, navigate, and are checked, and so do the listeners
 the events configuration attaches. Active Record queries are typed by the
 record they are for, and the attributes and relations a record and its
-queries name navigate, complete, and are checked, and so do the properties
-form fields and hydration maps name. What is left is below.
+queries name navigate, complete, and are checked, the columns of a record
+without properties read from the project's migrations, and so do the
+properties form fields and hydration maps name. What is left is below.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).
@@ -131,35 +132,13 @@ qualified by a table alias the same query declares, and the table
 itself is often a class constant with the alias appended (`'post p'`,
 or `['p' => 'post']`). The columns come
 from the project's migrations (`yiisoft/db-migration`'s
-`createTable()` and `addColumn()`). Complete and navigate table and
-column names, and report one no migration creates. Laravel's migration
-scanning (`src/virtual_members/laravel/database_schema/`) is the
-precedent for reading the schema statically. Wait for a user to ask: the
-demo is the only project known to query this way.
-
----
-
-## Y19. Attributes of an Active Record without properties
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-#[\AllowDynamicProperties]
-final class Post extends ActiveRecord {}
-
-$post->get('title');
-```
-
-An Active Record's `get()`, `set()`, and the rest of its attribute API
-name an attribute, which navigates, completes, and is checked against
-the record's properties (`src/yii/active_record.rs`). A record that
-declares no properties, real or `@property` ones, reads its attributes
-from its table's columns instead, so on one of those nothing completes
-and every name passes. Once Y8 reads the schema from the project's
-migrations, complete those names from the columns of the record's table
-(`tableName()`, or the name `AbstractActiveRecord::tableName()` derives
-from the class), navigate to the migration that creates each one, and
-report one no migration creates.
+`createTable()` and `addColumn()`), which `src/yii/migrations.rs`
+already reads for the attributes of a record without properties. It
+reads a table named by a string literal only, and a table named any other
+way leaves the columns of every table open, so the class constants the
+demo names its tables with need resolving first. Complete and navigate table and column names, and report one no
+migration creates. Wait for a user to ask: the demo is the only project
+known to query this way.
 
 ---
 

@@ -70,7 +70,7 @@ const STUBS: &[(&str, &str)] = &[
     ),
     (
         "config/common/params.php",
-        "<?php\nreturn [\n    'yiisoft/aliases' => ['aliases' => require __DIR__ . '/aliases.php'],\n];\n",
+        "<?php\nreturn [\n    'yiisoft/aliases' => ['aliases' => require __DIR__ . '/aliases.php'],\n    'yiisoft/db-migration' => ['sourceNamespaces' => ['App\\\\Migration']],\n];\n",
     ),
     (
         "stubs/router/Route.php",
@@ -133,7 +133,7 @@ final class ConsumerAsset extends AssetBundle
 "#;
 
 /// The records' attributes and relations, named from a class of the
-/// application.
+/// application, and the columns of a record that declares no properties.
 const RECORD_CONSUMER_PHP: &str = r#"<?php
 namespace App\Catalog;
 
@@ -144,6 +144,11 @@ final class Catalog
         $record->get('');
         Record1::query()->with('')->one();
         Record1::query()->with('author.')->one();
+    }
+
+    public function review(Review $review): void
+    {
+        $review->get('');
     }
 }
 "#;
@@ -394,6 +399,35 @@ fn generate_application() -> Vec<(String, String)> {
         "src/Web/ConsumerForm.php".to_string(),
         FORM_CONSUMER_PHP.to_string(),
     ));
+    // A migration per section, each creating a table, and a record that
+    // declares no properties, whose attributes are the columns of the table
+    // the first migration creates and the last one adds to.
+    files.push((
+        "src/Catalog/Review.php".to_string(),
+        "<?php\nnamespace App\\Catalog;\n\nuse Yiisoft\\ActiveRecord\\ActiveRecord;\n\n#[\\AllowDynamicProperties]\nfinal class Review extends ActiveRecord\n{\n}\n".to_string(),
+    ));
+    for s in 0..SECTIONS {
+        let table = if s == 0 {
+            "review".to_string()
+        } else {
+            format!("table{s}")
+        };
+        let mut php = format!(
+            "<?php\nnamespace App\\Migration;\n\nfinal class M2511080000{s:02}Create\n{{\n    public function up(\\Yiisoft\\Db\\Migration\\MigrationBuilder $b): void\n    {{\n        $column = $b->columnBuilder();\n        $b->createTable('{{{{%{table}}}}}', [\n            'id' => $column::primaryKey(),\n"
+        );
+        for a in 0..ACTIONS {
+            let _ = writeln!(
+                php,
+                "            'column{a}' => $column::string()->notNull(),"
+            );
+        }
+        php.push_str("        ]);\n");
+        if s == SECTIONS - 1 {
+            php.push_str("        $b->addColumn('{{%review}}', 'rating', $column::integer());\n");
+        }
+        php.push_str("    }\n}\n");
+        files.push((format!("src/Migration/M2511080000{s:02}Create.php"), php));
+    }
     files
 }
 
@@ -593,6 +627,13 @@ fn bench_yii_name_completion(c: &mut Criterion) {
             RECORD_CONSUMER_PHP,
             "get(''",
             "title",
+        ),
+        (
+            "record_column",
+            &record_uri,
+            RECORD_CONSUMER_PHP,
+            "$review->get(''",
+            "rating",
         ),
         (
             "record_relation",

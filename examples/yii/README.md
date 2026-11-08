@@ -104,6 +104,12 @@ way a real Yii 3 project declares them.
   renaming the property renames the string. Clear a name to complete the
   relations or attributes the record declares, and misspell one to see it
   reported.
+  `Review` declares no properties, so in `stars()` its attributes are the
+  columns `src/Migration/M251108000000CreateCatalog.php` creates in its
+  table: `'rating'` goes to its column there, hovers with its type,
+  completes, and is reported when misspelled. The migrator finds the
+  migration through the `yiisoft/db-migration` params in
+  `config/console/params.php`.
 - Open `vendor/yiisoft/router/composer.json` once the dependencies are
   installed. Its `config-plugin` lists the files the package adds to each
   config group: go to the definition of `"di.php"` for `config/di.php`, clear

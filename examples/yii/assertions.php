@@ -17,6 +17,8 @@ use App\Blog\InMemoryPostRepository;
 use App\Catalog\Author;
 use App\Catalog\Book;
 use App\Catalog\BookCatalog;
+use App\Catalog\Review;
+use App\Migration\M251108000000CreateCatalog;
 use App\Blog\Post;
 use App\Blog\PostRepositoryInterface;
 use App\Blog\PostViewed;
@@ -30,12 +32,15 @@ use Yiisoft\Aliases\Aliases;
 use Yiisoft\Db\Connection\ConnectionInterface;
 use Yiisoft\FormModel\Field;
 use Yiisoft\FormModel\FormHydrator;
+use Yiisoft\Db\Migration\Informer\NullMigrationInformer;
+use Yiisoft\Db\Migration\MigrationBuilder;
 use Yiisoft\Injector\Injector;
 use Yiisoft\Injector\MissingRequiredArgumentException;
 use Yiisoft\Router\HydratorAttribute\RouteArgument;
 use Yiisoft\Router\RouteCollectionInterface;
 use Yiisoft\Router\UrlGeneratorInterface;
 use Yiisoft\Translator\TranslatorInterface;
+use Yiisoft\Yii\Runner\Console\ConsoleApplicationRunner;
 use Yiisoft\Yii\Runner\Http\HttpApplicationRunner;
 use Yiisoft\Yii\View\Renderer\WebViewRenderer;
 
@@ -245,8 +250,12 @@ foreach ($runner->getConfig()->get('bootstrap-web') as $bootstrap) {
     $bootstrap($container);
 }
 $db = $container->get(ConnectionInterface::class);
-$db->createCommand('CREATE TABLE author (id INTEGER PRIMARY KEY, name TEXT NOT NULL)')->execute();
-$db->createCommand('CREATE TABLE book (id INTEGER PRIMARY KEY, title TEXT NOT NULL, author_id INTEGER NOT NULL)')->execute();
+// The console runner is the one the migrator runs under, so it is the one
+// that reads the console params.
+$consoleRunner = new ConsoleApplicationRunner(rootPath: __DIR__, environment: 'dev');
+$migrations = $consoleRunner->getConfig()->get('params-console')['yiisoft/db-migration'];
+check('The console params point the migrator at App\\Migration', $migrations['sourceNamespaces'] === ['App\\Migration']);
+(new M251108000000CreateCatalog())->up(new MigrationBuilder($db, new NullMigrationInformer()));
 $db->createCommand("INSERT INTO author (id, name) VALUES (1, 'Ursula')")->execute();
 $db->createCommand("INSERT INTO book (id, title, author_id) VALUES (1, 'Earthsea', 1), (2, 'The Dispossessed', 1)")->execute();
 
@@ -266,6 +275,13 @@ check("with('author') loads the author", $book?->isRelationPopulated('author') =
 check("relation('author') is an Author", $book?->relation('author') instanceof Author);
 check("get('title') reads Book::\$title", $book?->get('title') === 'Earthsea');
 check('describe() reads the title and the author', $book !== null && $catalog->describe($book) === 'Earthsea by Ursula (Earthsea)');
+
+$db->createCommand("INSERT INTO review (id, book_id, rating, body) VALUES (1, 1, 5, 'A classic.')")->execute();
+check("Review's table is 'review'", (new Review())->tableName() === '{{%review}}');
+check("Review's attributes are the columns the migration creates", (new Review())->propertyNames() === ['id', 'book_id', 'rating', 'body']);
+$review = Review::query()->where(['id' => 1])->one();
+check("get('rating') reads the column of Review's table", $review instanceof Review && $review->get('rating') === 5);
+check('stars() reads the rating', $review instanceof Review && $catalog->stars($review) === '*****');
 
 $authors = $catalog->authorsWithBooks();
 $author = $authors[0] ?? null;
