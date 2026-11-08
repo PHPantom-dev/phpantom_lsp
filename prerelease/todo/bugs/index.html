@@ -1061,6 +1061,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b738-a-member-chain-rooted-at-this-inside-a-trait-is-never-checked" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B738. A member chain rooted at <code>$this</code> inside a trait is never checked
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1735,6 +1752,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b738-a-member-chain-rooted-at-this-inside-a-trait-is-never-checked" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B738. A member chain rooted at <code>$this</code> inside a trait is never checked
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1850,7 +1884,29 @@ test code only, so production code keeps ignoring them.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b738-a-member-chain-rooted-at-this-inside-a-trait-is-never-checked">B738. A member chain rooted at <code>$this</code> inside a trait is never checked<a class="headerlink" href="#b738-a-member-chain-rooted-at-this-inside-a-trait-is-never-checked" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">trait SwitchesWorkspace {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    protected function switchTo(int $id): void {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">        $this-&gt;manager-&gt;missing();   // not reported</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">        $m = $this-&gt;manager;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">        $m-&gt;missing();               // Method Manager::missing() not found</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    }</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">}</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">class FirstTest { use SwitchesWorkspace; protected Manager $manager; }</span>
+</code></pre></div>
+<p>Inside a trait, <code>unknown_member</code> skips every access whose subject starts
+at <code>$this</code>, <code>self</code>, <code>static</code> or <code>parent</code>
+(<code>subject_text_is_rooted_in_self</code> in
+<code>src/diagnostics/unknown_members/access.rs</code>), whatever the subject
+resolves to. That made sense when <code>$this</code> was only the trait, but it is
+now also what the trait's users are all guaranteed to be, and a property
+they declare is typed from their declarations, so the chain above
+resolves to <code>Manager</code> and the same call is reported once it goes through
+a variable. Only an access whose subject is nothing more than the trait
+itself (a member the host is expected to provide) is still unknowable;
+a chain whose subject resolves to a class should be checked like any
+other.</p>
 
 
 
