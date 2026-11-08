@@ -32,6 +32,7 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| TM8 | [The data `view()` passes completes and navigates](todo/tempest.md#tm8-the-data-view-passes-completes-and-navigates) | Low-Medium | Low-Medium |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -145,6 +146,7 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| TM8 | [The data `view()` passes completes and navigates](todo/tempest.md#tm8-the-data-view-passes-completes-and-navigates) | Low-Medium | Low-Medium |
 | TM7 | [A project's own route decorators change the route's URI](todo/tempest.md#tm7-a-projects-own-route-decorators-change-the-routes-uri) | Low | Medium |
 
 ## PHPUnit & Pest
