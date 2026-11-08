@@ -1550,6 +1550,8 @@ recursive component inference is bounded.
 Component attribute navigation maps the first variable read in the receiving
 view back to its source. Attribute hover uses that read's normal PHP hover,
 so declared and inferred types follow the same rules as the component body.
+Built-in tag and directive documentation is shared by source completion and
+hover; PHP expressions still use their copied source mappings.
 
 Dynamic component selectors use the same expression engine. The work queue
 loads selected targets as their names become known and removes contributions

@@ -97,6 +97,14 @@ if (!str_contains($branches, '<p>Read Named</p>') || !str_contains($branches, '<
     throw new RuntimeException('A sibling else did not remain inside its foreach.');
 }
 
+$builtins = $renderer->render(view(__DIR__ . '/app/builtins.view.php'));
+if (!str_contains($builtins, '<strong data-framework="Tempest">Tempest</strong>')
+    || str_contains($builtins, '<x-template')
+    || str_contains($builtins, 'Unnamed framework.')
+    || str_contains($builtins, 'No frameworks.')) {
+    throw new RuntimeException('The documented built-ins rendered the wrong tag, attributes, or branches.');
+}
+
 $detail = $renderer->render(new BookView(new Book('Custom view')));
 foreach (['<h1>Custom view</h1>', '<h2>Custom view</h2>', '<p>Read Custom view</p>'] as $expected) {
     if (!str_contains($detail, $expected)) {

@@ -18,6 +18,9 @@ The `.view.php` files use the editor's PHP language-server connection.
 - In `app/dynamic.view.php`, follow a dynamic component name, complete its
   attributes, and inspect the inferred data in the selected component and slot.
 - In `app/branches.view.php`, inspect the loop variable across sibling branches.
+- In `app/builtins.view.php`, hover built-in tags and directives, or inspect
+  their completion documentation, for descriptions and links to the view spec.
+  The template renders a `strong` element with an applied attribute and no wrapper.
 - In `app/components/x-card.view.php`, hover `$title` for its declared type.
 - In `app/book.view.php`, inspect the custom View through `$this` and the
   inferred types in component arguments and slots.

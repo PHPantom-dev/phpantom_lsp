@@ -48,24 +48,6 @@ binds `TModel` to the class, and offer the docblock fix upstream.
 
 ---
 
-## TM2. Documentation for built-in components and directives
-
-**Impact: Low · Complexity: Low**
-
-```html
-<x-form action="/books"><x-input name="title" /></x-form>
-<li :foreach="$books as $book" :if="$book->published">…</li>
-```
-
-Completion offers the directives (`:if`, `:elseif`, `:else`, `:isset`,
-`:foreach`, `:forelse`, `:apply`, `:as`) and the built-in tags, but
-neither the completion items nor hover say what they do. Add a short
-description and a link to the matching section of the view spec for
-each, shown in the completion item's documentation and on hover over
-the directive or tag name.
-
----
-
 ## TM5. Named arguments `Container::invoke()` forwards
 
 **Impact: Low · Complexity: Low-Medium**

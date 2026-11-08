@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
 | TM6 | [`query(Book::class)` builds a query for `Book`](todo/tempest.md#tm6-querybookclass-builds-a-query-for-book) | Medium | Low |
 | Y13 | [A definition's `'__construct()'` key goes to the constructor](todo/yii.md#y13-a-definitions-__construct-key-goes-to-the-constructor) | Low | Low |
@@ -154,7 +153,6 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
 | TM6 | [`query(Book::class)` builds a query for `Book`](todo/tempest.md#tm6-querybookclass-builds-a-query-for-book) | Medium | Low |
 | TM7 | [A project's own route decorators change the route's URI](todo/tempest.md#tm7-a-projects-own-route-decorators-change-the-routes-uri) | Low | Medium |

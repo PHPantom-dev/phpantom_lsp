@@ -164,12 +164,12 @@ $written = 'local';
                 .is_empty(),
             "{needle}"
         );
-        assert!(
-            hover_response(&backend, &uri, at.line, at.character)
-                .await
-                .is_none(),
-            "{needle}"
-        );
+        let hover = hover_response(&backend, &uri, at.line, at.character).await;
+        if matches!(needle, ":if" | ":foreach") {
+            assert!(hover_text(&hover.unwrap()).contains("view-spec#control-structures"));
+        } else {
+            assert!(hover.is_none(), "{needle}");
+        }
     }
     // Values still use PHP's navigation in the caller.
     let at = position_after(page, "\n<x-card :book=\"$bo");
