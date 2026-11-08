@@ -1305,17 +1305,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#y18-tables-a-query-names-in-an-earlier-statement" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y18. Tables a query names in an earlier statement
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1449,22 +1438,6 @@ config, or <code>parameters</code> under <code>params['yiisoft/view']</code>) an
 renderer's injections (<code>CsrfViewInjection</code> gives <code>$csrf</code>) supply the
 rest, and the layout receives its own. Collect those before reporting a
 missing one.</p>
-<hr />
-<h2 id="y18-tables-a-query-names-in-an-earlier-statement">Y18. Tables a query names in an earlier statement<a class="headerlink" href="#y18-tables-a-query-names-in-an-earlier-statement" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$query = (new Query($db))-&gt;from(Table::POST . ' p');</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">if ($published) {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    $query-&gt;andWhere(['p.status' =&gt; PostStatus::Published]);</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>The tables and columns a <code>yiisoft/db</code> query names are read against the
-tables its own chain of calls names, plus the record's table for an
-Active Record query. A query built up over several statements on the same
-variable names its tables in one and its columns in another, so the later
-ones are read against no tables: they complete nothing, navigate nowhere
-unless the qualifier is a table's own name, and are never reported. Follow
-the tables a variable's earlier chains name, through assignments in the
-same function.</p>
 
 
 
