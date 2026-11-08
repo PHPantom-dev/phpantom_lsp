@@ -300,6 +300,7 @@ mod tests {
                 twig: true,
                 doctrine: false,
                 yii_params: false,
+                tempest: false,
             },
             None,
         )

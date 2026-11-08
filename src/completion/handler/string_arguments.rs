@@ -42,6 +42,12 @@ impl Backend {
             *cursor_offset as usize,
         );
         if let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.tempest_route_string_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
+        if let Some(code) = code_ctx.as_ref()
             && let Some(response) = self.tempest_path_completion(uri, content, position, ctx, code)
         {
             return Some(response);

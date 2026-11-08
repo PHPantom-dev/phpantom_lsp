@@ -250,6 +250,13 @@ struct ExtractionCtx<'a> {
     yii_read_chains: Vec<(u32, u32)>,
     /// The routes the file declares.
     routes: Vec<crate::symbol_map::RouteSite>,
+    /// Whether the project uses Tempest.  Gates the route attributes
+    /// recorded for the type engine to confirm.
+    tempest: bool,
+    /// Method attributes that may declare a Tempest route.
+    tempest_routes: Vec<crate::tempest::routes::RouteAttribute>,
+    /// Argument-list starts of calls to Tempest's `uri()` helper.
+    tempest_uri_calls: Vec<u32>,
     /// The classes the file's DI definitions bind and build.
     yii_definitions: Vec<crate::symbol_map::YiiDefinitionSite>,
     /// The file's DI definition arrays that build a known class.
@@ -475,6 +482,8 @@ pub(crate) struct Frameworks {
     /// The file is a Yii configuration file `yiisoft/config` hands the
     /// `$params`, whose reads of it are recorded.
     pub yii_params: bool,
+    /// The project uses Tempest, which gates recording route attributes.
+    pub tempest: bool,
 }
 
 #[cfg(test)]
@@ -487,6 +496,7 @@ impl Frameworks {
         twig: true,
         doctrine: true,
         yii_params: false,
+        tempest: true,
     };
 }
 
@@ -583,6 +593,7 @@ fn extract_symbol_map_inner(
         twig,
         doctrine,
         yii_params,
+        tempest,
     } = frameworks;
     let mut ctx = ExtractionCtx {
         spans: Vec::new(),
@@ -661,6 +672,9 @@ fn extract_symbol_map_inner(
         names_yii_router: None,
         yii_read_chains: Vec::new(),
         routes: Vec::new(),
+        tempest,
+        tempest_routes: Vec::new(),
+        tempest_uri_calls: Vec::new(),
         yii_definitions: Vec::new(),
         yii_definition_bodies: Vec::new(),
         yii_relations: Vec::new(),
@@ -806,6 +820,7 @@ fn extract_symbol_map_inner(
     ctx.drupal_plugin_classes.sort_by_key(|s| s.start);
     ctx.drupal_plugins.sort_by_key(|s| s.start);
     ctx.drupal_hooks.sort_by_key(|s| s.start);
+    ctx.tempest_uri_calls.sort_unstable();
     ctx.drupal_hooks.dedup_by_key(|s| s.start);
     ctx.routes.shrink_to_fit();
 
@@ -859,6 +874,8 @@ fn extract_symbol_map_inner(
         drupal_hooks: ctx.drupal_hooks,
         drupal_computed_hooks: ctx.drupal_computed_hooks,
         routes: ctx.routes,
+        tempest_routes: ctx.tempest_routes.into_boxed_slice(),
+        tempest_uri_calls: ctx.tempest_uri_calls.into_boxed_slice(),
         yii_definitions: ctx.yii_definitions,
         yii_definition_bodies: ctx.yii_definition_bodies,
         yii_relations: ctx.yii_relations,

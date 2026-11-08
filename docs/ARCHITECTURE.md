@@ -1481,6 +1481,15 @@ PHP class names go through resolution at parse time (`resolve_parent_class_names
 
 This runs on every name a `ClassInfo` extracted from a file carries: its parents, interfaces, traits and mixins, its members' native and docblock types, its `@property` and `@method` tags, and the classes its constants' initializers name. A function's types get the same treatment. Names read later, in a method body or by whoever consumes a resolved name, follow [Source Names and Resolved Names](#source-names-and-resolved-names).
 
+## Tempest routes
+
+In a Tempest project, route attributes are collected alongside classes in the
+symbol map.
+Only attribute classes implementing `Tempest\Router\Route` contribute routes;
+the declaring-file index keeps requests from rescanning unrelated attributes.
+URI action types come from the shared PHP engine. Completion, navigation, and
+parameter rename consume the same route records and source ranges.
+
 ## Tempest View templates
 
 In a project that requires `tempest/view` or `tempest/framework`, files

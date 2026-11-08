@@ -402,6 +402,7 @@ mod tests {
                 twig: false,
                 doctrine: false,
                 yii_params: false,
+                tempest: false,
             },
             Some(std::path::Path::new("/p")),
         )

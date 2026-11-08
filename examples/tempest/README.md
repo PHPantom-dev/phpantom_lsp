@@ -1,9 +1,14 @@
-# Tempest View playground
+# Tempest playground
 
 Run `composer install`, then open this directory in an editor using PHPantom.
 The `.view.php` files use the editor's PHP language-server connection.
 
 - In `app/BookController.php`, complete or follow the view path.
+- In `app/RouteLinks.php`, complete and follow route URIs and their arguments.
+  In `BookController.php`, follow route placeholders to parameters and rename them
+  together with their URI arguments. Routes without a leading slash complete
+  as absolute paths. Custom route attributes and controller
+  prefixes work too.
 - In `app/books.view.php`, complete directives and component tags, follow
   `<x-card>` to its file, and complete or navigate `$book`'s members.
 - In `app/dynamic.view.php`, follow a dynamic component name, complete its
@@ -31,7 +36,8 @@ phpantom_lsp analyze --project-root . --no-colour
 
 The assertions render the templates with Tempest's own renderer, checking
 the data and scope behavior demonstrated above, and discover configured
-components with Tempest's own discovery runner.
+components with Tempest's own discovery runner. They also discover routes and
+generate the demo links with Tempest's router.
 
 Performance checks use this playground's declarations with a generated
 catalogue of 400 views. Completion and navigation results are checked before

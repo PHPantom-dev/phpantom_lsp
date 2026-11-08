@@ -142,7 +142,7 @@ pub(crate) struct SymfonyState {
 /// key, an event listener, a Messenger bus, a Drupal entity type, a Drupal
 /// route, or a Drupal hook, outright or through a configurator call still
 /// to be confirmed, or registers a Messenger handler, or imports routes, or
-/// declares a Twig loader.
+/// declares a Twig loader, or carries a Tempest route attribute.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that
 /// uses Twig declares its templates, filters, and functions and nothing
@@ -160,6 +160,7 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         KeyFramework::Laravel | KeyFramework::WordPress | KeyFramework::Tempest => false,
     };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
+        || !map.tempest_routes.is_empty()
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
         || (!map.yii_definitions.is_empty() && enabled(StringKeyKind::YiiDefinitionArgument))
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
@@ -221,7 +222,11 @@ impl Backend {
     /// Dependencies are never part of the project's own configuration, so a
     /// vendor file that happens to be parsed is left out.
     pub(crate) fn note_symfony_declarations(&self, uri: &str, map: &SymbolMap) {
-        if !self.reads_service_container() && !self.is_twig_project() && !self.is_yii_project() {
+        if !self.reads_service_container()
+            && !self.is_twig_project()
+            && !self.is_yii_project()
+            && !self.is_tempest_project()
+        {
             return;
         }
         let declares = declares_symfony_keys(map, |kind| self.string_key_kind_enabled(kind))

@@ -233,7 +233,9 @@ impl Backend {
         self.yii_aliases()
             .resolve(key)
             .filter(|path| is_absolute_view_path(path))
-            .map(|path| PathBuf::from(normalize_view_path(&path)))
+            .map(|path| {
+                crate::util::canonical_path_for_comparison(Path::new(&normalize_view_path(&path)))
+            })
     }
 
     /// The template file a view key names, when there is one: the path
@@ -272,9 +274,9 @@ impl Backend {
         };
         let root = self.workspace.workspace_root.read().clone();
         root.and_then(|root| {
-            path.strip_prefix(&root)
+            path.strip_prefix(crate::util::canonical_path_for_comparison(&root))
                 .ok()
-                .map(|relative| relative.to_string_lossy().into_owned())
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
         })
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
     }
@@ -311,7 +313,7 @@ impl Backend {
     /// rest.
     pub(crate) fn yii_view_renders_of(&self, path: &Path) -> Vec<Location> {
         let snapshot = self.user_file_symbol_maps_nonblocking();
-        self.yii_view_usages(path, &snapshot)
+        self.yii_view_usages(&crate::util::canonical_path_for_comparison(path), &snapshot)
     }
 
     /// Every view key in `snapshot` that names the file `target`.
@@ -388,12 +390,13 @@ impl Backend {
 /// exists, else the path with the first fallback extension that exists.
 fn view_file(path: &Path) -> Option<PathBuf> {
     if path.extension().is_some() && path.is_file() {
-        return Some(path.to_path_buf());
+        return Some(crate::util::canonical_path_for_comparison(path));
     }
     FALLBACK_EXTENSIONS
         .iter()
         .map(|extension| with_extension(path, extension))
         .find(|candidate| candidate.is_file())
+        .map(|path| crate::util::canonical_path_for_comparison(&path))
 }
 
 /// `path` with `.extension` appended, keeping any dot its name already has.

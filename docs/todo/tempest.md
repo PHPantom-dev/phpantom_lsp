@@ -13,10 +13,9 @@ Work out each behaviour from the framework's own source
 (`tempest/view`, `tempest/router`, `tempest/database`,
 `tempest/container`) and the [view spec](https://tempestphp.com/3.x/internals/view-spec).
 
-`examples/tempest/` is the playground. It installs only the view layer
-and what it depends on today, so the router and database items add
-`tempest/router` and `tempest/database` to its `composer.json` along
-with their demos.
+`examples/tempest/` is the playground. It installs the view and router
+layers. The database items add `tempest/database` to its `composer.json`
+along with their demos.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
@@ -50,43 +49,6 @@ the builder type TM4 reads the model from, so it comes first.
 
 ---
 
-## TM3. Route URIs and route parameters
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-#[Get('/books/{book}')]
-public function show(Book $book): View { /* ... */ }
-
-uri([BookController::class, 'show'], book: $book->id);
-```
-
-Three places name a route or one of its parameters:
-
-- **The first argument of `Tempest\Router\uri()`.** Complete the routes
-  the project declares (the `#[Get]`, `#[Post]`, … attributes on
-  controller methods, showing the HTTP method and the action), and
-  navigate from the argument to the action method. `uri()` takes an
-  array callable, an invokable controller's class name, or a URI string
-  starting with `/`, so a string completes as either and navigates by
-  whichever it matches.
-- **The named arguments after it.** They fill the route's `{name}`
-  placeholders. Complete them from the placeholders of the route the
-  first argument picks, navigate from one to the action's parameter, and
-  include them when that parameter is renamed.
-- **The placeholders in the route attribute itself.** Navigate from
-  `{book}` to the `$book` parameter of the method the attribute sits on,
-  and complete the method's parameter names inside the braces.
-
-Collect the routes in the same pass that indexes classes rather than
-walking every attribute on demand, the way Yii's routes are collected
-in `src/yii/routes.rs`. The built-in attributes all implement
-`Tempest\Router\Route`. If the router's discovery accepts any class
-implementing it, recognise routes by the interface rather than by a
-fixed list of attribute names, so a project's own route attributes are
-found too.
-
----
 
 ## TM4. Model property names in query builders and model helpers
 
@@ -167,3 +129,36 @@ from the callable's parameters and navigate from one to its parameter.
 Laravel's `app()->call([Foo::class, 'bar'], ['param' => …])` forwards
 the same way through an array, so build the callable lookup once and
 let both use it.
+
+---
+
+## TM7. A project's own route decorators change the route's URI
+
+**Impact: Low · Complexity: Medium**
+
+```php
+#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]
+final class Admin implements RouteDecorator
+{
+    public function decorate(Route $route): Route
+    {
+        return new Prefix('/admin')->decorate($route);
+    }
+}
+
+#[Admin]
+final class BookController
+{
+    #[Get('/books/{book}')] // the route is /admin/books/{book}
+    public function show(Book $book): View { /* ... */ }
+}
+```
+
+Route discovery applies every attribute that implements
+`Tempest\Router\RouteDecorator`, method ones before class ones, but only
+`Tempest\Router\Prefix` is read for the URI it adds. A project's own
+decorator that rewrites the URI is skipped, so its routes are recorded
+without the prefix, and a `uri()` literal that includes it finds no
+route. Read a decorator whose `decorate()` hands the route to a `Prefix`
+it builds from a literal, or assigns `$route->uri` from a literal joined
+with the old URI, as that prefix.

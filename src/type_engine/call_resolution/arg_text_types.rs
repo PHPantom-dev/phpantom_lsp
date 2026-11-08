@@ -14,6 +14,9 @@ use super::return_types::{
     resolve_static_access_type, split_cast,
 };
 
+#[cfg(test)]
+mod tests;
+
 impl Backend {
     /// Resolve an argument text string to a type name.
     ///
@@ -144,9 +147,10 @@ impl Backend {
         // source `VarResolutionCtx`'s constant loader draws from) and infer
         // the type from its value, mirroring the
         // `Expression::ConstantAccess` branch the AST-based RHS resolver
-        // already has for a plain `$x = PHP_EOL;` assignment.  This path
-        // takes expression *text*, with no offset to resolve a namespaced
-        // name against, so only the name as written is tried.
+        // already has for a plain `$x = PHP_EOL;` assignment. The enclosing
+        // file supplies the imports even when the expression has no AST offset.
+        // Read its import tables directly: linking the file's classes is unrelated
+        // to a constant lookup, and declaration files can contain many classes.
         if !trimmed.is_empty()
             && !trimmed.starts_with('$')
             && !trimmed.contains("::")
@@ -159,13 +163,44 @@ impl Backend {
             && !is_self_or_static(trimmed)
             && !trimmed.eq_ignore_ascii_case("parent")
             && let Some(backend) = ctx.file.backend
-            && let Some(ty) = match backend.lookup_global_constant(trimmed) {
+            && let Some(ty) = match ctx
+                .file
+                .uri
+                .and_then(|uri| backend.file_state(uri))
+                .map_or_else(
+                    || backend.lookup_global_constant(trimmed),
+                    |state| {
+                        let span = crate::types::NamespaceSpan::containing(
+                            &state.namespaces,
+                            ctx.cursor_offset,
+                        );
+                        backend.resolve_constant_name_at(
+                            trimmed,
+                            None,
+                            0,
+                            span.map_or(&state.use_map, |span| &span.use_map),
+                            span.map_or(&state.symbol_imports.constants, |span| {
+                                &span.symbol_imports.constants
+                            }),
+                            span.map_or(&None, |span| &span.namespace),
+                        )
+                    },
+                ) {
                 None => None,
                 Some(Some(value)) => {
                     crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
                         &value,
                     )
-                    .or_else(|| super::folded_global_constant_type(trimmed, &value, ctx))
+                    .or_else(|| {
+                        // The initializer was written where the constant is
+                        // declared, so this file's namespace and imports
+                        // must not resolve the names it uses.
+                        let declared = ResolutionCtx {
+                            file: ctx.file.with_uri(None),
+                            ..*ctx
+                        };
+                        super::folded_global_constant_type(trimmed, &value, &declared)
+                    })
                 }
                 Some(None) => crate::resolution::unversioned_php_version_constant_type(trimmed),
             }

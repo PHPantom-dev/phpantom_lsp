@@ -460,6 +460,13 @@ impl Backend {
                         kind: SymbolKind::CompactVariable { .. },
                         ..
                     }) => bare_name.to_string(),
+                    _ if loc_content.as_deref().is_some_and(|content| {
+                        range_text(content, location.range)
+                            .is_some_and(|text| !text.starts_with('$'))
+                    }) =>
+                    {
+                        bare_name.to_string()
+                    }
                     _ => {
                         if new_name.starts_with('$') {
                             new_name.to_string()

@@ -5,6 +5,7 @@ use tower_lsp_server::gen_lsp_types::*;
 use crate::Backend;
 use crate::completion::source::code_context::CodeContext;
 use crate::text_position::{offset_to_position, position_to_offset};
+use crate::text_scan::escape_literal_value;
 use crate::types::FileContext;
 use crate::virtual_members::laravel::validation_strings as validation;
 
@@ -135,15 +136,4 @@ impl Backend {
         }
         Some(CompletionResponse::CompletionItemList(items))
     }
-}
-
-fn escape_literal_value(value: &str, quote: char) -> String {
-    let mut text = String::with_capacity(value.len());
-    for ch in value.chars() {
-        if ch == '\\' || ch == quote || (quote == '"' && ch == '$') {
-            text.push('\\');
-        }
-        text.push(ch);
-    }
-    text
 }
