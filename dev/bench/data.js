@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794134559901,
+  "lastUpdate": 1794145507546,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -110777,6 +110777,576 @@ window.BENCHMARK_DATA = {
             "name": "yii_completion/message_id",
             "value": 0.138,
             "range": "± 0.007",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "54fd5230f25fb52c3c2b7e989ad4daa074d77bdc",
+          "message": "Yii Active Record",
+          "timestamp": "2026-11-08T14:21:26+01:00",
+          "tree_id": "f169b29aa87f8e0adb9406d1ad3c7099a0de6666",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/54fd5230f25fb52c3c2b7e989ad4daa074d77bdc"
+        },
+        "date": 1794145494736,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 4.79,
+            "range": "± 0.552",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.036,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.089,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.127,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.194,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.218,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.859,
+            "range": "± 0.015",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.649,
+            "range": "± 0.041",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.11,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.048,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.042,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.057,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 5.636,
+            "range": "± 0.027",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.148,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.334,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.062,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.041,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.117,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.072,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.058,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.248,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.143,
+            "range": "± 0.03",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.957,
+            "range": "± 0.381",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.167,
+            "range": "± 0.03",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 1.175,
+            "range": "± 0.096",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.385,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 9.515,
+            "range": "± 0.288",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.037,
+            "range": "± 0.044",
+            "unit": "ms"
+          },
+          {
+            "name": "custom_builder_completion/custom_builder_deep_inheritance",
+            "value": 0.09,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/service_id",
+            "value": 0.34,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/route_name",
+            "value": 0.344,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/entity_type_id",
+            "value": 0.424,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/permission_name",
+            "value": 0.446,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/config_name",
+            "value": 0.085,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/render_element",
+            "value": 0.325,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/plugin_id",
+            "value": 0.203,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/hook_name_invoke_all",
+            "value": 0.175,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/hook_name_attribute",
+            "value": 0.076,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/theme_hook_name",
+            "value": 0.071,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/library_name",
+            "value": 0.33,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "drupal_completion/hook_implementation",
+            "value": 0.092,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_where_prefix",
+            "value": 0.07,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_typing_sequence",
+            "value": 0.282,
+            "range": "± 0.021",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cold_confirmation/1",
+            "value": 0.068,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cached_request/1",
+            "value": 0.043,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cold_confirmation/128",
+            "value": 0.128,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cached_request/128",
+            "value": 0.07,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_collection_property_completion/key_by",
+            "value": 0.148,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_collection_property_completion/key_by_callback",
+            "value": 0.195,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_collection_property_completion/group_by",
+            "value": 0.158,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_collection_property_completion/group_by_named",
+            "value": 0.162,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_collection_property_completion/group_by_multilevel",
+            "value": 0.176,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_collection_property_completion/pluck",
+            "value": 0.143,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_collection_property_completion/pluck_named",
+            "value": 0.146,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_collection_property_completion/ordinary_method",
+            "value": 0.15,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/50",
+            "value": 0.358,
+            "range": "± 0.024",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/150",
+            "value": 0.455,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/service_id_php",
+            "value": 0.295,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/translation_key_php",
+            "value": 0.68,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/route_name_php",
+            "value": 0.379,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/template_name_php",
+            "value": 0.288,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/route_name_twig",
+            "value": 0.267,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "tempest/member_completion",
+            "value": 0.131,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "tempest/component_completion",
+            "value": 0.115,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "tempest/attribute_completion",
+            "value": 0.084,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "tempest/view_path_completion",
+            "value": 0.323,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "tempest/component_definition",
+            "value": 0.077,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "tempest/edit_10_loops",
+            "value": 0.071,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "tempest/edit_100_loops",
+            "value": 0.412,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "tempest/caller_edit_context",
+            "value": 0.614,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "wordpress_completion/hook_name_add_action",
+            "value": 0.815,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "wordpress_completion/hook_name_apply_filters",
+            "value": 0.82,
+            "range": "± 0.014",
+            "unit": "ms"
+          },
+          {
+            "name": "wordpress_completion/stub_member_global_wpdb",
+            "value": 0.079,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "wordpress_completion/stub_member_get_post",
+            "value": 0.109,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "wordpress_completion/hook_definition",
+            "value": 0.121,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/view_name_php",
+            "value": 0.207,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/view_path_php",
+            "value": 0.161,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/view_name_template",
+            "value": 0.153,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/alias_name",
+            "value": 0.038,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/asset_file",
+            "value": 0.077,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/route_name",
+            "value": 0.176,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/route_name_wrapper",
+            "value": 0.23,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/route_parameter_key",
+            "value": 0.153,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/route_argument",
+            "value": 0.056,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/definition_key",
+            "value": 0.049,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/definition_argument",
+            "value": 0.055,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/params_key",
+            "value": 0.067,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/message_id",
+            "value": 0.199,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/record_attribute",
+            "value": 0.126,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/record_relation",
+            "value": 0.101,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/record_relation_path",
+            "value": 0.107,
+            "range": "± 0.005",
             "unit": "ms"
           }
         ]
