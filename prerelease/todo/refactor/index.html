@@ -1845,9 +1845,8 @@ feature area.    </p>
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
 <h2 id="blocks-a-sprint-8-task">Blocks a Sprint 8 task<a class="headerlink" href="#blocks-a-sprint-8-task" title="Permanent link">&para;</a></h2>
 <h3 id="read-the-services-files-with-a-yaml-parser">Read the services files with a YAML parser<a class="headerlink" href="#read-the-services-files-with-a-yaml-parser" title="Permanent link">&para;</a></h3>
-<p>T70 (decorated services) and F68 (method names under <code>calls:</code>) both
-read services files, and F68 needs the key path down to a sequence
-item, which the line scan in <code>scan_yaml</code> (<code>src/symfony/resources.rs</code>)
+<p>F68 (method names under <code>calls:</code>) reads services files and needs the
+key path down to a sequence item, which the line scan in <code>scan_yaml</code> (<code>src/symfony/resources.rs</code>)
 does not give. PHPantom has no YAML parser: about 50 functions across
 18 files read YAML line by line, each handling indentation, comments,
 quotes, and flow collections its own way.</p>
