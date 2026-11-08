@@ -23,9 +23,11 @@
 //! [`YiiQueryName`], since the extractor cannot see types; this resolves the
 //! chain's receiver and keeps only a query.
 //!
-//! The tables a query names in another statement than the one that names a
-//! column are not followed, so such a column is read against the record of
-//! an Active Record query, or not at all.
+//! A chain on a variable also reads its names against the tables the
+//! variable's earlier chains in the same function named, through
+//! assignments.  Tables a query names in another function (one it is passed
+//! to, or one that builds it) are not followed, so such a column is read
+//! against the record of an Active Record query, or not at all.
 //!
 //! [`YiiQuerySite`]: crate::symbol_map::YiiQuerySite
 //! [`YiiQueryName`]: crate::symbol_map::YiiQueryName
@@ -400,7 +402,7 @@ impl Backend {
         };
         if !site.sets_from {
             if record_tables.is_empty() {
-                // A query whose `FROM` another statement sets.
+                // A query whose `FROM` another function sets.
                 tables.open = true;
             }
             for table in record_tables {

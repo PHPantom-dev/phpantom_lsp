@@ -9,6 +9,22 @@
 //! The extractor cannot see types, and `where()` and `select()` are common
 //! names, so it reads every such chain in a Yii project; the consumers
 //! resolve the receiver and keep only a query.
+//!
+//! A query built up over several statements on one variable names its
+//! tables in one and its columns in another:
+//!
+//! ```php
+//! $query = (new Query($db))->from('post p');
+//! if ($published) {
+//!     $query->andWhere(['p.status' => 1]);
+//! }
+//! ```
+//!
+//! So the tables each variable's chains have named are kept, per function,
+//! and a chain whose receiver is the variable itself reads its names
+//! against them too.  They are only ever added to, never replaced: a
+//! statement may run on one path and not another, and a column one of the
+//! tables has is a column of the query on some path.
 
 use crate::atom::{Atom, atom};
 use crate::symbol_map::{
@@ -26,6 +42,7 @@ use super::*;
 pub(in crate::symbol_map::extraction) fn record_yii_query_chain<'a>(
     chain: &'a Expression<'a>,
     ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
 ) {
     if !ctx.yii {
         return;
@@ -72,6 +89,10 @@ pub(in crate::symbol_map::extraction) fn record_yii_query_chain<'a>(
     reader.site.open = links
         .iter()
         .any(|(method, _, _)| joins_unnamed_tables(method));
+    let receiver = match links[first].2 {
+        Expression::Variable(Variable::Direct(variable)) => Some(bytes_to_str(variable.name)),
+        _ => None,
+    };
     for (method, arguments, _) in &links[first..] {
         for (index, argument) in arguments.arguments.iter().enumerate() {
             let Argument::Positional(argument) = argument else {
@@ -85,8 +106,128 @@ pub(in crate::symbol_map::extraction) fn record_yii_query_chain<'a>(
             }
         }
     }
+    if let Some(name) = receiver {
+        let mut named = NamedTables::of(&reader.site);
+        match ctx
+            .yii_query_vars
+            .iter_mut()
+            .find(|var| var.scope_start == scope_start && var.name == name)
+        {
+            Some(var) => {
+                var.named.add(&named);
+                named = var.named.clone();
+            }
+            None => ctx.yii_query_vars.push(YiiQueryVar {
+                scope_start,
+                name: name.to_string(),
+                named: named.clone(),
+            }),
+        }
+        reader.site.tables = named.tables;
+        reader.site.sets_from = named.sets_from;
+        reader.site.alias = named.alias;
+        reader.site.open = named.open;
+    }
     ctx.yii_queries.push(reader.site);
     ctx.yii_query_names.extend(reader.names);
+}
+
+/// The tables the queries a variable has held name, so far in the function
+/// whose scope starts at `scope_start`.
+pub(in crate::symbol_map::extraction) struct YiiQueryVar {
+    scope_start: u32,
+    /// The variable's name, with its `$`.
+    name: String,
+    named: NamedTables,
+}
+
+/// What a query names about the tables it reads from, as a
+/// [`YiiQuerySite`] keeps it.
+#[derive(Clone)]
+pub(in crate::symbol_map::extraction) struct NamedTables {
+    tables: Vec<YiiQueryTable>,
+    sets_from: bool,
+    alias: Option<Atom>,
+    open: bool,
+}
+
+impl NamedTables {
+    fn of(site: &YiiQuerySite) -> Self {
+        Self {
+            tables: site.tables.clone(),
+            sets_from: site.sets_from,
+            alias: site.alias,
+            open: site.open,
+        }
+    }
+
+    /// Add what `other` names, keeping what this already does.
+    fn add(&mut self, other: &NamedTables) {
+        for table in &other.tables {
+            if !self.tables.contains(table) {
+                self.tables.push(table.clone());
+            }
+        }
+        self.sets_from |= other.sets_from;
+        self.open |= other.open;
+        self.alias = self.alias.or(other.alias);
+    }
+}
+
+/// `$query = <a query chain>`, or `$copy = $query`: the variable holds the
+/// query's tables from here on.
+pub(in crate::symbol_map::extraction) fn note_yii_query_assignment<'a>(
+    assign: &'a Assignment<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    if !ctx.yii || !assign.operator.is_assign() {
+        return;
+    }
+    let Expression::Variable(Variable::Direct(variable)) = assign.lhs else {
+        return;
+    };
+    let named = match assign.rhs {
+        // The same query: a variable holds an object by handle.
+        Expression::Variable(Variable::Direct(source)) => {
+            let source = bytes_to_str(source.name);
+            match ctx
+                .yii_query_vars
+                .iter()
+                .find(|var| var.scope_start == scope_start && var.name == source)
+            {
+                Some(var) => var.named.clone(),
+                None => return,
+            }
+        }
+        rhs => {
+            let span = rhs.span();
+            // The chain was read just now, before the chains in its
+            // arguments.
+            match ctx
+                .yii_queries
+                .iter()
+                .rev()
+                .find(|site| site.start == span.start.offset && site.end == span.end.offset)
+            {
+                Some(site) => NamedTables::of(site),
+                None => return,
+            }
+        }
+    };
+    let name = bytes_to_str(variable.name);
+    match ctx
+        .yii_query_vars
+        .iter_mut()
+        .find(|var| var.scope_start == scope_start && var.name == name)
+    {
+        Some(var) => var.named.add(&named),
+        None => ctx.yii_query_vars.push(YiiQueryVar {
+            scope_start,
+            name: name.to_string(),
+            named,
+        }),
+    }
 }
 
 /// A query chain being read.

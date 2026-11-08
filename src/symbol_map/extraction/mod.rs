@@ -257,6 +257,8 @@ struct ExtractionCtx<'a> {
     /// column names they write.
     yii_queries: Vec<crate::symbol_map::YiiQuerySite>,
     yii_query_names: Vec<crate::symbol_map::YiiQueryName>,
+    /// The tables the queries held in each variable have named so far.
+    yii_query_vars: Vec<YiiQueryVar>,
     /// Whether the file is handed the Yii `$params` (see
     /// [`Frameworks::yii_params`]).
     yii_params: bool,
@@ -660,6 +662,7 @@ fn extract_symbol_map_inner(
         yii_relations: Vec::new(),
         yii_queries: Vec::new(),
         yii_query_names: Vec::new(),
+        yii_query_vars: Vec::new(),
         yii_params,
         doctrine,
         dql: Default::default(),

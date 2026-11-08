@@ -116,6 +116,10 @@ way a real Yii 3 project declares them.
   `Table::BOOK . ' b'` names through a constant the migration names it with
   too. Hover a column for its type, clear one to complete the columns of the
   query's tables, and misspell a table or a column to see it reported.
+  `titles()` builds its query over several statements, and the columns the
+  later ones name are read against the table the first one names: `'b.title'`
+  and `'b.author_id'` go to their columns, complete, and are reported when
+  misspelled.
 - In `BookCatalog::shelvedTitle()`, hover `$title`: `getValueByPath()`
   walks `'book.title'` through the entry and into its `Book`, so it is a
   `string`. Go to the definition of `'title'`, which lands on `Book::$title`.

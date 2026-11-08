@@ -288,6 +288,7 @@ check('stars() reads the rating', $review instanceof Review && $catalog->stars($
 check("Table::BOOK names the table the migration creates", $db->getTableSchema(Table::BOOK) !== null);
 check("Table::AUTHOR names the table the migration creates", $db->getTableSchema(Table::AUTHOR) !== null);
 check("titlesBy() reads 'b.title' of the books 'a.name' wrote, in order", $catalog->titlesBy($db, 'Ursula') === ['Earthsea', 'The Dispossessed']);
+check("titles() reads 'b.author_id' in a later statement against the alias the first gives", $catalog->titles($db, 1) === ['Earthsea', 'The Dispossessed'] && $catalog->titles($db, 2) === []);
 
 $authors = $catalog->authorsWithBooks();
 $author = $authors[0] ?? null;

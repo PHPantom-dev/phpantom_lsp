@@ -376,3 +376,57 @@ function demo(object $db): void
         vec!["author_id", "id", "publication_date", "status", "title"]
     );
 }
+
+#[tokio::test]
+async fn tables_an_earlier_statement_names_carry_to_later_ones() {
+    let php = r#"<?php
+namespace App\Blog;
+
+use App\Db\Table;
+use Yiisoft\Db\Query\Query;
+
+function demo(object $db, bool $published, bool $joined): array
+{
+    $query = (new Query($db))->from(Table::POST . ' p');
+    if ($published) {
+        $query->andWhere(['p.status' => 1, 'p.stauts' => 1]);
+    }
+    if ($joined) {
+        $query->leftJoin('{{%user}} u', 'u.id = p.author_id');
+    }
+    $query->andWhere(['nme' => 'x', 'u.name' => 'y']);
+    $records = Post::query()->alias('r');
+    $records->andWhere(['r.titel' => 'x'])->one();
+    $copy = $query;
+    $copy->andWhere(['titel' => 1]);
+    return $query->orderBy(['p.' => SORT_ASC])->all();
+}
+
+function other(Query $query): void
+{
+    // Another function's `$query`: its FROM is set elsewhere.
+    $query->where(['anything' => 1]);
+}
+"#;
+    let (backend, dir) = workspace();
+    let uri = open(&backend, &dir, php).await;
+    assert_eq!(
+        definition_of(&backend, &uri, php, "p.status", 2).await,
+        vec![(MIGRATION_FILE.to_string(), 15)]
+    );
+    let hover = hover_on(&backend, &uri, php, "name' => 'y'").await;
+    assert!(hover.contains("Column `name` of table `user`"), "{hover}");
+    assert_eq!(
+        diagnostics(&backend, &uri, php, "invalid_yii_column"),
+        vec![
+            "Column 'stauts' is not a column of table 'post'",
+            "Column 'nme' is not a column of any of the tables 'post', 'user'",
+            "Column 'titel' is not a column of table 'post'",
+            "Column 'titel' is not a column of any of the tables 'post', 'user'",
+        ]
+    );
+    assert_eq!(
+        complete(&backend, &uri, php, "orderBy(['p.").await,
+        vec!["author_id", "id", "publication_date", "status", "title"]
+    );
+}

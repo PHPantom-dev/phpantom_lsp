@@ -116,25 +116,3 @@ config, or `parameters` under `params['yiisoft/view']`) and the
 renderer's injections (`CsrfViewInjection` gives `$csrf`) supply the
 rest, and the layout receives its own. Collect those before reporting a
 missing one.
-
----
-
-## Y18. Tables a query names in an earlier statement
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$query = (new Query($db))->from(Table::POST . ' p');
-if ($published) {
-    $query->andWhere(['p.status' => PostStatus::Published]);
-}
-```
-
-The tables and columns a `yiisoft/db` query names are read against the
-tables its own chain of calls names, plus the record's table for an
-Active Record query. A query built up over several statements on the same
-variable names its tables in one and its columns in another, so the later
-ones are read against no tables: they complete nothing, navigate nowhere
-unless the qualifier is a table's own name, and are never reported. Follow
-the tables a variable's earlier chains name, through assignments in the
-same function.

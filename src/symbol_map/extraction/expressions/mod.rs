@@ -120,7 +120,7 @@ pub(super) fn extract_from_expression<'a>(
         record_yii_route_chain(expr, ctx);
         // And so is a query chain, whose names are read against the tables
         // the whole chain names.
-        record_yii_query_chain(expr, ctx);
+        record_yii_query_chain(expr, ctx, scope_start);
         // So is the subject text of each link, which spells the chain
         // before it: rendering the links one by one, innermost first,
         // would render each from scratch.
