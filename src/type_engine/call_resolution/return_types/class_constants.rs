@@ -282,3 +282,27 @@ pub(crate) fn folded_global_constant_type(
     let resolve = |text: &str| Backend::resolve_arg_text_to_type(text, ctx);
     crate::type_engine::type_ops::const_fold::folded_constant_type(name, value, &resolve)
 }
+
+/// The type a global constant holds when its initialiser is `Foo::class` or
+/// an enum case (`Suit::Hearts`), which the literal fold does not read.
+///
+/// The initialiser was qualified against the declaring file when it was
+/// parsed, so the reader's namespace and imports are dropped.
+pub(crate) fn global_constant_class_reference_type(
+    value: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let value = value.trim();
+    class_name_literal_type(value).or_else(|| {
+        let declared = ResolutionCtx {
+            file: ctx
+                .file
+                .with_imports(None)
+                .with_uri(None)
+                .with_namespace(None),
+            current_class: None,
+            ..*ctx
+        };
+        resolve_static_access_type(value, &declared)
+    })
+}

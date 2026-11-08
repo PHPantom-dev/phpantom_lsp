@@ -73,44 +73,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B742. A global constant holding `Foo::class` or an enum case has no type
-
-**Impact: Low · Complexity: Low**
-
-```php
-namespace Lib;
-
-class Widget {}
-enum Suit { case Hearts; }
-
-const WIDGET = Widget::class;
-const SUIT = Suit::Hearts;
-
-$w = WIDGET;                    // class-string<Widget>, but untyped
-$s = SUIT;                      // Suit::Hearts, but untyped
-
-/**
- * @template T of object
- * @param class-string<T> $class
- * @return T
- */
-function make(string $class = WIDGET): object { … }
-
-$made = make();                 // Widget, but mixed
-$made = make(WIDGET);           // the same
-```
-
-A class constant initialized to `Foo::class` or `Suit::Hearts` reads as
-that class name or case (`class_constants.rs` falls back to
-`class_name_literal_type` and `resolve_static_access_type` after the
-literal fold), but a global or namespaced constant does not: both the AST
-path (`global_constant_type` in `rhs_resolution/constant_access.rs`) and
-the text path (`Backend::resolve_arg_text_to_type`) stop at
-`infer_type_from_constant_value` and `folded_constant_type`, which only
-read literals. Both need the same fallback.
-
-Once fixed, cover the template case with a callee and a caller in
-different namespaces that each declare a constant of the same name: an
-omitted argument's default is read in the callee's namespace
-(`TemplateCallee::namespace`), which nothing can observe until such a
-constant has a type.
+No outstanding items.

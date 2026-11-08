@@ -12949,6 +12949,105 @@ function test(): void {
     }
 }
 
+/// A global or namespaced constant initialized to `Foo::class` or an enum
+/// case holds that class's name or that case, as a class constant does.
+#[test]
+fn hover_global_constant_initialized_to_class_name_or_enum_case() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace Lib;
+
+class Widget {}
+enum Suit { case Hearts; }
+
+const WIDGET = Widget::class;
+const SUIT = Suit::Hearts;
+define('GLOBAL_SUIT', Suit::Hearts);
+
+function test(): void {
+    $w = WIDGET;
+    $w;
+    $s = SUIT;
+    $s;
+    $g = \GLOBAL_SUIT;
+    $g;
+}
+"#;
+
+    for (line, var, expected) in [
+        (12, "$w", "class-string<Widget>"),
+        (14, "$s", "Suit::Hearts"),
+        (16, "$g", "Suit::Hearts"),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, 6)
+            .unwrap_or_else(|| panic!("expected hover on {var}"));
+        let text = hover_text(&hover);
+        assert!(
+            text.contains(&format!("{var} = {expected}")),
+            "{var} should be {expected}, got: {text}"
+        );
+    }
+}
+
+/// A template bound through a constant argument, or through a parameter
+/// default naming a constant, reads the constant the code it was written
+/// in means, when the caller declares one of the same name.
+#[test]
+fn hover_template_bound_from_constant_holding_a_class_name() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///lib.php",
+        r#"<?php
+namespace Lib;
+
+class Widget {}
+
+const WIDGET = Widget::class;
+
+/**
+ * @template T of object
+ * @param class-string<T> $class
+ * @return T
+ */
+function make(string $class = WIDGET): object
+{
+    return new $class();
+}
+"#,
+    );
+    let uri = "file:///run.php";
+    let content = r#"<?php
+namespace App;
+
+class Gadget {}
+
+const WIDGET = Gadget::class;
+
+function test(): void {
+    $omitted = \Lib\make();
+    $omitted;
+    $theirs = \Lib\make(\Lib\WIDGET);
+    $theirs;
+    $mine = \Lib\make(WIDGET);
+    $mine;
+}
+"#;
+    for (line, var, expected, unexpected) in [
+        (9, "$omitted", "Widget", "Gadget"),
+        (11, "$theirs", "Widget", "Gadget"),
+        (13, "$mine", "Gadget", "Widget"),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, 6)
+            .unwrap_or_else(|| panic!("expected hover on {var}"));
+        let text = hover_text(&hover);
+        assert!(
+            text.contains(expected) && !text.contains(unexpected),
+            "{var} should be {expected}, got: {text}"
+        );
+    }
+}
+
 // ─── instanceof on nullable strips null ───────────────────────────────
 
 #[test]

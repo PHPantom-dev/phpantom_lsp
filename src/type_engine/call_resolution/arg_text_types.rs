@@ -202,6 +202,7 @@ impl Backend {
                         };
                         super::folded_global_constant_type(trimmed, &value, &declared)
                     })
+                    .or_else(|| super::global_constant_class_reference_type(&value, ctx))
                 }
                 Some(None) => crate::resolution::unversioned_php_version_constant_type(trimmed),
             }
