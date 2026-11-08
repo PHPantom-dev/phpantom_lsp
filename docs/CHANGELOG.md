@@ -579,6 +579,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Completion, hover, and editor features
 
+- **Global class member navigation.** Following a member of a global class goes to its declaration even when another namespace contains a class with the same short name. Contributed by @shuvroroy.
+
 - **Classes that share a short name in one type.** Hover, completion, and signature help now show each class by its full name when a type names two classes with the same short name, such as `class-string<\App\C>|class-string<\Other\C>`, instead of printing them as one.
 - **Code examples in hover.** A multi-line `<code>` or `<pre>` example in a docblock, as in Doctrine's query builder, now shows as a code block instead of running together on one line.
 - **Hover on a `global` statement's variable.** Hovering the variable in `global $x;` now shows the type it imports, instead of nothing.

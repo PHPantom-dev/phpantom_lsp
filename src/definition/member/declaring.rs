@@ -12,8 +12,6 @@ use crate::inheritance::{ancestors, find_declaring_ancestor, find_declaring_trai
 use crate::types::*;
 use std::sync::Arc;
 
-use crate::util::build_fqn;
-
 use super::MemberAccessHint;
 
 impl Backend {
@@ -41,13 +39,8 @@ impl Backend {
     /// the given member and the FQN (or best-known name) used to load it.
     ///
     /// Returns `Some((ClassInfo, fqn))` of the declaring class, or `None` if
-    /// the member cannot be found in any ancestor.  The `fqn` is the name
-    /// that was passed to `class_loader` to obtain the `ClassInfo`, which is
-    /// a fully-qualified name for parents and traits.  For the class itself
-    /// (when the member is declared directly), the FQN is reconstructed
-    /// from `file_namespace` + `name` when a namespace is available so
-    /// that `find_class_file_content` can disambiguate classes that share
-    /// the same short name (e.g. `Eloquent\Builder` vs `Query\Builder`).
+    /// the member cannot be found in any ancestor. Keep the class's exact
+    /// FQN, including the file identity an anonymous class carries.
     ///
     /// Interfaces are searched too, since one can declare `@method` /
     /// `@property` tags worth jumping to; `@mixin` classes come last, on
@@ -62,7 +55,7 @@ impl Backend {
         };
 
         if declares(class) {
-            let fqn = build_fqn(&class.name, class.file_namespace.as_deref());
+            let fqn = class.fqn().to_string();
             return Some((class.clone(), fqn));
         }
 

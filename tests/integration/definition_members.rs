@@ -3,6 +3,60 @@ use crate::common::{
 };
 use tower_lsp_server::gen_lsp_types::*;
 
+#[tokio::test]
+async fn member_navigation_keeps_global_and_namespaced_classes_distinct() {
+    use crate::common::{definition_locations, position_of, workspace_uri};
+    let global = "<?php namespace { class Importer { public static function run(): void {} } }\nnamespace Extra { class Marker {} }\n";
+    let local =
+        "<?php namespace Client; class Importer { public static function run(): void {} }\n";
+    let imported =
+        "<?php namespace Library; class Importer { public static function run(): void {} }\n";
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"Client\\":"client/","Library\\":"library/"}}}"#,
+        &[
+            ("global.php", global),
+            ("client/Importer.php", local),
+            ("library/Importer.php", imported),
+        ],
+    );
+    for (path, source) in [
+        ("global.php", global),
+        ("client/Importer.php", local),
+        ("library/Importer.php", imported),
+    ] {
+        backend.update_ast(workspace_uri(&backend, path).as_str(), source);
+    }
+    let uri = workspace_uri(&backend, "client/caller.php");
+    for (imports, receiver, expected_path, expected_source) in [
+        ("", "\\Importer", "global.php", global),
+        ("use Library\\Importer;", "\\Importer", "global.php", global),
+        ("", "Importer", "client/Importer.php", local),
+        (
+            "use Library\\Importer;",
+            "Importer",
+            "library/Importer.php",
+            imported,
+        ),
+    ] {
+        let source = format!("<?php namespace Client; {imports} {receiver}::run();\n");
+        open_php(&backend, &uri, &source).await;
+        let at = position_of(&source, "run()");
+        let locations =
+            definition_locations(goto_definition_at(&backend, &uri, at.line, at.character).await);
+        assert_eq!(locations.len(), 1, "{source}: {locations:?}");
+        assert_eq!(
+            locations[0].uri,
+            workspace_uri(&backend, expected_path),
+            "{source}"
+        );
+        assert_eq!(
+            locations[0].range.start,
+            position_of(expected_source, "run()"),
+            "{source}"
+        );
+    }
+}
+
 // ─── Member Definition: Class Constants ─────────────────────────────────────
 
 #[tokio::test]
