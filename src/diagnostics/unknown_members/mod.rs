@@ -312,6 +312,27 @@ impl UnknownMemberPass<'_> {
             }
             return MemberCheckResult::Ok;
         }
+        if access.form_model_property {
+            // Only a form model takes property names there: on anything
+            // else the string is an ordinary argument.
+            return match outcome {
+                SubjectOutcome::Resolved {
+                    classes,
+                    branches,
+                    types,
+                } if !classes.is_empty()
+                    && crate::yii::forms::form_model_classes(
+                        classes.to_vec(),
+                        self.class_loader(),
+                    )
+                    .len()
+                        == classes.len() =>
+                {
+                    self.report_on_resolved(access, classes, branches, types, out)
+                }
+                _ => MemberCheckResult::Ok,
+            };
+        }
         if access.mock_expectation {
             // Only a mock has mocked methods: on anything else the string
             // is an ordinary argument, and not this check's business.

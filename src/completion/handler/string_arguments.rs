@@ -289,6 +289,18 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Yii form fields and hydration maps ──────────────────
+        // `Field::text($form, '|')` and the keys of a hydration map,
+        // `populate($form, $data, ['|' …`, name properties of the object.
+        if self.is_yii_project()
+            && matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_yii_form_property_completion(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
         // ── Yii route arguments ─────────────────────────────────
         // The keys of `$urls->generate('blog/post', ['|' => …])` are the
         // placeholders of the named route's path.

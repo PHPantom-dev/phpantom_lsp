@@ -539,3 +539,210 @@ function demo(Tag $tag, Collection $tags): void
         vec![("Tagged.php".to_string(), 7)]
     );
 }
+
+/// A project whose `yiisoft/config` params point the migrator at the
+/// migrations, with `migrations` in the params' `yiisoft/db-migration`.
+fn migrated_workspace(migrations: &str, extra: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+    let composer = r#"{
+    "require": { "yiisoft/active-record": "^1.1", "yiisoft/db-migration": "^2.2" },
+    "autoload": { "psr-4": {
+        "App\\": "src/",
+        "Yiisoft\\ActiveRecord\\": "vendor/yiisoft/active-record/src/"
+    } },
+    "extra": {
+        "config-plugin-options": { "source-directory": "config" },
+        "config-plugin": { "params": "params.php" }
+    }
+}"#;
+    let params =
+        format!("<?php\nreturn [\n    'yiisoft/db-migration' => [\n{migrations}\n    ],\n];\n");
+    let mut files: Vec<(&str, &str)> = PACKAGE.to_vec();
+    files.push(("src/Blog/User.php", USER_PHP));
+    files.push(("src/Blog/Post.php", POST_PHP));
+    files.push(("src/Blog/Profile.php", PROFILE_PHP));
+    files.push(("config/params.php", &params));
+    files.extend_from_slice(extra);
+    create_psr4_workspace(composer, &files)
+}
+
+const CREATE_PROFILE: &str = r#"<?php
+namespace App\Migration;
+
+use Yiisoft\Db\Migration\MigrationBuilder;
+use Yiisoft\Db\Migration\RevertibleMigrationInterface;
+
+final class M251108000000CreateProfile implements RevertibleMigrationInterface
+{
+    public function up(MigrationBuilder $b): void
+    {
+        $column = $b->columnBuilder();
+        $b->createTable('{{%profile}}', [
+            'id' => $column::primaryKey(),
+            'user_id' => $column::integer()->notNull(),
+            'bio' => $column::text(),
+        ]);
+    }
+
+    public function down(MigrationBuilder $b): void
+    {
+        $b->dropTable('{{%profile}}');
+    }
+}
+"#;
+
+const RENAME_BIO: &str = r#"<?php
+namespace App\Migration;
+
+use Yiisoft\Db\Migration\MigrationBuilder;
+use Yiisoft\Db\Migration\RevertibleMigrationInterface;
+
+final class M251109000000RenameBio implements RevertibleMigrationInterface
+{
+    public function up(MigrationBuilder $b): void
+    {
+        $b->renameColumn('{{%profile}}', 'bio', 'about');
+        $b->addColumn('{{%profile}}', 'website', 'string');
+    }
+
+    public function down(MigrationBuilder $b): void
+    {
+    }
+}
+"#;
+
+const BY_NAMESPACE: &str = "        'sourceNamespaces' => ['App\\\\Migration'],";
+
+#[tokio::test]
+async fn columns_of_a_record_without_properties_come_from_the_migrations() {
+    let php = r#"<?php
+namespace App\Blog;
+
+function demo(Profile $profile): void
+{
+    $profile->get('');
+    $profile->get('about');
+    $profile->set('bio', 'Hello');
+    $profile->get('website');
+}
+"#;
+    let (backend, dir) = migrated_workspace(
+        BY_NAMESPACE,
+        &[
+            (
+                "src/Migration/M251108000000CreateProfile.php",
+                CREATE_PROFILE,
+            ),
+            ("src/Migration/M251109000000RenameBio.php", RENAME_BIO),
+        ],
+    );
+    let uri = open(&backend, &dir, "src/Blog/demo.php", php).await;
+    assert_eq!(
+        complete(&backend, &uri, php, "get('").await,
+        vec!["about", "id", "user_id", "website"]
+    );
+    // A renamed column goes to the migration that renames it.
+    assert_eq!(
+        definition_of(&backend, &uri, php, "'about'", 2).await,
+        vec![("M251109000000RenameBio.php".to_string(), 10)]
+    );
+    assert_eq!(
+        definition_of(&backend, &uri, php, "'website'", 2).await,
+        vec![("M251109000000RenameBio.php".to_string(), 11)]
+    );
+    assert_eq!(
+        diagnostics(&backend, &uri, php, "invalid_yii_attribute"),
+        vec!["Attribute 'bio' is not a column of table 'profile' of record App\\Blog\\Profile"]
+    );
+    let hover = hover_on(&backend, &uri, php, "'about'").await;
+    assert!(
+        hover.contains("Column `about` of table `profile`: `text`"),
+        "{hover}"
+    );
+}
+
+#[tokio::test]
+async fn a_record_names_its_table_and_migrations_are_found_by_path() {
+    let record = r#"<?php
+namespace App\Blog;
+
+use Yiisoft\ActiveRecord\ActiveRecord;
+
+final class Bio extends ActiveRecord
+{
+    public function tableName(): string
+    {
+        return '{{%profile}}';
+    }
+}
+"#;
+    let php = r#"<?php
+namespace App\Blog;
+
+function demo(Bio $bio, Profile $profile): void
+{
+    $bio->get('user_id');
+    $bio->get('usr_id');
+}
+"#;
+    let by_path = "        'sourcePaths' => [dirname(__DIR__) . '/migrations'],";
+    let (backend, dir) = migrated_workspace(
+        by_path,
+        &[
+            ("migrations/M251108000000CreateProfile.php", CREATE_PROFILE),
+            ("src/Blog/Bio.php", record),
+        ],
+    );
+    let uri = open(&backend, &dir, "src/Blog/demo.php", php).await;
+    assert_eq!(
+        diagnostics(&backend, &uri, php, "invalid_yii_attribute"),
+        vec!["Attribute 'usr_id' is not a column of table 'profile' of record App\\Blog\\Bio"]
+    );
+    assert_eq!(
+        definition_of(&backend, &uri, php, "'user_id'", 2).await,
+        vec![("M251108000000CreateProfile.php".to_string(), 13)]
+    );
+}
+
+#[tokio::test]
+async fn columns_a_migration_cannot_list_are_not_reported() {
+    let open_table = r#"<?php
+namespace App\Migration;
+
+use Yiisoft\Db\Migration\MigrationBuilder;
+
+final class M251109000000AddColumns
+{
+    public function up(MigrationBuilder $b): void
+    {
+        foreach (['twitter', 'github'] as $name) {
+            $b->addColumn('{{%profile}}', $name, 'string');
+        }
+        $b->addColumn('{{%profile}}', $this->column(), 'string');
+    }
+}
+"#;
+    let php = r#"<?php
+namespace App\Blog;
+
+function demo(Profile $profile): void
+{
+    $profile->get('twitter');
+}
+"#;
+    let (backend, dir) = migrated_workspace(
+        BY_NAMESPACE,
+        &[
+            (
+                "src/Migration/M251108000000CreateProfile.php",
+                CREATE_PROFILE,
+            ),
+            ("src/Migration/M251109000000AddColumns.php", open_table),
+        ],
+    );
+    let uri = open(&backend, &dir, "src/Blog/demo.php", php).await;
+    assert!(diagnostics(&backend, &uri, php, "invalid_yii_attribute").is_empty());
+    assert_eq!(
+        complete(&backend, &uri, php, "get('").await,
+        vec!["bio", "id", "user_id"]
+    );
+}

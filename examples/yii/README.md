@@ -38,6 +38,13 @@ way a real Yii 3 project declares them.
   type from the closure's `$event` for the same report. Open
   `src/Blog/PostViewed.php` for the lens listing its listeners, which
   go-to-implementation on the class name lists too.
+- Open `resources/views/blog/post.php`. Go to the definition of `'author'`
+  in `Field::text($comment, 'author')`, which lands on the property in
+  `src/Web/Blog/CommentForm.php`. Clear the string to complete the form's
+  properties, misspell it to see it reported, or rename the property and
+  both fields follow. In `PostController::comment()`, the keys of the map
+  `populateFromPost()` is given name the same properties, and navigate,
+  complete, and are checked the same way.
 - Open `src/Blog/PostRepositoryInterface.php`. The lens above the interface,
   and go-to-implementation on its name, lead to the definition that binds it.
   Go-to-implementation on `LoggerInterface` in `Reference::to()` does the same
@@ -97,6 +104,12 @@ way a real Yii 3 project declares them.
   renaming the property renames the string. Clear a name to complete the
   relations or attributes the record declares, and misspell one to see it
   reported.
+  `Review` declares no properties, so in `stars()` its attributes are the
+  columns `src/Migration/M251108000000CreateCatalog.php` creates in its
+  table: `'rating'` goes to its column there, hovers with its type,
+  completes, and is reported when misspelled. The migrator finds the
+  migration through the `yiisoft/db-migration` params in
+  `config/console/params.php`.
 - Open `vendor/yiisoft/router/composer.json` once the dependencies are
   installed. Its `config-plugin` lists the files the package adds to each
   config group: go to the definition of `"di.php"` for `config/di.php`, clear

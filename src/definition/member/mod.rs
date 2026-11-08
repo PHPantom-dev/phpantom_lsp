@@ -246,6 +246,16 @@ impl Backend {
             crate::symbol_map::DocblockMemberRef::YiiAttribute => {
                 candidates
                     .retain(|class| crate::yii::active_record::is_record(class, class_loader));
+                // A record that declares no properties names a column of
+                // its table, which a migration creates.
+                if let Some(location) = candidates.iter().find_map(|record| {
+                    self.yii_column_location(record, mctx.member_name, class_loader)
+                }) {
+                    return Some(location);
+                }
+            }
+            crate::symbol_map::DocblockMemberRef::YiiProperty { form_model: true } => {
+                candidates = crate::yii::forms::form_model_classes(candidates, class_loader);
             }
             _ => {}
         }

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "50791c66c284f6585aafcc61e9bfac45",
+    "content-hash": "6be2bc6cbdac8a089fd5d3b7031108c8",
     "packages": [
         {
             "name": "alexkart/curl-builder",
@@ -2171,6 +2171,98 @@
             "time": "2026-10-20T07:44:20+00:00"
         },
         {
+            "name": "yiisoft/db-migration",
+            "version": "2.2.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/yiisoft/db-migration.git",
+                "reference": "2cab728c11e96baa53f1bbb5c4825a2d52e3010e"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/yiisoft/db-migration/zipball/2cab728c11e96baa53f1bbb5c4825a2d52e3010e",
+                "reference": "2cab728c11e96baa53f1bbb5c4825a2d52e3010e",
+                "shasum": ""
+            },
+            "require": {
+                "php": "8.1 - 8.5",
+                "symfony/console": "^6.0 || ^7.0 || ^8.0",
+                "yiisoft/db": "^2.0",
+                "yiisoft/injector": "^1.2"
+            },
+            "require-dev": {
+                "bamarni/composer-bin-plugin": "^1.9.1",
+                "ext-tokenizer": "*",
+                "friendsofphp/php-cs-fixer": "^3.95.1",
+                "phpunit/phpunit": "^10.5.63",
+                "psr/container": "^2.0",
+                "psr/log": "^3.0",
+                "psr/simple-cache": "^3.0",
+                "rector/rector": "^2.4.2",
+                "shipmonk/composer-dependency-analyser": "^1.8",
+                "yiisoft/db-sqlite": "^2.0",
+                "yiisoft/definitions": "^3.4.1",
+                "yiisoft/di": "^1.4.1",
+                "yiisoft/files": "^2.1",
+                "yiisoft/psr-dummy-provider": "^1.0.2",
+                "yiisoft/test-support": "^3.2.0",
+                "yiisoft/yii-console": "^2.4.2"
+            },
+            "bin": [
+                "bin/yii-db-migration"
+            ],
+            "type": "library",
+            "extra": {
+                "bamarni-bin": {
+                    "bin-links": true,
+                    "forward-command": true,
+                    "target-directory": "tools"
+                },
+                "config-plugin": {
+                    "params": "params.php",
+                    "di-console": "di-console.php"
+                },
+                "config-plugin-options": {
+                    "source-directory": "config"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Yiisoft\\Db\\Migration\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "BSD-3-Clause"
+            ],
+            "description": "Yii DB Migration",
+            "homepage": "https://www.yiiframework.com/",
+            "keywords": [
+                "db",
+                "migration",
+                "yii"
+            ],
+            "support": {
+                "chat": "https://t.me/yii3en",
+                "forum": "https://www.yiiframework.com/forum/",
+                "irc": "ircs://irc.libera.chat:6697/yii",
+                "issues": "https://github.com/yiisoft/db-migration/issues?state=open",
+                "source": "https://github.com/yiisoft/db-migration",
+                "wiki": "https://www.yiiframework.com/wiki/"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/sponsors/yiisoft",
+                    "type": "github"
+                },
+                {
+                    "url": "https://opencollective.com/yiisoft",
+                    "type": "opencollective"
+                }
+            ],
+            "time": "2026-10-18T14:18:35+00:00"
+        },
+        {
             "name": "yiisoft/db-sqlite",
             "version": "2.0.0",
             "source": {
@@ -2570,6 +2662,75 @@
             "time": "2022-10-27T12:02:21+00:00"
         },
         {
+            "name": "yiisoft/factory",
+            "version": "1.3.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/yiisoft/factory.git",
+                "reference": "c3d8be80dd3f1fc73f42f4293e2ba6b709a44363"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/yiisoft/factory/zipball/c3d8be80dd3f1fc73f42f4293e2ba6b709a44363",
+                "reference": "c3d8be80dd3f1fc73f42f4293e2ba6b709a44363",
+                "shasum": ""
+            },
+            "require": {
+                "php": "8.0 - 8.5",
+                "psr/container": "^1.0 || ^2.0",
+                "yiisoft/definitions": "^1.0 || ^2.0 || ^3.0.1"
+            },
+            "require-dev": {
+                "bamarni/composer-bin-plugin": "^1.8.3",
+                "maglnet/composer-require-checker": "^4.4",
+                "phpunit/phpunit": "^9.6.22",
+                "rector/rector": "^2.0.10",
+                "spatie/phpunit-watcher": "^1.23.6",
+                "yiisoft/test-support": "^3.0.2"
+            },
+            "type": "library",
+            "extra": {
+                "bamarni-bin": {
+                    "bin-links": true,
+                    "forward-command": true,
+                    "target-directory": "tools"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Yiisoft\\Factory\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "BSD-3-Clause"
+            ],
+            "description": "Yii Factory",
+            "homepage": "https://www.yiiframework.com/",
+            "keywords": [
+                "factory"
+            ],
+            "support": {
+                "chat": "https://t.me/yii3en",
+                "forum": "https://www.yiiframework.com/forum/",
+                "irc": "ircs://irc.libera.chat:6697/yii",
+                "issues": "https://github.com/yiisoft/factory/issues?state=open",
+                "source": "https://github.com/yiisoft/factory",
+                "wiki": "https://www.yiiframework.com/wiki/"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/sponsors/yiisoft",
+                    "type": "github"
+                },
+                {
+                    "url": "https://opencollective.com/yiisoft",
+                    "type": "opencollective"
+                }
+            ],
+            "time": "2025-12-02T07:59:18+00:00"
+        },
+        {
             "name": "yiisoft/files",
             "version": "2.1.0",
             "source": {
@@ -2636,6 +2797,164 @@
                 }
             ],
             "time": "2025-12-01T06:30:27+00:00"
+        },
+        {
+            "name": "yiisoft/form",
+            "version": "1.5.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/yiisoft/form.git",
+                "reference": "b33b34007ffea2fb412922c9980420c74f93b171"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/yiisoft/form/zipball/b33b34007ffea2fb412922c9980420c74f93b171",
+                "reference": "b33b34007ffea2fb412922c9980420c74f93b171",
+                "shasum": ""
+            },
+            "require": {
+                "php": "8.1 - 8.5",
+                "yiisoft/friendly-exception": "^1.0",
+                "yiisoft/html": "^3.13 || ^4.0",
+                "yiisoft/widget": "^2.2"
+            },
+            "require-dev": {
+                "bamarni/composer-bin-plugin": "^1.8.3",
+                "friendsofphp/php-cs-fixer": "^3.92",
+                "maglnet/composer-require-checker": "^4.7.1",
+                "phpunit/phpunit": "^10.5.45",
+                "rector/rector": "^2.0.10",
+                "spatie/phpunit-watcher": "^1.24",
+                "vimeo/psalm": "^5.26.1 || ^6.9.4"
+            },
+            "type": "library",
+            "extra": {
+                "bamarni-bin": {
+                    "bin-links": true,
+                    "forward-command": true,
+                    "target-directory": "tools"
+                },
+                "config-plugin": {
+                    "params": "params.php",
+                    "bootstrap": "bootstrap.php"
+                },
+                "config-plugin-options": {
+                    "source-directory": "config"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Yiisoft\\Form\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "BSD-3-Clause"
+            ],
+            "description": "The package helps with implementing data entry forms.",
+            "homepage": "https://www.yiiframework.com/",
+            "keywords": [
+                "form",
+                "yii"
+            ],
+            "support": {
+                "chat": "https://t.me/yii3en",
+                "forum": "https://www.yiiframework.com/forum/",
+                "irc": "ircs://irc.libera.chat:6697/yii",
+                "issues": "https://github.com/yiisoft/form/issues?state=open",
+                "source": "https://github.com/yiisoft/form",
+                "wiki": "https://www.yiiframework.com/wiki/"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/yiisoft",
+                    "type": "github"
+                },
+                {
+                    "url": "https://opencollective.com/yiisoft",
+                    "type": "open_collective"
+                }
+            ],
+            "time": "2026-03-20T07:38:31+00:00"
+        },
+        {
+            "name": "yiisoft/form-model",
+            "version": "1.1.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/yiisoft/form-model.git",
+                "reference": "f89ed3276eadba6d2d997a3d372515cdfd80c20d"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/yiisoft/form-model/zipball/f89ed3276eadba6d2d997a3d372515cdfd80c20d",
+                "reference": "f89ed3276eadba6d2d997a3d372515cdfd80c20d",
+                "shasum": ""
+            },
+            "require": {
+                "ext-mbstring": "*",
+                "php": "8.1 - 8.5",
+                "psr/http-message": "^1.0 || ^2.0",
+                "yiisoft/form": "^1.0",
+                "yiisoft/html": "^3.3 || ^4.0",
+                "yiisoft/hydrator": "^1.3",
+                "yiisoft/strings": "^2.3",
+                "yiisoft/validator": "^2.5"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "^3.92",
+                "httpsoft/http-message": "^1.1.6",
+                "maglnet/composer-require-checker": "^4.7.1",
+                "phpunit/phpunit": "^10.5.45",
+                "rector/rector": "^2.0.11",
+                "roave/infection-static-analysis-plugin": "^1.35",
+                "spatie/phpunit-watcher": "^1.24",
+                "vimeo/psalm": "^5.26.1 || ^6.10",
+                "yiisoft/di": "^1.3"
+            },
+            "type": "library",
+            "extra": {
+                "config-plugin": {
+                    "di": "di.php"
+                },
+                "config-plugin-options": {
+                    "source-directory": "config"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Yiisoft\\FormModel\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "BSD-3-Clause"
+            ],
+            "description": "Provides a base for form models and helps to fill, validate and display them.",
+            "homepage": "https://www.yiiframework.com/",
+            "keywords": [
+                "form",
+                "model"
+            ],
+            "support": {
+                "chat": "https://t.me/yii3en",
+                "forum": "https://www.yiiframework.com/forum/",
+                "irc": "ircs://irc.libera.chat:6697/yii",
+                "issues": "https://github.com/yiisoft/form-model/issues?state=open",
+                "source": "https://github.com/yiisoft/form-model",
+                "wiki": "https://www.yiiframework.com/wiki/"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/sponsors/yiisoft",
+                    "type": "github"
+                },
+                {
+                    "url": "https://opencollective.com/yiisoft",
+                    "type": "opencollective"
+                }
+            ],
+            "time": "2026-03-21T05:47:41+00:00"
         },
         {
             "name": "yiisoft/friendly-exception",
@@ -4503,6 +4822,84 @@
                 }
             ],
             "time": "2026-03-18T10:35:05+00:00"
+        },
+        {
+            "name": "yiisoft/widget",
+            "version": "2.2.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/yiisoft/widget.git",
+                "reference": "a3a88b7b5a0ced16a8354e4a915226301bae76dc"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/yiisoft/widget/zipball/a3a88b7b5a0ced16a8354e4a915226301bae76dc",
+                "reference": "a3a88b7b5a0ced16a8354e4a915226301bae76dc",
+                "shasum": ""
+            },
+            "require": {
+                "php": "8.0 - 8.5",
+                "psr/container": "^1.0 || ^2.0",
+                "yiisoft/definitions": "^3.1",
+                "yiisoft/factory": "^1.2",
+                "yiisoft/friendly-exception": "^1.0",
+                "yiisoft/html": "^2.0 || ^3.0 || ^4.0"
+            },
+            "require-dev": {
+                "maglnet/composer-require-checker": "^4.4",
+                "phpunit/phpunit": "^9.6.22",
+                "rector/rector": "^2.2.14",
+                "roave/infection-static-analysis-plugin": "^1.25",
+                "spatie/phpunit-watcher": "^1.23.6",
+                "vimeo/psalm": "^4.30 || ^5.26.1 || ^6.9.1",
+                "yiisoft/test-support": "^3.0.2"
+            },
+            "type": "library",
+            "extra": {
+                "config-plugin": {
+                    "params": "params.php",
+                    "widgets": [],
+                    "bootstrap": "bootstrap.php",
+                    "widgets-themes": []
+                },
+                "config-plugin-options": {
+                    "source-directory": "config"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Yiisoft\\Widget\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "BSD-3-Clause"
+            ],
+            "description": "Widget",
+            "homepage": "https://www.yiiframework.com/",
+            "keywords": [
+                "widgets",
+                "yii"
+            ],
+            "support": {
+                "chat": "https://t.me/yii3en",
+                "forum": "https://www.yiiframework.com/forum/",
+                "irc": "ircs://irc.libera.chat:6697/yii",
+                "issues": "https://github.com/yiisoft/widget/issues?state=open",
+                "source": "https://github.com/yiisoft/widget",
+                "wiki": "https://www.yiiframework.com/wiki/"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/sponsors/yiisoft",
+                    "type": "github"
+                },
+                {
+                    "url": "https://opencollective.com/yiisoft",
+                    "type": "opencollective"
+                }
+            ],
+            "time": "2026-03-18T10:37:07+00:00"
         },
         {
             "name": "yiisoft/yii-console",

@@ -88,7 +88,10 @@ impl MemberRefKind {
         };
         Some(if *is_method_call {
             Self::Method
-        } else if *docblock_ref == DocblockMemberRef::AttributeNamedArg {
+        } else if matches!(
+            docblock_ref,
+            DocblockMemberRef::AttributeNamedArg | DocblockMemberRef::YiiProperty { .. }
+        ) {
             Self::Property
         } else if docblock_ref.is_reference() {
             Self::Either

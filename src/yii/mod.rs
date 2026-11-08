@@ -1,7 +1,8 @@
 //! Yii 3: the views an application renders and the path aliases it names
 //! them through, the route names it declares and the arguments a handler
 //! takes from its route's path, the DI definitions it configures its
-//! container with, and the listeners it attaches to its events.
+//! container with, the listeners it attaches to its events, and the
+//! properties its form fields and hydration maps name.
 //!
 //! A view is named by a path (`__DIR__ . '/template'`) or by a name the
 //! renderer's view path prefixes (`render('index')` after
@@ -42,7 +43,12 @@
 //! [`translations`]).
 //!
 //! The attributes and relations an Active Record names as strings are read
-//! against the record (see [`active_record`]).
+//! against the record (see [`active_record`]), and the attributes of a
+//! record that declares no properties against the columns the project's
+//! migrations give its table (see [`migrations`]).
+//!
+//! The properties a form field and a hydration map name are member
+//! accesses on the object they are given (see [`forms`]).
 
 pub(crate) mod active_record;
 pub(crate) mod aliases;
@@ -50,6 +56,8 @@ pub(crate) mod assets;
 pub(crate) mod config_plugin;
 pub(crate) mod definitions;
 pub(crate) mod events;
+pub(crate) mod forms;
+pub(crate) mod migrations;
 pub(crate) mod params;
 pub(crate) mod relations;
 pub(crate) mod routes;
@@ -91,6 +99,10 @@ pub(crate) struct YiiState {
     messages: parking_lot::Mutex<Option<Arc<translations::Messages>>>,
     /// The directories the message files were last read from.
     message_dirs: RwLock<Vec<std::path::PathBuf>>,
+    /// The tables the project's migrations create, read on first use and
+    /// dropped when a configuration file, a migration, or the dependencies
+    /// change.
+    schema: parking_lot::Mutex<Option<Arc<migrations::Schema>>>,
 }
 
 /// The class names a string given to an HTML tag's `class()` names, each
@@ -131,8 +143,9 @@ impl Backend {
         aliases
     }
 
-    /// Forget the aliases, the params, and the message files when the file
-    /// at `uri` may declare some, so the next lookup reads them again.
+    /// Forget the aliases, the params, the message files, and the tables
+    /// when the file at `uri` may declare some, so the next lookup reads
+    /// them again.
     pub(crate) fn note_yii_config_change(&self, uri: &str) {
         if !self.is_yii_project() {
             return;
@@ -141,8 +154,10 @@ impl Backend {
             *self.yii.aliases.write() = None;
             self.forget_yii_params();
             self.forget_yii_messages();
+            self.forget_yii_schema();
         } else if let Some(path) = crate::util::uri_to_path(uri) {
             self.note_yii_message_change(&path);
+            self.note_yii_migration_change(&path);
         }
     }
 }

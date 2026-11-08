@@ -46,4 +46,17 @@ final class BookCatalog
         $name = $author instanceof Author ? $author->name : 'unknown';
         return $book->title . ' by ' . $name . ' (' . $book->get('title') . ')';
     }
+
+    /**
+     * Try: Review declares no properties, so its attributes are the columns
+     * of its table. Go to the definition of 'rating', which lands on the
+     * column in src/Migration/M251108000000CreateCatalog.php, or hover it
+     * for its type. Clear it to complete the columns, or misspell it to see
+     * it reported.
+     */
+    public function stars(Review $review): string
+    {
+        $rating = $review->get('rating');
+        return str_repeat('*', is_int($rating) ? $rating : 0);
+    }
 }

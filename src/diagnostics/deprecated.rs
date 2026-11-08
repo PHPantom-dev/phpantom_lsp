@@ -238,6 +238,18 @@ impl Backend {
                         None => continue,
                     };
 
+                    // A form field names a property only of a form model.
+                    if *docblock_ref
+                        == (crate::symbol_map::DocblockMemberRef::YiiProperty { form_model: true })
+                        && crate::yii::forms::form_model_classes(
+                            vec![Arc::clone(&base_class)],
+                            resolved_class_loader,
+                        )
+                        .is_empty()
+                    {
+                        continue;
+                    }
+
                     // An attribute's named-argument label uses a property
                     // only when the constructor promotes the parameter.
                     if *docblock_ref == crate::symbol_map::DocblockMemberRef::AttributeNamedArg

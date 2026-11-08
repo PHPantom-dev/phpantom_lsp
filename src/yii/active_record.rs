@@ -8,7 +8,8 @@
 //!
 //! A record's `get()`, `set()`, and the rest of its attribute API take an
 //! attribute, which is a property of the record, or, for a record that
-//! declares none, a column of its table.  Its `relation()` and the rest of
+//! declares none, a column of its table, as the project's migrations
+//! create it (see [`crate::yii::migrations`]).  Its `relation()` and the rest of
 //! its relation API take a relation, and so do a query's `with()` and
 //! `joinWith()`, as a path through relations (`'author.profile'`).
 //!
@@ -23,7 +24,8 @@
 //!
 //! An attribute name is a [`DocblockMemberRef::YiiAttribute`] access on the
 //! receiver, so it navigates, renames, and is checked like the property it
-//! names.  A relation name is not a member of the record, so it is kept
+//! names, or, when it names a column, navigates to the migration that
+//! creates it.  A relation name is not a member of the record, so it is kept
 //! beside the spans instead, as a [`YiiRelationSite`].
 //!
 //! [`DocblockMemberRef::YiiAttribute`]: crate::symbol_map::DocblockMemberRef::YiiAttribute
@@ -34,12 +36,14 @@ use std::sync::Arc;
 use mago_syntax::cst::class_like::method::{Method, MethodBody};
 use mago_syntax::cst::*;
 
+use crate::Backend;
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::parser::DocblockCtx;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, RecordRelation};
 use crate::util::short_name;
+use crate::yii::migrations::{Column, Schema, Table, bare_table_name};
 
 /// The interface every record implements.
 pub(crate) const RECORD_INTERFACE: &str = "Yiisoft\\ActiveRecord\\ActiveRecordInterface";
@@ -273,6 +277,28 @@ pub(crate) fn relation_getter_return_type(
     }
 }
 
+/// The table `method` names, when it is a `tableName()` that returns a
+/// string literal and nothing else.
+pub(crate) fn declared_table(method: &Method<'_>) -> Option<Atom> {
+    if !method.name.value.eq_ignore_ascii_case(b"tableName") {
+        return None;
+    }
+    let MethodBody::Concrete(block) = &method.body else {
+        return None;
+    };
+    let mut statements = block.statements.iter();
+    let (Some(Statement::Return(ret)), None) = (statements.next(), statements.next()) else {
+        return None;
+    };
+    let Some(Expression::Literal(Literal::String(table))) = ret.value else {
+        return None;
+    };
+    table
+        .value
+        .and_then(crate::atom::literal_bytes_to_str)
+        .map(atom)
+}
+
 /// The relation a `get{Name}Query()` method declares under
 /// `MagicRelationsTrait`: `getAuthorQuery` declares `author`.
 pub(crate) fn relation_getter_name(method: &str) -> Option<String> {
@@ -381,7 +407,7 @@ pub(crate) fn relation_path_owner(
 /// The attributes `record` declares as properties, real or `@property`
 /// ones, its ancestors' and traits' included, each with its type when it
 /// has one.  Empty for a record that declares none, which reads its
-/// attributes from its table's columns, which are not known.
+/// attributes from its table's columns (see [`Backend::yii_record_columns`]).
 pub(crate) fn attribute_names(
     record: &ClassInfo,
     class_loader: &ResolvedClassLoader<'_>,
@@ -403,6 +429,152 @@ pub(crate) fn attribute_names(
         }
     }
     names
+}
+
+/// The table `record` reads and writes: the one its `tableName()` names,
+/// or, when it declares none, the one `AbstractActiveRecord::tableName()`
+/// derives from its short name (`OrderItem` is `order_item`).  `None` when
+/// its `tableName()` says it some other way.
+pub(crate) fn record_table(
+    record: &ClassInfo,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<String> {
+    for class in own_declarations(record, class_loader) {
+        if let Some(method) = class
+            .methods
+            .iter()
+            .find(|method| !method.is_static && method.name.eq_ignore_ascii_case("tableName"))
+        {
+            let table = method.extras.as_ref()?.record_table?;
+            return Some(bare_table_name(&table).to_string());
+        }
+    }
+    Some(derived_table_name(short_name(&record.fqn())))
+}
+
+/// The table `AbstractActiveRecord::tableName()` derives from a record's
+/// short name: an underscore before each word, a run of capitals counting
+/// as one, then all of it in lower case.
+fn derived_table_name(short_name: &str) -> String {
+    let chars: Vec<char> = short_name.chars().collect();
+    let mut name = String::with_capacity(short_name.len() + 4);
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_uppercase() {
+            name.push('_');
+            name.push(chars[i]);
+            i += 1;
+            while i < chars.len()
+                && chars[i].is_ascii_uppercase()
+                && !chars.get(i + 1).is_some_and(char::is_ascii_lowercase)
+            {
+                name.push(chars[i]);
+                i += 1;
+            }
+        } else {
+            name.push(chars[i]);
+            i += 1;
+        }
+    }
+    name.trim_start_matches('_').to_ascii_lowercase()
+}
+
+/// The columns of the table a record that declares no properties reads
+/// its attributes from.
+pub(crate) struct RecordColumns {
+    schema: Arc<Schema>,
+    table: String,
+}
+
+impl RecordColumns {
+    fn table(&self) -> Option<&Table> {
+        self.schema.table(&self.table)
+    }
+
+    /// The table's name, without the prefix marker.
+    pub(crate) fn table_name(&self) -> &str {
+        &self.table
+    }
+
+    /// The columns, in the order the migrations add them.
+    pub(crate) fn columns(&self) -> &[Column] {
+        self.table().map(Table::columns).unwrap_or_default()
+    }
+
+    /// The column `name`.
+    pub(crate) fn column(&self, name: &str) -> Option<&Column> {
+        self.table()?.column(name)
+    }
+
+    /// Whether the columns are all known, so a name that is not one of them
+    /// can be told to name nothing.
+    pub(crate) fn all_known(&self) -> bool {
+        self.table()
+            .is_some_and(|table| self.schema.columns_known(table))
+    }
+}
+
+impl Backend {
+    /// The columns the project's migrations give the table of `record`,
+    /// which is where a record whose [`attribute_names`] are empty reads
+    /// its attributes from.  `None` when its table is not known, or no
+    /// migration creates or changes it.
+    pub(crate) fn yii_record_columns(
+        &self,
+        record: &ClassInfo,
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Option<RecordColumns> {
+        let table = record_table(record, class_loader)?;
+        let schema = self.yii_schema();
+        schema.table(&table)?;
+        Some(RecordColumns { schema, table })
+    }
+
+    /// Where the migration that creates the column `name` names it, when
+    /// `record` declares no properties and reads its attributes from the
+    /// columns of its table.
+    pub(crate) fn yii_column_location(
+        &self,
+        record: &ClassInfo,
+        name: &str,
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Option<tower_lsp_server::gen_lsp_types::Location> {
+        if !attribute_names(record, class_loader).is_empty() {
+            return None;
+        }
+        self.yii_record_columns(record, class_loader)?
+            .column(name)?
+            .location()
+    }
+
+    /// The hover of the column `name`, when `record` declares no properties
+    /// and reads its attributes from the columns of its table: its type, and
+    /// the migration that names it.
+    pub(crate) fn yii_column_detail(
+        &self,
+        record: &ClassInfo,
+        name: &str,
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Option<String> {
+        if !attribute_names(record, class_loader).is_empty() {
+            return None;
+        }
+        let columns = self.yii_record_columns(record, class_loader)?;
+        let column = columns.column(name)?;
+        let root = self.workspace.workspace_root.read().clone();
+        let file = root
+            .as_ref()
+            .and_then(|root| column.file.strip_prefix(root).ok())
+            .unwrap_or(&column.file)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let mut detail = format!("Column `{name}` of table `{}`", columns.table_name());
+        if let Some(kind) = &column.kind {
+            detail.push_str(&format!(": `{kind}`"));
+        }
+        detail.push_str(&format!("\n\nDeclared in `{file}`"));
+        Some(detail)
+    }
 }
 
 /// What declares the members of `record` outside the package: the record
@@ -459,6 +631,14 @@ mod tests {
         );
         assert_eq!(relation_getter_name("getQuery"), None);
         assert_eq!(relation_getter_name("authorQuery"), None);
+    }
+
+    #[test]
+    fn a_table_name_is_derived_from_the_short_name() {
+        assert_eq!(derived_table_name("Post"), "post");
+        assert_eq!(derived_table_name("OrderItem"), "order_item");
+        assert_eq!(derived_table_name("HTMLParser"), "html_parser");
+        assert_eq!(derived_table_name("UserID"), "user_id");
     }
 
     #[test]

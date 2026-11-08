@@ -36,6 +36,9 @@ pub(super) struct MemberAccessSite<'a> {
     /// than a constant (`Foo::BAR`).
     pub(super) is_static_property: bool,
     pub(super) is_docblock_ref: bool,
+    /// Whether any member of the name will do, as for a docblock
+    /// reference, rather than only one of the kind the access asks for.
+    pub(super) relaxed_lookup: bool,
     pub(super) is_nullsafe: bool,
     /// Whether the member is the method a mock expectation names, which
     /// is checked on the mocked class (see [`crate::mock_methods`]).
@@ -48,6 +51,10 @@ pub(super) struct MemberAccessSite<'a> {
     /// which is checked on the records among the subject's classes only
     /// (see [`crate::yii::active_record`]).
     pub(super) yii_attribute: bool,
+    /// Whether the member is a property a Yii form field or form hydrator
+    /// names, which is checked only on a form model (see
+    /// [`crate::yii::forms`]).
+    pub(super) form_model_property: bool,
     /// The class the access is written in.
     pub(super) current_class: Option<&'a ClassInfo>,
 }
@@ -170,10 +177,17 @@ impl<'a> MemberAccessSite<'a> {
                     .get(span.start.saturating_sub(1) as usize..=span.start as usize)
                     .is_some_and(|bytes| bytes.contains(&b'$')),
             is_docblock_ref: docblock_ref.is_reference(),
+            // A Yii form field or hydration map reads or writes a property
+            // by reflection, which a method or a constant cannot stand in
+            // for, though its visibility does not matter.
+            relaxed_lookup: docblock_ref.is_reference()
+                && !matches!(docblock_ref, DocblockMemberRef::YiiProperty { .. }),
             is_nullsafe: *is_nullsafe,
             mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
             entity_field: *docblock_ref == DocblockMemberRef::EntityField,
             yii_attribute: *docblock_ref == DocblockMemberRef::YiiAttribute,
+            form_model_property: *docblock_ref
+                == DocblockMemberRef::YiiProperty { form_model: true },
             current_class,
         })
     }
