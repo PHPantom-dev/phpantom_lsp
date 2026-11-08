@@ -1305,17 +1305,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#y12-the-route-arguments-a-url-generator-call-passes-navigate" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Y12. The route arguments a URL generator call passes navigate
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1449,18 +1438,6 @@ PHPantom already reads the file to merge params (<code>src/yii/params.rs</code>)
 so it knows which file it is. Give its string entries the same
 navigation, completion, and checks, relative to the file's directory,
 with the group names the installed packages declare offered after <code>$</code>.</p>
-<hr />
-<h2 id="y12-the-route-arguments-a-url-generator-call-passes-navigate">Y12. The route arguments a URL generator call passes navigate<a class="headerlink" href="#y12-the-route-arguments-a-url-generator-call-passes-navigate" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$urlGenerator-&gt;generate('blog/post/view', ['slug' =&gt; $post-&gt;slug]);</span>
-</code></pre></div>
-<p>The keys of the arguments array complete from the placeholders of the
-named route's path (<code>src/completion/yii_route_params.rs</code>), but
-go-to-definition and hover on <code>'slug'</code> find nothing. Navigate from a key
-to its <code>{slug}</code> in the route's path, the way <code>#[RouteArgument('slug')]</code>
-already does (<code>yii_route_argument_locations</code> in <code>src/yii/routes.rs</code>), and
-hover it with the path. A key the path does not declare could be
-reported the same way an unknown <code>RouteArgument</code> is.</p>
 
 
 
