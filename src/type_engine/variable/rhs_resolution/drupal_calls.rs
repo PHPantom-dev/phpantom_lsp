@@ -56,8 +56,14 @@ pub(super) fn try_resolve_entity_storage_type(
         .backend
         .filter(|backend| backend.is_drupal_project())?;
     let id = literal_first(argument_list, "entity_type_id", ctx.file.content)?;
-    let storages =
-        crate::drupal::types::storage_type(backend, owner, method_name, id, ctx.file.class_loader)?;
+    let storages = crate::drupal::types::storage_type(
+        backend,
+        owner,
+        method_name,
+        id,
+        ctx.file.uri,
+        ctx.file.class_loader,
+    )?;
     // Each storage keeps its own tag, so a load on it knows its entity.
     Some(
         storages
@@ -158,7 +164,8 @@ pub(super) fn try_resolve_entity_query_type(
     }
     let backend = ctx.file.backend?;
     let id = literal_first(argument_list, "entity_type", ctx.file.content)?;
-    let ty = crate::drupal::types::entity_query_type(backend, owner_fqn, method_name, id)?;
+    let ty =
+        crate::drupal::types::entity_query_type(backend, owner_fqn, method_name, id, ctx.file.uri)?;
     Some(
         crate::type_engine::type_ops::resolution::resolved_types_for_hint(
             ty,

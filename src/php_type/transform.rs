@@ -451,17 +451,35 @@ impl PhpType {
     /// inherited methods carry the declaring class's identity for `self`
     /// while preserving `static` for late-static-binding resolution.
     pub fn replace_bare_self(&self, class_name: &str) -> PhpType {
-        self.replace_bare_keyword("self", class_name, &[])
+        self.replace_bare_keyword("self", class_name)
     }
 
-    /// Bind `self` to its declaring class with the class's template arguments,
-    /// preserving explicit arguments on `self<U>` and late-bound `static`.
-    pub(crate) fn replace_bare_self_with_args(
-        &self,
-        class_name: &str,
-        args: &[PhpType],
-    ) -> PhpType {
-        self.replace_bare_keyword("self", class_name, args)
+    /// Replace only the `self` keyword with `replacement`, the type the
+    /// declaring class stands for (`Builder<TModel>` for a generic one).
+    ///
+    /// A `self<…>` written with its own arguments keeps them and takes only
+    /// the class name from `replacement`.
+    pub fn replace_bare_self_with(&self, replacement: &PhpType) -> PhpType {
+        match self.raw_kind() {
+            TypeKind::Named(s) if s.eq_ignore_ascii_case("self") => replacement.clone(),
+            TypeKind::Generic(g) if g.name.eq_ignore_ascii_case("self") => {
+                let name = match replacement.raw_kind() {
+                    TypeKind::Generic(r) => r.name,
+                    _ => match replacement.base_name() {
+                        Some(name) => atom(name),
+                        None => return self.clone(),
+                    },
+                };
+                PhpType::generic_atom(
+                    name,
+                    g.args
+                        .iter()
+                        .map(|a| a.replace_bare_self_with(replacement))
+                        .collect(),
+                )
+            }
+            _ => self.map_children(&|t| t.replace_bare_self_with(replacement)),
+        }
     }
 
     /// Replace only the `parent` keyword with a concrete class name.
@@ -471,26 +489,22 @@ impl PhpType {
     /// resolving `parent` against the class the call is made on names the
     /// wrong class as soon as another subclass is in between.
     pub fn replace_bare_parent(&self, class_name: &str) -> PhpType {
-        self.replace_bare_keyword("parent", class_name, &[])
+        self.replace_bare_keyword("parent", class_name)
     }
 
-    fn replace_bare_keyword(&self, keyword: &str, class_name: &str, args: &[PhpType]) -> PhpType {
+    fn replace_bare_keyword(&self, keyword: &str, class_name: &str) -> PhpType {
         match self.raw_kind() {
             TypeKind::Named(s) if s.eq_ignore_ascii_case(keyword) => {
-                if args.is_empty() {
-                    PhpType::named(atom(class_name))
-                } else {
-                    PhpType::generic_atom(atom(class_name), args.to_vec())
-                }
+                PhpType::named(atom(class_name))
             }
             TypeKind::Generic(g) if g.name.eq_ignore_ascii_case(keyword) => PhpType::generic_atom(
                 atom(class_name),
                 g.args
                     .iter()
-                    .map(|a| a.replace_bare_keyword(keyword, class_name, args))
+                    .map(|a| a.replace_bare_keyword(keyword, class_name))
                     .collect(),
             ),
-            _ => self.map_children(&|t| t.replace_bare_keyword(keyword, class_name, args)),
+            _ => self.map_children(&|t| t.replace_bare_keyword(keyword, class_name)),
         }
     }
 

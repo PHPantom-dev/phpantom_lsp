@@ -895,7 +895,17 @@ pub(crate) fn resolve_rhs_with_types<'b>(
     // common patterns where the result type depends only on the
     // expression kind, not on the operand types.
 
-    // Type casts (`(int) $x`), `!`, `~`, and the signs `-`/`+`.
+    // Type casts (`(int) $x`), `!`, `~`, and the signs `-`/`+`.  A cast a
+    // check narrowed earlier (`(int) $x` after `ctype_digit($x)`) reads
+    // the entry the check left under the cast's key instead.
+    if let Expression::UnaryPrefix(prefix) = rhs
+        && prefix.operator.is_cast()
+        && let Some(key) = crate::type_engine::type_ops::condition_facts::expr_to_subject_key(rhs)
+        && let narrowed = scope.get(&key)
+        && !narrowed.is_empty()
+    {
+        return narrowed.to_vec();
+    }
     if let Expression::UnaryPrefix(prefix) = rhs
         && let Some(ty) = super::super::rhs_resolution::unary_prefix_result_type(
             &prefix.operator,

@@ -17792,3 +17792,38 @@ function rewritten(string $delay, string $other): void {
         .collect();
     assert_eq!(lines, vec![25, 32, 38], "got: {diags:?}");
 }
+
+/// The non-negative cast survives being assigned to a variable first.
+#[test]
+fn int_cast_of_a_ctype_digit_checked_value_assigned_to_a_variable_is_non_negative() {
+    let php = r#"<?php
+namespace App;
+
+function inBody(string $delay): void {
+    if (ctype_digit($delay)) {
+        $seconds = (int) $delay;
+        sleep($seconds);
+    }
+}
+
+function guarded(string $delay): void {
+    if (!ctype_digit($delay)) {
+        return;
+    }
+    $seconds = (int) $delay;
+    sleep($seconds);
+}
+
+function unchecked(string $delay): void {
+    $seconds = (int) $delay;
+    sleep($seconds);
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    let lines: Vec<u32> = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "type_mismatch_argument"))
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(lines, vec![20], "got: {diags:?}");
+}

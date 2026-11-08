@@ -97,27 +97,7 @@ No outstanding items.
 
 ## Framework names in strings
 
-### B737. Test code does not see the entity types its test modules declare
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-// web/core/modules/config/tests/config_test/src/Entity/ConfigTest.php
-// declares `config_test`
-$storage = \Drupal::entityTypeManager()->getStorage('config_test');
-$storage->load('foo')->status(); // Method EntityInterface::status() not found
-```
-
-Declarations under a `tests` folder are skipped (`is_test_fixture` in
-`src/drupal/mod.rs`), because no real site enables a test module. The
-tests that enable them do, though, so in test code an entity type a test
-module declares leaves `getStorage()` with the declared
-`EntityStorageInterface`, and what it loads is a bare `EntityInterface`.
-That accounts for most of the ~150 `EntityInterface::get()` and
-`::status()` reports in `projects/drupal`'s tests. Services already make
-this exception (`is_test_services_file` in `src/drupal/services.rs`):
-read test modules' entity types too, and let them type lookups made from
-test code only, so production code keeps ignoring them.
+No outstanding items.
 
 ## Name resolution
 

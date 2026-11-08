@@ -6,15 +6,17 @@ diagnostics through virtual PHP, the data a view is rendered with is
 typed from the calls and View objects that render it, and component
 tags, their attributes, and the paths passed to `view()` complete and
 navigate. What is still missing is navigating from a component
-attribute, documentation for the built-in tags and directives, and the
-names Tempest's container forwards to callables.
+attribute, documentation for the built-in tags and directives, routes,
+and the names Tempest's database and container layers take as strings.
 
 Work out each behaviour from the framework's own source
 (`tempest/view`, `tempest/router`, `tempest/database`,
 `tempest/container`) and the [view spec](https://tempestphp.com/3.x/internals/view-spec).
 
-`examples/tempest/` is the playground. It installs the view, router, and
-database layers.
+`examples/tempest/` is the playground. It installs only the view layer
+and what it depends on today, so the router and database items add
+`tempest/router` and `tempest/database` to its `composer.json` along
+with their demos.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
@@ -25,6 +27,30 @@ within the same impact tier.
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
+
+## TM6. `query(Book::class)` builds a query for `Book`
+
+**Impact: Medium · Complexity: Low**
+
+```php
+$books = query(Book::class)->select()->where('title', $title)->all();
+// array<class-string<Book>>, should be array<Book>
+```
+
+`Tempest\Database\query()` declares `@template TModel` and
+`@param TModel $model`, so a class name binds `TModel` to
+`class-string<Book>`, and every builder after it, and every record its
+`all()` and `first()` return, is a class name instead of a `Book`. The
+builder's own constructor says what is meant
+(`@param class-string<TModel>|TModel|string $model`), and
+`Book::select()` already gives `SelectQueryBuilder<Book>`. Read
+`query()`'s parameter the way the constructor declares it, so a class name
+binds `TModel` to the class, and offer the docblock fix upstream. This is
+the builder type TM4 reads the model from, so it comes first.
+
+---
+
+
 
 ## TM1. Component attribute names navigate to the component's variable
 

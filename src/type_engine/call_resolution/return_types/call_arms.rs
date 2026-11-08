@@ -180,6 +180,7 @@ impl Backend {
                     owner,
                     method_name,
                     id,
+                    ctx.file.uri,
                     ctx.file.class_loader,
                 ) {
                     // A chain carries one hint: with two declarations of the
@@ -621,8 +622,13 @@ impl Backend {
             && let Some(backend) = ctx.file.backend
             && backend.is_drupal_project()
             && let Some(id) = first_literal_text_arg(text_args, "entity_type")
-            && let Some(ty) =
-                crate::drupal::types::entity_query_type(backend, &owner.fqn(), method_name, id)
+            && let Some(ty) = crate::drupal::types::entity_query_type(
+                backend,
+                &owner.fqn(),
+                method_name,
+                id,
+                ctx.file.uri,
+            )
         {
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                 &ty,
