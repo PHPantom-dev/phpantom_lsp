@@ -188,11 +188,14 @@ $created = $queries->create();
 $updated = $queries->update();
 $draft = $queries->draft();
 $books = $queries->books();
+$firstBook = $queries->firstBook();
 if ($created->title !== 'The PHP Book' || $created->isbn !== 'php'
     || $updated->title !== 'Updated PHP' || $updated->id->value !== $created->id->value
     || $draft->title !== 'Draft PHP' || $draft->isbn !== 'draft' || isset($draft->id)
     || count($books) !== 1 || $books[0]->id->value !== $created->id->value
-    || $books[0]->title !== 'Updated PHP' || $books[0]->publishedAt !== null) {
+    || $books[0]->title !== 'Updated PHP' || $books[0]->publishedAt !== null
+    || !$books[0] instanceof App\DatabaseBook || !$firstBook instanceof App\DatabaseBook
+    || $firstBook->id->value !== $created->id->value) {
     throw new RuntimeException('Model property names did not match the database demos.');
 }
 

@@ -175,6 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Tempest
 
+- **Queries built from model class names.** `query(Book::class)` keeps query results typed as `Book` objects through fluent calls. Contributed by @shuvroroy.
 - **Container invocation arguments.** The named arguments `Container::invoke()` and the `invoke()` helper forward complete from the callable's parameters and go to them. Contributed by @shuvroroy.
 - **Built-in view documentation.** Completion and hover explain Tempest's built-in components and directives, with links to the view specification. Contributed by @shuvroroy.
 - **Component attribute navigation and hover.** Follow an attribute name to the variable its component reads, and hover it to see the type in that view. Dynamic components use their selected views. Contributed by @shuvroroy.

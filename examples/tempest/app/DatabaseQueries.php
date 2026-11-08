@@ -29,12 +29,19 @@ final class DatabaseQueries
     public function books(): array
     {
         // Try: complete or follow field names through a typed builder chain.
-        return query(new DatabaseBook())
+        // Passing the class name keeps all() typed as DatabaseBook[].
+        return query(DatabaseBook::class)
             ->select()
             ->whereIn('isbn', ['php'])
             ->where('title', 'Updated PHP')
             ->whereNull('publishedAt')
             ->orderBy('title')
             ->all();
+    }
+
+    public function firstBook(): ?DatabaseBook
+    {
+        // Try: hover first(); the class name produces a DatabaseBook or null.
+        return query(DatabaseBook::class)->select()->where('isbn', 'php')->first();
     }
 }

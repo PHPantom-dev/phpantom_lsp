@@ -5,8 +5,8 @@ templates already get completion, hover, go-to-definition, and
 diagnostics through virtual PHP, the data a view is rendered with is
 typed from the calls and View objects that render it, and component
 tags, their attributes, and the paths passed to `view()` complete and
-navigate. What is still missing is the model a `query()` call builds
-and route URIs that a project's own decorators change.
+navigate. What is still missing is route URIs that a project's own
+decorators change.
 
 Work out each behaviour from the framework's own source
 (`tempest/view`, `tempest/router`, `tempest/database`,
@@ -23,27 +23,6 @@ within the same impact tier.
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
-
----
-
-## TM6. `query(Book::class)` builds a query for `Book`
-
-**Impact: Medium · Complexity: Low**
-
-```php
-$books = query(Book::class)->select()->where('title', $title)->all();
-// array<class-string<Book>>, should be array<Book>
-```
-
-`Tempest\Database\query()` declares `@template TModel` and
-`@param TModel $model`, so a class name binds `TModel` to
-`class-string<Book>`, and every builder after it, and every record its
-`all()` and `first()` return, is a class name instead of a `Book`. The
-builder's own constructor says what is meant
-(`@param class-string<TModel>|TModel|string $model`), and
-`Book::select()` already gives `SelectQueryBuilder<Book>`. Read
-`query()`'s parameter the way the constructor declares it, so a class name
-binds `TModel` to the class, and offer the docblock fix upstream.
 
 ---
 

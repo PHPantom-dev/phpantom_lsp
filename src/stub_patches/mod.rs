@@ -147,7 +147,7 @@
 //! leave undeclared, the `$args` docblock of Mockery's mock factories,
 //! whose `array<TMock>` alternative is really constructor arguments, and the
 //! record class a `yiisoft/active-record` query is for (see
-//! `active_record.rs`).
+//! `active_record.rs`), and the model class accepted by Tempest's `query()`.
 //!
 //! ### Class patches
 //!

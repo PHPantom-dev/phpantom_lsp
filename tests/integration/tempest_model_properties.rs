@@ -2,7 +2,8 @@
 
 use crate::common::{
     complete_at_opened, complete_labels_at_opened, create_psr4_workspace, definition_locations,
-    definitions_at, goto_definition_at, open_php, position_after, position_of, workspace_uri,
+    definitions_at, goto_definition_at, hover_on, open_php, position_after, position_of,
+    workspace_uri,
 };
 use phpantom_lsp::Backend;
 use tower_lsp_server::gen_lsp_types::*;
@@ -54,6 +55,10 @@ class SelectQueryBuilder {
     public function having(string $statement, mixed ...$bindings): self {}
     public function include(string ...$fields): self {}
     public function sum(string $column): int {}
+    /** @return TModel[] */
+    public function all(): array {}
+    /** @return TModel|null */
+    public function first() {}
 }
 /** @template TModel */
 class CountQueryBuilder {
@@ -155,6 +160,64 @@ async fn project(source: &str) -> (Backend, tempfile::TempDir, Uri, Uri) {
     .await;
     open_php(&backend, &uri, source).await;
     (backend, dir, models, uri)
+}
+
+#[tokio::test]
+async fn tempest_query_class_names_return_models_through_fluent_calls() {
+    let source = r"<?php
+namespace Caller;
+use App\Book as ImportedBook;
+use function Tempest\Database\query as build;
+/** @param class-string<ImportedBook> $model */
+function read(string $model): void {
+    $literal = build(ImportedBook::class)->select()->where('title', 'PHP')->all();
+    $instance = build(new ImportedBook())->select()->first();
+    $variable = build($model)->select()->whereNull('publishedAt')->first();
+    $named = build(model: ImportedBook::class)->select()->first();
+    $global = \Tempest\Database\query(\Book::class)->select()->first();
+    $literal[0]->;
+    $instance->;
+    $variable->;
+    $named->;
+    $global->;
+}
+";
+    let (backend, _dir, _, uri) = project(source).await;
+    for variable in ["$literal", "$instance", "$variable", "$named"] {
+        let hover = hover_on(&backend, &uri, source, variable).await;
+        assert!(hover.contains("Book"), "{variable}: {hover}");
+        assert!(!hover.contains("class-string"), "{variable}: {hover}");
+    }
+    let hover = hover_on(&backend, &uri, source, "$global").await;
+    assert!(hover.contains("Book"), "{hover}");
+    assert!(!hover.contains("App\\Book"), "{hover}");
+    assert!(!hover.contains("Caller\\Book"), "{hover}");
+    assert!(!hover.contains("class-string"), "{hover}");
+    for expression in [
+        "$literal[0]->",
+        "$instance->",
+        "$variable->",
+        "$named->",
+        "$global->",
+    ] {
+        let at = position_after(source, expression);
+        let labels = complete_labels_at_opened(&backend, &uri, at.line, at.character).await;
+        let global = expression == "$global->";
+        assert_eq!(
+            labels.contains(&"title".to_string()),
+            !global,
+            "{expression}: {labels:?}"
+        );
+        assert_eq!(
+            labels.contains(&"globalTitle".to_string()),
+            global,
+            "{expression}: {labels:?}"
+        );
+        assert!(
+            !labels.contains(&"localTitle".to_string()),
+            "{expression}: {labels:?}"
+        );
+    }
 }
 
 #[tokio::test]
