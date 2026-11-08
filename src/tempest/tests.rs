@@ -238,6 +238,15 @@ fn edits_reuse_inference_with_the_same_result_as_a_full_refresh() {
             "app/page.view.php",
             "<x-card :entry=\"$book->title\"><x-panel :item=\"$entry\" /></x-card>",
         ),
+        // A dynamic component's selected target changes.
+        (
+            "app/page.view.php",
+            "<x-component is=\"x-card\" :entry=\"$book\"><x-slot name=\"header\">{{ $local->title }}</x-slot>{{ $entry }}</x-component>",
+        ),
+        (
+            "app/page.view.php",
+            "<?php $kind = 'x-panel'; ?><x-component :is=\"$kind\" :item=\"$book\">{{ $item }}</x-component>",
+        ),
         // The component's outlets and the locals they expose change.
         (
             "app/x-card.view.php",
@@ -252,8 +261,12 @@ fn edits_reuse_inference_with_the_same_result_as_a_full_refresh() {
             "<?php namespace App; function page() {}",
         ),
     ];
+    let panel = &uri("app/x-panel.view.php");
     for (name, text) in edits {
-        edit(name, text);
+        let scopes = edit(name, text);
+        if text.contains(":is=") {
+            assert!(scopes[panel].vars.contains_key("item"), "{text}");
+        }
     }
 
     // Closing a view discards its buffer for the text on disk.
