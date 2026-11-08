@@ -1102,17 +1102,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p89-a-long-method-chain-makes-the-symbol-map-quadratic-in-its-length" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P89. A long method chain makes the symbol map quadratic in its length
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1422,17 +1411,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#p89-a-long-method-chain-makes-the-symbol-map-quadratic-in-its-length" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P89. A long method chain makes the symbol map quadratic in its length
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1569,31 +1547,6 @@ against that bar.</p>
 </tr>
 </tbody>
 </table>
-<hr />
-<h2 id="p89-a-long-method-chain-makes-the-symbol-map-quadratic-in-its-length">P89. A long method chain makes the symbol map quadratic in its length<a class="headerlink" href="#p89-a-long-method-chain-makes-the-symbol-map-quadratic-in-its-length" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Drupal core ships database dumps as test fixtures
-(<code>core/modules/migrate_drupal/tests/fixtures/drupal7.php</code> and three like
-it, 0.7 to 1.9 MB each): <code>$connection-&gt;insert('table')-&gt;fields([...])</code>
-followed by up to 1,027 <code>-&gt;values([...])</code> calls in one statement. Every
-link of such a chain records its receiver as subject text that spells out
-the whole chain before it, arrays included, so the text built for one
-statement grows with the square of its length.</p>
-<p>Indexing the four files takes 0.3 to 0.6 s each (release build,
-2026-11-05), against about a millisecond for a typical core file. That is
-most of the second phase of a Drupal site's workspace index, and they are
-what lifts the <code>memory_drupal_module</code> scenario of
-<code>benches/memory_usage.py</code> to a peak of about 860 MiB on the way to
-settling under 300 MiB. Leaving out the fixtures and <code>.phpstan-baseline.php</code>
-brings that peak down to about 330 MiB.</p>
-<p>On a Drupal site the files go dormant once indexed, so the cost is only a
-spike. In a project where such a file is the project's own code, it stays
-resident: <code>drupal7.php</code> alone, as the only file of a workspace, settles at
-about 170 MiB above an empty server, some 90 times its size on disk
-(release build, 2026-11-07).</p>
-<p><strong>Where to look:</strong> <code>src/symbol_map/extraction/subject_text.rs</code>
-(<code>lower_spine_base</code>, <code>format_arg_expr</code>) and <code>SubjectText</code> in
-<code>src/symbol_map/span.rs</code>.</p>
 <hr />
 <h2 id="p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse">P86. A Symfony app's generated <code>config/reference.php</code> is slow to parse<a class="headerlink" href="#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
