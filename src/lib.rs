@@ -312,6 +312,7 @@ mod phpstan;
 pub(crate) mod phpstan_ignore;
 pub(crate) mod process;
 pub mod progress;
+mod prophecy;
 mod reference_counts;
 mod reference_index;
 mod references;

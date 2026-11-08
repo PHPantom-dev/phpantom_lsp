@@ -310,6 +310,7 @@ mod pest_test_case;
 mod php_version;
 mod position_encoding_robustness;
 mod preg_match_shapes;
+mod prophecy;
 mod references;
 mod references_laravel_macros;
 mod references_laravel_trans;

@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Testing
 
 - **Mocked method names.** The method a mock is told to expect, in PHPUnit's `$mock->method('…')`, Mockery's `shouldReceive('…')` and its siblings, and a Laravel facade's `shouldReceive('…')`, completes from the mocked class, navigates, shows up in find references, renames with the method, and is reported when the mocked class has no such method.
+- **Prophecy doubles.** A prophecy from `prophesize()` completes the methods of the class it doubles, and a call to one jumps to that method and takes an argument token such as `Argument::any()` in place of any argument.
 - **`setUp()` and `tearDown()` that skip the parent.** A test's `setUp()`, `tearDown()`, `setUpBeforeClass()` or `tearDownAfterClass()` that never calls the base test case's is reported, with a quick fix that adds the call.
 - **Data providers PHPUnit cannot call.** A data provider that is not public, or from PHPUnit 10 on not static, is reported, with a quick fix that adds the modifier. A provider a test names but nobody declared can be created with a quick fix.
 - **Create a test for a class.** A code action on a class, or on one of its public methods, writes its test where the class's test CodeLens looks for it, in the test directory's namespace, extending the project's base test case, covering the class, with a test method for each public method or just the one under the cursor. A project with a `Pest.php` gets a Pest file instead.
