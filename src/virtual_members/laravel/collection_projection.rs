@@ -3,6 +3,7 @@
 use crate::atom::{Atom, atom};
 use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of};
 use crate::php_type::{PhpType, TypeKind};
+use crate::type_engine::key_path::{self, KeyPathRules};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::{BackedEnumType, ClassInfo, ClassLikeKind, ELOQUENT_COLLECTION_FQN};
 use crate::util::unescape_php_string_literal_cow;
@@ -301,67 +302,26 @@ fn array_key() -> PhpType {
     ARRAY_KEY.clone()
 }
 
+/// The value `data_get()` reaches along `path` in an item of type `value`.
 fn property_path_type(value: &PhpType, path: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
-    let (head, tail) = path
-        .split_once('.')
-        .map_or((path, None), |(head, tail)| (head, Some(tail)));
     // data_get() treats these segments as operators (or escapes of them),
     // not as property names.
-    if matches!(head, "*" | "{first}" | "{last}") || head.starts_with('\\') {
+    if path
+        .split('.')
+        .any(|segment| matches!(segment, "*" | "{first}" | "{last}") || segment.starts_with('\\'))
+    {
         return None;
     }
-    let next = match value.kind() {
-        TypeKind::Nullable(inner) => {
-            return property_path_type(inner, path, ctx).map(PhpType::or_null);
-        }
-        TypeKind::Union(members) => {
-            return members
-                .iter()
-                .map(|member| property_path_type(member, path, ctx))
-                .collect::<Option<Vec<_>>>()
-                .map(PhpType::union);
-        }
-        _ if value.is_null() => return Some(PhpType::null()),
-        TypeKind::ArrayShape(_) | TypeKind::ObjectShape(_) => {
-            let entry = value.shape_entry(head)?;
-            if entry.optional {
-                entry.value_type.clone().or_null()
-            } else {
-                entry.value_type.clone()
-            }
-        }
-        _ if value.is_array_like() => value.iterable_element_type()?.or_null(),
-        _ => {
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                value,
-                "",
-                ctx.file.all_classes,
-                ctx.file.class_loader,
-            );
-            if let [class] = classes.as_slice() {
-                crate::inheritance::resolve_property_type_hint(class, head, ctx.file.class_loader)?
-            } else {
-                let types = classes
-                    .iter()
-                    .filter_map(|class| {
-                        crate::inheritance::resolve_property_type_hint(
-                            class,
-                            head,
-                            ctx.file.class_loader,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                if types.is_empty() {
-                    return None;
-                }
-                PhpType::union(types)
-            }
-        }
+    let rules = KeyPathRules {
+        properties: true,
+        method_calls: false,
     };
-    match tail {
-        Some(tail) => property_path_type(&next, tail, ctx),
-        None => Some(next),
-    }
+    let reached = key_path::path_type(value, path.split('.'), rules, ctx)?;
+    Some(if reached.may_miss {
+        reached.ty.or_null()
+    } else {
+        reached.ty
+    })
 }
 
 #[cfg(test)]

@@ -66,6 +66,12 @@ impl Backend {
             return vec![location];
         }
 
+        // A segment of a key path an `ArrayHelper` call reads names a
+        // property or a method of the value the keys before it reach.
+        if let Some(location) = self.yii_array_path_definition(uri, content, position) {
+            return vec![location];
+        }
+
         // Laravel config fallback: declaration sites in config/*.php
         if self.resolved_class_cache.read().laravel().is_enabled()
             && let Some(loc) =

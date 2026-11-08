@@ -49,9 +49,13 @@
 //!
 //! The properties a form field and a hydration map name are member
 //! accesses on the object they are given (see [`forms`]).
+//!
+//! The key paths `ArrayHelper` reads are walked through the value they
+//! read (see [`array_helper`]).
 
 pub(crate) mod active_record;
 pub(crate) mod aliases;
+pub(crate) mod array_helper;
 pub(crate) mod assets;
 pub(crate) mod config_plugin;
 pub(crate) mod definitions;

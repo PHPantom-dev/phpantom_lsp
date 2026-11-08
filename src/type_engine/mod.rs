@@ -18,6 +18,8 @@
 //! - **subject_resolution**: The type of a subject a caller already has as
 //!   text, for features outside completion; it hands everything but the
 //!   class keywords to the forward walker and the resolver
+//! - **key_path**: The value a key path (`'profile.address.city'`) reaches
+//!   in an array or an object, shared by every helper that reads one
 //!
 //! ### `type_ops/` — Operations on types
 //!
@@ -45,6 +47,7 @@
 
 pub(crate) mod body_reads;
 pub(crate) mod call_resolution;
+pub(crate) mod key_path;
 pub(crate) mod regex_shape;
 pub(crate) mod resolver;
 pub mod subject_expr;

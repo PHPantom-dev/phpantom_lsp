@@ -275,6 +275,7 @@ check("with('author') loads the author", $book?->isRelationPopulated('author') =
 check("relation('author') is an Author", $book?->relation('author') instanceof Author);
 check("get('title') reads Book::\$title", $book?->get('title') === 'Earthsea');
 check('describe() reads the title and the author', $book !== null && $catalog->describe($book) === 'Earthsea by Ursula (Earthsea)');
+check("getValueByPath('book.title') reads the entry's Book::\$title", $book !== null && $catalog->shelvedTitle(['book' => $book, 'shelf' => 'A']) === 'Earthsea on shelf A');
 
 $db->createCommand("INSERT INTO review (id, book_id, rating, body) VALUES (1, 1, 5, 'A classic.')")->execute();
 check("Review's table is 'review'", (new Review())->tableName() === '{{%review}}');

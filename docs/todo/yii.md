@@ -13,7 +13,9 @@ the events configuration attaches. Active Record queries are typed by the
 record they are for, and the attributes and relations a record and its
 queries name navigate, complete, and are checked, the columns of a record
 without properties read from the project's migrations, and so do the
-properties form fields and hydration maps name. What is left is below.
+properties form fields and hydration maps name. The key paths
+`ArrayHelper` reads complete, navigate, and are typed. What is left is
+below.
 
 The items below are what the Yii team asked for in
 [discussion #505](https://github.com/PHPantom-dev/phpantom_lsp/discussions/505).
@@ -139,22 +141,3 @@ way leaves the columns of every table open, so the class constants the
 demo names its tables with need resolving first. Complete and navigate table and column names, and report one no
 migration creates. Wait for a user to ask: the demo is the only project
 known to query this way.
-
----
-
-## Y17. Key paths in `yiisoft/arrays`
-
-**Impact: Low · Complexity: Medium**
-
-```php
-ArrayHelper::getValue($user, 'profile.address.city');
-```
-
-`ArrayHelper::getValue()`, `setValue()`, `keyExists()`, and `remove()`
-take a key or a dotted path into the array or object they are given.
-When the shape of that value is known, complete each segment from its
-keys and properties, navigate from a segment to its declaration, and
-type `getValue()` as the value the path reaches instead of `mixed`. Any
-dotted-path helper (Laravel's `data_get()` and `Arr::get()` take the
-same kind of path) would share the walk, so build it in the shared
-resolution path rather than for Yii alone.

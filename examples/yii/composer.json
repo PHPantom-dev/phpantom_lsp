@@ -15,6 +15,7 @@
         "symfony/console": "^7.4.7",
         "yiisoft/active-record": "^1.1",
         "yiisoft/aliases": "^3.1.1",
+        "yiisoft/arrays": "^3.2",
         "yiisoft/assets": "^5.1.2",
         "yiisoft/config": "^1.6.2",
         "yiisoft/csrf": "^2.2.3",
