@@ -350,6 +350,7 @@ mod tempest_context;
 mod tempest_context_edges;
 mod tempest_discovery;
 mod tempest_dynamic_components;
+mod tempest_model_properties;
 mod tempest_paths;
 mod tempest_routes;
 mod trait_self_generics;

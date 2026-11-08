@@ -7,15 +7,14 @@ typed from the calls and View objects that render it, and component
 tags, their attributes, and the paths passed to `view()` complete and
 navigate. What is still missing is navigating from a component
 attribute, documentation for the built-in tags and directives, and the
-names Tempest's database and container layers take as strings.
+names Tempest's container forwards to callables.
 
 Work out each behaviour from the framework's own source
 (`tempest/view`, `tempest/router`, `tempest/database`,
 `tempest/container`) and the [view spec](https://tempestphp.com/3.x/internals/view-spec).
 
-`examples/tempest/` is the playground. It installs the view and router
-layers. The database item adds `tempest/database` to its `composer.json`
-along with its demos.
+`examples/tempest/` is the playground. It installs the view, router, and
+database layers.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
@@ -24,34 +23,6 @@ within the same impact tier.
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
-
----
-
-## TM4. Model property names in query builders and model helpers
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-query(Book::class)->select()->whereIn('isbn', $isbns)->where('title', $title);
-Book::updateOrCreate(['isbn' => $isbn], ['title' => $title]);
-Book::create(title: $title, isbn: $isbn);
-```
-
-Tempest's query builders take a model's property names as strings
-(`whereField()`, the `whereIn()`/`whereNull()`/`whereLike()` family and
-its date helpers, and `where()`/`andWhere()`/`orWhere()` when the string
-is a bare field), and the `IsDatabaseModel` helpers take them as array
-keys (`findOrNew()`, `updateOrCreate()`) or named arguments (`create()`,
-`new()`, `find()`). Complete those names from the model's properties
-and navigate from a name to the property. The model comes from the
-builder's generic type (`query()` returns `QueryBuilder<TModel>`, and
-`select()` a `SelectQueryBuilder<TModel>`), which the type engine
-already resolves, so read it from there rather than from the text of
-the `query()` call. `where()` treats a string containing a space or an
-operator as raw SQL and passes it to `whereRaw()`, so leave those, and
-the `*Raw()` methods, alone. Check `orderBy()`, `groupBy()`, and
-`having()` against `tempest/database` too, and include whichever take a
-field name.
 
 ---
 

@@ -250,6 +250,18 @@ pub(crate) fn is_tempest_project(package: &ComposerPackage) -> bool {
         })
 }
 
+/// Whether the project uses Tempest's standalone database layer or framework.
+pub(crate) fn is_tempest_database_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            name.eq_ignore_ascii_case("tempest/database")
+                || name.eq_ignore_ascii_case("tempest/framework")
+        })
+}
+
 /// Whether the package is a Drupal project: one that requires Drupal core.
 pub(crate) fn is_drupal_project(package: &ComposerPackage) -> bool {
     const DRUPAL_PACKAGES: &[&str] = &["drupal/core", "drupal/core-recommended", "drupal/core-dev"];
@@ -559,6 +571,27 @@ mod tests {
         )));
         assert!(!is_tempest_project(&pkg(
             r#"{"require": {"laravel/framework": "^11.0"}}"#
+        )));
+    }
+
+    #[test]
+    fn detects_tempest_database_independently_of_views() {
+        for json in [
+            r#"{"require":{"tempest/database":"^3.0"}}"#,
+            r#"{"require-dev":{"Tempest/Database":"^3.0"}}"#,
+            r#"{"require":{"tempest/framework":"^3.0"}}"#,
+        ] {
+            assert!(is_tempest_database_project(&pkg(json)), "{json}");
+        }
+        for json in [
+            r#"{}"#,
+            r#"{"require":{"tempest/view":"^3.0"}}"#,
+            r#"{"require":{"laravel/framework":"^12.0"}}"#,
+        ] {
+            assert!(!is_tempest_database_project(&pkg(json)), "{json}");
+        }
+        assert!(!is_tempest_project(&pkg(
+            r#"{"require":{"tempest/database":"^3.0"}}"#
         )));
     }
 

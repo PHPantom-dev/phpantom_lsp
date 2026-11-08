@@ -1,4 +1,4 @@
-//! Tempest View templates, lowered to PHP for the shared type engine.
+//! Tempest templates, routes, and database helpers backed by the shared type engine.
 
 mod component_context;
 mod components;
@@ -6,6 +6,7 @@ mod configuration;
 mod custom_views;
 mod discovery;
 pub(crate) mod inference;
+mod model_properties;
 mod paths;
 pub(crate) mod preprocessor;
 pub(crate) mod routes;

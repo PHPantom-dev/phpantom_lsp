@@ -35,7 +35,6 @@ contributor even though it's short.
 | TM1 | [Component attribute names navigate to the component's variable](todo/tempest.md#tm1-component-attribute-names-navigate-to-the-components-variable) | Low-Medium | Low |
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
-| TM4 | [Model property names in query builders and model helpers](todo/tempest.md#tm4-model-property-names-in-query-builders-and-model-helpers) | Medium | Medium |
 | Y15 | [Property names in hydrator attributes and form fields](todo/yii.md#y15-property-names-in-hydrator-attributes-and-form-fields) | Low-Medium  | Medium      |
 | Y17 | [Key paths in `yiisoft/arrays`](todo/yii.md#y17-key-paths-in-yiisoftarrays) | Low         | Medium      |
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
@@ -162,7 +161,6 @@ ships, remove every row that names it.
 | TM1 | [Component attribute names navigate to the component's variable](todo/tempest.md#tm1-component-attribute-names-navigate-to-the-components-variable) | Low-Medium | Low |
 | TM2 | [Documentation for built-in components and directives](todo/tempest.md#tm2-documentation-for-built-in-components-and-directives) | Low | Low |
 | TM5 | [Named arguments `Container::invoke()` forwards](todo/tempest.md#tm5-named-arguments-containerinvoke-forwards) | Low | Low-Medium |
-| TM4 | [Model property names in query builders and model helpers](todo/tempest.md#tm4-model-property-names-in-query-builders-and-model-helpers) | Medium | Medium |
 
 ## PHPUnit & Pest
 

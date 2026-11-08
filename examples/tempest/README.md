@@ -4,6 +4,8 @@ Run `composer install`, then open this directory in an editor using PHPantom.
 The `.view.php` files use the editor's PHP language-server connection.
 
 - In `app/BookController.php`, complete or follow the view path.
+- In `app/DatabaseQueries.php`, complete and follow model property names in
+  query builders and model helpers.
 - In `app/RouteLinks.php`, complete and follow route URIs and their arguments.
   In `BookController.php`, follow route placeholders to parameters and rename them
   together with their URI arguments. Routes without a leading slash complete
@@ -37,7 +39,8 @@ phpantom_lsp analyze --project-root . --no-colour
 The assertions render the templates with Tempest's own renderer, checking
 the data and scope behavior demonstrated above, and discover configured
 components with Tempest's own discovery runner. They also discover routes and
-generate the demo links with Tempest's router.
+generate the demo links with Tempest's router and run the model queries
+against an in-memory SQLite database.
 
 Performance checks use this playground's declarations with a generated
 catalogue of 400 views. Completion and navigation results are checked before
