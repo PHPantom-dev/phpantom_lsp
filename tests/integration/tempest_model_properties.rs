@@ -102,10 +102,12 @@ class BaseBook {
 class Book extends BaseBook {
     use BookFields;
     public ?string $publishedAt;
+    public string $INstock;
     public static string $staticField;
     protected string $protectedField;
     private string $privateField;
 }
+
 class Other { public string $different; }
 class OverrideBook extends Book {
     public static function create(mixed ...$payload): static {}
@@ -536,4 +538,33 @@ Book::updateOrCreate(['isbn' => 'title'], ['isbn' => ['title' => 1]]);
                 .is_empty()
         );
     }
+}
+
+#[tokio::test]
+async fn tempest_model_properties_leave_word_operators_in_where_as_sql() {
+    let source = r"<?php
+use App\Book;
+use function Tempest\Database\query;
+query(Book::class)->select()->where('INstock', 1);
+query(Book::class)->select()->whereField('INstock', 1);
+Book::select()->where('', 1);
+";
+    let (backend, _dir, models, uri) = project(source).await;
+    for needle in ["where('IN", "Book::select()->where('"] {
+        let at = position_after(source, needle);
+        let labels = complete_labels_at_opened(&backend, &uri, at.line, at.character).await;
+        assert!(!labels.contains(&"INstock".to_string()), "{labels:?}");
+    }
+    let at = position_after(source, "whereField('IN");
+    let labels = complete_labels_at_opened(&backend, &uri, at.line, at.character).await;
+    assert_eq!(labels, ["INstock"]);
+    assert!(
+        definitions_at(&backend, &uri, source, "'INstock'")
+            .await
+            .is_empty()
+    );
+    let locations =
+        definition_locations(goto_definition_at(&backend, &uri, at.line, at.character).await);
+    assert_eq!(locations.len(), 1);
+    assert_eq!(locations[0].uri, models);
 }

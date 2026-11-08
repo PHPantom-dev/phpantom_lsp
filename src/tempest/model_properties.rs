@@ -57,6 +57,16 @@ fn argument_role(method: &str) -> Option<PropertyArgument> {
 }
 
 impl PropertyArgument {
+    // Tempest's where() tests operator substrings case-sensitively, even
+    // inside an identifier. The explicit field APIs do not make that test.
+    fn accepts_name(self, name: &str) -> bool {
+        bare_property(name)
+            && (self != Self::Field("statement")
+                || !["LIKE", "IN", "BETWEEN", "EXISTS", "REGEXP"]
+                    .iter()
+                    .any(|operator| name.contains(operator)))
+    }
+
     fn matches_method(self, method: &MethodInfo) -> bool {
         let Some(first) = method.parameters.first() else {
             return false;
@@ -247,7 +257,7 @@ impl Backend {
         let operator = call.callee_operator.as_ref()?;
         let argument = string_argument(content, cursor, code, call)?;
         if !role.matches_string(&argument)
-            || !bare_property(content.get(quote + 1..argument.string_end)?)
+            || !role.accepts_name(content.get(quote + 1..argument.string_end)?)
         {
             return None;
         }
@@ -280,6 +290,7 @@ impl Backend {
                     && !p.is_static
                     && !p.is_virtual
                     && p.name.starts_with(prefix)
+                    && role.accepts_name(&p.name)
                     && !argument.used_keys.iter().any(|key| key == p.name)
             }) {
                 items.push(CompletionItem {
@@ -407,7 +418,7 @@ impl Backend {
             }
             content.get(quote + 1..argument.string_end)?
         };
-        if name.is_empty() || !bare_property(name) {
+        if name.is_empty() || !role.accepts_name(name) {
             return None;
         }
         let (receiver, access, method) = call_receiver(call.call_expression)?;
