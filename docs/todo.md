@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| TM6 | [`query(Book::class)` builds a query for `Book`](todo/tempest.md#tm6-querybookclass-builds-a-query-for-book) | Medium | Low |
 | DR29 | [Controller methods of a service](todo/drupal.md#dr29-controller-methods-of-a-service) | Low-Medium | Low |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
@@ -148,7 +147,6 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| TM6 | [`query(Book::class)` builds a query for `Book`](todo/tempest.md#tm6-querybookclass-builds-a-query-for-book) | Medium | Low |
 | TM7 | [A project's own route decorators change the route's URI](todo/tempest.md#tm7-a-projects-own-route-decorators-change-the-routes-uri) | Low | Medium |
 
 ## PHPUnit & Pest
