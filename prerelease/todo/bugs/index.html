@@ -1010,23 +1010,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b742-a-global-constant-holding-fooclass-or-an-enum-case-has-no-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B742. A global constant holding <code>Foo::class</code> or an enum case has no type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1650,23 +1633,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b742-a-global-constant-holding-fooclass-or-an-enum-case-has-no-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B742. A global constant holding <code>Foo::class</code> or an enum case has no type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1738,42 +1704,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b742-a-global-constant-holding-fooclass-or-an-enum-case-has-no-type">B742. A global constant holding <code>Foo::class</code> or an enum case has no type<a class="headerlink" href="#b742-a-global-constant-holding-fooclass-or-an-enum-case-has-no-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace Lib;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">class Widget {}</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">enum Suit { case Hearts; }</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">const WIDGET = Widget::class;</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">const SUIT = Suit::Hearts;</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">$w = WIDGET;                    // class-string&lt;Widget&gt;, but untyped</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">$s = SUIT;                      // Suit::Hearts, but untyped</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">/**</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x"> * @template T of object</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x"> * @param class-string&lt;T&gt; $class</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x"> * @return T</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x"> */</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="x">function make(string $class = WIDGET): object { … }</span>
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="x">$made = make();                 // Widget, but mixed</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="x">$made = make(WIDGET);           // the same</span>
-</code></pre></div>
-<p>A class constant initialized to <code>Foo::class</code> or <code>Suit::Hearts</code> reads as
-that class name or case (<code>class_constants.rs</code> falls back to
-<code>class_name_literal_type</code> and <code>resolve_static_access_type</code> after the
-literal fold), but a global or namespaced constant does not: both the AST
-path (<code>global_constant_type</code> in <code>rhs_resolution/constant_access.rs</code>) and
-the text path (<code>Backend::resolve_arg_text_to_type</code>) stop at
-<code>infer_type_from_constant_value</code> and <code>folded_constant_type</code>, which only
-read literals. Both need the same fallback.</p>
-<p>Once fixed, cover the template case with a callee and a caller in
-different namespaces that each declare a constant of the same name: an
-omitted argument's default is read in the callee's namespace
-(<code>TemplateCallee::namespace</code>), which nothing can observe until such a
-constant has a type.</p>
+<p>No outstanding items.</p>
 
 
 
