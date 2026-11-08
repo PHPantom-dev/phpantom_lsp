@@ -281,6 +281,7 @@ impl Backend {
                         DocblockMemberRef::MockedMethod
                             | DocblockMemberRef::AttributeNamedArg
                             | DocblockMemberRef::EntityField
+                            | DocblockMemberRef::YiiAttribute
                     )
                 {
                     return Vec::new();

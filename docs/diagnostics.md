@@ -170,6 +170,8 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_yii_param` | Warning | A `$params` key no params file declares. |
 | `invalid_yii_translation` | Warning | A message ID, spelled like a key (`menu.blog`), that no message file of its category declares. |
 | `invalid_yii_config_file` | Warning | A file a `config-plugin` in `composer.json` lists that does not exist. |
+| `invalid_yii_attribute` | Warning | An Active Record attribute the record declares no property for. Not reported on a record that declares no properties, whose attributes are its table's columns. |
+| `invalid_yii_relation` | Warning | An Active Record relation the record does not declare. |
 
 ## Drupal
 

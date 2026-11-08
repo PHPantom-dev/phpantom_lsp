@@ -237,6 +237,27 @@ pub struct MethodExtras {
     /// arguments) are substituted into this type before it replaces the
     /// receiver's tracked type.
     pub self_out: Option<PhpType>,
+    /// The relations a Yii Active Record's `relationQuery()` declares: one
+    /// per string condition of the `match` on its parameter that it
+    /// returns (see [`crate::yii::active_record`]).  `None` on every other
+    /// method, and on a `relationQuery()` whose body says something else,
+    /// or whose `default` arm takes names of its own, so that the names it
+    /// accepts are not known.
+    pub record_relations: Option<Box<[RecordRelation]>>,
+}
+
+/// A relation a Yii Active Record's `relationQuery()` declares with an arm
+/// of its `match`: `'author' => $this->hasOne(User::class, …)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordRelation {
+    /// The relation's name, the arm's condition.
+    pub name: Atom,
+    /// Where the name starts in the file, inside the quotes.
+    pub offset: u32,
+    /// The record class the arm's query is built for, fully qualified,
+    /// when the arm builds it with `hasOne()` or `hasMany()` given a
+    /// `::class`.
+    pub related: Option<Atom>,
 }
 
 impl MethodExtras {
@@ -258,6 +279,7 @@ impl MethodExtras {
             && self.throws.is_empty()
             && self.if_this_is.is_none()
             && self.self_out.is_none()
+            && self.record_relations.is_none()
     }
 
     /// Box `self` for [`MethodInfo::extras`], or `None` when it is empty.

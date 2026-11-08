@@ -240,6 +240,12 @@ fn resolve_member_owner(
     if docblock_ref == DocblockMemberRef::MockedMethod {
         names = crate::mock_methods::mocked_class_names(names, is_static, &class_loader);
     }
+    if docblock_ref == DocblockMemberRef::YiiAttribute {
+        names.retain(|name| {
+            class_loader(crate::class_lookup::Fqn::new(name))
+                .is_some_and(|class| crate::yii::active_record::is_record(&class, &class_loader))
+        });
+    }
     (names.len() == 1).then(|| names.swap_remove(0))
 }
 

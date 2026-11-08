@@ -44,6 +44,10 @@ pub(super) struct MemberAccessSite<'a> {
     /// which is checked against the entity's mapping rather than looked up
     /// on the subject (see [`crate::doctrine`]).
     pub(super) entity_field: bool,
+    /// Whether the member is an attribute a Yii Active Record call names,
+    /// which is checked on the records among the subject's classes only
+    /// (see [`crate::yii::active_record`]).
+    pub(super) yii_attribute: bool,
     /// The class the access is written in.
     pub(super) current_class: Option<&'a ClassInfo>,
 }
@@ -169,6 +173,7 @@ impl<'a> MemberAccessSite<'a> {
             is_nullsafe: *is_nullsafe,
             mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
             entity_field: *docblock_ref == DocblockMemberRef::EntityField,
+            yii_attribute: *docblock_ref == DocblockMemberRef::YiiAttribute,
             current_class,
         })
     }

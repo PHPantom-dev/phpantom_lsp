@@ -51,6 +51,13 @@ impl Backend {
             return resolved;
         }
 
+        // A relation an Active Record call names is declared by an arm of
+        // the record's `relationQuery()` or by a getter, not by a member of
+        // its name, so it is kept beside the spans.
+        if let Some(location) = self.yii_relation_definition(uri, content, position) {
+            return vec![location];
+        }
+
         // Laravel config fallback: declaration sites in config/*.php
         if self.resolved_class_cache.read().laravel().is_enabled()
             && let Some(loc) =

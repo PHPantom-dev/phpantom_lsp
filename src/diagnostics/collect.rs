@@ -216,6 +216,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         },
     ),
     always(
+        "invalid_yii_relation",
+        Backend::collect_yii_relation_diagnostics,
+    ),
+    always(
         "invalid_dql_syntax",
         Backend::collect_dql_syntax_diagnostics,
     ),

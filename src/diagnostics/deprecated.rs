@@ -171,11 +171,13 @@ impl Backend {
                     // A mock expectation names the method it stubs rather
                     // than calling it, and a deprecated method is still one
                     // a test has to mock.  A repository call's field name is
-                    // a column the query reads, not the property.
+                    // a column the query reads, not the property, and so is
+                    // a record's attribute name.
                     if matches!(
                         docblock_ref,
                         crate::symbol_map::DocblockMemberRef::MockedMethod
                             | crate::symbol_map::DocblockMemberRef::EntityField
+                            | crate::symbol_map::DocblockMemberRef::YiiAttribute
                     ) {
                         continue;
                     }

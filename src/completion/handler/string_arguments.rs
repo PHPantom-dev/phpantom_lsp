@@ -409,6 +409,19 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Yii Active Record attributes and relations ──────────
+        // `$post->get('|')` names an attribute of the record, and
+        // `$post->relation('|')` and `Post::query()->with('|')` a
+        // relation.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_yii_active_record_completion(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
         // ── Doctrine repository field names ─────────────────────
         // `$repository->findBy(['|' => …])` and its siblings key their
         // criteria and order by the entity's mapped fields.

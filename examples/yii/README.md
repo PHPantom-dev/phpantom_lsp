@@ -2,8 +2,9 @@
 
 A standalone editor playground for PHPantom's Yii 3 support. It is the
 application `yiisoft/app` generates, with the tooling trimmed off and a small
-blog added: a route group, a controller, views rendered through an alias, and
-a DI definition, each declared the way a real Yii 3 project declares them.
+blog added: a route group, a controller, views rendered through an alias, a
+DI definition, and a book catalog kept in Active Records, each declared the
+way a real Yii 3 project declares them.
 
 ## What to try
 
@@ -87,6 +88,15 @@ a DI definition, each declared the way a real Yii 3 project declares them.
   `assets/main/site.css`, or hover it for the stylesheets that declare it.
   Clear the string to complete the classes the project's stylesheets
   declare, a name at a time.
+- Open `src/Catalog/BookCatalog.php`. Hover `$book` in `find()`: the query
+  `Book::query()` builds returns a `Book`. Go to the definition of `'author'`
+  in `with()`, which lands on `Book::getAuthorQuery()`, and of `'books'` in
+  `with('books.author')`, which lands on its arm in `Author::relationQuery()`.
+  Each segment of the path is a relation of the record the one before it is
+  for. In `describe()`, `'title'` in `get()` goes to `Book::$title`, and
+  renaming the property renames the string. Clear a name to complete the
+  relations or attributes the record declares, and misspell one to see it
+  reported.
 - Open `vendor/yiisoft/router/composer.json` once the dependencies are
   installed. Its `config-plugin` lists the files the package adds to each
   config group: go to the definition of `"di.php"` for `config/di.php`, clear

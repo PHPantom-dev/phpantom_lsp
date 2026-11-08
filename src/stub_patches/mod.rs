@@ -144,8 +144,10 @@
 //! project or its vendor tree, so they match on an exact FQN (and, for
 //! functions, the docblock shape) and leave everything else alone. They
 //! cover a few `@phpstan-assert-if-true` promises PHPStan's own classes
-//! leave undeclared, and the `$args` docblock of Mockery's mock factories,
-//! whose `array<TMock>` alternative is really constructor arguments.
+//! leave undeclared, the `$args` docblock of Mockery's mock factories,
+//! whose `array<TMock>` alternative is really constructor arguments, and the
+//! record class a `yiisoft/active-record` query is for (see
+//! `active_record.rs`).
 //!
 //! ### Class patches
 //!
@@ -199,6 +201,7 @@
 //! `classes.rs`) and remove its dispatch from the entry point.  Run the test suite to verify that the stub's
 //! own annotations produce the same result.
 
+mod active_record;
 mod classes;
 mod functions;
 mod mockery;

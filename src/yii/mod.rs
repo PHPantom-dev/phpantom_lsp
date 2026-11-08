@@ -40,13 +40,18 @@
 //! category they are looked up in, and are declared by the message files
 //! of the directories the DI definitions give their message sources (see
 //! [`translations`]).
+//!
+//! The attributes and relations an Active Record names as strings are read
+//! against the record (see [`active_record`]).
 
+pub(crate) mod active_record;
 pub(crate) mod aliases;
 pub(crate) mod assets;
 pub(crate) mod config_plugin;
 pub(crate) mod definitions;
 pub(crate) mod events;
 pub(crate) mod params;
+pub(crate) mod relations;
 pub(crate) mod routes;
 pub(crate) mod translations;
 pub(crate) mod views;

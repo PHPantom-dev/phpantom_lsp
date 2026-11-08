@@ -355,6 +355,9 @@ pub(crate) struct SymbolMap {
     /// The file's Yii DI definition arrays that build a known class, in
     /// source order.  Empty for every file that writes none.
     pub yii_definition_bodies: Vec<YiiDefinitionBody>,
+    /// The relations the file's Yii Active Record calls name, in source
+    /// order.  Empty for every file that names none.
+    pub yii_relations: Vec<YiiRelationSite>,
     /// The DQL identification variables the file's queries and query
     /// builders declare, with what each stands for.  Empty for every file
     /// that declares none.

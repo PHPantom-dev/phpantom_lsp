@@ -251,6 +251,8 @@ struct ExtractionCtx<'a> {
     yii_definitions: Vec<crate::symbol_map::YiiDefinitionSite>,
     /// The file's DI definition arrays that build a known class.
     yii_definition_bodies: Vec<crate::symbol_map::YiiDefinitionBody>,
+    /// The relations the file's Active Record calls name.
+    yii_relations: Vec<crate::symbol_map::YiiRelationSite>,
     /// Whether the file is handed the Yii `$params` (see
     /// [`Frameworks::yii_params`]).
     yii_params: bool,
@@ -387,6 +389,7 @@ mod twig;
 mod twig_context;
 mod wordpress;
 mod yii;
+mod yii_active_record;
 mod yii_definitions;
 mod yii_routes;
 mod yii_translations;
@@ -409,6 +412,7 @@ use twig::*;
 use twig_context::*;
 use wordpress::*;
 use yii::*;
+use yii_active_record::*;
 use yii_definitions::*;
 use yii_routes::*;
 use yii_translations::*;
@@ -645,6 +649,7 @@ fn extract_symbol_map_inner(
         routes: Vec::new(),
         yii_definitions: Vec::new(),
         yii_definition_bodies: Vec::new(),
+        yii_relations: Vec::new(),
         yii_params,
         doctrine,
         dql: Default::default(),
@@ -839,6 +844,7 @@ fn extract_symbol_map_inner(
         routes: ctx.routes,
         yii_definitions: ctx.yii_definitions,
         yii_definition_bodies: ctx.yii_definition_bodies,
+        yii_relations: ctx.yii_relations,
         dql_aliases: ctx.dql_aliases,
         dql_syntax_errors: ctx.dql_syntax_errors,
         dql_builder_methods: ctx.dql_builder_methods,

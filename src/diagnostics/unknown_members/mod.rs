@@ -77,6 +77,7 @@ mod chains;
 mod doctrine;
 mod eloquent;
 mod member_check;
+mod yii;
 
 use std::collections::HashMap;
 
@@ -105,6 +106,10 @@ pub(crate) const UNKNOWN_MEMBER_CODE: &str = "unknown_member";
 /// Diagnostic code for a field a Doctrine repository call names that the
 /// entity does not map.
 pub(crate) const UNKNOWN_ENTITY_FIELD_CODE: &str = "invalid_doctrine_field";
+
+/// Diagnostic code for an attribute a Yii Active Record call names that the
+/// record does not have.
+pub(crate) const INVALID_YII_ATTRIBUTE_CODE: &str = "invalid_yii_attribute";
 
 /// Diagnostic code for a member that some classes of a union declare and
 /// others do not.  Opt-in through `partial-union-members`.
@@ -293,6 +298,12 @@ impl UnknownMemberPass<'_> {
         outcome: &SubjectOutcome,
         out: &mut Vec<Diagnostic>,
     ) -> MemberCheckResult {
+        if access.yii_attribute {
+            if let SubjectOutcome::Resolved { classes, .. } = outcome {
+                self.report_unknown_yii_attribute(access, classes, out);
+            }
+            return MemberCheckResult::Ok;
+        }
         if access.entity_field {
             // Only a repository whose entity is known takes field names:
             // on anything else the key is an ordinary array key.

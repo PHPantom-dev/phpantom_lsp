@@ -41,7 +41,7 @@ contributor even though it's short.
 | Y17 | [Key paths in `yiisoft/arrays`](todo/yii.md#y17-key-paths-in-yiisoftarrays) | Low         | Medium      |
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
 | Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
-| Y18 | [Active Record attributes and relations](todo/yii.md#y18-active-record-attributes-and-relations) (builds on Y8) | Low-Medium  | Medium-High |
+| Y19 | [Attributes of an Active Record without properties](todo/yii.md#y19-attributes-of-an-active-record-without-properties) (builds on Y8) | Low-Medium  | Low-Medium  |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -153,7 +153,7 @@ ships, remove every row that names it.
 | Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
 | Y15 | [Property names in hydrator attributes and form fields](todo/yii.md#y15-property-names-in-hydrator-attributes-and-form-fields) | Low-Medium  | Medium      |
 | Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
-| Y18 | [Active Record attributes and relations](todo/yii.md#y18-active-record-attributes-and-relations) (builds on Y8) | Low-Medium  | Medium-High |
+| Y19 | [Attributes of an Active Record without properties](todo/yii.md#y19-attributes-of-an-active-record-without-properties) (builds on Y8) | Low-Medium  | Low-Medium  |
 | Y17 | [Key paths in `yiisoft/arrays`](todo/yii.md#y17-key-paths-in-yiisoftarrays) | Low         | Medium      |
 
 ## Tempest

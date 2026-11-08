@@ -243,6 +243,10 @@ impl Backend {
                     &self.resolved_class_cache,
                 );
             }
+            crate::symbol_map::DocblockMemberRef::YiiAttribute => {
+                candidates
+                    .retain(|class| crate::yii::active_record::is_record(class, class_loader));
+            }
             _ => {}
         }
         let first = candidates.first()?;

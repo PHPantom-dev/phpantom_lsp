@@ -14,6 +14,9 @@
 require_once __DIR__ . '/vendor/autoload.php';
 
 use App\Blog\InMemoryPostRepository;
+use App\Catalog\Author;
+use App\Catalog\Book;
+use App\Catalog\BookCatalog;
 use App\Blog\Post;
 use App\Blog\PostRepositoryInterface;
 use App\Blog\PostViewed;
@@ -23,6 +26,7 @@ use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
 use Yiisoft\Aliases\Aliases;
+use Yiisoft\Db\Connection\ConnectionInterface;
 use Yiisoft\Injector\Injector;
 use Yiisoft\Injector\MissingRequiredArgumentException;
 use Yiisoft\Router\HydratorAttribute\RouteArgument;
@@ -216,6 +220,43 @@ check('A listener takes the event in any parameter its class fits', $injector->i
 $controller = $container->get(PostController::class);
 check('PostController::index() returns a response', $controller->index() instanceof ResponseInterface);
 check('PostController::view() answers 200 for a known slug', $controller->view('hello-yii')->getStatusCode() === 200);
+
+// ─── Active Record ──────────────────────────────────────────────────────────
+
+// The bootstrap group runs yiisoft/active-record's bootstrap, which hands the
+// connection config/common/di/db.php defines to the records.
+foreach ($runner->getConfig()->get('bootstrap-web') as $bootstrap) {
+    $bootstrap($container);
+}
+$db = $container->get(ConnectionInterface::class);
+$db->createCommand('CREATE TABLE author (id INTEGER PRIMARY KEY, name TEXT NOT NULL)')->execute();
+$db->createCommand('CREATE TABLE book (id INTEGER PRIMARY KEY, title TEXT NOT NULL, author_id INTEGER NOT NULL)')->execute();
+$db->createCommand("INSERT INTO author (id, name) VALUES (1, 'Ursula')")->execute();
+$db->createCommand("INSERT INTO book (id, title, author_id) VALUES (1, 'Earthsea', 1), (2, 'The Dispossessed', 1)")->execute();
+
+check("Book declares the relation 'author' with getAuthorQuery()", (new Book())->relationNames() === ['author']);
+check("Author declares the relation 'books' in relationQuery()", (new Author())->relationQuery('books')->getModel() instanceof Book);
+try {
+    (new Author())->relationQuery('autor');
+    check("Author declares no relation 'autor'", false);
+} catch (InvalidArgumentException) {
+    check("Author declares no relation 'autor'", true);
+}
+
+$catalog = new BookCatalog();
+$book = $catalog->find(1);
+check("Book::query()->with('author')->one() is a Book", $book instanceof Book);
+check("with('author') loads the author", $book?->isRelationPopulated('author') === true);
+check("relation('author') is an Author", $book?->relation('author') instanceof Author);
+check("get('title') reads Book::\$title", $book?->get('title') === 'Earthsea');
+check('describe() reads the title and the author', $book !== null && $catalog->describe($book) === 'Earthsea by Ursula (Earthsea)');
+
+$authors = $catalog->authorsWithBooks();
+$author = $authors[0] ?? null;
+check("Author::query()->with('books.author')->all() returns Authors", $author instanceof Author);
+check("with('books.author') loads each author's books", $author instanceof Author && count($author->relation('books')) === 2);
+$first = $author instanceof Author ? ($author->relation('books')[0] ?? null) : null;
+check("with('books.author') loads the author of each book", $first instanceof Book && $first->isRelationPopulated('author'));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 
