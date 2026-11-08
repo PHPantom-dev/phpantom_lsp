@@ -483,8 +483,7 @@ impl Backend {
                 shown = &view_path;
                 let detail = self
                     .yii_view_file(key)
-                    .and_then(|file| crate::util::path_to_url(&file))
-                    .and_then(|uri| self.workspace_relative_path(uri.as_str()))
+                    .map(|file| self.yii_view_display(&file.to_string_lossy()))
                     .map_or_else(
                         || "No template is there".to_string(),
                         |path| format!("`{}`", path),

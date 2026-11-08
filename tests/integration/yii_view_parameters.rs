@@ -267,7 +267,7 @@ async fn workspace(open: &[&str]) -> (Backend, tempfile::TempDir) {
         std::fs::write(&full, content).unwrap();
     }
     let backend = Backend::new_test();
-    initialize_with_options(&backend, dir.path(), None).await;
+    initialize_with_options(&backend, &dunce::canonicalize(dir.path()).unwrap(), None).await;
     for path in open {
         open_document(&backend, &uri_for(&dir, path), "php", content_of(path)).await;
     }
@@ -283,7 +283,10 @@ fn content_of(path: &str) -> &'static str {
 }
 
 fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
-    Uri::from_file_path(dunce::canonicalize(dir.path()).unwrap().join(rel)).unwrap()
+    let path = dir.path().join(rel);
+    let path = dunce::canonicalize(&path)
+        .unwrap_or_else(|_| dunce::canonicalize(dir.path()).unwrap().join(rel));
+    Uri::from_file_path(path).unwrap()
 }
 
 /// The position `inside` bytes into the first occurrence of `needle`.
@@ -365,6 +368,39 @@ async fn a_parameter_navigates_to_its_declaration_and_hovers_its_type() {
         .expect("a hover");
     let markup = hover_text(&hover);
     assert!(markup.contains("Post"), "{markup}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn symlinked_templates_use_unsaved_parameters_from_the_canonical_file() {
+    let (backend, dir) = workspace(&[]).await;
+    let source = dir.path().join("resources/views");
+    let target = dir.path().join("resources/templates");
+    std::fs::rename(&source, &target).unwrap();
+    std::os::unix::fs::symlink(&target, &source).unwrap();
+    let template = uri_for(&dir, "resources/views/blog/post.php");
+    let updated = POST_TEMPLATE_PHP.replace("@var Post $post", "@var string $post");
+    open_document(&backend, &template, "php", &updated).await;
+    let controller = uri_for(&dir, "src/Web/Blog/PostController.php");
+    open_document(&backend, &controller, "php", POST_CONTROLLER_PHP).await;
+    let position = position_in(POST_CONTROLLER_PHP, "['post' => $post, 'title'", 3);
+    let response = backend
+        .goto_definition(DefinitionParams {
+            text_document_position_params: text_document_position(&controller, position),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) = response else {
+        panic!("expected one location, got {response:?}");
+    };
+    assert_eq!(location.uri, template);
+    assert_eq!(location.range.start, position_in(&updated, "$post\n", 0));
+    let hover = hover_response(&backend, &controller, position.line, position.character)
+        .await
+        .unwrap();
+    assert!(hover_text(&hover).contains("string"), "{hover:?}");
 }
 
 #[tokio::test]

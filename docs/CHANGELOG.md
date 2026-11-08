@@ -238,6 +238,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Asset paths through symlinked directories.** Asset entries navigate to the canonical file, and missing-file diagnostics keep their paths relative to the project. Contributed by @shuvroroy.
 - **Translation files through symlinked directories.** Message IDs navigate to the canonical file and refresh when that file changes. Contributed by @shuvroroy.
+- **View paths through symlinked directories.** View names and parameters navigate to the canonical template, and hover and diagnostics keep paths relative to the project. Contributed by @shuvroroy.
 
 #### Type inference
 

@@ -193,7 +193,7 @@ async fn workspace(open: &[&str]) -> (Backend, tempfile::TempDir) {
         std::fs::write(&full, content).unwrap();
     }
     let backend = Backend::new_test();
-    initialize_with_options(&backend, dir.path(), None).await;
+    initialize_with_options(&backend, &dunce::canonicalize(dir.path()).unwrap(), None).await;
     for path in open {
         open_document(&backend, &uri_for(&dir, path), "php", content_of(path)).await;
     }
@@ -209,7 +209,10 @@ fn content_of(path: &str) -> &'static str {
 }
 
 fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
-    Uri::from_file_path(dir.path().join(rel)).unwrap()
+    let path = dir.path().join(rel);
+    let path = dunce::canonicalize(&path)
+        .unwrap_or_else(|_| dunce::canonicalize(dir.path()).unwrap().join(rel));
+    Uri::from_file_path(path).unwrap()
 }
 
 /// The position `inside` bytes into the first occurrence of `needle`.
@@ -304,6 +307,31 @@ async fn each_way_of_naming_a_view_resolves_to_its_template() {
     )
     .await;
     assert!(found.is_empty(), "{found:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn symlinked_views_with_an_extension_navigate_to_the_canonical_template() {
+    let (backend, dir) = workspace(&[]).await;
+    let source = dir.path().join("resources/views");
+    let target = dir.path().join("resources/templates");
+    std::fs::rename(&source, &target).unwrap();
+    std::os::unix::fs::symlink(&target, &source).unwrap();
+    let controller = uri_for(&dir, "src/Web/Blog/PostController.php");
+    let content = POST_CONTROLLER_PHP.replace("render('index')", "render('index.php')");
+    open_document(&backend, &controller, "php", &content).await;
+    let position = position_in(&content, "render('index.php", 9);
+    assert_eq!(
+        definitions(&backend, &controller, position).await,
+        vec![uri_for(&dir, "resources/views/blog/index.php")]
+    );
+    let hover = hover_response(&backend, &controller, position.line, position.character)
+        .await
+        .unwrap();
+    assert!(
+        hover_text(&hover).contains("`resources/templates/blog/index.php`"),
+        "{hover:?}"
+    );
 }
 
 #[tokio::test]
