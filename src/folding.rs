@@ -21,7 +21,9 @@ impl Backend {
     /// preprocessor emits for a Blade file, so its ranges are translated
     /// back to the original template through the source map before
     /// Blade-native fold regions (directive blocks, component tag bodies)
-    /// are added on top, in Blade coordinates directly.
+    /// are added on top, in Blade coordinates directly.  In a Yii project,
+    /// each string that starts with a path alias also folds, within its
+    /// line, to the path it resolves to.
     pub fn handle_folding_range(&self, uri: &str, content: &str) -> Option<Vec<FoldingRange>> {
         let mut ranges: Vec<FoldingRange> =
             crate::parser::with_parsed_program(content, "folding_range", |program, content| {
@@ -55,6 +57,11 @@ impl Backend {
         }
 
         ranges.retain(|r| r.start_line < r.end_line);
+        // An aliased path folds within its line, to the path it resolves
+        // to, which is only worth sending to a client that shows it.
+        if self.caps().folding_collapsed_text {
+            ranges.extend(self.yii_alias_folds(uri, content));
+        }
         ranges.sort_by(|a, b| {
             a.start_line
                 .cmp(&b.start_line)

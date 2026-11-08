@@ -265,18 +265,6 @@ user to ask: no project in our test set uses it.
 
 ---
 
-## Y19. Aliases in workspace symbols and folding
-
-**Impact: Low · Complexity: Low-Medium**
-
-The aliases the configuration declares navigate, complete, and show
-their path on hover, but cannot be found by name. List each declaration
-in workspace symbols (`@views` finds the line in `aliases.php` that sets
-it), and, for clients that show folded text, offer a folding range over
-an aliased path whose collapsed text is the path it resolves to.
-
----
-
 ## Y17. Key paths in `yiisoft/arrays`
 
 **Impact: Low · Complexity: Medium**
