@@ -175,9 +175,11 @@ impl Backend {
                 }
                 return;
             }
+            self.edit_awaiting_parse(&uri, &text);
             let backend = self.clone_for_blocking();
             tokio::spawn(async move {
                 let refresh_backend = backend.clone_for_blocking();
+                let (parsed_uri, parsed_text) = (uri.clone(), Arc::clone(&text));
                 let committed = run_blocking_cancel_safe("did_change resource scan", move || {
                     let is_latest_text = backend
                         .open_files
@@ -194,6 +196,7 @@ impl Backend {
                     true
                 })
                 .await;
+                refresh_backend.edit_parsed(&parsed_uri, &parsed_text);
 
                 if committed == Some(true) {
                     refresh_backend.request_code_lens_refresh().await;
@@ -217,10 +220,12 @@ impl Backend {
             }
             self.schedule_diagnostics(uri.clone());
         } else {
+            self.edit_awaiting_parse(&uri, &text);
             let backend = self.clone_for_blocking();
             tokio::spawn(async move {
                 let refresh_backend = backend.clone_for_blocking();
                 let uri_for_diagnostics = uri.clone();
+                let (parsed_uri, parsed_text) = (uri.clone(), Arc::clone(&text));
                 let committed = run_blocking_cancel_safe("did_change parse", move || {
                     let parse_lock = {
                         let mut locks = backend.did_change_parse_locks.lock();
@@ -260,6 +265,7 @@ impl Backend {
                     true
                 })
                 .await;
+                refresh_backend.edit_parsed(&parsed_uri, &parsed_text);
 
                 // A new symbol map was committed.  Tokens the editor already
                 // holds were computed from the pre-edit map (the

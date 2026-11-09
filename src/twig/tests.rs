@@ -187,3 +187,69 @@ fn deleting_a_template_on_disk_rediagnoses_the_files_that_name_it() {
 
     assert!(backend.diag.pending_uris.lock().contains(&index));
 }
+
+/// A pull sent right after an edit to a template waits for the
+/// background re-scan of the edit and the pass it queues, and answers
+/// with the edited template's diagnostics.
+#[tokio::test]
+async fn a_pull_right_after_editing_a_template_answers_for_the_edit() {
+    use crate::diagnostics::tests::full_report;
+    use std::sync::atomic::Ordering;
+    use tower_lsp_server::gen_lsp_types::*;
+
+    let page = "{% include 'menu.html' %}\n{% include 'footer.html' %}\n";
+    let (mut backend, dir) = workspace(&[
+        ("theme/default/menu.html", "<nav></nav>\n"),
+        ("theme/default/index.html", page),
+    ]);
+    backend.state_mut().sync_ast_updates = false;
+    backend.ensure_workspace_indexed();
+    backend.init_complete.store(true, Ordering::Release);
+    backend.client_caps.write().pull_diagnostics = true;
+    let worker = backend.spawn_diagnostic_worker();
+
+    let index = open(&backend, &dir, "theme/default/index.html", page).await;
+    let pull = |previous_result_id: Option<String>| {
+        backend.document_pull_diagnostic(DocumentDiagnosticParams {
+            text_document: TextDocumentIdentifier {
+                uri: index.parse().unwrap(),
+            },
+            identifier: None,
+            previous_result_id,
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+    };
+
+    let missing =
+        full_report(pull(None).await.unwrap()).expect("a first pull returns the full set");
+    assert_eq!(missing.items.len(), 1, "{:?}", missing.items);
+
+    backend
+        .on_did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                text_document_identifier: TextDocumentIdentifier {
+                    uri: index.parse().unwrap(),
+                },
+                version: 2,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                    TextDocumentContentChangeWholeDocument {
+                        text: "{% include 'menu.html' %}\n".to_string(),
+                    },
+                ),
+            ],
+        })
+        .await;
+    let fixed = full_report(pull(missing.result_id.clone()).await.unwrap())
+        .expect("a pull right after the edit must not answer Unchanged");
+    assert!(
+        fixed.items.is_empty(),
+        "stale diagnostics: {:?}",
+        fixed.items
+    );
+    assert!(backend.diag.edits_awaiting_parse.lock().is_empty());
+
+    worker.abort();
+}

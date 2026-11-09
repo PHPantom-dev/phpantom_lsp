@@ -8,10 +8,30 @@ use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
+use super::state::DiagnosticState;
 use super::{ignore_rules, incremental, stale, suppression};
 
 /// How long to wait after the last keystroke before publishing diagnostics.
 const DIAGNOSTIC_DEBOUNCE_MS: u64 = 500;
+
+/// Marks the diagnostic worker as running from the moment it is spawned
+/// for as long as its task lives, and wakes held document pulls when it
+/// stops however it stops.
+struct WorkerAlive(DiagnosticState);
+
+impl WorkerAlive {
+    fn start(state: &DiagnosticState) -> Self {
+        state.worker_alive.store(true, Ordering::Release);
+        Self(state.clone())
+    }
+}
+
+impl Drop for WorkerAlive {
+    fn drop(&mut self) {
+        self.0.worker_alive.store(false, Ordering::Release);
+        self.0.pass_done.notify_waiters();
+    }
+}
 
 impl Backend {
     /// Deliver diagnostics for a single file.
@@ -531,14 +551,12 @@ impl Backend {
         }
 
         // In pull mode we deliberately KEEP the previously cached full set.
-        // The pull handler no longer computes on the request path (that
-        // wedged the transport — see `trigger_diagnostics_for_pull`), so the
-        // editor would otherwise flicker to empty between an edit and the
-        // background recompute. Keeping the stale set means a pull returns
-        // the old diagnostics until the worker recomputes, bumps the
-        // resultId, and requests a refresh, which makes the editor re-pull
-        // the fresh set. The resultId is bumped only by `assemble_and_push`,
-        // so the "unchanged" fast-path stays correct.
+        // A document pull waits for the pass queued here (see
+        // `await_fresh_diagnostics`), but the workspace pull answers at
+        // once, and an empty set there would flicker the editor between
+        // an edit and the background recompute. The resultId is bumped
+        // only by `assemble_and_push`, so the "unchanged" fast-path stays
+        // correct.
 
         // Both modes: queue for the debounced background worker.
         // In push mode the worker pushes the full assembled set.
@@ -555,6 +573,32 @@ impl Backend {
         // They are expensive (seconds per run) and would block save-
         // triggered runs due to the serialization guarantee (one process
         // at a time).
+    }
+
+    /// Record that `text`, the latest edit of `uri`, is being parsed on a
+    /// background task that queues the file's diagnostic pass when done,
+    /// so a document pull sent meanwhile waits for that pass.
+    pub(crate) fn edit_awaiting_parse(&self, uri: &str, text: &Arc<String>) {
+        self.diag
+            .edits_awaiting_parse
+            .lock()
+            .insert(uri.to_string(), Arc::clone(text));
+    }
+
+    /// Called once the background parse of `text` is over, whether it
+    /// queued a pass, found a newer edit, or failed.  A newer edit's entry
+    /// is left to that edit's own parse.
+    pub(crate) fn edit_parsed(&self, uri: &str, text: &Arc<String>) {
+        {
+            let mut awaiting = self.diag.edits_awaiting_parse.lock();
+            if awaiting
+                .get(uri)
+                .is_some_and(|latest| Arc::ptr_eq(latest, text))
+            {
+                awaiting.remove(uri);
+            }
+        }
+        self.diag.pass_done.notify_waiters();
     }
 
     /// Schedule all external tool runs (PHPStan, PHPCS, PHPMD, Mago) for a
@@ -652,13 +696,11 @@ impl Backend {
     /// cached full diagnostics are stale or missing.  Does **not**
     /// compute synchronously; it only queues the file for the debounced
     /// background worker and returns immediately (see the comment inside
-    /// for why). The pull handler reads whatever is currently cached in
-    /// `diag_last_full`, which may be stale until the worker finishes and
-    /// requests a `workspace/diagnostic/refresh`.
+    /// for why).  The pull handler then waits for that pass before it
+    /// answers.
     pub(crate) fn trigger_diagnostics_for_pull(&self, uri_str: &str) {
         // Don't compute diagnostics before initialization is complete.
-        // The pull handler will return empty results; once `initialized`
-        // finishes it schedules all open files which populates the cache.
+        // The pull handler waits for it and calls this again.
         if !self.init_complete.load(Ordering::Acquire) {
             return;
         }
@@ -676,9 +718,9 @@ impl Backend {
         //
         // Instead, ensure the debounced background worker will (re)compute
         // this file off the async runtime; it caches the full set and
-        // requests a workspace diagnostic refresh when done. This pull
-        // returns whatever is currently cached (stale results are kept until
-        // the refresh, so the editor never flickers to empty).
+        // requests a workspace diagnostic refresh when done. The pull
+        // waits for that pass without occupying anything but its own
+        // request (see `await_fresh_diagnostics`).
         {
             let mut pending = self.diag.pending_uris.lock();
             pending.insert(uri_str.to_string());
@@ -712,7 +754,20 @@ impl Backend {
     /// the version counter will have moved, and step 1 picks up
     /// immediately after step 4 finishes — giving the two-slot
     /// (one running + one pending) behaviour.
-    pub(crate) async fn diagnostic_worker(&self) {
+    ///
+    /// The worker counts as running from this call on, so a document pull
+    /// that lands before the task is first polled already waits for it.
+    pub(crate) fn spawn_diagnostic_worker(&self) -> tokio::task::JoinHandle<()> {
+        let alive = WorkerAlive::start(&self.diag);
+        let worker = self.clone_for_blocking();
+        tokio::spawn(async move {
+            let _alive = alive;
+            worker.diagnostic_worker().await;
+        })
+    }
+
+    /// The loop [`Self::spawn_diagnostic_worker`] runs.
+    async fn diagnostic_worker(&self) {
         loop {
             if self.shutdown_flag.load(Ordering::Acquire) {
                 return;
@@ -738,9 +793,14 @@ impl Backend {
             }
 
             // ── Step 3: snapshot all pending URIs ────────────────────
+            // They move to `in_flight_uris` under the `pending_uris`
+            // guard, so a pull held on one of them never sees it as done
+            // before its pass has delivered.
             let uris: std::collections::HashSet<String> = {
                 let mut pending = self.diag.pending_uris.lock();
-                std::mem::take(&mut *pending)
+                let uris = std::mem::take(&mut *pending);
+                self.diag.in_flight_uris.lock().extend(uris.iter().cloned());
+                uris
             };
             if uris.is_empty() {
                 continue;
@@ -751,14 +811,12 @@ impl Backend {
             // read lock before each async publish call so that
             // `did_change` is never blocked.
             for uri in &uris {
-                let content = {
-                    let files = self.open_files.read();
-                    match files.get(uri) {
-                        Some(c) => c.clone(),
-                        None => continue,
-                    }
-                };
-                self.publish_diagnostics_for_file(uri, &content).await;
+                let content = self.open_files.read().get(uri).cloned();
+                if let Some(content) = content {
+                    self.publish_diagnostics_for_file(uri, &content).await;
+                }
+                self.diag.in_flight_uris.lock().remove(uri);
+                self.diag.pass_done.notify_waiters();
             }
         }
     }

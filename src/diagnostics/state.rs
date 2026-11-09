@@ -24,6 +24,32 @@ pub(crate) struct DiagnosticState {
     pub(crate) notify: Arc<Notify>,
     /// File URIs that need a diagnostic pass, drained by the worker.
     pub(crate) pending_uris: Arc<Mutex<HashSet<String>>>,
+    /// Open files whose latest edit is still being parsed, with that
+    /// edit's text.  The parse queues the file's diagnostic pass, so until
+    /// it has, the file is owed a pass that `pending_uris` does not show
+    /// yet.  The entry is removed only after the pass is queued, and only
+    /// by the parse of the text it holds.
+    pub(crate) edits_awaiting_parse: Arc<Mutex<HashMap<String, Arc<String>>>>,
+    /// File URIs the worker has drained from `pending_uris` and is still
+    /// diagnosing.  A URI moves here under the `pending_uris` guard, so
+    /// it is never missing from both while its pass is outstanding.
+    pub(crate) in_flight_uris: Arc<Mutex<HashSet<String>>>,
+    /// Wakes held document pulls (with `notify_waiters`) whenever startup
+    /// completes, the worker finishes a URI's pass, a newer document pull
+    /// supersedes a held one, the worker stops, or the server shuts down.
+    pub(crate) pass_done: Arc<Notify>,
+    /// Whether the diagnostic worker is running.  Cleared when it stops,
+    /// on shutdown or a panic, so pulls stop waiting on a queue nothing
+    /// drains any more.
+    pub(crate) worker_alive: Arc<AtomicBool>,
+    /// The latest `textDocument/diagnostic` request held per URI, drawn
+    /// from `pull_seq`, so a held pull can tell that a newer one for the
+    /// same document replaced it.  The newest pull removes its entry when
+    /// it answers.
+    pub(crate) pull_generations: Arc<Mutex<HashMap<String, u64>>>,
+    /// Session-global sequence feeding `pull_generations`, so an entry
+    /// removed and re-created never reuses a value a straggler holds.
+    pub(crate) pull_seq: Arc<AtomicU64>,
     /// Last-published slow diagnostics per file URI.
     pub(crate) last_slow: Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>,
     /// What each open file's next slow pass can start from instead of
@@ -103,6 +129,12 @@ impl DiagnosticState {
             version: Arc::new(AtomicU64::new(0)),
             notify: Arc::new(Notify::new()),
             pending_uris: Arc::new(Mutex::new(HashSet::new())),
+            edits_awaiting_parse: Arc::new(Mutex::new(HashMap::new())),
+            in_flight_uris: Arc::new(Mutex::new(HashSet::new())),
+            pass_done: Arc::new(Notify::new()),
+            worker_alive: Arc::new(AtomicBool::new(false)),
+            pull_generations: Arc::new(Mutex::new(HashMap::new())),
+            pull_seq: Arc::new(AtomicU64::new(0)),
             last_slow: Arc::new(Mutex::new(HashMap::new())),
             slow_baselines: Arc::new(Mutex::new(HashMap::new())),
             full_slow_pass_requested: Arc::new(Mutex::new(HashSet::new())),

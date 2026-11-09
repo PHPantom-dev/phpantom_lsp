@@ -287,6 +287,7 @@ impl LanguageServer for Backend {
         // of sleeping until the next edit arrives.
         self.diag.notify.notify_one();
         self.diag.workspace_pull_notify.notify_one();
+        self.diag.pass_done.notify_waiters();
         self.phpstan_tool.notify.notify_one();
         self.phpcs_tool.notify.notify_one();
         self.phpmd_tool.notify.notify_one();
@@ -1267,7 +1268,7 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReport> {
-        self.document_pull_diagnostic(params)
+        self.document_pull_diagnostic(params).await
     }
 
     async fn workspace_diagnostic(
