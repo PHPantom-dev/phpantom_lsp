@@ -176,6 +176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Tempest
 
+- **View data arguments.** Named data passed to `view()` completes from the template's inputs, navigates to their first reads, and shows their types on hover. Contributed by @shuvroroy.
 - **Queries built from model class names.** `query(Book::class)` keeps query results typed as `Book` objects through fluent calls. Contributed by @shuvroroy.
 - **Container invocation arguments.** The named arguments `Container::invoke()` and the `invoke()` helper forward complete from the callable's parameters and go to them. Contributed by @shuvroroy.
 - **Built-in view documentation.** Completion and hover explain Tempest's built-in components and directives, with links to the view specification. Contributed by @shuvroroy.
