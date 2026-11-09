@@ -313,17 +313,7 @@ impl RenderContext<'_> {
                     }
                     continue;
                 };
-                let path = args
-                    .arguments
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, arg)| match arg {
-                        Argument::Named(arg) if arg.name.value == b"path" => Some(arg.value),
-                        Argument::Positional(arg) if i == 0 && arg.ellipsis.is_none() => {
-                            Some(arg.value)
-                        }
-                        _ => None,
-                    });
+                let path = super::configuration::argument(args, "path", 0);
                 let Some(target) =
                     path.and_then(|path| path_definition(backend, uri, path, content, &loaders))
                 else {
@@ -362,12 +352,24 @@ fn view_arguments<'a>(
     let Expression::Call(Call::Function(call)) = expr else {
         return None;
     };
+    view_call_arguments(call, file)
+}
+
+fn view_call_arguments<'a>(
+    call: &'a FunctionCall<'a>,
+    file: &FileContext,
+) -> Option<&'a ArgumentList<'a>> {
     let Expression::Identifier(name) = call.function else {
         return None;
     };
-    let offset = name.span().start.offset;
+    is_view_function(bytes_to_str(name.value()), file, name.span().start.offset)
+        .then_some(&call.argument_list)
+}
+
+/// Identify the view helper in the namespace block where its name was written.
+pub(super) fn is_view_function(name: &str, file: &FileContext, offset: u32) -> bool {
     let (resolved, _) = crate::names::function_lookup_names(
-        bytes_to_str(name.value()),
+        name,
         file.use_map_at(offset),
         &file.symbol_imports_at(offset).functions,
         file.namespace_at(offset),
@@ -375,7 +377,59 @@ fn view_arguments<'a>(
     resolved
         .trim_start_matches('\\')
         .eq_ignore_ascii_case("Tempest\\View\\view")
-        .then_some(&call.argument_list)
+}
+
+/// A view call's target and the data names it already supplies.
+pub(super) struct CallTarget {
+    /// Canonical URI of the template the call renders.
+    pub(super) uri: String,
+    /// Data names guaranteed by named arguments and known spread keys.
+    pub(super) supplied: std::collections::BTreeSet<String>,
+}
+
+/// Reverse the same path lookup used when inferring a template's incoming data.
+pub(super) fn call_target(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    file: &FileContext,
+    args_start: u32,
+) -> Option<CallTarget> {
+    let loaders = backend.file_loaders(file);
+    crate::parser::with_parsed_program(content, "tempest_view_arguments", |program, content| {
+        let args = crate::parser::innermost_node_at(Node::Program(program), args_start, |node| {
+            let Node::FunctionCall(call) = node else {
+                return None;
+            };
+            view_call_arguments(call, file)
+                .filter(|args| args.left_parenthesis.end.offset == args_start)
+        })?;
+        let target = path_definition(
+            backend,
+            uri,
+            super::configuration::argument(args, "path", 0)?,
+            content,
+            &loaders,
+        )?;
+        let mut supplied = std::collections::BTreeSet::new();
+        for argument in args.arguments.iter() {
+            match argument {
+                Argument::Named(arg) => {
+                    supplied.insert(bytes_to_str(arg.name.value).to_owned());
+                }
+                Argument::Positional(arg) if arg.ellipsis.is_some() => {
+                    let mut vars = BTreeMap::new();
+                    shape_vars(&expression_type(arg.value, content, &loaders), &mut vars);
+                    supplied.extend(vars.into_keys());
+                }
+                _ => {}
+            }
+        }
+        Some(CallTarget {
+            uri: target.uri.to_string(),
+            supplied,
+        })
+    })
 }
 
 struct Calls;

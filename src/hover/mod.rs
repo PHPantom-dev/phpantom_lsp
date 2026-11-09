@@ -112,6 +112,9 @@ impl Backend {
         // runner, in-process tests) gets the same caches a request does.
         let _scope = self.enter_request_scope_borrowed(uri, content);
         let offset = crate::text_position::position_to_offset(content, position);
+        if let Some(hover) = self.tempest_view_argument_hover(uri, content, position) {
+            return Some(hover);
+        }
 
         // An attribute read off a Twig variable is no span of the
         // template's map: what it reads depends on the variable's type.
