@@ -26,14 +26,27 @@ pub(crate) struct RouteAttribute {
     pub method: Atom,
     /// Start of the action's name token.
     pub method_offset: u32,
-    /// Decoded URI supplied to the attribute.
+    /// URI with built-in prefixes applied, ready for the common case.
     pub path: String,
+    /// Original URI, retained only when normalization or built-in prefixes changed it.
+    pub original_path: Option<Box<str>>,
+    /// Method decorators followed by class decorators, in discovery order.
+    pub decorators: Box<[RouteDecorator]>,
     /// Start of the URI's literal contents in the source file.
     pub start: u32,
     /// Source ranges of the placeholder names, excluding braces and patterns.
     pub placeholders: Vec<(u32, u32)>,
     /// Parameters of the action, including those absent from its URI.
     pub parameters: Box<[RouteParameter]>,
+}
+
+/// Prefix values are indexed immediately; other attributes need their PHP type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RouteDecorator {
+    /// A built-in prefix's decoded literal argument.
+    Prefix(Atom),
+    /// An attribute whose resolved class may implement RouteDecorator.
+    Custom(Atom),
 }
 
 /// A controller parameter's exact declaration token.
@@ -117,7 +130,7 @@ fn literal(ty: &PhpType) -> Option<std::borrow::Cow<'_, str>> {
     }
 }
 
-fn matches_action(route: &RouteAttribute, ty: &PhpType) -> bool {
+fn matches_action(route: &super::route_decorators::ResolvedRoute<'_>, ty: &PhpType) -> bool {
     if let TypeKind::Union(types) = ty.kind() {
         return types.iter().any(|ty| matches_action(route, ty));
     }
@@ -141,7 +154,7 @@ fn matches_action(route: &RouteAttribute, ty: &PhpType) -> bool {
     })
 }
 
-fn names_route_uri(route: &RouteAttribute, ty: &PhpType) -> bool {
+fn names_route_uri(route: &super::route_decorators::ResolvedRoute<'_>, ty: &PhpType) -> bool {
     match ty.kind() {
         TypeKind::Union(types) => types.iter().any(|ty| names_route_uri(route, ty)),
         _ => literal(ty).is_some_and(|value| value == route.path),
@@ -218,6 +231,7 @@ impl Backend {
                 self.tempest_route_parameter_scopes(&controller_map, &content, name, scope)
             })
             .unwrap_or_default();
+        let mut decorators = super::route_decorators::Decorators::default();
         let action_routes: Vec<_> = controller_map
             .tempest_routes
             .iter()
@@ -231,6 +245,7 @@ impl Backend {
                     }))
                     && self.is_tempest_route(candidate)
             })
+            .map(|route| decorators.resolve(self, route))
             .collect();
         for (file_uri, map) in self.user_file_symbol_maps() {
             if map.tempest_routes.is_empty() && map.tempest_uri_calls.is_empty() {
@@ -351,17 +366,22 @@ impl Backend {
         }
     }
 
-    fn visit_tempest_routes(&self, mut visit: impl FnMut(&str, &RouteAttribute, bool)) {
+    fn visit_tempest_routes(
+        &self,
+        mut visit: impl FnMut(&str, &super::route_decorators::ResolvedRoute<'_>, bool),
+    ) {
         self.ensure_workspace_index_ready_for_request();
         let mut confirmed = crate::atom::AtomMap::default();
         let mut actions = std::collections::HashSet::new();
+        let mut decorators = super::route_decorators::Decorators::default();
         self.visit_declaring_symbol_maps(|uri, map| {
             for route in &map.tempest_routes {
                 if *confirmed
                     .entry(route.attribute)
                     .or_insert_with(|| self.is_tempest_route(route))
                 {
-                    visit(uri, route, actions.insert((route.class, route.method)));
+                    let resolved = decorators.resolve(self, route);
+                    visit(uri, &resolved, actions.insert((route.class, route.method)));
                 }
             }
         });
@@ -682,7 +702,7 @@ impl Backend {
                 [Some(route.method.as_str()), None]
             } else {
                 [
-                    Some(route.path.as_str()),
+                    Some(route.path.as_ref()),
                     route
                         .method
                         .eq_ignore_ascii_case("__invoke")
@@ -756,7 +776,7 @@ fn action_source<'a>(call: CallSite<'_>, content: &'a str) -> Option<(u32, &'a s
     Some((start + (text.len() - value.len()) as u32, value))
 }
 
-fn route_has_parameter(route: &RouteAttribute, name: &str) -> bool {
+fn route_has_parameter(route: &super::route_decorators::ResolvedRoute<'_>, name: &str) -> bool {
     placeholders(&route.path)
         .iter()
         .any(|&(start, end)| &route.path[start..end] == name)

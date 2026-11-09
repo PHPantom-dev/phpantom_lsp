@@ -7,7 +7,7 @@ use crate::virtual_members::laravel::helpers::resolved_string_literal_including_
 /// Keep route-shaped attributes during the class walk. Their types are
 /// resolved later, when cross-file interfaces are available.
 pub(super) fn record_route_attributes(class: &Class<'_>, ctx: &mut ExtractionCtx<'_>) {
-    use crate::tempest::routes::{RouteAttribute, RouteParameter, placeholders};
+    use crate::tempest::routes::{RouteAttribute, RouteDecorator, RouteParameter, placeholders};
 
     if !ctx.tempest {
         return;
@@ -62,7 +62,8 @@ pub(super) fn record_route_attributes(class: &Class<'_>, ctx: &mut ExtractionCtx
                     offset: parameter.variable.span.start.offset,
                 })
                 .collect();
-            let mut route_path = path.to_string();
+            let mut decorators = Vec::new();
+            let mut route_path = path.to_owned();
             let mut route_placeholders: Vec<_> = placeholders(&ctx.content[start..end])
                 .into_iter()
                 .map(|(from, to)| (start as u32 + from as u32, start as u32 + to as u32))
@@ -73,10 +74,11 @@ pub(super) fn record_route_attributes(class: &Class<'_>, ctx: &mut ExtractionCtx
                 .chain(class.attribute_lists.iter())
                 .flat_map(|list| list.attributes.iter())
             {
-                if !ctx
-                    .resolved_name_at(decorator.name.span().start.offset)
-                    .is_some_and(|name| name.eq_ignore_ascii_case("Tempest\\Router\\Prefix"))
-                {
+                let Some(name) = ctx.resolved_name_at(decorator.name.span().start.offset) else {
+                    continue;
+                };
+                if !name.eq_ignore_ascii_case("Tempest\\Router\\Prefix") {
+                    decorators.push(RouteDecorator::Custom(crate::atom::atom(name)));
                     continue;
                 }
                 let Some(value) = decorator.argument_list.as_ref().and_then(|args| {
@@ -98,6 +100,7 @@ pub(super) fn record_route_attributes(class: &Class<'_>, ctx: &mut ExtractionCtx
                 else {
                     continue 'attributes;
                 };
+                decorators.push(RouteDecorator::Prefix(crate::atom::atom(prefix)));
                 route_path = format!(
                     "{}/{}",
                     prefix.trim_end_matches('/'),
@@ -112,12 +115,15 @@ pub(super) fn record_route_attributes(class: &Class<'_>, ctx: &mut ExtractionCtx
             if !route_path.starts_with('/') {
                 route_path.insert(0, '/');
             }
+            let original_path = (path != route_path).then(|| path.into());
             ctx.tempest_routes.push(RouteAttribute {
                 attribute: crate::atom::atom(attribute_name),
                 class: crate::atom::atom(class_name),
                 method: crate::atom::atom_bytes(method.name.value),
                 method_offset: method.name.span.start.offset,
                 path: route_path,
+                original_path,
+                decorators: decorators.into_boxed_slice(),
                 start: start as u32,
                 placeholders: route_placeholders,
                 parameters,

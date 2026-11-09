@@ -41,6 +41,28 @@ fn route_extraction_requires_semantic_class_names() {
 }
 
 #[test]
+fn route_extraction_keeps_routes_when_a_decorator_has_no_semantic_name() {
+    let source = "<?php class Books { #[Get('/books')] #[Unresolved] public function index() {} }";
+    let arena = mago_allocator::LocalArena::new();
+    let file = mago_database::file::FileId::new(b"routes.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file, source.as_bytes());
+    // Leave just the decorator out of the name-resolution snapshot.
+    let partial = source.replace("#[Unresolved]", &" ".repeat("#[Unresolved]".len()));
+    let partial_program = mago_syntax::parser::parse_file_content(&arena, file, partial.as_bytes());
+    let resolved = mago_names::resolver::NameResolver::new(&arena).resolve(partial_program);
+    let names = crate::names::OwnedResolvedNames::from_resolved(&resolved);
+    let map = crate::symbol_map::extraction::extract_symbol_map_with_resolved_names(
+        program, source, &names,
+    );
+    assert_eq!(map.tempest_routes.len(), 1);
+    assert_eq!(map.tempest_routes[0].path, "/books");
+    assert_eq!(
+        map.tempest_routes[0].decorators.as_ref(),
+        [RouteDecorator::Custom(crate::atom::atom("Get"))]
+    );
+}
+
+#[test]
 fn route_navigation_rejects_missing_and_stale_maps() {
     let backend = make_backend();
     backend.set_is_tempest(true);
