@@ -263,7 +263,7 @@ pub(super) fn open_included_file<'a>(
             program: paths.program,
         },
     )?;
-    let path = path.canonicalize().unwrap_or(path);
+    let path = dunce::canonicalize(&path).unwrap_or(path);
     if !paths.open.borrow_mut().insert(path.clone()) {
         return None;
     }

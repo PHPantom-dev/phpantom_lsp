@@ -132,19 +132,19 @@ pub(crate) fn resolve_auth_user_type(
     if AUTH_MODELS_BEING_COMPUTED.with_borrow(|keys| keys.contains(&key)) {
         return None;
     }
-    let _compute_lock = backend.laravel.auth_user_type_compute_lock.lock();
-    if let Some(cached) = backend.laravel.auth_user_type_cache.read().get(&key) {
-        return cached.clone();
-    }
-    let result = {
+    // Another thread may be computing the same model.  This one computes it
+    // too rather than wait: the computation loads classes, and a thread that
+    // waited here could hold whatever that loading waits on (a workspace index
+    // pass, a pivot rebuild, a class resolution claim), deadlocking both.  The
+    // first result stored wins, so every thread hands out the same model.
+    let computed = {
         let _computing = AuthModelBeingComputed::start(&key);
         compute_auth_user_type(backend, guard, class_loader)
     };
-    backend
-        .laravel
-        .auth_user_type_cache
-        .write()
-        .insert(key, result.clone());
+    let result = match backend.laravel.auth_user_type_cache.write().entry(key) {
+        std::collections::hash_map::Entry::Occupied(stored) => return stored.get().clone(),
+        std::collections::hash_map::Entry::Vacant(slot) => slot.insert(computed).clone(),
+    };
     // A class loaded during the computation saw the raw class.
     backend.laravel.note_config_facts_change();
     result
@@ -153,12 +153,6 @@ pub(crate) fn resolve_auth_user_type(
 thread_local! {
     /// The guards whose auth model this thread is computing.
     static AUTH_MODELS_BEING_COMPUTED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-}
-
-/// Whether this thread is computing an auth model, and so holds the lock other
-/// threads wait on to read it.
-pub(crate) fn is_computing_auth_model() -> bool {
-    AUTH_MODELS_BEING_COMPUTED.with_borrow(|keys| !keys.is_empty())
 }
 
 /// RAII marker that a guard's auth model is being computed on this thread,
@@ -208,7 +202,7 @@ fn project_auth_implementors(
     // `/vendor/` filter below), and vendor classes are already parsed
     // during indexing, so restricting the scan up front avoids a
     // multi-second full-vendor parse on large Laravel apps.
-    let implementors = backend.find_implementors(
+    let implementors = backend.find_implementors_without_index_wait(
         "Authenticatable",
         AUTHENTICATABLE_FQN,
         class_loader,

@@ -111,6 +111,38 @@ pub(crate) fn apply_type_guard_on_operands(
     }
 }
 
+/// Narrow `(int) $x` to `int<0, max>` where `ctype_digit($x)` held.
+///
+/// The fact is recorded under the cast's own key, so it lasts until `$x`
+/// is written, the way any other narrowing of a cast does.
+pub(crate) fn apply_ctype_digit_narrowing(
+    condition: &Expression<'_>,
+    scope: &mut ScopeState,
+    truthy: bool,
+) {
+    for operand in collect_and_chain_operands(condition) {
+        let Some((cast_key, negated)) = condition_facts::try_extract_ctype_digit_int_cast(operand)
+        else {
+            continue;
+        };
+        if negated == truthy {
+            continue;
+        }
+        let non_negative = PhpType::int_range("0", "max");
+        let current = scope.get(&cast_key);
+        let already_narrower = !current.is_empty()
+            && current
+                .iter()
+                .all(|rt| rt.type_string.is_subtype_of(&non_negative));
+        if !already_narrower {
+            scope.set(
+                &cast_key,
+                vec![ResolvedType::from_type_string(non_negative)],
+            );
+        }
+    }
+}
+
 /// Narrow a union of object types by a check on a property that only some
 /// of its members could have passed.
 ///

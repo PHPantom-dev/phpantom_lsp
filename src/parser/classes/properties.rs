@@ -471,7 +471,7 @@ class Holder {
     }
 
     /// `$this->prop = new ClassName()` infers in any method, not just the
-    /// constructor, and resolves the name through the use-map.
+    /// constructor, and preserves the resolved name for later qualification.
     #[test]
     fn untyped_property_infers_type_from_instantiation_in_setter() {
         let src = r#"<?php
@@ -485,6 +485,9 @@ class Service {
 }
 "#;
         let classes = Backend::parse_php_versioned_with_namespaces(src, None);
-        assert_eq!(property_type(&classes, "Service", "logger"), "Lib\\Logger");
+        assert_eq!(
+            property_type(&classes, "Service", "logger"),
+            "\\Lib\\Logger"
+        );
     }
 }

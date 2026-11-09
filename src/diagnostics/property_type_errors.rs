@@ -36,7 +36,7 @@ use crate::types::{AccessKind, ClassInfo};
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::helpers::{FileDiagnosticContext, TypeCheckCtx, collect_type_check};
-use super::type_errors::{fails_only_on_empty, is_type_compatible};
+use super::type_errors::{fails_only_on_empty, fits_partially, is_type_compatible};
 
 /// Diagnostic code used for property type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_PROPERTY_CODE: &str = "type_mismatch_property";
@@ -54,7 +54,8 @@ struct ResolvedPropertyAssignment {
     start: usize,
     /// Byte offset of the RHS expression end (exclusive).
     end: usize,
-    /// The property name (for diagnostic messages).
+    /// The property as the message names it: `Foo::$bar`, or `$bar` when
+    /// the write can land on more than one class.
     property_name: String,
 }
 
@@ -67,6 +68,9 @@ struct PropertyCheckCtx<'a> {
     symbol_map: &'a SymbolMap,
     type_ctx: &'a TypeCheckCtx<'a>,
     backend: &'a Backend,
+    /// Whether the docblock type of a property is checked, or only its
+    /// native one.
+    docblock_types: bool,
     out: &'a mut Vec<ResolvedPropertyAssignment>,
 }
 
@@ -218,6 +222,7 @@ fn check_property_write(member_offset: u32, rhs: &Expression<'_>, ctx: &mut Prop
             receiver,
             prop_name,
             is_static,
+            ctx.docblock_types,
             resolved_class_loader,
             ctx.backend,
         ) else {
@@ -279,7 +284,12 @@ fn check_property_write(member_offset: u32, rhs: &Expression<'_>, ctx: &mut Prop
         declared_type,
         start: rhs_start,
         end: rhs_end,
-        property_name: prop_name.to_string(),
+        property_name: match &receivers[..] {
+            [receiver] if !receiver.name.starts_with("__anonymous@") => {
+                format!("{}::${prop_name}", receiver.fqn())
+            }
+            _ => format!("${prop_name}"),
+        },
     });
 }
 
@@ -289,20 +299,25 @@ fn check_property_write(member_offset: u32, rhs: &Expression<'_>, ctx: &mut Prop
 /// `None` when the receiver has no such property, when its staticness
 /// does not match the access, when the property is virtual (`@property`,
 /// framework attributes: magic `__set` decides what those accept), or
-/// when it carries no type worth checking.
-fn declared_property_type(
+/// when it carries no type worth checking. Only the native type counts
+/// when `docblock_types` is off.
+pub(crate) fn declared_property_type(
     receiver: &Arc<ClassInfo>,
     name: &str,
     is_static: bool,
+    docblock_types: bool,
     class_loader: &ResolvedClassLoader<'_>,
     backend: &Backend,
 ) -> Option<PhpType> {
     let find = |class: &ClassInfo| {
-        class
-            .properties
-            .iter()
-            .find(|p| p.name == name)
-            .map(|p| (p.is_virtual, p.is_static, p.type_hint.clone()))
+        class.properties.iter().find(|p| p.name == name).map(|p| {
+            let ty = if docblock_types {
+                &p.type_hint
+            } else {
+                &p.native_type_hint
+            };
+            (p.is_virtual, p.is_static, ty.clone())
+        })
     };
     // The receiver itself first: it carries any generic substitutions
     // the subject applied, which the cached merge of its class does not.
@@ -321,6 +336,33 @@ fn declared_property_type(
     }
     let ty = type_hint.filter(|t| !t.is_untyped() && !t.is_mixed())?;
     Some(ty.resolve_self_refs(receiver.fqn().as_str(), receiver.parent_class.as_deref()))
+}
+
+/// Whether writing a `value` to a property declared `declared` is reported:
+/// the two are incompatible, and the mismatch is not one the
+/// `possibly-empty-mismatches` or `partial-union-mismatches` settings leave
+/// out.
+pub(crate) fn property_value_mismatches(
+    value: &PhpType,
+    declared: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+    strict_types: bool,
+    report_possibly_empty: bool,
+    report_partial_union: bool,
+) -> bool {
+    !is_type_compatible(value, declared, class_loader, strict_types)
+        && (report_possibly_empty
+            || !fails_only_on_empty(value, declared, class_loader, strict_types))
+        && (report_partial_union || !fits_partially(value, declared, class_loader, strict_types))
+}
+
+/// The message for a value of type `value` written to `property`.
+pub(crate) fn property_mismatch_message(
+    property: &str,
+    declared: &PhpType,
+    value: &PhpType,
+) -> String {
+    format!("Property {property} expects {declared}, got {value}")
 }
 
 // ── Main diagnostic collection ──────────────────────────────────────────────
@@ -351,6 +393,8 @@ impl Backend {
     ) {
         let symbol_map = &ctx.symbol_map;
         let report_possibly_empty = self.possibly_empty_mismatches_enabled();
+        let report_partial_union = self.partial_union_mismatches_enabled();
+        let docblock_types = self.docblock_type_mismatches_enabled();
         out.extend(collect_type_check(
             self,
             &ctx.file,
@@ -366,6 +410,7 @@ impl Backend {
                         symbol_map,
                         type_ctx: ctx,
                         backend: self,
+                        docblock_types,
                         out: &mut resolved,
                     };
 
@@ -382,29 +427,22 @@ impl Backend {
                 })
             },
             |assignment, ctx| {
-                if is_type_compatible(
+                if !property_value_mismatches(
                     &assignment.rhs_type,
                     &assignment.declared_type,
                     ctx.loaders.resolved_class_loader(),
                     ctx.strict_types,
+                    report_possibly_empty,
+                    report_partial_union,
                 ) {
-                    return None;
-                }
-                if !report_possibly_empty
-                    && fails_only_on_empty(
-                        &assignment.rhs_type,
-                        &assignment.declared_type,
-                        ctx.loaders.resolved_class_loader(),
-                        ctx.strict_types,
-                    )
-                {
                     return None;
                 }
                 Some((
                     (assignment.start, assignment.end),
-                    format!(
-                        "Property ${} expects {}, got {}",
-                        assignment.property_name, assignment.declared_type, assignment.rhs_type,
+                    property_mismatch_message(
+                        &assignment.property_name,
+                        &assignment.declared_type,
+                        &assignment.rhs_type,
                     ),
                 ))
             },

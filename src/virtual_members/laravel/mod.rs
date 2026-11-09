@@ -85,17 +85,19 @@
 //!   unless timestamps are disabled or the columns are already covered.
 //!
 //! - **Column name properties.** Column names from `$fillable`,
-//!   `$guarded`, `$hidden`, and `$appends` produce `mixed`-typed
+//!   `$guarded`, `$hidden`, and `$visible` produce `mixed`-typed
 //!   virtual properties as a last-resort fallback.  Columns already
-//!   covered by any of the sources above are skipped.
+//!   covered by any of the sources above are skipped. `$appends` only
+//!   controls serialization; the corresponding accessor declares the property.
 //!
 //! - **`where{PropertyName}()` dynamic methods.** Laravel's
 //!   `Builder::__call()` translates calls like `whereBrandId($value)`
 //!   into `where('brand_id', $value)`.  For each known column on the
 //!   model (from `$casts`, `$dates`, `$attributes` defaults,
-//!   `$fillable`/`$guarded`/`$hidden`/`$appends`, timestamps,
-//!   `@property` annotations, and properties declared on the class
-//!   itself), a virtual `where{StudlyCase}()` method is synthesized.
+//!   `$fillable`/`$guarded`/`$hidden`/`$visible`, timestamps,
+//!   `@property` annotations, and schema columns), a virtual
+//!   `where{StudlyCase}()` method is synthesized. Computed accessors
+//!   without a backing column are excluded.
 //!   The method accepts a `mixed` value parameter and returns
 //!   `Builder<ConcreteModel>`.  These methods appear as both instance
 //!   methods on the Builder (for chaining: `$query->whereBrandId(42)`)
@@ -104,12 +106,14 @@
 mod accessors;
 mod aliases;
 pub(crate) mod array_file;
+mod assets;
 mod auth;
 mod builder;
 mod builder_injection;
 mod cache_state;
 mod cast_literals;
 mod casts;
+pub(crate) mod collection_projection;
 mod collections;
 mod commands;
 mod completion_cache;
@@ -118,6 +122,7 @@ pub(crate) mod config_values;
 mod const_eval;
 pub(crate) mod database_schema;
 mod env_vars;
+pub(crate) mod events;
 mod expr_walker;
 mod facade;
 mod factory;
@@ -162,10 +167,11 @@ mod view_data;
 mod view_names;
 pub(crate) mod where_property;
 
+pub(crate) use accessors::has_attribute_setter;
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
+pub(crate) use assets::{AssetWorld, InertiaPages, resolve_asset_definitions};
 pub(crate) use auth::{
-    AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, is_computing_auth_model, patch_auth_user_class,
-    resolve_auth_user_type,
+    AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type,
 };
 pub(crate) use cache_state::LaravelCacheState;
 pub(crate) use collections::{
@@ -183,7 +189,9 @@ pub(crate) use config_keys::{
     resolve_config_key_declaration_exact, resolve_config_key_definition_fallback,
 };
 pub(crate) use const_eval::ClassContext;
-pub(crate) use env_vars::{enumerate_env_keys, env_declaration, env_name_is_sensitive};
+pub(crate) use env_vars::{
+    declared_env_value, enumerate_env_keys, env_declaration, env_name_is_sensitive,
+};
 pub(crate) use gates::{
     LaravelGateIndex, enumerate_gate_abilities, model_policy_abilities, scan_gate_registrations,
 };
@@ -196,8 +204,8 @@ pub(crate) use macros::{
 pub(crate) use middleware::{LaravelMiddlewareIndex, MiddlewareTarget};
 pub(crate) use model_extraction::{
     attribute_entry_offset, extract_laravel_metadata, extract_laravel_trait_metadata,
-    has_inheritable_model_metadata, has_scope_attribute, inherit_model_metadata,
-    relationship_return_type,
+    has_inheritable_model_metadata, has_scope_attribute, inherit_model_column_attributes,
+    inherit_model_metadata, relationship_return_type,
 };
 pub(crate) use model_type::{expand_model_type, has_model_type_operator};
 pub(crate) use morph_columns::is_morph_type_column;
@@ -221,7 +229,7 @@ pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,
 };
-pub(crate) use table_names::{model_schema_is_known, model_table_name};
+pub(crate) use table_names::{model_connection_and_table, model_schema_is_known, model_table_name};
 pub(crate) use trans_catalog::TranslationCatalog;
 pub(crate) use trans_json::find_json_trans_references;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
@@ -271,7 +279,8 @@ pub use facade::LaravelFacadeProvider;
 pub(crate) use facade::facade_concrete_class;
 pub use factory::LaravelFactoryProvider;
 pub(crate) use factory::{
-    factory_model_type, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
+    FACTORY_FQN, extends_eloquent_factory, factory_for_model, factory_model_type, is_factory_class,
+    is_has_factory_trait, model_to_factory_fqn,
 };
 pub(crate) use factory_count::{
     carry_factory_count, fluent_factory_count, resolve_factory_count_return,

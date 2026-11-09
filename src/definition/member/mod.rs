@@ -64,10 +64,12 @@ pub(super) struct MemberDefinitionCtx<'a> {
     pub access_kind: AccessKind,
     /// Hint about whether the site looks like a method call or property access.
     pub access_hint: MemberAccessHint,
-    /// Whether the member is the method a mock expectation names, which
-    /// is looked up on the mocked class rather than on the subject
-    /// itself (see [`crate::mock_methods`]).
-    pub mock_expectation: bool,
+    /// What kind of name the member is when it is not written as an
+    /// access.  The method a mock expectation names is looked up on the
+    /// mocked class (see [`crate::mock_methods`]), and a field a
+    /// repository call names on the repository's entity (see
+    /// [`crate::doctrine`]), rather than on the subject itself.
+    pub docblock_ref: crate::symbol_map::DocblockMemberRef,
 }
 
 /// The kind of class member being resolved.
@@ -226,12 +228,36 @@ impl Backend {
                 mctx.access_kind,
                 &loaders.resolution_ctx_at(content, cursor_offset),
             ));
-        if mctx.mock_expectation {
-            candidates = crate::mock_methods::mocked_classes(
-                candidates,
-                mctx.access_kind == AccessKind::DoubleColon,
-                class_loader,
-            );
+        match mctx.docblock_ref {
+            crate::symbol_map::DocblockMemberRef::MockedMethod => {
+                candidates = crate::mock_methods::mocked_classes(
+                    candidates,
+                    mctx.access_kind == AccessKind::DoubleColon,
+                    class_loader,
+                );
+            }
+            crate::symbol_map::DocblockMemberRef::EntityField => {
+                candidates = crate::doctrine::managed_entity_classes(
+                    candidates,
+                    class_loader,
+                    &self.resolved_class_cache,
+                );
+            }
+            crate::symbol_map::DocblockMemberRef::YiiAttribute => {
+                candidates
+                    .retain(|class| crate::yii::active_record::is_record(class, class_loader));
+                // A record that declares no properties names a column of
+                // its table, which a migration creates.
+                if let Some(location) = candidates.iter().find_map(|record| {
+                    self.yii_column_location(record, mctx.member_name, class_loader)
+                }) {
+                    return Some(location);
+                }
+            }
+            crate::symbol_map::DocblockMemberRef::YiiProperty { form_model: true } => {
+                candidates = crate::yii::forms::form_model_classes(candidates, class_loader);
+            }
+            _ => {}
         }
         let first = candidates.first()?;
 
@@ -638,7 +664,11 @@ impl Backend {
             return Some((effective_name.to_string(), cls, fqn));
         }
 
-        None
+        // A call on a Prophecy `ObjectProphecy<Foo>` names `Foo`'s method.
+        crate::prophecy::revealed_classes(target_class, class_loader)
+            .iter()
+            .find_map(|mocked| Self::find_declaring_class(mocked, effective_name, class_loader))
+            .map(|(cls, fqn)| (effective_name.to_string(), cls, fqn))
     }
 
     // ─── Member Access Context Extraction ───────────────────────────────────

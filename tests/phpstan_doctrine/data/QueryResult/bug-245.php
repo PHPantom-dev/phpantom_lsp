@@ -28,7 +28,11 @@ class Foo
 				"0 = (SELECT COUNT(segment.id) FROM " . Bug245Segment::class . " as segment
               WHERE segment.episode = episode.id AND segment.state != 'distributed')"
 			)->getQuery()->getResult();
-		assertType('mixed', $result);
+		// Upstream expects `mixed`: its conditions name fields the entities do
+		// not map, which fails the whole query. PHPantom types the rows by what
+		// the query selects, and reports the unmapped fields where they are
+		// written.
+		assertType('array<string, array{id: string}>', $result);
 	}
 
 }

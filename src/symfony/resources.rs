@@ -16,7 +16,7 @@
 //! parameter is set to (see [`super::container`]).
 
 use crate::symbol_map::{
-    ContainerValue, ContainerValueSite, StringKeyKind, SymbolKind, SymbolSpan,
+    ContainerValue, ContainerValueSite, ServiceDecoration, StringKeyKind, SymbolKind, SymbolSpan,
 };
 
 /// Whether `uri` is a file Symfony loads container configuration from: a
@@ -33,24 +33,31 @@ pub(crate) fn is_container_config_uri(uri: &str) -> bool {
         .any(|segment| segment == "config")
 }
 
-/// The service-ID and container-parameter spans of one YAML or XML
-/// configuration file, sorted by offset, and what its declarations give
-/// the names they declare, sorted the same way.
-pub(crate) fn container_declarations(
-    uri: &str,
-    content: &str,
-) -> (Vec<SymbolSpan>, Vec<ContainerValueSite>) {
-    let mut spans = Vec::new();
-    let mut values = Vec::new();
+/// What one YAML or XML configuration file declares.
+#[derive(Default)]
+pub(crate) struct ContainerDeclarations {
+    /// The service-ID and container-parameter spans, sorted by offset.
+    pub spans: Vec<SymbolSpan>,
+    /// What the declarations give the names they declare, sorted the same
+    /// way.
+    pub values: Vec<ContainerValueSite>,
+    /// The services that decorate another, in source order.
+    pub decorations: Vec<ServiceDecoration>,
+}
+
+/// What one YAML or XML configuration file declares.
+pub(crate) fn container_declarations(uri: &str, content: &str) -> ContainerDeclarations {
+    let mut out = ContainerDeclarations::default();
     match super::config_format(uri) {
-        Some(super::ConfigFormat::Yaml) => scan_yaml(content, &mut spans, &mut values),
-        Some(super::ConfigFormat::Xml) => scan_xml(content, &mut spans, &mut values),
+        Some(super::ConfigFormat::Yaml) => scan_yaml(content, &mut out),
+        Some(super::ConfigFormat::Xml) => scan_xml(content, &mut out),
         None => {}
     }
-    spans.sort_by_key(|span| (span.start, span.end));
-    spans.dedup_by(|b, a| a.start == b.start && a.end == b.end);
-    values.sort_by_key(|site| site.start);
-    (spans, values)
+    out.spans.sort_by_key(|span| (span.start, span.end));
+    out.spans
+        .dedup_by(|b, a| a.start == b.start && a.end == b.end);
+    out.values.sort_by_key(|site| site.start);
+    out
 }
 
 fn value_site(start: usize, value: ContainerValue) -> ContainerValueSite {
@@ -111,16 +118,27 @@ fn yaml_section(trimmed: &str) -> Option<YamlSection> {
 }
 
 /// A declaration whose value is written on the lines nested under it: a
-/// service's `class:` or `alias:`, or a parameter's block of entries.
+/// service's `class:`, `alias:`, or `decorates:`, or a parameter's block of
+/// entries.
 struct OpenDeclaration {
     /// Where the declared name starts.
     start: usize,
     kind: YamlSection,
     /// The indentation of the service's own keys, from the first one.
     indent: Option<usize>,
+    /// The service's ID, a class name when it is spelled as one.
+    id: crate::atom::Atom,
+    /// Whether the name is a span of its own, which what the declaration
+    /// gives is keyed by; a service ID spelled as a class is not.
+    keyed: bool,
 }
 
-fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>, values: &mut Vec<ContainerValueSite>) {
+fn scan_yaml(content: &str, out: &mut ContainerDeclarations) {
+    let ContainerDeclarations {
+        spans,
+        values,
+        decorations,
+    } = out;
     let mut section: Option<OpenSection> = None;
     let mut declaration: Option<OpenDeclaration> = None;
     for (line_start, line) in crate::framework::line_offsets(content) {
@@ -152,7 +170,17 @@ fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>, values: &mut Vec<Contai
                     values.push(value_site(open.start, ContainerValue::Type(ty)));
                 }
                 (YamlSection::Services, true) => {
-                    declaration = Some(service_property(open, semantic, indent, values));
+                    declaration = Some(service_property(
+                        open,
+                        semantic,
+                        line_start,
+                        indent,
+                        ServiceOutput {
+                            spans: &mut *spans,
+                            values: &mut *values,
+                            decorations: &mut *decorations,
+                        },
+                    ));
                 }
                 (YamlSection::Services, false) => {}
             }
@@ -185,20 +213,46 @@ fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>, values: &mut Vec<Contai
                 YamlSection::Services => !key.starts_with('_'),
                 YamlSection::Parameters => true,
             };
-            if declares && is_container_key(key) {
-                let kind = match open.kind {
-                    YamlSection::Services => StringKeyKind::ServiceId,
-                    YamlSection::Parameters => StringKeyKind::ContainerParameter,
-                };
+            let keyed = is_container_key(key);
+            let id = match open.kind {
+                _ if !declares => None,
+                _ if keyed => Some(crate::atom::atom(key)),
+                YamlSection::Services => yaml_class_name(key),
+                YamlSection::Parameters => None,
+            };
+            if let Some(id) = id {
                 let start = key_start + quote;
-                spans.push(key_span(kind, key, start, true));
+                if keyed {
+                    let kind = match open.kind {
+                        YamlSection::Services => StringKeyKind::ServiceId,
+                        YamlSection::Parameters => StringKeyKind::ContainerParameter,
+                    };
+                    spans.push(key_span(kind, key, start, true));
+                }
                 let after_colon = &semantic[key_start - line_start + raw_key.len()..];
                 let inline = after_colon
                     .trim_start()
                     .strip_prefix(':')
                     .unwrap_or("")
                     .trim();
-                declaration = declared_inline(open.kind, start, inline, values);
+                let open = OpenDeclaration {
+                    start,
+                    kind: open.kind,
+                    indent: None,
+                    id,
+                    keyed,
+                };
+                let inline_start = line_start + offset_within(semantic, inline);
+                declaration = declared_inline(
+                    open,
+                    inline,
+                    inline_start,
+                    ServiceOutput {
+                        spans: &mut *spans,
+                        values: &mut *values,
+                        decorations: &mut *decorations,
+                    },
+                );
             }
         }
         if open.kind == YamlSection::Services {
@@ -215,25 +269,27 @@ fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>, values: &mut Vec<Contai
     }
 }
 
-/// Record what a declaration written on its key's own line gives the name
-/// at `start`, or open the declaration when it is written on the lines
-/// nested under it.
+/// Where what a service declaration's properties say is recorded.
+struct ServiceOutput<'a> {
+    spans: &'a mut Vec<SymbolSpan>,
+    values: &'a mut Vec<ContainerValueSite>,
+    decorations: &'a mut Vec<ServiceDecoration>,
+}
+
+/// Record what a declaration written on its key's own line, as `inline`
+/// starting at `inline_start`, gives the name, or open the declaration
+/// when it is written on the lines nested under it.
 fn declared_inline(
-    kind: YamlSection,
-    start: usize,
+    open: OpenDeclaration,
     inline: &str,
-    values: &mut Vec<ContainerValueSite>,
+    inline_start: usize,
+    mut out: ServiceOutput<'_>,
 ) -> Option<OpenDeclaration> {
-    let open = OpenDeclaration {
-        start,
-        kind,
-        indent: None,
-    };
-    match kind {
+    match open.kind {
         YamlSection::Parameters if inline.is_empty() => return Some(open),
         YamlSection::Parameters => {
             if let Some(value) = super::container::yaml_scalar_value(inline) {
-                values.push(value_site(start, value));
+                out.values.push(value_site(open.start, value));
             }
         }
         YamlSection::Services if inline.is_empty() || inline == "~" => return Some(open),
@@ -242,12 +298,16 @@ fn declared_inline(
                 let body = body.strip_suffix('}').unwrap_or(body);
                 for pair in body.split(',') {
                     if let Some((key, value)) = pair.split_once(':') {
-                        push_service_property(start, key.trim(), value.trim(), values);
+                        let value = value.trim();
+                        let value_start = inline_start + offset_within(inline, value);
+                        push_service_property(&open, key.trim(), value, value_start, &mut out);
                     }
                 }
-            } else if let Some(target) = service_reference(inline) {
-                values.push(value_site(
-                    start,
+            } else if open.keyed
+                && let Some(target) = service_reference(inline)
+            {
+                out.values.push(value_site(
+                    open.start,
                     ContainerValue::Alias(crate::atom::atom(target)),
                 ));
             }
@@ -256,48 +316,104 @@ fn declared_inline(
     None
 }
 
-/// Read one line nested under a service declaration, recording the
-/// `class:` or `alias:` at the service's own level.
+/// Read one line nested under a service declaration, starting at
+/// `line_start`, recording the `class:`, `alias:`, or `decorates:` at the
+/// service's own level.
 fn service_property(
     mut open: OpenDeclaration,
     line: &str,
+    line_start: usize,
     indent: usize,
-    values: &mut Vec<ContainerValueSite>,
+    mut out: ServiceOutput<'_>,
 ) -> OpenDeclaration {
     let at = *open.indent.get_or_insert(indent);
     if indent == at
         && let Some((key, value)) = line.trim().split_once(':')
     {
-        push_service_property(open.start, key.trim(), value.trim(), values);
+        let value = value.trim();
+        let value_start = line_start + offset_within(line, value);
+        push_service_property(&open, key.trim(), value, value_start, &mut out);
     }
     open
 }
 
-/// Record a service's `class` or `alias` property.
+/// Record a service's `class`, `alias`, or `decorates` property, whose
+/// value starts at `value_start`.
 fn push_service_property(
-    start: usize,
+    open: &OpenDeclaration,
     key: &str,
-    value: &str,
-    values: &mut Vec<ContainerValueSite>,
+    raw_value: &str,
+    value_start: usize,
+    out: &mut ServiceOutput<'_>,
 ) {
     let (key, _) = crate::framework::strip_yaml_quotes(key);
-    let (value, _) = crate::framework::strip_yaml_quotes(value);
+    let (value, (quote, _)) = crate::framework::strip_yaml_quotes(raw_value);
     match key {
-        "class" if !value.is_empty() => {
+        "class" if open.keyed && !value.is_empty() => {
             let class = value.strip_prefix('\\').unwrap_or(value);
-            values.push(value_site(
-                start,
+            out.values.push(value_site(
+                open.start,
                 ContainerValue::Class(crate::atom::atom(&class.replace("\\\\", "\\"))),
             ));
         }
-        "alias" if is_container_key(value) => {
-            values.push(value_site(
-                start,
+        "alias" if open.keyed && is_container_key(value) => {
+            out.values.push(value_site(
+                open.start,
                 ContainerValue::Alias(crate::atom::atom(value)),
             ));
         }
+        "decorates" => {
+            let decorated = if is_container_key(value) {
+                out.spans.push(key_span(
+                    StringKeyKind::ServiceId,
+                    value,
+                    value_start + quote,
+                    false,
+                ));
+                crate::atom::atom(value)
+            } else if let Some(class) = yaml_class_name(value) {
+                class
+            } else {
+                return;
+            };
+            out.decorations.push(ServiceDecoration {
+                decorator: open.id,
+                decorated,
+            });
+        }
         _ => {}
     }
+}
+
+/// The class a YAML service ID or `decorates:` value spelled as one names,
+/// without the leading `\`.  A double-quoted value escapes each `\`.
+fn yaml_class_name(text: &str) -> Option<crate::atom::Atom> {
+    let unescaped;
+    let text = if text.contains("\\\\") {
+        unescaped = text.replace("\\\\", "\\");
+        unescaped.as_str()
+    } else {
+        text
+    };
+    let class = text.strip_prefix('\\').unwrap_or(text);
+    (class.contains('\\') && super::container::is_class_name(class))
+        .then(|| crate::atom::atom(class))
+}
+
+/// The service an XML `id` or `decorates` attribute names, a class name
+/// without the leading `\` when it is spelled as one.
+fn xml_service_id(text: &str) -> Option<crate::atom::Atom> {
+    if is_container_key(text) {
+        return Some(crate::atom::atom(text));
+    }
+    let class = text.strip_prefix('\\').unwrap_or(text);
+    (class.contains('\\') && super::container::is_class_name(class))
+        .then(|| crate::atom::atom(class))
+}
+
+/// The offset of `part`, a slice of `whole`, within it.
+fn offset_within(whole: &str, part: &str) -> usize {
+    part.as_ptr() as usize - whole.as_ptr() as usize
 }
 
 /// The service a `'@id'` value names, the whole of a service's declaration
@@ -318,7 +434,7 @@ pub(super) fn yaml_mapping_key(line: &str, line_start: usize) -> Option<(&str, u
 }
 
 /// `line` without a trailing `# comment`, leaving a `#` inside quotes.
-pub(super) fn yaml_content_before_comment(line: &str) -> &str {
+pub(crate) fn yaml_content_before_comment(line: &str) -> &str {
     let mut quote = None;
     for (index, byte) in line.bytes().enumerate() {
         match (quote, byte) {
@@ -420,7 +536,12 @@ pub(crate) fn for_each_parameter_placeholder(text: &str, mut found: impl FnMut(&
 
 // ─── XML ────────────────────────────────────────────────────────────────────
 
-fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>, values: &mut Vec<ContainerValueSite>) {
+fn scan_xml(content: &str, out: &mut ContainerDeclarations) {
+    let ContainerDeclarations {
+        spans,
+        values,
+        decorations,
+    } = out;
     if !content.contains("<service")
         && !content.contains("<parameter")
         && !content.contains("<argument")
@@ -522,6 +643,16 @@ fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>, values: &mut Vec<Contain
                         ));
                     }
                 }
+                if let Some((decorated, _, _)) = attribute(&["decorates"])
+                    && let Some((id, _, _)) = attribute(&["id"])
+                    && let Some(decorator) = xml_service_id(&id)
+                    && let Some(decorated) = xml_service_id(&decorated)
+                {
+                    decorations.push(ServiceDecoration {
+                        decorator,
+                        decorated,
+                    });
+                }
                 service(attribute(&["id"]), true, spans);
                 for name in ["alias", "decorates", "parent"] {
                     service(attribute(&[name]), false, spans);
@@ -549,7 +680,7 @@ mod tests {
 
     fn keys(uri: &str, content: &str) -> Vec<(StringKeyKind, String, bool, String)> {
         container_declarations(uri, content)
-            .0
+            .spans
             .into_iter()
             .map(|span| {
                 let SymbolKind::StringKey {
@@ -656,7 +787,7 @@ mod tests {
 
     /// What each declaration gives, by the name it declares.
     fn values(uri: &str, content: &str) -> Vec<(String, String)> {
-        let (spans, values) = container_declarations(uri, content);
+        let ContainerDeclarations { spans, values, .. } = container_declarations(uri, content);
         values
             .into_iter()
             .map(|site| {
@@ -727,6 +858,57 @@ mod tests {
                 ("app.list", "array"),
                 ("app.mailer", "class App\\Mailer"),
                 ("app.alias", "alias app.mailer"),
+            ])
+        );
+    }
+
+    fn decorations(uri: &str, content: &str) -> Vec<(String, String)> {
+        container_declarations(uri, content)
+            .decorations
+            .into_iter()
+            .map(|found| (found.decorator.to_string(), found.decorated.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn yaml_and_xml_services_record_what_they_decorate() {
+        let yaml = "services:\n    app.cached:\n        class: App\\Cached\n        decorates: app.mailer\n    App\\Logging:\n        decorates: 'App\\Mailer'\n    \"App\\\\Quoted\": { decorates: \"App\\\\Mailer\" }\n    app.plain:\n        class: App\\Plain\n";
+        assert_eq!(
+            decorations("file:///p/config/services.yaml", yaml),
+            pairs(&[
+                ("app.cached", "app.mailer"),
+                ("App\\Logging", "App\\Mailer"),
+                ("App\\Quoted", "App\\Mailer"),
+            ])
+        );
+        // The decorated ID is a reference to the service it names, and a
+        // service ID spelled as a class gives nothing a span would key.
+        assert_eq!(
+            named(&keys("file:///p/config/services.yaml", yaml)),
+            vec![
+                (Service, "app.cached", true),
+                (Service, "app.mailer", false),
+                (Service, "app.plain", true),
+            ]
+        );
+        assert_eq!(
+            values("file:///p/config/services.yaml", yaml),
+            pairs(&[
+                ("app.cached", "class App\\Cached"),
+                ("app.plain", "class App\\Plain")
+            ])
+        );
+
+        let xml = r#"<container><services>
+    <service id="app.cached" class="App\Cached" decorates="app.mailer"/>
+    <service id="App\Logging" decorates="App\Mailer"/>
+</services></container>
+"#;
+        assert_eq!(
+            decorations("file:///p/config/services.xml", xml),
+            pairs(&[
+                ("app.cached", "app.mailer"),
+                ("App\\Logging", "App\\Mailer")
             ])
         );
     }

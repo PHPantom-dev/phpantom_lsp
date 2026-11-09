@@ -168,6 +168,14 @@ fn static_call_on_class(
                 ctx,
             );
         }
+        if let Some(result) = super::key_path_calls::try_resolve_array_helper_type(
+            &owner.fqn(),
+            method_name,
+            argument_list,
+            ctx,
+        ) {
+            return result;
+        }
         if let Some(result) =
             try_resolve_config_method_type(&owner.fqn(), method_name, argument_list, ctx)
         {
@@ -176,6 +184,30 @@ fn static_call_on_class(
         if let Some(result) =
             try_resolve_trans_method_type(&owner.fqn(), method_name, argument_list, ctx)
         {
+            return result;
+        }
+        if let Some(result) = super::drupal_calls::try_resolve_drupal_service_type(
+            &owner.fqn(),
+            method_name,
+            argument_list,
+            ctx,
+        ) {
+            return result;
+        }
+        if let Some(result) = super::drupal_calls::try_resolve_entity_query_type(
+            &owner.fqn(),
+            method_name,
+            argument_list,
+            ctx,
+        ) {
+            return result;
+        }
+        if let Some(result) = super::drupal_calls::try_resolve_config_object_type(
+            owner,
+            method_name,
+            argument_list,
+            ctx,
+        ) {
             return result;
         }
     }
@@ -213,6 +245,18 @@ fn static_call_on_class(
         &template_subs,
         &self_replace,
     );
+    // The return-type lookup answers a `static` return with the class it
+    // was declared on, but `parent::create()` from a subclass binds
+    // `static` to the calling class: member access on the result must see
+    // the caller's members, as the `static(Caller)` type already says.
+    // Only a subclass inherits the call: PHP 8 refuses an explicit
+    // `Foo::nonStatic()` from an unrelated class.
+    if let Some(lsb) = lsb_class.as_deref()
+        && lsb != owner_key.as_str()
+        && crate::class_lookup::is_subtype_of(caller, &owner_key, ctx.file.class_loader)
+    {
+        bind_static_results_to_caller(&mut results, &owner_key, lsb, caller, ctx);
+    }
     // `Model::factory(…)`, `UserFactory::times(3)` and
     // `UserFactory::new()` open a factory chain, and what they
     // were opened with is what the `create()` at the far end of
@@ -234,6 +278,39 @@ fn static_call_on_class(
     results
 }
 
+/// Re-point results typed `static(lsb)` / `$this(lsb)` (optionally
+/// nullable) whose class is still the declaring `owner` at the `caller`.
+fn bind_static_results_to_caller(
+    results: &mut [ResolvedType],
+    owner_key: &str,
+    lsb: &str,
+    caller: &ClassInfo,
+    ctx: &VarResolutionCtx<'_>,
+) {
+    let mut caller_arc: Option<Arc<ClassInfo>> = None;
+    for rt in results.iter_mut() {
+        let Some(class) = rt.class_info.as_ref() else {
+            continue;
+        };
+        if class.fqn().as_str() != owner_key {
+            continue;
+        }
+        let non_null = rt.type_string.non_null_type();
+        let ty = non_null.as_ref().unwrap_or(&rt.type_string);
+        let is_late_bound = matches!(
+            ty.kind(),
+            crate::php_type::TypeKind::StaticType(_) | crate::php_type::TypeKind::ThisType(_)
+        );
+        if !is_late_bound || ty.base_name() != Some(lsb.strip_prefix('\\').unwrap_or(lsb)) {
+            continue;
+        }
+        let bound = caller_arc.get_or_insert_with(|| {
+            (ctx.file.class_loader)(Fqn::new(lsb)).unwrap_or_else(|| Arc::new(caller.clone()))
+        });
+        rt.class_info = Some(Arc::clone(bound));
+    }
+}
+
 /// `$var::method()` where `$var` may hold any of several class-strings:
 /// the method resolved on each class, joined.
 fn static_call_on_class_strings(
@@ -247,6 +324,10 @@ fn static_call_on_class_strings(
     let text_args = arg_texts.join(", ");
     let rctx = ctx.as_resolution_ctx();
     let var_resolver = build_var_resolver_from_ctx(ctx);
+    let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
+    let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+        Backend::resolve_arg_text_to_type(t, &rctx.written_in(namespace))
+    };
     let mut union_types: Vec<PhpType> = Vec::new();
     let mut union_classes: Vec<ResolvedType> = Vec::new();
     for target in targets {
@@ -280,6 +361,8 @@ fn static_call_on_class_strings(
             backend: ctx.file.backend,
             template_subs: &template_subs,
             var_resolver: Some(&var_resolver),
+            arg_type_resolver: Some(&arg_ty_resolver),
+            default_type_resolver: Some(&default_ty_resolver),
             cache: ctx.resolved_class_cache,
             calling_class_name: Some(ctx.current_class.fqn().as_str()),
             written_class: Some(&|name: &str| ctx.written_names().resolve_class(name)),

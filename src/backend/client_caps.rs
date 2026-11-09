@@ -95,6 +95,11 @@ pub(crate) struct ClientCaps {
     /// refresh the editor keeps the ones it pulled before either was
     /// ready.
     pub(crate) inlay_hint_refresh: bool,
+    /// Whether the client shows a folding range's `collapsedText` and can
+    /// fold part of a line: it sets `foldingRange.collapsedText` and does
+    /// not restrict itself to `lineFoldingOnly`.  An aliased path then
+    /// folds to the path it resolves to.
+    pub(crate) folding_collapsed_text: bool,
 }
 
 impl ClientCaps {
@@ -180,6 +185,19 @@ impl ClientCaps {
             .and_then(|ih| ih.refresh_support)
             .unwrap_or(false);
 
+        let folding_collapsed_text = capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.folding_range.as_ref())
+            .is_some_and(|fr| {
+                fr.line_folding_only != Some(true)
+                    && fr
+                        .folding_range
+                        .as_ref()
+                        .and_then(|f| f.collapsed_text)
+                        .unwrap_or(false)
+            });
+
         let watched_files_capability = capabilities
             .workspace
             .as_ref()
@@ -221,6 +239,7 @@ impl ClientCaps {
             semantic_tokens_refresh,
             code_lens_refresh,
             inlay_hint_refresh,
+            folding_collapsed_text,
         }
     }
 }

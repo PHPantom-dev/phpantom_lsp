@@ -462,6 +462,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dunce"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1383,6 +1389,7 @@ dependencies = [
  "clap",
  "criterion",
  "datatest-stable",
+ "dunce",
  "etcetera",
  "flate2",
  "globset",
@@ -1405,6 +1412,7 @@ dependencies = [
  "regex",
  "self-replace",
  "serde",
+ "serde_ignored",
  "serde_json",
  "similar",
  "sqlparser",
@@ -1774,6 +1782,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "serde_ignored"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798"
+dependencies = [
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

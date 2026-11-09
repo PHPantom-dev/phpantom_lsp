@@ -24,7 +24,7 @@ use crate::type_engine::variable::rhs_resolution::{
     classify_template_binding, extract_array_position, insert_or_union, is_array_like_wrapper,
     resolve_arg_call_raw_type, resolve_arg_iterable_raw_type, resolve_array_literal_generic,
 };
-use crate::types::{ClassInfo, MethodInfo, ParameterInfo};
+use crate::types::{ClassInfo, FunctionInfo, MethodInfo, ParameterInfo};
 
 use super::arg_text_types::{array_literal_element_type, array_literal_shape_type};
 use super::constant_operands::type_operator_bound_literal;
@@ -43,6 +43,32 @@ pub(crate) struct TemplateCallee<'a> {
     /// constructor these are the class's, which is where a class
     /// template's `of …` lives.
     pub template_param_bounds: &'a AtomMap<PhpType>,
+    /// The namespace the parameters' defaults were written in, which an
+    /// unqualified constant in one is looked up in before the global
+    /// namespace.
+    pub namespace: Option<&'a str>,
+}
+
+impl<'a> TemplateCallee<'a> {
+    /// The signature of the standalone function `func`.
+    pub(crate) fn of_function(func: &'a FunctionInfo) -> Self {
+        Self {
+            parameters: &func.parameters,
+            template_bindings: &func.template_bindings,
+            template_param_bounds: &func.template_param_bounds,
+            namespace: func.namespace.as_deref(),
+        }
+    }
+
+    /// The signature of `method`.
+    pub(crate) fn of_method(method: &'a MethodInfo) -> Self {
+        Self {
+            parameters: &method.parameters,
+            template_bindings: method.template_bindings(),
+            template_param_bounds: method.template_param_bounds(),
+            namespace: method.default_namespace(),
+        }
+    }
 }
 
 /// Bind each of `callee`'s templates from the call-site `arg_texts`,
@@ -85,6 +111,9 @@ pub(crate) fn bind_template_args(
     let ordered = callable_bindings_last(callee.template_bindings, callee.parameters);
     let (written, omitted): (Vec<&(Atom, Atom)>, Vec<_>) = ordered.partition(is_written);
     let mut variadic_tail: Option<Vec<&str>> = None;
+    // A default was written in the callee's file, so the call site's imports
+    // and namespace must not resolve the names in it.
+    let declared_ctx = ctx.written_in(callee.namespace);
 
     for (tpl_name, param_name) in written.into_iter().chain(omitted) {
         let Some(param_idx) = param_index(param_name) else {
@@ -100,8 +129,8 @@ pub(crate) fn bind_template_args(
         let param_hint = via_bound.as_ref().or(param.type_hint.as_ref());
         let tpl_bound = callee.template_param_bounds.get(&atom(tpl_name));
 
-        let arg_text = match bound.get(param_idx).and_then(|o| o.as_deref()) {
-            Some(text) => text,
+        let (arg_text, ctx) = match bound.get(param_idx).and_then(|o| o.as_deref()) {
+            Some(text) => (text, ctx),
             None => match omitted_arg_default(
                 param.default_value.as_deref(),
                 tpl_name,
@@ -109,7 +138,7 @@ pub(crate) fn bind_template_args(
                 param_hint,
                 &subs,
             ) {
-                Some(default) => default,
+                Some(default) => (default, &declared_ctx),
                 None => continue,
             },
         };
@@ -196,9 +225,8 @@ fn bind_constructor_template_args(
         Cow::Owned(merged)
     };
     let callee = TemplateCallee {
-        parameters: &ctor.parameters,
-        template_bindings: ctor.template_bindings(),
         template_param_bounds: &bounds,
+        ..TemplateCallee::of_method(ctor)
     };
     let mut subs = bind_template_args(&callee, arg_texts, None, ctx);
     for (name, ty) in subs.iter_mut() {
@@ -693,7 +721,7 @@ fn constructor_class_subs(
         subs
     };
     if !subs.is_empty() {
-        infer_templates_from_bound_args(cls, &mut subs);
+        infer_templates_from_bound_args(cls, &mut subs, ctx);
     }
     subs
 }
@@ -701,33 +729,92 @@ fn constructor_class_subs(
 /// Bind the templates a bound's generic arguments name, from what the
 /// bounded template itself was bound to.
 ///
+/// A traversal bound is read off what the argument iterates as:
 /// `TIterator as Iterator<TKey, TValue>` bound to `Generator<int, string>`
-/// makes `TKey` `int` and `TValue` `string`.
-fn infer_templates_from_bound_args(cls: &ClassInfo, subs: &mut HashMap<String, PhpType>) {
+/// makes `TKey` `int` and `TValue` `string`, and bound to a class that
+/// declares no type arguments at all (`RecursiveDirectoryIterator`) still
+/// binds them from its `current()` and `key()`.  Any other generic bound
+/// is matched argument by argument.  Each member of a union bound is
+/// tried in turn.
+fn infer_templates_from_bound_args(
+    cls: &ClassInfo,
+    subs: &mut HashMap<String, PhpType>,
+    ctx: &ResolutionCtx<'_>,
+) {
+    let unbound_template = |ty: &PhpType, subs: &HashMap<String, PhpType>| match ty.kind() {
+        TypeKind::Named(name)
+            if cls.template_params.contains(name) && !subs.contains_key(name.as_str()) =>
+        {
+            Some(name.to_string())
+        }
+        _ => None,
+    };
     for (bound_param, bound_type) in cls.template_param_bounds.iter() {
-        let TypeKind::Generic(bound) = bound_type.kind() else {
+        let Some(concrete) = subs.get(bound_param.as_str()).cloned() else {
             continue;
         };
-        let Some(concrete) = subs.get(bound_param.as_str()) else {
-            continue;
+        let members = match bound_type.kind() {
+            TypeKind::Union(members) => &members[..],
+            _ => std::slice::from_ref(bound_type),
         };
-        let TypeKind::Generic(concrete) = concrete.kind() else {
-            continue;
-        };
-        let inferred: Vec<(String, PhpType)> = bound
-            .args
-            .iter()
-            .zip(concrete.args.iter())
-            .filter_map(|(bound_arg, concrete_arg)| match bound_arg.kind() {
-                TypeKind::Named(tpl_name)
-                    if cls.template_params.contains(tpl_name)
-                        && !subs.contains_key(tpl_name.as_str()) =>
-                {
-                    Some((tpl_name.to_string(), concrete_arg.clone()))
+        for member in members {
+            let TypeKind::Generic(bound) = member.kind() else {
+                continue;
+            };
+            if is_traversal_bound(&bound.name) {
+                let (key_arg, value_arg) = match bound.args.as_slice() {
+                    [value] => (None, value),
+                    [key, value, ..] => (Some(key), value),
+                    [] => continue,
+                };
+                let key_tpl = key_arg.and_then(|k| unbound_template(k, subs));
+                let value_tpl = unbound_template(value_arg, subs);
+                if key_tpl.is_none() && value_tpl.is_none() {
+                    continue;
                 }
-                _ => None,
-            })
-            .collect();
-        subs.extend(inferred);
+                let current_class = ClassInfo::default();
+                let iter_ctx = crate::type_engine::variable::iterable_elements::IterableCtx {
+                    current_class: ctx.current_class.unwrap_or(&current_class),
+                    all_classes: ctx.file.all_classes,
+                    class_loader: ctx.file.class_loader,
+                    resolved_class_cache: ctx.resolved_class_cache,
+                };
+                use crate::type_engine::variable::iterable_elements::{
+                    iteration_key_type, iteration_value_type,
+                };
+                if let Some(tpl) = value_tpl
+                    && let Some(value) = iteration_value_type(&concrete, &iter_ctx)
+                {
+                    subs.insert(tpl, value);
+                }
+                if let Some(tpl) = key_tpl
+                    && let Some(key) = iteration_key_type(&concrete, &iter_ctx)
+                {
+                    subs.insert(tpl, key);
+                }
+                continue;
+            }
+            let TypeKind::Generic(concrete) = concrete.kind() else {
+                continue;
+            };
+            let inferred: Vec<(String, PhpType)> = bound
+                .args
+                .iter()
+                .zip(concrete.args.iter())
+                .filter_map(|(bound_arg, concrete_arg)| {
+                    unbound_template(bound_arg, subs).map(|tpl| (tpl, concrete_arg.clone()))
+                })
+                .collect();
+            subs.extend(inferred);
+        }
     }
+}
+
+/// Whether a bound naming `name` describes what its template iterates as,
+/// with `<TKey, TValue>` (or a lone `<TValue>`) arguments.
+fn is_traversal_bound(name: &str) -> bool {
+    matches!(
+        crate::util::short_name(name),
+        "Traversable" | "Iterator" | "IteratorAggregate" | "RecursiveIterator" | "OuterIterator"
+    )
 }

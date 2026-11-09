@@ -513,6 +513,9 @@ impl Backend {
                 {
                     return Some(declared);
                 }
+                if let Some(attribute) = self.drupal_template_attribute_type(uri, name) {
+                    return self.twig_declared_type(attribute);
+                }
                 let key = (uri.to_string(), name.to_string(), usize::MAX);
                 if visiting.contains(&key) {
                     return None;
@@ -584,7 +587,9 @@ impl Backend {
             Resolved::Builtin(_) => match name {
                 "app" => self.twig_declared_type(APP_VARIABLE),
                 "loop" => Some(PhpType::parse(LOOP_TYPE)),
-                _ => None,
+                _ => self
+                    .drupal_template_default_type(uri, name)
+                    .and_then(|ty| self.twig_declared_type(ty)),
             },
         }
     }

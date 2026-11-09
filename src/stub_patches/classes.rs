@@ -16,6 +16,7 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
     match class.name.as_str() {
         "IteratorIterator" => patch_iterator_iterator(class),
         "RecursiveIteratorIterator" => patch_recursive_iterator_iterator(class),
+        "RecursiveArrayIterator" => patch_recursive_array_iterator(class),
         "FilterIterator" => patch_filter_iterator(class),
         "NoRewindIterator" => patch_no_rewind_iterator(class),
         "CachingIterator" => patch_caching_iterator(class),
@@ -134,6 +135,9 @@ const THIRD_PARTY_ASSERT_IF_TRUE: &[(&str, &str, &str)] = &[(
 /// confined to the embedded stubs: this one has to reach vendor code, so
 /// it does nothing at all for a class whose FQN is not in the list.
 pub fn apply_third_party_class_patches(class: &mut ClassInfo) {
+    if super::active_record::patch(class) {
+        return;
+    }
     let fqn = class.fqn();
     if let Some(methods) = super::mockery::mock_methods_of(fqn.as_str()) {
         for idx in 0..class.methods.len() {
@@ -233,35 +237,65 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
     patch_constructor_template_binding(class, "TIterator", "$iterator");
 }
 
-/// Add `@template T of RecursiveIterator|IteratorAggregate` and
-/// `@mixin T`, bound from the constructor's `$iterator` argument.
+/// Add `@template TKey`, `@template TValue`,
+/// `@template T of RecursiveIterator<TKey, TValue>|IteratorAggregate<TKey, TValue>`,
+/// `@implements OuterIterator<TKey, TValue>` and `@mixin T`, with `T`
+/// bound from the constructor's `$iterator` argument.
 ///
 /// `RecursiveIteratorIterator` does not extend `IteratorIterator`, so it
 /// gets its own patch rather than
 /// [`patch_iterator_iterator_subclass`]. phpstorm-stubs type the
-/// constructor `Traversable $iterator` and every accessor `mixed`, so the
-/// directory-walk idiom
-/// `foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)) as $file)`
-/// leaves `$file` with nothing behind it. Binding `T` to the wrapped
-/// iterator and mixing it in is what gives the traversal its element type.
+/// constructor `Traversable $iterator` and every accessor `mixed`. The
+/// traversal yields the wrapped iterator's elements (the leaves, in the
+/// default mode), so `TKey` and `TValue` are read off what `T` iterates
+/// as, and the mixin reaches the wrapped iterator's own methods
+/// (`getSubPathname()` on a directory walk).
 ///
-/// PHPStan ref: `stubs/iterable.stub`
+/// PHPStan ref: `stubs/iterable.stub` (which leaves the traversal untyped)
 fn patch_recursive_iterator_iterator(class: &mut ClassInfo) {
     if !class.template_params.is_empty() {
         return;
     }
+    add_templates(class, &[("TKey", None), ("TValue", None)]);
     let t = atom("T");
     class.template_params.push(t);
     class.template_param_bounds.entry(t).or_insert_with(|| {
+        let traversal = || vec![PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))];
         PhpType::union(vec![
-            PhpType::named(atom("RecursiveIterator")),
-            PhpType::named(atom("IteratorAggregate")),
+            PhpType::generic("RecursiveIterator", traversal()),
+            PhpType::generic("IteratorAggregate", traversal()),
         ])
     });
+    add_implements_generics(class, "OuterIterator", &["TKey", "TValue"]);
     if !class.mixins.contains(&t) {
         class.mixins.push(t);
     }
+    patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
+    patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
     patch_constructor_template_binding(class, "T", "$iterator");
+}
+
+/// Add `@template TKey of array-key`, `@template TValue`,
+/// `@extends ArrayIterator<TKey, TValue>` and
+/// `@implements RecursiveIterator<TKey, TValue>`.
+///
+/// phpstorm-stubs leave `RecursiveArrayIterator` without templates, so the
+/// array its inherited constructor is handed never reaches its elements.
+///
+/// PHPStan ref: `stubs/iterable.stub`
+fn patch_recursive_array_iterator(class: &mut ClassInfo) {
+    if !class.template_params.is_empty() {
+        return;
+    }
+    add_templates(class, &[("TKey", Some("array-key")), ("TValue", None)]);
+    let traversal = [PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))];
+    let parent = atom("ArrayIterator");
+    if !class.extends_generics.iter().any(|(n, _)| *n == parent) {
+        class.extends_generics.push((parent, traversal.to_vec()));
+    }
+    add_implements_generics_typed(class, "RecursiveIterator", &traversal);
+    patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
+    patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
 }
 
 /// Add `@template TKey`, `@template TValue`,
@@ -675,12 +709,12 @@ fn patch_method_return_type(class: &mut ClassInfo, method_name: &str, return_typ
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Index of the method named exactly `name`.
-fn method_index(class: &ClassInfo, name: &str) -> Option<usize> {
+pub(super) fn method_index(class: &ClassInfo, name: &str) -> Option<usize> {
     class.methods.iter().position(|m| m.name.as_str() == name)
 }
 
 /// Replace the method at `idx` with a copy `f` has mutated.
-fn update_method_at(
+pub(super) fn update_method_at(
     class: &mut ClassInfo,
     idx: usize,
     f: impl FnOnce(&mut crate::types::MethodInfo),
@@ -726,7 +760,7 @@ fn add_iterator_templates(class: &mut ClassInfo) {
 ///
 /// Each entry is `(param_name, optional_bound)`.  The bound, if present,
 /// is parsed into a `PhpType` and stored in `template_param_bounds`.
-fn add_templates(class: &mut ClassInfo, templates: &[(&str, Option<&str>)]) {
+pub(super) fn add_templates(class: &mut ClassInfo, templates: &[(&str, Option<&str>)]) {
     for &(name, bound) in templates {
         let param = atom(name);
         if !class.template_params.contains(&param) {

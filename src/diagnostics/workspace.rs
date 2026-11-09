@@ -1489,6 +1489,13 @@ mod tests {
         WorkspaceDocumentDiagnosticReport,
     };
 
+    /// A file outside any workspace, as the URI it is opened under and the
+    /// absolute path a tool reports it by, on every platform.
+    fn absolute_file(name: &str) -> (String, PathBuf) {
+        let path = std::env::temp_dir().join(name);
+        (crate::util::path_to_uri(&path), path)
+    }
+
     fn diag(code: &str, line: u32) -> Diagnostic {
         Diagnostic {
             range: Range::new(Position::new(line, 0), Position::new(line, 5)),
@@ -2191,14 +2198,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn store_workspace_external_results_updates_open_file_cache() {
         let backend = Backend::new_test();
-        let uri_str = "file:///open.php";
+        let (uri_owned, open_path) = absolute_file("open.php");
+        let uri_str = uri_owned.as_str();
         backend
             .open_files
             .write()
             .insert(uri_str.to_string(), Arc::new("<?php\n".to_string()));
 
         let mut results = HashMap::new();
-        results.insert(PathBuf::from("/open.php"), vec![diag("argument.type", 5)]);
+        results.insert(open_path.clone(), vec![diag("argument.type", 5)]);
         let generations = backend.phpstan_tool.generation_snapshot();
         backend
             .store_workspace_external_results("phpstan", results, generations)
@@ -2219,7 +2227,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn store_workspace_external_results_keeps_fresher_per_file_result() {
         let backend = Backend::new_test();
-        let uri_str = "file:///open.php";
+        let (uri_owned, open_path) = absolute_file("open.php");
+        let uri_str = uri_owned.as_str();
         backend
             .open_files
             .write()
@@ -2234,7 +2243,7 @@ mod tests {
 
         // The project-wide run now lands with its scan-time findings.
         let mut results = HashMap::new();
-        results.insert(PathBuf::from("/open.php"), vec![diag("argument.type", 5)]);
+        results.insert(open_path.clone(), vec![diag("argument.type", 5)]);
         backend
             .store_workspace_external_results("phpstan", results, generations)
             .await;
@@ -2256,8 +2265,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn store_workspace_external_results_skips_only_the_superseded_file() {
         let backend = Backend::new_test();
-        let edited = "file:///edited.php";
-        let untouched = "file:///untouched.php";
+        let (edited_uri, edited_path) = absolute_file("edited.php");
+        let (untouched_uri, untouched_path) = absolute_file("untouched.php");
+        let (edited, untouched) = (edited_uri.as_str(), untouched_uri.as_str());
         {
             let mut open = backend.open_files.write();
             open.insert(edited.to_string(), Arc::new("<?php\n".to_string()));
@@ -2268,11 +2278,8 @@ mod tests {
         backend.phpstan_tool.store_file_result(edited, Vec::new());
 
         let mut results = HashMap::new();
-        results.insert(PathBuf::from("/edited.php"), vec![diag("argument.type", 5)]);
-        results.insert(
-            PathBuf::from("/untouched.php"),
-            vec![diag("argument.type", 7)],
-        );
+        results.insert(edited_path, vec![diag("argument.type", 5)]);
+        results.insert(untouched_path, vec![diag("argument.type", 7)]);
         backend
             .store_workspace_external_results("phpstan", results, generations)
             .await;

@@ -489,6 +489,65 @@ async fn a_group_loading_a_file_by_base_path_prefixes_its_routes() {
     .await;
 }
 
+/// `bootstrap/app.php` in the shape `laravel new` writes, with a `then:`
+/// callback grouping one more route file under a name prefix.
+const BOOTSTRAP_THEN_GROUP: &str = "\
+<?php
+use Illuminate\\Foundation\\Application;
+use Illuminate\\Support\\Facades\\Route;
+
+return Application::configure(basePath: dirname(__DIR__))
+    ->withRouting(
+        web: __DIR__.'/../routes/web.php',
+        then: function () {
+            Route::name('admin.')->group(base_path('routes/web_backstage.php'));
+        },
+    )
+    ->withMiddleware(function ($middleware) {
+        //
+    })
+    ->create();
+";
+
+#[tokio::test]
+async fn a_with_routing_then_group_prefixes_the_file_it_loads() {
+    assert_route_names(
+        &[
+            ("bootstrap/app.php", BOOTSTRAP_THEN_GROUP),
+            (
+                "routes/web.php",
+                "<?php\nRoute::get('/', fn () => 'ok')->name('home');\n",
+            ),
+            ("routes/web_backstage.php", BACKSTAGE_ROUTES),
+        ],
+        &["admin.patient.index", "home"],
+        &["patient.index", "admin.home"],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_with_routing_using_callback_registers_its_routes() {
+    let bootstrap = "\
+<?php
+use Illuminate\\Foundation\\Application;
+use Illuminate\\Support\\Facades\\Route;
+
+return Application::configure(basePath: dirname(__DIR__))
+    ->withRouting(using: fn () => Route::name('admin.')->group(base_path('routes/web_backstage.php')))
+    ->create();
+";
+    assert_route_names(
+        &[
+            ("bootstrap/app.php", bootstrap),
+            ("routes/web_backstage.php", BACKSTAGE_ROUTES),
+        ],
+        &["admin.patient.index"],
+        &["patient.index"],
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn a_group_loading_a_dir_relative_file_prefixes_its_routes() {
     assert_route_names(

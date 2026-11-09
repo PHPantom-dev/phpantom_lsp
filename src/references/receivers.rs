@@ -17,7 +17,8 @@ use std::cell::OnceCell;
 use tower_lsp_server::gen_lsp_types::Range;
 
 use crate::atom::Atom;
-use crate::references::member_scope::MemberScope;
+use crate::class_lookup::Fqn;
+use crate::references::member_scope::{AccessReceiver, MemberScope};
 use crate::symbol_map::SymbolMap;
 use crate::symbol_map::{DocblockMemberRef, SelfStaticParentKind, SubjectText, SymbolKind};
 use crate::text_position::LineIndex;
@@ -69,10 +70,11 @@ pub(super) fn settled_receiver_text(symbol_map: &SymbolMap, span_index: usize) -
         // A subject the extraction synthesised carries its own text, so
         // there is nothing to recover.  It is passed on as written rather
         // than trimmed, since that is what the scan would hand over.
-        SubjectText::Owned(text) => {
+        SubjectText::Range { start, end } => (*start, *end),
+        SubjectText::Owned { .. } => {
+            let text = subject_text.synthesised()?;
             return receiver_settles_without_content(text, *is_static).then(|| text.to_string());
         }
-        SubjectText::Range { start, end } => (*start, *end),
     };
     let width = end.checked_sub(start)?;
 
@@ -117,26 +119,73 @@ pub(super) enum ReceiverWalk<'a> {
 impl Backend {
     /// The classes a member access's receiver resolves to, as the member
     /// search reads them: for the method a mock expectation names, the
-    /// class the receiver mocks (see [`crate::mock_methods`]).
+    /// class the receiver mocks (see [`crate::mock_methods`]), and for an
+    /// attribute's named-argument label, the attribute class only when its
+    /// constructor promotes the parameter `member_name`.
     pub(super) fn member_receiver_fqns(
         &self,
-        subject_text: &str,
-        is_static: bool,
-        docblock_ref: DocblockMemberRef,
+        receiver: AccessReceiver<'_>,
+        member_name: &str,
         ctx: &crate::types::FileContext,
         access_offset: u32,
         content: &str,
     ) -> Vec<String> {
-        let fqns =
+        let AccessReceiver {
+            subject_text,
+            is_static,
+            docblock_ref,
+        } = receiver;
+        // A repository's entity can be bound by a type argument
+        // (`EntityRepository<User>`), which a class name loses.
+        if docblock_ref == DocblockMemberRef::EntityField {
+            let Some(ty) =
+                self.resolve_subject_type_at(subject_text, is_static, ctx, access_offset, content)
+            else {
+                return Vec::new();
+            };
+            let class_loader = self.resolved_class_loader_with(&ctx.classes);
+            return crate::doctrine::managed_entity_names(
+                &ty,
+                &ctx.classes,
+                &class_loader,
+                &self.resolved_class_cache,
+            );
+        }
+        let mut fqns =
             self.resolve_subject_to_fqns(subject_text, is_static, ctx, access_offset, content);
-        if docblock_ref != DocblockMemberRef::MockedMethod || fqns.is_empty() {
+        if fqns.is_empty() {
             return fqns;
         }
-        crate::mock_methods::mocked_class_names(
-            fqns,
-            is_static,
-            &self.resolved_class_loader_with(&ctx.classes),
-        )
+        let class_loader = self.resolved_class_loader_with(&ctx.classes);
+        match docblock_ref {
+            DocblockMemberRef::MockedMethod => {
+                crate::mock_methods::mocked_class_names(fqns, is_static, &class_loader)
+            }
+            DocblockMemberRef::AttributeNamedArg => {
+                fqns.retain(|fqn| {
+                    class_loader(Fqn::new(fqn)).is_some_and(|class| {
+                        crate::class_lookup::constructor_promotes(
+                            &class,
+                            member_name,
+                            &class_loader,
+                        )
+                    })
+                });
+                fqns
+            }
+            DocblockMemberRef::YiiAttribute => {
+                fqns.retain(|fqn| {
+                    class_loader(Fqn::new(fqn)).is_some_and(|class| {
+                        crate::yii::active_record::is_record(&class, &class_loader)
+                    })
+                });
+                fqns
+            }
+            DocblockMemberRef::YiiProperty { form_model: true } => {
+                crate::yii::forms::form_model_class_names(fqns, &class_loader)
+            }
+            _ => fqns,
+        }
     }
 
     /// Whether what is already in memory answers "no reference here" for
@@ -214,9 +263,12 @@ impl Backend {
                 // one of them resolves from the enclosing class or the
                 // import table, which is precisely what makes them settled.
                 let subject_fqns = self.member_receiver_fqns(
-                    &subject_text,
-                    *is_static,
-                    *docblock_ref,
+                    AccessReceiver {
+                        subject_text: &subject_text,
+                        is_static: *is_static,
+                        docblock_ref: *docblock_ref,
+                    },
+                    member,
                     file_ctx,
                     span.start,
                     "",
@@ -457,6 +509,7 @@ impl Backend {
                 let span = &symbol_map.spans[span_index];
                 let SymbolKind::MemberAccess {
                     subject_text,
+                    member_name,
                     is_static,
                     docblock_ref,
                     ..
@@ -466,9 +519,12 @@ impl Backend {
                 };
                 let targets: Vec<Atom> = self
                     .member_receiver_fqns(
-                        subject_text.as_str(source),
-                        *is_static,
-                        *docblock_ref,
+                        AccessReceiver {
+                            subject_text: subject_text.as_str(source),
+                            is_static: *is_static,
+                            docblock_ref: *docblock_ref,
+                        },
+                        member_name,
                         &file_ctx,
                         span.start,
                         content,

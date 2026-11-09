@@ -79,16 +79,15 @@ mod tests {
                 }
             }
         };
-        let root = dir.path().to_string_lossy().to_string();
         Some(
             location
                 .uri
                 .to_file_path()
                 .unwrap()
+                .strip_prefix(dir.path())
+                .unwrap()
                 .to_string_lossy()
-                .trim_start_matches(&root)
-                .trim_start_matches('/')
-                .to_string(),
+                .replace('\\', "/"),
         )
     }
 

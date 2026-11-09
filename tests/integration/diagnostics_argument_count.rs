@@ -1008,7 +1008,7 @@ function test(): void {
         let diags = collect(php);
         assert!(
             diags.iter().any(
-                |d| message_text(&d.message).contains("Missing required argument")
+                |d| message_text(&d.message).contains("Expected an argument for")
                     && message_text(&d.message).contains("$a")
             ),
             "Expected missing-required-argument diagnostic for $a, got: {diags:?}",
@@ -1056,7 +1056,7 @@ function test(): void {
         let diags = collect(php);
         assert!(
             diags.iter().any(
-                |d| message_text(&d.message).contains("Missing required arguments")
+                |d| message_text(&d.message).contains("Expected arguments for")
                     && message_text(&d.message).contains("$a")
                     && message_text(&d.message).contains("$b")
             ),
@@ -1311,5 +1311,259 @@ namespace App {
             diags.is_empty(),
             "`Greeter` names `App\\Greeter`, not the global class, got: {diags:?}",
         );
+    }
+
+    // ── Unknown named arguments ─────────────────────────────────────
+
+    /// A named argument no constructor parameter is named after throws,
+    /// in an attribute as in `new`, and is reported on its name.
+    #[test]
+    fn flags_unknown_named_argument_to_constructor_and_attribute() {
+        let php = r#"<?php
+#[\Attribute]
+class Length {
+    public function __construct(public ?int $min = null, public ?int $max = null) {}
+}
+class Form {
+    #[Length(mni: 3, max: 5)]
+    public string $name = '';
+}
+function test(): void {
+    new Length(min: 1, maks: 2);
+}
+"#;
+        let diags = collect(php);
+        let found: Vec<(u32, &str)> = diags
+            .iter()
+            .filter(|d| d.code == Some(Code::String("unknown_named_argument".to_string())))
+            .map(|d| (d.range.start.line, message_text(&d.message)))
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                (6, "Unknown named parameter $mni"),
+                (10, "Unknown named parameter $maks"),
+            ],
+            "got: {diags:?}",
+        );
+        assert_eq!(diags[0].range.start.character, 13);
+        assert_eq!(diags[0].range.end.character, 16);
+    }
+
+    /// A variadic parameter collects the names nothing else takes, and a
+    /// class with no constructor ignores its arguments.
+    #[test]
+    fn no_unknown_named_argument_for_variadic_or_constructorless_class() {
+        let php = r#"<?php
+class Collects {
+    public function __construct(int $first, mixed ...$rest) {}
+}
+class Plain {}
+function test(): void {
+    new Collects(first: 1, anything: 2);
+    new Plain(whatever: 1);
+}
+"#;
+        let diags = collect(php);
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    fn unknown_named(diags: &[Diagnostic]) -> Vec<(u32, &str)> {
+        diags
+            .iter()
+            .filter(|d| d.code == Some(Code::String("unknown_named_argument".to_string())))
+            .map(|d| (d.range.start.line, message_text(&d.message)))
+            .collect()
+    }
+
+    /// A method or function binds named arguments to its declared
+    /// parameters as a constructor does, whether it is called on an
+    /// instance, statically, or as a first-class callable.
+    #[test]
+    fn flags_unknown_named_argument_to_method_and_function() {
+        let php = r#"<?php
+class Mailer {
+    public function send(string $to, string $subject): void {}
+    public static function make(string $dsn): self { return new self(); }
+}
+function greet(string $name): void {}
+function test(Mailer $mailer): void {
+    $mailer->send(to: 'a', subjct: 'Hi');
+    Mailer::make(dns: 'x');
+    greet(nme: 'x');
+    $fn = greet(...);
+    $fn(nam: 'x');
+    $mailer?->send('a', subject: 'ok');
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            unknown_named(&diags),
+            vec![
+                (7, "Unknown named parameter $subjct"),
+                (8, "Unknown named parameter $dns"),
+                (9, "Unknown named parameter $nme"),
+                (11, "Unknown named parameter $nam"),
+            ],
+            "got: {diags:?}",
+        );
+    }
+
+    /// Built-in functions and classes bind to the names php-src gives
+    /// their parameters.
+    #[test]
+    fn flags_unknown_named_argument_to_builtin() {
+        let php = r#"<?php
+function test(\DateTime $date): void {
+    strlen(str: 'x');
+    strlen(string: 'x');
+    $date->format(fmt: 'Y');
+    $date->format(format: 'Y');
+}
+"#;
+        let diags = collect_diagnostics_with(
+            &Backend::new_test_with_full_stubs(),
+            php,
+            Backend::collect_argument_count_diagnostics,
+        );
+        assert_eq!(
+            unknown_named(&diags),
+            vec![
+                (2, "Unknown named parameter $str"),
+                (4, "Unknown named parameter $fmt"),
+            ],
+            "got: {diags:?}",
+        );
+    }
+
+    /// A call `__call` or `__callStatic` receives takes any name: a
+    /// `@method` tag, a mixin's method, and a method the call site cannot
+    /// see on a class with a magic handler.  A signature read from a
+    /// callable type has no real parameter names to check against.
+    #[test]
+    fn no_unknown_named_argument_through_magic_or_callable_type() {
+        let php = r#"<?php
+class Target {
+    public function run(int $times): void {}
+}
+/**
+ * @method void virtualCall(int $count)
+ * @mixin Target
+ */
+class Magic {
+    public function __call(string $name, array $args): mixed { return null; }
+    public static function __callStatic(string $name, array $args): mixed { return null; }
+    protected function hidden(int $value): void {}
+}
+/**
+ * @param Closure(int): void $callback
+ */
+function test(Magic $magic, Closure $callback): void {
+    $magic->virtualCall(anything: 1);
+    $magic->run(other: 1);
+    $magic->hidden(whatever: 1);
+    Magic::hidden(whatever: 1);
+    $callback(value: 1);
+}
+"#;
+        let diags = collect(php);
+        assert!(unknown_named(&diags).is_empty(), "got: {diags:?}");
+    }
+
+    /// A call that cannot see a method goes to `__call` / `__callStatic`,
+    /// which takes any arguments, so only the calls that can see it are
+    /// checked against its signature.  Without a handler PHP rejects the
+    /// call outright and the signature still applies.
+    #[test]
+    fn unreachable_method_with_magic_handler_takes_any_arguments() {
+        let php = r#"<?php
+class Magic {
+    public function __call(string $name, array $args): mixed { return null; }
+    public static function __callStatic(string $name, array $args): mixed { return null; }
+    protected function hidden(int $value): void {}
+    private static function secret(int $value): void {}
+    public function inside(): void {
+        $this->hidden();
+        self::secret();
+    }
+}
+class Plain {
+    protected function hidden(int $value): void {}
+}
+function test(Magic $magic, Plain $plain): void {
+    $magic->hidden();
+    Magic::secret();
+    $plain->hidden();
+}
+class Child extends Magic {
+    public function test(Magic $other): void {
+        $this->hidden();
+        $other->hidden();
+    }
+}
+"#;
+        let diags = collect(php);
+        let lines: Vec<u32> = diags
+            .iter()
+            .filter(|d| message_text(&d.message).contains("Expected 1 argument"))
+            .map(|d| d.range.start.line)
+            .collect();
+        assert_eq!(lines, vec![7, 8, 17, 21, 22], "got: {diags:?}");
+    }
+
+    /// A call that can see a non-public method binds to its parameters
+    /// even when the class has a magic handler, so an unknown name is an
+    /// error there.
+    #[test]
+    fn flags_unknown_named_argument_to_visible_method_with_magic_handler() {
+        let php = r#"<?php
+class Magic {
+    public function __call(string $name, array $args): mixed { return null; }
+    public static function __callStatic(string $name, array $args): mixed { return null; }
+    protected function hidden(int $value): void {}
+    private static function secret(int $value): void {}
+    public function test(): void {
+        $this->hidden(valeu: 1);
+        self::secret(valeu: 1);
+    }
+}
+class Child extends Magic {
+    public function test(): void {
+        $this->hidden(valeu: 1);
+        $this->secret(valeu: 1);
+    }
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            unknown_named(&diags),
+            vec![
+                (7, "Unknown named parameter $valeu"),
+                (8, "Unknown named parameter $valeu"),
+                (13, "Unknown named parameter $valeu"),
+            ],
+            "got: {diags:?}",
+        );
+    }
+
+    /// A separately released extension names its parameters differently
+    /// from one release to the next, so its stub cannot say which names
+    /// the installed one takes, including through a subclass.
+    #[test]
+    fn no_unknown_named_argument_for_unbundled_extension() {
+        let php = r#"<?php
+class Thumbnail extends \Imagick {}
+function test(\Imagick $image, Thumbnail $thumb): void {
+    $image->compareImageLayers(metric: 1);
+    $thumb->compareImageLayers(metric: 1);
+    new \RedisSentinel(options: []);
+}
+"#;
+        let diags = collect_diagnostics_with(
+            &Backend::new_test_with_full_stubs(),
+            php,
+            Backend::collect_argument_count_diagnostics,
+        );
+        assert!(unknown_named(&diags).is_empty(), "got: {diags:?}");
     }
 }

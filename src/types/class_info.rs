@@ -178,6 +178,28 @@ pub mod attribute_target {
 /// an `Arc`, so the inheritance merge and the PHPDoc virtual-member
 /// provider read the structured form instead of re-parsing
 /// [`ClassInfo::class_docblock`] every time the class is resolved.
+/// What a class's Doctrine ORM attributes map.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DoctrineMapping {
+    /// Whether the class carries `#[ORM\Entity]`, so that its attributes
+    /// are its whole mapping.
+    pub is_entity: bool,
+    /// The repository `#[ORM\Entity(repositoryClass: ...)]` names, fully
+    /// qualified.
+    pub repository: Option<Atom>,
+    /// The properties the class declares with a field, identifier, or
+    /// association attribute: the names a repository's criteria take.
+    pub fields: Vec<Atom>,
+    /// The associations among `fields`, each with the entity its
+    /// attribute's `targetEntity` names, fully qualified.  `None` when the
+    /// attribute leaves the target to the property's type.
+    pub associations: Vec<(Atom, Option<Atom>)>,
+    /// On a resolved repository whose entity's mapping is known, the
+    /// entity it manages, a union when the repository serves several.
+    /// Never set by the parser.
+    pub managed_entity: Option<PhpType>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DocblockMembers {
     /// `@method` / `@psalm-method` signatures, in source order.
@@ -372,6 +394,19 @@ pub struct ClassInfo {
     /// The per-property [`PropertyInfo::is_readonly`] stays `false` for
     /// these: the keyword is not repeatable in a subclass.
     pub is_readonly: bool,
+    /// Whether the class carries `#[\AllowDynamicProperties]`, or inherits
+    /// it from an ancestor.
+    ///
+    /// Such a class takes any property, so reading or writing one it does
+    /// not declare is no unknown member.  Like [`Self::is_readonly`], the
+    /// inheritance merge propagates the flag down the parent chain.
+    pub allows_dynamic_properties: bool,
+    /// Whether the class comes from the stub of an extension php-src does not
+    /// ship, whose parameter names follow the installed release of the
+    /// extension rather than the stub (see
+    /// [`crate::stubs::is_unbundled_extension_stub`]).  A named argument is
+    /// not checked against them.
+    pub from_unbundled_extension: bool,
     /// Deprecation message from the `@deprecated` PHPDoc tag.
     ///
     /// `None` means not deprecated. `Some("")` means deprecated without a
@@ -516,6 +551,13 @@ pub struct ClassInfo {
     /// When `#[\Attribute]` is used without arguments, the default is
     /// [`attribute_target::TARGET_ALL`] (all targets).
     pub attribute_targets: u8,
+    /// What the class's Doctrine ORM attributes map, and on a resolved
+    /// repository, the entity it manages.
+    ///
+    /// `None` for a class Doctrine attributes say nothing about, so other
+    /// classes pay one pointer for it.  A YAML or XML mapping lives in the
+    /// backend's Doctrine mapping index, not here.
+    pub doctrine: Option<Box<DoctrineMapping>>,
     /// Laravel-specific metadata (custom collections, casts, attribute
     /// defaults, column names). `None` for non-Laravel classes to avoid
     /// per-class allocation overhead.
@@ -799,9 +841,11 @@ impl ClassInfo {
             || self.is_final != other.is_final
             || self.is_abstract != other.is_abstract
             || self.is_readonly != other.is_readonly
+            || self.allows_dynamic_properties != other.allows_dynamic_properties
             || self.deprecation_message != other.deprecation_message
             || self.deprecated_replacement != other.deprecated_replacement
             || self.attribute_targets != other.attribute_targets
+            || self.doctrine != other.doctrine
             || self.template_params != other.template_params
             || self.template_param_bounds != other.template_param_bounds
             || self.template_param_defaults != other.template_param_defaults
@@ -881,6 +925,12 @@ impl ClassInfo {
     /// Return a reference to the `LaravelMetadata`, if present.
     pub fn laravel(&self) -> Option<&LaravelMetadata> {
         self.laravel.as_deref()
+    }
+
+    /// The repository class a Doctrine entity names in
+    /// `#[ORM\Entity(repositoryClass: ...)]`, fully qualified.
+    pub fn doctrine_repository(&self) -> Option<Atom> {
+        self.doctrine.as_ref()?.repository
     }
 
     /// Look up the stored `name_offset` for a member by name and kind.

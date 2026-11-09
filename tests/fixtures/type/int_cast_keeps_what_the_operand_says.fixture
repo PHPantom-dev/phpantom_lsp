@@ -1,0 +1,25 @@
+// test: an (int) cast keeps an integer's range and turns null, bool and arrays into 0 or 1
+// feature: hover
+// expect_hover: $fromRange => $fromRange = int<0, max>
+// expect_hover: $fromBool => $fromBool = 0|1
+// expect_hover: $fromNullable => $fromNullable = int<0, 5>
+// expect_hover: $fromArray => $fromArray = 0|1
+// expect_hover: $fromString => $fromString = int
+// expect_hover: $fromMixedUnion => $fromMixedUnion = int
+---
+<?php
+
+/**
+ * @param int<0, max> $range
+ * @param int<1, 5>|null $nullable
+ * @param list<int> $list
+ */
+function test(int $range, bool $flag, ?int $nullable, array $list, string $text, int|string $either): void {
+    $fromRange = (int) $range;
+    $fromBool = (int) $flag;
+    $fromNullable = (int) $nullable;
+    $fromArray = (int) $list;
+    $fromString = (int) $text;
+    $fromMixedUnion = (int) $either;
+    $<>fromMixedUnion;
+}

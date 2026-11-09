@@ -25,7 +25,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Built-in diagnostics<sup>4</sup>         | ✅       | 🚧🔒         | ✅         | 🚧          | ✅          |
 | External analyzer integration<sup>5</sup> | ✅       | ❌           | ❌         | 🚧          | 🚧          |
 | **Type Intelligence**                    |          |              |            |             |             |
-| Generics / `@template`                   | ✅       | 🚧           | ✅         | 🚧          | ✅          |
+| Generics / `@template`                   | ✅       | 🚧           | ✅         | 🚧          | 🚧          |
 | Array / object shapes                    | ✅       | ✅           | ✅         | 🚧          | 🚧          |
 | Advanced PHPDoc types<sup>6</sup>        | ✅       | 🚧🔒         | 🚧         | 🚧          | 🚧          |
 | Closure parameter inference              | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
@@ -33,10 +33,11 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Laravel & Blade                          | ✅       | ❌           | 🚧         | ❌          | 🚧🧩          |
 | Symfony & Twig                           | ✅       | ❌           | ❌         | 🚧          | 🧩         |
 | WordPress                                | ✅       | 🚧           | 🚧         | ❌          | ✅          |
-| Yii 3                                    | ✅       | ❌           | ❌         | ❌          | ❌          |
-| Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅🧩          |
+| Drupal                                   | ✅       | ❌           | ❌         | ❌          | ✅🧩          |
+| Yii 3                                    | ✅       | ❌           | ❌         | ❌          | 🚧🧩🔒        |
+| Tempest                                  | 🚧       | ❌           | ❌         | ❌          | 🧩          |
 | PHPUnit & Pest                           | ✅       | ❌           | 🚧         | 🚧          | ✅          |
-| Other frameworks                         | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
+| Other frameworks                         | ❌       | 🚧           | 🚧         | 🚧          | 🧩        |
 | **Refactoring**                          |          |              |            |             |             |
 | Rename                                   | ✅       | ✅🔒         | ✅       | ✅          | ✅          |
 | Extract & generate<sup>8</sup>           | ✅       | ❌           | 🚧🔒       | 🚧          | ✅          |
@@ -64,7 +65,7 @@ Independent, re-runnable type-inference conformance results across twelve PHP en
 </p>
 
 > [!TIP]
-> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. Each framework has a standalone project of its own, with a README listing what to try: [`examples/laravel/`](examples/laravel/), [`examples/symfony/`](examples/symfony/), [`examples/wordpress/`](examples/wordpress/), and [`examples/yii/`](examples/yii/).
+> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. Each framework has a standalone project of its own, with a README listing what to try: [`examples/laravel/`](examples/laravel/), [`examples/symfony/`](examples/symfony/), [`examples/wordpress/`](examples/wordpress/), [`examples/yii/`](examples/yii/), and [`examples/tempest/`](examples/tempest/).
 
 ## Context-Aware Intelligence
 
@@ -79,6 +80,7 @@ Independent, re-runnable type-inference conformance results across twelve PHP en
 - **Twig.** Template names complete, navigate, and are checked in any project that uses Twig, Symfony or not. Blocks navigate between the templates that override them, filters and functions lead to the PHP that runs them, with its signature on hover, and variables lead to the renders and templates that pass them and hold what those pass, so `post.` completes and navigates the entity's attributes. The template directories are found from the templates themselves, with no configuration.
 - **WordPress.** Core's functions and classes come from `php-stubs/wordpress-stubs` once Composer installs it, and their return types follow the arguments. Hook names, core's included, complete and navigate between the places that fire a hook and the ones that listen to it, and the project's own rename. `@global` tags type the globals a function imports.
 - **Yii 3.** Route names, route arguments, and view names complete, navigate, and are checked, and a route's handler renames with the method it names. Everything is read from the application's configuration without booting it.
+- **Tempest.** View templates get completion, hover, go-to-definition, and diagnostics through virtual PHP, the same way Blade templates do. The data a view is rendered with is typed from the calls and View objects that render it, and component attributes and slots get the scope Tempest renders them in. Component tags and their attributes complete and navigate, and the paths passed to `view()` complete and lead to their templates.
 - **Testing.** PHPUnit's assertions narrow types, in Pest tests too. Test metadata (data providers, dependencies, coverage) navigates and renames, a class links to its tests and each test back to the class it tests, a class without a test gets one created in the right place, and mocks keep the mocked class, with the methods an expectation names completing, navigating, and renaming like calls. Inside a Pest test, `$this` is the test case your `Pest.php` binds.
 - **Everything else you'd expect.** Generics, type narrowing, named arguments, destructuring, first-class callables, anonymous classes, `@deprecated` detection, and namespace segment drilling.
 
@@ -86,12 +88,13 @@ Independent, re-runnable type-inference conformance results across twelve PHP en
 
 PHPantom understands Composer projects out of the box, but works without setup on non-Composer projects too:
 
+- **Frameworks need no setup.** Laravel, Symfony, WordPress, Drupal, Yii, Tempest, PHPUnit, and Pest are recognised from the project itself, and their code is read from where the project already has it. There is nothing to enable, download, or point at.
 - **Autoloader-accurate results.** Completions and go-to-definition only surface classes that Composer's autoloader can actually load, avoiding false positives from internal, inaccessible, or duplicate vendor classes. You see exactly what your application can use.
 - **PSR-4 correctness.** Quick fixes for when the namespace or class name does not match their PSR-4 path.
 - **PSR-4 autoloading.** Resolves classes across files on demand.
 - **Classmap and file autoloading.** `autoload_classmap.php` and `autoload_files.php`.
 - **Embedded PHP stubs** from [phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) bundled in the binary, no runtime downloads needed.
-- **Drupal project support.** Detects Drupal projects via `composer.json`, resolves the web root, and indexes Drupal-specific directories and PHP extensions (`.module`, `.install`, `.theme`, etc.) with `.gitignore` bypassed so that Composer-managed core and contrib code is always available.
+- **Drupal project support.** Detects Drupal projects, with or without a `composer.json`, resolves the web root, and indexes Drupal-specific directories and PHP extensions (`.module`, `.install`, `.theme`, etc.) with `.gitignore` bypassed so that Composer-managed core and contrib code is always available.
 - **`require_once` discovery.** Functions from required files are available for completion.
 - **Go-to-implementation.** Jump from an interface or abstract class to all concrete implementations. Scans open files, classmap, PSR-4 directories, and embedded stubs.
 - **Go-to-declaration.** Jump from a method call or a method to the interface or abstract method it implements.
@@ -104,6 +107,7 @@ PHPantom stands on the shoulders of:
 - **[Mago](https://github.com/carthage-software/mago):** the PHP parser that powers all of PHPantom's AST analysis.
 - **[PHPStan](https://phpstan.org/) and [Psalm](https://psalm.dev/):** for their pioneering work in PHP static analysis and shaping the type ecosystem. PHPantom builds on PHPStan-informed type experience, with full support for `@phpstan-*` annotations.
 - **[JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs):** type information for the entire PHP standard library, embedded directly into the binary.
+- **[Viktor Szépe (@szepeviktor)](https://github.com/szepeviktor):** for [wordpress-stubs](https://github.com/php-stubs/wordpress-stubs), which supplies PHPantom's knowledge of WordPress core, and [phpstan-wordpress](https://github.com/szepeviktor/phpstan-wordpress), whose return-type rules and test fixtures shaped PHPantom's WordPress support.
 - **[Phpactor](https://github.com/phpactor/phpactor):** the PHP language server whose comprehensive test suite and benchmark fixtures informed PHPantom's own test coverage. Many of PHPantom's type inference fixtures were adapted from Phpactor's reflection tests.
 
 ## License

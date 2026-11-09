@@ -75,11 +75,13 @@ impl Backend {
         }
 
         let Some(content) = self.effective_content(uri) else {
+            note_partial_answer();
             return empty_spans();
         };
         // The recorded offsets index the text the map was built from; a
         // buffer that has grown or shrunk since is a different text.
         if !map.matches_source(&content) {
+            note_partial_answer();
             return empty_spans();
         }
 
@@ -89,6 +91,7 @@ impl Backend {
         // confirmed.  That file's declarations are not known yet: it reads
         // as declaring nothing, and the partial answer is not cached.
         let Some(_confirming) = ConfirmingGuard::enter(uri) else {
+            note_partial_answer();
             return empty_spans();
         };
         let spans =
@@ -114,18 +117,23 @@ impl Backend {
     /// The source every offset in a file's symbol map indexes: a Blade
     /// template's virtual PHP, and any other file's own text.
     fn effective_content(&self, uri: &str) -> Option<Arc<String>> {
-        self.blade_virtual_php_arc(uri)
+        self.template_virtual_php_arc(uri)
             .or_else(|| self.get_file_content_arc(uri))
     }
 
     /// Resolve the receiver of every candidate site and keep the confirmed
     /// string-key spans, including property defaults on their enclosing class.
-    fn confirm_typed_receiver_sites(
+    pub(crate) fn confirm_typed_receiver_sites(
         &self,
         uri: &str,
         content: &str,
         sites: &[TypedReceiverSite],
     ) -> Vec<SymbolSpan> {
+        // The spans are cached per file, and a caller working on a file of
+        // another Composer project (a `\Drupal::service()` lookup reading a
+        // Symfony app's configurator) would otherwise resolve this file's
+        // receivers against that project's classes.
+        let _project = self.enter_project_scope(uri);
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let _cache_guard =
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
@@ -135,6 +143,9 @@ impl Backend {
         let file_ctx = self.file_context(uri);
         let loaders = self.file_loaders(&file_ctx);
         let _parse_guard = crate::parser::with_parse_cache(content);
+        let in_drupal_site = self.is_in_drupal_web_root(uri);
+        let catches_missing_plugin =
+            in_drupal_site && crate::drupal::plugins::may_catch_missing_plugin(content);
 
         with_parsed_program(content, "blade_typed_receiver", |program, content| {
             let mut calls: Vec<ReceiverCall<'_, '_, '_>> = Vec::new();
@@ -171,7 +182,80 @@ impl Backend {
                         site.receiver,
                         loaders.resolved_class_loader(),
                     ) {
-                        confirmed.push(site.to_span(kind));
+                        if kind == StringKeyKind::DrupalConfigKey {
+                            // The key is one of the object's whose name its
+                            // type carries.
+                            let editable = site.receiver == ReceiverClass::EditableConfigKeys;
+                            for name in self.drupal_config_names_of(
+                                &ty,
+                                editable,
+                                loaders.resolved_class_loader(),
+                            ) {
+                                let mut span = site.to_span(kind);
+                                if let crate::symbol_map::SymbolKind::StringKey { key, .. } =
+                                    &mut span.kind
+                                {
+                                    *key = crate::drupal::config_keys::config_key(&name, &site.key);
+                                }
+                                confirmed.push(span);
+                            }
+                            continue;
+                        }
+                        if kind == StringKeyKind::DrupalPlugin && site.receiver.bare_plugin_key() {
+                            // The ID is one of the manager's the receiver
+                            // is, or the one the call always looks it up in.
+                            let manager = if site.receiver == ReceiverClass::ConstraintTarget {
+                                Some(crate::atom::atom(crate::drupal::plugins::CONSTRAINTS))
+                            } else {
+                                self.drupal_plugin_manager_of(
+                                    &ty.top_level_class_names(),
+                                    loaders.resolved_class_loader(),
+                                )
+                            };
+                            if let Some(manager) = manager {
+                                let mut span = site.to_span(kind);
+                                if let crate::symbol_map::SymbolKind::StringKey {
+                                    key,
+                                    is_optional,
+                                    ..
+                                } = &mut span.kind
+                                {
+                                    *key = crate::drupal::plugins::plugin_key(&manager, &site.key);
+                                    // A file that may catch a missing
+                                    // plugin's exception does without the
+                                    // plugin, and so does a manager that
+                                    // looks its plugins up its own way.
+                                    *is_optional |= catches_missing_plugin
+                                        || self
+                                            .drupal_plugin_index()
+                                            .looks_up_own_way(&manager, call.method);
+                                }
+                                confirmed.push(span);
+                            }
+                            continue;
+                        }
+                        let mut span = site.to_span(kind);
+                        // A Drupal lookup on a plain PSR container may ask
+                        // any other container, whose services are not the
+                        // site's.
+                        if kind == StringKeyKind::ServiceId
+                            && site.receiver == ReceiverClass::ContainerLookup
+                            && in_drupal_site
+                            && !crate::drupal::services::SERVICE_CONTAINERS.iter().any(
+                                |container| {
+                                    crate::class_lookup::is_subtype_of_named(
+                                        &ty,
+                                        container,
+                                        loaders.resolved_class_loader(),
+                                    )
+                                },
+                            )
+                            && let crate::symbol_map::SymbolKind::StringKey { is_optional, .. } =
+                                &mut span.kind
+                        {
+                            *is_optional = true;
+                        }
+                        confirmed.push(span);
                     }
                 }
             }
@@ -192,6 +276,20 @@ impl Backend {
         receiver: ReceiverClass,
         class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<StringKeyKind> {
+        // A route argument is the route's that the call names first, so the
+        // call is confirmed by that name, through the project's own
+        // wrappers too.
+        if receiver == ReceiverClass::YiiUrlArguments {
+            let name = self.typed_receiver_key_kind(
+                ty,
+                method,
+                0,
+                ReceiverClass::UrlGenerator,
+                class_loader,
+            );
+            return (name == Some(StringKeyKind::YiiRoute))
+                .then_some(StringKeyKind::YiiUrlArgument);
+        }
         let connection = matches!(
             receiver,
             ReceiverClass::LaravelConnection
@@ -199,11 +297,13 @@ impl Backend {
                 | ReceiverClass::LaravelConnectionProperty
         );
         let ty = if connection { ty.unwrap_nullable() } else { ty };
-        if let Some((_, kind)) = receiver
-            .targets()
-            .iter()
-            .find(|(fqn, _)| crate::class_lookup::is_subtype_of_named(ty, fqn, class_loader))
-        {
+        // A Drupal target is not worth a subtype check outside Drupal: a
+        // Symfony project's `get()` is never asked about the config factory.
+        if let Some((_, kind)) = receiver.targets().iter().find(|(fqn, kind)| {
+            (kind.framework() != crate::symbol_map::KeyFramework::Drupal
+                || self.is_drupal_project())
+                && crate::class_lookup::is_subtype_of_named(ty, fqn, class_loader)
+        }) {
             return Some(*kind);
         }
         if connection && let crate::php_type::TypeKind::Union(members) = ty.kind() {
@@ -241,6 +341,16 @@ impl Backend {
                     crate::symbol_map::LaravelConfigResource::QueueConnection,
                 ));
             }
+        }
+        // A class that uses core's `ConfigFormBaseTrait` has its `config()`,
+        // and a trait is no type a target can name.
+        if receiver == ReceiverClass::ConfigShortcut && self.is_drupal_project() {
+            return ty
+                .top_level_class_names()
+                .iter()
+                .filter_map(|class| class_loader(crate::class_lookup::Fqn::new(class)))
+                .any(|class| crate::drupal::config::uses_config_form_trait(&class, class_loader))
+                .then_some(StringKeyKind::DrupalConfigName);
         }
         if !receiver.follows_wrappers() {
             return None;
@@ -446,6 +556,27 @@ thread_local! {
         std::cell::RefCell::default();
 }
 
+thread_local! {
+    /// How many times [`Backend::typed_receiver_spans_for`] has answered
+    /// on this thread with spans it could not work out, see
+    /// [`partial_answers`].
+    static PARTIAL_ANSWERS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn note_partial_answer() {
+    PARTIAL_ANSWERS.with(|count| count.set(count.get() + 1));
+}
+
+/// A count that moves whenever [`Backend::typed_receiver_spans_for`]
+/// answers on this thread with no spans for a file it could not confirm
+/// (one already being confirmed further up, or whose text no longer
+/// matches its map) rather than the file's actual spans.  Whatever is
+/// derived from the answers between two readings that differ is partial
+/// and must not be cached.
+pub(crate) fn partial_answers() -> u64 {
+    PARTIAL_ANSWERS.with(std::cell::Cell::get)
+}
+
 /// Marks one file as being confirmed for as long as it lives.
 struct ConfirmingGuard {
     uri: String,
@@ -503,7 +634,8 @@ struct ReceiverCallWalker<'a, 'sites> {
 impl<'sites> ReceiverCallWalker<'_, 'sites> {
     /// The candidates the argument at `index` holds: in the string itself,
     /// or in the entries of the array a `first(['a', 'b'])` or an
-    /// `args(['%app.sender%'])` builds.
+    /// `args(['%app.sender%'])` builds, their keys included, which name
+    /// the parameters of a Drupal `setRedirect('route', ['node' => 1])`.
     fn matching_sites(
         &self,
         expr: &Expression<'_>,
@@ -541,7 +673,10 @@ impl<'sites> ReceiverCallWalker<'_, 'sites> {
         for element in elements.iter() {
             match element {
                 ArrayElement::Value(value) => self.matching_sites(value.value, index, out),
-                ArrayElement::KeyValue(value) => self.matching_sites(value.value, index, out),
+                ArrayElement::KeyValue(value) => {
+                    self.matching_sites(value.key, index, out);
+                    self.matching_sites(value.value, index, out);
+                }
                 _ => {}
             }
         }

@@ -54,12 +54,21 @@ impl Backend {
         doc_ctx: &DocblockCtx<'a>,
     ) -> FileDeclarations {
         let mut decls = FileDeclarations::default();
+        // Attribute metadata is extracted here, before the later type-name
+        // qualification pass, so it needs the imports at its declaration.
+        let mut context = DocblockCtx {
+            trivias: doc_ctx.trivias,
+            content: doc_ctx.content,
+            php_version: doc_ctx.php_version,
+            use_map: HashMap::new(),
+            namespace: None,
+        };
         for statement in program.statements.iter() {
             match statement {
                 Statement::Use(use_stmt) => {
                     Self::extract_use_items(
                         &use_stmt.items,
-                        &mut decls.use_map,
+                        &mut context.use_map,
                         Some(&mut decls.symbol_imports),
                     );
                 }
@@ -71,14 +80,14 @@ impl Backend {
                     // wrapper-function arm below).
                     Self::extract_blade_wrapper_method_use_statements(
                         statement,
-                        &mut decls.use_map,
+                        &mut context.use_map,
                         &mut decls.symbol_imports,
                     );
                     let mut top_classes = Vec::new();
                     Self::extract_classes_from_statements(
                         std::iter::once(statement),
                         &mut top_classes,
-                        Some(doc_ctx),
+                        Some(&context),
                     );
                     for cls in top_classes {
                         decls.classes_with_ns.push((cls, None, None));
@@ -93,9 +102,9 @@ impl Backend {
                 Statement::Function(func)
                     if bytes_to_str(func.name.value) == crate::blade::WRAPPER_FUNCTION =>
                 {
-                    Self::extract_use_statements_from_statements(
+                    Self::extract_template_use_statements(
                         func.body.statements.iter(),
-                        &mut decls.use_map,
+                        &mut context.use_map,
                         Some(&mut decls.symbol_imports),
                     );
                 }
@@ -106,7 +115,7 @@ impl Backend {
                     Self::find_anonymous_classes_in_statement(
                         statement,
                         &mut anon_classes,
-                        Some(doc_ctx),
+                        Some(&context),
                     );
                     for cls in anon_classes {
                         decls.classes_with_ns.push((cls, None, None));
@@ -114,6 +123,7 @@ impl Backend {
                 }
             }
         }
+        decls.use_map = context.use_map;
         decls.fold_block_imports();
 
         // A class-like declared in two branches of a conditional yields
@@ -142,14 +152,20 @@ impl Backend {
         }
 
         let mut block_classes = Vec::new();
-        let mut block_use_map = HashMap::new();
+        let mut context = DocblockCtx {
+            trivias: doc_ctx.trivias,
+            content: doc_ctx.content,
+            php_version: doc_ctx.php_version,
+            use_map: HashMap::new(),
+            namespace: block_ns.clone(),
+        };
         let mut block_symbol_imports = crate::types::SymbolImports::default();
         for inner in ns.statements().iter() {
             match inner {
                 Statement::Use(use_stmt) => {
                     Self::extract_use_items(
                         &use_stmt.items,
-                        &mut block_use_map,
+                        &mut context.use_map,
                         Some(&mut block_symbol_imports),
                     );
                 }
@@ -157,20 +173,20 @@ impl Backend {
                     Self::extract_classes_from_statements(
                         std::iter::once(inner),
                         &mut block_classes,
-                        Some(doc_ctx),
+                        Some(&context),
                     );
                 }
                 Statement::Namespace(inner_ns) => {
                     // Nested namespaces (rare but valid)
                     Self::extract_use_statements_from_statements(
                         inner_ns.statements().iter(),
-                        &mut block_use_map,
+                        &mut context.use_map,
                         Some(&mut block_symbol_imports),
                     );
                     Self::extract_classes_from_statements(
                         inner_ns.statements().iter(),
                         &mut block_classes,
-                        Some(doc_ctx),
+                        Some(&context),
                     );
                 }
                 _ => {
@@ -179,7 +195,7 @@ impl Backend {
                     Self::find_anonymous_classes_in_statement(
                         inner,
                         &mut block_classes,
-                        Some(doc_ctx),
+                        Some(&context),
                     );
                 }
             }
@@ -197,7 +213,7 @@ impl Backend {
             namespace: block_ns,
             start: ns_span.start.offset,
             end: ns_span.end.offset,
-            use_map: block_use_map,
+            use_map: context.use_map,
             symbol_imports: block_symbol_imports,
         });
     }
@@ -291,5 +307,44 @@ impl FileDeclarations {
                 self.symbol_imports.constants.extend(block.constants);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_attributes_survive_a_nested_namespace_during_editing() {
+        // An unfinished namespace edit can leave a nested block in the CST.
+        // Its imported attributes must still supply the model's column names.
+        let source = r#"<?php
+namespace App {
+    namespace Models {
+        use Illuminate\Database\Eloquent\Attributes\Fillable as Fields;
+        #[Fields(['nickname'])]
+        class User {}
+    }
+}
+"#;
+        crate::parser::with_parsed_program(source, "nested_namespace", |program, content| {
+            let context = DocblockCtx {
+                trivias: program.trivia.as_slice(),
+                content,
+                php_version: None,
+                use_map: HashMap::new(),
+                namespace: None,
+            };
+            let declarations = Backend::collect_file_declarations(program, &context);
+            assert_eq!(declarations.classes_with_ns.len(), 1);
+            assert_eq!(
+                declarations.classes_with_ns[0]
+                    .0
+                    .laravel()
+                    .unwrap()
+                    .column_names,
+                ["nickname"],
+            );
+        });
     }
 }

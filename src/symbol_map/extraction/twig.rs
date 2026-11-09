@@ -281,7 +281,7 @@ fn class_named(class: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbol_map::SymbolMap;
+    use crate::symbol_map::{KeyFramework, SymbolMap};
 
     fn map_of(php: &str) -> SymbolMap {
         let arena = mago_allocator::LocalArena::new();
@@ -289,7 +289,21 @@ mod tests {
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = crate::names::OwnedResolvedNames::from_resolved(&resolver.resolve(program));
-        crate::symbol_map::extract_symbol_map_for_index(program, php, &names, false, true, None)
+        crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: false,
+                twig: true,
+                doctrine: false,
+                yii_params: false,
+                tempest: false,
+            },
+            None,
+        )
     }
 
     fn report(map: &SymbolMap, php: &str) -> Vec<String> {
@@ -361,7 +375,8 @@ final class AppExtension extends AbstractExtension {
             .filter(|span| {
                 matches!(
                     &span.kind,
-                    SymbolKind::StringKey { kind, is_write: true, .. } if kind.is_twig()
+                    SymbolKind::StringKey { kind, is_write: true, .. }
+                        if kind.framework() == KeyFramework::Twig
                 )
             })
             .count();

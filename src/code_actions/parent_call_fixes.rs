@@ -1,5 +1,5 @@
 //! Quick-fix for a PHPUnit hook that skips the parent's: insert the
-//! `parent::setUp()` (or `tearDown()`, …) call the `missing_parent_call`
+//! `parent::setUp()` (or `tearDown()`, …) call the `missing_phpunit_parent_call`
 //! diagnostic reports missing.
 //!
 //! A set-up hook calls the parent first, so the base class's fixtures

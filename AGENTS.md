@@ -187,11 +187,16 @@ edit and must be fixed before moving on.
 views, and translations), Symfony demos in `examples/symfony/` (a
 standalone project with `composer.json`, controllers, YAML/XML/PHP
 configuration, Twig templates, and translation catalogues), Yii 3
-demos in `examples/yii/` (an application generated from `yiisoft/app`), and
+demos in `examples/yii/` (an application generated from `yiisoft/app`),
 WordPress demos in `examples/wordpress/` (a plugin and a theme under
-`wp-content/`, with core's declarations from `php-stubs/wordpress-stubs`).
-`vendor/` is git-ignored in all four, so run `composer install` there before
-verifying framework demos on a fresh clone. Put new
+`wp-content/`, with core's declarations from `php-stubs/wordpress-stubs`),
+Drupal demos in `examples/drupal/` (a `drupal/recommended-project`
+site with one custom module and one theme), and Tempest demos in
+`examples/tempest/` (a controller, `.view.php` templates and a view
+component under `app/`). `vendor/` is git-ignored in all six, and so is
+Drupal core under `web/`, so run `composer install` there before
+verifying framework demos on a fresh clone. The Tempest playground's
+locked packages need PHP 8.5. Put new
 framework-specific features in the matching `examples/<framework>/`
 project, not in `examples/php/`. If a feature affects Laravel-specific
 resolution (Eloquent, config, views, routes, translations), also update
@@ -242,6 +247,31 @@ claim the "Try:" comments make. Add a check there for each new one, run
 `phpantom_lsp analyze --project-root examples/wordpress --no-colour`, which
 must report `[OK] No errors`.
 
+Drupal support (services, entity types, routes, hooks, theme hooks)
+follows the same pattern in `examples/drupal/`, a
+`drupal/recommended-project` site whose custom module `acme` and theme
+`acme_theme` are the only committed code under `web/`: a "Try:" comment
+at the site and a line in its `README.md`. Lint with
+`find examples/drupal/web/modules/custom examples/drupal/web/themes/custom -type f \( -name '*.php' -o -name '*.module' -o -name '*.theme' \) -print0 | xargs -0 -n1 php -l`.
+`examples/drupal/assertions.php` reads the module's declarations with
+Drupal's own loaders and reflection, without booting a kernel, and checks
+every name the demo declares and every claim its "Try:" comments make.
+Add a check there for each new one, run
+`php examples/drupal/assertions.php`, then
+`phpantom_lsp analyze --project-root examples/drupal --no-colour`, which
+must report `[OK] No errors`.
+
+Tempest View support (component tags, view paths, template PHP) follows
+the same pattern in `examples/tempest/`: a line in its `README.md` for
+each demo. Lint with
+`find examples/tempest/app -name '*.php' -print0 | xargs -0 -n1 php -l`.
+`examples/tempest/assertions.php` renders the views and components with
+Tempest's own renderer and checks the behaviour the README describes.
+Add a check there for each new claim, run
+`php examples/tempest/assertions.php`, then
+`phpantom_lsp analyze --project-root examples/tempest --no-colour`, which
+must report `[OK] No errors`.
+
 ## Updating docs/todo.md
 
 Remove completed items entirely from both `docs/todo.md` **and** the
@@ -281,6 +311,38 @@ Do not assume pre-existing failures are someone else's problem. Sessions
 crash mid-work; the previous agent may have edited code but died before
 fixing the resulting breakage. "It was already broken" is not an excuse
 to leave it broken.
+
+## Writing Portable Code and Tests
+
+CI runs the suite on Windows too, and local runs are on Linux, so a
+Windows-only failure shows up only after you push. These are the
+mistakes that have broken it:
+
+- **Canonicalize with `dunce::canonicalize`.** The standard library's
+  version returns a verbatim `\\?\C:\...` path on Windows that never
+  equals the same file reached any other way. `clippy.toml` forbids it.
+- **Compare against the spelling the index stores.** Package roots and
+  the files under them are stored canonicalized. A temp dir can come
+  back as an 8.3 short name (`C:\Users\RUNNER~1\...`), so an expected
+  path or URI built straight from `tempdir()` spells the same file
+  differently. Canonicalize the expected path first (after the file
+  exists).
+- **Paths are not strings.** Don't test absoluteness with
+  `starts_with('/')` or a suffix with `str::ends_with`. Use
+  `Path::is_absolute`, `Path::ends_with`, and `Path::join`, and when a
+  test compares relative paths as text, normalise `\` to `/` first.
+- **Build test URIs from real paths.** `file:///foo.php` has no drive
+  letter, so it is not a path on Windows. Make a path under
+  `std::env::temp_dir()` (or a `tempdir()`) and convert it with
+  `crate::util::path_to_uri`.
+- **The filesystem is case-insensitive.** A namespace like `Tests\Unit`
+  is also a relative path that finds `tests/Unit`.
+- **Executables have extensions.** Tools in `node_modules/.bin` or
+  `vendor/bin` are `.cmd`/`.bat`/`.exe` files there. Use the
+  platform-specific name the code already defines (e.g. `BINARY` in the
+  Blade formatter) rather than a hardcoded Unix name.
+- **Line endings can be CRLF.** User files may use `\r\n`, so offset
+  and line arithmetic must not assume `\n`.
 
 ## Discovered Bugs
 

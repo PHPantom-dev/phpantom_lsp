@@ -45,7 +45,7 @@ pub(crate) fn is_factory_class(class_name: &str) -> bool {
 }
 
 /// The fully-qualified name of the `Factory` base class.
-pub(super) const FACTORY_FQN: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
+pub(crate) const FACTORY_FQN: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
 
 /// Derive the conventional factory FQN from a model FQN.
 ///
@@ -317,6 +317,7 @@ fn relationship_param(name: &str, type_str: &str) -> ParameterInfo {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }
 }
 

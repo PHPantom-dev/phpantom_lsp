@@ -247,7 +247,7 @@ fn probe_source(collection_type: &str, expression: &str) -> String {
 fn hover_markdown(collection_type: &str, expression: &str) -> String {
     let (backend, dir) = workspace();
     let content = probe_source(collection_type, expression);
-    let uri = format!("file://{}/src/Probe.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Probe.php"));
     backend.update_ast(&uri, &content);
 
     let hover = backend
@@ -419,11 +419,7 @@ fn a_custom_collection_subclass_is_preserved() {
 
 #[test]
 fn key_by_moves_the_member_into_the_key() {
-    assert_type(
-        SUPPORT,
-        "$items->keyBy->email",
-        "Collection<array-key, User>",
-    );
+    assert_type(SUPPORT, "$items->keyBy->email", "Collection<string, User>");
 }
 
 #[test]
@@ -431,7 +427,7 @@ fn group_by_nests_the_collection() {
     assert_type(
         SUPPORT,
         "$items->groupBy->email",
-        "Collection<array-key, Collection<int, User>>",
+        "Collection<string, Collection<int, User>>",
     );
 }
 
@@ -516,7 +512,7 @@ fn completion_labels(collection_type: &str, prefix_expression: &str) -> Vec<Stri
         "<?php\nnamespace App;\n\n/** @var {} $items */\n$items = null;\n{}\n",
         collection_type, prefix_expression
     );
-    let uri = format!("file://{}/src/Probe.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Probe.php"));
     let url = Uri::parse(&uri).unwrap();
 
     let response = tokio::runtime::Builder::new_current_thread()
@@ -566,7 +562,7 @@ fn completion_after_a_proxy_offers_item_members() {
 fn unknown_member_messages(expression: &str) -> Vec<String> {
     let (backend, dir) = workspace();
     let content = probe_source(SUPPORT, expression);
-    let uri = format!("file://{}/src/Probe.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Probe.php"));
     backend.update_ast(&uri, &content);
 
     let mut diagnostics = Vec::new();
@@ -574,9 +570,9 @@ fn unknown_member_messages(expression: &str) -> Vec<String> {
     diagnostics
         .into_iter()
         .filter(|d| {
-            d.code
-                .as_ref()
-                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, Code::String(s) if s == "unknown_member" || s == "unknown_class"),
+            )
         })
         .map(|d| message_text(&d.message).to_string())
         .collect()

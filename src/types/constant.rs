@@ -105,5 +105,13 @@ pub struct DefineInfo {
     /// The initializer expression source text (e.g. `"'1.0.0'"` for
     /// `define('APP_VERSION', '1.0.0')`, or `"42"` for `const LIMIT = 42;`).
     /// `None` when the value could not be extracted.
+    ///
+    /// The classes it names, and the constants that have one meaning, are
+    /// spelled fully qualified (see `qualify_constant_names`).
     pub value: Option<String>,
+    /// The namespace the value was written in, where an unqualified
+    /// constant name in it means that namespace's constant when there is
+    /// one and the global constant otherwise.  `None` in the global
+    /// namespace, where it can only mean the global one.
+    pub namespace: Option<crate::atom::Atom>,
 }

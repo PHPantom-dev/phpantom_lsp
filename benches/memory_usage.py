@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure PHPantom LSP resident memory (RSS) on four workloads.
+"""Measure PHPantom LSP resident memory (RSS) on seven workloads.
 
 Scenarios
 ---------
@@ -10,10 +10,18 @@ Scenarios
    checkout (with Composer dependencies installed).
 4. **yii_action** – open an action inside a full yiisoft/demo-blog
    checkout (with Composer dependencies installed).
+5. **wordpress_plugin** – open a class inside a plugin project that
+   installs ``php-stubs/wordpress-stubs`` and WordPress core through
+   Composer.
+6. **drupal_module** – open a controller in a custom module of a Drupal
+   site whose core Composer installs into the web root.
+7. **tempest_view** – complete members and components in the Tempest
+   playground, with its locked dependencies and a catalogue of 400 views.
 
 The script communicates with the LSP binary over JSON-RPC / stdio,
 waits for indexing to finish, sends a ``textDocument/didOpen``, lets the
-server settle, then samples ``VmRSS`` from ``/proc/<pid>/status``.
+server settle, then samples ``VmRSS`` from ``/proc/<pid>/status`` (or
+``ps`` on macOS).
 
 Output is printed as ``customSmallerIsBetter`` JSON so
 ``github-action-benchmark`` can ingest it with proper units::
@@ -22,7 +30,10 @@ Output is printed as ``customSmallerIsBetter`` JSON so
       {"name": "memory_hello_world",  "unit": "MiB", "value": 24.5},
       {"name": "memory_laravel_model", "unit": "MiB", "value": 31.7},
       {"name": "memory_symfony_controller", "unit": "MiB", "value": 45.2},
-      {"name": "memory_yii_action", "unit": "MiB", "value": 40.1}
+      {"name": "memory_yii_action", "unit": "MiB", "value": 40.1},
+      {"name": "memory_wordpress_plugin", "unit": "MiB", "value": 60.3},
+      {"name": "memory_drupal_module", "unit": "MiB", "value": 80.0},
+      {"name": "memory_tempest_view", "unit": "MiB", "value": 35.0}
     ]
 
 Usage (CI)::
@@ -81,6 +92,20 @@ YII_COMMIT = "0924761392b8f79a5896ba4e96f09e4d43b38feb"
 YII_TARBALL = (
     "https://github.com/yiisoft/demo-blog/archive/"
     f"{YII_COMMIT}.tar.gz"
+)
+
+# The WordPress plugin project's composer.json and its pinned composer.lock.
+# WordPress has no project skeleton to download, so the whole project is a
+# fixture: the stubs and core at the versions examples/wordpress uses.
+WORDPRESS_FIXTURE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "fixtures", "wordpress"
+)
+
+# The Drupal site's composer.json and its pinned composer.lock. Drupal's
+# recommended-project template commits no lock, so the site is a fixture:
+# core at the version examples/drupal uses, installed under ``web/``.
+DRUPAL_FIXTURE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "fixtures", "drupal"
 )
 
 HELLO_WORLD_PHP = """\
@@ -153,8 +178,63 @@ final readonly class Action
 }
 """
 
+WORDPRESS_PLUGIN_PHP = r"""<?php
+
+namespace Acme\Bench;
+
+final class Plugin
+{
+    public function register(): void
+    {
+        add_action('init', [$this, 'boot']);
+    }
+
+    public function boot(): void
+    {
+        global $wpdb;
+        $post = get_post(1);
+        echo esc_html($post->post_title . $wpdb->prefix);
+    }
+}
+"""
+
+DRUPAL_MODULE_FILES = {
+    "acme.info.yml": "name: Acme\ntype: module\ncore_version_requirement: ^11\n",
+    "acme.routing.yml": (
+        "acme.report:\n"
+        "  path: '/acme/report/{node}'\n"
+        "  defaults:\n"
+        "    _controller: '\\Drupal\\acme\\Controller\\ReportController::view'\n"
+        "  requirements:\n"
+        "    _permission: 'access content'\n"
+    ),
+}
+
+DRUPAL_CONTROLLER_PHP = r"""<?php
+
+namespace Drupal\acme\Controller;
+
+use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\Url;
+
+final class ReportController extends ControllerBase
+{
+    public function view(): array
+    {
+        $node = $this->entityTypeManager()->getStorage('node')->load(1);
+        $url = Url::fromRoute('acme.report', ['node' => 1]);
+        return ['#markup' => $node->getTitle() . $url->toString()];
+    }
+}
+"""
+
 # Timeout for the LSP to finish indexing (seconds).
 INDEX_TIMEOUT = 120
+
+# How long no progress token may be active before indexing counts as
+# finished (seconds).  Covers the gap between one indexing phase ending
+# and the next beginning.
+PROGRESS_QUIET_TIME = 2
 
 # How long to wait after didOpen for the server to settle (seconds).
 SETTLE_TIME = 2
@@ -394,41 +474,45 @@ class LspClient:
     def wait_for_indexing(self, timeout: float = INDEX_TIMEOUT) -> None:
         """Block until PHPantom finishes indexing.
 
-        PHPantom sends ``$/progress`` with ``kind: "end"`` when indexing
-        finishes.  We also accept a quiet period as a fallback for
-        workspaces where indexing is trivial and no progress tokens are
-        emitted.
+        PHPantom reports each indexing phase under its own progress token,
+        and the full background index begins only as the first phase
+        ends.  So an empty set of active tokens is not the end: it has to
+        stay empty for ``PROGRESS_QUIET_TIME`` before the server counts
+        as settled.  Sampling earlier catches the full index part-way,
+        which on a large workspace swings the result by hundreds of MiB
+        depending on how far the runner got.  A workspace that never
+        reports progress is done after the same quiet period.
         """
         deadline = time.monotonic() + timeout
         active_tokens: set[str] = set()
-        saw_any_progress = False
+        idle_since = time.monotonic()
 
         while time.monotonic() < deadline:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            if not active_tokens:
+                idle_for = time.monotonic() - idle_since
+                if idle_for >= PROGRESS_QUIET_TIME:
+                    return
+                wait = PROGRESS_QUIET_TIME - idle_for
+            else:
+                wait = 2.0
+            wait = min(wait, deadline - time.monotonic())
+            if wait <= 0:
                 break
             try:
-                msg = self._notifications.get(timeout=min(remaining, 2.0))
+                msg = self._notifications.get(timeout=wait)
             except queue.Empty:
-                # Silence. If we never saw progress, treat it as "done"
-                # (trivial workspace). If all tokens ended, also done.
-                if not saw_any_progress or not active_tokens:
-                    return
                 continue
 
-            method = msg.get("method", "")
-
-            if method == "$/progress":
-                saw_any_progress = True
-                token = str(msg["params"].get("token", ""))
-                value = msg["params"].get("value", {})
-                kind = value.get("kind", "")
-                if kind == "begin":
-                    active_tokens.add(token)
-                elif kind == "end":
-                    active_tokens.discard(token)
-                    if not active_tokens:
-                        return
+            if msg.get("method", "") != "$/progress":
+                continue
+            token = str(msg["params"].get("token", ""))
+            kind = msg["params"].get("value", {}).get("kind", "")
+            if kind == "begin":
+                active_tokens.add(token)
+            elif kind == "end":
+                active_tokens.discard(token)
+                if not active_tokens:
+                    idle_since = time.monotonic()
 
         raise TimeoutError(f"Indexing did not finish within {timeout}s")
 
@@ -475,8 +559,14 @@ class LspClient:
 
 
 def get_rss_kib(pid: int) -> int | None:
-    """Read VmRSS from /proc/<pid>/status. Returns KiB or None."""
+    """Read resident memory in KiB, or None when the process has exited."""
     try:
+        if sys.platform == "darwin":
+            result = subprocess.run(
+                ["ps", "-o", "rss=", "-p", str(pid)],
+                capture_output=True, text=True, check=False,
+            )
+            return int(result.stdout.strip()) if result.returncode == 0 else None
         status = Path(f"/proc/{pid}/status").read_text()
         for line in status.splitlines():
             if line.startswith("VmRSS:"):
@@ -507,6 +597,50 @@ def sample_rss(
 
 
 # ── Scenario runners ─────────────────────────────────────────────────────────
+
+
+def run_tempest_view(binary: str, work_dir: str) -> int:
+    """Measure a template's PHP scope and component discovery catalogue."""
+    fixture = Path(__file__).resolve().parent.parent / "examples" / "tempest"
+    project = Path(work_dir) / "tempest_project"
+    shutil.copytree(
+        fixture, project, dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("vendor", ".phpantom", ".tempest"),
+    )
+    subprocess.run(
+        ["composer", "install", "--no-interaction", "--no-progress",
+         "--prefer-dist", "--no-scripts", "--no-plugins", "--quiet"],
+        check=True, cwd=project, timeout=300,
+    )
+    source = (project / "app" / "books.view.php").read_text()
+    component = (project / "app" / "components" / "x-card.view.php").read_text()
+    for n in range(200):
+        (project / "app" / f"page{n}.view.php").write_text(source)
+        (project / "app" / "components" / f"x-panel-{n}.view.php").write_text(component)
+
+    client = LspClient(binary, str(project))
+    try:
+        client.initialize()
+        client.wait_for_indexing(timeout=INDEX_TIMEOUT)
+        uri = (project / "app" / "books.view.php").as_uri()
+        client.did_open(uri, source)
+        for needle, expected in [("$book->", "summary"), ("<x-", "x-card")]:
+            before = source[:source.rindex(needle) + len(needle)]
+            rid = client.send_request("textDocument/completion", {
+                "textDocument": {"uri": uri},
+                "position": {
+                    "line": before.count("\n"),
+                    "character": len(before.rsplit("\n", 1)[-1].encode("utf-16-le")) // 2,
+                },
+            })
+            result = client.wait_for_response(rid).get("result")
+            items = result.get("items", []) if isinstance(result, dict) else result or []
+            if not any(item["label"].split("(")[0] == expected for item in items):
+                raise RuntimeError(f"Tempest completion did not offer {expected}: {result}")
+        client.drain_notifications(SETTLE_TIME)
+        return sample_rss(client.pid)
+    finally:
+        client.shutdown()
 
 
 def run_hello_world(binary: str, work_dir: str) -> int:
@@ -786,6 +920,155 @@ def run_yii_action(binary: str, work_dir: str) -> int:
         client.shutdown()
 
 
+def setup_wordpress(work_dir: str) -> str:
+    """Create a plugin project from the fixture and install Composer deps.
+
+    Composer plugins are skipped so ``composer/installers`` never moves
+    core out of ``vendor/``, matching how plugin authors pull core in for
+    their tooling.
+
+    Returns the path to the plugin project root.
+    """
+    plugin_dir = os.path.join(work_dir, "wordpress_plugin")
+    os.makedirs(os.path.join(plugin_dir, "src"), exist_ok=True)
+    for name in ("composer.json", "composer.lock"):
+        src = os.path.join(WORDPRESS_FIXTURE_DIR, name)
+        if not os.path.isfile(src):
+            raise FileNotFoundError(f"WordPress fixture not found at {src}.")
+        shutil.copy2(src, os.path.join(plugin_dir, name))
+
+    print("  Running composer install...", file=sys.stderr)
+    subprocess.run(
+        [
+            "composer", "install",
+            "--no-interaction",
+            "--no-progress",
+            "--prefer-dist",
+            "--no-scripts",
+            "--no-plugins",
+            "--ignore-platform-reqs",
+            "--quiet",
+        ],
+        check=True,
+        cwd=plugin_dir,
+        timeout=300,
+    )
+
+    return plugin_dir
+
+
+def run_wordpress_plugin(binary: str, work_dir: str) -> int:
+    """Measure RSS after indexing a WordPress plugin project and hovering a property.
+
+    Opens a class that registers a hook and reads ``get_post()`` and
+    ``$wpdb``, then hovers on ``post_title``.  Indexing reads the
+    single-file ``wordpress-stubs`` declaration list and scans core's
+    source for the hooks it fires, which is what sets WordPress apart
+    from the Composer-autoloaded frameworks above.
+
+    Returns RSS in KiB.
+    """
+    plugin_dir = setup_wordpress(work_dir)
+
+    plugin_path = os.path.join(plugin_dir, "src", "Plugin.php")
+    with open(plugin_path, "w") as f:
+        f.write(WORDPRESS_PLUGIN_PHP)
+
+    client = LspClient(binary, plugin_dir)
+    try:
+        client.initialize()
+        client.wait_for_indexing(timeout=INDEX_TIMEOUT)
+
+        file_uri = Path(plugin_path).as_uri()
+        client.did_open(file_uri, WORDPRESS_PLUGIN_PHP)
+
+        # Hover on ``$post->post_title`` (line 15, col 31).
+        client.hover(file_uri, line=15, character=31)
+        client.drain_notifications(SETTLE_TIME)
+
+        rss = sample_rss(client.pid)
+        return rss
+    finally:
+        client.shutdown()
+
+
+def setup_drupal(work_dir: str) -> str:
+    """Create a Drupal site from the fixture and install Composer deps.
+
+    Plugins run, so ``composer/installers`` puts core in ``web/core`` the
+    way a real site has it.  Scripts are skipped, so the scaffold files
+    (``index.php``, ``sites/default``) that only the web server reads are
+    never written.
+
+    Returns the path to the site root.
+    """
+    site_dir = os.path.join(work_dir, "drupal_site")
+    os.makedirs(site_dir, exist_ok=True)
+    for name in ("composer.json", "composer.lock"):
+        src = os.path.join(DRUPAL_FIXTURE_DIR, name)
+        if not os.path.isfile(src):
+            raise FileNotFoundError(f"Drupal fixture not found at {src}.")
+        shutil.copy2(src, os.path.join(site_dir, name))
+
+    print("  Running composer install...", file=sys.stderr)
+    subprocess.run(
+        [
+            "composer", "install",
+            "--no-interaction",
+            "--no-progress",
+            "--prefer-dist",
+            "--no-scripts",
+            "--ignore-platform-reqs",
+            "--quiet",
+        ],
+        check=True,
+        cwd=site_dir,
+        timeout=300,
+    )
+
+    return site_dir
+
+
+def run_drupal_module(binary: str, work_dir: str) -> int:
+    """Measure RSS after indexing a Drupal site and hovering an entity getter.
+
+    Opens a custom module's controller that loads a node through the
+    entity type manager, then hovers on ``getTitle``.  Indexing reads
+    core's PHP, its ``*.services.yml`` and ``*.routing.yml`` files, its
+    entity type declarations, and the hooks its ``*.api.php`` files
+    document, all from a ``web/core`` that sits outside ``vendor/``.
+
+    Returns RSS in KiB.
+    """
+    site_dir = setup_drupal(work_dir)
+
+    module_dir = os.path.join(site_dir, "web", "modules", "custom", "acme")
+    os.makedirs(os.path.join(module_dir, "src", "Controller"), exist_ok=True)
+    for name, content in DRUPAL_MODULE_FILES.items():
+        with open(os.path.join(module_dir, name), "w") as f:
+            f.write(content)
+    ctrl_path = os.path.join(module_dir, "src", "Controller", "ReportController.php")
+    with open(ctrl_path, "w") as f:
+        f.write(DRUPAL_CONTROLLER_PHP)
+
+    client = LspClient(binary, site_dir)
+    try:
+        client.initialize()
+        client.wait_for_indexing(timeout=INDEX_TIMEOUT)
+
+        file_uri = Path(ctrl_path).as_uri()
+        client.did_open(file_uri, DRUPAL_CONTROLLER_PHP)
+
+        # Hover on ``$node->getTitle()`` (line 13, col 38).
+        client.hover(file_uri, line=13, character=38)
+        client.drain_notifications(SETTLE_TIME)
+
+        rss = sample_rss(client.pid)
+        return rss
+    finally:
+        client.shutdown()
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
@@ -818,7 +1101,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--scenario",
-        choices=["hello_world", "laravel_model", "symfony_controller", "yii_action", "all"],
+        choices=["hello_world", "laravel_model", "symfony_controller", "yii_action", "wordpress_plugin", "drupal_module", "tempest_view", "all"],
         default="all",
         help="Which scenario to run (default: all).",
     )
@@ -894,6 +1177,30 @@ def main() -> None:
             print("Running yii_action scenario...", file=sys.stderr)
             rss = run_yii_action(binary, work_dir)
             results["memory_yii_action"] = rss
+            print(
+                f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
+            )
+
+        if args.scenario in ("wordpress_plugin", "all"):
+            print("Running wordpress_plugin scenario...", file=sys.stderr)
+            rss = run_wordpress_plugin(binary, work_dir)
+            results["memory_wordpress_plugin"] = rss
+            print(
+                f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
+            )
+
+        if args.scenario in ("drupal_module", "all"):
+            print("Running drupal_module scenario...", file=sys.stderr)
+            rss = run_drupal_module(binary, work_dir)
+            results["memory_drupal_module"] = rss
+            print(
+                f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
+            )
+
+        if args.scenario in ("tempest_view", "all"):
+            print("Running tempest_view scenario...", file=sys.stderr)
+            rss = run_tempest_view(binary, work_dir)
+            results["memory_tempest_view"] = rss
             print(
                 f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
             )

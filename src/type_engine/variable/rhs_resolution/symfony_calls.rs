@@ -2,13 +2,11 @@
 //! service fetched by its ID, a container parameter, and the result of the
 //! one handler a query bus's `HandleTrait::handle()` sends a message to.
 
-use std::sync::Arc;
-
 use mago_syntax::cst::*;
 
 use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
-use crate::symbol_map::StringKeyKind;
+use crate::symfony::container::ContainerLookup;
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -18,12 +16,7 @@ use super::resolve_rhs_expression;
 const HANDLE_TRAIT: &str = "Symfony\\Component\\Messenger\\HandleTrait";
 
 /// What a container lookup on `owner` returns, from the name its literal
-/// first argument gives: the class a service ID is built from for `get()`
-/// on a container, and the type of a parameter's value for `get()` on a
-/// parameter bag or `getParameter()`.
-///
-/// `None` when the project does not declare what the name is, so the call
-/// keeps the type the method declares.
+/// first argument gives (see [`crate::Backend::container_lookup`]).
 pub(super) fn try_resolve_container_lookup_type(
     owner: &ClassInfo,
     method_name: &str,
@@ -34,10 +27,7 @@ pub(super) fn try_resolve_container_lookup_type(
     {
         return None;
     }
-    let backend = ctx
-        .file
-        .backend
-        .filter(|backend| backend.is_symfony_project())?;
+    let backend = ctx.file.backend?;
     let Some(Argument::Positional(argument)) = argument_list.arguments.first() else {
         return None;
     };
@@ -45,26 +35,12 @@ pub(super) fn try_resolve_container_lookup_type(
         argument.value,
         ctx.file.content,
     )?;
-    let (receiver, _) = crate::symbol_map::extraction::symfony_receiver_method(method_name, 0)?;
-    let (_, kind) = receiver
-        .targets()
-        .iter()
-        .find(|(fqn, _)| crate::class_lookup::is_subtype_of(owner, fqn, ctx.file.class_loader))?;
-    match kind {
-        StringKeyKind::ServiceId => {
-            let classes: Vec<Arc<ClassInfo>> = backend
-                .symfony_service_classes(key)
-                .iter()
-                .filter_map(|class| (ctx.file.class_loader)(Fqn::new(class)))
-                .collect();
-            (!classes.is_empty()).then(|| ResolvedType::from_classes(classes))
-        }
-        StringKeyKind::ContainerParameter => {
-            let ty = backend.symfony_parameter_type(key)?;
-            Some(vec![ResolvedType::from_type_string(ty)])
-        }
-        _ => None,
-    }
+    Some(
+        match backend.container_lookup(owner, method_name, key, ctx.file.class_loader)? {
+            ContainerLookup::Classes(classes) => ResolvedType::from_classes(classes),
+            ContainerLookup::Type(ty) => vec![ResolvedType::from_type_string(ty)],
+        },
+    )
 }
 
 /// What Messenger's `HandleTrait::handle()` returns for the message it is

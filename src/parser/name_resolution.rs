@@ -89,7 +89,27 @@ fn qualify_see_refs(
     }
 }
 
-/// Qualify the class names a parameter's default and types spell.
+/// `value`, initializer text written in a block whose namespace is
+/// `namespace` and whose imports are `use_map` and `constant_imports`, with
+/// the classes and the constants with one meaning that it names spelled
+/// fully qualified, or `None` when nothing in it needs that.
+pub(super) fn qualify_initializer(
+    value: &str,
+    use_map: &HashMap<String, String>,
+    constant_imports: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> Option<String> {
+    let constants =
+        super::initializers::qualify_constant_names(value, namespace, use_map, constant_imports);
+    let value = constants.as_deref().unwrap_or(value);
+    super::initializers::qualify_class_names(value, namespace.as_deref(), &|name| {
+        resolve_to_fqn(name, use_map, namespace)
+    })
+    .or(constants)
+}
+
+/// Qualify the names a parameter's default and the classes its types
+/// spell.
 ///
 /// `qualify_native` says whether the native hint is qualified too: a
 /// method's is, while a function's is kept as written (see "Source Names
@@ -101,6 +121,16 @@ fn qualify_param(
     qualify_native: bool,
 ) {
     crate::parser::qualify_param_default(param, scope.use_map, scope.namespace);
+    if let Some(qualified) = param.default_value.as_deref().and_then(|value| {
+        super::initializers::qualify_constant_names(
+            value,
+            scope.namespace,
+            scope.use_map,
+            scope.constant_imports,
+        )
+    }) {
+        param.default_value = Some(qualified);
+    }
     let native_was_effective = qualify_native && param.native_type_hint == param.type_hint;
     qualify_in_place(&mut param.type_hint, resolver);
     if native_was_effective {
@@ -470,6 +500,17 @@ impl Backend {
             .map(|i| atom(&resolve_to_fqn(i, use_map, namespace)))
             .collect();
 
+        if let Some(doctrine) = class.doctrine.as_deref_mut() {
+            if let Some(ref repository) = doctrine.repository {
+                doctrine.repository = Some(atom(&resolve_to_fqn(repository, use_map, namespace)));
+            }
+            for (_, target) in &mut doctrine.associations {
+                if let Some(name) = target {
+                    *name = atom(&resolve_to_fqn(name, use_map, namespace));
+                }
+            }
+        }
+
         // Resolve the `@phpstan-require-extends` base class to its
         // fully-qualified name so it is loadable cross-file.
         if let Some(ref required) = class.require_extends {
@@ -564,6 +605,16 @@ impl Backend {
         // loadable cross-file.
         if let Some(policy) = class.laravel().and_then(|l| l.policy_class.clone()) {
             class.laravel_mut().policy_class = Some(resolve_to_fqn(&policy, use_map, namespace));
+        }
+        if let Some(related) = class
+            .laravel
+            .as_deref_mut()
+            .and_then(|l| l.related_classes.as_deref_mut())
+        {
+            let resolve = |name: &mut String| *name = resolve_to_fqn(name, use_map, namespace);
+            related.observers.iter_mut().for_each(resolve);
+            related.resource.iter_mut().for_each(resolve);
+            related.resource_collection.iter_mut().for_each(resolve);
         }
 
         // Resolve custom pivot class names (`->using(X::class)`) to FQNs so
@@ -700,6 +751,20 @@ impl Backend {
             crate::parser::qualify_param_default_keyword(param, self_fqn, parent_fqn);
             qualify_param(param, resolver, scope, true);
         }
+        // An unqualified constant left in a default is the namespace's when
+        // it declares one and the global one otherwise, which only an index
+        // of the declared constants can say, so the default is read with
+        // the namespace it was written in.
+        if let Some(namespace) = scope.namespace.as_deref()
+            && method.parameters.iter().any(|param| {
+                param
+                    .default_value
+                    .as_deref()
+                    .is_some_and(super::initializers::names_unqualified_constant)
+            })
+        {
+            method.extras_mut().default_namespace = Some(atom(namespace));
+        }
         Self::record_unverified_method_types(
             method,
             class_skip,
@@ -776,22 +841,23 @@ impl Backend {
         }
     }
 
-    /// Qualify the classes each constant's initializer and declared type
-    /// (`const Foo C = …`) name.  The initializer stays source text, and the
-    /// file that reads the constant has none of this file's imports.
+    /// Qualify the classes and constants each constant's initializer and
+    /// the classes its declared type (`const Foo C = …`) name.  The
+    /// initializer stays source text, and the file that reads the constant
+    /// has none of this file's imports.
     fn qualify_constant_names(
         class: &mut ClassInfo,
         scope: NameScope<'_>,
         resolver: &dyn Fn(&str) -> String,
     ) {
-        let NameScope {
-            use_map, namespace, ..
-        } = scope;
         for i in 0..class.constants.len() {
             let qualified = class.constants[i].value.as_deref().and_then(|value| {
-                super::initializers::qualify_class_names(value, namespace.as_deref(), &|name| {
-                    resolve_to_fqn(name, use_map, namespace)
-                })
+                qualify_initializer(
+                    value,
+                    scope.use_map,
+                    scope.constant_imports,
+                    scope.namespace,
+                )
             });
             let typed = class.constants[i]
                 .type_hint

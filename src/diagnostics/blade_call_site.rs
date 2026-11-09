@@ -36,11 +36,11 @@ use super::helpers::make_diagnostic;
 use super::type_errors::is_type_compatible;
 
 /// A declared variable the call site does not pass.
-const MISSING_CODE: &str = "missing_view_variable";
+const MISSING_CODE: &str = "missing_blade_variable";
 /// A passed variable the template has no use for.
-const UNUSED_CODE: &str = "unused_view_variable";
+const UNUSED_CODE: &str = "unused_blade_variable";
 /// A passed variable whose type the declaration does not accept.
-const TYPE_MISMATCH_CODE: &str = "type_mismatch_view_variable";
+const TYPE_MISMATCH_CODE: &str = "type_mismatch_blade_variable";
 
 impl Backend {
     /// Check every view render in `uri` against the contract the template
@@ -88,7 +88,8 @@ impl Backend {
         // A template renders its includes from its own scope, so what is
         // already in scope here decides whether an `@include` is short of
         // anything.  A plain PHP call site passes exactly what it lists.
-        let inherited = if self.is_blade_file(uri) {
+        let is_blade = self.is_blade_file(uri);
+        let inherited = if is_blade {
             self.blade_rendering_scope(uri)
         } else {
             Some(HashSet::new())
@@ -96,6 +97,10 @@ impl Backend {
         // What a render that forwards nothing inherits, so a site can stand
         // in for the file-wide answer without cloning it.
         let no_inherited = HashSet::new();
+        // What this template's own renders hand it beyond what it reads off
+        // itself. Finding them means reading other files, so it waits until
+        // a name is short of everything the template holds on its own.
+        let mut inbound: Option<Option<HashSet<String>>> = None;
 
         let file_ctx = &ctx.file;
         let class_loader = self.resolved_class_loader(file_ctx);
@@ -144,8 +149,8 @@ impl Backend {
                         "View '{}' expects ${} of type {}, got {}",
                         view_name,
                         var.name,
-                        declared.conditionals_as_branch_unions(),
-                        var.ty,
+                        super::helpers::shown_type(&declared.conditionals_as_branch_unions()),
+                        super::helpers::shown_type(&var.ty),
                     ),
                 ));
             }
@@ -192,6 +197,15 @@ impl Backend {
                         );
                         continue;
                     }
+                    // A signature is only what this template's callers have
+                    // to pass, so a name it leaves out may still reach it,
+                    // and through it the include, from every one of them.
+                    if is_blade && site.forwards_scope {
+                        let inbound = inbound.get_or_insert_with(|| self.blade_inbound_scope(uri));
+                        if inbound.as_ref().is_none_or(|names| names.contains(name)) {
+                            continue;
+                        }
+                    }
                     let Some(range) = self.offset_range_to_lsp_range(
                         uri,
                         content,
@@ -206,7 +220,9 @@ impl Backend {
                         MISSING_CODE,
                         format!(
                             "View '{}' expects ${} of type {}, which is not passed",
-                            view_name, name, ty,
+                            view_name,
+                            name,
+                            super::helpers::shown_type(ty),
                         ),
                     ));
                 }
@@ -288,11 +304,11 @@ impl Backend {
             DiagnosticSeverity::Error,
             TYPE_MISMATCH_CODE,
             format!(
-                "View '{}' expects ${} of type {}, but {} given by the surrounding scope",
+                "View '{}' expects ${} of type {}, got {} from the surrounding scope",
                 view_name,
                 name,
-                declared.conditionals_as_branch_unions(),
-                actual,
+                super::helpers::shown_type(&declared.conditionals_as_branch_unions()),
+                super::helpers::shown_type(&actual),
             ),
         ));
     }

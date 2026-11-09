@@ -77,6 +77,7 @@ src/
 ├── type_engine/
 │   ├── subject_expr.rs, subject_extraction.rs, subject_resolution.rs
 │   │                       # Extracting and resolving the subject before ->, ?->, ::
+│   ├── key_path.rs         # The value a key path ('profile.city') reaches, for every helper that reads one
 │   ├── resolver/           # Subject expression → ClassInfo (type engine entry point) + chain cache
 │   ├── variable/           # Variable type resolution via assignment scanning
 │   │   ├── forward_walk/   #   the forward walker (shared by diagnostics, hover, go-to-def, sig help)
@@ -99,9 +100,10 @@ src/
 ├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
 ├── definition/             # Go-to-definition (resolve, member, variable/, implementation, declaration, type_definition)
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
-├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
+├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields and options, validation mappings, serializer groups, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
 ├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner, block names paired across the templates that extend, use, or embed each other, the filters and functions extensions declare (the installed packages' read from disk), and the variables a template reads, traced to the renders, templates, and globals that pass them and typed by what those pass, with the attributes read off them
-├── yii/                    # Yii views and the path aliases they are named through (the alias table read from the params files, view keys resolved to templates), and route names and route arguments (route paths and handlers, looked up in the declaring files' route side tables)
+├── yii/                    # Yii views and the path aliases they are named through (the alias table read from the params files, with where each alias is declared, view keys resolved to templates), the files asset bundles list (resolved under the bundle's source or base path), route names and route arguments (route paths and handlers, looked up in the declaring files' route side tables), DI definitions (the classes they bind, the parameters their argument keys name, and the definition files installed packages contribute), event listeners (read from the files of the events groups the merge plan and the installed packages list), the properties form fields and hydration maps name (member accesses kept only on a form model where the call could be any class's), the key paths `ArrayHelper` reads (which calls take one and how they split it, walked by `type_engine/key_path.rs`), the parameters a render call passes its view (keyed by the view and the name, read against the `@var` block the template opens with, beside the names every view is given by the configuration, `setParameter()` calls, and the renderer's injections), and params (the merge plan read from `composer.json`, which says which files are handed `$params`, and the params files it lists, the installed packages' included, merged into a key tree that types `$params` at the top of those files and judges the keys read from it), translation message IDs (the message files of the directories the DI definitions give their message sources, keyed by category, with the translator's default category and locale read from the params), and the `config-plugin` of a `composer.json`, read in place as a resource document for its group names, `$group` references, and file paths
+├── stylesheets.rs          # CSS class selectors of the workspace's `.css`, `.scss`, and `.less` files, which the class names a Yii tag's `class()` and `addClass()` take resolve against
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 ├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
@@ -124,8 +126,10 @@ src/
 ├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
 ├── self_update.rs          # Binary self-update
 │
-│   # Blade & shared utilities
-├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
+│   # Templates & shared utilities
+├── blade/                  # Laravel Blade template support (directives, preprocessor)
+├── tempest/                # Tempest templates, routes, and model property names
+├── template/               # Shared virtual PHP source maps and LSP coordinate translation
 └── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
 
 build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
@@ -248,6 +252,9 @@ The symbol map also stores:
 - **Config-backed Laravel resource names**: one declarative table maps direct helpers, facades, contextual attributes, and middleware parameters to their config subtrees. A `SymbolSpan` whose string-key kind is `ConfigResource(...)` stores the short source name, while completion, navigation, diagnostics, and references derive the full dot key only at the config boundary. This keeps source ranges and reference identity exact without duplicating one trigger table across LSP features.
 - **Candidate morph-column aliases** (`morph_column_sites`): literals compared with properties or query columns are confirmed lazily by `virtual_members/laravel/typed_morph_columns.rs`. The shared type engine identifies the receiver model, and its parsed `morphTo()` metadata identifies the column. Array values in one query share a single model and column check. Confirmed literals become ordinary `MorphAlias` spans for completion, navigation, references, and diagnostics. Model metadata changes invalidate dependent confirmations, including when a relation's column changes without changing its PHP signature.
 - **Routes** (`routes`): each route a file declares, with what its name alone does not say: its path, group prefixes included, the placeholders the file spells out, and the handler it dispatches to. A path's placeholders only mean something under their route, so they are a side table keyed back to the name's span rather than spans of their own. Yii's route definitions fill it (`symbol_map/extraction/yii_routes.rs`), and a `#[RouteArgument]` is resolved through it by its handler.
+- **Yii DI definitions** (`yii_definitions`): each class a Yii DI definition binds (`MailerInterface::class => [...]`) or builds (`'class' => Mailer::class`), by the range of the class's name. A definition is recognised by its shape wherever it is written (`symbol_map/extraction/yii_definitions.rs`). Its `'name()'` and `'$name'` keys are ordinary `MemberAccess` spans on the class (`DocblockMemberRef::YiiDefinition`), so the member machinery navigates, renames, and checks them, and the arguments a method key passes by name are `YiiDefinitionArgument` string keys. The files holding a definition are among the declaring files, which is how go-to-implementation and the CodeLens on a class find the definitions that bind it. Each definition array that builds a known class is also kept by where it starts (`yii_definition_bodies`), so `diagnostics/yii_definitions.rs` can find it in the AST and check its keys and values against the class, feeding the arguments through the call argument check.
+- **Yii Active Record relations** (`yii_relations`): each relation a record's `relation()` family or a query's `with()` and `joinWith()` names, one per segment of a path (`'author.profile'`), with the call's receiver and the segments before it (`symbol_map/extraction/yii_active_record.rs`). A relation is not a member of the record, so it is kept beside the spans: the parser reads the arms of a record's `relationQuery()` onto the method (`MethodExtras::record_relations`), and `yii/active_record.rs` lists them with the `get{Name}Query()` getters of a record that uses `MagicRelationsTrait`. An attribute the record's `get()` family names is an ordinary `MemberAccess` span on the receiver (`DocblockMemberRef::YiiAttribute`), so the member machinery navigates, renames, and checks it on the records among the receiver's classes. A record that declares no properties reads its attributes from its table's columns instead: `yii/migrations.rs` applies the `up()` methods of the migrations the `yiisoft/db-migration` params point at, in file name order, into a schema cached on the backend, and the parser keeps a `tableName()` that returns a literal on the method (`MethodExtras::record_table`). The record a query is for comes from the type engine: a third-party patch makes the package's queries generic over their model (`stub_patches/active_record.rs`).
+- **Yii queries** (`yii_queries`, `yii_query_names`): each `yiisoft/db` query chain that names tables or columns, read whole from its outermost call (`symbol_map/extraction/yii_queries.rs`), with the receiver of its first such call and the tables its `from()` and joins name, aliases included, plus those the earlier chains on the same variable in the same function named, and each table and column name it writes as a string, keyed to its chain. The extractor cannot see types, so `yii/queries.rs` resolves the receiver, keeps only a query, adds the table of the record an Active Record query is for, and reads the names against the schema `yii/migrations.rs` builds. A table named by a class constant (`Table::POST . ' p'`) is kept as the constant and read from the class when the chain is resolved; the migrations read theirs the same way, and the schema is forgotten when the class's file changes.
 - **Messenger handlers** (`messenger_handlers`): each method a Symfony `#[AsMessageHandler]` registers, with the message class it receives, read from the attribute's `handles:` or the method's first parameter type. A handler is a fact about a class rather than a string at a cursor, so it is a side table rather than a span. The files holding one are among the Symfony declaring files (`symfony/mod.rs`), which is how the CodeLens on a message class finds the handlers that receive it.
 
 ### Tier 2: Stored Byte Offsets (cross-file jumps)
@@ -524,7 +531,17 @@ Rules for code that touches names:
    A callee's parameter defaults, a constant's initializer and a parent's
    docblock were written against their own file's imports. Qualify them when
    that file is parsed, or resolve them as resolved names, never through the
-   call site's source loader.
+   call site's source loader. Constant names in such text are qualified at
+   parse time too where they have one meaning (`use const`, qualified
+   names). An unqualified one inside a namespace is that namespace's constant
+   when one is declared and the global constant otherwise, which only the
+   index can say, so it is looked up when read: a class constant's
+   initializer through `FileCtx::namespace`, a namespaced constant's value by
+   `Backend::lookup_global_constant_candidates` from `DefineInfo::namespace`,
+   and a parameter default through `ResolutionCtx::written_in` with the
+   callee's namespace (`FunctionInfo::namespace`, or
+   `MethodInfo::default_namespace`, kept only for a method whose defaults
+   need it).
 4. **Identify classes by FQN.** `ClassInfo::name` is the short name, and
    `class_lookup::find_class_by_name` matches a bare name against the
    classes of every namespace block in the file. Use `ClassInfo::fqn()` and
@@ -1473,3 +1490,94 @@ PHP class names go through resolution at parse time (`resolve_parent_class_names
 5. **No namespace** → keep as-is.
 
 This runs on every name a `ClassInfo` extracted from a file carries: its parents, interfaces, traits and mixins, its members' native and docblock types, its `@property` and `@method` tags, and the classes its constants' initializers name. A function's types get the same treatment. Names read later, in a method body or by whoever consumes a resolved name, follow [Source Names and Resolved Names](#source-names-and-resolved-names).
+
+## Container invocation arguments
+
+`container_calls.rs` resolves the callable passed to Tempest's `invoke()` and
+Laravel's `call()` through the shared type engine. Both completion and definition
+read its parameters; definition looks up their source spans only when requested.
+Container recognition checks the receiver's resolved interface and method
+signature, so unrelated methods with the same name retain ordinary handling.
+
+## Tempest routes
+
+In a Tempest project, route attributes are collected alongside classes in the
+symbol map.
+Only attribute classes implementing `Tempest\Router\Route` contribute routes;
+the declaring-file index keeps requests from rescanning unrelated attributes.
+URI action types come from the shared PHP engine. Completion, navigation, and
+parameter rename consume the same route records and source ranges.
+
+## Tempest View templates
+
+In a project that requires `tempest/view` or `tempest/framework`, files
+ending in `.view.php` are lowered by `tempest/preprocessor.rs` before
+parsing. Elsewhere the suffix is left to plain PHP, since other renderers
+use it too. Native PHP, echo expressions, and bound attributes become PHP in a
+synthetic function, with element-scoped branches and loops. They use the
+same parser, symbol map, and forward walker as ordinary PHP. Template
+imports and `@var` declarations remain in that PHP; no second type resolver
+is involved.
+
+`template/` owns coordinate translation shared with Blade. Tempest records
+exact copied regions because an attribute written before `:foreach` still
+runs inside the loop. Both directions use sorted indexes, and generated
+syntax has no source position. Blade retains its existing column anchors.
+
+Component discovery is lazy and cached, under Composer and configured
+roots, with project components taking precedence over vendor components.
+Installed packages follow Tempest's dependency and opt-in discovery rules.
+`tempest/configuration.rs` reads discovery locations and component registrations
+using the shared PHP engine. PHP edits refresh configuration values; unchanged
+locations reuse their filesystem scans. File creation/deletion and Composer
+changes invalidate the catalogue. Open buffers supply current declarations. View-path
+spans identify the fully qualified `Tempest\View\view` helper; navigation
+resolves paths from the project, caller, and discovery roots. References
+compare the resolved file, since identical relative paths in two callers
+can name different views.
+
+`tempest/view_data.rs` resolves render arguments through the shared type
+engine in the caller's namespace. Helpers returning a View are read under
+their call-site parameter types, using shared forward-walker parameter seeding
+and the declaration's URI. File magic constants in stored initializers retain
+their declaration-file value when read through inheritance or from another
+namespace. Custom View declarations supply the
+renderer proxy's `$this` type; only explicit view data becomes local
+variables. `tempest/inference.rs` caches these declarations before parsing,
+and refreshes them after indexing, saves, and changes to a view or to a file
+that renders one; edits to any other file skip the refresh. Indexing, saves
+and watcher batches recompute everything. An unsaved edit reuses the data
+of every other render caller, and the results of every component call whose
+two templates and incoming scope are unchanged, so typing in one view
+re-evaluates only the calls that edit reaches. A stale indexing batch cannot
+overwrite a lowering built with newer inferred data.
+
+Component arguments are evaluated in the caller, while slot contents are
+lowered into isolated closures. `tempest/component_context.rs` resolves slot
+locals at the receiving component's outlet for that invocation. Component
+attributes override global view data without inheriting arbitrary caller
+locals. A work queue propagates changed scopes through component calls;
+recursive component inference is bounded.
+
+Component attribute navigation maps the first variable read in the receiving
+view back to its source. Attribute hover uses that read's normal PHP hover,
+so declared and inferred types follow the same rules as the component body.
+Built-in tag and directive documentation is shared by source completion and
+hover; PHP expressions still use their copied source mappings. A tag is
+documented only while it resolves to the packaged component, so a project
+component that replaces a built-in shows nothing borrowed from Tempest.
+
+Dynamic component selectors use the same expression engine. The work queue
+loads selected targets as their names become known and removes contributions
+when a selector changes. The dynamic wrapper's scalar attributes become
+strings, while objects and arrays enter the inner view's data. Literal `:is`
+names navigate to components; variables and constants keep PHP navigation.
+
+## Tempest model property names
+
+Tempest database property arguments use the shared resolver to read the model
+from a query builder's generic type. Model helpers are recognized by their
+method's declaring trait, so an override keeps its own parameter handling.
+Completion and navigation share the same argument roles and property lookup.
+Composer classifies database support separately from view rendering; requiring
+only the database package does not lower `.view.php` files as templates.

@@ -72,6 +72,9 @@ struct Node {
     /// Whether the file declares a route with an attribute or annotation,
     /// which is what an attribute import loads.
     has_attribute_routes: bool,
+    /// Whether the kernel loads the file itself: the workspace's routing
+    /// configuration under the kernel's configuration directory.
+    kernel_loads: bool,
 }
 
 /// What one import loads.
@@ -202,8 +205,21 @@ fn read_routing_file(path: &Path, content: &str) -> Option<SymbolMap> {
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = crate::names::OwnedResolvedNames::from_resolved(&resolver.resolve(program));
-        let map = crate::symbol_map::extract_symbol_map_for_index(
-            program, content, &names, true, false, None,
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_file(
+            program,
+            content,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: true,
+                service_container: true,
+                drupal: false,
+                twig: false,
+                doctrine: false,
+                yii_params: false,
+                tempest: false,
+            },
+            None,
+            crate::drupal::hooks::DrupalFile::Other,
         );
         let mut spans: Vec<_> = map
             .spans
@@ -230,11 +246,12 @@ fn read_routing_file(path: &Path, content: &str) -> Option<SymbolMap> {
     holds_routes(&map).then_some(map)
 }
 
-/// The bundle a `@Name/…` resource names, by the class `config/bundles.php`
-/// registers it under, or Symfony's own spelling of the name.
-fn bundle_class(root: &Path, name: &str) -> String {
-    let registered = std::fs::read_to_string(root.join("config/bundles.php"))
-        .ok()
+/// The bundle a `@Name/…` resource names, by the class the `bundles.php`
+/// of the configuration directory `config_dir` registers it under, or
+/// Symfony's own spelling of the name.
+fn bundle_class(config_dir: Option<&Path>, name: &str) -> String {
+    let registered = config_dir
+        .and_then(|dir| std::fs::read_to_string(dir.join("bundles.php")).ok())
         .and_then(|bundles| {
             let suffix = format!("\\{name}::class");
             let end = bundles.find(&suffix)? + suffix.len() - "::class".len();
@@ -300,7 +317,8 @@ impl Backend {
     fn bundle_resource_path(&self, resource: &str) -> Option<PathBuf> {
         let (name, rest) = resource.strip_prefix('@')?.split_once('/')?;
         let root = self.workspace_root().read().clone()?;
-        let class_dir = self.class_file(&bundle_class(&root, name))?;
+        let config_dir = self.symfony_config_dir(&root);
+        let class_dir = self.class_file(&bundle_class(config_dir.as_deref(), name))?;
         let class_dir = class_dir.parent()?;
         [Some(class_dir), class_dir.parent()]
             .into_iter()
@@ -332,15 +350,19 @@ impl Backend {
                     .spans
                     .iter()
                     .any(|span| declared_route(&span.kind).is_some());
+            let kernel_loads = is_kernel_routing_uri(&self.symfony_config_uri(&uri));
             nodes.push(Node {
                 uri,
                 path,
                 map,
                 indexed: true,
                 has_attribute_routes,
+                kernel_loads,
             });
         }
-        let has_root = nodes.iter().any(|node| is_kernel_routing_uri(&node.uri));
+        // A kernel that keeps its configuration where this cannot tell
+        // loads routing configuration that was not found.
+        let has_root = !self.symfony_config_unread() && nodes.iter().any(|node| node.kernel_loads);
 
         // Imports reach files read from disk, which import others in turn.
         let mut edges: Vec<(usize, usize, String)> = Vec::new();
@@ -428,6 +450,7 @@ impl Backend {
             map,
             indexed: false,
             has_attribute_routes,
+            kernel_loads: false,
         });
         Some(nodes.len() - 1)
     }
@@ -607,7 +630,7 @@ fn node_prefixes(
     }
     visiting[node] = true;
     let mut prefixes: Vec<String> = Vec::new();
-    if into[node].is_empty() || (nodes[node].indexed && is_kernel_routing_uri(&nodes[node].uri)) {
+    if into[node].is_empty() || nodes[node].kernel_loads {
         prefixes.push(String::new());
     }
     for &(importer, prefix) in &into[node] {
@@ -650,11 +673,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            bundle_class(dir.path(), "AcmeBlogBundle"),
+            bundle_class(Some(&dir.path().join("config")), "AcmeBlogBundle"),
             "Acme\\BlogBundle\\AcmeBlogBundle"
         );
         assert_eq!(
-            bundle_class(dir.path(), "WebProfilerBundle"),
+            bundle_class(Some(&dir.path().join("config")), "WebProfilerBundle"),
             "Symfony\\Bundle\\WebProfilerBundle\\WebProfilerBundle"
         );
     }

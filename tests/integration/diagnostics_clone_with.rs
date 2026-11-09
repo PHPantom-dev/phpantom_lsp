@@ -71,7 +71,7 @@ fn a_nested_call_is_checked() {
 #[test]
 fn a_private_property_from_outside_is_flagged() {
     let diags = with_point("$copy = clone($p, ['secret' => 1]);");
-    let msgs = messages_with_code(&diags, "invalid_member_access");
+    let msgs = messages_with_code(&diags, "inaccessible_member");
     assert_eq!(msgs.len(), 1, "got {diags:?}");
     assert!(msgs[0].contains("secret"), "message: {}", msgs[0]);
 }

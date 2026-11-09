@@ -41,6 +41,8 @@ pub(crate) trait MethodReceiver {
     fn is_config_repository(&self) -> bool;
     /// The service container: `app()`, `$app`, or `$this->app`.
     fn is_container(&self) -> bool;
+    /// A bare `url()` call: the URL generator.
+    fn is_url_generator(&self) -> bool;
 }
 
 /// The receiver of an instance method call, read off the AST.
@@ -94,6 +96,10 @@ impl MethodReceiver for AstReceiver<'_> {
     fn is_container(&self) -> bool {
         is_laravel_container_expr(self.object)
     }
+
+    fn is_url_generator(&self) -> bool {
+        is_bare_helper_call(self.object, "url")
+    }
 }
 
 /// Whether `member_name` reads or writes the config key in its first
@@ -121,6 +127,12 @@ pub(in crate::symbol_map::extraction) fn names_route(
     receiver: &dyn MethodReceiver,
 ) -> bool {
     is_route_name_method(member_name) && receiver.is_route_name_helper()
+}
+
+/// Whether `member_name` links to a file under `public/`:
+/// `url()->asset('css/app.css')`.
+fn names_asset(member_name: &str, receiver: &dyn MethodReceiver) -> bool {
+    is_url_asset_method(member_name) && receiver.is_url_generator()
 }
 
 /// Whether `member_name` is a mailable building its content from a
@@ -224,6 +236,8 @@ pub(crate) fn instance_method_arg_kind(
         Some(StringKeyKind::View)
     } else if first && names_command(member_name, receiver) {
         Some(StringKeyKind::Command)
+    } else if first && names_asset(member_name, receiver) {
+        Some(StringKeyKind::Asset)
     } else if ability_arguments(member_name, receiver).is_some_and(|args| args.ability == index) {
         Some(StringKeyKind::GateAbility)
     } else if index == MORPH_TYPES_ARG && is_morph_types_query_method(member_name) {
@@ -310,6 +324,14 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_method_call_spans<'a>(
             argument_list,
             ctx.content,
             &mut ctx.typed_receiver_sites,
+        );
+    }
+    if names_asset(member_name, &receiver) {
+        try_emit_laravel_string_span(
+            StringKeyKind::Asset,
+            argument_list,
+            ctx.content,
+            &mut ctx.spans,
         );
     }
     if names_command(member_name, &receiver) {

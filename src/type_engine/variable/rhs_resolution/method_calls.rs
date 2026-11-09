@@ -10,12 +10,15 @@ use mago_syntax::cst::*;
 use crate::atom::bytes_to_str;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
+use crate::virtual_members::laravel::collection_projection::{
+    ProjectionMethod, collection_property_return,
+};
 use crate::virtual_members::laravel::validated_shape;
 
 use crate::type_engine::resolver::VarResolutionCtx;
 
 use super::calls::any_argument_is_never;
-use super::function_calls::closure_call_return;
+use super::function_calls::{callable_return_resolution, closure_call_return};
 use super::laravel_calls::{
     try_resolve_command_accessor_type, try_resolve_config_method_type,
     try_resolve_request_accessor_type, try_resolve_trans_method_type, try_resolve_validated_shape,
@@ -164,6 +167,15 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
     let (owner_classes, receiver_resolved) =
         expand_union_generic_owners(owner_classes, receiver_resolved, ctx);
 
+    // `->__invoke()` / `->call()` on a closure signature returns what the
+    // signature says, which the `Closure` class it resolves on cannot know.
+    if crate::type_engine::call_resolution::is_closure_invoke_call(&method_name)
+        && let Some(ret_type) =
+            crate::type_engine::call_resolution::closure_invoke_return(&receiver_resolved)
+    {
+        return callable_return_resolution(&ret_type, ctx);
+    }
+
     // A property read through the Reflection API: the name handed to
     // `getProperty()` decides the type, so the stub's `ReflectionProperty`
     // / `mixed` return types are as specific as an annotation can be.
@@ -188,6 +200,49 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
         } else {
             ResolvedType::from_classes_with_hint(classes, ty)
         };
+    }
+
+    // A load on an entity storage `getStorage()` tagged with its entity
+    // class.  The entity type rides on the receiver's type argument, not on
+    // any owner class.
+    if let Some(result) =
+        super::drupal_calls::try_resolve_entity_load_type(&method_name, &receiver_resolved, ctx)
+    {
+        return result;
+    }
+    // An entity query on a tagged storage, and the count and the IDs a
+    // tagged query gives.
+    if let Some(result) = super::drupal_calls::try_resolve_entity_query_call_type(
+        &method_name,
+        &receiver_resolved,
+        ctx,
+    ) {
+        return result;
+    }
+
+    // A Doctrine query's result methods: the row type rides on the query's
+    // type arguments, which its DQL decided.
+    if let Some(argument_list) = argument_list
+        && let Some(result) = super::doctrine_calls::try_resolve_query_result_type(
+            &method_name,
+            &receiver_resolved,
+            argument_list,
+            ctx,
+        )
+    {
+        return result;
+    }
+    // A Doctrine query builder that carries the DQL it has built: the next
+    // call on it adds to that DQL, and `getQuery()` is typed by it.
+    if let Some(argument_list) = argument_list
+        && let Some(result) = super::doctrine_calls::try_resolve_dql_builder_call(
+            &method_name,
+            &receiver_resolved,
+            argument_list,
+            ctx,
+        )
+    {
+        return result;
     }
 
     // Laravel validated input: the rules that guard this request describe the
@@ -230,6 +285,60 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             if let Some(result) =
                 try_resolve_container_lookup_type(owner, &method_name, argument_list, ctx)
             {
+                return result;
+            }
+            if let Some(result) = super::doctrine_calls::try_resolve_create_query_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
+                return result;
+            }
+            if let Some(result) = super::doctrine_calls::try_resolve_builder_owner_call(
+                owner,
+                &receiver_resolved,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
+                return result;
+            }
+            if let Some(ty) = crate::type_engine::call_resolution::repository_at_call(
+                owner,
+                &method_name,
+                &arg_refs,
+                &rctx,
+            ) {
+                return crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+                    ty,
+                    "",
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
+                );
+            }
+            if let Some(result) = super::drupal_calls::try_resolve_entity_storage_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
+                return result;
+            }
+            if let Some(result) = super::drupal_calls::try_resolve_plugin_instance_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
+                return result;
+            }
+            if let Some(result) = super::drupal_calls::try_resolve_config_object_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
                 return result;
             }
             if let Some(result) =
@@ -313,54 +422,64 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             .iter()
             .all(|rt| matches!(rt.type_string.kind(), TypeKind::Intersection(_)));
     let mut intersected_results: Vec<Vec<ResolvedType>> = Vec::new();
+    let projection = argument_list.and_then(|_| ProjectionMethod::from_name(&method_name));
 
     for (idx, owner) in owner_classes.iter().enumerate() {
-        // Build class-level template substitutions from the receiver's
-        // generic type string (e.g. `Collection<int, User>` maps
-        // `TKey => int, TValue => User`), merge in method-level
-        // substitutions bound from the call's arguments, then override
-        // with any `@psalm-if-this-is` inference from the receiver's
-        // concrete type.
         let receiver_type = receiver_resolved
             .get(idx)
             .or_else(|| receiver_resolved.first())
             .map(|rt| &rt.type_string);
-        let template_subs = crate::type_engine::call_resolution::build_call_template_subs(
-            owner,
-            &method_name,
-            &arg_refs,
-            receiver_type,
-            &rctx,
-        );
+        let projected = projection.and_then(|method| {
+            collection_property_return(owner, receiver_type, method, &arg_refs, &rctx)
+        });
+        let mut owner_results = if let Some(hint) = projected {
+            crate::type_engine::type_resolution::resolved_types_for_hint(
+                hint,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            )
+        } else {
+            // Only the declared return type needs template substitution;
+            // a property projection already has the concrete result.
+            let template_subs = crate::type_engine::call_resolution::build_call_template_subs(
+                owner,
+                &method_name,
+                &arg_refs,
+                receiver_type,
+                &rctx,
+            );
 
-        // When the return type contains `static`/`self`/`$this` and the
-        // receiver was resolved with generic parameters, use the
-        // receiver's full type (e.g. `Builder<Article>`) for
-        // substitution so the generics are preserved; otherwise fall
-        // back to a plain FQN swap.
-        let owner_key = owner.fqn();
-        let receiver_intersection = receiver_intersection_for_owner(&receiver_resolved, &owner_key);
-        let self_replace =
-            |ty: &PhpType| match receiver_type_for_owner(&receiver_resolved, &owner_key) {
-                Some(rt) => ty.replace_self_with_type(&rt),
-                // An intersection receiver keeps every member: whichever
-                // class late static binding lands on satisfies all of them,
-                // not only the one that declared the method.
-                None => match receiver_intersection {
-                    Some(ref inter) => ty.replace_self_over_type(&owner_key, inter),
-                    None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
-                },
-            };
+            // When the return type contains `static`/`self`/`$this` and the
+            // receiver was resolved with generic parameters, use the
+            // receiver's full type (e.g. `Builder<Article>`) for
+            // substitution so the generics are preserved; otherwise fall
+            // back to a plain FQN swap.
+            let owner_key = owner.fqn();
+            let receiver_intersection =
+                receiver_intersection_for_owner(&receiver_resolved, &owner_key);
+            let self_replace =
+                |ty: &PhpType| match receiver_type_for_owner(&receiver_resolved, &owner_key) {
+                    Some(rt) => ty.replace_self_with_type(&rt),
+                    // An intersection receiver keeps every member: whichever
+                    // class late static binding lands on satisfies all of them,
+                    // not only the one that declared the method.
+                    None => match receiver_intersection {
+                        Some(ref inter) => ty.replace_self_over_type(&owner_key, inter),
+                        None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
+                    },
+                };
 
-        let mut owner_results = resolve_owner_method_call(
-            owner,
-            &method_name,
-            argument_list,
-            ctx,
-            is_static,
-            &template_subs,
-            &self_replace,
-        );
+            resolve_owner_method_call(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+                is_static,
+                &template_subs,
+                &self_replace,
+            )
+        };
         if let Some(count) = fluent_count {
             crate::virtual_members::laravel::carry_factory_count(
                 &mut owner_results,

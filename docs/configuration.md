@@ -53,13 +53,47 @@ saving either file. The exceptions are settings that shape the initial
 workspace scan, such as the PHP version and indexing strategy below --
 those still need a restart to fully apply.
 
+A key PHPantom does not know, such as a typo or a setting from a newer
+release, is ignored with a warning that names the key and the file it
+is in. The editor shows it when the config loads, and `analyze`, `fix`,
+`format`, and `move` print it on stderr. The rest of the config still
+applies.
+
 The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/phpantom_lsp/blob/main/config-schema.json).
+
+#### Compatibility
+
+From 1.0, the configuration format is stable: a key that works in one
+1.x release keeps working, with the same meaning, in every later 1.x
+release. New keys and sections can be added, and a new key's default is
+chosen so that a config written for an earlier release behaves the same.
+The same promise covers the [diagnostic identifiers](diagnostics.md)
+that `[[diagnostics.ignore]]` and `@phpantom-ignore` match on. The
+wording of a diagnostic's message is not covered and can be improved in
+any release, so prefer `identifier` over `message` in an ignore rule
+that has to keep working.
+
+Every section and key is spelled in kebab-case. A name that was spelled
+differently before 1.0 is still read under its old spelling, with a
+warning that names the new one, so an older config keeps working.
+
+The schema a generated `.phpantom.toml` points at is served from the
+`main` branch, so it always describes the newest release. An editor may
+therefore offer a key your installed version does not know yet. Such a
+key is reported as unknown; check the [changelog](CHANGELOG.md) for the
+release that added it.
 
 ### `[php]`
 
 | Key       | Type   | Default                     | Description |
 | --------- | ------ | --------------------------- | ----------- |
 | `version` | string | Inferred from composer.json | Override the detected PHP version (e.g. `"8.3"`). |
+
+PHPantom understands PHP syntax up to 8.5. The version, taken from the
+`php` requirement in `composer.json` when this key is unset and 8.5
+when neither says, decides which built-in functions, classes, and
+constants exist, and which version-specific diagnostics and code
+actions apply.
 
 ### `[diagnostics]`
 
@@ -68,9 +102,14 @@ The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/php
 | `enabled`                  | bool   | `true`  | Show diagnostics in the editor at all. Set to `false` to report nothing: no native diagnostics (syntax errors included), no external tool runs, and no workspace pass. Every other key in this section is then moot. `analyze` ignores it. |
 | `unresolved-member-access` | bool   | `false` | Report `->`, `?->`, `::` where the subject is `mixed` or its type could not be worked out. Useful for type coverage, noisy on untyped codebases. |
 | `extra-arguments`          | bool   | `false` | Report calls that pass more arguments than the function accepts. |
-| `report-magic-properties`  | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |
+| `magic-properties`         | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |
 | `partial-union-members`    | bool   | `false` | Report a member access on a union when only some of its classes declare the member. Matches PHPStan's `checkUnionTypes`. |
 | `possibly-empty-mismatches` | bool | `false` | Report a type mismatch on an argument, return value or property assignment when the only members that fail are `null` or `false`, such as a `string\|false` passed to a `string` parameter. Matches PHPStan's `checkUnionTypes` and `checkNullables`. |
+| `partial-union-mismatches` | bool | `true` | Report a type mismatch on an argument, return value or property assignment when some members of the value's union fit, such as an `array\|string` passed to a `string` parameter. Set to `false` to only report values no member of which fits, which also leaves out what `possibly-empty-mismatches` covers. |
+| `docblock-type-mismatches` | bool | `true` | Check arguments, return values and property assignments against the types docblocks declare. Set to `false` to only report values that break the native type, for legacy code whose docblocks have drifted from what the code does. |
+| `unhandled-exceptions`     | bool   | `false` | Report a `throw`, or a call whose callee declares `@throws`, when the exception is neither caught nor covered by a `@throws` tag of the function or method it is in. Offers an "Add @throws" quick fix. Matches PhpStorm's "Unhandled exception" inspection and PHPStan's checked exceptions. |
+| `unchecked-exceptions`     | string[] | `["Error", "LogicException", "RuntimeException"]` | Exception classes, fully qualified, that `unhandled-exceptions` does not report, along with every class that extends them. The default is the list PhpStorm treats as unchecked. |
+| `unused-parameters`        | bool   | `false` | Dim a parameter a function, closure, or method never reads, when it comes after the last one the body does read. Methods whose signature an interface, a parent class, or a possible override dictates are left alone, and so is a parameter whose name starts with `$_`. |
 | `workspace`                | bool   | `false` | Compute diagnostics for the whole workspace in the background after startup, so problems appear for files you have not opened. Costs a project-wide sweep every session. Requires the default `full` indexing strategy. |
 | `workspace-external`       | bool   | `true`  | Run configured external tools (PHPStan, PHPCS, PHPMD, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when `workspace` is enabled. |
 
@@ -88,8 +127,32 @@ path = "tests/**"
 
 [[diagnostics.ignore]]
 identifier = "deprecated_usage"
-message = "^Call to deprecated function some_legacy_helper\\(\\)"
+message = "^Function some_legacy_helper\\(\\) is deprecated"
 ```
+
+The identifiers are listed in the [Diagnostics Reference](diagnostics.md).
+
+#### Inline suppression
+
+To silence one diagnostic where it happens rather than project-wide, put
+an `@phpantom-ignore` comment on the same line, or on its own line just
+above:
+
+```php
+$legacy->magicCall(); // @phpantom-ignore unknown_member
+
+// @phpantom-ignore unused_variable, deprecated_usage
+$unused = some_legacy_helper();
+
+/* @phpantom-ignore */
+$everything->on($this, 'line');
+```
+
+List one or more identifiers, separated by commas, to suppress only
+those. Leave them out to suppress every diagnostic on the line. A
+comment applies to the line a diagnostic starts on, and it covers
+diagnostics from external tools (PHPStan, PHPCS, PHPMD, Mago) shown in
+the editor as well as PHPantom's own. `analyze` honours it too.
 
 ### `[indexing]`
 
@@ -215,7 +278,7 @@ which also keeps `analyze` from reporting on it. Listing the
 deliberately make its stand-in classes win, where `include` only lets
 them fill gaps.
 
-### `[semantic_tokens]`
+### `[semantic-tokens]`
 
 PHPantom defaults to `contextual` semantic tokens so editor syntax
 highlighting remains in charge of ordinary PHP syntax.
@@ -230,7 +293,7 @@ highlighting remains in charge of ordinary PHP syntax.
 | `"full"` | Emit the complete semantic token stream, including ordinary classes, variables, functions, methods, properties, comments, keywords, attributes, and Blade tokens. |
 | `"off"` | Return no semantic tokens. |
 
-### `[inlay_hints]`
+### `[inlay-hints]`
 
 | Key               | Type | Default | Description |
 | ----------------- | ---- | ------- | ----------- |
@@ -349,7 +412,7 @@ It is read from `initializationOptions` and `workspace/didChangeConfiguration`, 
 
 ## Editor-supplied inlay hint toggles
 
-An editor extension can offer its own switches for the `[inlay_hints]` kinds and pass them the same way:
+An editor extension can offer its own switches for the `[inlay-hints]` kinds and pass them the same way:
 
 ```json
 { "inlayHints": { "parameterNames": false, "closureTypes": true } }

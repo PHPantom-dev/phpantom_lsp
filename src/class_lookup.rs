@@ -367,6 +367,55 @@ pub(crate) fn find_or_load_resolved(
         .or_else(|| class_loader(Fqn::new(fqn)))
 }
 
+/// Whether the constructor `class` runs promotes its parameter `param`
+/// (named without the `$`), so that the parameter is also a property.
+///
+/// The constructor that runs is the class's own, else one a trait it uses
+/// declares, else its parent's, the order PHP finds it in.  A parameter of
+/// a constructor that does not promote it is a plain parameter even when
+/// some other class in the chain promotes one of the same name.
+pub(crate) fn constructor_promotes(
+    class: &ClassInfo,
+    param: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> bool {
+    fn walk(
+        class: &ClassInfo,
+        param: &str,
+        class_loader: &ResolvedClassLoader<'_>,
+        visited: &mut Vec<crate::atom::Atom>,
+    ) -> Option<bool> {
+        let fqn = class.fqn();
+        if visited.contains(&fqn) {
+            return None;
+        }
+        visited.push(fqn);
+        if class
+            .methods
+            .iter()
+            .any(|m| m.name.eq_ignore_ascii_case("__construct"))
+        {
+            return Some(class.properties.iter().any(|p| {
+                p.name == param
+                    && matches!(
+                        p.source,
+                        Some(crate::types::PropertySource::PromotedParameter)
+                    )
+            }));
+        }
+        for used in &class.used_traits {
+            if let Some(used) = class_loader(Fqn::new(used))
+                && let Some(promotes) = walk(&used, param, class_loader, visited)
+            {
+                return Some(promotes);
+            }
+        }
+        let parent = class_loader(Fqn::new(class.parent_class.as_deref()?))?;
+        walk(&parent, param, class_loader, visited)
+    }
+    walk(class, param, class_loader, &mut Vec::new()).unwrap_or(false)
+}
+
 #[cfg(test)]
 #[path = "class_lookup_tests.rs"]
 mod tests;

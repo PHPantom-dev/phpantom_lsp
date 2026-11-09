@@ -96,8 +96,7 @@ impl Backend {
         let report = |out: &mut Vec<Diagnostic>,
                       start: u32,
                       end: u32,
-                      symbol: &str,
-                      class: Option<&str>,
+                      subject: String,
                       msg: &str,
                       see_refs: &[SeeRef]| {
             if is_within_deprecated_scope(
@@ -113,7 +112,7 @@ impl Backend {
             if let Some(range) =
                 self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
             {
-                out.push(deprecated_diagnostic(range, symbol, class, msg, see_refs));
+                out.push(deprecated_diagnostic(range, &subject, msg, see_refs));
             }
         };
 
@@ -153,8 +152,7 @@ impl Backend {
                             out,
                             span.start,
                             span.end,
-                            &cls.fqn(),
-                            None,
+                            format!("{} {}", kind_word(cls.kind), cls.fqn()),
                             msg,
                             &cls.see_refs,
                         );
@@ -172,8 +170,15 @@ impl Backend {
                 } => {
                     // A mock expectation names the method it stubs rather
                     // than calling it, and a deprecated method is still one
-                    // a test has to mock.
-                    if *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod {
+                    // a test has to mock.  A repository call's field name is
+                    // a column the query reads, not the property, and so is
+                    // a record's attribute name.
+                    if matches!(
+                        docblock_ref,
+                        crate::symbol_map::DocblockMemberRef::MockedMethod
+                            | crate::symbol_map::DocblockMemberRef::EntityField
+                            | crate::symbol_map::DocblockMemberRef::YiiAttribute
+                    ) {
                         continue;
                     }
                     let subject_ctx =
@@ -233,6 +238,30 @@ impl Backend {
                         None => continue,
                     };
 
+                    // A form field names a property only of a form model.
+                    if *docblock_ref
+                        == (crate::symbol_map::DocblockMemberRef::YiiProperty { form_model: true })
+                        && crate::yii::forms::form_model_classes(
+                            vec![Arc::clone(&base_class)],
+                            resolved_class_loader,
+                        )
+                        .is_empty()
+                    {
+                        continue;
+                    }
+
+                    // An attribute's named-argument label uses a property
+                    // only when the constructor promotes the parameter.
+                    if *docblock_ref == crate::symbol_map::DocblockMemberRef::AttributeNamedArg
+                        && !crate::class_lookup::constructor_promotes(
+                            &base_class,
+                            member_name,
+                            resolved_class_loader,
+                        )
+                    {
+                        continue;
+                    }
+
                     // Resolve with inheritance + virtual members so we find
                     // members from parent classes and traits too.
                     //
@@ -249,12 +278,17 @@ impl Backend {
                     // A method, or a property and then a static constant of
                     // that name.  Each is looked up on base_class first,
                     // which preserves scope methods, then on resolved.
+                    let owner = resolved.fqn();
                     let deprecated = if *is_method_call {
                         base_class
                             .get_method(member_name)
                             .or_else(|| resolved.get_method(member_name))
                             .and_then(|method| {
-                                Some((method.deprecation_message()?, method.see_refs()))
+                                Some((
+                                    format!("Method {owner}::{member_name}()"),
+                                    method.deprecation_message()?,
+                                    method.see_refs(),
+                                ))
                             })
                     } else {
                         base_class
@@ -263,7 +297,11 @@ impl Backend {
                             .find(|p| p.name == *member_name)
                             .or_else(|| resolved.properties.iter().find(|p| p.name == *member_name))
                             .and_then(|prop| {
-                                Some((prop.deprecation_message.as_deref()?, &prop.see_refs[..]))
+                                Some((
+                                    format!("Property {owner}::${member_name}"),
+                                    prop.deprecation_message.as_deref()?,
+                                    &prop.see_refs[..],
+                                ))
                             })
                             .or_else(|| {
                                 let constant = resolved
@@ -271,21 +309,14 @@ impl Backend {
                                     .iter()
                                     .find(|c| *is_static && c.name == *member_name)?;
                                 Some((
+                                    format!("Constant {owner}::{member_name}"),
                                     constant.deprecation_message.as_deref()?,
                                     &constant.see_refs[..],
                                 ))
                             })
                     };
-                    if let Some((msg, see_refs)) = deprecated {
-                        report(
-                            out,
-                            span.start,
-                            span.end,
-                            member_name,
-                            Some(&resolved.fqn()),
-                            msg,
-                            see_refs,
-                        );
+                    if let Some((subject, msg, see_refs)) = deprecated {
+                        report(out, span.start, span.end, subject, msg, see_refs);
                     }
                 }
 
@@ -308,12 +339,15 @@ impl Backend {
                         file_namespace,
                     ) && let Some(msg) = &func_info.deprecation_message
                     {
+                        let function = match func_info.namespace.as_deref() {
+                            Some(ns) if !ns.is_empty() => format!("{ns}\\{}", func_info.name),
+                            _ => func_info.name.to_string(),
+                        };
                         report(
                             out,
                             span.start,
                             span.end,
-                            name,
-                            None,
+                            format!("Function {function}()"),
                             msg,
                             &func_info.see_refs,
                         );
@@ -329,42 +363,41 @@ impl Backend {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/// Build a deprecated diagnostic.
+/// The word a message names a class-like of `kind` with.
+fn kind_word(kind: ClassLikeKind) -> &'static str {
+    match kind {
+        ClassLikeKind::Class => "Class",
+        ClassLikeKind::Interface => "Interface",
+        ClassLikeKind::Trait => "Trait",
+        ClassLikeKind::Enum => "Enum",
+    }
+}
+
+/// Build a deprecated diagnostic for `subject` ("Method Foo::bar()").
 fn deprecated_diagnostic(
     range: Range,
-    symbol_name: &str,
-    class_name: Option<&str>,
+    subject: &str,
     deprecation_message: &str,
     see_refs: &[SeeRef],
 ) -> Diagnostic {
-    let display = if let Some(cls) = class_name {
-        format!("{}::{}", cls, symbol_name)
+    // The reason is the docblock's own text, which usually ends in a
+    // period the message does not.
+    let reason = deprecation_message.trim().trim_end_matches('.');
+    let mut message = if reason.is_empty() {
+        format!("{subject} is deprecated")
     } else {
-        symbol_name.to_string()
+        format!("{subject} is deprecated: {reason}")
     };
-
-    // Combine the deprecation message with @see references so the
-    // diagnostic tooltip includes pointers to replacement APIs.
-    let full_message = if see_refs.is_empty() {
-        deprecation_message.to_string()
-    } else {
+    // The @see references point at the replacement API.
+    if !see_refs.is_empty() {
         let see_list = see_refs
             .iter()
             .map(|see| see.text.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        if deprecation_message.is_empty() {
-            format!("See: {}", see_list)
-        } else {
-            format!("{} (see: {})", deprecation_message, see_list)
-        }
-    };
-
-    let message = if full_message.is_empty() {
-        format!("'{}' is deprecated", display)
-    } else {
-        format!("'{}' is deprecated: {}", display, full_message)
-    };
+        message.push_str("; see ");
+        message.push_str(&see_list);
+    }
 
     make_tagged_diagnostic(
         range,

@@ -27,6 +27,7 @@ use mago_phpdoc_syntax::cst::r#type as cst;
 use mago_span::{Position, Span};
 
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::doctrine::query::QueryBuilderState;
 
 mod components;
 mod constructors;
@@ -107,6 +108,7 @@ impl PhpType {
             TypeKind::UnsealedShape(unsealed) => &unsealed.widened.0,
             TypeKind::ClassNameLiteral(class_string) => &class_string.0,
             TypeKind::EnumCase(enum_type, _) => &enum_type.0,
+            TypeKind::DqlBuilder(class, _) => &class.0,
             kind => kind,
         }
     }
@@ -140,9 +142,34 @@ impl PhpType {
         }
     }
 
+    /// The builder class and the DQL it has built, when this type is a
+    /// [`DqlBuilder`](TypeKind::DqlBuilder).
+    #[inline]
+    pub(crate) fn as_dql_builder(&self) -> Option<(&PhpType, &QueryBuilderState)> {
+        let TypeKind::DqlBuilder(class, state) = &*self.0 else {
+            return None;
+        };
+        Some((class, state))
+    }
+
+    /// Whether this type is, or has among its alternatives, a
+    /// [`DqlBuilder`](TypeKind::DqlBuilder): the check that keeps the
+    /// Doctrine builder handling off every other call.
+    #[inline]
+    pub(crate) fn has_dql_builder(&self) -> bool {
+        match &*self.0 {
+            TypeKind::DqlBuilder(..) => true,
+            TypeKind::Union(members) => members
+                .iter()
+                .any(|member| matches!(&*member.0, TypeKind::DqlBuilder(..))),
+            _ => false,
+        }
+    }
+
     /// Whether this type is one exact value of the wider type
     /// [`kind`](PhpType::kind) reads it as: `Foo::class` of
-    /// `class-string<Foo>`, or `Suit::Hearts` of `Suit`.
+    /// `class-string<Foo>`, `Suit::Hearts` of `Suit`, or a query builder
+    /// that built known DQL of its class.
     ///
     /// Rebuilding such a type through `kind()` keeps only the wider type,
     /// so a transform that cannot carry the marker has to leave it alone.
@@ -150,7 +177,7 @@ impl PhpType {
     pub(crate) fn is_exact_value_marker(&self) -> bool {
         matches!(
             &*self.0,
-            TypeKind::ClassNameLiteral(_) | TypeKind::EnumCase(..)
+            TypeKind::ClassNameLiteral(_) | TypeKind::EnumCase(..) | TypeKind::DqlBuilder(..)
         )
     }
 
@@ -465,6 +492,18 @@ pub enum TypeKind {
     /// another), dedup, the narrowing that subtracts cases, and the
     /// `->name`/`->value` reads that know the case's own literals.
     EnumCase(PhpType, Atom),
+
+    /// A Doctrine query builder, with the parts of the DQL its calls have
+    /// built so far.
+    ///
+    /// Invisible to [`PhpType::kind`] and the display, which both see the
+    /// builder's class, so the value is the builder wherever only its
+    /// class is asked about.  The Doctrine call resolution asks, via
+    /// [`PhpType::as_dql_builder`], to replay the builder's next call and
+    /// to type the query `getQuery()` gives.  Two builders that built
+    /// different DQL are different values, the way two enum cases are, and
+    /// the bare class (a builder whose DQL is not known) admits both.
+    DqlBuilder(PhpType, Box<QueryBuilderState>),
 }
 
 /// Payload of [`TypeKind::UnsealedShape`].
@@ -494,12 +533,26 @@ pub struct GenericType {
 /// Payload of [`TypeKind::Callable`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CallableType {
-    /// One of `callable`, `Closure`, `pure-callable`, `pure-Closure`.
+    /// `callable` or `Closure`, as written (so possibly `\Closure`).
     pub kind: Atom,
     /// Parameter types.
     pub params: Vec<CallableParam>,
     /// Optional return type.
     pub return_type: Option<PhpType>,
+}
+
+impl CallableType {
+    /// Whether this signature describes a `Closure` (`Closure(int): string`,
+    /// `\Closure(): void`, `pure-closure(): void`) rather than a plain
+    /// `callable`.
+    ///
+    /// A closure signature is still an instance of the `Closure` class, so
+    /// it has that class's members; a `callable` may be a string or an
+    /// array and has none.
+    pub fn is_closure(&self) -> bool {
+        let kind = self.kind.strip_prefix('\\').unwrap_or(&self.kind);
+        kind.eq_ignore_ascii_case("Closure")
+    }
 }
 
 /// Payload of [`TypeKind::Conditional`].

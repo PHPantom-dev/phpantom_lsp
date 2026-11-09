@@ -25,6 +25,9 @@ const ATTR_LANGUAGE_LEVEL_TYPE_AWARE: &str = "LanguageLevelTypeAware";
 /// Last segment of the `ArrayShape` attribute FQN.
 const ATTR_ARRAY_SHAPE: &str = "ArrayShape";
 
+/// Last segment of the `ExpectedValues` attribute FQN.
+const ATTR_EXPECTED_VALUES: &str = "ExpectedValues";
+
 /// Fully-qualified names (without leading `\`) that we recognise as
 /// deprecation attributes.  Only the native PHP 8.4 `\Deprecated` and
 /// the JetBrains stubs `\JetBrains\PhpStorm\Deprecated` should match.
@@ -65,6 +68,14 @@ impl DocblockCtx<'_> {
         let name_str = bytes_to_str(attr_short_name);
         let canonical = self.resolve_attr_last_segment(name_str).unwrap_or(name_str);
         canonical == ATTR_ARRAY_SHAPE
+    }
+
+    /// Check whether `attr_short_name` resolves to `ExpectedValues`
+    /// (imported as `EV` by a couple of stub files).
+    fn is_expected_values_attr(&self, attr_short_name: &[u8]) -> bool {
+        let name_str = bytes_to_str(attr_short_name);
+        let canonical = self.resolve_attr_last_segment(name_str).unwrap_or(name_str);
+        canonical == ATTR_EXPECTED_VALUES
     }
 }
 
@@ -388,6 +399,97 @@ pub(crate) fn apply_array_shape_override(
     }
 }
 
+// ─── ExpectedValues Attribute Parsing ───────────────────────────────────────
+
+/// Extract the values a `#[ExpectedValues]` attribute on a parameter
+/// declares.
+///
+/// Supports the forms phpstorm-stubs use:
+///   - `#[ExpectedValues([A, B])]` and `#[ExpectedValues(values: [A, B])]`
+///   - `#[ExpectedValues(flags: [A, B])]`
+///   - `#[ExpectedValues(valuesFromClass: Foo::class)]`
+///   - `#[ExpectedValues(flagsFromClass: Foo::class)]`
+///
+/// Class names are resolved against the declaring file, so the values
+/// read the same from whichever file calls the function.  An entry naming
+/// `self`, `static` or `parent`, and a `values:` argument that is a
+/// constant holding the list rather than the list itself, are not read.
+pub(crate) fn extract_expected_values(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    ctx: &DocblockCtx<'_>,
+) -> Option<ExpectedValues> {
+    let attr = attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+        .find(|attr| ctx.is_expected_values_attr(last_segment(attr.name.value())))?;
+
+    let (argument_name, value) = match attr.argument_list.as_ref()?.arguments.first()? {
+        argument::PartialArgument::Positional(p) => ("values", p.value),
+        argument::PartialArgument::Named(n) => (bytes_to_str(n.name.value), n.value),
+        _ => return None,
+    };
+
+    let (is_flags, source) = match argument_name {
+        "values" | "flags" => {
+            let elements: Box<dyn Iterator<Item = &ArrayElement<'_>>> = match value {
+                Expression::Array(arr) => Box::new(arr.elements.iter()),
+                Expression::LegacyArray(arr) => Box::new(arr.elements.iter()),
+                _ => return None,
+            };
+            let values: Vec<String> = elements
+                .filter_map(|elem| match elem {
+                    ArrayElement::Value(v) => expected_value_text(v.value, ctx),
+                    _ => None,
+                })
+                .collect();
+            if values.is_empty() {
+                return None;
+            }
+            (
+                argument_name == "flags",
+                ExpectedValuesSource::Listed(values),
+            )
+        }
+        "valuesFromClass" | "flagsFromClass" => {
+            let ident = super::ast_helpers::class_fetch_identifier(value)?;
+            let fqn = crate::names::resolve_to_fqn(
+                bytes_to_str(ident.value()),
+                &ctx.use_map,
+                &ctx.namespace,
+            );
+            (
+                argument_name == "flagsFromClass",
+                ExpectedValuesSource::FromClass(fqn),
+            )
+        }
+        _ => return None,
+    };
+
+    Some(ExpectedValues { is_flags, source })
+}
+
+/// One entry of an `#[ExpectedValues]` list as source text that reads the
+/// same from any file; see [`ExpectedValuesSource::Listed`].
+fn expected_value_text(expr: &Expression<'_>, ctx: &DocblockCtx<'_>) -> Option<String> {
+    if let Expression::Access(Access::ClassConstant(cca)) = expr {
+        let Expression::Identifier(class) = cca.class else {
+            return None;
+        };
+        let ClassLikeConstantSelector::Identifier(constant) = &cca.constant else {
+            return None;
+        };
+        let fqn =
+            crate::names::resolve_to_fqn(bytes_to_str(class.value()), &ctx.use_map, &ctx.namespace);
+        return Some(format!("\\{}::{}", fqn, bytes_to_str(constant.value)));
+    }
+    let span = expr.span();
+    let raw = ctx
+        .content
+        .get(span.start.offset as usize..span.end.offset as usize)?;
+    // A value written across lines (`A |\n B`) is offered on one.
+    Some(raw.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
 /// Parse the version → type array inside `LanguageLevelTypeAware`.
 ///
 /// Handles both `['8.0' => 'string']` (short array) and
@@ -617,6 +719,24 @@ pub(crate) fn has_no_discard_attribute(
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
     ctx: Option<&DocblockCtx<'_>>,
 ) -> bool {
+    has_global_attribute(attribute_lists, ctx, "NoDiscard")
+}
+
+/// Whether a class carries PHP 8.2's native `#[\AllowDynamicProperties]`
+/// attribute, read the same way as [`has_no_discard_attribute`].
+pub(crate) fn has_allow_dynamic_properties_attribute(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    ctx: Option<&DocblockCtx<'_>>,
+) -> bool {
+    has_global_attribute(attribute_lists, ctx, "AllowDynamicProperties")
+}
+
+/// Whether one of the attributes names the global class `fqn`.
+fn has_global_attribute(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    ctx: Option<&DocblockCtx<'_>>,
+    fqn: &str,
+) -> bool {
     attribute_lists
         .iter()
         .flat_map(|list| list.attributes.iter())
@@ -624,11 +744,11 @@ pub(crate) fn has_no_discard_attribute(
             let raw = bytes_to_str(attr.name.value());
             match ctx {
                 Some(ctx) => crate::names::resolve_to_fqn(raw, &ctx.use_map, &ctx.namespace)
-                    .eq_ignore_ascii_case("NoDiscard"),
+                    .eq_ignore_ascii_case(fqn),
                 None => raw
                     .strip_prefix('\\')
                     .unwrap_or(raw)
-                    .eq_ignore_ascii_case("NoDiscard"),
+                    .eq_ignore_ascii_case(fqn),
             }
         })
 }

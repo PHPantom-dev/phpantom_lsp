@@ -56,25 +56,23 @@ fn catches_everything(try_stmt: &Try<'_>) -> bool {
     })
 }
 
-/// Walk a `try` body into `scope` and return the scope a `catch` clause
-/// starts from.
+/// Walk `statements` into `scope` and return the join of the state before
+/// each statement that can throw, or `None` when none of them can.
 ///
-/// A `catch` sees the join of the state before each statement that can
-/// throw: the assignments the body made before the throw, but not the one
-/// the throwing statement was about to make (`$x = mayThrow();` leaves `$x`
-/// as it was).  A body where nothing can throw leaves the catch with the
-/// state before the `try`.
+/// That join is what a handler for an exception thrown from the
+/// statements starts from: the assignments made before the throw, but not
+/// the one the throwing statement was about to make (`$x = mayThrow();`
+/// leaves `$x` as it was).
 ///
 /// When `throws` is given, what each statement can throw is added to it.
-fn walk_try_body<'b>(
-    try_stmt: &'b Try<'b>,
+fn walk_throwing_statements<'b>(
+    statements: impl Iterator<Item = &'b Statement<'b>>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
     mut throws: Option<&mut ThrowPoints>,
-) -> ScopeState {
-    let pre_try = scope.clone();
+) -> Option<ScopeState> {
     let mut catch_entry: Option<ScopeState> = None;
-    for stmt in try_stmt.block.statements.iter() {
+    for stmt in statements {
         let flat = matches!(
             stmt,
             Statement::Expression(_)
@@ -95,7 +93,52 @@ fn walk_try_body<'b>(
         }
         walk_body_forward(std::iter::once(stmt), scope, ctx);
     }
-    catch_entry.unwrap_or(pre_try)
+    catch_entry
+}
+
+/// Walk the `try` body into `scope` and return the scope a `catch` clause
+/// starts from (see [`walk_throwing_statements`]), or `None` when nothing
+/// in the body can throw.
+fn walk_try_body<'b>(
+    try_stmt: &'b Try<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    throws: Option<&mut ThrowPoints>,
+) -> Option<ScopeState> {
+    walk_throwing_statements(try_stmt.block.statements.iter(), scope, ctx, throws)
+}
+
+/// Walk a `catch` clause from `catch_entry` and return the scope it
+/// finishes with.
+///
+/// When `thrown` is given, the state before each statement of the clause
+/// that can throw is merged into it: an exception the clause throws
+/// partway through still runs the `finally` block.
+fn walk_catch<'b>(
+    catch: &'b TryCatchClause<'b>,
+    catch_entry: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    thrown: Option<&mut Option<ScopeState>>,
+) -> ScopeState {
+    let mut catch_scope = catch_entry.clone();
+    bind_catch_variable(catch, &mut catch_scope, ctx);
+    let statements = catch.block.statements.iter();
+    match thrown {
+        Some(thrown) => {
+            if let Some(entry) = walk_throwing_statements(statements, &mut catch_scope, ctx, None) {
+                merge_into(thrown, entry);
+            }
+        }
+        None => walk_body_forward(statements, &mut catch_scope, ctx),
+    }
+    catch_scope
+}
+
+fn merge_into(target: &mut Option<ScopeState>, state: ScopeState) {
+    match target.as_mut() {
+        Some(target) => target.merge_branch(&state),
+        None => *target = Some(state),
+    }
 }
 
 /// Process a `try-catch-finally` statement.
@@ -118,7 +161,8 @@ pub(crate) fn process_try<'b>(
         ctx.cursor_offset >= catch_span.start.offset && ctx.cursor_offset <= catch_span.end.offset
     });
     if let Some(catch) = cursor_in_catch {
-        *scope = walk_try_body(try_stmt, scope, ctx, None);
+        let pre_try = scope.clone();
+        *scope = walk_try_body(try_stmt, scope, ctx, None).unwrap_or(pre_try);
         bind_catch_variable(catch, scope, ctx);
         walk_body_forward(catch.block.statements.iter(), scope, ctx);
         return;
@@ -133,23 +177,27 @@ pub(crate) fn process_try<'b>(
             // try body finishing, each catch finishing (even one that
             // returns or rethrows, since the block runs before it leaves),
             // an exception no catch takes, which arrives with whatever the
-            // try body had done when it threw, and a `return` out of the
-            // try body.
+            // try body or catch had done when it threw, and a `return` out
+            // of the try body.
             let mut throws = ThrowPoints::default();
             let return_frame = push_return_frame(ctx.flow);
-            let catch_entry = walk_try_body(try_stmt, scope, ctx, Some(&mut throws));
+            let pre_try = scope.clone();
+            let thrown = walk_try_body(try_stmt, scope, ctx, Some(&mut throws));
+            let mut uncaught = thrown
+                .as_ref()
+                .filter(|_| !catches_everything(try_stmt))
+                .cloned();
+            let catch_entry = thrown.unwrap_or(pre_try);
             let mut merged = scope.clone();
             for catch in try_stmt.catch_clauses.iter() {
                 if !throws.reach(catch, ctx) {
                     continue;
                 }
-                let mut catch_scope = catch_entry.clone();
-                bind_catch_variable(catch, &mut catch_scope, ctx);
-                walk_body_forward(catch.block.statements.iter(), &mut catch_scope, ctx);
+                let catch_scope = walk_catch(catch, &catch_entry, ctx, Some(&mut uncaught));
                 merged.merge_branch(&catch_scope);
             }
-            if !catches_everything(try_stmt) {
-                merged.merge_branch(&catch_entry);
+            if let Some(uncaught) = &uncaught {
+                merged.merge_branch(uncaught);
             }
             if let Some(returned) = return_frame.finish() {
                 merged.merge_branch(&returned);
@@ -171,30 +219,47 @@ pub(crate) fn process_try<'b>(
         .finally_clause
         .is_some()
         .then(|| push_return_frame(ctx.flow));
-    let catch_entry = walk_try_body(try_stmt, scope, ctx, collect);
-    let try_scope = scope.clone();
+    let pre_try = scope.clone();
+    let thrown = walk_try_body(try_stmt, scope, ctx, collect);
+    let has_finally = try_stmt.finally_clause.is_some();
+    // The exceptions that leave the statement through the `finally` block:
+    // one from the try body that no catch takes, or one a catch throws
+    // partway through.
+    let mut uncaught = thrown
+        .as_ref()
+        .filter(|_| has_finally && !catches_everything(try_stmt))
+        .cloned();
+    let catch_entry = thrown.unwrap_or(pre_try);
+    let mut try_scope = scope.clone();
+    // A try body that always returns or throws never runs off its end, so
+    // only the catches that carry on reach the statement after the `try`.
+    // The join treats an unreachable scope as contributing nothing.
+    if branch_exits_stmts(try_stmt.block.statements.iter(), &try_scope, ctx) {
+        try_scope.unreachable = true;
+    }
 
     let mut all_scopes = vec![try_scope];
     // The catches that return or rethrow, which leave through the
     // `finally` block without reaching the statement after the `try`.
     let mut exited: Option<ScopeState> = None;
     for catch in try_stmt.catch_clauses.iter() {
+        throws.record_catch_types(catch, ctx);
         if !throws.reach(catch, ctx) {
             continue;
         }
-        let mut catch_scope = catch_entry.clone();
-        bind_catch_variable(catch, &mut catch_scope, ctx);
-        walk_body_forward(catch.block.statements.iter(), &mut catch_scope, ctx);
+        let catch_scope = walk_catch(
+            catch,
+            &catch_entry,
+            ctx,
+            has_finally.then_some(&mut uncaught),
+        );
         // A catch that rethrows or returns never reaches the statement
         // after the `try`, so the state it leaves must not be merged in:
         // that is what puts the pre-try type of a variable the try body
         // assigned back into the join.
         if branch_exits_stmts(catch.block.statements.iter(), &catch_scope, ctx) {
-            if return_frame.is_some() {
-                match exited.as_mut() {
-                    Some(exited) => exited.merge_branch(&catch_scope),
-                    None => exited = Some(catch_scope),
-                }
+            if has_finally {
+                merge_into(&mut exited, catch_scope);
             }
             continue;
         }
@@ -210,7 +275,12 @@ pub(crate) fn process_try<'b>(
     *scope = merged;
 
     if let Some(ref finally) = try_stmt.finally_clause {
-        walk_finally_block(finally, scope, [exited.as_ref(), returned.as_ref()], ctx);
+        walk_finally_block(
+            finally,
+            scope,
+            [exited.as_ref(), returned.as_ref(), uncaught.as_ref()],
+            ctx,
+        );
     }
     // The `return`s collected above still leave the enclosing body.
     if let Some(returned) = &returned {
@@ -221,8 +291,8 @@ pub(crate) fn process_try<'b>(
 /// Walk a `finally` block for the code after its `try` statement.
 ///
 /// `scope` holds the paths that carry on past the statement, and `exits`
-/// the ones that leave it by a `return` or a rethrowing `catch`, which run
-/// the block on their way out too.  The code after the statement must only
+/// the ones that leave it by a `return`, a rethrowing `catch` or an
+/// uncaught exception, which run the block on their way out too.  The code after the statement must only
 /// see the first, while the block's own statements are read with both.  So when
 /// the walk records the scopes statements are read with, the block is
 /// walked twice: once for `scope`, recording nothing, and once more from
@@ -235,7 +305,7 @@ pub(crate) fn process_try<'b>(
 fn walk_finally_block<'b>(
     finally: &'b TryFinallyClause<'b>,
     scope: &mut ScopeState,
-    exits: [Option<&ScopeState>; 2],
+    exits: [Option<&ScopeState>; 3],
     ctx: &ForwardWalkCtx<'_>,
 ) {
     let statements = &finally.block.statements;

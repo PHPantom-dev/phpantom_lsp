@@ -42,7 +42,7 @@ mintId();
     assert_eq!(d.range.end, Position::new(4, 8));
     assert_eq!(
         message_text(&d.message),
-        "The return value of function mintId() should either be used or intentionally ignored by casting it as (void)"
+        "Result of function mintId() must be used; cast the call to (void) to discard it"
     );
 }
 
@@ -171,7 +171,7 @@ $n = $ids->next();
     let got: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
     assert_eq!(got, vec![11, 12, 18, 19, 20], "got {diags:?}");
     assert!(
-        message_text(&diags[0].message).starts_with("The return value of method Ids::next()"),
+        message_text(&diags[0].message).starts_with("Result of method Ids::next()"),
         "unexpected message: {}",
         message_text(&diags[0].message)
     );

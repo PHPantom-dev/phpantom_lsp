@@ -5,14 +5,19 @@
 //!
 //! ## Diagnostic code naming convention
 //!
-//! Every diagnostic has a `code` string that identifies the rule. When adding
-//! a new diagnostic, follow these rules:
+//! Every diagnostic has a `code` string that identifies the rule. Users
+//! write codes into ignore rules and inline comments, so a code is a
+//! public interface: renaming one means adding its old spelling to
+//! [`identifiers`] so those keep matching. When adding a new diagnostic,
+//! follow these rules:
 //!
 //! 1. **All `snake_case`, no dots or other separators.**
 //! 2. **Codes read as noun phrases describing the problem**, not bare
 //!    categories. Prefer `argument_count_mismatch` over `argument_count`.
-//! 3. **`unknown_*`** — symbol could not be resolved (class, function,
-//!    member, variable).
+//!    The word for the kind of problem comes first
+//!    (`used_void_result`, `discarded_return_value`).
+//! 3. **`unknown_*`** — a PHP symbol could not be resolved (class,
+//!    function, member, variable).
 //! 4. **`unused_*`** — symbol is defined/imported but never referenced.
 //! 5. **`type_mismatch_*`** — a value's type doesn't satisfy a constraint
 //!    (`type_mismatch_argument`, `type_mismatch_return`,
@@ -20,11 +25,18 @@
 //! 6. **`missing_*`** — a required declaration is absent (e.g.
 //!    `missing_implementation` for unimplemented interface methods).
 //! 7. **`invalid_*`** — a structural/syntactic violation (e.g.
-//!    `invalid_class_kind`).
+//!    `invalid_class_kind`), and a framework name that is not declared
+//!    (`invalid_laravel_route`, `invalid_symfony_form_option`).
 //! 8. **`deprecated_usage`** — usage of a deprecated symbol.
 //! 9. **`syntax_error`** — parser-level errors.
 //! 10. **`unresolved_*`** — the analyser couldn't determine the type of an
 //!     expression (opt-in coverage hints).
+//! 11. **A framework or template language follows the kind of problem**:
+//!     `invalid_laravel_route`, `unclosed_blade_directive`,
+//!     `missing_phpunit_parent_call`.  Name the narrowest one the rule
+//!     belongs to (`blade`, `livewire`, `inertia`, `twig`, `dql`, before
+//!     `laravel`, `symfony`, `doctrine`).  A code without one is about
+//!     PHP itself.
 //!
 //! Two native delivery models are supported:
 //!
@@ -91,6 +103,14 @@
 //!   unresolved-member-access = true` in `.phpantom.toml`.  Uses
 //!   `Severity::HINT` to surface type-coverage gaps without drowning
 //!   the editor in warnings.
+//! - **Unhandled exception diagnostics** (opt-in) — report a `throw`, or
+//!   a call whose callee declares `@throws`, whose checked exception no
+//!   enclosing `try` catches and the function's own `@throws` does not
+//!   cover.  Off by default; enable via `[diagnostics]
+//!   unhandled-exceptions = true`.
+//! - **Unused parameter diagnostics** (opt-in) — dim trailing
+//!   parameters a function, closure, or method never reads.  Off by
+//!   default; enable via `[diagnostics] unused-parameters = true`.
 //! - **Argument count diagnostics** — report calls where the number of
 //!   arguments does not match the function/method signature.
 //! - **Implementation error diagnostics** — report concrete classes that
@@ -111,6 +131,9 @@
 //! - **Type mismatch diagnostics** — report argument, return, and
 //!   property-assignment values whose type does not satisfy the
 //!   declared/inferred type.
+//! - **String conversion diagnostics** — report an object used as a
+//!   string (`echo`, concatenation, interpolation, a `(string)` cast)
+//!   whose class has no `__toString()`.
 //! - **Member visibility diagnostics** — report a `private` or
 //!   `protected` property, method, or class constant reached from a
 //!   scope PHP does not let see it.  Emitted from the unknown-member
@@ -256,16 +279,20 @@ pub(crate) mod class_name_mismatch;
 mod collect;
 pub(crate) mod cross_file;
 pub(crate) mod data_providers;
+mod dead_catches;
 mod delivery;
 mod deprecated;
 mod destructuring_offsets;
 mod discarded_results;
 mod docblock_native_mismatch;
+pub(crate) mod dql_syntax;
+mod drupal_route_parameters;
 mod dynamic_member_names;
 mod enum_errors;
 pub(crate) mod existence_guards;
 mod external;
 pub(crate) mod helpers;
+pub(crate) mod identifiers;
 pub(crate) mod ignore_rules;
 mod implementation_errors;
 mod incompatible_override;
@@ -275,6 +302,7 @@ mod laravel_string_keys;
 mod match_type_errors;
 pub(crate) mod member_lookup;
 pub(crate) mod member_visibility;
+mod missing_return;
 pub(crate) mod namespace_mismatch;
 mod override_attribute;
 pub(crate) mod parent_calls;
@@ -284,12 +312,16 @@ mod readonly_writes;
 mod return_type_errors;
 mod stale;
 pub(crate) mod state;
+mod string_conversions;
 mod subject_cache;
 pub(crate) mod suppression;
+mod symfony_constraint_options;
+mod symfony_form_options;
 mod syntax_errors;
 mod trait_property_conflicts;
 mod type_errors;
 pub(crate) mod undefined_variables;
+pub(crate) mod unhandled_exceptions;
 mod uninitialized_properties;
 mod uninitialized_reads;
 pub(crate) mod unknown_classes;
@@ -298,10 +330,17 @@ pub(crate) mod unknown_members;
 pub(crate) mod unreachable_code;
 pub(crate) mod unresolved_member_access;
 mod unused_imports;
+pub(crate) mod unused_parameters;
+pub(crate) mod unused_private_members;
 pub(crate) mod unused_variables;
 pub(crate) mod use_statements;
 mod validation_strings;
+mod void_results;
 pub(crate) mod workspace;
+pub(crate) mod yii_definitions;
+pub(crate) mod yii_queries;
+pub(crate) mod yii_relations;
+pub(crate) mod yii_view_parameters;
 
 use tower_lsp_server::gen_lsp_types::*;
 
@@ -328,8 +367,8 @@ impl Backend {
             .files
             .read()
             .get(uri)
-            .and_then(|state| state.blade.clone());
-        if let Some(crate::file_state::BladeFileState {
+            .and_then(|state| state.template.clone());
+        if let Some(crate::file_state::TemplateFileState {
             virtual_php,
             source_map: map,
         }) = &blade
@@ -400,7 +439,7 @@ mod tests {
 
         // First 6 lines are prologue (including wrapper function declaration).
         let virtual_php = backend
-            .blade_virtual_php_arc(uri)
+            .template_virtual_php_arc(uri)
             .expect("Virtual content should exist");
 
         // Find start of line 5 (0-indexed).
@@ -504,8 +543,8 @@ mod tests {
             "unknown_member",
             "argument_count_mismatch",
             "invalid_class_kind",
-            "invalid_string_key",
-            "invalid_command_parameter",
+            "framework string keys",
+            "invalid_laravel_command_parameter",
         ] {
             assert!(
                 names.contains(&expected),

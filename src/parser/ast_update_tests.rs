@@ -392,7 +392,7 @@ fn racing_template_parses_leave_one_consistent_lowering() {
     backend.update_ast(uri, template);
     backend.apply_ast_index_parse_results_batch(vec![stale]);
 
-    let virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+    let virtual_php = backend.template_virtual_php_arc(uri).unwrap();
     let symbol_map = backend.symbol_map_for(uri).unwrap();
     assert!(
         symbol_map.matches_source(&virtual_php),
@@ -407,7 +407,7 @@ fn racing_template_parses_leave_one_consistent_lowering() {
     let position = crate::text_position::offset_to_position(&virtual_php, item.start as usize);
     assert_eq!(
         backend
-            .try_translate_php_to_blade(uri, position)
+            .try_translate_php_to_template(uri, position)
             .map(|p| p.line),
         Some(1),
         "App\\Item is on the template's second line"
@@ -440,17 +440,38 @@ fn stale_scope_batch_does_not_clobber_a_fresher_reinference() {
         },
     );
     backend.update_ast(uri, template);
-    let fresh_virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+    let fresh_virtual_php = backend.template_virtual_php_arc(uri).unwrap();
 
     // The index worker's batch, built from the empty scope, lands last.
     backend.apply_ast_index_parse_results_batch(vec![stale]);
 
     assert_eq!(
-        backend.blade_virtual_php_arc(uri).unwrap(),
+        backend.template_virtual_php_arc(uri).unwrap(),
         fresh_virtual_php,
         "a batch built from a scope the template has moved past must not \
          overwrite the lowering built from the current scope"
     );
+}
+
+#[test]
+fn stale_tempest_index_batch_keeps_the_current_inferred_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let view = dir.path().join("shop.view.php");
+    let caller = dir.path().join("caller.php");
+    let template = "{{ $count + 1 }}";
+    let php = "<?php \\Tempest\\View\\view(__DIR__.'/shop.view.php', count: 3);";
+    std::fs::write(&view, template).unwrap();
+    std::fs::write(&caller, php).unwrap();
+    let uri = crate::util::path_to_uri(&view);
+    let backend = Backend::new_test();
+    let stale = backend.parse_ast_index_update_for_index(&uri, template);
+    backend.update_ast(&crate::util::path_to_uri(&caller), php);
+    backend.update_ast(&uri, template);
+    backend.refresh_tempest_inference();
+    let fresh = backend.template_virtual_php_arc(&uri).unwrap();
+    assert!(fresh.contains("@var 3 $count"));
+    backend.apply_ast_index_parse_results_batch(vec![stale]);
+    assert_eq!(backend.template_virtual_php_arc(&uri).unwrap(), fresh);
 }
 
 /// A `belongsToMany` body with `->as(...)`, `->using(...)`, and
@@ -493,6 +514,33 @@ public function roles(): BelongsToMany {
         "using() class should be resolved to an FQN"
     );
     assert_eq!(pivots[0].columns, vec!["expires_at", "active"]);
+}
+
+/// An opened model's imported `#[Table]` and `#[Connection]` attributes are
+/// read through the file's imports, as the lazily loaded copy's are.
+#[test]
+fn reads_imported_table_and_connection_attributes() {
+    let backend = Backend::new_test();
+    let uri = "file:///app/Models/Flight.php";
+    let content = "<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Attributes\\{Connection, Table};
+#[Table('flight_records')]
+#[Connection('archive')]
+class Flight extends Model {}
+";
+    backend.update_ast(uri, content);
+    let classes = backend.symbols.uri_classes_index.read();
+    let flight = classes
+        .get(uri)
+        .and_then(|c| c.iter().find(|c| c.name == "Flight"))
+        .expect("Flight class should be indexed");
+    let laravel = flight
+        .laravel()
+        .expect("Flight should have Laravel metadata");
+    assert_eq!(laravel.table_name.as_deref(), Some("flight_records"));
+    assert_eq!(laravel.connection_name.as_deref(), Some("archive"));
 }
 
 #[test]
@@ -594,7 +642,7 @@ fn ast_index_parse_result_batch_records_failures_and_empty_noops() {
     let changed =
         backend.apply_ast_index_parse_results_batch(vec![AstIndexParseResult::ParseFailed {
             uri: uri.to_string(),
-            errors: vec![("Parse failed (internal error)".to_string(), 10, 20)],
+            errors: vec![("PHPantom could not parse this file".to_string(), 10, 20)],
         }]);
 
     assert!(!changed);
@@ -602,7 +650,11 @@ fn ast_index_parse_result_batch_records_failures_and_empty_noops() {
         backend
             .file_state(uri)
             .map(|state| state.parse_errors.clone()),
-        Some(vec![("Parse failed (internal error)".to_string(), 10, 20)])
+        Some(vec![(
+            "PHPantom could not parse this file".to_string(),
+            10,
+            20
+        )])
     );
 }
 
@@ -751,7 +803,7 @@ fn an_unclosed_call_keeps_its_braced_namespace_block_indexed() {
     assert!(
         errors
             .iter()
-            .any(|(message, _, _)| message.ends_with("unexpected end of file, expected `}`")),
+            .any(|(message, _, _)| message.ends_with("Unexpected end of file, expected '}'")),
         "the block's missing `}}` is still reported: {errors:?}"
     );
 }
@@ -782,60 +834,74 @@ fn reparsing_a_class_does_not_duplicate_its_inheritance_edges() {
     }
 }
 
-/// The diagnostic pass an edit schedules reads the parse the edit made
-/// for the index instead of parsing the buffer again.
+/// The diagnostic pass an edit schedules, and every request against the
+/// same text after it, read the parse the edit made for the index instead
+/// of parsing the buffer again.
 #[test]
-fn open_file_parse_is_handed_to_its_diagnostic_pass() {
+fn open_file_parse_is_read_by_every_pass_over_its_text() {
     let backend = Backend::new_test();
     let uri = "file:///project/src/Widget.php";
-    let content = "<?php\nclass Widget {\n    public function run(): int { return 1; }\n}\n";
+    // Unfinished at the end of the file, which is parsed more than once.
+    let content = "<?php\nclass Widget {\n    public function run(): int { return 1; }\n}\n$w = new Widget();\n$w->";
+    let text = std::sync::Arc::new(content.to_string());
     backend
         .open_files
         .write()
-        .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+        .insert(uri.to_string(), std::sync::Arc::clone(&text));
     backend.update_ast(uri, content);
 
-    let parsed = backend
-        .take_parsed_for_diagnostics(uri, content)
-        .expect("the open file's parse is kept");
-    let kept_program = std::ptr::from_ref(parsed.program()) as usize;
-    let text = std::sync::Arc::clone(parsed.content());
-    let _guard = crate::parser::with_parsed_file_cache(parsed);
-    let read_program = crate::parser::with_parsed_program(&text, "test", |program, _| {
-        std::ptr::from_ref(program) as usize
-    });
-    assert_eq!(read_program, kept_program, "the pass reparsed the file");
-    assert!(
-        backend.take_parsed_for_diagnostics(uri, content).is_none(),
-        "a parse is handed over once"
-    );
+    let kept_program = {
+        let parsed = backend
+            .kept_parse(uri, &text)
+            .expect("the open file's parse is kept");
+        std::ptr::from_ref(parsed.program()) as usize
+    };
+    for _pass in 0..2 {
+        let _guard = backend.enter_parse_cache(uri, std::sync::Arc::clone(&text));
+        let read_program = crate::parser::with_parsed_program(&text, "test", |program, _| {
+            std::ptr::from_ref(program) as usize
+        });
+        assert_eq!(read_program, kept_program, "the pass reparsed the file");
+    }
+
+    backend.forget_kept_parse(uri);
+    assert!(backend.kept_parse(uri, &text).is_none());
 }
 
 #[test]
 fn a_parse_is_only_kept_for_the_text_and_file_it_read() {
     let backend = Backend::new_test();
     let uri = "file:///project/src/Widget.php";
-    let before = "<?php\nclass Widget {}\n";
-    let after = "<?php\nclass Widget { const A = 1; }\n";
+    let before = std::sync::Arc::new("<?php\nclass Widget {}\n".to_string());
+    let after = std::sync::Arc::new("<?php\nclass Widget { const A = 1; }\n".to_string());
 
     // A file that is not open is not diagnosed after its parse.
-    backend.update_ast(uri, before);
-    assert!(backend.take_parsed_for_diagnostics(uri, before).is_none());
+    backend.update_ast(uri, &before);
+    assert!(backend.kept_parse(uri, &before).is_none());
 
     backend
         .open_files
         .write()
-        .insert(uri.to_string(), std::sync::Arc::new(before.to_string()));
-    backend.update_ast(uri, before);
+        .insert(uri.to_string(), std::sync::Arc::clone(&before));
+    backend.update_ast(uri, &before);
     assert!(
         backend
-            .take_parsed_for_diagnostics("file:///project/src/Other.php", before)
+            .kept_parse("file:///project/src/Other.php", &before)
             .is_none(),
         "another file's pass does not get this parse"
     );
     assert!(
-        backend.take_parsed_for_diagnostics(uri, after).is_none(),
+        backend.kept_parse(uri, &after).is_none(),
         "a pass over newer text does not get the older parse"
+    );
+    assert!(
+        backend.kept_parse(uri, &before).is_some(),
+        "a pass over other text leaves the parse for the passes over its own"
+    );
+    backend.forget_kept_parse("file:///project/src/Other.php");
+    assert!(
+        backend.kept_parse(uri, &before).is_some(),
+        "closing another file keeps this file's parse"
     );
 }
 

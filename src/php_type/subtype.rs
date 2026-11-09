@@ -33,6 +33,11 @@ impl PhpType {
                 _ => false,
             };
         }
+        // Two builders are the same value only when they built the same
+        // DQL, which the interned comparison above already answered.
+        if self.as_dql_builder().is_some() || other.as_dql_builder().is_some() {
+            return false;
+        }
         match (self.kind(), other.kind()) {
             (TypeKind::Named(a), TypeKind::Named(b)) => {
                 Self::short_name_of(a) == Self::short_name_of(b)

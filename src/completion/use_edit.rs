@@ -449,13 +449,13 @@ impl Backend {
         content: &str,
         block: Option<(usize, usize)>,
     ) -> UseBlockInfo {
-        if !self.is_blade_file(uri) {
+        if !self.is_php_template(uri) {
             return analyze_use_block_in(content, block);
         }
         let Some(template) = self.get_file_content_arc(uri) else {
             return analyze_use_block_in(content, block);
         };
-        let source_map = self.blade_source_map(uri);
+        let source_map = self.template_source_map(uri);
         crate::blade::use_block::analyze_template_use_block(&template, source_map.as_deref())
     }
 }
@@ -496,6 +496,44 @@ pub(crate) fn use_import_conflicts(fqn: &str, file_use_map: &HashMap<String, Str
         }
     }
     false
+}
+
+/// Whether `use_map` already binds `name` (case-insensitively), whatever
+/// it binds it to.
+pub(crate) fn import_name_taken(name: &str, use_map: &HashMap<String, String>) -> bool {
+    use_map.keys().any(|bound| bound.eq_ignore_ascii_case(name))
+}
+
+/// The alias to import `fqn` under when its short name is already bound.
+///
+/// The parent namespace segment is joined to the short name
+/// (`Illuminate\Database\Eloquent\Collection` → `EloquentCollection`),
+/// except that a class under a `Contracts` namespace takes a `Contract`
+/// suffix instead (`Illuminate\Contracts\Support\Jsonable` →
+/// `JsonableContract`), the name Laravel code gives its contracts.  A
+/// global class is prefixed with `Global`.  When `is_taken` rejects that
+/// name too, the first free numbered variant is used.
+pub(crate) fn import_alias(fqn: &str, is_taken: impl Fn(&str) -> bool) -> String {
+    let mut segments = fqn.rsplit('\\');
+    let short = segments.next().unwrap_or(fqn);
+    let parent = segments.next();
+    let under_contracts = fqn
+        .split('\\')
+        .rev()
+        .skip(1)
+        .any(|segment| segment.eq_ignore_ascii_case("Contracts"));
+    let base = if under_contracts && !short.ends_with("Interface") && !short.ends_with("Contract") {
+        format!("{short}Contract")
+    } else {
+        format!("{}{short}", parent.unwrap_or("Global"))
+    };
+    if !is_taken(&base) {
+        return base;
+    }
+    (2u32..)
+        .map(|n| format!("{base}{n}"))
+        .find(|candidate| !is_taken(candidate))
+        .unwrap_or(base)
 }
 
 /// Whether writing `fqn` by its short name in a block with `use_map` and

@@ -32,7 +32,7 @@ impl InstalledPackages {
             Some(install_path) => self.composer_dir.join(install_path),
             None => self.vendor_path.join(package.get("name")?.as_str()?),
         };
-        let root = root.canonicalize().unwrap_or(root);
+        let root = dunce::canonicalize(&root).unwrap_or(root);
         root.is_dir().then_some(root)
     }
 }
@@ -119,23 +119,15 @@ pub(crate) fn path_repo_psr4_mappings(
     workspace_root: &Path,
     installed: &InstalledPackages,
 ) -> Vec<Psr4Mapping> {
-    let canonical_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
-    let canonical_vendor = installed
-        .vendor_path
-        .canonicalize()
+    let canonical_root =
+        dunce::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
+    let canonical_vendor = dunce::canonicalize(&installed.vendor_path)
         .unwrap_or_else(|_| installed.vendor_path.clone());
     let mut mappings = Vec::new();
 
     for package in &installed.packages {
         // Condition 1: dist.type must be "path".
-        let is_path_repo = package
-            .get("dist")
-            .and_then(|d| d.get("type"))
-            .and_then(|t| t.as_str())
-            == Some("path");
-        if !is_path_repo {
+        if !is_path_repository(package) {
             continue;
         }
 
@@ -244,12 +236,33 @@ fn is_stub_package(package: &serde_json::Value) -> bool {
 /// installer placed elsewhere.  Each is given canonically and, when that
 /// differs, as `install-path` spells it from the vendor directory.
 pub(crate) fn linked_package_roots(installed: &InstalledPackages) -> Vec<PathBuf> {
-    let canonical_vendor = installed
-        .vendor_path
-        .canonicalize()
+    roots_outside_vendor(installed, |_| true)
+}
+
+/// The roots of the packages a custom installer placed outside the vendor
+/// directory (Drupal core and contributed extensions under the web root,
+/// say), spelled as [`linked_package_roots`] spells them.  Path
+/// repositories are left out: they are the project's own code, linked in.
+pub(crate) fn installed_package_roots(installed: &InstalledPackages) -> Vec<PathBuf> {
+    roots_outside_vendor(installed, |package| !is_path_repository(package))
+}
+
+fn is_path_repository(package: &serde_json::Value) -> bool {
+    package
+        .get("dist")
+        .and_then(|d| d.get("type"))
+        .and_then(|t| t.as_str())
+        == Some("path")
+}
+
+fn roots_outside_vendor(
+    installed: &InstalledPackages,
+    include: impl Fn(&serde_json::Value) -> bool,
+) -> Vec<PathBuf> {
+    let canonical_vendor = dunce::canonicalize(&installed.vendor_path)
         .unwrap_or_else(|_| installed.vendor_path.clone());
     let mut roots = Vec::new();
-    for package in &installed.packages {
+    for package in installed.packages.iter().filter(|package| include(package)) {
         let Some(root) = installed.package_root(package) else {
             continue;
         };

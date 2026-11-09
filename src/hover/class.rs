@@ -37,6 +37,13 @@ impl Backend {
             loaders,
             ..
         } = *site;
+        // A Drupal plugin's annotation is found the way plugin discovery
+        // finds it, when no import names it.
+        let discovered = self.drupal_annotation_class_at(uri, name, is_fqn, context, cursor_offset);
+        let (name, is_fqn) = match &discovered {
+            Some(fqn) => (fqn.as_str(), true),
+            None => (name, is_fqn),
+        };
         let class_loader = loaders.class_loader_at(cursor_offset);
         let resolved_class_loader = loaders.resolved_class_loader();
         // A fully qualified reference (`\stdClass`, stored without

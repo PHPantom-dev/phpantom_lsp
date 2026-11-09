@@ -439,8 +439,8 @@ final class CheckController extends AbstractController
     assert_eq!(
         route_problems(&backend, &consumer_uri, consumer),
         vec![
-            "Unknown route: 'app_missing'".to_string(),
-            "Unknown route: '_profiler'".to_string(),
+            "Unknown route 'app_missing'".to_string(),
+            "Unknown route '_profiler'".to_string(),
         ]
     );
 }
@@ -494,8 +494,8 @@ final class LinkController extends AbstractController
     assert_eq!(
         route_problems(&backend, &consumer_uri, consumer),
         vec![
-            "Unknown route: 'App\\Controller\\ContactController::contact'".to_string(),
-            "Unknown route: 'contact.de'".to_string(),
+            "Unknown route 'App\\Controller\\ContactController::contact'".to_string(),
+            "Unknown route 'contact.de'".to_string(),
         ]
     );
 }
@@ -637,7 +637,7 @@ return [
         let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
         assert_eq!(
             route_problems(&backend, &consumer_uri, consumer),
-            vec!["Unknown route: 'from_the_custom_loader'".to_string()],
+            vec!["Unknown route 'from_the_custom_loader'".to_string()],
             "{routing}"
         );
     }
@@ -697,14 +697,14 @@ final class GeneratorTest extends AbstractController
     let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
     assert_eq!(
         route_problems(&backend, &consumer_uri, consumer),
-        vec!["Unknown route: 'caught_elsewhere'".to_string()]
+        vec!["Unknown route 'caught_elsewhere'".to_string()]
     );
     // A router the file builds has its own routes; the application's are
     // still the application's.
     let test_uri = uri_for(&dir, "src/Tests/GeneratorTest.php");
     assert_eq!(
         route_problems(&backend, &test_uri, test),
-        vec!["Unknown route: 'app_missing'".to_string()]
+        vec!["Unknown route 'app_missing'".to_string()]
     );
 }
 
@@ -746,7 +746,7 @@ final class LinkController extends AbstractController
     // The alias declared on a collection takes its name prefix.
     assert_eq!(
         route_problems(&backend, &consumer_uri, consumer),
-        vec!["Unknown route: 'start'".to_string()]
+        vec!["Unknown route 'start'".to_string()]
     );
     let found = definitions(&backend, &consumer_uri, position_in(consumer, "'home'", 2)).await;
     assert_eq!(found, vec![(routes_uri.clone(), 5)]);
@@ -788,7 +788,7 @@ async fn undeclared_routes_a_template_names_are_reported() {
             )
         })
         .collect();
-    assert_eq!(reported, vec![("Unknown route: 'app_hme'".to_string(), 2)]);
+    assert_eq!(reported, vec![("Unknown route 'app_hme'".to_string(), 2)]);
 }
 
 /// An application whose routes are put together by the imports that load
@@ -934,9 +934,9 @@ async fn names_the_imports_compose_are_declared() {
     assert_eq!(
         route_problems(&backend, &consumer, COMPOSED_CONSUMER),
         vec![
-            "Unknown route: 'post_edit'".to_string(),
-            "Unknown route: 'cart'".to_string(),
-            "Unknown route: 'app_missing'".to_string(),
+            "Unknown route 'post_edit'".to_string(),
+            "Unknown route 'cart'".to_string(),
+            "Unknown route 'app_missing'".to_string(),
         ]
     );
 }

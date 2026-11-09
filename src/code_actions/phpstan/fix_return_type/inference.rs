@@ -78,7 +78,7 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let block = self.import_block_at(uri, offset as usize);
+        let block = self.import_block_in(uri, content, offset as usize);
         let class_loader = self.resolved_class_loader_with(&local_classes);
         let source_class_loader =
             self.class_loader_with(&local_classes, &block.use_map, &block.namespace);
@@ -194,7 +194,14 @@ fn infer_return_type_at(
                     ..VarResolutionCtx::new("", file, enclosing_class, start as u32)
                 };
 
-                let ty = resolve_expression_type(expr, &ctx).unwrap_or_else(PhpType::mixed);
+                let mut ty = resolve_expression_type(expr, &ctx).unwrap_or_else(PhpType::mixed);
+                // `new static()` resolves to a late-static type bounded over
+                // the declaring class.  Hand it back as the `static` marker
+                // for the same reason as `$this` above, so a call through a
+                // subclass gives the subclass.
+                if self_as_marker {
+                    ty = static_over_class_to_marker(&ty, &enclosing_class.fqn());
+                }
                 let ty = ty.resolve_names(&|name: &str| {
                     if let Some(cls) = class_loader(Fqn::new(name)) {
                         cls.fqn().to_string()
@@ -285,6 +292,18 @@ fn infer_return_type_at(
 /// Whether `expr` is the bare `$this` variable.
 fn is_this_variable(expr: &Expression<'_>) -> bool {
     matches!(expr, Expression::Variable(Variable::Direct(dv)) if bytes_to_str(dv.name) == "$this")
+}
+
+/// Replace every `static` bounded over `class_fqn` in `ty` with the bare
+/// `static` marker.  A bound over any other class came from a call on a
+/// different receiver and stays as it is.
+fn static_over_class_to_marker(ty: &PhpType, class_fqn: &str) -> PhpType {
+    match ty.kind() {
+        crate::php_type::TypeKind::StaticType(bound) if bound.as_str() == class_fqn => {
+            PhpType::static_()
+        }
+        _ => ty.map_children(&|t| static_over_class_to_marker(t, class_fqn)),
+    }
 }
 
 /// Infer a `@return` type string for the function whose declaration

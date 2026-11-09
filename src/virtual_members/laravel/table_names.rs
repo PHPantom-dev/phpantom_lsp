@@ -24,7 +24,7 @@ pub(crate) fn model_table_name(class: &ClassInfo) -> Option<String> {
     Some(default_table_name(&class.name))
 }
 
-fn model_connection_and_table(
+pub(crate) fn model_connection_and_table(
     class: &ClassInfo,
     cache: Option<&ResolvedClassCache>,
 ) -> Option<(String, String)> {

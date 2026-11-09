@@ -443,7 +443,7 @@ final class Other
         .collect();
     assert_eq!(
         reported,
-        vec!["Unknown Messenger bus: 'event.bus'".to_string()]
+        vec!["Unknown Messenger bus 'event.bus'".to_string()]
     );
 }
 

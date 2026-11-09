@@ -230,6 +230,10 @@ pub(super) fn extract_class<'a>(
         is_final: class.modifiers.contains_final(),
         is_abstract: class.modifiers.contains_abstract(),
         is_readonly: class.modifiers.contains_readonly(),
+        allows_dynamic_properties: crate::parser::has_allow_dynamic_properties_attribute(
+            &class.attribute_lists,
+            doc_ctx,
+        ),
         deprecation_message: class_depr.message,
         deprecated_replacement: class_depr.replacement,
         links: doc_info.links,
@@ -247,6 +251,11 @@ pub(super) fn extract_class<'a>(
         class_docblock_start: doc_info.docblock_start,
         doc_members: doc_info.doc_members,
         attribute_targets: attr_targets,
+        doctrine: attributes::extract_doctrine_mapping(
+            &class.attribute_lists,
+            class.members.iter(),
+            doc_ctx,
+        ),
         laravel: Some(Box::new(laravel_metadata)),
         ..Default::default()
     }
@@ -370,6 +379,7 @@ pub(super) fn extract_trait<'a>(
         trait_def,
         &methods,
         doc_ctx.map_or("", |ctx| ctx.content),
+        doc_ctx,
     );
     ClassInfo {
         kind: ClassLikeKind::Trait,
@@ -400,6 +410,11 @@ pub(super) fn extract_trait<'a>(
         class_docblock: doc_info.raw_docblock,
         class_docblock_start: doc_info.docblock_start,
         doc_members: doc_info.doc_members,
+        doctrine: attributes::extract_doctrine_mapping(
+            &trait_def.attribute_lists,
+            trait_def.members.iter(),
+            doc_ctx,
+        ),
         laravel,
         ..Default::default()
     }

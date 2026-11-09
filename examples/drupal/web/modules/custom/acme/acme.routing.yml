@@ -1,0 +1,28 @@
+acme.greeting:
+  # Try: find the references of {name}, the parameter this path declares,
+  # to see the calls, the menu link, and the template that pass it.
+  path: '/acme/greeting/{name}'
+  defaults:
+    # Try: go to the definition of GreetingController, or of greet after the
+    # `::`. A class name or a `Class::method` string in YAML navigates in any
+    # project, and counts among the references of what it names.
+    _controller: '\Drupal\acme\Controller\GreetingController::greet'
+    # Try: go to the definition of acme.greeter, or of greet after the `:`,
+    # which lands in the Greeter class the service is built from. Complete
+    # a method after the `:`, or find the references of Greeter::greet():
+    # this line is one of them.
+    _title_callback: 'acme.greeter:greet'
+  requirements:
+    _permission: 'access content'
+
+acme.note:
+  path: '/acme/note/{acme_note}'
+  defaults:
+    # Try: hover $acme_note in NoteController::view() and title(). Drupal
+    # loads the Note entity for the {acme_note} parameter before either runs.
+    _controller: '\Drupal\acme\Controller\NoteController::view'
+    _title_callback: '\Drupal\acme\Controller\NoteController::title'
+  requirements:
+    # Try: go to the definition of either permission. A visitor needs one
+    # of them; `,` would ask for both.
+    _permission: 'view acme notes+administer acme'

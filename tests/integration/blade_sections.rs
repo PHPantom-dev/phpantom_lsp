@@ -72,16 +72,15 @@ mod tests {
                 .collect(),
             None => Vec::new(),
         };
-        let root = dir.path().to_string_lossy().to_string();
         locations
             .into_iter()
             .map(|location| {
                 let path = location.uri.to_file_path().unwrap();
                 let relative = path
+                    .strip_prefix(dir.path())
+                    .unwrap()
                     .to_string_lossy()
-                    .trim_start_matches(&root)
-                    .trim_start_matches('/')
-                    .to_string();
+                    .replace('\\', "/");
                 (
                     relative,
                     location.range.start.line,

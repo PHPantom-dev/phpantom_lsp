@@ -25,6 +25,10 @@ use tower_lsp_server::gen_lsp_types::{
 
 use crate::Backend;
 
+/// Sequence number appended to every created progress token, so that
+/// concurrent operations of one kind never share a token.
+static NEXT_PROGRESS_TOKEN: AtomicU64 = AtomicU64::new(0);
+
 /// Thread-safe progress state for one long-running operation.
 ///
 /// Two reporting modes cooperate on the same state:
@@ -292,8 +296,43 @@ impl Backend {
         }
     }
 
+    /// Warn about what a config load found (unknown keys, old
+    /// spellings): each warning goes to the log, and the client shows
+    /// one message for the whole load.
+    pub(crate) fn warn_config(&self, warnings: &[crate::config::ConfigWarning]) {
+        if warnings.is_empty() {
+            return;
+        }
+        let lines: Vec<String> = warnings.iter().map(ToString::to_string).collect();
+        let (Some(client), Ok(runtime)) = (&self.client, tokio::runtime::Handle::try_current())
+        else {
+            for line in &lines {
+                tracing::warn!("{}", line);
+            }
+            return;
+        };
+        let summary = match lines.as_slice() {
+            [only] => format!("PHPantom: {only}"),
+            _ => format!(
+                "PHPantom: {} configuration warnings, see the log for details",
+                lines.len()
+            ),
+        };
+        let client = client.clone();
+        runtime.spawn(async move {
+            for line in lines {
+                client.log_message(MessageType::Warning, line).await;
+            }
+            client.show_message(MessageType::Warning, summary).await;
+        });
+    }
+
     /// Create a server-initiated work-done progress token and send the
     /// `window/workDoneProgress/create` request to the client.
+    ///
+    /// The token is `token_name` followed by a sequence number: the spec
+    /// requires a token to identify one progress while it runs, and
+    /// requests of one kind run concurrently.
     ///
     /// Returns `Some(token)` on success, `None` when there is no client
     /// or the client rejects the request.  The caller should pass the
@@ -308,7 +347,8 @@ impl Backend {
         }
 
         let client = self.client.as_ref()?;
-        let token = ProgressToken::String(token_name.to_string());
+        let sequence = NEXT_PROGRESS_TOKEN.fetch_add(1, Ordering::Relaxed);
+        let token = ProgressToken::String(format!("{token_name}/{sequence}"));
         let params = WorkDoneProgressCreateParams {
             token: token.clone(),
         };

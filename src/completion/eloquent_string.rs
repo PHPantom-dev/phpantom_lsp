@@ -31,7 +31,8 @@ use crate::text_position::{offset_to_position, position_to_offset};
 use crate::text_scan::collapse_continuation_lines;
 use crate::type_engine::resolver::resolve_target_classes;
 use crate::type_engine::subject_extraction::detect_access_operator;
-use crate::types::{AccessKind, ClassInfo, FileContext};
+use crate::types::{AccessKind, ClassInfo, FileContext, ParameterInfo};
+use crate::virtual_members::laravel::where_property::{AttributeNameKind, collect_attribute_names};
 use crate::virtual_members::laravel::{
     classify_relationship_typed, extends_eloquent_model, resolve_relation_chain,
 };
@@ -222,6 +223,8 @@ pub(crate) struct EloquentStringContext {
     pub string_content_start: usize,
     /// Parsed argument details for column and attribute completion.
     argument: Option<StringArgument>,
+    /// Which model names the argument accepts.
+    names: AttributeNameKind,
 }
 
 /// Try to detect an Eloquent string context at the given cursor position.
@@ -253,6 +256,7 @@ pub(crate) fn detect_eloquent_string_context(
             is_static: ctx.is_static,
             string_content_start: ctx.string_content_start,
             argument: None,
+            names: AttributeNameKind::Column,
         });
     }
 
@@ -274,6 +278,12 @@ pub(crate) fn detect_eloquent_string_context(
     if !accepts_column_argument(method, kind, &argument) {
         return None;
     }
+    let names =
+        if kind == EloquentStringKind::AttributeKey && !is_lookup_attributes(method, &argument) {
+            AttributeNameKind::Writable
+        } else {
+            AttributeNameKind::Column
+        };
     Some(EloquentStringContext {
         kind,
         partial: content[quote + 1..cursor_offset].to_string(),
@@ -282,7 +292,25 @@ pub(crate) fn detect_eloquent_string_context(
         is_static: operator.is_static,
         string_content_start: quote + 1,
         argument: Some(argument),
+        names,
     })
+}
+
+/// Whether `arg` is the `$attributes` of `firstOrCreate()` and its
+/// siblings, which is queried before it is assigned, so it needs columns.
+fn is_lookup_attributes(method: &str, arg: &StringArgument) -> bool {
+    [
+        "updateOrCreate",
+        "firstOrCreate",
+        "firstOrNew",
+        "createOrFirst",
+    ]
+    .iter()
+    .any(|name| name.eq_ignore_ascii_case(method))
+        && match arg.name.as_deref() {
+            Some(name) => name == "attributes",
+            None => arg.index == 0,
+        }
 }
 
 /// Match the argument's role, keeping values and operators out of column lists.
@@ -355,7 +383,7 @@ fn accepts_column_argument(method: &str, kind: EloquentStringKind, arg: &StringA
 
 /// Extract an identifier (method name) scanning backwards from the end of `text`.
 /// Returns (identifier, text_before_identifier).
-pub(super) fn extract_identifier_backwards(text: &str) -> Option<(&str, &str)> {
+pub(crate) fn extract_identifier_backwards(text: &str) -> Option<(&str, &str)> {
     let trimmed = text.trim_end();
     let bytes = trimmed.as_bytes();
     let mut end = bytes.len();
@@ -381,7 +409,7 @@ pub(super) fn extract_identifier_backwards(text: &str) -> Option<(&str, &str)> {
 /// operator is put back right after it.  That hands the member-completion
 /// subject extractor the same shape it sees after a typed `->`, chains and
 /// multi-line continuations included.
-pub(super) fn extract_receiver_subject(content: &str, op: &Operator) -> Option<String> {
+pub(crate) fn extract_receiver_subject(content: &str, op: &Operator) -> Option<String> {
     let mut lines: Vec<&str> = content.get(..op.code_before)?.lines().collect();
     let receiver_line = format!("{}{}", lines.pop()?, if op.is_static { "::" } else { "->" });
     lines.push(&receiver_line);
@@ -566,7 +594,7 @@ impl Backend {
         content: &str,
     ) -> Vec<CompletionItem> {
         let partial = es_ctx.partial.to_lowercase();
-        let columns = crate::virtual_members::laravel::where_property::collect_column_names(model);
+        let columns = collect_attribute_names(model, es_ctx.names);
         let argument = es_ctx.argument.as_ref();
         let range = argument.map(|argument| {
             Range::new(
@@ -575,6 +603,15 @@ impl Backend {
             )
         });
 
+        let fillable_columns: Vec<&String> = match model.laravel() {
+            Some(metadata) if es_ctx.kind == EloquentStringKind::AttributeKey => metadata
+                .column_lists()
+                .filter(|(_, sources)| sources & crate::types::model_declaration::FILLABLE != 0)
+                .map(|(name, _)| name)
+                .collect(),
+            _ => Vec::new(),
+        };
+
         let mut items = Vec::new();
         for col in &columns {
             if !col.to_lowercase().starts_with(&partial)
@@ -582,23 +619,7 @@ impl Backend {
             {
                 continue;
             }
-            let fillable = es_ctx.kind == EloquentStringKind::AttributeKey
-                && model.laravel().is_some_and(|metadata| {
-                    metadata
-                        .column_names
-                        .iter()
-                        .enumerate()
-                        .any(|(index, name)| {
-                            name == col
-                                && metadata
-                                    .column_sources
-                                    .get(index)
-                                    .copied()
-                                    .unwrap_or(metadata.declared)
-                                    & crate::types::model_declaration::FILLABLE
-                                    != 0
-                        })
-                });
+            let fillable = fillable_columns.contains(&col);
 
             items.push(CompletionItem {
                 label: col.clone(),
@@ -620,8 +641,8 @@ impl Backend {
         items
     }
 
-    /// The declared type of the parameter the string under the cursor
-    /// fills, with the call context it was found through.
+    /// The parameter the string under the cursor fills, with the call
+    /// context it was found through.
     ///
     /// The prologue every *type*-driven string strategy shares, resolved
     /// once and handed to each: locating the enclosing call is a scan and
@@ -635,7 +656,7 @@ impl Backend {
         position: Position,
         ctx: &FileContext,
         code: &CodeContext<'_>,
-    ) -> Option<(StringCallContext, PhpType)> {
+    ) -> Option<(StringCallContext, ParameterInfo)> {
         let cursor_offset = position_to_offset(content, position) as usize;
         let sc = detect_string_call_context(content, cursor_offset, code)?;
 
@@ -646,13 +667,8 @@ impl Backend {
         };
 
         let resolved = self.resolve_callable_target(&call_expr, content, position, ctx)?;
-        let param_type = resolved
-            .parameters
-            .get(sc.arg_index)?
-            .type_hint
-            .as_ref()?
-            .clone();
-        Some((sc, param_type))
+        let param = resolved.parameters.get(sc.arg_index)?.clone();
+        Some((sc, param))
     }
 
     /// Try completion for `model-property<Model>` typed parameters.

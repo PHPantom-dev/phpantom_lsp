@@ -982,13 +982,11 @@ fn unsealed_shape_round_trips() {
     for spelling in [
         "array{name: string, ...<string, int>}",
         "list{string, ...<int>}",
+        "array{name: string, ...}",
+        "list{string, ...}",
     ] {
         assert_eq!(PhpType::parse(spelling).to_string(), spelling);
     }
-    assert_eq!(
-        PhpType::parse("array{name: string, ...}").to_string(),
-        "array{name: string, ...<array-key, mixed>}"
-    );
     assert_eq!(
         PhpType::parse("array{name: string, ...<int>}").to_string(),
         "array{name: string, ...<array-key, int>}"
@@ -2020,6 +2018,30 @@ fn shorten_scalar() {
 fn shorten_union() {
     let ty = PhpType::parse("App\\Models\\User|null");
     assert_eq!(ty.shorten().to_string(), "User|null");
+}
+
+#[test]
+fn shorten_keeps_classes_sharing_a_short_name_apart() {
+    let ty = PhpType::parse("class-string<App\\C>|class-string<App\\D>|class-string<Other\\C>");
+    assert_eq!(
+        ty.shorten().to_string(),
+        "class-string<\\App\\C>|class-string<D>|class-string<\\Other\\C>"
+    );
+}
+
+#[test]
+fn shorten_keeps_global_and_namespaced_class_apart() {
+    let ty = PhpType::parse("Collection<int, \\Collection>|App\\Collection");
+    assert_eq!(
+        ty.shorten().to_string(),
+        "\\Collection<int, \\Collection>|\\App\\Collection"
+    );
+}
+
+#[test]
+fn shorten_same_class_repeated_stays_short() {
+    let ty = PhpType::parse("App\\User|array<App\\User>");
+    assert_eq!(ty.shorten().to_string(), "User|array<User>");
 }
 
 #[test]

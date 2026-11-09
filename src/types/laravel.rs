@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// Flags for the list-valued Eloquent model properties a class declares
+/// Flags for the list-valued Eloquent model configuration a class declares
 /// itself, stored as a bitmask in [`LaravelMetadata::declared`].
 ///
 /// A subclass inherits each of these from the nearest ancestor that
@@ -29,8 +29,69 @@ pub mod model_declaration {
     pub const VISIBLE: u16 = 1 << 7;
     /// The class declares an `$appends` property.
     pub const APPENDS: u16 = 1 << 8;
-    /// The column-name lists that feed [`LaravelMetadata::column_names`](super::LaravelMetadata::column_names).
-    pub const COLUMN_LISTS: u16 = FILLABLE | GUARDED | HIDDEN | VISIBLE | APPENDS;
+    /// The class declares a `#[Fillable]` attribute.
+    pub const FILLABLE_ATTRIBUTE: u16 = FILLABLE << 5;
+    /// The class declares a `#[Guarded]` attribute.
+    pub const GUARDED_ATTRIBUTE: u16 = GUARDED << 5;
+    /// The class declares a `#[Hidden]` attribute.
+    pub const HIDDEN_ATTRIBUTE: u16 = HIDDEN << 5;
+    /// The class declares a `#[Visible]` attribute.
+    pub const VISIBLE_ATTRIBUTE: u16 = VISIBLE << 5;
+    /// The class declares an `#[Appends]` attribute.
+    pub const APPENDS_ATTRIBUTE: u16 = APPENDS << 5;
+    /// The class declares an `#[Unguarded]` attribute.
+    pub const UNGUARDED_ATTRIBUTE: u16 = 1 << 14;
+    /// Eloquent's `Pivot` class, whose default `$guarded` is `[]`, or a subclass.
+    pub const PIVOT: u16 = 1 << 15;
+    /// Property lists, inherited independently of their class attributes.
+    pub const COLUMN_PROPERTIES: u16 = FILLABLE | GUARDED | HIDDEN | VISIBLE | APPENDS;
+    /// Class attributes that supply column lists.
+    pub const COLUMN_ATTRIBUTES: u16 = COLUMN_PROPERTIES << 5;
+    /// All column-name sources recorded in [`LaravelMetadata::column_names`](super::LaravelMetadata::column_names).
+    pub const COLUMN_LISTS: u16 = COLUMN_PROPERTIES | COLUMN_ATTRIBUTES;
+}
+
+impl LaravelMetadata {
+    /// Column-list entries with their effective property flags, after Laravel
+    /// merges class attributes into the independently inherited properties.
+    pub(crate) fn column_lists(&self) -> impl Iterator<Item = (&String, u16)> {
+        use model_declaration::*;
+        let source = |index: usize| {
+            self.column_sources.get(index).copied().unwrap_or_else(|| {
+                let flags = self.declared & COLUMN_LISTS;
+                if flags == 0 { FILLABLE } else { flags }
+            })
+        };
+        // Guarded attributes replace only the default property. An explicit
+        // empty list or a custom property wins, even over #[Unguarded].
+        let guarded_attribute = self.declared & GUARDED_ATTRIBUTE != 0
+            && self.declared & UNGUARDED_ATTRIBUTE == 0
+            && (self.declared & GUARDED == 0 || {
+                let mut guarded = self
+                    .column_names
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| source(*index) & GUARDED != 0);
+                if self.declared & PIVOT != 0 {
+                    guarded.next().is_none()
+                } else {
+                    guarded.next().is_some_and(|(_, name)| name == "*") && guarded.next().is_none()
+                }
+            });
+        self.column_names
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, name)| {
+                let flags = source(index);
+                let attributes = if guarded_attribute {
+                    flags & COLUMN_ATTRIBUTES
+                } else {
+                    flags & (COLUMN_ATTRIBUTES & !GUARDED_ATTRIBUTE)
+                };
+                let effective = (flags & COLUMN_PROPERTIES) | (attributes >> 5);
+                (effective != 0).then_some((name, effective))
+            })
+    }
 }
 
 /// The `$casts` property and `casts()` method entries of a model, kept
@@ -88,7 +149,7 @@ pub struct LaravelMetadata {
     /// `casts()` method (its own or inherited). With a single source,
     /// `casts_definitions` already is that source's list.
     pub cast_sources: Option<Box<CastSources>>,
-    /// Which list-valued model properties the class declares itself, as
+    /// Which model properties and column attributes the class declares, as
     /// [`model_declaration`] flags.
     pub declared: u16,
     /// Column names extracted from the deprecated `$dates` property
@@ -112,19 +173,20 @@ pub struct LaravelMetadata {
     /// Literal Eloquent app-level defaults extracted from `$attributes`.
     pub attribute_defaults: Vec<(String, String)>,
     /// Column names extracted from `$fillable`, `$guarded`, `$hidden`,
-    /// and `$appends` property arrays.
+    /// `$visible`, `$appends` and the corresponding class attributes.
     ///
     /// These are simple string lists (no type information), so the
     /// `LaravelModelProvider` synthesizes `mixed`-typed virtual
     /// properties as a last-resort fallback when a column is not
-    /// already covered by `$casts` or `$attributes`.
+    /// already covered by `$casts` or `$attributes`. `$appends` only
+    /// describes serialization and does not establish a column. Consumers use
+    /// [`column_lists`](Self::column_lists) to apply guarded precedence.
     pub column_names: Vec<String>,
     /// The [`model_declaration`] list flags each entry of
     /// [`column_names`](Self::column_names) comes from, index for index.
     ///
-    /// Lets a subclass that redeclares `$hidden` still inherit the parent's
-    /// `$fillable`. An entry past the end of this list belongs to every
-    /// declared column list.
+    /// Properties and class attributes inherit independently. An entry past
+    /// the end of this list belongs to every declared column list.
     pub column_sources: Vec<u16>,
     /// Explicit Eloquent `$connection` property.
     pub connection_name: Option<String>,
@@ -207,6 +269,10 @@ pub struct LaravelMetadata {
     /// which policy governs the model, so the abilities a `$user->can(…)`
     /// check may name are read from the declared class.
     pub policy_class: Option<String>,
+    /// The observers and API resources a model names in its class
+    /// attributes, for navigating from the model to them.  Boxed because
+    /// only the odd model declares any.
+    pub related_classes: Option<Box<ModelRelatedClasses>>,
     /// Pivot configuration recovered from `belongsToMany`/`morphToMany`
     /// relationship method bodies.
     ///
@@ -237,6 +303,18 @@ pub struct LaravelMetadata {
     /// does not declare the method, which is all but the handful of
     /// facades in a project.
     pub facade_accessor: Option<FacadeAccessor>,
+}
+
+/// Classes an Eloquent model names in its own attributes, each resolved
+/// to an FQN in the name-resolution pass.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelRelatedClasses {
+    /// Every class an `#[ObservedBy]` attribute registers, in order.
+    pub observers: Vec<String>,
+    /// The class `#[UseResource]` names.
+    pub resource: Option<String>,
+    /// The class `#[UseResourceCollection]` names.
+    pub resource_collection: Option<String>,
 }
 
 /// What a facade's `getFacadeAccessor()` returns.

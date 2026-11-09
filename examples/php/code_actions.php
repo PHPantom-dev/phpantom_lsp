@@ -105,6 +105,28 @@ class SortUseStatementsDemo
 }
 
 
+// ── Code Action: Alias Or Unalias An Import ─────────────────────────────────
+// Place cursor on `use SplQueue as Line;` below and press Ctrl+. → "Remove
+// alias `Line`" turns it into `use SplQueue;` and every `Line` in this file
+// into `SplQueue`. On an import without an alias, such as `use Closure;` at
+// the top, the action is "Alias `Closure` as `GlobalClosure`" instead.
+// Renaming `Line` (F2), here or on any `Line` below, renames only the alias.
+// Completing a class whose short name another import already holds imports
+// it under an alias the same way, e.g. `EloquentCollection`.
+
+use SplQueue as Line;
+
+class ImportAliasDemo
+{
+    public function demo(): Line
+    {
+        $line = new Line();
+        $line->enqueue('first');
+        return $line;
+    }
+}
+
+
 // ── PHPDoc Block Generation ─────────────────────────────────────────────────
 // Typing `/**` above a declaration generates a docblock skeleton.  Tags are
 // only emitted when the native type hint needs enrichment: missing types get
@@ -191,10 +213,10 @@ class GenerateConstructorDemo
 
 class GenerateGetterSetterDemo
 {
-    private string $name = '';
-    private bool $active = false;
+    protected string $name = '';
+    protected bool $active = false;
     public readonly int $id;
-    private static int $count;
+    protected static int $count;
     /** @var list<string> */
     public $tags;
 }
@@ -243,6 +265,7 @@ class ChangeVisibilityDemo
     public function getTitle(): string { return $this->title; }
     protected function increment(): void { $this->count++; }
     private function toggle(): void { $this->active = !$this->active; }
+    public function badge(): string { $this->toggle(); return self::SECRET . $this->name; }
 
     public const VERSION = 1;
     protected const LIMIT = 100;
@@ -361,6 +384,8 @@ class PromoteConstructorParamDemo
         $this->email = $email;
         $this->slug = $slug;
     }
+
+    public function contact(): string { return "{$this->name} <{$this->email}>"; }
 }
 
 // ── Simplify Null Coalescing / Null-Safe ────────────────────────────────────

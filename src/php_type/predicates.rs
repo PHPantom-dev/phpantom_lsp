@@ -38,7 +38,7 @@ impl PhpType {
             TypeKind::Generic(g) => is_primitive_scalar_name(&g.name),
             TypeKind::Array(_) => true,
             TypeKind::ArrayShape(_) => true,
-            TypeKind::Callable(_) => true,
+            TypeKind::Callable(c) => !c.is_closure(),
             TypeKind::IntRange(_, _) => true,
             TypeKind::Literal(_) => true,
             TypeKind::Raw(_) => false,
@@ -121,6 +121,20 @@ impl PhpType {
         }
     }
 
+    /// Whether this (documented) type is the `native` hint with nothing but
+    /// its spelled-out `null` left out: `string` against `?string`, or
+    /// `int|string` against `int|string|null`.
+    ///
+    /// A type that refines the hint (`non-empty-string` against `?string`)
+    /// says something the hint does not, so it does not count.
+    pub fn omits_only_null_of(&self, native: &PhpType) -> bool {
+        native.has_null_member()
+            && !self.accepts_null()
+            && native
+                .non_null_type()
+                .is_some_and(|core| self.equivalent(&core))
+    }
+
     /// Whether a [`TypeKind::Conditional`] appears anywhere in this type tree.
     ///
     /// Used as a cheap guard before running the (cloning) nested-conditional
@@ -157,38 +171,60 @@ impl PhpType {
         }
     }
 
-    /// Whether a type operator that never got evaluated — `key-of<T>`,
-    /// `value-of<T>`, `T[K]` — appears anywhere in this type tree.
+    /// Whether something only the index can finish appears anywhere in this
+    /// type tree: a type operator that never got evaluated (`key-of<T>`,
+    /// `value-of<T>`, `T[K]`), or a class constant named as a type
+    /// (`Foo::BAR`, `Foo::BAR_*`, `Foo::class`), which the docblock parser
+    /// keeps as text since it cannot read the constant behind it.
     ///
     /// Companion guard to [`PhpType::unevaluated_operators_as_bounds`], in the
     /// same spirit as [`PhpType::contains_conditional`]: cheap enough to run on
     /// every type, so the (cloning) rewrite only runs on the few that need it.
     pub fn contains_unevaluated_operator(&self) -> bool {
+        self.contains_unevaluated(true)
+    }
+
+    /// Whether a type operator that never got evaluated — `key-of<T>`,
+    /// `value-of<T>`, `T[K]` — appears anywhere in this type tree.  Unlike
+    /// [`PhpType::contains_unevaluated_operator`], a class constant named as
+    /// a type does not count: what it reads is one fixed value, where an
+    /// operator may yet evaluate to something that takes `null`.
+    pub fn contains_type_operator(&self) -> bool {
+        self.contains_unevaluated(false)
+    }
+
+    /// Whether this type is a class constant named as a type (`Foo::BAR`,
+    /// `Foo::BAR_*`, `Foo::class`), still as the text the parser kept.
+    pub fn is_class_member_reference(&self) -> bool {
+        match self.kind() {
+            TypeKind::Raw(text) => class_member_reference(text).is_some(),
+            TypeKind::Named(name) => class_member_reference(name).is_some(),
+            _ => false,
+        }
+    }
+
+    fn contains_unevaluated(&self, references: bool) -> bool {
+        let recurse = |inner: &PhpType| inner.contains_unevaluated(references);
         match self.kind() {
             TypeKind::KeyOf(_) | TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => true,
+            TypeKind::Raw(_) | TypeKind::Named(_) => references && self.is_class_member_reference(),
             TypeKind::Nullable(inner)
             | TypeKind::Array(inner)
             | TypeKind::ClassString(Some(inner))
-            | TypeKind::InterfaceString(Some(inner)) => inner.contains_unevaluated_operator(),
+            | TypeKind::InterfaceString(Some(inner)) => recurse(inner),
             TypeKind::Union(members) | TypeKind::Intersection(members) => {
-                members.iter().any(|m| m.contains_unevaluated_operator())
+                members.iter().any(recurse)
             }
-            TypeKind::Generic(g) => g.args.iter().any(|m| m.contains_unevaluated_operator()),
-            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
-                .iter()
-                .any(|e| e.value_type.contains_unevaluated_operator()),
+            TypeKind::Generic(g) => g.args.iter().any(recurse),
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
+                entries.iter().any(|e| recurse(&e.value_type))
+            }
             TypeKind::Callable(c) => {
-                c.params
-                    .iter()
-                    .any(|p| p.type_hint.contains_unevaluated_operator())
-                    || c.return_type
-                        .as_ref()
-                        .is_some_and(|r| r.contains_unevaluated_operator())
+                c.params.iter().any(|p| recurse(&p.type_hint))
+                    || c.return_type.as_ref().is_some_and(recurse)
             }
             TypeKind::Conditional(c) => {
-                c.condition.contains_unevaluated_operator()
-                    || c.then_type.contains_unevaluated_operator()
-                    || c.else_type.contains_unevaluated_operator()
+                recurse(&c.condition) || recurse(&c.then_type) || recurse(&c.else_type)
             }
             _ => false,
         }
@@ -571,7 +607,7 @@ impl PhpType {
                 let trimmed = s.strip_prefix('\\').unwrap_or(s);
                 trimmed.eq_ignore_ascii_case("Closure")
             }
-            TypeKind::Callable(c) => c.kind.eq_ignore_ascii_case("Closure"),
+            TypeKind::Callable(c) => c.is_closure(),
             TypeKind::Nullable(inner) => inner.is_closure(),
             _ => false,
         }
@@ -686,6 +722,21 @@ impl PhpType {
             TypeKind::Union(members) => {
                 let non_null: Vec<_> = members.iter().filter(|m| !m.is_null()).collect();
                 !non_null.is_empty() && non_null.iter().all(|m| m.is_parent_ref())
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether this type is `static` or `$this` (bare, nullable, or in a
+    /// union with null): the keywords late static binding decides, unlike
+    /// `self` and `parent`, which always name the declaring class's side.
+    pub fn is_late_static_bound(&self) -> bool {
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("static") || s == "$this",
+            TypeKind::Nullable(inner) => inner.is_late_static_bound(),
+            TypeKind::Union(members) => {
+                let mut non_null = members.iter().filter(|m| !m.is_null()).peekable();
+                non_null.peek().is_some() && non_null.all(PhpType::is_late_static_bound)
             }
             _ => false,
         }
@@ -879,7 +930,8 @@ impl PhpType {
             | TypeKind::ListShape(inner)
             | TypeKind::TemplateParam(_, inner)
             | TypeKind::ClassNameLiteral(inner)
-            | TypeKind::EnumCase(inner, _) => inner.to_native_hint_typed(),
+            | TypeKind::EnumCase(inner, _)
+            | TypeKind::DqlBuilder(inner, _) => inner.to_native_hint_typed(),
             TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 native_scalar_name(s).map(|n| PhpType::named(atom(n)))
             }
@@ -986,10 +1038,13 @@ impl PhpType {
         if self_members.is_empty() {
             return false;
         }
-        // An enum case is one of the values its enum holds.
+        // An enum case is one of the values its enum holds, and a builder
+        // that built known DQL one of the builders its class holds.
         self_members.iter().all(|s| {
             other_members.iter().any(|o| {
-                s.equivalent(o) || (s.as_enum_case().is_some() && s.enum_cases_as_enums() == *o)
+                s.equivalent(o)
+                    || (s.as_enum_case().is_some() && s.enum_cases_as_enums() == *o)
+                    || s.as_dql_builder().is_some_and(|(class, _)| class == o)
             })
         })
     }
@@ -1091,7 +1146,8 @@ impl PhpType {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
             | TypeKind::ClassNameLiteral(inner)
-            | TypeKind::EnumCase(inner, _) => inner.is_informative(),
+            | TypeKind::EnumCase(inner, _)
+            | TypeKind::DqlBuilder(inner, _) => inner.is_informative(),
             TypeKind::Generic(..) | TypeKind::UnsealedShape(..) => true,
             TypeKind::ArrayShape(..) | TypeKind::ObjectShape(..) => true,
             TypeKind::Array(..) => true,
@@ -1154,7 +1210,10 @@ impl PhpType {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
             | TypeKind::ClassNameLiteral(inner)
-            | TypeKind::EnumCase(inner, _) => inner.references_any_template_param(template_params),
+            | TypeKind::EnumCase(inner, _)
+            | TypeKind::DqlBuilder(inner, _) => {
+                inner.references_any_template_param(template_params)
+            }
             TypeKind::UnsealedShape(unsealed) => unsealed
                 .widened
                 .references_any_template_param(template_params),

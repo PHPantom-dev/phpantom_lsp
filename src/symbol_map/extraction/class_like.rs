@@ -23,6 +23,17 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_twig_callable_attributes(class, ctx);
     emit_twig_global_declarations(class, ctx);
     emit_yii_route_argument_spans(class, ctx);
+    tempest::record_route_attributes(class, ctx);
+    emit_yii_asset_bundle_spans(class, ctx);
+    emit_drupal_entity_type_spans(class, ctx);
+    emit_drupal_render_element_spans(class, ctx);
+    emit_drupal_plugin_declarations(class, ctx);
+    emit_drupal_plugin_manager(class, ctx);
+    emit_drupal_route_attribute_spans(class, ctx);
+    emit_drupal_hook_attribute_spans(class, ctx);
+    emit_drupal_computed_hook_sites(&class.members, class.name.span.start.offset, ctx);
+    emit_drupal_route_builder_spans(&class.members, class.name.span.start.offset, ctx);
+    emit_drupal_editable_config_spans(&class.members, ctx);
 
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {
@@ -79,6 +90,8 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     ctx.covers_default_class = covers_default_class;
     let yii_view_scope = yii_class_scope(class, ctx);
     let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, yii_view_scope);
+    let yii_category = yii_class_category(class.span(), class.members.iter(), ctx);
+    let prev_yii_category = std::mem::replace(&mut ctx.yii_category, yii_category);
     let prev_class_name_offset = ctx.class_name_offset.replace(class.name.span.start.offset);
 
     for member in class.members.iter() {
@@ -87,6 +100,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
 
     ctx.class_name_offset = prev_class_name_offset;
     ctx.yii_view_scope = prev_yii_view_scope;
+    ctx.yii_category = prev_yii_category;
     ctx.covers_default_class = prev_covers_default_class;
     ctx.in_controller = prev_in_controller;
     ctx.in_mailable = prev_in_mailable;
@@ -196,6 +210,8 @@ pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut Extract
     });
 
     extract_from_attribute_lists(&trait_def.attribute_lists, ctx, 0);
+    emit_drupal_route_builder_spans(&trait_def.members, trait_def.name.span.start.offset, ctx);
+    emit_drupal_computed_hook_sites(&trait_def.members, trait_def.name.span.start.offset, ctx);
 
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, trait_def)
@@ -218,10 +234,13 @@ pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut Extract
     // A view a trait or an enum renders is under a view path its code
     // does not show.
     let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, YiiViewScope::Class(None));
+    let yii_category = yii_class_category(trait_def.span(), trait_def.members.iter(), ctx);
+    let prev_yii_category = std::mem::replace(&mut ctx.yii_category, yii_category);
     for member in trait_def.members.iter() {
         extract_from_class_member(member, ctx);
     }
     ctx.yii_view_scope = prev_yii_view_scope;
+    ctx.yii_category = prev_yii_category;
 }
 
 pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut ExtractionCtx<'a>) {
@@ -263,10 +282,13 @@ pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut Extraction
     // A view a trait or an enum renders is under a view path its code
     // does not show.
     let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, YiiViewScope::Class(None));
+    let yii_category = yii_class_category(enum_def.span(), enum_def.members.iter(), ctx);
+    let prev_yii_category = std::mem::replace(&mut ctx.yii_category, yii_category);
     for member in enum_def.members.iter() {
         extract_from_class_member(member, ctx);
     }
     ctx.yii_view_scope = prev_yii_view_scope;
+    ctx.yii_category = prev_yii_category;
 }
 
 // ─── Class member extractors ────────────────────────────────────────────────
@@ -295,6 +317,7 @@ pub(super) fn extract_from_attribute_lists<'a>(
             // inside `#[Attr(...)]` just like `new Attr(...)`.
             if let Some(ref arg_list) = attr.argument_list {
                 extract_from_partial_arguments(&arg_list.arguments, ctx, scope_start);
+                emit_attribute_named_arg_spans(&attr.name, arg_list, ctx);
                 let class_name = raw.trim_start_matches('\\');
                 if !class_name.is_empty() {
                     emit_partial_call_site(
@@ -357,6 +380,16 @@ pub(super) fn extract_from_attribute_lists<'a>(
                     emit_template_attribute_span(arg_list, ctx);
                 }
 
+                // `#[Groups(['user:read'])]` puts a member in serializer
+                // groups, and `#[Context]` and `#[MapRequestPayload]` name
+                // the groups they serialize with.
+                if ctx.symfony
+                    && let Some(attribute) =
+                        crate::symfony::serializer::groups_attribute(semantic_class_name)
+                {
+                    emit_serializer_group_spans(attribute, arg_list, ctx);
+                }
+
                 // `#[Middleware('auth')]` on a controller or an action names
                 // the middleware it runs, `#[WithoutMiddleware]` the
                 // middleware it leaves out.
@@ -404,6 +437,54 @@ pub(super) fn extract_from_attribute_lists<'a>(
                 );
             }
         }
+    }
+}
+
+/// Emit a span for each named argument's label in an attribute,
+/// `#[Foo(bar: 1)]`, naming the property `bar` of the attribute class `Foo`.
+///
+/// Only a promoted constructor parameter is a property, which takes the
+/// class to tell, so the span is marked
+/// [`AttributeNamedArg`](DocblockMemberRef::AttributeNamedArg) for its
+/// consumers to check.  A `new Foo(bar: 1)` gets no such span: an
+/// attribute's arguments exist to set its properties, while a call's
+/// common parameter names (`name`, `id`) would mostly name properties the
+/// call has nothing to do with.
+fn emit_attribute_named_arg_spans<'a>(
+    attribute_name: &Identifier<'a>,
+    arg_list: &mago_syntax::cst::PartialArgumentList<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+) {
+    let name_span = attribute_name.span();
+    let subject = bytes_to_str(attribute_name.value());
+    for arg in arg_list.arguments.iter() {
+        let mago_syntax::cst::PartialArgument::Named(named) = arg else {
+            continue;
+        };
+        let label = bytes_to_str(named.name.value);
+        if label.is_empty() {
+            continue;
+        }
+        ctx.spans.push(SymbolSpan {
+            start: named.name.span.start.offset,
+            end: named.name.span.end.offset,
+            kind: SymbolKind::MemberAccess {
+                subject_text: SubjectText::new(
+                    subject.to_string(),
+                    name_span.start.offset,
+                    name_span.end.offset,
+                    ctx.content,
+                ),
+                member_name: crate::atom::atom(label),
+                // The subject is a class name, which is what a static
+                // access's subject is.
+                is_static: true,
+                is_method_call: false,
+                docblock_ref: DocblockMemberRef::AttributeNamedArg,
+                is_array_callable: false,
+                is_nullsafe: false,
+            },
+        });
     }
 }
 
@@ -654,6 +735,8 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         let s = body.left_brace.start.offset;
         let e = body.right_brace.end.offset;
         ctx.scopes.push((s, e));
+        note_dql_body(s, body.statements.as_slice(), ctx);
+        note_dql_method(s, method, ctx);
         if is_static {
             ctx.static_method_scopes.push((s, e));
         } else {
@@ -816,6 +899,7 @@ fn extract_from_hook<'a>(hook: &'a PropertyHook<'a>, ctx: &mut ExtractionCtx<'a>
 
     match body {
         PropertyHookConcreteBody::Block(block) => {
+            note_dql_body(scope_start, block.statements.as_slice(), ctx);
             for stmt in block.statements.iter() {
                 extract_from_statement(stmt, ctx, scope_start);
             }
@@ -920,6 +1004,8 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
             is_docblock_reference: false,
         },
     });
+    emit_drupal_hook_doc_span(func, ctx);
+    emit_drupal_procedural_hook_span(func, ctx);
 
     // Docblock.  We extract type spans and template params now, but
     // defer `@param $var` variable spans until after we know
@@ -946,6 +1032,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
     let func_scope_start = func.body.left_brace.start.offset;
     let func_scope_end = func.body.right_brace.end.offset;
     ctx.scopes.push((func_scope_start, func_scope_end));
+    note_dql_body(func_scope_start, func.body.statements.as_slice(), ctx);
 
     // Emit Variable spans and VarDefSite markers for `@param $varName`
     // tokens in the docblock so that rename and find-references cover

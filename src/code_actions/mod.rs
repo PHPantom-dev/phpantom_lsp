@@ -23,6 +23,10 @@
 //! - **Replace deprecated call** — when the cursor is on a deprecated
 //!   function or method call that has a `#[Deprecated(replacement: "...")]`
 //!   template, offer to rewrite the call to the suggested replacement.
+//! - **Make parameter explicitly nullable** — when a typed parameter has
+//!   a `null` default but its type does not admit `null` (deprecated in
+//!   PHP 8.4), offer to write the `null` into the type: `?Foo` or
+//!   `int|string|null`.
 //! - **PHPStan quickfixes** — a family of code actions that respond to
 //!   PHPStan diagnostics.  See the [`phpstan`] submodule for details.
 //! - **Change visibility** — when the cursor is on a method, property,
@@ -73,8 +77,8 @@
 //!   project's configured view root (or the matching package namespace's
 //!   own view directory) and open it.
 //! - **Create missing component** — when a `<x-…>` or `<livewire:…>` tag
-//!   names no component (`unknown_blade_component`,
-//!   `unknown_livewire_component`), offer the closest component names and
+//!   names no component (`invalid_blade_component`,
+//!   `invalid_livewire_component`), offer the closest component names and
 //!   to create the component: an anonymous component's template, or a
 //!   component class and its template.
 //! - **Create test** — on a class, or one of its public methods, that
@@ -87,6 +91,8 @@
 //! - **Parent call fixes** — when a PHPUnit `setUp()`, `tearDown()`,
 //!   `setUpBeforeClass()`, or `tearDownAfterClass()` never calls the
 //!   parent's, offer to insert the call.
+//! - **Remove unused member** — when a private method, constant, or
+//!   property is never used, offer to remove its declaration.
 //!
 //! ## Deferred edit computation (`codeAction/resolve`)
 //!
@@ -114,6 +120,7 @@ mod create_missing_view;
 mod create_test;
 pub(crate) mod cursor_context;
 mod data_provider_fixes;
+pub(crate) mod explicit_nullable;
 mod extract_constant;
 mod extract_function;
 mod extract_interface;
@@ -125,6 +132,7 @@ mod generate_constructor;
 mod generate_getter_setter;
 mod generate_property_hooks;
 pub(crate) mod implement_methods;
+pub(crate) mod import_alias;
 mod import_all_classes;
 mod import_class;
 mod inline_variable;
@@ -135,12 +143,14 @@ mod parent_call_fixes;
 pub(crate) mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;
+mod remove_unused_member;
 mod replace_deprecated;
 mod replace_fqcn;
 mod simplify_null;
 mod sort_use_statements;
 mod update_docblock;
 mod use_line_deletion;
+mod yii_definition_keys;
 pub(crate) use use_line_deletion::{
     build_line_deletion_edit, build_use_directive_deletion_edit, range_touches_use_import,
 };

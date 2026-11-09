@@ -242,8 +242,10 @@ fn scan_files_parallel_psr4(
 /// stem matches the class's short name displaces one whose stem does not:
 /// a package with conditional loading declares the same trait in
 /// `ArraySubsetAsserts.php` and `ArraySubsetAssertsEmpty.php`, and PSR-4
-/// says the first of those is the real one. The origin tier follows
-/// whichever file the classmap ends up pointing at.
+/// says the first of those is the real one. A function likewise goes to a
+/// later file that [outranks](crate::wordpress::function_file_outranks)
+/// the first. The origin tier follows whichever file the index ends up
+/// pointing at.
 fn merge_scanned_file(
     result: &mut WorkspaceScanResult,
     scan: ScanResult,
@@ -276,11 +278,18 @@ fn merge_scanned_file(
         }
     }
     for fqn in scan.functions {
-        result
-            .function_index
-            .entry(fqn.clone())
-            .or_insert_with(|| path.to_path_buf());
-        result.function_origins.entry(fqn).or_insert(origin);
+        match result.function_index.entry(fqn) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                result.function_origins.insert(e.key().clone(), origin);
+                e.insert(path.to_path_buf());
+            }
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                if crate::wordpress::function_file_outranks(path, e.get()) {
+                    result.function_origins.insert(e.key().clone(), origin);
+                    e.insert(path.to_path_buf());
+                }
+            }
+        }
     }
     for name in scan.constants {
         result
@@ -308,6 +317,16 @@ pub(super) fn scan_files_parallel_full(
     files: &[(PathBuf, crate::ClassCompletionOrigin)],
     progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
+    scan_files_parallel_noting(files, progress, |_, _| false).0
+}
+
+/// [`scan_files_parallel_full`], also returning the files whose path and
+/// content `note` picks, read while their content is at hand.
+fn scan_files_parallel_noting(
+    files: &[(PathBuf, crate::ClassCompletionOrigin)],
+    progress: Option<&ScanProgress>,
+    note: impl Fn(&Path, &[u8]) -> bool + Sync,
+) -> (WorkspaceScanResult, Vec<PathBuf>) {
     let scanned = crate::parallel::map_in_blocks(
         "scan_files_parallel_full",
         files,
@@ -315,20 +334,27 @@ pub(super) fn scan_files_parallel_full(
         |(path, origin)| {
             progress_add_done(progress);
             let content = read_for_scan(path).ok()?;
+            let noted = note(path, &content);
             let scan = super::find_symbols_and_global_tags(&content);
-            (!scan.classes.is_empty()
+            let declares = !scan.classes.is_empty()
                 || !scan.functions.is_empty()
                 || !scan.constants.is_empty()
-                || !scan.globals.is_empty())
-            .then_some((scan, path, *origin))
+                || !scan.globals.is_empty();
+            (declares || noted).then_some((declares.then_some(scan), path, *origin, noted))
         },
     );
 
     let mut result = WorkspaceScanResult::default();
-    for (scan, path, origin) in scanned {
-        merge_scanned_file(&mut result, scan, path, origin);
+    let mut noted_files = Vec::new();
+    for (scan, path, origin, noted) in scanned {
+        if noted {
+            noted_files.push(path.clone());
+        }
+        if let Some(scan) = scan {
+            merge_scanned_file(&mut result, scan, path, origin);
+        }
     }
-    result
+    (result, noted_files)
 }
 
 /// Scan all `.php` files under the workspace root using the full-scan
@@ -634,24 +660,23 @@ fn read_phpstorm_stubs_map(
 /// with `[indexing] exclude`, which is honored here like everywhere
 /// else; duplicate fixture classes are handled by the classmap's
 /// first-wins merge.
+///
+/// The same walk collects the files Drupal reads declarations from,
+/// returned beside the symbols.
 pub fn scan_drupal_directories(
     web_root: &Path,
     filters: &std::sync::Arc<IndexFilters>,
     progress: Option<&ScanProgress>,
-) -> WorkspaceScanResult {
+) -> (WorkspaceScanResult, DrupalDeclarationFiles) {
     use ignore::WalkBuilder;
 
-    let drupal_dirs = [
-        "core",
-        "modules/contrib",
-        "modules/custom",
-        "themes/contrib",
-        "themes/custom",
-        "profiles",
-        "sites",
-    ];
+    // Whole folders, not only their `contrib` and `custom` halves: sites
+    // also group modules by vendor (`modules/acme/`), keep them directly
+    // under `modules/`, or ship them inside a profile.
+    let drupal_dirs = ["core", "modules", "themes", "profiles", "sites"];
 
     let mut php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
+    let mut declaration_files = DrupalDeclarationFiles::default();
 
     for rel in &drupal_dirs {
         let dir = web_root.join(rel);
@@ -678,14 +703,68 @@ pub fn scan_drupal_directories(
 
         for entry in walker.flatten() {
             let path = entry.path();
-            if path.is_file() && (is_drupal_php_file(path) || filters.is_php_file(path)) {
+            if !path.is_file() {
+                continue;
+            }
+            if is_drupal_php_file(path) || filters.is_php_file(path) {
+                if crate::drupal::service_providers::is_service_provider_file(path, web_root) {
+                    declaration_files.service_providers.push(path.to_path_buf());
+                }
                 php_files.push((path.to_path_buf(), crate::ClassCompletionOrigin::Project));
+                if crate::drupal::is_hook_php_file(path, web_root) {
+                    declaration_files.declarations.push(path.to_path_buf());
+                }
+            } else if crate::drupal::config::is_default_config_file(path, web_root) {
+                declaration_files.default_config.push(path.to_path_buf());
+            } else if crate::drupal::config::is_schema_file(path, web_root) {
+                declaration_files.config_schemas.push(path.to_path_buf());
+            } else if crate::drupal::is_declaration_file(path, web_root) {
+                declaration_files.declarations.push(path.to_path_buf());
+            } else if crate::drupal::is_template_file(path, web_root) {
+                declaration_files.templates.push(path.to_path_buf());
+            } else if crate::drupal::services::is_test_services_file(path, web_root) {
+                declaration_files
+                    .service_definitions
+                    .push(path.to_path_buf());
             }
         }
     }
 
     progress_add_total(progress, php_files.len());
-    scan_files_parallel_full(&php_files, progress)
+    // Test code's containers are mocks, so what it defines is left out.
+    let (result, defining) = scan_files_parallel_noting(&php_files, progress, |path, content| {
+        crate::drupal::services::may_define_services(content)
+            && !path
+                .strip_prefix(web_root)
+                .unwrap_or(path)
+                .components()
+                .any(|part| part.as_os_str() == "tests")
+    });
+    declaration_files.service_definitions.extend(defining);
+    (result, declaration_files)
+}
+
+/// The files a Drupal web root declares things in.
+#[derive(Default)]
+pub struct DrupalDeclarationFiles {
+    /// The YAML files Drupal reads declarations from (see
+    /// `drupal::is_declaration_file`) and the PHP files that document or
+    /// implement hooks (see `drupal::is_hook_php_file`).
+    pub declarations: Vec<PathBuf>,
+    /// The service providers whose `alter()` may give a service another
+    /// class (see `drupal::service_providers`).
+    pub service_providers: Vec<PathBuf>,
+    /// The default configuration files, which are never parsed (see
+    /// `drupal::config`).
+    pub default_config: Vec<PathBuf>,
+    /// The configuration schema files.
+    pub config_schemas: Vec<PathBuf>,
+    /// The Twig templates theme hooks are drawn with (see
+    /// `drupal::is_template_file`), recorded without being read.
+    pub templates: Vec<PathBuf>,
+    /// The PHP files that may define services, and test modules' services
+    /// files (see `drupal::services`), recorded without being read.
+    pub service_definitions: Vec<PathBuf>,
 }
 
 /// The extensions besides `.php` that Drupal treats as PHP source.

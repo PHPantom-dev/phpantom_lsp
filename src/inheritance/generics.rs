@@ -103,7 +103,7 @@ fn method_has_bare_parent(method: &MethodInfo) -> bool {
 }
 
 /// Bind the relative class keywords of an inherited method to concrete
-/// classes: bare `self` to `class_name`, bare `parent` to
+/// classes: bare `self` to `self_type`, bare `parent` to
 /// `declaring_parent`.
 ///
 /// Both bind to the class that *declares* the method, so an inherited copy
@@ -113,10 +113,10 @@ fn method_has_bare_parent(method: &MethodInfo) -> bool {
 /// class the call is made on.
 pub(crate) fn bind_inherited_class_keywords(
     method: &mut MethodInfo,
-    class_name: &str,
+    self_type: &PhpType,
     declaring_parent: Option<&str>,
 ) {
-    replace_bare_self_in_method(method, class_name);
+    replace_bare_self_in_method(method, self_type);
     let Some(declaring_parent) = declaring_parent else {
         return;
     };
@@ -154,7 +154,7 @@ pub(crate) fn property_has_inherited_class_keyword(
 /// does for a method.
 pub(crate) fn bind_inherited_class_keywords_in_property(
     property: &mut PropertyInfo,
-    class_name: &str,
+    self_type: &PhpType,
     declaring_parent: Option<&str>,
 ) {
     for ty in [&mut property.type_hint, &mut property.native_type_hint] {
@@ -162,7 +162,7 @@ pub(crate) fn bind_inherited_class_keywords_in_property(
             continue;
         };
         if hint.contains_bare_self() {
-            *hint = hint.replace_bare_self(class_name);
+            *hint = hint.replace_bare_self_with(self_type);
         }
         if let Some(declaring_parent) = declaring_parent
             && hint.contains_bare_parent()
@@ -172,8 +172,34 @@ pub(crate) fn bind_inherited_class_keywords_in_property(
     }
 }
 
+/// The type a bare `self` written in `class` stands for: the class, with
+/// its own template parameters as arguments when it is generic, bound
+/// through `subs` (the arguments an `@extends` gives them).
+///
+/// A generic class's `self` is the class with the arguments of the
+/// instance at hand, so a call through `Builder<Book>` to a method that
+/// returns `self` gives `Builder<Book>`, wherever the method is declared.
+pub(crate) fn declared_self_type(class: &ClassInfo, subs: &HashMap<String, PhpType>) -> PhpType {
+    let fqn = class.fqn();
+    if class.template_params.is_empty() {
+        return PhpType::named(fqn);
+    }
+    PhpType::generic_atom(
+        fqn,
+        class
+            .template_params
+            .iter()
+            .map(|param| {
+                subs.get(param.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| PhpType::named(*param))
+            })
+            .collect(),
+    )
+}
+
 /// Replace bare `self` in a method's return type and parameter hints
-/// with `class_name`.
+/// with `self_type` (see [`declared_self_type`]).
 ///
 /// `self` binds to the class that declares the method, so an inherited
 /// or trait-imported method must carry the declaring class rather than
@@ -185,12 +211,12 @@ pub(crate) fn bind_inherited_class_keywords_in_property(
 /// docblock override, so binding only one side would make the bound copy
 /// look richer than it is and let it overwrite an override's narrower
 /// native return type.
-pub(crate) fn replace_bare_self_in_method(method: &mut MethodInfo, class_name: &str) {
+pub(crate) fn replace_bare_self_in_method(method: &mut MethodInfo, self_type: &PhpType) {
     let bind = |ty: &mut Option<PhpType>| {
         if let Some(t) = ty
             && t.contains_bare_self()
         {
-            *t = t.replace_bare_self(class_name);
+            *t = t.replace_bare_self_with(self_type);
         }
     };
     bind(&mut method.return_type);

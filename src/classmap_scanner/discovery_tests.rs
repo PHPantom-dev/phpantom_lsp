@@ -428,7 +428,7 @@ fn scan_drupal_directories_finds_php_and_module_files() {
     )
     .unwrap();
 
-    let result = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let (result, _) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
     assert!(
         result
             .classmap
@@ -445,6 +445,87 @@ fn scan_drupal_directories_finds_php_and_module_files() {
         result.function_index.contains_key("mymod_help"),
         "should index .module files; functions: {:?}",
         result.function_index.keys().collect::<Vec<_>>()
+    );
+}
+
+/// Extensions outside `contrib` and `custom`: grouped by vendor, directly
+/// under `modules/`, and inside an install profile.
+#[test]
+fn scan_drupal_directories_finds_extensions_outside_contrib_and_custom() {
+    let dir = tempfile::tempdir().unwrap();
+    let web_root = dir.path();
+    for (path, content) in [
+        (
+            "modules/acme/acme_shop/src/Cart.php",
+            "<?php\nnamespace Drupal\\acme_shop;\nclass Cart {}",
+        ),
+        (
+            "modules/acme/acme_shop/acme_shop.module",
+            "<?php\nfunction acme_shop_help() {}",
+        ),
+        (
+            "modules/acme/acme_shop/acme_shop.services.yml",
+            "services: {}\n",
+        ),
+        (
+            "modules/acme/acme_shop/src/AcmeShopServiceProvider.php",
+            "<?php\nnamespace Drupal\\acme_shop;\nclass AcmeShopServiceProvider {}",
+        ),
+        (
+            "modules/example/src/Greeter.php",
+            "<?php\nnamespace Drupal\\example;\nclass Greeter {}",
+        ),
+        (
+            "themes/acme/acme_theme/src/ThemeHelper.php",
+            "<?php\nnamespace Drupal\\acme_theme;\nclass ThemeHelper {}",
+        ),
+        (
+            "profiles/acme_profile/modules/acme_base/src/Base.php",
+            "<?php\nnamespace Drupal\\acme_base;\nclass Base {}",
+        ),
+        (
+            "profiles/acme_profile/modules/acme_base/acme_base.services.yml",
+            "services: {}\n",
+        ),
+    ] {
+        let full = web_root.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+
+    let (result, files) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    for class in [
+        "Drupal\\acme_shop\\Cart",
+        "Drupal\\example\\Greeter",
+        "Drupal\\acme_theme\\ThemeHelper",
+        "Drupal\\acme_base\\Base",
+    ] {
+        assert!(
+            result.classmap.contains_key(class),
+            "{class}; keys: {:?}",
+            result.classmap.keys().collect::<Vec<_>>()
+        );
+    }
+    assert!(result.function_index.contains_key("acme_shop_help"));
+    for services in [
+        "modules/acme/acme_shop/acme_shop.services.yml",
+        "profiles/acme_profile/modules/acme_base/acme_base.services.yml",
+    ] {
+        assert!(
+            files.declarations.contains(&web_root.join(services)),
+            "{services}: {:?}",
+            files.declarations
+        );
+    }
+    assert!(
+        files
+            .declarations
+            .contains(&web_root.join("modules/acme/acme_shop/acme_shop.module")),
+        "the module file documents or implements hooks"
+    );
+    assert_eq!(
+        files.service_providers,
+        vec![web_root.join("modules/acme/acme_shop/src/AcmeShopServiceProvider.php")]
     );
 }
 
@@ -471,7 +552,7 @@ fn scan_drupal_directories_indexes_test_dirs_by_default() {
     )
     .unwrap();
 
-    let result = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let (result, _) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
     assert!(
         result.classmap.contains_key("Drupal\\Tests\\UnitTestCase"),
         "core test base classes must be indexed"
@@ -485,7 +566,7 @@ fn scan_drupal_directories_indexes_test_dirs_by_default() {
 
     // Projects that want the old behaviour opt in via the exclude list.
     let filters = test_filters(dir.path(), &["tests/", "Tests/"], &[]);
-    let result = scan_drupal_directories(web_root, &filters, None);
+    let (result, _) = scan_drupal_directories(web_root, &filters, None);
     assert!(
         !result
             .classmap
@@ -502,7 +583,7 @@ fn scan_drupal_directories_indexes_test_dirs_by_default() {
 fn scan_drupal_directories_skips_nonexistent_dirs() {
     let dir = tempfile::tempdir().unwrap();
     // Empty web root — none of the expected subdirectories exist
-    let result = scan_drupal_directories(dir.path(), &IndexFilters::empty(), None);
+    let (result, _) = scan_drupal_directories(dir.path(), &IndexFilters::empty(), None);
     assert!(result.classmap.is_empty());
     assert!(result.function_index.is_empty());
     assert!(result.constant_index.is_empty());
@@ -523,7 +604,7 @@ fn scan_drupal_directories_ignores_non_php_files() {
     )
     .unwrap();
 
-    let result = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let (result, _) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
     // Only the .php file should be indexed
     assert!(
         result.function_index.contains_key("install_begin"),
@@ -701,11 +782,116 @@ fn drupal_scan_honors_exclude_globs() {
     .unwrap();
 
     let filters = test_filters(dir.path(), &["fixtures"], &[]);
-    let result = scan_drupal_directories(web_root, &filters, None);
+    let (result, _) = scan_drupal_directories(web_root, &filters, None);
 
     assert!(result.classmap.contains_key("Mymod"));
     assert!(
         !result.classmap.contains_key("FixtureClass"),
         "exclude globs should apply to the Drupal scanner too"
     );
+}
+
+#[test]
+fn scan_drupal_directories_collects_declaration_files_outside_tests() {
+    let dir = tempfile::tempdir().unwrap();
+    let web_root = dir.path();
+    for (path, content) in [
+        ("core/core.services.yml", "services: {}\n"),
+        ("modules/contrib/token/token.services.yml", "services: {}\n"),
+        ("modules/contrib/token/token.info.yml", "name: Token\n"),
+        ("sites/default/services.yml", "parameters: {}\n"),
+        (
+            "core/modules/system/tests/modules/fixture/fixture.services.yml",
+            "services: {}\n",
+        ),
+    ] {
+        let full = web_root.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+
+    let (_, files) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let mut files = files.declarations;
+    files.sort();
+    assert_eq!(
+        files,
+        vec![
+            web_root.join("core/core.services.yml"),
+            web_root.join("modules/contrib/token/token.info.yml"),
+            web_root.join("modules/contrib/token/token.services.yml"),
+            web_root.join("sites/default/services.yml"),
+        ]
+    );
+}
+
+#[test]
+fn scan_drupal_directories_records_templates_outside_tests() {
+    let dir = tempfile::tempdir().unwrap();
+    let web_root = dir.path();
+    for path in [
+        "core/modules/system/templates/item-list.html.twig",
+        "themes/contrib/olivo/templates/content/node.html.twig",
+        "core/modules/system/tests/themes/fixture/templates/item-list.html.twig",
+        "modules/custom/acme/templates/acme.txt.twig",
+    ] {
+        let full = web_root.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, "{{ x }}\n").unwrap();
+    }
+
+    let (_, files) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    let mut templates = files.templates;
+    templates.sort();
+    assert_eq!(
+        templates,
+        vec![
+            web_root.join("core/modules/system/templates/item-list.html.twig"),
+            web_root.join("themes/contrib/olivo/templates/content/node.html.twig"),
+        ]
+    );
+    assert!(files.declarations.is_empty());
+}
+
+#[test]
+fn wordpress_script_loader_noops_give_way_to_the_real_declarations() {
+    let dir = tempfile::tempdir().unwrap();
+    let includes = dir.path().join("wp-admin").join("includes");
+    let wp_includes = dir.path().join("wp-includes");
+    std::fs::create_dir_all(&includes).unwrap();
+    std::fs::create_dir_all(&wp_includes).unwrap();
+    std::fs::write(
+        includes.join("noop.php"),
+        "<?php\nfunction __() {}\nfunction get_file( $path ) {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        wp_includes.join("l10n.php"),
+        "<?php\nfunction __( $text, $domain = 'default' ) {}\n",
+    )
+    .unwrap();
+
+    let skip = std::collections::HashSet::new();
+    let result =
+        scan_workspace_fallback_full(dir.path(), &skip, &IndexFilters::empty(), None, None);
+    assert!(
+        result.function_index["__"].ends_with("wp-includes/l10n.php"),
+        "{:?}",
+        result.function_index
+    );
+    assert!(result.function_index["get_file"].ends_with("wp-admin/includes/noop.php"));
+
+    // Folding the scans together decides the same way in either order.
+    let noops = || {
+        let path = includes.join("noop.php");
+        WorkspaceScanResult::from_file(crate::classmap_scanner::scan_file_full(&path), &path)
+    };
+    let l10n = || {
+        let path = wp_includes.join("l10n.php");
+        WorkspaceScanResult::from_file(crate::classmap_scanner::scan_file_full(&path), &path)
+    };
+    for (mut into, from) in [(noops(), l10n()), (l10n(), noops())] {
+        into.absorb_missing(from);
+        assert!(into.function_index["__"].ends_with("wp-includes/l10n.php"));
+        assert!(into.function_index["get_file"].ends_with("wp-admin/includes/noop.php"));
+    }
 }

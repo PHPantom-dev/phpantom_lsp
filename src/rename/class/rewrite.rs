@@ -125,18 +125,17 @@ impl FileRewrite {
         &self,
         old_fqn: &str,
         old_short_name: &str,
-        new_short_name: &str,
+        new_fqn: &str,
         new_import_alias: Option<&str>,
     ) -> ReferenceRewrite {
+        let new_short_name = crate::util::short_name(new_fqn);
         let class_name_changed = old_short_name != new_short_name;
         let has_collision = class_name_changed
             && self.import_info.is_some()
             && has_import_collision(&self.use_map, old_fqn, new_short_name);
         let (skip_alias_refs, in_code_replacement) = match &self.import_info {
             Some(info) if info.has_explicit_alias => (true, info.alias.clone()),
-            Some(_) if has_collision => {
-                (false, pick_collision_alias(new_short_name, &self.use_map))
-            }
+            Some(_) if has_collision => (false, pick_collision_alias(new_fqn, &self.use_map)),
             _ => match new_import_alias {
                 Some(alias) => (false, alias.to_string()),
                 None if class_name_changed => (false, new_short_name.to_string()),
@@ -158,7 +157,6 @@ impl FileRewrite {
         &self,
         old_fqn: &str,
         new_fqn: &str,
-        new_short_name: &str,
         rewrite: &ReferenceRewrite,
         file_namespace: Option<&str>,
     ) -> Option<(Range, Vec<TextEdit>)> {
@@ -169,7 +167,6 @@ impl FileRewrite {
             old_fqn,
             &RenameTarget {
                 new_fqn,
-                new_short_name,
                 has_collision: rewrite.has_collision,
             },
             info,

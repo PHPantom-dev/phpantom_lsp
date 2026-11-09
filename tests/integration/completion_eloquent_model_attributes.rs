@@ -26,6 +26,9 @@ class BaseUser extends Model {
         return Attribute::make(get: fn (): string => 'Display');
     }
     public function getLegacyNameAttribute(): string { return 'Legacy'; }
+    protected function writableName(): Attribute {
+        return Attribute::make(set: fn ($value) => ['name' => $value]);
+    }
 }
 "#;
 
@@ -60,7 +63,7 @@ async fn complete(marked: &str, installed: bool) -> Vec<CompletionItem> {
         ),
         (
             "framework/Casts/Attribute.php",
-            "<?php namespace Illuminate\\Database\\Eloquent\\Casts; class Attribute { public static function make(?callable $get = null): static { return new static; } }",
+            "<?php namespace Illuminate\\Database\\Eloquent\\Casts; class Attribute { public static function make(?callable $get = null, ?callable $set = null): static { return new static; } }",
         ),
         ("app/Models/BaseUser.php", BASE_MODEL),
         (
@@ -127,6 +130,42 @@ async fn eloquent_model_attributes_include_inherited_column_sources() {
             !names.contains(&excluded),
             "unexpected {excluded}: {names:?}"
         );
+    }
+}
+
+#[tokio::test]
+async fn eloquent_model_attributes_distinguish_assignable_and_serializable_names() {
+    for (attribute, readonly, writable) in [
+        ("Fillable", false, true),
+        ("Guarded", false, true),
+        ("Hidden", true, true),
+        ("Visible", true, true),
+        ("Appends", true, true),
+        ("RouteKey", false, false),
+    ] {
+        let arguments = if attribute == "RouteKey" {
+            "'|'"
+        } else {
+            "['|']"
+        };
+        let items = complete(&model(&format!("#[{attribute}({arguments})]")), true).await;
+        let names = labels(&items);
+        assert_eq!(
+            names.contains(&"display_name"),
+            readonly,
+            "{attribute}: {names:?}"
+        );
+        assert_eq!(
+            names.contains(&"legacy_name"),
+            readonly,
+            "{attribute}: {names:?}"
+        );
+        assert_eq!(
+            names.contains(&"writable_name"),
+            writable,
+            "{attribute}: {names:?}"
+        );
+        assert!(names.contains(&"name"), "{attribute}: {names:?}");
     }
 }
 
@@ -205,6 +244,18 @@ async fn eloquent_model_attribute_completion_replaces_literal_and_skips_siblings
     assert!(names.contains(&"name"), "{names:?}");
     assert!(!names.contains(&"email"), "{names:?}");
     assert!(!names.contains(&"rank"), "{names:?}");
+}
+
+#[tokio::test]
+async fn eloquent_model_attribute_completion_skips_only_the_literal_being_edited() {
+    // The unfinished literal is a column of the model being edited, wherever
+    // the cursor sits in it, but the same name from another source is not.
+    for marked in ["#[Fillable(['na|zz'])]", "#[Hidden(['na|'])]"] {
+        let items = complete(&model(marked), true).await;
+        assert_eq!(labels(&items), vec!["name"], "{marked}");
+    }
+    let items = complete(&model("#[Hidden(['email|'])]"), true).await;
+    assert_eq!(labels(&items), vec!["email"]);
 }
 
 #[tokio::test]

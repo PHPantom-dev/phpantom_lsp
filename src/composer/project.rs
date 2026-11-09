@@ -202,17 +202,27 @@ pub(crate) fn is_twig_project(package: &ComposerPackage) -> bool {
 
 /// The packages that make a project a Yii application: the view layer
 /// itself and the renderer an application's actions use, under its current
-/// and its former name, and the router.
-const YII_PACKAGES: [&str; 4] = [
+/// and its former name, the router, the translator, the package that
+/// attaches event listeners from configuration, Active Record, and the form
+/// models and the hydrator that fills objects from data.
+const YII_PACKAGES: [&str; 9] = [
     "yiisoft/view",
     "yiisoft/yii-view-renderer",
     "yiisoft/yii-view",
     "yiisoft/router",
+    "yiisoft/translator",
+    "yiisoft/yii-event",
+    "yiisoft/active-record",
+    "yiisoft/form-model",
+    "yiisoft/hydrator",
 ];
 
 /// Detect whether the project is a Yii application, which view names, route
-/// names, and route arguments are read in: it renders Yii views or routes
-/// requests with Yii's router.
+/// names, route arguments, message IDs, event listeners, Active Record
+/// attributes and relations, and form properties are read in: it renders
+/// Yii views, routes requests with Yii's router, translates with Yii's
+/// translator, attaches listeners through `yiisoft/yii-event`, keeps its
+/// data in Yii's Active Record, or fills form models and objects from data.
 pub(crate) fn is_yii_project(package: &ComposerPackage) -> bool {
     package
         .require
@@ -223,6 +233,44 @@ pub(crate) fn is_yii_project(package: &ComposerPackage) -> bool {
                 .iter()
                 .any(|package| name.eq_ignore_ascii_case(package))
         })
+}
+
+/// The packages that render Tempest views: the standalone view renderer, the
+/// router that depends on it, and the framework that bundles both.
+const TEMPEST_PACKAGES: [&str; 3] = ["tempest/view", "tempest/router", "tempest/framework"];
+
+/// Detect whether the project renders Tempest views, whose `.view.php`
+/// files are templates rather than plain PHP.
+pub(crate) fn is_tempest_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            TEMPEST_PACKAGES
+                .iter()
+                .any(|package| name.eq_ignore_ascii_case(package))
+        })
+}
+
+/// Whether the project uses Tempest's standalone database layer or framework.
+pub(crate) fn is_tempest_database_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            name.eq_ignore_ascii_case("tempest/database")
+                || name.eq_ignore_ascii_case("tempest/framework")
+        })
+}
+
+/// Whether the package is a Drupal project: one that requires Drupal core.
+pub(crate) fn is_drupal_project(package: &ComposerPackage) -> bool {
+    const DRUPAL_PACKAGES: &[&str] = &["drupal/core", "drupal/core-recommended", "drupal/core-dev"];
+    DRUPAL_PACKAGES
+        .iter()
+        .any(|pkg| package.require.contains_key(*pkg) || package.require_dev.contains_key(*pkg))
 }
 
 /// Detect whether the project is a Laravel *application* rather than a
@@ -372,19 +420,12 @@ pub(crate) fn explicit_dependency_names(package: &ComposerPackage) -> HashSet<St
 ///
 /// **Web-root resolution order:**
 /// 1. `extra.drupal-scaffold.locations.web-root` in `composer.json`.
-/// 2. Filesystem fallback: the first of `web/`, `docroot/`, `public/`,
-///    `html/` that contains `core/lib/Drupal.php`.
+/// 2. Filesystem fallback: [`drupal_web_root_on_disk`].
 pub(crate) fn detect_drupal_web_root(
     workspace_root: &Path,
     package: &ComposerPackage,
 ) -> Option<PathBuf> {
-    const DRUPAL_PACKAGES: &[&str] = &["drupal/core", "drupal/core-recommended", "drupal/core-dev"];
-
-    let is_drupal = DRUPAL_PACKAGES
-        .iter()
-        .any(|pkg| package.require.contains_key(*pkg) || package.require_dev.contains_key(*pkg));
-
-    if !is_drupal {
+    if !is_drupal_project(package) {
         return None;
     }
 
@@ -396,19 +437,30 @@ pub(crate) fn detect_drupal_web_root(
             .and_then(|l| l.get("web-root"))
             .and_then(|v| v.as_str())
     {
-        let path = workspace_root.join(web_root_str.trim_end_matches('/'));
-        return Some(path);
-    }
-
-    // 2. Filesystem fallback: find which common dir contains core/lib/Drupal.php
-    for candidate in &["web", "docroot", "public", "html"] {
-        let path = workspace_root.join(candidate);
-        if path.join("core/lib/Drupal.php").exists() {
-            return Some(path);
+        // `drupal/legacy-project` names the project root as `./`, which
+        // must not leave a `.` in every path walked under it.
+        let relative = web_root_str.trim_end_matches('/');
+        let relative = relative.strip_prefix("./").unwrap_or(relative);
+        if relative.is_empty() || relative == "." {
+            return Some(workspace_root.to_path_buf());
         }
+        return Some(workspace_root.join(relative));
     }
 
-    None
+    // 2. Filesystem fallback
+    drupal_web_root_on_disk(workspace_root)
+}
+
+/// The web root of the Drupal tree at `root`, found on disk: the first of
+/// `web/`, `docroot/`, `public/` and `html/` that holds
+/// `core/lib/Drupal.php`, else `root` itself when it does, as in a legacy
+/// layout that keeps `core/` beside `composer.json`.
+pub(crate) fn drupal_web_root_on_disk(root: &Path) -> Option<PathBuf> {
+    ["web", "docroot", "public", "html"]
+        .iter()
+        .map(|candidate| root.join(candidate))
+        .chain(std::iter::once(root.to_path_buf()))
+        .find(|path| path.join("core/lib/Drupal.php").exists())
 }
 
 #[cfg(test)]
@@ -507,6 +559,42 @@ mod tests {
         )));
         assert!(!is_yii_project(&pkg(
             r#"{"require": {"yiisoft/arrays": "^3.0"}}"#
+        )));
+    }
+
+    // ── is_tempest_project ──────────────────────────────────────────
+
+    #[test]
+    fn detects_tempest_through_its_view_renderer_or_framework() {
+        assert!(is_tempest_project(&pkg(
+            r#"{"require": {"tempest/view": "^3.0"}}"#
+        )));
+        assert!(is_tempest_project(&pkg(
+            r#"{"require": {"tempest/framework": "^3.0"}}"#
+        )));
+        assert!(!is_tempest_project(&pkg(
+            r#"{"require": {"laravel/framework": "^11.0"}}"#
+        )));
+    }
+
+    #[test]
+    fn detects_tempest_database_independently_of_views() {
+        for json in [
+            r#"{"require":{"tempest/database":"^3.0"}}"#,
+            r#"{"require-dev":{"Tempest/Database":"^3.0"}}"#,
+            r#"{"require":{"tempest/framework":"^3.0"}}"#,
+        ] {
+            assert!(is_tempest_database_project(&pkg(json)), "{json}");
+        }
+        for json in [
+            r#"{}"#,
+            r#"{"require":{"tempest/view":"^3.0"}}"#,
+            r#"{"require":{"laravel/framework":"^12.0"}}"#,
+        ] {
+            assert!(!is_tempest_database_project(&pkg(json)), "{json}");
+        }
+        assert!(!is_tempest_project(&pkg(
+            r#"{"require":{"tempest/database":"^3.0"}}"#
         )));
     }
 
@@ -708,6 +796,66 @@ mod tests {
         let p = pkg(r#"{"require": {"drupal/core": "^10.0"}}"#);
         let result = detect_drupal_web_root(dir.path(), &p);
         assert_eq!(result, Some(dir.path().join("public")));
+    }
+
+    /// Write `<dir>/core/lib/Drupal.php`.
+    fn write_core(dir: &Path) {
+        let lib = dir.join("core").join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(lib.join("Drupal.php"), "<?php").unwrap();
+    }
+
+    #[test]
+    fn drupal_core_beside_composer_json_makes_the_project_root_the_web_root() {
+        let dir = tempfile::tempdir().unwrap();
+        write_core(dir.path());
+
+        let p = pkg(r#"{"require": {"drupal/core": "^10.0"}}"#);
+        assert_eq!(
+            detect_drupal_web_root(dir.path(), &p),
+            Some(dir.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn a_scaffold_entry_or_a_web_folder_wins_over_core_at_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        write_core(dir.path());
+        write_core(&dir.path().join("html"));
+
+        let p = pkg(r#"{"require": {"drupal/core": "^10.0"}}"#);
+        assert_eq!(
+            detect_drupal_web_root(dir.path(), &p),
+            Some(dir.path().join("html"))
+        );
+
+        let p = pkg(r#"{
+            "require": {"drupal/core": "^10.0"},
+            "extra": {"drupal-scaffold": {"locations": {"web-root": "docroot/"}}}
+        }"#);
+        assert_eq!(
+            detect_drupal_web_root(dir.path(), &p),
+            Some(dir.path().join("docroot"))
+        );
+    }
+
+    #[test]
+    fn a_scaffold_entry_naming_the_project_root_gives_the_root_as_written() {
+        let dir = tempfile::tempdir().unwrap();
+        for web_root in ["./", ".", ""] {
+            let p = pkg(&format!(
+                r#"{{
+                    "require": {{"drupal/core": "^10.0"}},
+                    "extra": {{"drupal-scaffold": {{"locations": {{"web-root": "{web_root}"}}}}}}
+                }}"#
+            ));
+            // Compared as text: `Path` equality ignores a trailing `.`.
+            assert_eq!(
+                detect_drupal_web_root(dir.path(), &p).map(PathBuf::into_os_string),
+                Some(dir.path().as_os_str().to_owned()),
+                "{web_root:?}"
+            );
+        }
     }
 
     #[test]

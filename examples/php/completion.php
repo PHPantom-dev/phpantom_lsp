@@ -42,6 +42,12 @@ use Exception;
 // Try: type `use function parse_file` and accept to get
 // `use function ast\parse_file;`
 
+// ── Expected Argument Values ────────────────────────────────────────────────
+// Try: type `pathinfo('report.pdf', ` and trigger completion. The
+// `PATHINFO_*` flags the function expects are listed first. Accept one, type
+// ` | `, and the flags not combined yet are offered again.
+// Try: type `settype($value, '` to pick one of the type names it accepts.
+
 
 // ── Instance Completion ─────────────────────────────────────────────────────
 
@@ -1454,6 +1460,15 @@ class InArrayNarrowingDemo
 
 class GenericsDemo
 {
+    /** @param Scaffolding\Box<Scaffolding\Pen> $box */
+    public function callableBox(Scaffolding\Box $box): Scaffolding\Pen
+    {
+        $unwrap = [$box, 'unwrap'];
+        // Try completion after $unwrap()->: the result keeps the box's Pen type.
+        $unwrap()->write();
+        return $unwrap();
+    }
+
     /** @param Scaffolding\Box<Scaffolding\Pen>|Scaffolding\Box<Scaffolding\Pencil> $box */
     public function boxedAlternatives(Scaffolding\Box $box): string
     {
@@ -1552,6 +1567,45 @@ class ConstantTableLookupDemo
     }
 }
 
+
+// ── Class Constants Named as Types ──────────────────────────────────────────
+
+class ClassConstantTypeDemo
+{
+    public const PRIORITY_LOW = 'low';
+    public const PRIORITY_HIGH = 'high';
+
+    /**
+     * A docblock type that names class constants stands for the values
+     * they hold, and `PRIORITY_*` for every constant the pattern matches.
+     *
+     * @param self::PRIORITY_* $priority
+     */
+    public function badge(string $priority): string
+    {
+        // Try: hover `$priority` → 'low'|'high'
+        // A case for each constant covers every value, so the method is
+        // not reported for reaching its end without returning.
+        switch ($priority) {
+            case self::PRIORITY_LOW:
+                return 'grey';
+            case self::PRIORITY_HIGH:
+                return 'red';
+        }
+    }
+
+    /** @return self::PRIORITY_HIGH */
+    public function urgent(): string
+    {
+        return self::PRIORITY_HIGH;
+    }
+
+    public function demo(): void
+    {
+        $priority = $this->urgent();               // self::PRIORITY_HIGH → 'high'
+        var_dump($this->badge($priority));
+    }
+}
 
 // ── @implements Generic Resolution ─────────────────────────────────────────
 
@@ -2220,6 +2274,8 @@ class TraitGenericDemo
 
         $idx = new Scaffolding\PenIndex();                    // @use Scaffolding\Indexable<int, Scaffolding\Pen>
         $idx->get()->write();                     // TValue → Scaffolding\Pen
+        $pens = Scaffolding\TypedCollection::make([new Scaffolding\Pen()]);
+        $pens->same()->first()->write();          // Try: after first()->, Pen members survive the trait's self return
     }
 }
 
@@ -3225,7 +3281,7 @@ class InvokeReturnTypeDemo
         }
 
         // Enum from()/tryFrom() chains to instance methods
-        Scaffolding\Status::from('Active')->label();          // from() returns Scaffolding\Status
+        Scaffolding\Status::from('active')->label();         // from() returns Scaffolding\Status
     }
 
     private Scaffolding\ScaffoldingFormatter $formatter;
@@ -4519,7 +4575,7 @@ class ClassFilteringDemo extends Scaffolding\Model implements Scaffolding\Render
 
 function typeHintDemo(Scaffolding\User $user, string $name): string { return $user->displayName . $name; }
 
-function unionDemo(string|int $value, ?Scaffolding\User $maybe): string { return $maybe . $maybe->displayName; }
+function unionDemo(string|int $value, ?Scaffolding\User $maybe): string { return $value . $maybe?->displayName; }
 
 
 // ── $_SERVER Superglobal ────────────────────────────────────────────────────

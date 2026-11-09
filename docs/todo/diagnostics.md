@@ -48,33 +48,6 @@ proxies:
 
 ---
 
-## D15. Unused parameter diagnostic
-
-**Impact: Low · Complexity: Medium**
-
-Flag function and method parameters that are never read inside the
-body. The `unused_variable` diagnostic deliberately skips parameters
-because false positives are common for callbacks, interface
-implementations, and framework conventions (e.g. Laravel event
-listeners) that require specific parameter signatures even when not
-all parameters are used. Users can now silence false positives with
-`// @phpantom-ignore unused_parameter`.
-
-### Scope
-
-1. Function and method parameters (including closures and arrow
-   functions) that are never read inside their body.
-2. Constructor parameters that are not promoted and never read.
-
-### Exclusions
-
-- Parameters named `$_` or starting with `$_` (intentional discard).
-- Promoted constructor parameters (they are property assignments).
-- Parameters in abstract methods and interface method signatures
-  (no body to check).
-
----
-
 ## D16. `unreachable_match_arm` ignores literal subject types
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -102,77 +75,7 @@ now resolves to `mixed` rather than to the surviving literal.
 
 ---
 
-## D17. `docblock_native_mismatch` only judges nullability
-
-**Impact: Low · Complexity: Medium-High**
-
-```php
-/** @param int $name */
-function greet(string $name): void {}    // not flagged: int is not string at all
-
-/** @param Foo $value */
-function take(Bar $value): void {}       // not flagged: `Foo` may alias `Bar`
-```
-
-`src/diagnostics/docblock_native_mismatch.rs` compares a documented type
-against its native hint on one axis only: whether the annotation admits a
-`null` the signature rules out. A documented type that is not a subtype of
-the native hint on any *other* axis (`@param int` on a `string`, `@return
-array` on a `: string`) stays silent. That is the check PHPStan's
-`IncompatiblePhpDocTypeRule` performs, and the one the existing
-`is_type_compatible` in `src/class_lookup/compatibility.rs`
-already has the machinery for.
-
-Covering it means resolving the documented type's bare names first, since a
-`Foo` that a `@template` list or an imported `@psalm-type` alias stands
-behind may well be the native `Bar` after resolution. The nullability axis
-sidesteps that today: a name that resolves to something nullable never
-spells `null` itself, so the check simply does not fire on it.
-
-**Fix:** Resolve the documented type's names against the declaration's own
-`@template` list, the enclosing class's, and the file's
-`@psalm-type`/`@psalm-import-type` tags, then run the comparison through
-`is_type_compatible` rather than the nullability test alone.
-
----
-
-## D18. `array<int, T>` is accepted wherever a `list<T>` is declared
-
-**Impact: Low · Complexity: Medium-High**
-
-```php
-/**
- * @param list<int> $values
- * @return list<int>
- */
-function keep(array $values): array {
-    return array_filter($values, fn ($v) => $v > 3);  // array<int, int>, not flagged
-}
-```
-
-`is_type_compatible` in `src/class_lookup/compatibility.rs`
-carries an explicit MAYBE hatch for `array<int, X>` reaching a `list<X>`
-parameter or return type, on the grounds that PHP codebases spell the two
-interchangeably. The core `is_subtype_of` already rejects the direction
-(only `list<X>` satisfies `array<int, X>`, not the reverse), so the hatch
-is the only thing standing between us and PHPStan's report here.
-
-Now that `array_filter()` reports the `array<int, T>` it actually
-produces, the hatch is what keeps the second half of the over-claim
-alive: a function that hands back an unwrapped filter result still
-passes a declared `list<T>`.
-
-**Fix:** Drop the `array<int, X> → list<X>` arm and audit the corpus
-under `projects/` for what it starts reporting. The arm exists because
-plain `array<int, X>` is what an unannotated array resolves to in many
-places, so retiring it wants the resolver to answer `list<X>` for the
-shapes that genuinely are lists (literal arrays, `array_values()`,
-appended-to locals) first. Pay for it with resolver precision, the same
-way the supertype-where-subtype hatch was retired.
-
----
-
-## D19. `invalid_member_access` cannot tell a property read from a write
+## D19. `inaccessible_member` cannot tell a property read from a write
 
 **Impact: Medium · Complexity: Medium**
 
@@ -237,29 +140,6 @@ a static flag.
 
 ---
 
-## D21. A union of an unreachable and a missing member is reported by neither check
-
-**Impact: Low · Complexity: Medium-High**
-
-`Known|Other` where `Known::$x` is private and `Other` has no `$x` at all
-fails on every runtime branch, and nothing reports it. Both checks are
-conservative in the same direction and each assumes the other covers what
-it declines to judge: the unknown-member check stays silent because the
-member exists on one branch, and the visibility check stays silent
-because it does not exist on the other.
-
-A related gap sits one layer earlier: the resolver hands the diagnostics
-only the branches it could load and drops the rest, so neither check can
-see that a union had a branch it failed to resolve. Any verdict that
-wants to distinguish "no branch permits this" from "we could not read
-one of the branches" needs that information preserved.
-
-**Fix:** Give the branches of a resolved union a verdict of their own —
-accessible, inaccessible, missing, unresolved — instead of collapsing
-them to a list of loaded classes, and decide the union once from those.
-
----
-
 ## D22. Member provenance is recomputed instead of recorded
 
 **Impact: Medium · Complexity: Medium-High**
@@ -272,7 +152,7 @@ declared it.
 
 Every check that needs the declaring class therefore recomputes it by
 walking the raw hierarchy, and every such walk is a partial
-reimplementation of the merge's own rules. `invalid_member_access` has
+reimplementation of the merge's own rules. `inaccessible_member` has
 one, and it is already known to be incomplete: it does not apply
 `trait_aliases`, so a member a `use` clause renamed is untraceable and
 the access goes unreported.
@@ -465,43 +345,6 @@ The extension's fixtures are the `entity_*.fixture` fixtures in
 
 ---
 
-## D33. Private properties nothing reads or writes are not reported
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-final class Invoice
-{
-    private string $legacyNumber; // never read
-    private int $total;           // read, never written
-}
-```
-
-A private property nothing outside the class can reach is dead when the
-class never reads it, and holds only its default when the class never
-writes it. A typed one without a default is already reported by
-`uninitialized_property` when the class never writes it; its write
-bookkeeping in `src/diagnostics/uninitialized_properties.rs` is a starting
-point for the rest. Both are a bug or leftover code more often than not, and PHPStan
-reports them (`property.unused`, `property.onlyRead`, `property.onlyWritten`).
-
-Frameworks read and write properties PHP code does not: Doctrine writes an
-entity's generated identifier and every mapped field when it hydrates, and
-reads them when it flushes; Gedmo writes the fields its attributes mark;
-Symfony writes a `#[Required]` property while autowiring. Those count as
-read and written (PHPStan's Doctrine extension models Doctrine's and
-Gedmo's), or the check flags correct entities.
-
-The Doctrine extension's fixtures are `unused_private_property*.fixture`
-and `gedmo_property_assign*.fixture` in `tests/fixtures/phpstan_doctrine/`.
-
-**Where to look:** the unused-variable check (`src/diagnostics/unused_variables.rs`)
-for the read/write bookkeeping, the Doctrine mapping index in
-`src/framework.rs`, and PHPStan's `UnusedPrivatePropertyRule` with the
-Doctrine extension's `PropertiesExtension`s.
-
----
-
 ## D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties
 
 **Impact: Low · Complexity: Medium**
@@ -517,4 +360,53 @@ same.
 
 **Where to look:** `src/framework.rs` (the Doctrine mapping index, which
 D31 also needs) and `src/diagnostics/uninitialized_properties.rs`.
+
+---
+
+## D50. `unused-parameters` skips methods a subclass can override
+
+**Impact: Low · Complexity: Medium-High**
+
+The opt-in `unused_parameter` diagnostic only judges a public or protected
+method when nothing can override it: a final method, or one in a final
+class, an enum, or an anonymous class. A method in an open class is part
+of a contract, and an override may read the parameter its base ignores
+(a no-op hook such as `protected function boot($app) {}` is the common
+case), so flagging it from the method alone would be wrong.
+
+Psalm's `PossiblyUnusedParam` settles this with the whole program: a
+parameter is unused only when no override of the method reads it either.
+Doing that here needs the project's subclasses of the class, which
+`find_implementors()` can list but only once the workspace index is
+complete, so the answer would change as indexing progresses. A
+deterministic version needs the reverse inheritance index to be complete
+before the diagnostic runs, or a separate workspace-wide pass.
+
+**Where to look:** `src/diagnostics/unused_parameters.rs` (`can_be_overridden`)
+and `src/definition/implementation.rs` (`find_implementors`).
+
+---
+
+## D52. `incompatible_override` only checks a `static` return type
+
+**Impact: Medium · Complexity: Medium-High**
+
+`incompatible_override` reports an override that does not return
+`static` where the parent method does, and nothing else. PHP refuses
+every override whose signature the parent's callers could not use: a
+return type that is not a subtype of the parent's, a parameter type
+narrower than the parent's, a parameter the parent has that the
+override drops, a new required parameter, a narrower visibility, a
+`static` method overriding an instance one or the reverse, and an
+override of a `final` method. All of these are fatal when the class is
+loaded, so all belong under this identifier, which was kept broad so the
+check can grow into them without a rename.
+
+Comparing types needs the subtype check `type_mismatch_*` already uses,
+with the parent's templates substituted the way inheritance merging does,
+and native types only: a docblock that disagrees with the parent is not
+an error PHP raises.
+
+**Where to look:** `src/diagnostics/incompatible_override.rs` and the
+subtype check behind `src/diagnostics/type_errors/`.
 

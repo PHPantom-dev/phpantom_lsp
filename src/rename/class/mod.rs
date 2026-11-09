@@ -110,7 +110,7 @@ impl Backend {
     ///   and in-code references `Alias` are left unchanged.
     /// - **Collision**: if the file already imports a different class with
     ///   the same short name as `NewName`, the renamed import gets an
-    ///   alias (`use Ns\NewName as NewNameAlias;`) and in-code references
+    ///   alias (`use Ns\NewName as NsNewName;`) and in-code references
     ///   are updated to use that alias.
     pub(super) fn build_class_rename_edit(
         &self,
@@ -139,21 +139,12 @@ impl Backend {
             let mut file_edits: Vec<TextEdit> = Vec::new();
             for (file, block_locations) in locations_by_block(&blocks, file_locations) {
                 // A rename adds no import, so there is no alias for one either.
-                let rewrite = file.reference_rewrite(
-                    old_fqn_normalized,
-                    old_short_name,
-                    new_short_name,
-                    None,
-                );
+                let rewrite =
+                    file.reference_rewrite(old_fqn_normalized, old_short_name, &new_fqn, None);
                 // A pure rename never changes the namespace, so the group
                 // prefix (if any) always still fits.
-                let use_statement_edit = file.use_statement_edit(
-                    old_fqn_normalized,
-                    &new_fqn,
-                    new_short_name,
-                    &rewrite,
-                    None,
-                );
+                let use_statement_edit =
+                    file.use_statement_edit(old_fqn_normalized, &new_fqn, &rewrite, None);
 
                 // An inline qualified reference (`\Ns\Foo`, `Sub\Foo`) keeps
                 // its prefix; only the last segment changes.
@@ -210,10 +201,13 @@ impl Backend {
         old_fqn: &str,
         edits: &mut Vec<TextEdit>,
     ) {
-        if !self.is_blade_file(uri) {
+        if !self.is_php_template(uri) {
             return;
         }
         self.translate_template_edits(uri, edits);
+        if !self.is_blade_file(uri) {
+            return;
+        }
         let Some(template) = self.get_file_content(uri) else {
             return;
         };

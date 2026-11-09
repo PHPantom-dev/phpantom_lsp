@@ -329,6 +329,9 @@ fn emit_tag_symbols(tag: &Tag<'_>, docblock: &str, base_offset: u32, sink: &mut 
                     sink.spans,
                 );
             }
+            TagKind::Other if tag.vendor.is_none() => {
+                emit_annotation_symbols(tag, &text.value, docblock, base_offset, sink.spans);
+            }
             _ => {}
         },
         _ => {}
@@ -474,6 +477,98 @@ fn emit_see_tag_symbol(
 
     let offset = text.span.start.offset + (raw.len() - trimmed.len()) as u32;
     emit_see_reference(reference, offset, spans);
+}
+
+/// Emit the class a Doctrine-style annotation (`@ORM\Entity`,
+/// `@Route("/users")`) names, and the classes of the annotations nested in
+/// its arguments (`@ORM\Table(indexes={@ORM\Index(…)})`).
+///
+/// `value` is the tag's argument text, which the PHPDoc grammar keeps as free
+/// text because it does not model the tag.
+fn emit_annotation_symbols(
+    tag: &Tag<'_>,
+    value: &Text<'_>,
+    docblock: &str,
+    base_offset: u32,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let name = crate::atom::bytes_to_str(tag.name.value);
+    if !is_annotation_name(name) {
+        return;
+    }
+    // The identifier's span includes the `@`.
+    let end = tag.name.span.end.offset;
+    spans.push(class_ref_span_ctx(
+        end - name.len() as u32,
+        end,
+        name,
+        ClassRefContext::Annotation,
+    ));
+
+    let start = value.span.start.offset.saturating_sub(base_offset) as usize;
+    let end = (value.span.end.offset.saturating_sub(base_offset) as usize).min(docblock.len());
+    let Some(arguments) = docblock.get(start..end) else {
+        return;
+    };
+    let bytes = arguments.as_bytes();
+    // Only an `@` inside the parentheses, outside a string, and where an
+    // argument value can begin starts a nested annotation.  Doctrine escapes
+    // a quote inside a string by doubling it, which toggling handles.
+    let mut depth = 0u32;
+    let mut in_string = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => in_string = !in_string,
+            _ if in_string => {}
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            b'@' if depth > 0
+                && i.checked_sub(1).is_none_or(|p| {
+                    matches!(bytes[p], b'(' | b'{' | b'[' | b',' | b'=' | b':')
+                        || bytes[p].is_ascii_whitespace()
+                }) =>
+            {
+                let name_start = i + 1;
+                let name_end = bytes[name_start..]
+                    .iter()
+                    .position(|&b| !(b.is_ascii_alphanumeric() || b == b'_' || b == b'\\'))
+                    .map_or(bytes.len(), |n| name_start + n);
+                let name = arguments[name_start..name_end].trim_end_matches('\\');
+                if is_annotation_name(name) {
+                    let file_start = value.span.start.offset + name_start as u32;
+                    spans.push(class_ref_span_ctx(
+                        file_start,
+                        file_start + name.len() as u32,
+                        name,
+                        ClassRefContext::Annotation,
+                    ));
+                }
+                i = name_end;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+/// Whether a docblock tag name can be a Doctrine-style annotation class: a
+/// class name that is qualified or starts with a capital.  The lowercase
+/// tags PHPDoc, PHPUnit and the rest define (`@group`, `@todo`, `@api`) are
+/// not.
+fn is_annotation_name(name: &str) -> bool {
+    let bare = name.strip_prefix('\\').unwrap_or(name);
+    let well_formed = bare.split('\\').all(|segment| {
+        segment
+            .as_bytes()
+            .first()
+            .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_')
+            && segment
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    });
+    well_formed && (bare.contains('\\') || bare.as_bytes()[0].is_ascii_uppercase())
 }
 
 /// Emit the symbols that `@see` tags name in a plain (`//`, `#` or `/* */`)
@@ -999,9 +1094,17 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
         type_ast::Type::Variable(_) => {}
 
         // ── Member / Alias references ───────────────────────────────
-        type_ast::Type::MemberReference(_) | type_ast::Type::AliasReference(_) => {
-            // These are rare PHPStan types — not navigable in our system.
+        // ── Member references (`Foo::class`, `Foo::BAR`, `Foo::*`) ──
+        type_ast::Type::MemberReference(m) => {
+            let id_span = m.kind.span();
+            emit_identifier_span(
+                crate::php_type::reference_kind_name(&m.kind),
+                id_span.start.offset,
+                id_span.end.offset,
+                sink.spans,
+            );
         }
+        type_ast::Type::AliasReference(_) => {}
 
         // ── Keyword types (int, string, bool, void, etc.) ───────────
         // All keyword types are non-navigable *except* `static`, `self`,

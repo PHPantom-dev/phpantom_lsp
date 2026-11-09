@@ -351,7 +351,7 @@ fn check_scope(
                 None => continue,
             };
 
-            let message = format!("Unused variable '{}'", var_name);
+            let message = format!("Unused variable {}", var_name);
 
             ctx.diagnostics.push(make_tagged_diagnostic(
                 range,
@@ -432,7 +432,7 @@ fn check_catch_frame(
             range,
             DiagnosticSeverity::Hint,
             UNUSED_VARIABLE_CODE,
-            format!("Unused variable '{}'", var_name),
+            format!("Unused variable {}", var_name),
             Some(DiagnosticTag::Unnecessary),
         ));
     }

@@ -23,9 +23,12 @@
 //!   those change mid-session.
 //! - [`reindex`] — re-scanning a batch of files that changed on disk, the
 //!   step [`watch`] and [`reconcile`] share.
+//! - [`dormant`] — letting go of the parse of an installed package's file
+//!   once it is indexed, and parsing it again when a search reads it.
 
 use std::path::{Path, PathBuf};
 
+mod dormant;
 mod extra_roots;
 mod init;
 mod library_paths;
@@ -41,7 +44,7 @@ mod watch;
 /// filesystem exposes the same location through an alias.
 pub(crate) fn path_aliases(path: &Path) -> Vec<PathBuf> {
     let mut paths = vec![path.to_path_buf()];
-    if let Ok(canonical) = path.canonicalize()
+    if let Ok(canonical) = dunce::canonicalize(path)
         && canonical != path
     {
         paths.push(canonical);
@@ -107,7 +110,7 @@ mod tests {
         let vendor_paths = path_aliases(&aliased_vendor);
         let class_path = package_src.join("Service.php");
         std::fs::write(&class_path, "<?php").expect("write class file");
-        let class_path = class_path.canonicalize().expect("canonical class path");
+        let class_path = dunce::canonicalize(&class_path).expect("canonical class path");
 
         assert_eq!(
             classify_class_origin(&class_path, &vendor_paths, &[]),
@@ -126,7 +129,7 @@ mod tests {
 
         let vendor_paths = path_aliases(&aliased_vendor);
         let roots = vec![(
-            package_root.canonicalize().expect("canonical package root"),
+            dunce::canonicalize(&package_root).expect("canonical package root"),
             crate::ClassCompletionOrigin::VendorExplicit,
             "acme/package".to_string(),
         )];

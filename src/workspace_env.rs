@@ -31,6 +31,15 @@ pub(crate) struct WorkspaceEnv {
     pub(crate) vendor_uri_prefixes: Mutex<Vec<String>>,
     /// Absolute raw and canonical paths of all known vendor directories.
     pub(crate) vendor_dir_paths: Mutex<Vec<PathBuf>>,
+    /// `file://` URI prefixes of the packages Composer installed outside
+    /// every vendor directory (see [`composer::installed_package_roots`]),
+    /// the union of each project's
+    /// [`ComposerProjectPaths::installed_packages`].
+    ///
+    /// Their files are project code to every feature, but the workspace
+    /// index keeps no parse of one resident (see
+    /// [`Backend::dormant_files`](crate::Backend)).
+    pub(crate) installed_package_uri_prefixes: Mutex<Vec<String>>,
     /// Who registered each entry of `vendor_dir_paths` and
     /// `vendor_uri_prefixes`, which are the union of these.
     ///
@@ -96,14 +105,16 @@ pub(crate) struct WorkspaceEnv {
     pub(crate) client_indexing: Arc<RwLock<config::ClientIndexingOptions>>,
     /// Whether a Composer project of the workspace is a Drupal site, so
     /// `index_filters` treats Drupal's `.module`, `.install`, … files as
-    /// PHP source in every walk, not only in the web-root class scan.
+    /// PHP source in every walk, not only in the web-root class scan, and
+    /// Drupal's own declarations, such as its services, are read (see
+    /// [`crate::drupal`]).
     pub(crate) is_drupal: Arc<AtomicBool>,
     /// The stub directory the editor extension forwarded, beside the
     /// `[stubs]` paths of `config`. Shared by `Arc` for the same reason
     /// `client_indexing` is.
     pub(crate) client_stubs: Arc<RwLock<config::ClientStubOptions>>,
     /// The inlay hint toggles the editor forwarded, beside the
-    /// `[inlay_hints]` section of `config`. Shared by `Arc` for the same
+    /// `[inlay-hints]` section of `config`. Shared by `Arc` for the same
     /// reason `client_indexing` is.
     pub(crate) client_inlay_hints: Arc<RwLock<config::ClientInlayHintOptions>>,
     /// Directory symlinks the workspace walks have indexed through.
@@ -156,10 +167,21 @@ pub(crate) struct ComposerProjectPaths {
     /// Every spelling of the project's vendor directory, or empty when it
     /// has none on disk.
     pub(crate) vendor_paths: Vec<PathBuf>,
+    /// The bin directory of `bamarni/composer-bin-plugin`, when the project
+    /// requires it (see [`composer::bin_namespaces`]).
+    pub(crate) bin_target: Option<PathBuf>,
+    /// The roots of the project's bin namespaces.
+    pub(crate) bin_namespace_roots: Vec<PathBuf>,
+    /// Every spelling of the vendor directories of the project's bin
+    /// namespaces that exist on disk.  They are the project's vendor
+    /// directories as much as `vendor_paths` is.
+    pub(crate) bin_vendor_paths: Vec<PathBuf>,
     /// The packages it installed from outside its vendor directory (see
     /// [`composer::linked_package_roots`]), which can lie in another
     /// project's tree.
     pub(crate) linked_packages: Vec<PathBuf>,
+    /// The subset of `linked_packages` that is not a path repository.
+    pub(crate) installed_packages: Vec<PathBuf>,
     pub(crate) package_roots: Vec<(PathBuf, ClassCompletionOrigin, String)>,
     /// The roots of the stub packages it installed, which are stub paths.
     pub(crate) stub_packages: Vec<PathBuf>,
@@ -190,6 +212,7 @@ impl WorkspaceEnv {
             psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
             vendor_dir_paths: Mutex::new(Vec::new()),
+            installed_package_uri_prefixes: Mutex::new(Vec::new()),
             library_claims: Mutex::new(Vec::new()),
             vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             composer_projects: Arc::new(RwLock::new(Vec::new())),
@@ -238,6 +261,9 @@ impl Clone for WorkspaceEnv {
             psr4_mappings: Arc::clone(&self.psr4_mappings),
             vendor_uri_prefixes: Mutex::new(self.vendor_uri_prefixes.lock().clone()),
             vendor_dir_paths: Mutex::new(self.vendor_dir_paths.lock().clone()),
+            installed_package_uri_prefixes: Mutex::new(
+                self.installed_package_uri_prefixes.lock().clone(),
+            ),
             library_claims: Mutex::new(self.library_claims.lock().clone()),
             vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
             composer_projects: Arc::clone(&self.composer_projects),

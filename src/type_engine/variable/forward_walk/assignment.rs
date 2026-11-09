@@ -682,7 +682,13 @@ pub(crate) fn process_compound_assignment<'b>(
                 resolve_rhs_with_scope(assignment.lhs, scope, ctx),
                 resolve_rhs_with_scope(assignment.rhs, scope, ctx),
             );
-            super::array_assignment::process_array_key_write(array_access, combined, scope, ctx);
+            super::array_assignment::process_array_key_write(
+                array_access,
+                combined,
+                false,
+                scope,
+                ctx,
+            );
             return;
         }
         // `$this->regexp ??= $this->generate();` leaves the property
@@ -709,6 +715,7 @@ pub(crate) fn process_compound_assignment<'b>(
                 super::array_assignment::process_array_key_write(
                     array_access,
                     vec![ResolvedType::from_type_string(result_type)],
+                    false,
                     scope,
                     ctx,
                 );
@@ -888,7 +895,17 @@ pub(crate) fn resolve_rhs_with_types<'b>(
     // common patterns where the result type depends only on the
     // expression kind, not on the operand types.
 
-    // Type casts (`(int) $x`), `!`, `~`, and the signs `-`/`+`.
+    // Type casts (`(int) $x`), `!`, `~`, and the signs `-`/`+`.  A cast a
+    // check narrowed earlier (`(int) $x` after `ctype_digit($x)`) reads
+    // the entry the check left under the cast's key instead.
+    if let Expression::UnaryPrefix(prefix) = rhs
+        && prefix.operator.is_cast()
+        && let Some(key) = crate::type_engine::type_ops::condition_facts::expr_to_subject_key(rhs)
+        && let narrowed = scope.get(&key)
+        && !narrowed.is_empty()
+    {
+        return narrowed.to_vec();
+    }
     if let Expression::UnaryPrefix(prefix) = rhs
         && let Some(ty) = super::super::rhs_resolution::unary_prefix_result_type(
             &prefix.operator,
@@ -960,6 +977,32 @@ pub(crate) fn seed_superglobals(scope: &mut ScopeState) {
     for name in crate::scope_collector::AUTO_GLOBALS {
         scope.set(name, array_type.clone());
     }
+}
+
+/// Seed what a file's top level starts with: the superglobals, and the
+/// variables whatever runs the file hands it (see
+/// [`handed_variable_type`]).
+pub(crate) fn seed_top_level(scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    seed_superglobals(scope);
+    if let Some(ty) = handed_variable_type(YII_PARAMS, ctx) {
+        scope.set(YII_PARAMS, vec![ResolvedType::from_type_string(ty)]);
+    }
+}
+
+/// The variable `yiisoft/config` hands a Yii configuration file the merged
+/// params in.
+const YII_PARAMS: &str = "$params";
+
+/// The type of the variable `name` that whatever runs the file being walked
+/// hands its top level, when that is known: the `$params` `yiisoft/config`
+/// hands a Yii configuration file.
+pub(crate) fn handed_variable_type(name: &str, ctx: &ForwardWalkCtx<'_>) -> Option<PhpType> {
+    if name != YII_PARAMS || memchr::memmem::find(ctx.file.content.as_bytes(), b"$params").is_none()
+    {
+        return None;
+    }
+    let backend = ctx.file.backend?;
+    backend.yii_params_type(ctx.file.uri?)
 }
 
 #[cfg(test)]

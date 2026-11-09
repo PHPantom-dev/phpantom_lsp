@@ -1,12 +1,15 @@
 // test: DQL strings that do not parse or name unknown fields and classes
 // feature: diagnostics
 // Ported from PHPStan's Doctrine extension, DqlRuleTest::testRule.
-// PHPantom has no check this rule corresponds to yet, so no code is compared.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/dql.php
-// expect_diagnostic: 35: DQL: [Syntax Error] line 0, col -1: Error: Expected Doctrine\ORM\Query\TokenType::T_IDENTIFIER, got end of string. // SKIP: DQL and query builder strings are not checked
-// expect_diagnostic: 42: DQL: [Semantical Error] line 0, col 60 near 'transient = ': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named transient // SKIP: DQL and query builder strings are not checked
-// expect_diagnostic: 49: DQL: [Semantical Error] line 0, col 14 near 'Foo e': Error: Class 'Foo' is not defined. // SKIP: DQL and query builder strings are not checked
-// expect_diagnostic: 56: DQL: [Semantical Error] line 0, col 17 near 'Foo': Error: Class 'Foo' is not defined. // SKIP: DQL and query builder strings are not checked
-// expect_diagnostic: 64: DQL: [Semantical Error] line 0, col 17 near 'Foo': Error: Class 'Foo' is not defined. // SKIP: DQL and query builder strings are not checked
+// codes: unknown_class, invalid_doctrine_field, invalid_dql_syntax
+// PHPantom reports a name on the line its string spells it, where upstream reports the line the call starts on.
+// expect_diagnostic: 36: DQL expects an identification variable, got end of string
+// expect_diagnostic: 43: Field 'transient' is not mapped on entity PHPStan\Rules\Doctrine\ORM\MyEntity
+// expect_diagnostic: 50: Class Foo not found
+// expect_diagnostic: 56: DQL expects an identification variable, got end of string
+// expect_diagnostic: 57: Class Foo not found
+// expect_diagnostic: 64: DQL expects an identification variable, got end of string
+// expect_diagnostic: 65: Class Foo not found
 ---

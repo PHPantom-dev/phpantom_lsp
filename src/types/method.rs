@@ -114,7 +114,7 @@ pub struct MethodInfo {
     /// its result away is reported.  PHP does not inherit the attribute:
     /// an override without it may be called for its effect alone.
     pub is_no_discard: bool,
-    /// Docblock-derived data that most methods leave empty (`@return`
+    /// Metadata that most methods leave empty (`@return`
     /// descriptions, links, deprecation, method-level templates, `@throws`,
     /// assertions, conditional and `$this`-narrowing types).
     ///
@@ -131,6 +131,8 @@ pub struct MethodInfo {
 /// pointer instead of the inline fields.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MethodExtras {
+    /// Whether a modern Eloquent `Attribute` return declares a setter.
+    pub has_attribute_setter: bool,
     /// Human-readable description extracted from the `@return` tag.
     ///
     /// For `@return list<User> The active users`, this would be
@@ -235,12 +237,42 @@ pub struct MethodExtras {
     /// arguments) are substituted into this type before it replaces the
     /// receiver's tracked type.
     pub self_out: Option<PhpType>,
+    /// The relations a Yii Active Record's `relationQuery()` declares: one
+    /// per string condition of the `match` on its parameter that it
+    /// returns (see [`crate::yii::active_record`]).  `None` on every other
+    /// method, and on a `relationQuery()` whose body says something else,
+    /// or whose `default` arm takes names of its own, so that the names it
+    /// accepts are not known.
+    pub record_relations: Option<Box<[RecordRelation]>>,
+    /// The table a Yii Active Record's `tableName()` names, when it
+    /// returns a string literal (see [`crate::yii::active_record`]).
+    pub record_table: Option<Atom>,
+    /// The namespace the method is declared in, kept only when a
+    /// parameter's default names a constant by an unqualified name: that
+    /// is the namespace's constant when one is declared and the global one
+    /// otherwise, which is decided where the default is read.
+    pub default_namespace: Option<Atom>,
+}
+
+/// A relation a Yii Active Record's `relationQuery()` declares with an arm
+/// of its `match`: `'author' => $this->hasOne(User::class, …)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordRelation {
+    /// The relation's name, the arm's condition.
+    pub name: Atom,
+    /// Where the name starts in the file, inside the quotes.
+    pub offset: u32,
+    /// The record class the arm's query is built for, fully qualified,
+    /// when the arm builds it with `hasOne()` or `hasMany()` given a
+    /// `::class`.
+    pub related: Option<Atom>,
 }
 
 impl MethodExtras {
     /// Whether every field is empty, i.e. the method needs no extras box.
     pub fn is_empty(&self) -> bool {
-        self.return_description.is_none()
+        !self.has_attribute_setter
+            && self.return_description.is_none()
             && self.links.is_empty()
             && self.see_refs.is_empty()
             && self.conditional_return.is_none()
@@ -255,6 +287,9 @@ impl MethodExtras {
             && self.throws.is_empty()
             && self.if_this_is.is_none()
             && self.self_out.is_none()
+            && self.record_relations.is_none()
+            && self.record_table.is_none()
+            && self.default_namespace.is_none()
     }
 
     /// Box `self` for [`MethodInfo::extras`], or `None` when it is empty.
@@ -318,6 +353,13 @@ impl MethodInfo {
     /// avoided.
     pub fn extras_mut(&mut self) -> &mut MethodExtras {
         self.extras.get_or_insert_with(Default::default)
+    }
+
+    /// The namespace the parameters' defaults were written in, when one
+    /// of them names a constant by an unqualified name (see
+    /// [`MethodExtras::default_namespace`]).
+    pub fn default_namespace(&self) -> Option<&str> {
+        self.extras.as_ref()?.default_namespace.as_deref()
     }
 
     /// The `@return` tag's description text.

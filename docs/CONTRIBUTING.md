@@ -22,17 +22,23 @@ php -l examples/laravel/app/Demo.php
 find examples/symfony/src examples/symfony/config -name '*.php' -print0 | xargs -0 -n1 php -l
 find examples/yii/src examples/yii/config examples/yii/resources -name '*.php' -print0 | xargs -0 -n1 php -l
 find examples/wordpress/wp-content -name '*.php' -print0 | xargs -0 -n1 php -l
+find examples/drupal/web/modules/custom examples/drupal/web/themes/custom -type f \( -name '*.php' -o -name '*.module' -o -name '*.theme' \) -print0 | xargs -0 -n1 php -l
 php examples/laravel/assertions.php
 php examples/symfony/assertions.php
 php examples/yii/assertions.php
 php examples/wordpress/assertions.php
+php examples/drupal/assertions.php
+find examples/tempest/app examples/tempest/resources examples/tempest/ui -name '*.php' -print0 | xargs -0 -n1 php -l
+php examples/tempest/assertions.php
 phpantom_lsp analyze --project-root examples/laravel --no-colour
 phpantom_lsp analyze --project-root examples/symfony --no-colour
 phpantom_lsp analyze --project-root examples/yii --no-colour
 phpantom_lsp analyze --project-root examples/wordpress --no-colour
+phpantom_lsp analyze --project-root examples/drupal --no-colour
+phpantom_lsp analyze --project-root examples/tempest --no-colour
 ```
 
-Note that clippy runs twice, once for library code and once including test code. The `php -l` checks keep the PHP and framework playgrounds valid. The `php -d zend.assertions=1` run executes `assertions.php`'s `runDemoAssertions()` to verify that `scaffolding/scaffolding.php`'s stubs actually return what their docblocks claim. Each framework playground has an `assertions.php` of its own that checks the demo against the real framework: the Laravel one boots Eloquent on an in-memory database, the Symfony one loads the routes, services, translations, templates, forms, and validation mappings with Symfony's own loaders, the Yii one builds the configuration and DI container the way Yii's web runner does, and the WordPress one installs WordPress into a throwaway SQLite database and loads the demo plugin and theme. The framework `assertions.php` and `phpantom_lsp analyze` runs need `composer install` in each playground first; the `analyze` runs check the playgrounds for diagnostic regressions. `examples/symfony/`, `examples/yii/` and `examples/wordpress/` must report `[OK] No errors`. In `examples/laravel/`, `app/Demo.php` carries three deliberate mistakes: `Artisan::call('does:not-exist')` demonstrates `invalid_laravel_command`, and one `view('welcome', …)` call both leaves out a variable the template declares and passes a misspelled key, demonstrating `missing_view_variable` and `unused_view_variable`. So the analyze run must report exactly `[ERROR] Found 3 errors` on those two lines, not `[OK] No errors`; any other count, or an error on a different line, is a regression.
+Note that clippy runs twice, once for library code and once including test code. The `php -l` checks keep the PHP and framework playgrounds valid. The `php -d zend.assertions=1` run executes `assertions.php`'s `runDemoAssertions()` to verify that `scaffolding/scaffolding.php`'s stubs actually return what their docblocks claim. Each framework playground has an `assertions.php` of its own that checks the demo against the real framework: the Laravel one boots Eloquent on an in-memory database, the Symfony one loads the routes, services, translations, templates, forms, and validation mappings with Symfony's own loaders, the Yii one builds the configuration and DI container the way Yii's web runner does, the WordPress one installs WordPress into a throwaway SQLite database and loads the demo plugin and theme, the Tempest one renders its views and components with the framework renderer, and the Drupal one reads the demo's services, routes, entity type, hooks, permissions, configuration, theme hooks, render elements, and libraries with Drupal's own loaders and reflection. The framework `assertions.php` and `phpantom_lsp analyze` runs need `composer install` in each playground first; the `analyze` runs check the playgrounds for diagnostic regressions. `examples/symfony/`, `examples/yii/`, `examples/wordpress/`, `examples/drupal/` and `examples/tempest/` must report `[OK] No errors`. In `examples/laravel/`, `app/Demo.php` carries four deliberate mistakes: `Artisan::call('does:not-exist')` demonstrates `invalid_laravel_command`, `->withoutMiddleware('bakery.closed')` demonstrates `invalid_laravel_middleware`, and one `view('welcome', …)` call both leaves out a variable the template declares and passes a misspelled key, demonstrating `missing_blade_variable` and `unused_blade_variable`. So the analyze run must report exactly `[ERROR] Found 4 errors` on those three lines, not `[OK] No errors`; any other count, or an error on a different line, is a regression.
 
 ## Code Style
 
@@ -51,31 +57,45 @@ reports are uploaded together to Codecov. To reproduce one shard locally
 cargo llvm-cov nextest --partition hash:1/6 --lcov --output-path lcov.info
 ```
 
-PR latency benchmarks build once, then distribute the discovered benchmark
-cases across four runners. Each runner measures its cases sequentially with
-Criterion's usual sampling settings. The `Benchmark (PR comparison)` check
-compares the combined results only after every shard passes and every case
-is accounted for. To reproduce a shard locally from the repository root:
+PR latency benchmarks build the base and PR revisions with the same toolchain
+and settings, then distribute the cases across four runners. Each runner
+runs both revisions sequentially with Criterion's usual sampling settings
+and each revision's own fixtures. One shared assignment
+keeps matching cases on the same runner even when a PR adds benchmarks.
+The `Benchmark (PR comparison)` check compares the paired results only after
+every shard passes and every case is accounted for. New cases are reported
+without a baseline; removed cases are listed explicitly. Main-branch
+measurements continue to populate the historical dashboard.
+
+To reproduce a paired shard locally from the repository root, replace
+`BASE_COMMIT` with the PR's base revision:
 
 ```bash
-cargo bench --bench completion --bench references --bench laravel_completion \
-  --bench custom_builder --bench symfony_completion --bench yii_completion \
-  --bench wordpress_completion \
-  --no-run --message-format=json > /tmp/benchmark-build.jsonl
+benchmark_root="$PWD"
+git worktree add --detach /tmp/phpantom-bench-base BASE_COMMIT
+cargo bench --locked --manifest-path /tmp/phpantom-bench-base/Cargo.toml \
+  --bench '*' --no-run --message-format=json > /tmp/baseline-build.jsonl
+(
+  cd /tmp/phpantom-bench-base
+  python3 "$benchmark_root/benches/ci_benchmarks.py" prepare \
+    --build-dir /tmp/phpantom-baseline --shards 1 < /tmp/baseline-build.jsonl
+)
+cargo bench --locked --bench '*' --no-run --message-format=json > /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py prepare --build-dir /tmp/phpantom-benchmarks \
-  --shards 4 < /tmp/benchmark-build.jsonl
+  --shards 4 --baseline-dir /tmp/phpantom-baseline < /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py run --build-dir /tmp/phpantom-benchmarks \
-  --shard 1 --output /tmp/shard-1.json
+  --baseline-source /tmp/phpantom-bench-base --shard 1 --output /tmp/shard-1.json
 ```
 
 CI uses static musl binaries; these commands use your local Cargo target.
-Run the sharding helper's tests with
-`python3 -m unittest discover -s benches -p 'test_ci_benchmarks.py'`.
+Run the benchmark helpers' tests with
+`python3 -m unittest discover -s benches -p 'test_*.py'`.
 
 Latency and memory benchmark comparisons appear in the job summaries.
-A regression over 30% fails the comparison check. Alerts also leave a PR
-comment for same-repository PRs, except Dependabot runs; fork and Dependabot
-PRs use the summaries so they do not need permission to post a review.
+A regression over 30% fails the comparison check. Latency compares the raw
+paired measurements and reports both timings and their ratio. Memory alerts
+also leave a PR comment for same-repository PRs, except Dependabot runs;
+fork and Dependabot PRs use the summaries.
 
 - Integration tests go in `tests/integration/`, one file per feature area (`completion_*.rs`, `definition_*.rs`, `code_action_*.rs`, ...)
 - Use `create_test_backend()` from `tests/integration/common/mod.rs` for same-file tests
@@ -104,6 +124,22 @@ Example:
 ```markdown
 - **`analyze` takes more than one path.** `phpantom_lsp analyze app/ lib/Helper.php tests/` checks everything named, so a pre-commit hook or CI step can pass only the changed files.
 ```
+
+## Diagnostic messages
+
+A diagnostic's message is the text users read most, in the editor and in CI logs, so every check writes it the same way. Where PHP itself reports the same mistake at runtime, use PHP's wording (`Cannot instantiate interface App\Shape`, `Undefined variable $total`).
+
+- Write one sentence that starts with a capital letter and has no final period. PHP's short form also counts: an adjective, the kind, and the name (`Unused import App\Models\User`, `Unknown middleware 'auth.admin'`). Don't write a label and a colon (`Dead catch: …`), and don't start with a name, a `$`, or an `@`; lead with its kind instead (`Method …`, `Directive @if …`).
+- Write a name the way PHP code spells it, without quotes: classes fully qualified and without a leading backslash (`App\Models\User`), functions with `()` (`App\helper()`), and members on their class whenever it is known: `User::save()`, `User::$name`, `User::MAX`. Variables and parameters keep their `$`.
+- Call each kind of thing by its name: a constant is a constant, not a member. When two checks report the same fact, they use the same words.
+- Put a value written in the code as a string in single quotes, the way PHP writes the literal: route, view, config, and translation keys, array keys, option names (`Unknown view 'emails.welcome'`). A token from a parser goes in single quotes too (`Unexpected token '}'`).
+- Write types the way a docblock does, without quotes (`int`, `array<string, User>`, `?string`).
+- Report a type mismatch as `… expects X, got Y`, with what was expected first: `Argument 1 ($id) expects int, got string`, `Property App\User::$name expects string, got null`, `Return expects int, got string`. Extra detail goes in parentheses at the end.
+- Add a clause that says what to do only when there is one obvious fix, after a semicolon: `Readonly property App\Point::$x is never initialized; assign it in the constructor`.
+- Say what is wrong in plain words rather than the vocabulary of the PHP RFCs (`Nothing in the try block throws App\NotFound`, not `Dead catch`). No em-dashes.
+- Text quoted from the user's code, such as the reason in an `@deprecated` tag, follows a colon as written, without its final period. Messages from PHPStan, PHPCS, PHPMD, and Mago are passed on as the tool wrote them.
+
+The [Diagnostics Reference](diagnostics.md) lists every identifier; a new check adds its row there.
 
 ## Documentation
 

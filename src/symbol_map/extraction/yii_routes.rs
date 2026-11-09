@@ -21,6 +21,7 @@ use crate::virtual_members::laravel::helpers::{
 };
 use crate::yii::routes::{
     handler_key, is_route_argument_attribute, path_placeholders, route_argument_key,
+    url_argument_key,
 };
 
 const ROUTE: &str = "Yiisoft\\Router\\Route";
@@ -381,6 +382,45 @@ pub(in crate::symbol_map::extraction) fn emit_yii_route_argument_spans(
     }
 }
 
+/// Record the route arguments a URL generator's `generate()` or
+/// `generateAbsolute()` passes after the route name it reads, each keyed by
+/// the route as well as the name, for the type engine to confirm against
+/// its receiver like the name.
+pub(in crate::symbol_map::extraction) fn record_yii_url_argument_sites(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.yii
+        || !(member_name.eq_ignore_ascii_case("generate")
+            || member_name.eq_ignore_ascii_case("generateAbsolute"))
+    {
+        return;
+    }
+    // The route name is read only when it is written first, as the
+    // receiver's own sites read it.
+    let Some(Argument::Positional(route)) = argument_list.arguments.first() else {
+        return;
+    };
+    let Some((route, _, _)) = resolved_string_literal(route.value, ctx.content) else {
+        return;
+    };
+    let Some(arguments) = argument_at(argument_list, 1, b"arguments") else {
+        return;
+    };
+    for (name, start, end) in parameter_keys(arguments, ctx.content) {
+        ctx.typed_receiver_sites.push(TypedReceiverSite {
+            start,
+            end,
+            key: url_argument_key(route, name),
+            is_write: false,
+            is_optional: false,
+            guards: 0,
+            receiver: ReceiverClass::YiiUrlArguments,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap};
@@ -395,8 +435,15 @@ mod tests {
             program,
             php,
             &names,
-            false,
-            false,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: false,
+                twig: false,
+                doctrine: false,
+                yii_params: false,
+                tempest: false,
+            },
             Some(std::path::Path::new("/p")),
         )
     }
@@ -530,13 +577,23 @@ final class Action
 
     #[test]
     fn url_generator_calls_are_recorded_for_the_type_engine() {
-        let php = "<?php\n$urls->generate('home', ['id' => 1]);\n$urls->generateAbsolute('blog/index');\n$urls->generateFromCurrent([], [], null, 'home');\n";
+        use crate::symbol_map::ReceiverClass::{UrlGenerator, YiiUrlArguments};
+        let php = "<?php\n$urls->generate('home', ['id' => 1, 0 => 'x']);\n$urls->generateAbsolute('blog/index', arguments: ['page' => 2]);\n$urls->generateFromCurrent(['id' => 1], [], null, 'home');\n";
         let map = map_of(php);
-        let sites: Vec<&str> = map
+        let sites: Vec<_> = map
             .typed_receiver_sites
             .iter()
-            .map(|site| site.key.as_str())
+            .map(|site| (site.key.as_str(), site.receiver))
             .collect();
-        assert_eq!(sites, vec!["home", "blog/index", "home"]);
+        assert_eq!(
+            sites,
+            vec![
+                ("home", UrlGenerator),
+                ("home#id", YiiUrlArguments),
+                ("blog/index", UrlGenerator),
+                ("blog/index#page", YiiUrlArguments),
+                ("home", UrlGenerator),
+            ]
+        );
     }
 }

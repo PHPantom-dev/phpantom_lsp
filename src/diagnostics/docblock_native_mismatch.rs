@@ -22,6 +22,12 @@
 //! /** @param non-empty-string $name */
 //! function greet(?string $name): void {}   // reads as `non-empty-string|null`
 //! ```
+//!
+//! The one exception is a tag that repeats the hint and only drops its
+//! `null` (`@param string` on `?string`).  It says nothing the hint does not,
+//! so it reads as an incomplete copy of it, and PhpStorm users expect it
+//! pointed out.  That gets a `Hint` on the tag, which the "Update docblock"
+//! action completes.  The engine still reads the type as `string|null`.
 
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
@@ -37,23 +43,37 @@ use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::docblock::parser::{TagInfo, parse_docblock_for_tags};
 use crate::docblock::{
-    DocblockInfo, extract_param_raw_type_from_info, extract_return_type_from_info,
-    get_docblock_info_for_node,
+    DocblockInfo, TagKind, extract_param_raw_type_from_info, extract_return_type_from_info,
+    sanitise_and_parse_docblock_type,
 };
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
+use crate::symbol_map::docblock::get_docblock_text_with_offset;
 
 use super::helpers::make_diagnostic;
 
 /// Diagnostic code used for docblock/native type-hint contradictions.
 pub(crate) const DOCBLOCK_NATIVE_MISMATCH_CODE: &str = "docblock_native_mismatch";
 
+/// Diagnostic code used for a docblock type that copies its nullable hint
+/// but leaves out the `null`.
+pub(crate) const DOCBLOCK_MISSING_NULL_CODE: &str = "docblock_missing_null";
+
 /// One flagged annotation: the source range to underline and the message.
 struct Finding {
     start: usize,
     end: usize,
+    kind: FindingKind,
     message: String,
+}
+
+enum FindingKind {
+    /// The docblock admits a `null` the native hint rules out.
+    Mismatch,
+    /// The docblock copies a nullable hint without its `null`.
+    MissingNull,
 }
 
 /// The program trivia and source text needed to look up a node's docblock.
@@ -63,8 +83,9 @@ struct Ctx<'a> {
 }
 
 impl Backend {
-    /// Flag every `@param`/`@return` annotation that denies `null` where the
-    /// native type hint it annotates admits it.
+    /// Flag every `@param`/`@return` annotation that admits `null` where the
+    /// native type hint it annotates denies it, and hint at every one that
+    /// copies a nullable hint but leaves out its `null`.
     pub fn collect_docblock_native_mismatch_diagnostics(
         &self,
         uri: &str,
@@ -87,12 +108,15 @@ impl Backend {
             if let Some(range) =
                 self.offset_range_to_lsp_range(uri, content, finding.start, finding.end)
             {
-                out.push(make_diagnostic(
-                    range,
-                    DiagnosticSeverity::Warning,
-                    DOCBLOCK_NATIVE_MISMATCH_CODE,
-                    finding.message,
-                ));
+                let (severity, code) = match finding.kind {
+                    FindingKind::Mismatch => {
+                        (DiagnosticSeverity::Warning, DOCBLOCK_NATIVE_MISMATCH_CODE)
+                    }
+                    FindingKind::MissingNull => {
+                        (DiagnosticSeverity::Hint, DOCBLOCK_MISSING_NULL_CODE)
+                    }
+                };
+                out.push(make_diagnostic(range, severity, code, finding.message));
             }
         }
     }
@@ -156,9 +180,14 @@ fn check_declaration(
     ctx: &Ctx<'_>,
     out: &mut Vec<Finding>,
 ) {
-    let Some(info) = get_docblock_info_for_node(ctx.trivia, ctx.content, node) else {
+    let Some((text, docblock_start)) = get_docblock_text_with_offset(ctx.trivia, ctx.content, node)
+    else {
         return;
     };
+    let Some(info) = parse_docblock_for_tags(text) else {
+        return;
+    };
+    let docblock_start = docblock_start as usize;
 
     for param in parameters.parameters.iter() {
         let Some(hint) = param.hint.as_ref() else {
@@ -176,6 +205,24 @@ fn check_declaration(
         {
             native = native.or_null();
         }
+        // Measured against the hint as written: a hint made nullable only by
+        // its `= null` default never spelled the `null` a tag could copy.
+        if let Some(tag) = plain_tag(&info, TagKind::Param, Some(name))
+            && let Some(written) = tag_type(tag)
+        {
+            let hint_type = extract_hint_type(hint);
+            if written.omits_only_null_of(&hint_type) {
+                out.push(missing_null_finding(
+                    tag,
+                    docblock_start,
+                    format!(
+                        "Documented type {} for {} leaves out the null its native type {} allows",
+                        written, name, hint_type
+                    ),
+                ));
+            }
+        }
+
         let Some(documented) = extract_param_raw_type_from_info(&info, name) else {
             continue;
         };
@@ -185,14 +232,46 @@ fn check_declaration(
         out.push(Finding {
             start: hint.span().start.offset as usize,
             end: param.variable.span.end.offset as usize,
+            kind: FindingKind::Mismatch,
             message: format!(
-                "Documented type '{}' for {} accepts null, but the native type hint '{}' does not",
+                "Documented type {} for {} accepts null, but its native type {} does not",
                 documented, name, native
             ),
         });
     }
 
-    check_return(&info, return_type_hint, out);
+    check_return(&info, docblock_start, return_type_hint, out);
+}
+
+/// The last unprefixed tag of `kind` (naming `variable`, when given).
+///
+/// Only the plain spelling counts for the missing-`null` hint: it is the one
+/// PhpStorm compares against the signature and the one "Update docblock"
+/// rewrites, while a `@phpstan-param` beside it is free to refine.
+fn plain_tag<'a>(
+    info: &'a DocblockInfo,
+    kind: TagKind,
+    variable: Option<&str>,
+) -> Option<&'a TagInfo> {
+    info.tags_by_kind(kind)
+        .filter(|tag| tag.vendor.is_none())
+        .filter(|tag| variable.is_none_or(|name| tag.variable().as_deref() == Some(name)))
+        .last()
+}
+
+fn tag_type(tag: &TagInfo) -> Option<PhpType> {
+    sanitise_and_parse_docblock_type(&tag.type_text()?)
+}
+
+/// A missing-`null` finding underlining the tag, whose spans are relative
+/// to the docblock that starts at `docblock_start`.
+fn missing_null_finding(tag: &TagInfo, docblock_start: usize, message: String) -> Finding {
+    Finding {
+        start: docblock_start + tag.span.start.offset as usize,
+        end: docblock_start + tag.span.end.offset as usize,
+        kind: FindingKind::MissingNull,
+        message,
+    }
 }
 
 /// Whether a parameter's default value is the literal `null`.
@@ -205,6 +284,7 @@ fn default_is_null(default: &FunctionLikeParameterDefaultValue<'_>, content: &st
 
 fn check_return(
     info: &DocblockInfo,
+    docblock_start: usize,
     return_type_hint: Option<&FunctionLikeReturnTypeHint<'_>>,
     out: &mut Vec<Finding>,
 ) {
@@ -212,6 +292,19 @@ fn check_return(
         return;
     };
     let native = extract_hint_type(&hint.hint);
+    if let Some(tag) = plain_tag(info, TagKind::Return, None)
+        && let Some(written) = tag_type(tag)
+        && written.omits_only_null_of(&native)
+    {
+        out.push(missing_null_finding(
+            tag,
+            docblock_start,
+            format!(
+                "Documented return type {} leaves out the null its native type {} allows",
+                written, native
+            ),
+        ));
+    }
     let Some(documented) = extract_return_type_from_info(info) else {
         return;
     };
@@ -222,8 +315,9 @@ fn check_return(
     out.push(Finding {
         start: span.start.offset as usize,
         end: span.end.offset as usize,
+        kind: FindingKind::Mismatch,
         message: format!(
-            "Documented return type '{}' accepts null, but the native type hint '{}' does not",
+            "Documented return type {} accepts null, but its native type {} does not",
             documented, native
         ),
     });

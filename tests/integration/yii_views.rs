@@ -1,7 +1,9 @@
 //! Yii view names: a name a renderer resolves against the view path its
 //! class gives it, a path built from `__DIR__`, and a view rendered from
 //! inside a template, each navigating to its template, completing from the
-//! template directory, and reported when no template is there.
+//! template directory, and reported when no template is there.  A layout
+//! is named the same way, and a view path is reported when no directory is
+//! there.
 use crate::common::{
     completion_response, hover_response, hover_text, initialize_with_options, message_text,
     offset_position, open_document, response_labels,
@@ -29,6 +31,7 @@ final class WebViewRenderer
 {
     public function withViewPath(string $viewPath): self { return $this; }
     public function withController(object $controller): self { return $this; }
+    public function withLayout(?string $layout): self { return $this; }
     public function render(string $view, array $parameters = []): object { return $this; }
     public function renderPartial(string $view, array $parameters = []): object { return $this; }
 }
@@ -56,6 +59,7 @@ const ALIASES_PHP: &str = r#"<?php
 return [
     '@root' => dirname(__DIR__, 2),
     '@views' => '@root/resources/views',
+    '@layout' => '@views/layout',
 ];
 "#;
 
@@ -127,6 +131,32 @@ final class Action
 }
 "#;
 
+const LAYOUT_CONTROLLER_PHP: &str = r#"<?php
+namespace App\Web\Blog;
+
+use Yiisoft\Yii\View\Renderer\WebViewRenderer;
+
+final class LayoutController
+{
+    public function __construct(private WebViewRenderer $viewRenderer) {}
+
+    public function aliased(): object
+    {
+        return $this->viewRenderer->withLayout('@layout/main');
+    }
+
+    public function relative(): object
+    {
+        return $this->viewRenderer->withViewPath('@views/blog')->withLayout('admin/edit');
+    }
+
+    public function missing(): object
+    {
+        return $this->viewRenderer->withViewPath('@views/blogg')->withLayout('@layout/mainn');
+    }
+}
+"#;
+
 const INDEX_PHP: &str = r#"<?php
 /** @var \Yiisoft\View\WebView $this */
 echo $this->render('_card');
@@ -144,6 +174,8 @@ fn files() -> Vec<(&'static str, &'static str)> {
         ("src/Web/Blog/PostController.php", POST_CONTROLLER_PHP),
         ("src/Web/Shop/ShopController.php", SHOP_CONTROLLER_PHP),
         ("src/Web/HomePage/Action.php", ACTION_PHP),
+        ("src/Web/Blog/LayoutController.php", LAYOUT_CONTROLLER_PHP),
+        ("resources/views/layout/main.php", "<?= $content ?>\n"),
         ("src/Web/HomePage/template.php", "<h1>Hello</h1>\n"),
         ("resources/views/blog/index.php", INDEX_PHP),
         ("resources/views/blog/_card.php", "<article></article>\n"),
@@ -161,7 +193,7 @@ async fn workspace(open: &[&str]) -> (Backend, tempfile::TempDir) {
         std::fs::write(&full, content).unwrap();
     }
     let backend = Backend::new_test();
-    initialize_with_options(&backend, dir.path(), None).await;
+    initialize_with_options(&backend, &dunce::canonicalize(dir.path()).unwrap(), None).await;
     for path in open {
         open_document(&backend, &uri_for(&dir, path), "php", content_of(path)).await;
     }
@@ -177,7 +209,10 @@ fn content_of(path: &str) -> &'static str {
 }
 
 fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
-    Uri::from_file_path(dir.path().join(rel)).unwrap()
+    let path = dir.path().join(rel);
+    let path = dunce::canonicalize(&path)
+        .unwrap_or_else(|_| dunce::canonicalize(dir.path()).unwrap().join(rel));
+    Uri::from_file_path(path).unwrap()
 }
 
 /// The position `inside` bytes into the first occurrence of `needle`.
@@ -274,6 +309,31 @@ async fn each_way_of_naming_a_view_resolves_to_its_template() {
     assert!(found.is_empty(), "{found:?}");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn symlinked_views_with_an_extension_navigate_to_the_canonical_template() {
+    let (backend, dir) = workspace(&[]).await;
+    let source = dir.path().join("resources/views");
+    let target = dir.path().join("resources/templates");
+    std::fs::rename(&source, &target).unwrap();
+    std::os::unix::fs::symlink(&target, &source).unwrap();
+    let controller = uri_for(&dir, "src/Web/Blog/PostController.php");
+    let content = POST_CONTROLLER_PHP.replace("render('index')", "render('index.php')");
+    open_document(&backend, &controller, "php", &content).await;
+    let position = position_in(&content, "render('index.php", 9);
+    assert_eq!(
+        definitions(&backend, &controller, position).await,
+        vec![uri_for(&dir, "resources/views/blog/index.php")]
+    );
+    let hover = hover_response(&backend, &controller, position.line, position.character)
+        .await
+        .unwrap();
+    assert!(
+        hover_text(&hover).contains("`resources/templates/blog/index.php`"),
+        "{hover:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_template_lists_the_calls_that_render_it() {
     let (backend, dir) = workspace(&["resources/views/blog/index.php"]).await;
@@ -352,8 +412,8 @@ async fn a_view_no_template_matches_is_reported() {
     assert_eq!(
         reported,
         vec![
-            "Unknown view: 'resources/views/blog/missing'".to_string(),
-            "Unknown view: 'src/Web/HomePage/nope'".to_string(),
+            "Unknown view 'resources/views/blog/missing'".to_string(),
+            "Unknown view 'src/Web/HomePage/nope'".to_string(),
         ]
     );
 }
@@ -409,4 +469,102 @@ async fn hovering_a_view_shows_its_template() {
         markup.contains("`resources/views/blog/index.php`"),
         "{markup}"
     );
+}
+
+#[tokio::test]
+async fn a_layout_resolves_to_its_template() {
+    let file = "src/Web/Blog/LayoutController.php";
+    let (backend, dir) = workspace(&[file]).await;
+    for (needle, expected) in [
+        ("@layout/main'", "resources/views/layout/main.php"),
+        ("admin/edit'", "resources/views/blog/admin/edit.php"),
+    ] {
+        let found = definitions(
+            &backend,
+            &uri_for(&dir, file),
+            position_in(LAYOUT_CONTROLLER_PHP, needle, needle.len() - 3),
+        )
+        .await;
+        assert_eq!(found, vec![uri_for(&dir, expected)], "for {needle}");
+    }
+}
+
+#[tokio::test]
+async fn a_missing_layout_and_view_directory_are_reported() {
+    let file = "src/Web/Blog/LayoutController.php";
+    let (backend, dir) = workspace(&[file]).await;
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(
+        uri_for(&dir, file).as_str(),
+        LAYOUT_CONTROLLER_PHP,
+        &mut diagnostics,
+    );
+    let reported: Vec<(String, String)> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| match &diagnostic.code {
+            Some(Code::String(code)) if code.starts_with("invalid_yii_view") => {
+                Some((code.clone(), message_text(&diagnostic.message).to_string()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        reported,
+        vec![
+            (
+                "invalid_yii_view_path".to_string(),
+                "Unknown view directory 'resources/views/blogg'".to_string()
+            ),
+            (
+                "invalid_yii_view".to_string(),
+                "Unknown view 'resources/views/layout/mainn'".to_string()
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn layouts_complete_like_views() {
+    let (backend, dir) = workspace(&[]).await;
+    for (file, content, needle, expected) in [
+        (
+            "src/Web/Blog/A.php",
+            "<?php\nnamespace App\\Web\\Blog;\nfinal class A {\n    public function __construct(private \\Yiisoft\\Yii\\View\\Renderer\\WebViewRenderer $r) {}\n    public function a(): object { return $this->r->withLayout('@layout/'); }\n}\n",
+            "withLayout('@layout/",
+            vec!["@layout/main"],
+        ),
+        (
+            "src/Web/Blog/B.php",
+            "<?php\nnamespace App\\Web\\Blog;\nfinal class B {\n    public function __construct(private \\Yiisoft\\Yii\\View\\Renderer\\WebViewRenderer $r) {}\n    public function a(): object { return $this->r->withViewPath('@views/blog')->withLayout(''); }\n}\n",
+            "withLayout('",
+            vec!["_card", "admin/", "index"],
+        ),
+    ] {
+        let uri = uri_for(&dir, file);
+        open_document(&backend, &uri, "php", content).await;
+        let position = position_in(content, needle, needle.len());
+        let labels = response_labels(
+            completion_response(&backend, &uri, position.line, position.character, None).await,
+        );
+        let expected: Vec<String> = expected.into_iter().map(str::to_string).collect();
+        assert_eq!(labels, expected, "for {needle} in {file}");
+    }
+}
+
+#[tokio::test]
+async fn hovering_a_view_path_shows_its_directory() {
+    let file = "src/Web/Blog/LayoutController.php";
+    let (backend, dir) = workspace(&[file]).await;
+    let uri = uri_for(&dir, file);
+    for (needle, expected) in [
+        ("blog')", "**View directory** `resources/views/blog`"),
+        ("blogg')", "No directory is there"),
+    ] {
+        let position = position_in(LAYOUT_CONTROLLER_PHP, needle, 1);
+        let hover = hover_response(&backend, &uri, position.line, position.character)
+            .await
+            .expect("a hover");
+        let markup = hover_text(&hover);
+        assert!(markup.contains(expected), "{markup}");
+    }
 }

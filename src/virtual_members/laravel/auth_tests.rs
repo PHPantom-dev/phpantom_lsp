@@ -231,15 +231,29 @@ fn backend_configuring_user_model() -> (
     tempfile::TempDir,
     impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + Sync,
 ) {
+    backend_with_auth_model(r"'App\Models\User'")
+}
+
+/// A backend whose `config/auth.php` gives `model_expr` as the model, kept
+/// alive by the returned directory, and a loader that knows `App\Models\User`.
+fn backend_with_auth_model(
+    model_expr: &str,
+) -> (
+    Backend,
+    tempfile::TempDir,
+    impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + Sync,
+) {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("config")).unwrap();
     std::fs::write(
         dir.path().join("config/auth.php"),
-        r"<?php return [
-            'defaults' => ['guard' => 'web'],
-            'guards' => ['web' => ['provider' => 'users']],
-            'providers' => ['users' => ['model' => 'App\Models\User']],
-        ];",
+        format!(
+            "<?php return [
+                'defaults' => ['guard' => 'web'],
+                'guards' => ['web' => ['provider' => 'users']],
+                'providers' => ['users' => ['model' => {model_expr}]],
+            ];"
+        ),
     )
     .unwrap();
     let backend = crate::test_fixtures::make_backend();
@@ -283,8 +297,52 @@ fn a_thread_asking_during_the_computation_gets_the_model() {
     assert_eq!(during, Some(named("App\\Models\\User")));
 }
 
+/// A thread that asks while another is computing the model does not wait for
+/// that computation.  The computing thread's loads can wait on whatever the
+/// asking thread holds (the workspace index pass, a class resolution claim),
+/// so waiting here could deadlock both.
+#[test]
+fn a_thread_asking_during_the_computation_does_not_wait_for_it() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Barrier, Mutex, mpsc};
+
+    let (backend, _dir, load_user) = backend_configuring_user_model();
+
+    let computing = Barrier::new(2);
+    let paused = AtomicBool::new(false);
+    let (answered_tx, answered_rx) = mpsc::channel::<()>();
+    let answered_rx = Mutex::new(answered_rx);
+    let waiting_loader = |name: Fqn<'_>| {
+        if !paused.swap(true, Ordering::Relaxed) {
+            computing.wait();
+            // Stands in for a load that waits on something the other thread
+            // holds until that thread has its answer.
+            let _ = answered_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(10));
+        }
+        load_user(name)
+    };
+
+    let (during, computed, answered_in_time) = std::thread::scope(|scope| {
+        let computing_thread =
+            scope.spawn(|| resolve_auth_user_type(&backend, None, &waiting_loader));
+        computing.wait();
+        let started = std::time::Instant::now();
+        let during = resolve_auth_user_type(&backend, None, &load_user);
+        let answered_in_time = started.elapsed() < std::time::Duration::from_secs(5);
+        answered_tx.send(()).unwrap();
+        (during, computing_thread.join().unwrap(), answered_in_time)
+    });
+
+    assert!(answered_in_time, "waited for the other computation");
+    assert_eq!(during, Some(named("App\\Models\\User")));
+    assert_eq!(computed, during);
+}
+
 /// The loads a computation triggers ask for the model too, and must get the
-/// raw class rather than recurse or block on the lock their own thread holds.
+/// raw class rather than recurse.
 #[test]
 fn the_computing_thread_asking_again_gets_no_model() {
     let (backend, _dir, load_user) = backend_configuring_user_model();
@@ -301,47 +359,25 @@ fn the_computing_thread_asking_again_gets_no_model() {
     assert_eq!(computed, Some(named("App\\Models\\User")));
 }
 
-/// A claim's owner may be queued on the lock the computing thread holds, so
-/// waiting on that claim could only end at the timeout.
+/// A model the config does not pin down widens to the project's implementors
+/// without waiting for the workspace index.  The index pass loads the auth
+/// entry points itself, so a computation waiting on it never finished.
 #[test]
-fn the_computing_thread_does_not_wait_on_a_claimed_class() {
-    use crate::virtual_members::cache::PendingClaim;
-    use crate::virtual_members::new_resolved_class_cache;
-    use crate::virtual_members::resolve::{PENDING_WAIT_ESCAPE_HATCH, resolve_class_fully_cached};
+fn the_implementor_floor_does_not_wait_for_the_workspace_index() {
+    let (backend, _dir, load_user) = backend_with_auth_model("runtime_model()");
+    let indexing = backend.workspace_index.lock.lock();
 
-    let (backend, _dir, load_user) = backend_configuring_user_model();
-
-    let claimed = Arc::new(crate::test_fixtures::make_class("Claimed"));
-    let load_claimed = |_: Fqn<'_>| Some(claimed.clone());
-    let cache = new_resolved_class_cache();
-    std::thread::scope(|scope| {
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let finished = std::thread::scope(|scope| {
         scope.spawn(|| {
-            let key = (atom("Claimed"), Vec::new());
-            assert!(matches!(
-                cache
-                    .write()
-                    .claim_pending(std::thread::current().id(), &key),
-                PendingClaim::Fresh
-            ));
+            let _ = done_tx.send(resolve_auth_user_type(&backend, None, &load_user));
         });
+        let finished = done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .is_ok();
+        drop(indexing);
+        finished
     });
 
-    let resolved = std::cell::OnceCell::new();
-    let resolving_loader = |name: Fqn<'_>| {
-        resolved.get_or_init(|| resolve_class_fully_cached(&claimed, &load_claimed, &cache));
-        load_user(name)
-    };
-
-    let started = std::time::Instant::now();
-    resolve_auth_user_type(&backend, None, &resolving_loader);
-    let elapsed = started.elapsed();
-
-    assert!(
-        elapsed < PENDING_WAIT_ESCAPE_HATCH,
-        "waited on the claim: {elapsed:?}"
-    );
-    assert_eq!(
-        resolved.get().map(|class| class.fqn().as_str()),
-        Some("Claimed")
-    );
+    assert!(finished, "waited for the workspace index");
 }

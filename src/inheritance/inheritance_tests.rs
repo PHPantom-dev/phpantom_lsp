@@ -15,6 +15,49 @@ fn make_subs(pairs: &[(&str, &str)]) -> HashMap<String, PhpType> {
 }
 
 #[test]
+fn recovered_trait_import_keeps_the_using_class_generic_self() {
+    // While editing, a trait import can still resolve to a class. The
+    // recovery walk through that class's parent must retain the caller's
+    // self binding; the invalid-class-kind diagnostic is handled separately.
+    let fluent = ClassInfo {
+        name: atom("Fluent"),
+        kind: ClassLikeKind::Trait,
+        methods: vec![Arc::new(MethodInfo {
+            is_virtual: false,
+            native_return_type: Some(PhpType::parse("self")),
+            ..MethodInfo::virtual_method("same", Some("self"))
+        })]
+        .into(),
+        ..ClassInfo::default()
+    };
+    let base = ClassInfo {
+        name: atom("Base"),
+        used_traits: vec![atom("Fluent")],
+        ..ClassInfo::default()
+    };
+    let imported = ClassInfo {
+        name: atom("Imported"),
+        parent_class: Some(atom("Base")),
+        ..ClassInfo::default()
+    };
+    let owner = ClassInfo {
+        name: atom("Collection"),
+        template_params: vec![atom("T")],
+        used_traits: vec![atom("Imported")],
+        ..ClassInfo::default()
+    };
+    let classes: HashMap<_, _> = [fluent, base, imported]
+        .into_iter()
+        .map(|class| (class.fqn(), Arc::new(class)))
+        .collect();
+    let loader = |name: Fqn<'_>| classes.get(&atom(name.as_str())).cloned();
+    let resolved = resolve_class_with_inheritance(&owner, &loader);
+    let method = resolved.get_method_ci("same").unwrap();
+    assert_eq!(method.return_type, Some(PhpType::parse("Collection<T>")));
+    assert_eq!(method.native_return_type, method.return_type);
+}
+
+#[test]
 fn test_apply_substitution_direct() {
     let subs = make_subs(&[("TValue", "Language"), ("TKey", "int")]);
 
@@ -313,6 +356,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         }]
         .into(),
         return_type: Some(PhpType::parse("TValue")),

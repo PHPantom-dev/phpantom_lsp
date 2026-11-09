@@ -1,0 +1,17 @@
+// test: array callable return types preserve the receiver's generic arguments
+// feature: hover
+// expect: $result = Book
+---
+<?php
+class Book {}
+/** @template T */
+class Box {
+    /** @return T */
+    public function get() {}
+}
+/** @param Box<Book> $box */
+function read(Box $box): void {
+    $callback = [$box, 'get'];
+    $result = $callback();
+    $<>result;
+}

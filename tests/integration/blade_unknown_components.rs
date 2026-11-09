@@ -115,8 +115,8 @@ async fn a_misspelt_blade_component_is_reported_on_its_name() {
     assert_eq!(
         unknown_components(&backend, &uri),
         vec![(
-            "unknown_blade_component".to_string(),
-            "Unknown Blade component: 'buttons.bakc'".to_string(),
+            "invalid_blade_component".to_string(),
+            "Unknown Blade component 'buttons.bakc'".to_string(),
             1,
             3
         )]
@@ -134,8 +134,8 @@ async fn a_misspelt_livewire_component_is_reported() {
     assert_eq!(
         unknown_components(&backend, &uri),
         vec![(
-            "unknown_livewire_component".to_string(),
-            "Unknown Livewire component: 'orders.overveiw'".to_string(),
+            "invalid_livewire_component".to_string(),
+            "Unknown Livewire component 'orders.overveiw'".to_string(),
             1,
             10
         )]
@@ -241,7 +241,7 @@ async fn a_tag_under_a_registered_anonymous_namespace_is_judged() {
     .await;
     let reported = unknown_components(&backend, &uri);
     assert_eq!(reported.len(), 1, "{reported:?}");
-    assert_eq!(reported[0].1, "Unknown Blade component: 'shop::crad'");
+    assert_eq!(reported[0].1, "Unknown Blade component 'shop::crad'");
 }
 
 // ── Quick fixes ─────────────────────────────────────────────────────────────

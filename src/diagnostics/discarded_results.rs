@@ -112,9 +112,7 @@ impl Backend {
                 range,
                 DiagnosticSeverity::Warning,
                 DISCARDED_RETURN_VALUE_CODE,
-                format!(
-                    "The return value of {callee} should either be used or intentionally ignored by casting it as (void)"
-                ),
+                format!("Result of {callee} must be used; cast the call to (void) to discard it"),
             ));
         }
     }
@@ -122,7 +120,7 @@ impl Backend {
 
 /// The method a `$subject->method` or `Class::method` call expression
 /// names.
-fn member_name(expr: &str) -> Option<&str> {
+pub(super) fn member_name(expr: &str) -> Option<&str> {
     let arrow = expr.rfind("->").map(|i| i + 2);
     let colons = expr.rfind("::").map(|i| i + 2);
     Some(&expr[arrow.max(colons)?..])

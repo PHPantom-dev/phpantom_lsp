@@ -214,11 +214,7 @@ fn non_chain_subject_key(expr: &Expression<'_>) -> Option<String> {
                 }
                 _ => return None,
             };
-            Some(format!(
-                "{}({})",
-                function,
-                argument_value_key(prefix.operand)?
-            ))
+            conversion_call_key(function, prefix.operand)
         }
         // See through parentheses so `($x instanceof Foo)` and grouped
         // subjects resolve to the same key as the bare form.
@@ -501,6 +497,12 @@ fn argument_list_key(argument_list: &ArgumentList<'_>) -> Option<String> {
         }
     }
     Some(out)
+}
+
+/// The key of a call to the one-argument conversion function `function`
+/// (`intval`, `strval`, …), which a scalar cast of `operand` shares.
+pub(super) fn conversion_call_key(function: &str, operand: &Expression<'_>) -> Option<String> {
+    Some(format!("{}({})", function, argument_value_key(operand)?))
 }
 
 /// Render one argument value, or `None` when it is not deterministic.

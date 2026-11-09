@@ -11,6 +11,29 @@ mod tests {
         collect_diagnostics_with(backend, content, Backend::collect_unknown_class_diagnostics)
     }
 
+    /// A capitalised docblock tag is read as an annotation class, but one
+    /// with no class behind it (`@Given`, `@SuppressWarnings`) is not an
+    /// error: tools define tags like these without declaring a class.
+    #[test]
+    fn unresolved_annotation_is_not_reported() {
+        let backend = Backend::new_test();
+        let content = r#"<?php
+namespace App;
+
+/**
+ * @Given there is a user
+ * @SuppressWarnings(PHPMD.StaticAccess)
+ */
+function f(): void {}
+"#;
+        let diags = collect(&backend, content);
+        assert!(
+            diags.is_empty(),
+            "{:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
     /// PHP class names are case-insensitive (B25): `new stdclass()` and
     /// `extends \pdo` refer to the built-in classes and must not be
     /// flagged as unknown.
@@ -60,7 +83,7 @@ class Panel {
         let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
         backend.fqn_uri_index().write().insert(
             "Filament\\Panel".to_string(),
-            format!("file://{}", vendor_class_path.display()),
+            crate::common::file_uri(&vendor_class_path),
         );
 
         // Open a file that uses the vendor class via a use-import.
@@ -200,9 +223,9 @@ class MyProvider {
         let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| {
-                message_text(&d.message).contains("'self'")
-                    || message_text(&d.message).contains("'static'")
-                    || message_text(&d.message).contains("'parent'")
+                message_text(&d.message).contains("self not found")
+                    || message_text(&d.message).contains("static not found")
+                    || message_text(&d.message).contains("parent not found")
             }),
             "should not flag self/static/parent, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
@@ -395,7 +418,7 @@ class MyProvider {
         assert!(
             !diags
                 .iter()
-                .any(|d| message_text(&d.message).contains("'T'")),
+                .any(|d| message_text(&d.message).contains("T not found")),
             "should not flag method-level @template param T, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -771,7 +794,7 @@ class MyProvider {
         assert!(
             !diags
                 .iter()
-                .any(|d| message_text(&d.message).contains("'bar'")),
+                .any(|d| message_text(&d.message).contains("bar not found")),
             "should not flag single-quoted literal as unknown class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -1125,7 +1148,7 @@ class MyProvider {
         let dir = tempfile::tempdir().expect("failed to create temp dir");
         let dep_path = dir.path().join("Mockery.php");
         std::fs::write(&dep_path, "<?php\nclass Mockery {}\n").expect("failed to write temp file");
-        let dep_uri = format!("file://{}", dep_path.display());
+        let dep_uri = crate::common::file_uri(&dep_path);
 
         let backend = Backend::new_test();
 
@@ -1407,7 +1430,7 @@ namespace B {
         let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
         assert_eq!(
             messages,
-            vec!["Class 'B\\Foo' not found"],
+            vec!["Class B\\Foo not found"],
             "only block B's `Foo` is unknown"
         );
     }

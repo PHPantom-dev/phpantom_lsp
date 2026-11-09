@@ -16,6 +16,11 @@ pub(super) fn extract_assignment_expr<'a>(
     if connection_assignment_receiver(assign).is_some() {
         record_connection_site(ReceiverClass::LaravelConnectionProperty, assign.rhs, ctx);
     }
+    crate::symbol_map::extraction::doctrine_dql::note_builder_assignment(assign, ctx);
+    note_yii_query_assignment(assign, ctx, scope_start);
+    emit_drupal_render_element_assignment(assign, ctx);
+    emit_drupal_render_array_assignment(assign, ctx);
+    emit_drupal_attached_assignment_spans(assign, ctx);
 
     // The definition only becomes visible *after* the entire
     // assignment expression — the RHS still sees the previous

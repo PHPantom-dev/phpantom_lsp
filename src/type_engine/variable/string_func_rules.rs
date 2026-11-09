@@ -76,6 +76,30 @@ fn literal_type(name: &str, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     }
 
     let folded: Vec<String> = match name {
+        "dirname" => {
+            let levels = if args.has_arg(1) {
+                literal_int(args, 1)?
+            } else {
+                1
+            };
+            if !(1..=64).contains(&levels) {
+                return None;
+            }
+            literal_alternatives_any(args, 0)?
+                .iter()
+                .map(|subject| {
+                    let mut path = subject.clone();
+                    for _ in 0..levels {
+                        let parent = dirname(&path, cfg!(windows));
+                        if parent == path {
+                            break;
+                        }
+                        path = parent;
+                    }
+                    path
+                })
+                .collect()
+        }
         // `mb_*` agrees with the ASCII mapping on ASCII input, which is
         // the only input that gets this far.
         "strtolower" | "mb_strtolower" => map_subject(args, |s| s.to_ascii_lowercase())?,
@@ -486,6 +510,49 @@ fn implode_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     }
 }
 
+/// PHP removes path segments lexically: `a/./b` keeps `a/.` and
+/// `a/../b` keeps `a/..`. `Path::parent` would normalize the dot away.
+fn dirname(path: &str, windows: bool) -> String {
+    if path.is_empty() {
+        return String::new();
+    }
+    let drive_len = if windows
+        && path.as_bytes().get(1) == Some(&b':')
+        && path.as_bytes()[0].is_ascii_alphabetic()
+    {
+        2
+    } else {
+        0
+    };
+    let (drive, tail) = path.split_at(drive_len);
+    if tail.is_empty() {
+        return drive.to_string();
+    }
+    let separator = |ch| ch == '/' || (windows && ch == '\\');
+    let tail = tail.trim_end_matches(separator);
+    let parent = tail
+        .rfind(separator)
+        .map(|end| tail[..end].trim_end_matches(separator));
+    let value = match parent {
+        None if !tail.is_empty() => ".",
+        None | Some("") => {
+            if windows {
+                "\\"
+            } else {
+                "/"
+            }
+        }
+        Some(value) => value,
+    };
+    let result = format!("{drive}{value}");
+    // PHP's Windows dirname drops the extended path prefix as well.
+    if windows && let Some(short) = result.strip_prefix(r"\\?\") {
+        short.to_string()
+    } else {
+        result
+    }
+}
+
 /// Apply `transform` to every alternative of the call's first argument.
 fn map_subject(
     args: &dyn ArrayFuncArgs,
@@ -655,6 +722,24 @@ fn trim_default(s: &str, left: bool, right: bool) -> String {
     .to_string()
 }
 
+/// A string builtin must resolve to the global declaration, even when a
+/// namespaced function or import shares its short name.
+pub(in crate::type_engine) fn is_builtin_string_function(
+    name: &str,
+    loader: crate::types::FunctionLoader<'_>,
+    offset: u32,
+) -> bool {
+    has_string_func_rule(name)
+        && loader
+            .and_then(|loader| loader(name, offset))
+            .is_none_or(|function| {
+                function.namespace.as_deref().is_none_or(str::is_empty)
+                    && function
+                        .name
+                        .eq_ignore_ascii_case(name.trim_start_matches('\\'))
+            })
+}
+
 /// Whether `func_name` is one of the string builtins
 /// [`string_func_return_type`] has a rule for.
 ///
@@ -667,6 +752,7 @@ pub(in crate::type_engine) fn has_string_func_rule(func_name: &str) -> bool {
             .to_ascii_lowercase()
             .as_str(),
         "strtolower"
+            | "dirname"
             | "mb_strtolower"
             | "strtoupper"
             | "mb_strtoupper"

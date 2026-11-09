@@ -1238,3 +1238,54 @@ fn parse_invoked_closure_literal_round_trips() {
         assert_eq!(parsed.to_subject_text(), text);
     }
 }
+
+#[test]
+fn parse_dql_association_path() {
+    assert_eq!(
+        SubjectExpr::parse("\\App\\User.team.owner"),
+        SubjectExpr::DqlAssociation {
+            base: Box::new(SubjectExpr::DqlAssociation {
+                base: Box::new(SubjectExpr::ClassName("\\App\\User".to_string())),
+                association: "team".to_string(),
+            }),
+            association: "owner".to_string(),
+        }
+    );
+    assert_eq!(
+        SubjectExpr::parse("$this.team").to_subject_text(),
+        "$this.team"
+    );
+    assert_eq!(
+        SubjectExpr::parse("$em->getRepository(User::class).team").to_subject_text(),
+        "$em->getRepository(User::class).team"
+    );
+    // A `.` inside a call's arguments is no path.
+    assert!(matches!(
+        SubjectExpr::parse("$x->find('a.b')"),
+        SubjectExpr::CallExpr { .. }
+    ));
+}
+
+#[test]
+fn parse_dql_builder_alias() {
+    assert_eq!(
+        SubjectExpr::parse("e@$qb"),
+        SubjectExpr::DqlBuilderAlias {
+            base: Box::new(SubjectExpr::Variable("$qb".to_string())),
+            alias: "e".to_string(),
+        }
+    );
+    let joined = SubjectExpr::parse("e@$this->users().team");
+    assert!(
+        matches!(&joined, SubjectExpr::DqlAssociation { base, association }
+            if association == "team"
+                && matches!(base.as_ref(), SubjectExpr::DqlBuilderAlias { alias, .. } if alias == "e")),
+        "{joined:?}"
+    );
+    assert_eq!(joined.to_subject_text(), "e@$this->users().team");
+    // An `@` inside a call's arguments is no builder variable.
+    assert!(matches!(
+        SubjectExpr::parse("$x->find('a@b')"),
+        SubjectExpr::CallExpr { .. }
+    ));
+}

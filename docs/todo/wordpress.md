@@ -40,7 +40,10 @@ WP3, WP9 and WP15. Hooks and template parts produce no diagnostics
 today, so the baseline cannot rank WP5 and WP6; they rank by what an
 editor user compares first.
 
-**Benchmarks.** `benches/wordpress_completion.rs` measures hook name
+**Benchmarks.** `benches/memory_usage.py` measures memory on a plugin
+project that installs the stubs and core through Composer
+(`memory_wordpress_plugin`), next to the Laravel, Symfony, and Yii
+scenarios. `benches/wordpress_completion.rs` measures hook name
 completion, going from a listener to the places that fire its hook, and
 member completion on values the stubs type, over a generated plugin and
 the plugins Composer installs beside it. Every item that adds a hook or

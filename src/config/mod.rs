@@ -22,6 +22,8 @@ mod diagnostics;
 mod indexing;
 mod inlay_hints;
 mod laravel;
+#[cfg(test)]
+mod schema_tests;
 mod stubs;
 #[cfg(test)]
 mod tests;
@@ -47,8 +49,10 @@ pub struct Config {
     /// Stub files whose declarations win.
     pub stubs: StubsConfig,
     /// Semantic token highlighting settings.
+    #[serde(rename = "semantic-tokens")]
     pub semantic_tokens: SemanticTokensConfig,
     /// Inlay hint toggles.
+    #[serde(rename = "inlay-hints")]
     pub inlay_hints: InlayHintsConfig,
     /// Formatting proxy settings.
     pub formatting: FormattingConfig,
@@ -64,7 +68,7 @@ pub struct Config {
     pub laravel: LaravelConfig,
 }
 
-/// `[semantic_tokens]` section — controls LSP semantic highlighting.
+/// `[semantic-tokens]` section — controls LSP semantic highlighting.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct SemanticTokensConfig {
@@ -130,6 +134,50 @@ pub struct PhpConfig {
     /// Override the detected PHP version (e.g. `"8.3"`).
     /// When `None`, PHPantom infers from `composer.json`.
     pub version: Option<String>,
+}
+
+/// Sections and keys an earlier release spelled differently, as
+/// `(parent table path, old name, current name)`.
+///
+/// From 1.0 a key that once worked has to keep working, so a rename
+/// lands here rather than breaking the configs that use the old name.
+const RENAMED_KEYS: &[(&[&str], &str, &str)] = &[
+    (&[], "semantic_tokens", "semantic-tokens"),
+    (&[], "inlay_hints", "inlay-hints"),
+    (
+        &["diagnostics"],
+        "report-magic-properties",
+        "magic-properties",
+    ),
+];
+
+/// Rewrite the old spellings in [`RENAMED_KEYS`] to the current ones,
+/// recording a warning for each one `path` uses.
+///
+/// This runs on each file before the layers are merged, rather than
+/// through a serde alias, so a global config written with the old name
+/// and a project config written with the new one still merge key by
+/// key instead of colliding as duplicate fields.  When one file spells
+/// a key both ways, the current spelling wins.
+fn upgrade_renamed_keys(table: &mut toml::Table, path: &Path, warnings: &mut Vec<ConfigWarning>) {
+    for &(parent_path, old, new) in RENAMED_KEYS {
+        let mut parent = Some(&mut *table);
+        for segment in parent_path {
+            parent = parent.and_then(|t| t.get_mut(*segment)?.as_table_mut());
+        }
+        let Some(parent) = parent else {
+            continue;
+        };
+        if let Some(value) = parent.remove(old) {
+            parent.entry(new).or_insert(value);
+            let prefix: String = parent_path.iter().map(|s| format!("{s}.")).collect();
+            warnings.push(ConfigWarning::RenamedKey {
+                file: path.to_path_buf(),
+                old: format!("{prefix}{old}"),
+                new: format!("{prefix}{new}"),
+            });
+        }
+    }
 }
 
 /// Recursively merge `overlay` into `base`.  Keys in `overlay` take
@@ -257,7 +305,10 @@ fn write_config_content(config_path: &Path, content: &str) -> Result<bool, Confi
     Ok(true)
 }
 
-fn load_toml_table(path: &Path) -> Result<Option<toml::Table>, ConfigError> {
+fn load_toml_table(
+    path: &Path,
+    warnings: &mut Vec<ConfigWarning>,
+) -> Result<Option<toml::Table>, ConfigError> {
     if !path.exists() {
         return Ok(None);
     }
@@ -267,12 +318,80 @@ fn load_toml_table(path: &Path) -> Result<Option<toml::Table>, ConfigError> {
         source: e,
     })?;
 
-    let table: toml::Table = content.parse().map_err(|e| ConfigError::Parse {
+    let mut table: toml::Table = content.parse().map_err(|e| ConfigError::Parse {
         path: path.display().to_string(),
         source: e,
     })?;
+    upgrade_renamed_keys(&mut table, path, warnings);
 
     Ok(Some(table))
+}
+
+/// Something in a config file worth telling the user about.  Never an
+/// error: a config written for a newer release, or in an older
+/// spelling, still loads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigWarning {
+    /// A key no setting reads, so it has no effect.
+    UnknownKey {
+        /// The file the key was written in.
+        file: PathBuf,
+        /// The key's dotted path, e.g. `diagnostics.unused-parameter`.
+        key: String,
+    },
+    /// A key written in the spelling an earlier release used.  It still
+    /// applies, under its current name.
+    RenamedKey {
+        /// The file the key was written in.
+        file: PathBuf,
+        /// The old dotted path, e.g. `semantic_tokens`.
+        old: String,
+        /// The current dotted path, e.g. `semantic-tokens`.
+        new: String,
+    },
+}
+
+impl std::fmt::Display for ConfigWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigWarning::UnknownKey { file, key } => {
+                write!(f, "unknown key `{key}` in {} is ignored", file.display())
+            }
+            ConfigWarning::RenamedKey { file, old, new } => write!(
+                f,
+                "`{old}` in {} has been renamed to `{new}`",
+                file.display()
+            ),
+        }
+    }
+}
+
+/// A loaded configuration together with the warnings its files raised.
+#[derive(Debug, Clone, Default)]
+pub struct LoadedConfig {
+    /// The merged configuration.
+    pub config: Config,
+    /// Warnings in the order they were found, global layer first.
+    pub warnings: Vec<ConfigWarning>,
+}
+
+/// Deserialize one config layer, recording every key no setting reads
+/// against `file`.
+fn deserialize_layer(
+    table: toml::Table,
+    file: &Path,
+    warnings: &mut Vec<ConfigWarning>,
+) -> Result<Config, ConfigError> {
+    serde_ignored::deserialize(toml::Value::Table(table), |path| {
+        warnings.push(ConfigWarning::UnknownKey {
+            file: file.to_path_buf(),
+            key: path.to_string(),
+        });
+    })
+    .map_err(|e| ConfigError::Parse {
+        path: file.display().to_string(),
+        source: e,
+    })
 }
 
 /// Load the project configuration, merging the global config layer at
@@ -291,34 +410,49 @@ pub fn load_config_from(
     workspace_root: &Path,
     global_path: Option<&Path>,
 ) -> Result<Config, ConfigError> {
-    let mut table = match global_path {
-        Some(path) => load_toml_table(path)?.unwrap_or_default(),
-        None => toml::Table::new(),
-    };
+    load_config_with_warnings(workspace_root, global_path).map(|loaded| loaded.config)
+}
 
-    // Deserialize the global layer on its own before merging, so a bad
-    // value in it is reported against the file it actually came from
-    // instead of against the project config it gets merged into.
+/// [`load_config_from`], also returning the keys either file sets that
+/// no setting reads or that use an old spelling, so the caller can warn
+/// about them.
+pub fn load_config_with_warnings(
+    workspace_root: &Path,
+    global_path: Option<&Path>,
+) -> Result<LoadedConfig, ConfigError> {
+    let mut warnings = Vec::new();
+
+    // Each layer is deserialized on its own before merging, so a bad
+    // value or an unknown key is reported against the file it was
+    // actually written in.
+    let mut table = toml::Table::new();
+    let mut config = None;
     if let Some(path) = global_path
-        && !table.is_empty()
+        && let Some(global) = load_toml_table(path, &mut warnings)?
+        && !global.is_empty()
     {
-        let _: Config = table.clone().try_into().map_err(|e| ConfigError::Parse {
-            path: path.display().to_string(),
-            source: e,
-        })?;
+        config = Some(deserialize_layer(global.clone(), path, &mut warnings)?);
+        table = global;
     }
 
     let project_path = workspace_root.join(CONFIG_FILE_NAME);
-    if let Some(project) = load_toml_table(&project_path)? {
-        merge_toml(&mut table, project);
+    if let Some(project) = load_toml_table(&project_path, &mut warnings)? {
+        if table.is_empty() {
+            config = Some(deserialize_layer(project, &project_path, &mut warnings)?);
+        } else {
+            deserialize_layer(project.clone(), &project_path, &mut warnings)?;
+            merge_toml(&mut table, project);
+            config = Some(table.try_into().map_err(|e| ConfigError::Parse {
+                path: project_path.display().to_string(),
+                source: e,
+            })?);
+        }
     }
 
-    let config: Config = table.try_into().map_err(|e| ConfigError::Parse {
-        path: project_path.display().to_string(),
-        source: e,
-    })?;
-
-    Ok(config)
+    Ok(LoadedConfig {
+        config: config.unwrap_or_default(),
+        warnings,
+    })
 }
 
 /// Errors that can occur when loading the config file.

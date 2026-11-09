@@ -300,10 +300,10 @@ async fn a_missing_package_view_is_created_in_the_packages_directory() {
     let uri = open_php_file(&backend, "app/WidgetController.php").await;
 
     let path = created_view_path(&backend, &uri, &caller, 4);
-    let path = path.to_string_lossy();
     assert!(
-        path.contains("/packages/widgets/") && path.ends_with("/resources/views/badge.blade.php"),
-        "the template should be created in the package's view directory, got {path}"
+        path.ends_with("packages/widgets/resources/views/badge.blade.php"),
+        "the template should be created in the package's view directory, got {}",
+        path.display()
     );
 }
 
@@ -947,7 +947,7 @@ async fn a_view_string_parameter_reports_a_name_no_template_answers() {
 
     assert_eq!(
         view_diagnostics(&backend, &uri, VIEW_STRING_RENDERER),
-        vec!["Unknown view: 'users.nope'".to_string()],
+        vec!["Unknown view 'users.nope'".to_string()],
     );
 }
 
@@ -1026,7 +1026,7 @@ class PackageRenderer
 
     assert_eq!(
         view_diagnostics(&backend, &uri, caller),
-        vec!["Unknown view: 'widgets::missing'".to_string()],
+        vec!["Unknown view 'widgets::missing'".to_string()],
     );
 }
 

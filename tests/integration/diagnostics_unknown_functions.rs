@@ -686,7 +686,7 @@ function run(): void {
         let mut diags = Vec::new();
         backend.collect_unknown_function_diagnostics("file:///test.php", php, &mut diags);
         let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
-        assert_eq!(messages, vec!["Function 'missingFn' not found"]);
+        assert_eq!(messages, vec!["Function missingFn() not found"]);
     }
 
     // ─── Qualified function names ───────────────────────────────────────

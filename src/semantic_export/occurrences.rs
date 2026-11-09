@@ -94,7 +94,9 @@ pub(super) fn export_span(
             if resolved.is_none()
                 && !matches!(
                     class_context,
-                    ClassRefContext::TypeOperatorOperand | ClassRefContext::DocblockSee
+                    ClassRefContext::TypeOperatorOperand
+                        | ClassRefContext::DocblockSee
+                        | ClassRefContext::Annotation
                 )
             {
                 output.diagnostics.push(ExportDiagnostic {
@@ -152,8 +154,30 @@ pub(super) fn export_span(
             is_array_callable,
             ..
         } => {
-            let kind = member_occurrence_kind(&source.source, range, *is_static, *is_method_call);
             let subject = subject_text.as_str(export_context.mapped_source);
+            // An attribute's named-argument label is an occurrence of the
+            // property its constructor promotes, and of nothing otherwise.
+            let kind = if *docblock_ref == DocblockMemberRef::AttributeNamedArg {
+                if !backend.member_span_names_member(
+                    context,
+                    *docblock_ref,
+                    subject,
+                    span.start,
+                    member_name,
+                ) {
+                    return;
+                }
+                OccurrenceKind::Property
+            } else if matches!(
+                docblock_ref,
+                DocblockMemberRef::EntityField
+                    | DocblockMemberRef::YiiAttribute
+                    | DocblockMemberRef::YiiProperty { .. }
+            ) {
+                OccurrenceKind::Property
+            } else {
+                member_occurrence_kind(&source.source, range, *is_static, *is_method_call)
+            };
             let target = MemberTargetResolver {
                 backend,
                 context,
@@ -166,11 +190,23 @@ pub(super) fn export_span(
                 span.start,
                 member_name,
                 kind,
-                *docblock_ref == DocblockMemberRef::MockedMethod,
+                *docblock_ref,
             );
             // A string naming no method of a mock is an ordinary argument
-            // (`$gate->allows('update')`), not an occurrence of anything.
-            if target.is_none() && *docblock_ref == DocblockMemberRef::MockedMethod {
+            // (`$gate->allows('update')`), not an occurrence of anything,
+            // and so is a key of an array passed to something other than a
+            // repository, or a name passed to the `get()` of something
+            // other than a record, or a field helper's string given
+            // something other than a form model.
+            if target.is_none()
+                && matches!(
+                    docblock_ref,
+                    DocblockMemberRef::MockedMethod
+                        | DocblockMemberRef::EntityField
+                        | DocblockMemberRef::YiiAttribute
+                        | DocblockMemberRef::YiiProperty { form_model: true }
+                )
+            {
                 return;
             }
             output.occurrences.push(ExportOccurrence {

@@ -68,6 +68,19 @@ pub(crate) fn class_constant_key(key: &str) -> Option<(&str, &str)> {
         .then_some((class, constant))
 }
 
+/// The class and the member a type spelled `Foo::BAR`, `Foo::BAR_*` or
+/// `Foo::class` names.  The member may carry `*` wildcards, which a shape
+/// key never does.
+pub(crate) fn class_member_reference(text: &str) -> Option<(&str, &str)> {
+    let (class, member) = text.rsplit_once("::")?;
+    let is_member_spelling = !member.is_empty()
+        && member
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '*' || !c.is_ascii())
+        && !member.starts_with(|c: char| c.is_ascii_digit());
+    (is_class_name_spelling(class) && is_member_spelling).then_some((class, member))
+}
+
 /// The runtime array key each shape entry occupies, in order.
 ///
 /// A positional entry takes the next free integer index, mirroring the
@@ -117,4 +130,26 @@ pub(crate) fn shape_key_type(key: &str) -> PhpType {
     } else {
         PhpType::literal_string_value(key)
     }
+}
+
+/// The exact key a runtime shape key stands for: the integer or string
+/// literal it spells, or the class name a `Foo::class` key names.
+///
+/// `None` for any other class-constant key, whose value is not read here.
+pub(crate) fn shape_key_literal(key: &str) -> Option<PhpType> {
+    if is_canonical_int_key(key) {
+        Some(PhpType::literal_int(key))
+    } else if let Some(class) = class_name_key(key) {
+        Some(PhpType::class_name_literal(atom(class)))
+    } else if class_constant_key(key).is_some() {
+        None
+    } else {
+        Some(PhpType::literal_string_value(key))
+    }
+}
+
+/// Whether a shape key is only known by its spelling: a class constant
+/// other than `Foo::class`, whose value is not read here.
+pub(crate) fn is_opaque_shape_key(key: &str) -> bool {
+    class_name_key(key).is_none() && class_constant_key(key).is_some()
 }

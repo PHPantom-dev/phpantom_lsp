@@ -157,6 +157,14 @@ impl PhpType {
         TypeKind::EnumCase(PhpType::named(enum_name), case).into()
     }
 
+    /// The query builder `class` that has built the DQL `state` describes.
+    pub(crate) fn dql_builder(
+        class: PhpType,
+        state: crate::doctrine::query::QueryBuilderState,
+    ) -> PhpType {
+        TypeKind::DqlBuilder(class, Box::new(state)).into()
+    }
+
     /// `interface-string<T>`, or bare `interface-string` when `inner` is
     /// `None`.
     pub fn interface_string(inner: Option<PhpType>) -> PhpType {

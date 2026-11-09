@@ -105,6 +105,12 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Vec<Location> {
+        if self.is_yii_config_plugin_uri(uri)
+            && let Some(locations) =
+                self.resolve_yii_config_plugin_definition(uri, content, position)
+        {
+            return locations;
+        }
         if let Some(location) = self.resolve_resource_symbol_definition(content, position) {
             return vec![location];
         }
@@ -141,13 +147,39 @@ impl Backend {
             SymbolKind::StringKey { kind, key, .. } if self.string_key_kind_enabled(kind) => {
                 crate::virtual_members::laravel::resolve_laravel_string_key(self, &kind, &key, uri)
             }
+            // The method of a Drupal `service:method` handler, of the
+            // service's class.
             SymbolKind::MemberAccess {
-                subject_text: SubjectText::Owned(class_fqn),
+                subject_text: ref subject @ SubjectText::Owned { .. },
+                member_name,
+                ..
+            } if let Some(service) = subject
+                .synthesised()
+                .and_then(crate::drupal::routing::service_of_subject) =>
+            {
+                self.symfony_service_classes(service)
+                    .iter()
+                    .filter_map(|class| {
+                        self.class_member_declaration_location(class, &member_name, false)
+                    })
+                    .fold(Vec::new(), |mut locations, location| {
+                        if !locations.contains(&location) {
+                            locations.push(location);
+                        }
+                        locations
+                    })
+            }
+            SymbolKind::MemberAccess {
+                subject_text: ref subject @ SubjectText::Owned { .. },
                 member_name,
                 is_method_call,
                 ..
             } => self
-                .class_member_declaration_location(&class_fqn, &member_name, !is_method_call)
+                .class_member_declaration_location(
+                    subject.synthesised().unwrap_or_default(),
+                    &member_name,
+                    !is_method_call,
+                )
                 .into_iter()
                 .collect(),
             SymbolKind::ClassReference {
@@ -163,6 +195,7 @@ impl Backend {
     /// one.
     pub(crate) fn update_resource_symbol_index(&self, uri: &str, content: &str) {
         self.note_twig_source(uri, content);
+        self.note_drupal_config_document(uri, Some(content));
         if self.is_resource_uri(uri) {
             self.publish_resource_symbol_index(uri, content);
         } else if self.symbol_map_for(uri).is_some() {
@@ -256,6 +289,16 @@ impl Backend {
             let spans = if is_template {
                 if self.is_twig_project() {
                     self.twig_template_spans(uri, content, is_symfony)
+                } else if self.is_drupal_project() {
+                    let mut spans = crate::symfony::routes::twig_route_spans(
+                        content,
+                        StringKeyKind::DrupalRoute,
+                    );
+                    let parameters = crate::drupal::routing::twig_parameter_spans(content, &spans);
+                    spans.extend(parameters);
+                    spans.extend(crate::drupal::libraries::twig_library_spans(content));
+                    spans.sort_by_key(|span| span.start);
+                    spans
                 } else {
                     Vec::new()
                 }
@@ -273,27 +316,79 @@ impl Backend {
 
         let mut spans = Vec::new();
         let mut container_values = Vec::new();
+        let mut service_decorations = Vec::new();
         let mut route_imports = Vec::new();
+        let mut drupal_routes = Vec::new();
         let mut declares_twig_loader = false;
-        if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
+        // A file under a configuration directory the kernel moved is read
+        // as the same file under `config/`.
+        let config_uri = if is_symfony {
+            self.symfony_config_uri(uri)
+        } else {
+            std::borrow::Cow::Borrowed(uri)
+        };
+        let config = config_uri.as_ref();
+        // A Drupal declaration file is Drupal's, also in a Drupal site that
+        // requires Symfony's container and has a `config` directory on the
+        // way to it, as core's `config` module does.
+        if let Some(file) = self.drupal_declaration_file(uri) {
+            match file {
+                crate::drupal::DeclarationFile::Services => {
+                    let declared = crate::symfony::resources::container_declarations(uri, content);
+                    spans = declared.spans;
+                    spans.extend(crate::symfony::service_calls::service_call_spans(
+                        uri, content,
+                    ));
+                    container_values = declared.values;
+                    service_decorations = declared.decorations;
+                }
+                crate::drupal::DeclarationFile::Routing => {
+                    spans = crate::symfony::routes::drupal_routing_spans(content);
+                    spans.extend(crate::drupal::routing::routing_value_spans(content));
+                    let (parameters, routes) = crate::drupal::routing::routing_routes(content);
+                    spans.extend(parameters);
+                    drupal_routes = routes;
+                }
+                crate::drupal::DeclarationFile::Links => {
+                    spans = crate::drupal::links::links_route_spans(content);
+                    spans.extend(crate::drupal::links::links_parameter_spans(content));
+                }
+                crate::drupal::DeclarationFile::Permissions => {
+                    spans = crate::drupal::permissions::permissions_spans(content);
+                }
+                crate::drupal::DeclarationFile::Libraries => {
+                    if let Some(extension) = crate::drupal::libraries::libraries_file_extension(uri)
+                    {
+                        spans = crate::drupal::libraries::libraries_file_spans(extension, content);
+                    }
+                }
+                crate::drupal::DeclarationFile::Info => {
+                    spans = crate::drupal::libraries::info_file_spans(content);
+                }
+            }
+        } else if is_symfony && crate::symfony::resources::is_container_config_uri(config) {
             declares_twig_loader = crate::symfony::tags::tags_twig_loader(content);
             // A bus is declared by a key under `config/packages/`, which is
             // a configuration key too; the bus is the one that means
             // something, and the first of two spans over the same text is
             // the one kept.
-            let mut slots = crate::symfony::tags::tag_slots(uri, content);
-            slots.extend(crate::symfony::messenger::bus_slots(uri, content));
+            let mut slots = crate::symfony::tags::tag_slots(config, content);
+            slots.extend(crate::symfony::messenger::bus_slots(config, content));
             spans = crate::symfony::slot_spans(content, slots);
-            let (container_spans, values) =
-                crate::symfony::resources::container_declarations(uri, content);
-            spans.extend(container_spans);
-            container_values = values;
-            if crate::symfony::routes::is_routing_config_uri(uri) {
-                let (routes, imports) = crate::symfony::routes::routing_declarations(uri, content);
+            let declared = crate::symfony::resources::container_declarations(config, content);
+            spans.extend(declared.spans);
+            spans.extend(crate::symfony::service_calls::service_call_spans(
+                config, content,
+            ));
+            container_values = declared.values;
+            service_decorations = declared.decorations;
+            if crate::symfony::routes::is_routing_config_uri(config) {
+                let (routes, imports) =
+                    crate::symfony::routes::routing_declarations(config, content);
                 spans.extend(routes);
                 route_imports = imports;
-            } else if uri.contains("/config/packages/")
-                && crate::symfony::config_tree::configures_foreign_router_resource(uri, content)
+            } else if config.contains("/config/packages/")
+                && crate::symfony::config_tree::configures_foreign_router_resource(config, content)
             {
                 // The router loads its routes from somewhere else than the
                 // routing files, which is a loader whose routes cannot be
@@ -307,10 +402,17 @@ impl Backend {
         }
         if is_symfony {
             spans.extend(crate::symfony::translations::catalogue_spans(uri, content));
-            if crate::symfony::validation::is_validation_mapping_uri(uri) {
-                spans.extend(crate::symfony::validation::validation_spans(uri, content));
+            if crate::symfony::validation::is_validation_mapping_uri(config) {
+                spans.extend(crate::symfony::validation::validation_spans(
+                    config, content,
+                ));
             }
-            if crate::symfony::config_tree::is_bundle_config_uri(uri) {
+            if crate::symfony::serializer::is_serializer_mapping_uri(config) {
+                spans.extend(crate::symfony::serializer::serializer_mapping_spans(
+                    config, content,
+                ));
+            }
+            if crate::symfony::config_tree::is_bundle_config_uri(config) {
                 spans.extend(crate::symfony::config_tree::config_key_spans(content));
             }
         }
@@ -358,7 +460,9 @@ impl Backend {
             spans,
             member_access_indices,
             container_values,
+            service_decorations,
             route_imports,
+            drupal_routes,
             declares_twig_loader,
             source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
             ..SymbolMap::default()
@@ -368,16 +472,39 @@ impl Backend {
 
 impl Backend {
     /// The spans of a Twig template: the names it is loaded by, the
-    /// templates, blocks, filters, functions, and variables it names, and in
-    /// a Symfony project the route names and translation keys it reads.
+    /// templates, blocks, filters, functions, and variables it names, the
+    /// route names it reads, Drupal's inside a Drupal web root and
+    /// Symfony's elsewhere in a Symfony project, and in a Symfony project
+    /// its translation keys.
     fn twig_template_spans(&self, uri: &str, content: &str, is_symfony: bool) -> Vec<SymbolSpan> {
         let roots = self.twig_roots();
         let names = crate::util::uri_to_path(uri)
             .map(|path| roots.template_names(&path))
             .unwrap_or_default();
         let mut spans = crate::twig::templates::template_declaration_spans(names);
+        // A Drupal site that requires Symfony's container is a Symfony
+        // project too, but the templates in its web root name Drupal's
+        // routes.  A Symfony application beside it keeps its own.
+        let route_kind = if self.is_in_drupal_web_root(uri) {
+            Some(StringKeyKind::DrupalRoute)
+        } else if is_symfony {
+            Some(StringKeyKind::SymfonyRoute)
+        } else if self.is_drupal_project() {
+            Some(StringKeyKind::DrupalRoute)
+        } else {
+            None
+        };
+        if let Some(kind) = route_kind {
+            let routes = crate::symfony::routes::twig_route_spans(content, kind);
+            spans.extend(crate::drupal::routing::twig_parameter_spans(
+                content, &routes,
+            ));
+            spans.extend(routes);
+        }
+        if self.is_drupal_project() {
+            spans.extend(crate::drupal::libraries::twig_library_spans(content));
+        }
         if is_symfony {
-            spans.extend(crate::symfony::routes::twig_route_spans(content));
             spans.extend(crate::symfony::translations::twig_translation_spans(
                 content,
             ));

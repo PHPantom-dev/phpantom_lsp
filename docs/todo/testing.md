@@ -8,9 +8,10 @@ nothing; a data provider PHPUnit cannot call and a `setUp()` or
 listing the tests that cover it or are named after it, and a test one
 back to its class, and a class without a test can have one created;
 Pest closures know the test case `Pest.php` binds them to; Mockery mocks
-keep the mocked class; and the method a PHPUnit or Mockery expectation
-names by string completes, navigates, renames, and is reported when the
-mocked class has no such method.
+keep the mocked class, and Prophecy prophecies offer its methods; and
+the method a PHPUnit or Mockery expectation names by string completes,
+navigates, renames, and is reported when the mocked class has no such
+method.
 
 PHPStan's PHPUnit extension (`phpstan/phpstan-phpunit`) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
@@ -51,25 +52,6 @@ them. Add an assertion fixture per library covering the common forms
 
 ---
 
-## TS7. Prophecy
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-$repo = $this->prophesize(OrderRepository::class);
-$repo->findOpen()->willReturn([]);
-$service = new Billing($repo->reveal());
-```
-
-Phpactor completes the mocked class's methods on an `ObjectProphecy`.
-Check what PHPantom does with current Prophecy, which declares
-`ObjectProphecy` generic: `reveal()` should give the mocked class, and
-a call on the prophecy should complete the mocked class's methods and
-give a `MethodProphecy`. PHPUnit 10 removed `prophesize()`, so Prophecy
-is declining; fix only what is cheap.
-
----
-
 ## TS8. Port PHPStan's PHPUnit and Mockery extension tests
 
 **Impact: Medium · Complexity: Low-Medium**
@@ -89,6 +71,36 @@ by `tests/assert_type_runner.rs`, the rule tests as `.fixture` files,
 and slices of `phpunit/phpunit` and `mockery/mockery` copied by
 `scripts/extract-framework-stubs.php` as the stubs. File every
 gap as a `// SKIP: reason` in this document or `docs/todo/`.
+
+---
+
+## TS11. Mock unions in property docblocks
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @var \Drupal\Core\Entity\EntityTypeManagerInterface|\PHPUnit\Framework\MockObject\MockObject */
+protected $entityTypeManager;
+
+protected function setUp(): void {
+    $this->entityTypeManager = $this->createMock(EntityTypeManagerInterface::class);
+}
+
+public function testLoad(): void {
+    new Loader($this->entityTypeManager);   // expects EntityTypeManagerInterface, got …|MockObject
+}
+```
+
+Before PHPUnit types could be intersections, a mock property was
+documented as a union of the mocked class and `MockObject`, and
+Drupal's tests and many older suites still are. Read as written, the
+union fails every parameter that takes the mocked class. PHPStan's
+PHPUnit extension (`MockObjectTypeNodeResolverExtension`) reads a
+docblock union that names `MockObject` or `Stub` as the intersection of
+its members, which is what the property holds. Do the same when a
+docblock type is resolved. Inside the method that assigns the mock the
+assignment already narrows it, so the reports are on the other test
+methods.
 
 ---
 

@@ -197,22 +197,42 @@ pub(crate) fn process_array_key_assignment<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-    process_array_key_write(array_access, rhs_types, scope, ctx);
+    let constant = is_constant_value(assignment.rhs);
+    process_array_key_write(array_access, rhs_types, constant, scope, ctx);
 }
 
 /// Store `value_types` at the element `$var['key']…` names, the write both a
 /// plain `=` and a compound assignment (`+=`, `.=`, …) perform.
+///
+/// `constant` says the write stores the same value every time it runs; see
+/// [`loop_written_value`](super::super::array_shape_writes::loop_written_value).
 pub(crate) fn process_array_key_write<'b>(
     array_access: &'b ArrayAccess<'b>,
     value_types: Vec<ResolvedType>,
+    constant: bool,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
     if let Some((base_name, key_chain)) =
         super::super::array_shape_writes::extract_nested_array_access_chain(array_access)
     {
-        apply_array_write(&base_name, &key_chain, false, value_types, scope, ctx);
+        apply_array_write(
+            &base_name,
+            &key_chain,
+            false,
+            value_types,
+            constant,
+            scope,
+            ctx,
+        );
     }
+}
+
+/// Whether `expr` is a constant expression (literals and constants, and
+/// operations on them), which evaluates to the same value every time it
+/// runs.
+fn is_constant_value(expr: &Expression<'_>) -> bool {
+    expr.is_constant(&mago_php_version::PHPVersion::LATEST, false)
 }
 
 /// Process array append: `$var[] = expr;` and `$var['a'][$i][] = expr;`
@@ -226,7 +246,8 @@ pub(crate) fn process_array_append<'b>(
         Expression::Variable(Variable::Direct(dv)) => {
             let base_name = bytes_to_str(dv.name).to_string();
             let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-            apply_array_write(&base_name, &[], true, rhs_types, scope, ctx);
+            let constant = is_constant_value(assignment.rhs);
+            apply_array_write(&base_name, &[], true, rhs_types, constant, scope, ctx);
         }
         // `$var['a'][$i][] = …` — the append lands on the innermost level
         // of an array-access chain rather than on the variable itself.
@@ -235,7 +256,10 @@ pub(crate) fn process_array_append<'b>(
                 super::super::array_shape_writes::extract_nested_array_access_chain(inner)
             {
                 let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-                apply_array_write(&base_name, &key_chain, true, rhs_types, scope, ctx);
+                let constant = is_constant_value(assignment.rhs);
+                apply_array_write(
+                    &base_name, &key_chain, true, rhs_types, constant, scope, ctx,
+                );
             }
         }
         _ => {}
@@ -254,7 +278,9 @@ pub(crate) fn process_array_push_call<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
-    use super::super::array_shape_writes::{PushedValues, apply_array_push, apply_array_unshift};
+    use super::super::array_shape_writes::{
+        PushedValues, apply_array_push, apply_array_unshift, loop_written_value,
+    };
 
     let Expression::Call(Call::Function(call)) = expr else {
         return false;
@@ -304,7 +330,11 @@ pub(crate) fn process_array_push_call<'b>(
         let Argument::Positional(arg) = arg else {
             return false;
         };
-        let value = resolve(arg.value);
+        let value = loop_written_value(
+            resolve(arg.value),
+            ctx.in_loop,
+            is_constant_value(arg.value),
+        );
         if arg.ellipsis.is_none() {
             values.push(PushedValues::One(value));
             continue;
@@ -497,6 +527,7 @@ fn apply_array_write<'b>(
     key_chain: &[&Expression<'b>],
     append: bool,
     rhs_types: Vec<ResolvedType>,
+    constant: bool,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
@@ -522,9 +553,10 @@ fn apply_array_write<'b>(
         }
     }
     // The write lands on whichever value the variable holds, so every
-    // alternative a branch join left behind takes it.
+    // alternative a branch join left behind takes it. A variable that holds
+    // nothing yet auto-vivifies to an empty array.
     let base_type = match scope.get(base_name) {
-        [] => PhpType::array(),
+        [] => PhpType::array_shape(Vec::new()),
         base_types => ResolvedType::types_joined(base_types),
     };
 
@@ -599,10 +631,12 @@ fn apply_array_write<'b>(
         write_keys.push(super::super::array_shape_writes::ArrayWriteKey::Append);
     }
 
+    let written =
+        super::super::array_shape_writes::loop_written_value(value_php_type, ctx.in_loop, constant);
     let merged = super::super::array_shape_writes::merge_nested_array_write(
         &base_type,
         &write_keys,
-        &value_php_type,
+        &written,
         ctx.in_loop,
     );
     scope.set(base_name, vec![ResolvedType::from_type_string(merged)]);

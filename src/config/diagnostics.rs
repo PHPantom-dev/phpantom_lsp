@@ -46,8 +46,8 @@ pub struct DiagnosticsConfig {
     /// provider) will flag unknown property access instead of
     /// suppressing it. This matches PHPStan's `reportMagicProperties`
     /// behaviour.
-    #[serde(rename = "report-magic-properties")]
-    pub report_magic_properties: Option<bool>,
+    #[serde(rename = "magic-properties")]
+    pub magic_properties: Option<bool>,
 
     /// Report a member that only some classes of a union declare.
     ///
@@ -61,6 +61,35 @@ pub struct DiagnosticsConfig {
     /// be reported too.
     #[serde(rename = "partial-union-members")]
     pub partial_union_members: Option<bool>,
+
+    /// Report an exception a function or method lets escape without
+    /// listing it in its `@throws` tags.
+    ///
+    /// Off by default. When enabled, PHPantom emits a hint-level
+    /// diagnostic on every `throw`, and every call whose callee declares
+    /// `@throws`, where the exception is neither caught by an enclosing
+    /// `try` nor covered by a `@throws` tag of the function the code is
+    /// written in. Exceptions extending a class listed in
+    /// `unchecked-exceptions` are never reported.
+    #[serde(rename = "unhandled-exceptions")]
+    pub unhandled_exceptions: Option<bool>,
+
+    /// Report a parameter a function, closure, or method never reads.
+    ///
+    /// Off by default: an unused parameter is often deliberate (a
+    /// callback that ignores what it is handed, a stub kept for its
+    /// signature), so whether it is worth flagging is a matter of style.
+    #[serde(rename = "unused-parameters")]
+    pub unused_parameters: Option<bool>,
+
+    /// The exception classes `unhandled-exceptions` leaves alone, along
+    /// with every class extending them.
+    ///
+    /// Defaults to `["Error", "LogicException", "RuntimeException"]`,
+    /// the classes PhpStorm treats as unchecked. Names are fully
+    /// qualified, with or without a leading `\`.
+    #[serde(rename = "unchecked-exceptions")]
+    pub unchecked_exceptions: Option<Vec<String>>,
 
     /// Compute diagnostics for the whole workspace in the background.
     ///
@@ -97,6 +126,29 @@ pub struct DiagnosticsConfig {
     #[serde(rename = "possibly-empty-mismatches")]
     pub possibly_empty_mismatches: Option<bool>,
 
+    /// Report a `type_mismatch_argument`, `type_mismatch_return` or
+    /// `type_mismatch_property` where some members of the value's union
+    /// fit the declared type, such as an `array|string` passed to a
+    /// `string` parameter.
+    ///
+    /// On by default. Set to `false` and only a value no member of which
+    /// fits is reported, the way PHPStan below level 7 judges unions. That
+    /// also leaves out the mismatches `possibly-empty-mismatches` covers.
+    #[serde(rename = "partial-union-mismatches")]
+    pub partial_union_mismatches: Option<bool>,
+
+    /// Check arguments, return values and property writes against the
+    /// type a docblock declares, not just the native one.
+    ///
+    /// On by default. Set to `false` and a `type_mismatch_argument`,
+    /// `type_mismatch_return` or `type_mismatch_property` is only reported
+    /// when the value breaks the native type, so the code would throw a
+    /// `TypeError`. A parameter, return or property with no native type is
+    /// then not checked at all. Useful on legacy code whose docblocks
+    /// have drifted from what the code does.
+    #[serde(rename = "docblock-type-mismatches")]
+    pub docblock_type_mismatches: Option<bool>,
+
     /// Rules that suppress matching diagnostics, similar to PHPStan's
     /// `ignoreErrors`.
     ///
@@ -118,6 +170,9 @@ pub struct DiagnosticsConfig {
     /// ```
     pub ignore: Vec<IgnoreRule>,
 }
+
+/// The exception classes PhpStorm treats as unchecked by default.
+const DEFAULT_UNCHECKED_EXCEPTIONS: [&str; 3] = ["Error", "LogicException", "RuntimeException"];
 
 /// A single `[[diagnostics.ignore]]` rule.
 ///
@@ -161,8 +216,8 @@ impl DiagnosticsConfig {
     /// Whether magic property reporting is enabled.
     ///
     /// Defaults to `false` (off) when not explicitly set.
-    pub fn report_magic_properties_enabled(&self) -> bool {
-        self.report_magic_properties.unwrap_or(false)
+    pub fn magic_properties_enabled(&self) -> bool {
+        self.magic_properties.unwrap_or(false)
     }
 
     /// Whether the partial-union-members diagnostic is enabled.
@@ -170,6 +225,33 @@ impl DiagnosticsConfig {
     /// Defaults to `false` (off) when not explicitly set.
     pub fn partial_union_members_enabled(&self) -> bool {
         self.partial_union_members.unwrap_or(false)
+    }
+
+    /// Whether the unhandled-exceptions diagnostic is enabled.
+    ///
+    /// Defaults to `false` (off) when not explicitly set.
+    pub fn unhandled_exceptions_enabled(&self) -> bool {
+        self.unhandled_exceptions.unwrap_or(false)
+    }
+
+    /// Whether the unused-parameters diagnostic is enabled.
+    ///
+    /// Defaults to `false` (off) when not explicitly set.
+    pub fn unused_parameters_enabled(&self) -> bool {
+        self.unused_parameters.unwrap_or(false)
+    }
+
+    /// The exception classes, without a leading `\`, that
+    /// `unhandled-exceptions` does not report, nor their subclasses.
+    pub fn unchecked_exceptions(&self) -> Vec<&str> {
+        match &self.unchecked_exceptions {
+            Some(names) => names
+                .iter()
+                .map(|name| name.trim().trim_start_matches('\\'))
+                .filter(|name| !name.is_empty())
+                .collect(),
+            None => DEFAULT_UNCHECKED_EXCEPTIONS.to_vec(),
+        }
     }
 
     /// Whether background workspace diagnostics are enabled.
@@ -191,5 +273,19 @@ impl DiagnosticsConfig {
     /// Whether a mismatch that only a `null` or `false` causes is reported.
     pub fn possibly_empty_mismatches_enabled(&self) -> bool {
         self.possibly_empty_mismatches.unwrap_or(false)
+    }
+
+    /// Whether a mismatch some members of the value's union fit is reported.
+    ///
+    /// Defaults to `true` (on) when not explicitly set.
+    pub fn partial_union_mismatches_enabled(&self) -> bool {
+        self.partial_union_mismatches.unwrap_or(true)
+    }
+
+    /// Whether type mismatches are checked against docblock types.
+    ///
+    /// Defaults to `true` (on) when not explicitly set.
+    pub fn docblock_type_mismatches_enabled(&self) -> bool {
+        self.docblock_type_mismatches.unwrap_or(true)
     }
 }

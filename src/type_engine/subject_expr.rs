@@ -117,6 +117,27 @@ pub enum SubjectExpr {
         /// The bracket segments in left-to-right order.
         segments: Vec<BracketSegment>,
     },
+    /// The entity a Doctrine Query Language variable joined through an
+    /// association stands for, `base.association`: the target of the
+    /// association of the entity `base` stands for.  DQL's own path
+    /// notation, which no PHP expression is written in, so the symbol map
+    /// can name a joined variable's entity by a subject text.
+    DqlAssociation {
+        /// What the variable the path starts from stands for.
+        base: Box<SubjectExpr>,
+        /// The association's field.
+        association: String,
+    },
+    /// The entity the Doctrine Query Language variable `alias` of the query
+    /// builder `base` stands for, `alias@base`: the variable a builder
+    /// declared before it got to the code that uses it, which the builder's
+    /// type carries.  No PHP expression is written this way either.
+    DqlBuilderAlias {
+        /// The query builder.
+        base: Box<SubjectExpr>,
+        /// The variable.
+        alias: String,
+    },
     /// Inline array literal with index access: `[expr1, expr2][0]`.
     InlineArray {
         /// The raw element expressions inside the `[…]` literal.
@@ -220,6 +241,22 @@ impl SubjectExpr {
             "static" => return SubjectExpr::StaticKw,
             "parent" => return SubjectExpr::Parent,
             _ => {}
+        }
+
+        // ── A DQL association path: `base.association` ─────────────
+        if let Some((base, association)) = split_dql_association(subject) {
+            return SubjectExpr::DqlAssociation {
+                base: Box::new(SubjectExpr::parse(base)),
+                association: association.to_string(),
+            };
+        }
+
+        // ── A query builder's DQL variable: `alias@base` ───────────
+        if let Some((alias, base)) = split_dql_builder_alias(subject) {
+            return SubjectExpr::DqlBuilderAlias {
+                base: Box::new(SubjectExpr::parse(base)),
+                alias: alias.to_string(),
+            };
         }
 
         // ── `new ClassName(…)` or `(new ClassName(…))` ──────────────
@@ -445,6 +482,16 @@ impl SubjectExpr {
                     stack.push(Step::Text("->"));
                     stack.push(Step::Node(base));
                 }
+                SubjectExpr::DqlAssociation { base, association } => {
+                    stack.push(Step::Text(association));
+                    stack.push(Step::Text("."));
+                    stack.push(Step::Node(base));
+                }
+                SubjectExpr::DqlBuilderAlias { base, alias } => {
+                    out.push_str(alias);
+                    out.push('@');
+                    stack.push(Step::Node(base));
+                }
                 SubjectExpr::StaticMethodCall { class, method } => {
                     out.push_str(class);
                     out.push_str("::");
@@ -574,9 +621,22 @@ impl SubjectExpr {
                     out.push(class_name.clone());
                     break;
                 }
-                SubjectExpr::PropertyChain { base, .. }
-                | SubjectExpr::MethodCall { base, .. }
-                | SubjectExpr::ArrayAccess { base, .. } => base,
+                // A member named by a variable (`$obj->$name`) reads that
+                // variable as well, and is set aside with the arguments.
+                SubjectExpr::PropertyChain {
+                    base,
+                    property: member,
+                }
+                | SubjectExpr::MethodCall {
+                    base,
+                    method: member,
+                } => {
+                    pending_args.push(member);
+                    base
+                }
+                SubjectExpr::ArrayAccess { base, .. }
+                | SubjectExpr::DqlAssociation { base, .. }
+                | SubjectExpr::DqlBuilderAlias { base, .. } => base,
                 SubjectExpr::CallExpr { callee, args_text } => {
                     pending_args.push(args_text);
                     callee
@@ -649,7 +709,9 @@ fn detach_child(node: &mut SubjectExpr, pending: &mut Vec<SubjectExpr>) {
     let child = match node {
         SubjectExpr::PropertyChain { base, .. }
         | SubjectExpr::MethodCall { base, .. }
-        | SubjectExpr::ArrayAccess { base, .. } => base,
+        | SubjectExpr::ArrayAccess { base, .. }
+        | SubjectExpr::DqlAssociation { base, .. }
+        | SubjectExpr::DqlBuilderAlias { base, .. } => base,
         SubjectExpr::CallExpr { callee, .. } => callee,
         SubjectExpr::This
         | SubjectExpr::SelfKw
@@ -668,6 +730,35 @@ fn detach_child(node: &mut SubjectExpr, pending: &mut Vec<SubjectExpr>) {
 }
 
 // ─── SubjectExpr parsing helpers ────────────────────────────────────────────
+
+/// Split a DQL association path, `base.association`, at its last `.`: the
+/// association is a name, and the base ends the way a subject does.  A PHP
+/// subject has no `.` outside a string or a number, neither of which can
+/// end it in front of a name.
+fn split_dql_association(subject: &str) -> Option<(&str, &str)> {
+    let (base, association) = subject.rsplit_once('.')?;
+    let mut chars = association.chars();
+    let starts_name = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    if !starts_name || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    base.ends_with(|c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | ')' | ']'))
+        .then_some((base, association))
+}
+
+/// Split a query builder's DQL variable, `alias@base`, into the variable
+/// and the builder.
+fn split_dql_builder_alias(subject: &str) -> Option<(&str, &str)> {
+    let (alias, base) = subject.split_once('@')?;
+    let mut chars = alias.chars();
+    let starts_name = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    (starts_name && chars.all(|c| c.is_ascii_alphanumeric() || c == '_') && !base.is_empty())
+        .then_some((alias, base))
+}
 
 /// Appends the names of genuine local variables (`$name`, but not `$this`)
 /// found in a raw argument/element text to `out`, each with its leading

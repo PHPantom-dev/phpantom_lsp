@@ -92,7 +92,7 @@ class Repro {
     }
 }
 "#,
-        "Method 'nope' not found on class 'Err'",
+        "Method Err::nope() not found",
     );
 }
 
@@ -118,9 +118,13 @@ class Repro {
 "#,
     );
     assert_eq!(messages.len(), 2, "got: {messages:?}");
-    assert!(messages[0].contains("'int'"), "uksort: {:?}", messages[0]);
     assert!(
-        messages[1].contains("'string'"),
+        messages[0].ends_with(" on int"),
+        "uksort: {:?}",
+        messages[0]
+    );
+    assert!(
+        messages[1].ends_with(" on string"),
         "uasort: {:?}",
         messages[1]
     );
@@ -152,7 +156,7 @@ class Repro {
     }
 }
 "#,
-        "Method 'nope' not found on class 'Err'",
+        "Method Err::nope() not found",
     );
 }
 
@@ -177,7 +181,7 @@ class Repro {
     }
 }
 "#,
-        "Method 'nope' not found on class 'Item'",
+        "Method Item::nope() not found",
     );
 }
 
@@ -308,7 +312,7 @@ class Repro {
     }
 }
 "#,
-        "Method 'nope' not found on class 'Arg'",
+        "Method Arg::nope() not found",
     );
 }
 
@@ -333,7 +337,7 @@ class Repro {
     }
 }
 "#,
-        "Method 'nope' not found on class 'Arg'",
+        "Method Arg::nope() not found",
     );
 }
 
@@ -418,13 +422,13 @@ class Repro {
     }
 }
 "#,
-        "Method 'nope' not found on class 'Message'",
+        "Method Message::nope() not found",
     );
 }
 
 /// The directory-walk idiom: `RecursiveIteratorIterator` binds its
-/// `@template` from the iterator it is constructed with and reaches that
-/// iterator's element type through `@mixin`.
+/// `@template` from the iterator it is constructed with and iterates as
+/// that iterator does.
 #[test]
 fn recursive_iterator_iterator_iterates_the_wrapped_iterator() {
     assert_clean(
@@ -454,7 +458,7 @@ class Repro {
     }
 }
 "#,
-        "'nope'",
+        "nope()",
     );
 }
 

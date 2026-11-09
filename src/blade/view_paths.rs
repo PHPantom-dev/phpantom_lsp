@@ -94,7 +94,7 @@ impl crate::Backend {
                 let roots = view_paths_from_config(config.as_deref().map(String::as_str), &root)
                     .into_iter()
                     .map(|path| ViewRoot {
-                        canonical: path.canonicalize().ok(),
+                        canonical: dunce::canonicalize(&path).ok(),
                         path,
                     })
                     .collect();
@@ -172,7 +172,11 @@ impl crate::Backend {
             match_root(&root.path, &|| root.canonical.clone(), "");
         }
         for res in &self.laravel.provider_resources.read().view_dirs {
-            match_root(&res.path, &|| res.path.canonicalize().ok(), &res.namespace);
+            match_root(
+                &res.path,
+                &|| dunce::canonicalize(&res.path).ok(),
+                &res.namespace,
+            );
         }
         names
     }

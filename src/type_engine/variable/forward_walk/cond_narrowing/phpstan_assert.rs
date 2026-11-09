@@ -1,5 +1,6 @@
 use super::*;
 use crate::class_lookup::Fqn;
+use crate::type_engine::call_resolution::TemplateCallee;
 
 /// Apply `@phpstan-assert-if-true` / `@phpstan-assert-if-false` narrowing
 /// from a function or static/instance method call used as a condition.
@@ -93,9 +94,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 let asserted_type = condition_facts::bind_call_templates(
                     &assertion.asserted_type,
                     &func_info.template_params,
-                    &func_info.template_bindings,
-                    &func_info.template_param_bounds,
-                    &func_info.parameters,
+                    &TemplateCallee::of_function(&func_info),
                     &func_call.argument_list,
                     &build_var_ctx("", ctx, &scope_resolver),
                 );
@@ -159,9 +158,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 let asserted_type = condition_facts::bind_call_templates(
                     &assertion.asserted_type,
                     method.template_params(),
-                    method.template_bindings(),
-                    method.template_param_bounds(),
-                    &method.parameters,
+                    &TemplateCallee::of_method(&method),
                     &static_call.argument_list,
                     &build_var_ctx("", ctx, &scope_resolver),
                 );
@@ -255,9 +252,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     let asserted_type = condition_facts::bind_call_templates(
                         &assertion.asserted_type,
                         method.template_params(),
-                        method.template_bindings(),
-                        method.template_param_bounds(),
-                        &method.parameters,
+                        &TemplateCallee::of_method(&method),
                         &method_call.argument_list,
                         &build_var_ctx("", ctx, &scope_resolver),
                     );

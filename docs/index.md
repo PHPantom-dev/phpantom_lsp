@@ -30,6 +30,7 @@ You may want to jump to:
 - [Editor Setup](editor-setup.md) and [Manual Installation](installation.md)
 - [Configuration Reference](configuration.md)
 - [CLI Reference](cli.md)
+- [Diagnostics Reference](diagnostics.md)
 - [Running in the browser (WebAssembly)](wasm.md)
 - [Development Roadmap](todo.md)
 - [Changelog](CHANGELOG.md)

@@ -248,12 +248,13 @@ impl Backend {
             // Read `.phpantom.toml` before anything else so that settings
             // (e.g. PHP version override, diagnostic toggles) are active
             // from the very first file load.
-            match crate::config::load_config_from(
+            match crate::config::load_config_with_warnings(
                 &root,
                 self.workspace.global_config_path.as_deref(),
             ) {
-                Ok(cfg) => {
-                    self.set_config(cfg);
+                Ok(loaded) => {
+                    self.warn_config(&loaded.warnings);
+                    self.set_config(loaded.config);
                 }
                 Err(e) => {
                     self.log(
@@ -311,6 +312,14 @@ impl Backend {
 
             self.discover_workspace_symbols(&root, php_version, composer_package, Some(&progress))
                 .await;
+
+            // After the pass above, which tells a Doctrine project from
+            // composer.json, and before the open files are diagnosed.
+            let mapping_backend = self.clone_for_blocking();
+            run_blocking_cancel_safe("index_doctrine_mapping_files", move || {
+                mapping_backend.index_doctrine_mapping_files();
+            })
+            .await;
 
             // Laravel-only startup work.  The project classification is
             // set by the init pass above from composer.json, so it has to
@@ -656,6 +665,16 @@ impl Backend {
                     .await;
             }
 
+            // A Drupal file opened before the index finished was judged
+            // against the route names read so far, and the route builders
+            // of core and contributed extensions are only read here.
+            if progress_backend.is_drupal_project() {
+                let open: Vec<String> =
+                    progress_backend.open_files.read().keys().cloned().collect();
+                for uri in open {
+                    progress_backend.schedule_diagnostics(uri);
+                }
+            }
             progress_backend.request_diagnostic_refresh().await;
 
             // Files opened before the index finished were annotated from a

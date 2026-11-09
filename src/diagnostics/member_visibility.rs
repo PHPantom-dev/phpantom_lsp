@@ -76,7 +76,7 @@ use crate::inheritance::ancestors;
 use crate::types::{ClassInfo, ClassLikeKind, Visibility};
 
 /// Diagnostic code for an access to a member the calling scope may not see.
-pub(crate) const INVALID_MEMBER_ACCESS_CODE: &str = "invalid_member_access";
+pub(crate) const INVALID_MEMBER_ACCESS_CODE: &str = "inaccessible_member";
 
 /// What one branch of a union type says about the access.
 enum BranchVerdict {
@@ -253,6 +253,72 @@ fn judge_branch(
         return BranchVerdict::Permitted;
     }
 
+    judge_scope(
+        merged,
+        member_name,
+        is_static,
+        is_method_call,
+        restriction,
+        kind,
+        current_class,
+        subject_binds_scope,
+        class_loader,
+    )
+}
+
+/// Whether a call written in `current_class` reaches the non-public
+/// method `method_name` on `merged` directly, rather than being routed to
+/// `__call` / `__callStatic` (or rejected) because it cannot see it.
+///
+/// Answers `true` whenever the access cannot be judged, the way the
+/// visibility diagnostic stays silent, so a call is only taken away from
+/// the method's own signature when it positively cannot reach it.
+pub(crate) fn call_site_reaches_method(
+    merged: &Arc<ClassInfo>,
+    method_name: &str,
+    visibility: Visibility,
+    is_static: bool,
+    current_class: Option<&ClassInfo>,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> bool {
+    let Some(restriction) = Restriction::from_visibility(visibility) else {
+        return true;
+    };
+    if current_class.is_some_and(|c| c.kind == ClassLikeKind::Trait)
+        || merged.kind == ClassLikeKind::Trait
+    {
+        return true;
+    }
+    !matches!(
+        judge_scope(
+            merged,
+            method_name,
+            is_static,
+            true,
+            restriction,
+            MemberKind::Method,
+            current_class,
+            false,
+            class_loader,
+        ),
+        BranchVerdict::Rejected(_)
+    )
+}
+
+/// Judge a non-public member that is present on the assembled class
+/// against the scopes the access is written in.
+#[allow(clippy::too_many_arguments)]
+fn judge_scope(
+    merged: &Arc<ClassInfo>,
+    member_name: &str,
+    is_static: bool,
+    is_method_call: bool,
+    restriction: Restriction,
+    kind: MemberKind,
+    current_class: Option<&ClassInfo>,
+    subject_binds_scope: bool,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> BranchVerdict {
     // Every class the access counts as being written inside.  Normally
     // that is just the enclosing declaration, but a subject that names
     // its own binding adds the class it binds to — see
@@ -556,7 +622,7 @@ fn is_accessible(
 /// unknown-member module, which answers a different question — whether a
 /// member that exists *nowhere* is still handled — and gates `__get`
 /// behind the
-/// `report-magic-properties` setting.  That setting is about which
+/// `magic-properties` setting.  That setting is about which
 /// virtual property surface to trust; it has no bearing on whether PHP
 /// dispatches to `__get` for a property that demonstrably exists.
 ///

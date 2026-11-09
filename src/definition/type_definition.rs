@@ -20,7 +20,7 @@ use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::php_type::PhpType;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
+use crate::symbol_map::{DocblockMemberRef, SelfStaticParentKind, SymbolKind};
 use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::*;
@@ -97,12 +97,38 @@ impl Backend {
                     ),
                 );
 
-                if *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod {
-                    candidates = crate::mock_methods::mocked_classes(
-                        candidates,
-                        *is_static,
-                        &resolved_class_loader,
-                    );
+                match docblock_ref {
+                    DocblockMemberRef::MockedMethod => {
+                        candidates = crate::mock_methods::mocked_classes(
+                            candidates,
+                            *is_static,
+                            &resolved_class_loader,
+                        );
+                    }
+                    DocblockMemberRef::EntityField => {
+                        candidates = crate::doctrine::managed_entity_classes(
+                            candidates,
+                            &resolved_class_loader,
+                            &self.resolved_class_cache,
+                        );
+                    }
+                    DocblockMemberRef::AttributeNamedArg => candidates.retain(|class| {
+                        crate::class_lookup::constructor_promotes(
+                            class,
+                            member_name,
+                            &resolved_class_loader,
+                        )
+                    }),
+                    DocblockMemberRef::YiiAttribute => candidates.retain(|class| {
+                        crate::yii::active_record::is_record(class, &resolved_class_loader)
+                    }),
+                    DocblockMemberRef::YiiProperty { form_model: true } => {
+                        candidates = crate::yii::forms::form_model_classes(
+                            candidates,
+                            &resolved_class_loader,
+                        );
+                    }
+                    _ => {}
                 }
 
                 // Resolve the member's return type / property type.
@@ -140,10 +166,20 @@ impl Backend {
                     .unwrap_or_default(),
             },
 
-            SymbolKind::ClassReference { name, is_fqn, .. } => {
+            SymbolKind::ClassReference {
+                name,
+                is_fqn,
+                context,
+            } => {
                 // The type *is* the class itself, named as written.
+                let discovered =
+                    self.drupal_annotation_class_at(uri, name, *is_fqn, *context, symbol.start);
+                let (name, is_fqn) = match &discovered {
+                    Some(fqn) => (fqn.as_str(), true),
+                    None => (name.as_str(), *is_fqn),
+                };
                 return self
-                    .resolve_class_reference(uri, content, name, *is_fqn, offset)
+                    .resolve_class_reference(uri, content, name, is_fqn, offset)
                     .map(|loc| vec![loc]);
             }
 

@@ -8,12 +8,123 @@
 //! `$container->get('app.mailer')` and `$this->getParameter('app.sender')`
 //! are typed by what the project's own configuration declares.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use parking_lot::{Mutex, RwLock};
 
 use crate::Backend;
-use crate::atom::Atom;
+use crate::atom::{Atom, AtomMap};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
-use crate::symbol_map::{ContainerValue, StringKeyKind};
+use crate::symbol_map::{ContainerValue, ServiceDecoration, StringKeyKind, SymbolKind, SymbolMap};
+use crate::types::ClassInfo;
+
+/// What each service ID and container parameter is declared with, and the
+/// services declared to decorate each ID, gathered in one pass over the
+/// declarations.
+///
+/// A `get('x')` is resolved in every file that makes one, and finding
+/// `x`'s declarations by walking every declaring file for each of them
+/// costs as much as the walk, times the number of lookups.
+struct ContainerIndex {
+    /// The [`ContainerIndexState::generation`] it was built at.
+    generation: u64,
+    /// Whether it was built for a Symfony project, which reads the
+    /// configurator calls and the installed bundles too.
+    is_symfony: bool,
+    services: AtomMap<Vec<Option<ContainerValue>>>,
+    parameters: AtomMap<Vec<Option<ContainerValue>>>,
+    decorators: AtomMap<Vec<Atom>>,
+}
+
+impl ContainerIndex {
+    /// What each declaration of the `kind` name `key` gives it as, `None`
+    /// for one that gives nothing.
+    fn values(&self, kind: StringKeyKind, key: &str) -> &[Option<ContainerValue>] {
+        let map = match kind {
+            StringKeyKind::ServiceId => &self.services,
+            _ => &self.parameters,
+        };
+        // A name nothing interned was never declared.
+        Atom::from_existing(key)
+            .and_then(|key| map.get(&key))
+            .map_or(&[], Vec::as_slice)
+    }
+}
+
+/// The [`ContainerIndex`] once built, and what keeps it current.
+#[derive(Default)]
+pub(crate) struct ContainerIndexState {
+    built: RwLock<Option<Arc<ContainerIndex>>>,
+    /// Moves whenever a declaration the index reads may have changed.
+    generation: AtomicU64,
+    /// What each file gives the index, so a re-parse that leaves a file's
+    /// declarations as they were keeps the index.
+    contributions: Mutex<HashMap<String, Contribution>>,
+}
+
+/// The service IDs and parameters one file declares, with what it gives
+/// each, and the decorations it declares.
+#[derive(Default, PartialEq)]
+struct Contribution {
+    declarations: Vec<(StringKeyKind, String, Vec<ContainerValue>)>,
+    /// The calls whose receiver the type engine has to confirm before they
+    /// declare anything, which depends on the classes of the whole
+    /// workspace and not just this file.
+    typed: Vec<(String, Vec<ContainerValue>)>,
+    decorations: Vec<ServiceDecoration>,
+}
+
+impl Contribution {
+    fn of(map: &SymbolMap) -> Self {
+        let values_at = |start: u32| -> Vec<ContainerValue> {
+            let at = map
+                .container_values
+                .partition_point(|site| site.start < start);
+            map.container_values[at..]
+                .iter()
+                .take_while(|site| site.start == start)
+                .map(|site| site.value.clone())
+                .collect()
+        };
+        let indexed = |kind: StringKeyKind| {
+            matches!(
+                kind,
+                StringKeyKind::ServiceId | StringKeyKind::ContainerParameter
+            )
+        };
+        let declarations = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind,
+                    key,
+                    is_write: true,
+                    ..
+                } if indexed(*kind) => Some((*kind, key.clone(), values_at(span.start))),
+                _ => None,
+            })
+            .collect();
+        let typed = map
+            .typed_receiver_sites
+            .iter()
+            .filter(|site| site.is_write && site.receiver.names_any(indexed))
+            .map(|site| (site.key.clone(), values_at(site.start)))
+            .collect();
+        Self {
+            declarations,
+            typed,
+            decorations: map.service_decorations.clone(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.declarations.is_empty() && self.typed.is_empty() && self.decorations.is_empty()
+    }
+}
 
 /// What a string value gives a service or a parameter as: the parameter a
 /// whole `%name%` placeholder copies, a class when the string is spelled as
@@ -150,7 +261,7 @@ fn env_placeholder_type(text: &str) -> Option<PhpType> {
 }
 
 /// Whether `name` is spelled as a class name.
-fn is_class_name(name: &str) -> bool {
+pub(crate) fn is_class_name(name: &str) -> bool {
     !name.is_empty()
         && !name.starts_with(|c: char| c.is_ascii_digit())
         && !name.ends_with('\\')
@@ -181,41 +292,130 @@ fn kernel_parameter_type(name: &str) -> Option<PhpType> {
 }
 
 impl Backend {
-    /// What each of the project's declarations of the `kind` name `key`
-    /// gives it as, `None` for one that gives nothing.
-    fn symfony_declared_values(
-        &self,
-        kind: StringKeyKind,
-        key: &str,
-    ) -> Vec<Option<ContainerValue>> {
-        let mut values = Vec::new();
-        self.visit_symfony_declarations(kind, |_, map, start, _, declared| {
-            if declared != key {
-                return;
+    /// Keep the container index in step with what the file at `uri`
+    /// declares: `map` when it counts as one of the project's declaring
+    /// files, `None` when it does not or no longer exists.
+    pub(crate) fn note_container_declarations(&self, uri: &str, map: Option<&SymbolMap>) {
+        let contribution = map.map(Contribution::of).filter(|c| !c.is_empty());
+        let state = &self.symfony.container_index;
+        let mut contributions = state.contributions.lock();
+        let changed = match contribution {
+            Some(contribution) => {
+                if contributions.get(uri) == Some(&contribution) {
+                    false
+                } else {
+                    contributions.insert(uri.to_string(), contribution);
+                    true
+                }
             }
-            let at = map
-                .container_values
-                .partition_point(|site| site.start < start);
-            let mut found = false;
-            for site in map.container_values[at..]
-                .iter()
-                .take_while(|site| site.start == start)
+            None => contributions.remove(uri).is_some(),
+        };
+        if changed {
+            state.generation.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    /// Rebuild the container index on its next read when anything it holds
+    /// may have changed without a declaring file changing: the installed
+    /// bundles, or (`typed_only`) the classes that confirm a configurator
+    /// call's receiver.
+    pub(crate) fn invalidate_container_index(&self, typed_only: bool) {
+        let state = &self.symfony.container_index;
+        if typed_only
+            && !state
+                .contributions
+                .lock()
+                .values()
+                .any(|contribution| !contribution.typed.is_empty())
+        {
+            return;
+        }
+        state.generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// The container index, built if nothing current is kept.
+    fn container_index(&self) -> Arc<ContainerIndex> {
+        let state = &self.symfony.container_index;
+        let generation = state.generation.load(Ordering::Acquire);
+        let is_symfony = self.is_symfony_project();
+        if let Some(index) = state.built.read().as_ref()
+            && index.generation == generation
+            && index.is_symfony == is_symfony
+        {
+            return Arc::clone(index);
+        }
+        let partial_before = crate::blade::typed_receiver::partial_answers();
+        let index = Arc::new(self.build_container_index(generation, is_symfony));
+        // A configurator file being confirmed further up this thread reads
+        // as declaring nothing, so an index built meanwhile is incomplete.
+        if crate::blade::typed_receiver::partial_answers() == partial_before {
+            let mut built = state.built.write();
+            if built
+                .as_ref()
+                .is_none_or(|kept| kept.generation <= generation)
             {
-                values.push(Some(site.value.clone()));
-                found = true;
+                *built = Some(Arc::clone(&index));
             }
-            if !found {
-                values.push(None);
+        }
+        index
+    }
+
+    fn build_container_index(&self, generation: u64, is_symfony: bool) -> ContainerIndex {
+        let mut index = ContainerIndex {
+            generation,
+            is_symfony,
+            services: AtomMap::default(),
+            parameters: AtomMap::default(),
+            decorators: AtomMap::default(),
+        };
+        for kind in [StringKeyKind::ServiceId, StringKeyKind::ContainerParameter] {
+            let values = match kind {
+                StringKeyKind::ServiceId => &mut index.services,
+                _ => &mut index.parameters,
+            };
+            self.visit_symfony_declarations(kind, |_, map, start, _, declared| {
+                let values = values.entry(crate::atom::atom(declared)).or_default();
+                let at = map
+                    .container_values
+                    .partition_point(|site| site.start < start);
+                let before = values.len();
+                values.extend(
+                    map.container_values[at..]
+                        .iter()
+                        .take_while(|site| site.start == start)
+                        .map(|site| Some(site.value.clone())),
+                );
+                if values.len() == before {
+                    values.push(None);
+                }
+            });
+        }
+        let decorators = &mut index.decorators;
+        let mut visit = |map: &SymbolMap| {
+            for decoration in &map.service_decorations {
+                push_unique(
+                    decorators.entry(decoration.decorated).or_default(),
+                    decoration.decorator,
+                );
             }
-        });
-        values
+        };
+        self.visit_declaring_symbol_maps(|_, map| visit(map));
+        if is_symfony {
+            for (_, map) in &self.symfony_bundle_declarations().files {
+                visit(map);
+            }
+        }
+        index
     }
 
     /// The classes the service `id` is built from, following aliases, a
     /// class given as a parameter, and the parent a child definition takes
-    /// its class from when it names none.  An ID spelled as a class is that class
-    /// when no declaration says otherwise.  Empty when nothing the project
-    /// declares says.
+    /// its class from when it names none.  The classes of the services
+    /// that decorate it join them, as do, in Drupal, the classes service
+    /// providers replace it with: either may apply only in some
+    /// environments, or with some modules enabled.  An ID spelled as a
+    /// class is that class when no declaration says otherwise.  Empty when
+    /// nothing the project declares says.
     pub(crate) fn symfony_service_classes(&self, id: &str) -> Vec<Atom> {
         let mut classes = Vec::new();
         self.collect_service_classes(id, &mut HashSet::new(), &mut classes);
@@ -223,43 +423,60 @@ impl Backend {
     }
 
     fn collect_service_classes(&self, id: &str, seen: &mut HashSet<String>, out: &mut Vec<Atom>) {
+        let index = self.container_index();
+        self.collect_indexed_service_classes(&index, id, seen, out);
+    }
+
+    fn collect_indexed_service_classes(
+        &self,
+        index: &ContainerIndex,
+        id: &str,
+        seen: &mut HashSet<String>,
+        out: &mut Vec<Atom>,
+    ) {
         if !seen.insert(id.to_string()) {
             return;
         }
         let mut found = false;
         let mut parents = Vec::new();
-        for value in self.symfony_declared_values(StringKeyKind::ServiceId, id) {
+        for value in index.values(StringKeyKind::ServiceId, id) {
             match value {
-                Some(ContainerValue::Class(class)) => match placeholder_name(&class) {
+                Some(ContainerValue::Class(class)) => match placeholder_name(class) {
                     Some(parameter) => {
-                        for value in self.parameter_values(parameter) {
+                        for value in parameter_values(index, parameter) {
                             if let Some(ContainerValue::Class(class)) = value
-                                && placeholder_name(&class).is_none()
+                                && placeholder_name(class).is_none()
                             {
                                 found = true;
-                                push_unique(out, class);
+                                push_unique(out, *class);
                             }
                         }
                     }
                     None => {
                         found = true;
-                        push_unique(out, class);
+                        push_unique(out, *class);
                     }
                 },
                 Some(ContainerValue::Alias(target)) => {
                     found = true;
-                    self.collect_service_classes(&target, seen, out);
+                    self.collect_indexed_service_classes(index, target, seen, out);
                 }
-                Some(ContainerValue::Parent(parent)) => parents.push(parent),
+                Some(ContainerValue::Parent(parent)) => parents.push(*parent),
                 Some(ContainerValue::Type(_)) | None => {}
             }
         }
         if !found {
             let before = out.len();
             for parent in parents {
-                self.collect_service_classes(&parent, seen, out);
+                self.collect_indexed_service_classes(index, &parent, seen, out);
             }
             found = out.len() > before;
+        }
+        if self.is_drupal_project() {
+            for class in self.drupal_service_replacements(id) {
+                found = true;
+                push_unique(out, class);
+            }
         }
         if !found && id.contains('\\') {
             let class = id.strip_prefix('\\').unwrap_or(id);
@@ -267,42 +484,29 @@ impl Backend {
                 push_unique(out, crate::atom::atom(class));
             }
         }
-    }
-
-    /// The values the parameter `name` is declared with, following a value
-    /// that copies another parameter.
-    fn parameter_values(&self, name: &str) -> Vec<Option<ContainerValue>> {
-        let mut values = Vec::new();
-        let mut seen = HashSet::new();
-        let mut pending = vec![name.to_string()];
-        while let Some(name) = pending.pop() {
-            if !seen.insert(name.clone()) {
-                continue;
-            }
-            for value in self.symfony_declared_values(StringKeyKind::ContainerParameter, &name) {
-                if let Some(ContainerValue::Class(class)) = &value
-                    && let Some(copied) = placeholder_name(class)
-                {
-                    pending.push(copied.to_string());
-                    continue;
-                }
-                values.push(value);
+        // The services the project and its bundles declare to decorate it.
+        let decorated = id.strip_prefix('\\').unwrap_or(id);
+        if let Some(decorators) =
+            Atom::from_existing(decorated).and_then(|id| index.decorators.get(&id))
+        {
+            for decorator in decorators {
+                self.collect_indexed_service_classes(index, decorator, seen, out);
             }
         }
-        values
     }
 
     /// The type of the container parameter `name`'s value, when every
     /// declaration of it says, or when it is one the kernel sets.
     pub(crate) fn symfony_parameter_type(&self, name: &str) -> Option<PhpType> {
-        let values = self.parameter_values(name);
+        let index = self.container_index();
+        let values = parameter_values(&index, name);
         if values.is_empty() {
             return kernel_parameter_type(name);
         }
         let mut types = Vec::with_capacity(values.len());
         for value in values {
-            types.push(match value? {
-                ContainerValue::Type(ty) => ty,
+            types.push(match value.as_ref()? {
+                ContainerValue::Type(ty) => ty.clone(),
                 ContainerValue::Class(_) | ContainerValue::Alias(_) | ContainerValue::Parent(_) => {
                     PhpType::string()
                 }
@@ -310,6 +514,79 @@ impl Backend {
         }
         Some(PhpType::union(types))
     }
+
+    /// What `method_name(key)` on `owner` gives when it looks `key` up in
+    /// the container: the classes a service ID is built from for `get()`
+    /// on a container, and the type of a parameter's value for `get()` on
+    /// a parameter bag or `getParameter()`.  `None` when the call is no
+    /// container lookup or the project does not declare what `key` is, so
+    /// the call keeps the type the method declares.
+    pub(crate) fn container_lookup(
+        &self,
+        owner: &ClassInfo,
+        method_name: &str,
+        key: &str,
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Option<ContainerLookup> {
+        if !method_name.eq_ignore_ascii_case("get")
+            && !method_name.eq_ignore_ascii_case("getParameter")
+        {
+            return None;
+        }
+        if !self.reads_service_container() {
+            return None;
+        }
+        let (receiver, _) = crate::symbol_map::extraction::symfony_receiver_method(method_name, 0)?;
+        let (_, kind) = receiver
+            .targets()
+            .iter()
+            .find(|(fqn, _)| crate::class_lookup::is_subtype_of(owner, fqn, class_loader))?;
+        match kind {
+            StringKeyKind::ServiceId => {
+                let classes: Vec<Arc<ClassInfo>> = self
+                    .symfony_service_classes(key)
+                    .iter()
+                    .filter_map(|class| class_loader(Fqn::new(class)))
+                    .collect();
+                (!classes.is_empty()).then_some(ContainerLookup::Classes(classes))
+            }
+            StringKeyKind::ContainerParameter => {
+                self.symfony_parameter_type(key).map(ContainerLookup::Type)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// What a container lookup gives (see [`Backend::container_lookup`]).
+pub(crate) enum ContainerLookup {
+    /// The classes of the service an ID names.
+    Classes(Vec<Arc<ClassInfo>>),
+    /// The type of a parameter's value.
+    Type(PhpType),
+}
+
+/// The values the parameter `name` is declared with, following a value
+/// that copies another parameter.
+fn parameter_values<'a>(index: &'a ContainerIndex, name: &str) -> Vec<&'a Option<ContainerValue>> {
+    let mut values = Vec::new();
+    let mut seen = HashSet::new();
+    let mut pending = vec![name];
+    while let Some(name) = pending.pop() {
+        if !seen.insert(name) {
+            continue;
+        }
+        for value in index.values(StringKeyKind::ContainerParameter, name) {
+            if let Some(ContainerValue::Class(class)) = value
+                && let Some(copied) = placeholder_name(class)
+            {
+                pending.push(copied);
+                continue;
+            }
+            values.push(value);
+        }
+    }
+    values
 }
 
 fn push_unique(out: &mut Vec<Atom>, class: Atom) {

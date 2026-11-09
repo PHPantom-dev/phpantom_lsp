@@ -42,7 +42,7 @@ impl Backend {
         if self.is_resource_uri(&uri) {
             self.update_resource_symbol_index(&uri, &text);
             self.rediagnose_template_namers(template_names);
-            if self.is_twig_template_uri(&uri) {
+            if self.has_resource_diagnostics(&uri) {
                 self.schedule_diagnostics(uri.clone());
             }
             self.log(MessageType::Info, format!("Opened resource file: {}", uri))
@@ -70,6 +70,18 @@ impl Backend {
                 let content = Arc::clone(&text);
                 spawn_blocking_detached("did_open blade inference", move || {
                     backend.reinfer_blade_and_its_renders(&blade_uri, &content);
+                });
+            }
+        }
+
+        if self.affects_tempest_inference(&uri) {
+            if self.sync_ast_updates {
+                self.refresh_tempest_inference_after_edit(&uri);
+            } else {
+                let backend = self.clone_for_blocking();
+                let uri = uri.clone();
+                spawn_blocking_detached("did_open Tempest inference", move || {
+                    backend.refresh_tempest_inference_after_edit(&uri);
                 });
             }
         }
@@ -153,12 +165,12 @@ impl Backend {
         // service loop for every keystroke would stall interactive
         // requests, and refreshing lenses per keystroke would make the
         // client re-pull them faster than it can render them.  A
-        // template's names are judged against the scan, so its diagnostics
-        // follow it.
+        // template's names and a validation mapping's options are judged
+        // against the scan, so their diagnostics follow it.
         if self.is_resource_uri(&uri) {
             if self.sync_ast_updates {
                 self.update_resource_symbol_index(&uri, &text);
-                if self.is_twig_template_uri(&uri) {
+                if self.has_resource_diagnostics(&uri) {
                     self.schedule_diagnostics(uri);
                 }
                 return;
@@ -176,7 +188,7 @@ impl Backend {
                         return false;
                     }
                     backend.update_resource_symbol_index(&uri, &text);
-                    if backend.is_twig_template_uri(&uri) {
+                    if backend.has_resource_diagnostics(&uri) {
                         backend.schedule_diagnostics(uri);
                     }
                     true
@@ -200,6 +212,9 @@ impl Backend {
         // incomplete code cannot be parsed.
         if self.sync_ast_updates {
             self.update_ast(&uri, &text);
+            if self.affects_tempest_inference(&uri) {
+                self.refresh_tempest_inference_after_edit(&uri);
+            }
             self.schedule_diagnostics(uri.clone());
         } else {
             let backend = self.clone_for_blocking();
@@ -235,6 +250,12 @@ impl Backend {
                             elapsed
                         );
                     }
+                    // Republishing a view takes its parse lock, this one
+                    // included, to parse the buffer as it is by then.
+                    drop(_parse_guard);
+                    if backend.affects_tempest_inference(&uri) {
+                        backend.refresh_tempest_inference_after_edit(&uri);
+                    }
                     backend.schedule_diagnostics(uri_for_diagnostics);
                     true
                 })
@@ -255,6 +276,7 @@ impl Backend {
 
     pub(crate) async fn on_did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
+        self.note_tempest_php_change(&uri);
 
         self.open_files.write().remove(&uri);
         self.did_change_parse_locks.lock().remove(&uri);
@@ -268,6 +290,8 @@ impl Backend {
             if let Some(content) = self.get_file_content(&uri) {
                 self.update_resource_symbol_index(&uri, &content);
             } else {
+                // A buffer never saved leaves no file behind.
+                self.note_drupal_config_document(&uri, None);
                 self.clear_file_maps(&uri);
             }
         } else if let Some(path) = self.workspace_index_path(&uri) {
@@ -282,8 +306,18 @@ impl Backend {
                 move |backend: &Backend, uri: &str| match crate::util::read_php_source(&path) {
                     Some(content) => {
                         backend.update_ast(uri, &content);
+                        if backend.affects_tempest_inference(uri) {
+                            backend.refresh_tempest_inference_after_edit(uri);
+                        }
+                        backend.put_to_sleep([uri]);
                     }
-                    None => backend.forget_closed_file(uri),
+                    None => {
+                        let tempest = backend.affects_tempest_inference(uri);
+                        backend.forget_closed_file(uri);
+                        if tempest {
+                            backend.refresh_tempest_inference_after_edit(uri);
+                        }
+                    }
                 };
             if self.sync_ast_updates {
                 reparse(self, &uri);
@@ -303,7 +337,11 @@ impl Backend {
                 });
             }
         } else {
+            let tempest = self.affects_tempest_inference(&uri);
             self.forget_closed_file(&uri);
+            if tempest {
+                self.refresh_tempest_inference_after_edit(&uri);
+            }
         }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
@@ -370,6 +408,7 @@ impl Backend {
             let caller_uri = uri.clone();
             spawn_blocking_detached("did_save blade inference", move || {
                 backend.refresh_blade_inference_for_caller(&caller_uri);
+                backend.refresh_tempest_inference();
             });
         }
 

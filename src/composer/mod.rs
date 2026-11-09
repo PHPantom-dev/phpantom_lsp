@@ -10,6 +10,8 @@
 //!   `vendor/composer/`, and the files they pull in.
 //! - [`project`]: what kind of project a `composer.json` describes (PHP
 //!   version, Laravel, Drupal, permission packages).
+//! - [`bin_plugin`]: the tools `bamarni/composer-bin-plugin` installs into
+//!   bin namespaces of their own.
 //!
 //! # PSR-4 Resolution
 //!
@@ -31,6 +33,7 @@ use std::path::{Path, PathBuf};
 pub use mago_composer::ComposerPackage;
 
 mod autoload_files;
+mod bin_plugin;
 mod installed;
 mod project;
 mod psr4;
@@ -40,15 +43,17 @@ pub use autoload_files::{
     parse_autoload_classmap, parse_autoload_files, parse_autoload_namespaces,
     scan_composer_bootstrap_classes,
 };
+pub(crate) use bin_plugin::{BinNamespace, bin_namespaces, bin_target_directory};
 pub use installed::extract_path_repo_psr4_mappings;
 pub(crate) use installed::{
-    InstalledPackages, linked_package_roots, parse_installed_packages, path_repo_psr4_mappings,
-    read_installed_packages, stub_package_roots,
+    InstalledPackages, installed_package_roots, linked_package_roots, parse_installed_packages,
+    path_repo_psr4_mappings, read_installed_packages, stub_package_roots,
 };
 pub(crate) use project::{
-    detect_drupal_web_root, explicit_dependency_names, has_dependency, has_laravel_aware_phpstan,
-    has_require_dev, has_runtime_permission_package, is_application_project, is_doctrine_project,
-    is_laravel_application, is_laravel_project, is_symfony_project, is_twig_project,
+    detect_drupal_web_root, drupal_web_root_on_disk, explicit_dependency_names, has_dependency,
+    has_laravel_aware_phpstan, has_require_dev, has_runtime_permission_package,
+    is_application_project, is_doctrine_project, is_laravel_application, is_laravel_project,
+    is_symfony_project, is_tempest_database_project, is_tempest_project, is_twig_project,
     is_yii_project, locked_phpunit_major,
 };
 pub use project::{detect_php_version, detect_php_version_from_package};
@@ -206,7 +211,38 @@ pub(crate) fn get_bin_dir(package: &ComposerPackage) -> String {
 ///
 /// returns `[(monorepo/project-a, "vendor"), (monorepo/packages/project-b, "vendor")]`.
 pub fn discover_subproject_roots(workspace_root: &Path) -> Vec<(PathBuf, String)> {
-    outermost_with_vendor_dirs(composer_json_dirs(workspace_root, None))
+    outermost_with_vendor_dirs(composer_json_dirs(workspace_root, &[]))
+}
+
+/// The Composer projects of a workspace without a `composer.json` of its
+/// own (see [`discover_subproject_roots`]), and the web root of a Drupal
+/// tree in it that none of them owns.
+///
+/// A Drupal tree holds `composer.json` files that are no project to index
+/// on its own: core's, the extensions', and the packages of a `vendor/`
+/// shipped with the tree.  So a subproject inside the web root is kept
+/// only when it is the web root or has its own dependencies installed.  A
+/// project that is the web root or holds it owns the site, which is then
+/// indexed as part of that project.
+pub fn discover_workspace_projects(
+    workspace_root: &Path,
+) -> (Vec<(PathBuf, String)>, Option<PathBuf>) {
+    let mut subprojects = discover_subproject_roots(workspace_root);
+    let Some(web_root) = drupal_web_root_on_disk(workspace_root) else {
+        return (subprojects, None);
+    };
+    subprojects.retain(|(sub_root, vendor_dir)| {
+        *sub_root == web_root
+            || !sub_root.starts_with(&web_root)
+            || sub_root
+                .join(vendor_dir)
+                .join("composer/installed.json")
+                .is_file()
+    });
+    let owned = subprojects
+        .iter()
+        .any(|(sub_root, _)| web_root.starts_with(sub_root));
+    (subprojects, (!owned).then_some(web_root))
 }
 
 /// The Composer projects nested inside a workspace that has a
@@ -218,13 +254,15 @@ pub fn discover_subproject_roots(workspace_root: &Path) -> Vec<(PathBuf, String)
 /// knows nothing about, which is what makes it a project to index rather
 /// than a package the root installs from a path repository or a fixture
 /// a test suite keeps beside its sources: those have no `vendor/` of their
-/// own.  `root_vendor` is the root project's vendor directory, which is
-/// not walked: every installed package carries a `composer.json`.
+/// own.  The directories in `skip` are not walked: the root project's
+/// vendor directory, since every installed package carries a
+/// `composer.json`, and its bin directory, whose namespaces install the
+/// root's own tools (see [`bin_namespaces`]).
 pub fn discover_installed_subprojects(
     workspace_root: &Path,
-    root_vendor: &Path,
+    skip: &[PathBuf],
 ) -> Vec<(PathBuf, String)> {
-    let installed = composer_json_dirs(workspace_root, Some(root_vendor))
+    let installed = composer_json_dirs(workspace_root, skip)
         .into_iter()
         .filter(|dir| {
             let vendor_dir = read_composer_package(dir)
@@ -240,11 +278,11 @@ pub fn discover_installed_subprojects(
 
 /// The directories below `workspace_root` holding a `composer.json`,
 /// shallowest first, found by a gitignore-aware walk that skips hidden
-/// directories and `skip`.
-fn composer_json_dirs(workspace_root: &Path, skip: Option<&Path>) -> Vec<PathBuf> {
+/// directories and the directories in `skip`.
+fn composer_json_dirs(workspace_root: &Path, skip: &[PathBuf]) -> Vec<PathBuf> {
     use ignore::WalkBuilder;
 
-    let skip = skip.map(Path::to_path_buf);
+    let skip = skip.to_vec();
     let walker = WalkBuilder::new(workspace_root)
         .git_ignore(true)
         .git_global(true)
@@ -254,7 +292,7 @@ fn composer_json_dirs(workspace_root: &Path, skip: Option<&Path>) -> Vec<PathBuf
         .ignore(true)
         // Sort to get deterministic output
         .sort_by_file_name(|a, b| a.cmp(b))
-        .filter_entry(move |entry| skip.as_deref() != Some(entry.path()))
+        .filter_entry(move |entry| !skip.iter().any(|dir| dir == entry.path()))
         .build();
 
     let mut candidates: Vec<PathBuf> = Vec::new();

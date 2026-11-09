@@ -16,6 +16,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 use App\Admin\DashboardController;
 use App\Controller\DemoController;
 use App\DependencyInjection\Configuration;
+use App\Entity\Team;
 use App\Entity\User;
 use App\DependencyInjection\AcmeDemoExtension;
 use App\EventListener\OrderPlacedListener;
@@ -25,10 +26,19 @@ use App\Message\SendWelcomeEmail;
 use App\MessageHandler\CountWelcomeEmailsHandler;
 use App\MessageHandler\SendWelcomeEmailHandler;
 use App\Query\QueryBus;
+use App\Service\CachingSlugger;
+use App\Service\Slugger;
 use App\Service\WelcomeMailer;
 use App\Twig\AppExtension;
 use App\Twig\Badges;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\DBAL\DriverManager;
+use Doctrine\ORM\EntityManager;
+use Doctrine\ORM\Mapping\ClassMetadata;
+use Doctrine\ORM\Mapping\Driver\SimplifiedXmlDriver;
+use Doctrine\ORM\ORMSetup;
+use Doctrine\ORM\Query\QueryException;
+use Doctrine\ORM\Tools\SchemaTool;
 use Symfony\Bridge\Twig\Extension\RoutingExtension;
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
 use Symfony\Bundle\FrameworkBundle\DependencyInjection\Configuration as FrameworkConfiguration;
@@ -43,6 +53,8 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
 use Symfony\Component\DependencyInjection\Loader\YamlFileLoader as ServicesYamlLoader;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+use Symfony\Component\Form\Extension\Core\Type\EmailType;
+use Symfony\Component\Form\Extension\Validator\ValidatorExtension;
 use Symfony\Component\Form\Forms;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\HandleTrait;
@@ -51,9 +63,14 @@ use Symfony\Component\Routing\Loader\AttributeDirectoryLoader;
 use Symfony\Component\Routing\Loader\PhpFileLoader as RoutesPhpLoader;
 use Symfony\Component\Routing\Loader\YamlFileLoader as RoutesYamlLoader;
 use Symfony\Component\Routing\RequestContext;
+use Symfony\Component\Serializer\Mapping\Factory\ClassMetadataFactory;
+use Symfony\Component\Serializer\Mapping\Loader\AttributeLoader;
+use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
+use Symfony\Component\Serializer\Serializer;
 use Symfony\Component\Translation\Loader\XliffFileLoader;
 use Symfony\Component\Translation\Loader\YamlFileLoader as TranslationYamlLoader;
 use Symfony\Component\Translation\Translator;
+use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Validation;
 use Symfony\Component\Yaml\Yaml;
 use Twig\Environment;
@@ -103,6 +120,7 @@ $routes = $routeLoader->load('routes.yaml');
 check('app_demo is declared by the #[Route] on DemoController::index()', $routes->get('app_demo')?->getDefault('_controller') === DemoController::class . '::index');
 check('app_demo_legacy is declared in config/routes.yaml', $routes->get('app_demo_legacy')?->getDefault('_controller') === DemoController::class . '::legacy');
 check('The legacy route points at a method that exists', method_exists(DemoController::class, 'legacy'));
+check('app_demo_profile is declared by the #[Route] on DemoController::profile()', $routes->get('app_demo_profile')?->getDefault('_controller') === DemoController::class . '::profile');
 
 check("The admin import's name_prefix names DashboardController's route admin_dashboard", $routes->get('admin_dashboard')?->getDefault('_controller') === DashboardController::class . '::index');
 check("'dashboard' on its own is not a route", $routes->get('dashboard') === null);
@@ -137,8 +155,15 @@ check('app.welcome_mailer, which app.mailer aliases, is built from WelcomeMailer
 check('app.support_email is a string', is_string($container->getParameter('app.support_email')));
 check('The App\\ resource registers the controller as a service', $container->hasDefinition(DemoController::class));
 check("app.greeting's %app.sender_name% placeholder reads app.sender_name", $container->getParameterBag()->resolveValue($container->getParameter('app.greeting')) === 'Hello from PHPantom');
+$mailerCalls = $container->getDefinition(WelcomeMailer::class)->getMethodCalls();
+check("WelcomeMailer's calls: in config/services.yaml calls setSender", ($mailerCalls[0][0] ?? null) === 'setSender' && method_exists(WelcomeMailer::class, 'setSender'));
 $demoCache = $container->getDefinition('app.demo_cache');
 check('app.demo_cache is a child of cache.app', $demoCache instanceof ChildDefinition && $demoCache->getParent() === 'cache.app');
+check('app.slugger is built from Slugger', $container->getDefinition('app.slugger')->getClass() === Slugger::class);
+check('CachingSlugger decorates app.slugger', ($container->getDefinition(CachingSlugger::class)->getDecoratedService()[0] ?? null) === 'app.slugger');
+check('Only CachingSlugger declares cachedCount()', method_exists(CachingSlugger::class, 'cachedCount') && !method_exists(Slugger::class, 'cachedCount'));
+$cachingSlugger = new CachingSlugger(new Slugger());
+check('CachingSlugger slugs as Slugger does, and counts what it cached', $cachingSlugger->slug('Hello World') === 'hello-world' && $cachingSlugger->cachedCount() === 1);
 
 // FrameworkBundle declares cache.app in its own configuration, read from
 // the bundle's directory.
@@ -252,12 +277,40 @@ check("The template's user.displayName and user.email read User's getters", str_
 // Each field RegistrationType adds reads and writes the data-class property
 // of the same name.
 $user = new User('ada@example.com', 'Ada');
-$form = Forms::createFormFactory()->create(RegistrationType::class, $user);
+// The validator's type extension gives every form its 'constraints' option.
+$formFactory = Forms::createFormFactoryBuilder()
+    ->addExtension(new ValidatorExtension(Validation::createValidator()))
+    ->getFormFactory();
+$form = $formFactory->create(RegistrationType::class, $user);
 check("The 'email' field reads User's email", $form->get('email')->getData() === 'ada@example.com');
 check("The 'displayName' field reads User's displayName", $form->get('displayName')->getData() === 'Ada');
 $form->submit(['email' => 'grace@example.com', 'displayName' => 'Grace']);
 check("The 'email' field writes User's email", $user->getEmail() === 'grace@example.com');
 check("The 'displayName' field writes User's displayName", $user->getDisplayName() === 'Grace');
+
+// The 'email' field's options are EmailType's, its parents', and the
+// validator extension's, and Length takes max as a constructor parameter.
+$emailConfig = $form->get('email')->getConfig();
+check("The 'email' field is an EmailType", $emailConfig->getType()->getInnerType() instanceof EmailType);
+check("'help' is an option the 'email' field takes", $emailConfig->getOption('help') === 'We never share it.');
+$constraints = $emailConfig->getOption('constraints');
+check("'constraints' holds Length(max: 180)", $constraints[0] instanceof Length && $constraints[0]->max === 180);
+$threwOnUnknownOption = false;
+try {
+    $formFactory->createBuilder(EmailType::class, null, ['hlep' => 'x']);
+} catch (\Symfony\Component\OptionsResolver\Exception\UndefinedOptionsException) {
+    $threwOnUnknownOption = true;
+}
+check('An option no type declares throws, as PHPantom reports it', $threwOnUnknownOption);
+
+// ─── Serializer groups ──────────────────────────────────────────────────────
+
+// The #[Groups] on User's getters put them in 'user:read' and 'user:list',
+// which DemoController::profile() serializes with.
+$serializer = new Serializer([new ObjectNormalizer(new ClassMetadataFactory(new AttributeLoader()))]);
+$ada = new User('ada@example.com', 'Ada');
+check("'user:list' holds displayName only", $serializer->normalize($ada, null, ['groups' => ['user:list']]) === ['displayName' => 'Ada']);
+check("'user:read' holds email and displayName", $serializer->normalize($ada, null, ['groups' => ['user:read']]) === ['email' => 'ada@example.com', 'displayName' => 'Ada']);
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -273,6 +326,9 @@ foreach ($violations as $violation) {
 sort($paths);
 check('NotBlank on email and Length on displayName both apply', $paths === ['displayName', 'email']);
 check('A valid user has no violations', count($validator->validate(new User('ada@example.com', 'Ada'))) === 0);
+// The option keys the mapping gives Length are options it takes.
+$length = $validator->getMetadataFor(User::class)->getPropertyMetadata('displayName')[0]->getConstraints()[0];
+check('Length takes min and max from the mapping', $length instanceof Length && $length->min === 2 && $length->max === 50);
 
 // ─── Doctrine mapping ───────────────────────────────────────────────────────
 
@@ -281,6 +337,88 @@ $entity = (string) $mapping->entity['name'];
 $repository = (string) $mapping->entity['repository-class'];
 check('The XML mapping names the User entity', $entity === User::class);
 check('The XML mapping names a ServiceEntityRepository', is_subclass_of($repository, ServiceEntityRepository::class));
+check('The mapped repository declares withEmail()', method_exists($repository, 'withEmail'));
+$metadata = new ClassMetadata(User::class);
+(new SimplifiedXmlDriver(["$config/doctrine" => 'App\Entity'], '.orm.xml'))->loadMetadataForClass(User::class, $metadata);
+check('The XML mapping maps email and displayName, which findOneByEmail() and findBy() take', $metadata->hasField('email') && $metadata->hasField('displayName'));
+$entityManager = new EntityManager(
+    DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]),
+    ORMSetup::createXMLMetadataConfiguration(["$config/doctrine"], true),
+);
+$entityManager->getConfiguration()->setMetadataDriverImpl(new SimplifiedXmlDriver(["$config/doctrine" => 'App\Entity'], '.orm.xml'));
+$dqlParses = static function (string $dql) use ($entityManager): bool {
+    try {
+        $entityManager->createQuery($dql)->getSQL();
+        return true;
+    } catch (QueryException) {
+        return false;
+    }
+};
+check('The DQL in UserRepository::named() names the User entity and its mapped fields', $dqlParses('SELECT u FROM App\Entity\User u WHERE u.displayName = :name ORDER BY u.email ASC'));
+check('A field the mapping does not map fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE u.nickname = :name'));
+check('An entity class without its identification variable fails DQL', !$dqlParses('SELECT u FROM App\Entity\User WHERE u.displayName = :name'));
+check('A stray parenthesis in the where() fragment fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE u.displayName = :name)'));
+$userMetadata = $entityManager->getClassMetadata(User::class);
+check('The XML mapping maps team as an association to Team', $userMetadata->hasAssociation('team') && $userMetadata->getAssociationTargetClass('team') === Team::class);
+check('The DQL in UserRepository::inTeam() joins Team and names its fields', $dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE t.name = :team'));
+check('A field the joined Team does not map fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE t.email = :team'));
+check('A variable nothing declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u JOIN u.team t WHERE x.name = :team'));
+check('UserRepository::search() without a team builds DQL without t', $dqlParses('SELECT u FROM App\Entity\User u'));
+check('A variable used on a path that does not join it fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.name = :team'));
+check('UserRepository::inTeamByEmail() builds DQL that joins t through joinTeam()', $dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE t.name = :team ORDER BY u.email ASC'));
+check('A variable neither byEmail() nor joinTeam() declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.displayName = :name ORDER BY u.email ASC'));
+check('UserRepository::teamMembers() builds DQL that joins t through byEmailInTeam()', $dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE t.name = :team ORDER BY u.email ASC'));
+check('A variable no method along the chain declares fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE x.name = :team ORDER BY u.email ASC'));
+check('UserRepository::namedTeamMembers() builds DQL that joins the t onlyNamedTeams() uses', $dqlParses('SELECT u FROM App\Entity\User u INNER JOIN u.team t WHERE t.name IS NOT NULL ORDER BY u.email ASC'));
+check('A variable a method the builder is passed to uses, and nothing declares, fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u WHERE t.name IS NOT NULL ORDER BY u.email ASC'));
+(new SchemaTool($entityManager))->createSchema([
+    $entityManager->getClassMetadata(User::class),
+    $entityManager->getClassMetadata(Team::class),
+]);
+$core = new Team('Core');
+$member = new User('ada@example.com', 'Ada');
+$member->setTeam($core);
+$entityManager->persist($core);
+$entityManager->persist($member);
+$entityManager->flush();
+$inTeam = $entityManager->createQueryBuilder()
+    ->select('u')
+    ->from(User::class, 'u')
+    ->join('u.team', 't')
+    ->where('t.name = :team')
+    ->setParameter('team', 'Core')
+    ->getQuery()
+    ->getResult();
+check('inTeam() gets a list of User', array_is_list($inTeam) && $inTeam[0] instanceof User);
+$rows = $entityManager->createQueryBuilder()
+    ->select('u')
+    ->from(User::class, 'u', 'u.email')
+    ->select('u.email', 'u.displayName')
+    ->getQuery()
+    ->getResult();
+check('displayNamesByEmail() gets a shape of the fields keyed by email', $rows === ['ada@example.com' => ['email' => 'ada@example.com', 'displayName' => 'Ada']]);
+$rows = $entityManager
+    ->createQuery('SELECT t.name, COUNT(u.email) AS members, UPPER(t.name) AS label, AVG(LENGTH(u.displayName)) AS nameLength FROM App\Entity\User u JOIN u.team t GROUP BY t.name')
+    ->getResult();
+check('teamSizes() gets the COUNT() as an int, UPPER() as a string, and AVG() on SQLite as a float', $rows === [['name' => 'Core', 'members' => 1, 'label' => 'CORE', 'nameLength' => 3.0]]);
+$dbal = Yaml::parseFile("$config/packages/doctrine.yaml")['doctrine']['dbal'];
+check('config/packages/doctrine.yaml connects with SQLite, which the assertions run on', str_starts_with($dbal['url'], 'sqlite:'));
+$users = $entityManager->createQuery('SELECT u FROM App\Entity\User u WHERE u.displayName = :name')
+    ->setParameter('name', 'Ada')
+    ->getResult();
+check('named() gets a list of User', array_is_list($users) && $users[0] instanceof User);
+$builder = $entityManager->createQueryBuilder()->select('u')->from(User::class, 'u')->orderBy('u.email', 'ASC');
+$builder->andWhere('u.displayName = :name')->setParameter('name', 'Ada');
+$users = $builder->getQuery()->getResult();
+check('searchByName() gets a list of User from the builder byEmail() sets up and the branch changes', array_is_list($users) && $users[0] instanceof User);
+$users = $entityManager->createQueryBuilder()
+    ->select('u')
+    ->from(User::class, 'u')
+    ->add('orderBy', new \Doctrine\ORM\Query\Expr\OrderBy('u.displayName', 'ASC'))
+    ->getQuery()
+    ->getResult();
+check('sortedByName() orders by the displayName an Expr\OrderBy names', array_is_list($users) && $users[0] instanceof User);
+check('A stray parenthesis in an Expr\OrderBy fails DQL', !$dqlParses('SELECT u FROM App\Entity\User u ORDER BY u.displayName) ASC'));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

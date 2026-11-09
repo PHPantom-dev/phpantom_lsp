@@ -26,9 +26,9 @@ use crate::types::*;
 
 use crate::text_scan::split_top_level_commas;
 use crate::type_engine::conditional_resolution::{
-    TemplateContext, ThisContext, VarClassStringResolver, receiver_type_for_condition,
-    resolve_conditional_with_text_args_and_defaults, resolve_conditional_without_args,
-    resolve_conditional_without_args_and_defaults,
+    ArgTypeResolver, DefaultTypeResolver, TemplateContext, ThisContext, VarClassStringResolver,
+    receiver_type_for_condition, resolve_conditional_with_text_args_and_defaults,
+    resolve_conditional_without_args, resolve_conditional_without_args_and_defaults,
 };
 use crate::type_engine::resolver::ResolutionCtx;
 
@@ -37,7 +37,7 @@ use super::target_cache::try_infer_body_return_type;
 
 pub(crate) use class_constants::{
     class_constant_type, enum_case_property_literal, folded_global_constant_type,
-    resolve_static_access_type,
+    global_constant_class_reference_type, resolve_static_access_type,
 };
 use laravel::{
     replace_support_carbon_return, resolve_auth_user_at_call, resolve_request_accessor_at_call,
@@ -65,6 +65,14 @@ pub(crate) struct MethodReturnCtx<'a> {
     /// Resolves a variable name to class-string values (for conditional
     /// return type evaluation).
     pub var_resolver: VarClassStringResolver<'a>,
+    /// Resolves an argument's source text to its type, for a conditional
+    /// return decided by the type of an argument whose text alone does not
+    /// settle it (`$id is list<int>` against `[7, 8]` or `$ids`).
+    pub arg_type_resolver: ArgTypeResolver<'a>,
+    /// Resolves an omitted argument's default where the method declares
+    /// it; see
+    /// [`TemplateContext::default_type_resolver`](crate::type_engine::conditional_resolution::TemplateContext::default_type_resolver).
+    pub default_type_resolver: DefaultTypeResolver<'a>,
     /// Shared resolved-class cache (when available).
     pub cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
     /// The class at the call site (where `self::class` / `static::class`
@@ -102,6 +110,8 @@ impl<'a> MethodReturnCtx<'a> {
         ctx: &'a ResolutionCtx<'a>,
         template_subs: &'a HashMap<String, PhpType>,
         var_resolver: &'a dyn Fn(&str) -> Vec<String>,
+        arg_type_resolver: &'a dyn Fn(&str) -> Option<PhpType>,
+        default_type_resolver: &'a dyn Fn(&str, Option<&str>) -> Option<PhpType>,
         written_class: &'a dyn Fn(&str) -> String,
         is_static: bool,
     ) -> Self {
@@ -111,6 +121,8 @@ impl<'a> MethodReturnCtx<'a> {
             backend: ctx.file.backend,
             template_subs,
             var_resolver: Some(var_resolver),
+            arg_type_resolver: Some(arg_type_resolver),
+            default_type_resolver: Some(default_type_resolver),
             cache: ctx.resolved_class_cache,
             calling_class_name: ctx.current_class.map(|c| c.fqn().as_str()),
             written_class: Some(written_class),
@@ -194,15 +206,17 @@ pub(super) fn build_var_resolver<'a>(
 /// `resolve_call_return_types_on_receiver_inner` (which needs the winning
 /// branch's full type, e.g. to preserve an intersection) so the two agree
 /// on what a conditional return type resolves to.
+///
+/// `template_subs` is passed separately from `mr_ctx` because the classes
+/// path decides the condition with the owner's template defaults folded in.
 fn resolve_conditional_return_hint(
     method: &MethodInfo,
     text_args: &str,
-    var_resolver: VarClassStringResolver<'_>,
     template_subs: &HashMap<String, PhpType>,
-    call_site: crate::type_engine::conditional_resolution::ConditionalClassContext<'_>,
+    mr_ctx: &MethodReturnCtx<'_>,
     owner: &ClassInfo,
-    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
+    let class_loader = mr_ctx.class_loader;
     let cond = method.conditional_return()?;
     let bound_cond = crate::type_engine::conditional_resolution::bind_callable_condition_templates(
         cond,
@@ -221,7 +235,8 @@ fn resolve_conditional_return_hint(
         defaults: Some(class_values.as_ref()),
         params: method.template_params(),
         bindings: method.template_bindings(),
-        arg_type_resolver: None,
+        arg_type_resolver: mr_ctx.arg_type_resolver,
+        default_type_resolver: mr_ctx.default_type_resolver,
         this_type: Some(&this_type),
         subs: None,
     };
@@ -230,10 +245,12 @@ fn resolve_conditional_return_hint(
             cond,
             &method.parameters,
             text_args,
-            var_resolver,
+            mr_ctx.var_resolver,
             crate::type_engine::conditional_resolution::ConditionalClassContext {
+                calling: mr_ctx.calling_class_name,
                 declaring: Some(declaring_fqn.as_str()),
-                ..call_site
+                written_class: mr_ctx.written_class,
+                namespace: method.default_namespace(),
             },
             class_loader,
             &tpl,
@@ -390,25 +407,35 @@ impl Backend {
     ) -> Vec<Arc<ClassInfo>> {
         match callee {
             SubjectExpr::MethodCall { base, method } => {
-                let method = crate::type_engine::resolver::resolve_dynamic_member_name(method, ctx);
-                Self::return_types_of_method_call(
-                    base,
-                    &method,
-                    text_args,
-                    receiver,
-                    ctx,
-                    return_type_hint_out,
-                )
+                let names = crate::type_engine::resolver::resolve_dynamic_member_names(method, ctx);
+                // A dynamic name reads its receiver once for every method
+                // it can name, so the receiver is resolved up front.
+                let receiver = match (&receiver, names.len()) {
+                    (None, n) if n > 1 => {
+                        Some(crate::type_engine::resolver::resolve_target_classes_expr(
+                            base,
+                            AccessKind::Arrow,
+                            ctx,
+                        ))
+                    }
+                    _ => receiver,
+                };
+                Self::join_member_returns(&names, return_type_hint_out, |name, hint_out| {
+                    Self::return_types_of_method_call(
+                        base,
+                        name,
+                        text_args,
+                        receiver.clone(),
+                        ctx,
+                        hint_out,
+                    )
+                })
             }
             SubjectExpr::StaticMethodCall { class, method } => {
-                let method = crate::type_engine::resolver::resolve_dynamic_member_name(method, ctx);
-                Self::return_types_of_static_method_call(
-                    class,
-                    &method,
-                    text_args,
-                    ctx,
-                    return_type_hint_out,
-                )
+                let names = crate::type_engine::resolver::resolve_dynamic_member_names(method, ctx);
+                Self::join_member_returns(&names, return_type_hint_out, |name, hint_out| {
+                    Self::return_types_of_static_method_call(class, name, text_args, ctx, hint_out)
+                })
             }
             SubjectExpr::FunctionCall(func_name) => {
                 Self::return_types_of_function_call(func_name, text_args, ctx, return_type_hint_out)
@@ -426,6 +453,37 @@ impl Backend {
                 return_type_hint_out,
             ),
             _ => Self::return_types_of_other_callee(callee, ctx, return_type_hint_out),
+        }
+    }
+
+    /// Join what a call returns over every member name its selector can
+    /// stand for (see `resolve_dynamic_member_names`).  The return type
+    /// hint is the union of each name's, and is left unset when any name
+    /// has none, since the classes alone then say more than a partial hint.
+    fn join_member_returns(
+        names: &[std::borrow::Cow<'_, str>],
+        return_type_hint_out: Option<&mut Option<PhpType>>,
+        mut resolve: impl FnMut(&str, Option<&mut Option<PhpType>>) -> Vec<Arc<ClassInfo>>,
+    ) -> Vec<Arc<ClassInfo>> {
+        match names {
+            [] => Vec::new(),
+            [name] => resolve(name, return_type_hint_out),
+            _ => {
+                let mut classes: Vec<Arc<ClassInfo>> = Vec::new();
+                let mut hints: Option<Vec<PhpType>> = Some(Vec::new());
+                for name in names {
+                    let mut hint = None;
+                    ClassInfo::extend_unique_arc(&mut classes, resolve(name, Some(&mut hint)));
+                    match (hint, hints.as_mut()) {
+                        (Some(hint), Some(hints)) => hints.push(hint),
+                        _ => hints = None,
+                    }
+                }
+                if let Some(out) = return_type_hint_out {
+                    *out = hints.map(PhpType::union);
+                }
+                classes
+            }
         }
     }
 
@@ -461,7 +519,8 @@ impl Backend {
                 defaults: Some(template_subs),
                 params: method.template_params(),
                 bindings: method.template_bindings(),
-                arg_type_resolver: None,
+                arg_type_resolver: mr_ctx.arg_type_resolver,
+                default_type_resolver: mr_ctx.default_type_resolver,
                 this_type: None,
                 subs: None,
             };
@@ -474,6 +533,7 @@ impl Backend {
                     calling: mr_ctx.calling_class_name,
                     declaring: Some(class_info.fqn().as_str()),
                     written_class: mr_ctx.written_class,
+                    namespace: method.default_namespace(),
                 },
                 class_loader,
                 &tpl,
@@ -510,15 +570,9 @@ impl Backend {
             if let Some(effective) = resolve_conditional_return_hint(
                 method,
                 text_args,
-                var_resolver,
                 template_subs,
-                crate::type_engine::conditional_resolution::ConditionalClassContext {
-                    calling: mr_ctx.calling_class_name,
-                    declaring: None,
-                    written_class: mr_ctx.written_class,
-                },
+                mr_ctx,
                 class_info,
-                class_loader,
             ) {
                 let classes: Vec<Arc<ClassInfo>> =
                     crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(

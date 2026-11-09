@@ -1,10 +1,19 @@
 # PHPantom — Drupal
 
-Known gaps and missing features in PHPantom's Drupal support. Today
-Drupal support is project discovery only: the web root is detected, and
-core, contrib, and the Drupal file extensions (`.module`, `.install`,
-`.theme`, …) are indexed past `.gitignore`. Nothing reads Drupal's own
-declarations: services, entity types, fields, routes, or hooks.
+Known gaps and missing features in PHPantom's Drupal support. The web
+root is detected with or without a `composer.json`. Core and every
+module, theme, and profile, with the Drupal file extensions (`.module`,
+`.install`, `.theme`, …), are indexed past `.gitignore`, and
+the services the `*.services.yml` files declare, the entity types
+entity classes declare, the routes the routing files, route attributes,
+and route builders declare, the hooks the `*.api.php` files document
+and the extensions implement, the plugin types plugin managers declare and
+the plugins of each, the permissions the `*.permissions.yml`
+files declare, the configuration objects and keys the default
+configuration and the configuration schema declare, the theme hooks
+`hook_theme()` implementations declare, the render elements element
+classes declare, and the libraries the `*.libraries.yml` files declare
+are read. Nothing reads fields yet.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -18,6 +27,15 @@ Drupal extension (`mglaman/phpstan-drupal`) is the checklist of what a
 Drupal developer expects from types; PhpStorm's built-in Drupal support
 is what they expect from an editor.
 
+**Benchmarks.** `benches/memory_usage.py` measures memory on a site that
+installs core into `web/core` through Composer (`memory_drupal_module`),
+next to the other framework scenarios. `benches/drupal_completion.rs`
+measures completion of service IDs, route names, entity type IDs,
+permission names, configuration names, render element names, plugin IDs,
+hook names, theme hook names, library names, and hook implementations over a
+generated site with many custom modules. Every item that adds a name
+Drupal declares adds its case to it.
+
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
@@ -28,103 +46,9 @@ within the same impact tier.
 
 ---
 
-## DR1. Drupal demo project and a real-world baseline
-
-**Impact: High · Complexity: Low-Medium**
-
-Every other Drupal item is measured against this one. Without a demo
-project and a baseline from real code, Drupal support would be built
-untested and could regress silently.
-
-- **`examples/drupal/`**: a `drupal/recommended-project` site with one
-  custom module and one theme, in the same shape as `examples/laravel/`
-  and `examples/symfony/`, with "Try:" comments at each site and a
-  README listing what to try. The module declares a service, a route,
-  a content entity type, a hook implementation (procedural and
-  `#[Hook]`), and a render array with a theme hook.
-- **Runtime assertions**: an `assertions.php` that checks the demo's
-  claims against real Drupal. Decide whether that bootstraps a kernel
-  (core supports SQLite, so no server is needed) or only checks what
-  can be read without booting.
-- **A real-world baseline**: run `analyze` on an actively maintained
-  contrib module and a site build, bucket the diagnostics by cause, and
-  file what Drupal-specific gaps they show. That ranks the rest of this
-  document by what actually breaks.
-- **What already works**: the Symfony support reads some of the same
-  shapes Drupal uses (event subscribers' `getSubscribedEvents()` maps,
-  `Class::method` strings in YAML). Check each against the demo and note
-  it in the README, so the items below only build what is missing.
-
----
-
-## DR2. Service IDs from `*.services.yml`
-
-**Impact: High · Complexity: Medium**
-
-```php
-$manager = \Drupal::service('acme.order_manager');
-
-public static function create(ContainerInterface $container): static {
-    return new static($container->get('entity_type.manager'));
-}
-```
-
-A module declares its services in `<module>.services.yml`, in Symfony's
-service format. Type `\Drupal::service()` and `$container->get()` by the
-class the declaration names, and complete and navigate the service IDs,
-including `@service_id` arguments in the YAML. Newer code registers a
-service under its interface and fetches it with
-`\Drupal::service(OrderManagerInterface::class)`; that ID is a class
-name and types as that class without any lookup.
-
-The Symfony container reading already parses this format and follows
-aliases and parameter placeholders. Start by checking what it picks up from a
-Drupal module unchanged, then teach it where Drupal keeps the files
-(every enabled module's and core's `*.services.yml`) instead of
-`config/services.yaml`.
-
-Most of Drupal's navigation depends on this. On Drupal core, Find
-References on `EntityStorageInterface::load()` misses about 240 calls
-of the shape
-`$this->container->get('entity_type.manager')->getStorage('node')->load(1)`.
-They are the bulk of what a tool that types service lookups finds and
-we don't.
-
-**Where to look:** `src/symfony/container.rs`, `src/symfony/resources.rs`,
-PHPStan's Drupal extension (its service map), and PHPlumb
-(`crates/phplumb-index/src/frameworks/drupal/services.rs`, MIT), which
-reads the same files.
-
----
-
-## DR3. Entity storage and entity type IDs
-
-**Impact: High · Complexity: Medium-High**
-
-```php
-$storage = \Drupal::entityTypeManager()->getStorage('node');  // NodeStorageInterface
-$node = $storage->load($nid);                                  // ?NodeInterface
-```
-
-`getStorage()` returns the generic `EntityStorageInterface`, so every
-loaded entity is the generic `EntityInterface` and the methods a node
-or user has are reported as unknown. The entity type ID maps to an
-entity class and its storage handler through the entity type's
-declaration: the `#[ContentEntityType]` / `#[ConfigEntityType]`
-attribute, or the annotation older code uses. Read those statically,
-type `getStorage()`, `load()`, `loadMultiple()`, and `create()` from
-them, and complete and navigate entity type IDs. Entity queries
-(`\Drupal::entityQuery('node')`, `$storage->getQuery()`) take the same
-IDs and return IDs of that entity type.
-
-**Where to look:** PHPStan's Drupal extension (its entity data
-repository and the storage return-type extensions).
-
----
-
 ## DR4. Entity field access
 
-**Impact: Medium-High · Complexity: High** (depends on DR3)
+**Impact: Medium-High · Complexity: High**
 
 ```php
 $tags = $node->field_tags;          // FieldItemListInterface
@@ -143,151 +67,6 @@ PHPStan's Drupal extension types any magic property on a fieldable
 entity as `FieldItemListInterface` without checking the name. That is
 the floor; reading the configuration is what lets an editor complete
 names and report a misspelt one.
-
----
-
-## DR5. Route names
-
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-Url::fromRoute('acme.order_view', ['order' => $id]);
-$form_state->setRedirect('acme.order_list');
-```
-
-```yaml
-acme.order_view:
-  path: '/order/{order}'
-  defaults:
-    _controller: '\Drupal\acme\Controller\OrderController::view'
-```
-
-Routes are declared in `<module>.routing.yml`. Complete, navigate, and
-find references for route names in `Url::fromRoute()`,
-`Link::createFromRoute()`, `$this->redirect()`,
-`$form_state->setRedirect()`, and the menu, tab, and action YAML files,
-and report a name nothing declares. The `_controller`, `_form`, and
-`_entity_form` values may already navigate through the resource symbol
-maps that read `Class::method` strings in YAML; check before building
-anything for them. The parameter keys are the same problem as Symfony's
-[F27](lsp-features.md#f27-symfony-route-parameters).
-
-A path parameter named after an entity type (`/node/{node}`) is upcast
-by Drupal's parameter converters, so the controller method's `$node`
-receives a `NodeInterface`, not the ID. Type an untyped controller
-parameter from the route that names it, and check a typed one against
-it.
-
----
-
-## DR6. Hooks
-
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-function acme_form_alter(&$form, FormStateInterface $form_state, $form_id) { … }
-
-#[Hook('form_alter')]
-public function formAlter(array &$form, FormStateInterface $form_state, $form_id): void { … }
-```
-
-A hook is implemented by naming a function `<module>_<hook>` or, since
-Drupal 11.1, with a `#[Hook]` attribute on a method. Core and modules
-document each hook as a `hook_<name>()` function in a `*.api.php` file.
-Link an implementation to that documentation: hover shows it,
-go-to-definition reaches it, find references lists the implementations,
-and completing `acme_` in a `.module` file offers the hooks with their
-documented signatures. Parameter types for an implementation that
-omits them can come from the documented signature.
-
----
-
-## DR7. Render arrays, theme hooks, and libraries
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-return [
-    '#theme' => 'acme_order_summary',
-    '#order' => $order,
-    '#attached' => ['library' => ['acme/order-summary']],
-];
-```
-
-- **`#theme`** names a theme hook a `hook_theme()` implementation
-  declares, which renders `templates/acme-order-summary.html.twig`.
-  Navigate from the string to both, complete it, and complete the
-  `#`-prefixed variables the hook declares.
-- **`#type`** names a render or form element class
-  (`#[RenderElement('details')]`, `#[FormElement('textfield')]`).
-- **Libraries** in `#attached` name entries in `<module>.libraries.yml`.
-
-The Twig support already finds templates outside Symfony, and a
-template's variables from the renders that name it; a theme hook's
-variables would be one more source of them (see `src/twig/variables.rs`).
-
----
-
-## DR8. Permission and configuration names
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$account->hasPermission('administer acme orders');
-\Drupal::config('acme.settings')->get('notify_email');
-```
-
-Permissions are declared in `<module>.permissions.yml` (and by
-permission callbacks), configuration objects in `config/install` and
-`config/schema`. Complete and navigate both, and complete the keys
-`get()` reads from the schema.
-
----
-
-## DR9. Drupal directories outside `contrib` and `custom`
-
-**Impact: Medium-High · Complexity: Low-Medium**
-
-The scan that bypasses `.gitignore` covers `core`, `modules/contrib`,
-`modules/custom`, `themes/contrib`, `themes/custom`, `profiles`, and
-`sites` under the web root. Sites also group modules by vendor
-(`modules/acme/`) or keep them directly under `modules/`, and profiles
-carry their own `modules/` and `themes/`; a module a site's `.gitignore`
-hides in any of those places is not indexed, and its classes read as
-unknown. Scan `modules`, `themes`, and `profiles` whole.
-
-The scan also runs only when the Drupal site is the workspace's Composer
-root. A workspace that holds the site beside other Composer projects, or
-opens a Drupal tree without a `composer.json`, gets none of it. Run it
-for each Composer project in the workspace that requires `drupal/core`,
-and give the scanned classes the same origin (project, vendor) other
-classes get, so completion ranks and filters them the same way.
-
-**Where to look:** `scan_drupal_directories` in
-`src/classmap_scanner/discovery.rs`, its caller in
-`src/indexing/init.rs`, and how per-project Composer roots are handled
-there.
-
----
-
-## DR10. Plugin IDs
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-#[Block(id: 'acme_order_summary', admin_label: new TranslatableMarkup('Order summary'))]
-final class OrderSummaryBlock extends BlockBase { … }
-
-$block = $this->blockManager->createInstance('acme_order_summary');
-```
-
-Blocks, field types, formatters, widgets, queue workers, and the other
-plugin types declare an ID in an attribute (or, in older code, a
-docblock annotation). Complete and navigate plugin IDs where a plugin
-manager takes one (`createInstance()`, `getDefinition()`,
-`hasDefinition()`), and in the YAML and render arrays that name them
-(`'#type'` is [DR7](#dr7-render-arrays-theme-hooks-and-libraries)), and
-type `createInstance()` as the plugin class.
 
 ---
 
@@ -365,14 +144,224 @@ in the README as not ported.
 
 ---
 
-## DR15. Benchmark for Drupal names
+## DR16. Event subscribers
 
-**Impact: Low-Medium · Complexity: Low** (depends on DR2)
+**Impact: Medium · Complexity: Low-Medium**
 
-Laravel, Symfony, and Yii have Criterion benchmarks in `benches/`.
-Once Drupal service IDs complete (DR2), add
-`benches/drupal_completion.rs` in the shape of
-`benches/symfony_completion.rs`: generate a site with many modules,
-each declaring services, routes, and hooks, and time completion of
-service IDs, route names, and hook names as each ships. Register it in
-`Cargo.toml` so `benches/ci_benchmarks.py` picks it up.
+```php
+final class AcmeSubscriber implements EventSubscriberInterface {
+    public static function getSubscribedEvents(): array {
+        return [KernelEvents::REQUEST => 'onRequest'];
+    }
+}
+```
+
+Drupal's event subscribers are Symfony's: a service tagged
+`event_subscriber` maps event names to its own methods in
+`getSubscribedEvents()`. The Symfony support reads that map, jumps from
+a listener name to its method, and reports one that does not exist,
+but only in a Symfony project, and a Drupal site's `composer.json`
+requires none of the packages that make it one. Read the map in a
+Drupal site too, so the listener methods navigate and are checked, and
+the event names complete where Drupal's event dispatcher takes one.
+
+---
+
+## DR18. Warn on unknown entity type IDs
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$storage = \Drupal::entityTypeManager()->getStorage('nod');
+```
+
+An entity type ID no entity class declares is a typo or a module the
+site lacks, and the entity type manager throws for it at run time.
+Report one where `getStorage()`, `\Drupal::entityQuery()`, and the other
+calls that take an entity type ID take it. A module can add entity types
+in code from `hook_entity_type_build()`, which no class declares, so a
+site where an implementation of that hook may add one stays silent.
+
+---
+
+## DR19. Warn on unknown hook names
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+\Drupal::moduleHandler()->invokeAll('acme_order_placd', [$order]);
+```
+
+Any module may invoke any hook name, and many hooks have no `*.api.php`
+documentation, so a name nothing documents is not wrong on that alone.
+Report only a hook name that nothing in the site documents, implements,
+or invokes anywhere else, which is most likely a typo.
+
+---
+
+## DR20. Complete route names built in code
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+Url::fromRoute('entity.node.canonical', ['node' => $nid]);
+Url::fromRoute('view.content.page_1');
+```
+
+Entity routes and Views routes are accepted without a warning, but
+neither completes nor goes to a definition, since no routing file declares
+them. Read them from where Drupal builds them: each entity type's link
+templates (`entity.<type>.<link>`) and each view's displays
+(`view.<view_id>.<display_id>`).
+
+The same reading would narrow what goes unreported. Any `view.<a>.<b>`
+is accepted by its shape alone, so a misspelt view or display is not
+reported. And a route builder that adds a route under a name held in a
+variable or returned by a call (`$collection->add($route_name, $route)`,
+as Views and JSON:API do) leaves every name under its extension
+(`views.*`, `jsonapi.*`) unjudged. Following the variable to the string
+the method assigns it (`"view.$view_id.$display_id"`) would keep only that
+shape.
+
+---
+
+## DR21. Return types core's docblocks leave wide
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$url = Url::fromRoute('acme.greeting')->toString();           // string|GeneratedUrl
+$query = $db->select('node', 'n')->extend(PagerSelectExtender::class);
+$query->limit(10);                                            // limit() not found on ExtendableInterface
+```
+
+A few core methods that Drupal code calls everywhere declare a return
+type wider than what the call gives. `Url::toString()` returns a
+`GeneratedUrl` only when `$collect_bubbleable_metadata` is `true`, and a
+`string` otherwise; PHPStan's Drupal extension ships a stub with the
+conditional return type `($collect_bubbleable_metadata is true ?
+\Drupal\Core\GeneratedUrl : string)`. `extend()` on a query returns an
+instance of the extender class it is given, but declares
+`ExtendableInterface`, so every pager or table-sort query loses its
+type. Give both the precise type, through the same mechanism as the
+other framework corrections ([E7](external-stubs.md#e7-stub-based-framework-patches)
+if it has shipped), so a `string` parameter takes the plain
+`toString()` and the extender's methods resolve.
+
+---
+
+## DR22. Complete permissions built in code
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$account->hasPermission('create article content');
+$account->hasPermission('use text format basic_html');
+```
+
+Permissions a permissions file builds through its
+`permission_callbacks` neither complete nor go to a definition, since no
+key of the file declares them. Ten of core's permissions files do, among
+them node, taxonomy, media, block content, and filter, which build one
+set of permissions per bundle or text format. Read them from where
+Drupal builds them: each callback returns an array keyed by names such as
+`"create $type_id content"`, and the bundles and formats the names are
+built from are configuration entities (`node.type.*`,
+`filter.format.*`). Their names come from the default configuration,
+and on most sites from the exported configuration, which
+[DR4](#dr4-entity-field-access) reads. A name built from something the
+site's files do not hold could be kept as a pattern, as route builders'
+names are.
+
+---
+
+## DR23. Warn on unknown permission names
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$account->hasPermission('administer acme ordres');
+$account->hasPermission('administer acme+access content');
+```
+
+A permission name no `*.permissions.yml` declares is a typo or a module
+the site lacks, and Drupal does not throw for it: the check fails, and the
+mistake shows only as access denied. `hasPermission()` checks one exact
+name, so `'administer acme+access content'` is a name of its own; `+` and
+`,` only combine permissions in a route's `_permission`. Report a name
+nothing declares wherever permission names are read: the access checks,
+the access result helpers, the user module's role functions, each part of
+a route's `_permission`, and an entity type's `admin_permission`. This
+depends on [DR22](#dr22-complete-permissions-built-in-code): the names
+permission callbacks build would otherwise be reported.
+
+---
+
+## DR24. Warn on unknown theme hook names
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```php
+return ['#theme' => 'acme_order_sumary', '#order' => $order];
+```
+
+A `#theme` that names no theme hook never reaches a template: Drupal
+logs a warning and renders only the array's children and `#markup`. Render element and library names are reported when
+nothing declares them, but theme hook names are not, because the hooks
+read from `hook_theme()` implementations are not all of them. Views, in
+core, and some contributed modules build their hooks in a loop or from
+other calls, which are not read, and a hook name does not say which
+extension declares it, so the only safe rule, silence wherever an
+implementation cannot be read, would silence every site. Report a name
+only once those hooks are read, or with a rule that knows which names
+such an implementation can add. A suggestion such as
+`acme_greeting__compact` is valid when its base hook is.
+
+---
+
+## DR27. Plugin IDs in YAML
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```yaml
+# config/install/core.entity_form_display.node.article.default.yml
+content:
+  title:
+    type: string_textfield
+# config/install/block.block.acme_theme_greeting.yml
+plugin: acme_greeting_block
+```
+
+Plugin IDs complete and navigate in PHP: a plugin manager's lookups, the
+field type `BaseFieldDefinition::create()` takes, the widget or formatter
+of a field's display options, and the constraint `addConstraint()` takes.
+The YAML that names them does not yet: a form or view display's `type`
+(a widget or formatter), a field storage's `type` (a field type), a
+block's `plugin`, and a migration's `source`, `process`, and
+`destination` plugins. Default configuration files are not parsed today
+(see `drupal::config`), so this needs a reader for the keys that name a
+plugin and the manager each one belongs to.
+
+---
+
+## DR28. Plugin types a manager builds at run time
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+class ViewsPluginManager extends DefaultPluginManager {
+  public function __construct($type, \Traversable $namespaces, …) {
+    parent::__construct("Plugin/views/$type", $namespaces, …);
+  }
+}
+```
+
+A plugin type is read from the literals a manager's constructor passes to
+`DefaultPluginManager`'s. Views and Migrate serve many plugin types from
+one manager class whose subdirectory is built from a constructor
+argument, which each service in `views.services.yml` and
+`migrate.services.yml` passes (`plugin.manager.views.field` passes
+`field`), so their plugins (Views fields, filters, and displays, Migrate
+sources and processes) neither complete nor navigate. Read the argument
+each such service passes, and type the service by the plugin type it
+builds.

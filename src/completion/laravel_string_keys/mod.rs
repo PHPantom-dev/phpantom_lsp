@@ -8,6 +8,9 @@
 //! - `view('|')` / `View::make('|')` → view names
 //! - `__('|')` / `trans('|')` / `Lang::get('|')` → translation keys
 //! - `env('|')` / `Env::get('|')` → environment variables
+//! - `asset('|')` / `@vite('|')` → files, a directory at a time
+//! - `mix('|')` → Mix manifest entries
+//! - `Inertia::render('|')` / `inertia('|')` → Inertia pages
 
 use std::sync::Arc;
 
@@ -31,32 +34,62 @@ pub(crate) use context::{ArgumentSlot, attribute_class_start, scalar_argument_at
 /// names is what it should look like.
 pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
-        StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::Property,
-        StringKeyKind::View | StringKeyKind::TwigTemplate | StringKeyKind::YiiView => {
-            CompletionItemKind::File
+        StringKeyKind::Config | StringKeyKind::ConfigResource(_) | StringKeyKind::YiiParam => {
+            CompletionItemKind::Property
         }
-        StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
+        StringKeyKind::View
+        | StringKeyKind::TempestView { .. }
+        | StringKeyKind::TwigTemplate
+        | StringKeyKind::YiiView
+        | StringKeyKind::YiiAssetFile
+        | StringKeyKind::Asset
+        | StringKeyKind::MixAsset
+        | StringKeyKind::ViteAsset
+        | StringKeyKind::InertiaPage => CompletionItemKind::File,
+        StringKeyKind::Trans
+        | StringKeyKind::SymfonyTranslation
+        | StringKeyKind::YiiTranslation => CompletionItemKind::Text,
+        StringKeyKind::DrupalPermission => CompletionItemKind::Constant,
+        StringKeyKind::DrupalConfigName => CompletionItemKind::File,
+        StringKeyKind::DrupalConfigKey => CompletionItemKind::Field,
         StringKeyKind::TranslationDomain => CompletionItemKind::Module,
         StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
         StringKeyKind::Middleware => CompletionItemKind::Class,
         StringKeyKind::GateAbility => CompletionItemKind::Method,
         StringKeyKind::Env => CompletionItemKind::Constant,
         StringKeyKind::ServiceId => CompletionItemKind::Reference,
+        StringKeyKind::DrupalEntityType
+        | StringKeyKind::DrupalRenderElement
+        | StringKeyKind::DrupalPlugin => CompletionItemKind::Class,
         StringKeyKind::ContainerParameter => CompletionItemKind::Property,
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
-        StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook => CompletionItemKind::Event,
+        StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook | StringKeyKind::DrupalHook => {
+            CompletionItemKind::Event
+        }
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
-        StringKeyKind::YiiRouteArgument => CompletionItemKind::Field,
+        StringKeyKind::SerializerGroup => CompletionItemKind::EnumMember,
+        StringKeyKind::YiiRouteArgument
+        | StringKeyKind::YiiUrlArgument
+        | StringKeyKind::YiiViewParameter
+        | StringKeyKind::DrupalRouteParameter
+        | StringKeyKind::DrupalThemeHookVariable => CompletionItemKind::Field,
+        StringKeyKind::YiiDefinitionArgument => CompletionItemKind::Variable,
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => CompletionItemKind::Function,
         StringKeyKind::TwigVariable => CompletionItemKind::Variable,
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::YiiRoute
+        | StringKeyKind::YiiAlias
+        | StringKeyKind::DrupalRoute
+        | StringKeyKind::DrupalThemeHook
+        | StringKeyKind::DrupalLibrary
         | StringKeyKind::Command
         | StringKeyKind::Section
         | StringKeyKind::Stack
         | StringKeyKind::TwigBlock
         | StringKeyKind::ContainerBinding => CompletionItemKind::Value,
+        StringKeyKind::YiiViewPath => CompletionItemKind::Folder,
+        StringKeyKind::CssClass => CompletionItemKind::Constant,
     }
 }
 
@@ -107,7 +140,8 @@ impl Backend {
 
     /// Every name a string key of `kind` could be, unfiltered.
     ///
-    /// Four kinds have no list to offer. A Blade section or stack name is
+    /// A public or Vite asset path is completed a directory at a time
+    /// instead, and four more kinds have no list to offer. A Blade section or stack name is
     /// completed from the raw template instead
     /// (`crate::completion::handler::blade_block_name`): what a name may be
     /// depends on the layouts above the file, and the edit has to land in
@@ -175,6 +209,8 @@ impl Backend {
             StringKeyKind::GateAbility => self.cached_gate_abilities(),
             StringKeyKind::Middleware => self.laravel.middleware.read().all_names().into(),
             StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
+            StringKeyKind::MixAsset => self.mix_manifest_keys(typed_prefix).into(),
+            StringKeyKind::InertiaPage => self.inertia_pages().page_names().into(),
             StringKeyKind::ServiceId
             | StringKeyKind::ContainerParameter
             | StringKeyKind::SymfonyRoute
@@ -182,26 +218,69 @@ impl Backend {
             | StringKeyKind::TwigTemplate
             | StringKeyKind::SymfonyEvent
             | StringKeyKind::MessengerBus
-            | StringKeyKind::YiiRoute => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::SerializerGroup
+            | StringKeyKind::YiiRoute
+            | StringKeyKind::DrupalEntityType
+            | StringKeyKind::DrupalRoute
+            | StringKeyKind::DrupalPermission
+            | StringKeyKind::DrupalConfigName
+            | StringKeyKind::DrupalRenderElement
+            | StringKeyKind::DrupalLibrary => self.symfony_declared_names(*kind).into(),
             StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
                 self.twig_callable_names(*kind).into()
             }
-            // A translation key is completed in the domain it is looked up
-            // in, a configuration key under the key it is nested in, which
+            // Only the documentation, not the invocations the type engine
+            // would have to confirm in every file that fires a hook.
+            StringKeyKind::DrupalHook => self.drupal_documented_hooks().into(),
+            StringKeyKind::DrupalThemeHook => self.drupal_theme_hook_names().into(),
+            // A translation key is completed in the domain or the category it
+            // is looked up in, a configuration key under the key it is nested in, which
             // only the Symfony completion knows, and a route argument from
-            // the routes of the handler it is written in.  A hook name is
+            // the routes of the handler it is written in, and a Yii URL
+            // argument or a Drupal route parameter from the route its call
+            // names (`crate::completion::yii_route_params`), and a theme hook's
+            // variable from the `#theme` of its render array, and a DI
+            // definition's argument from the method it is passed to, and a
+            // plugin ID from the manager its receiver is, and a Yii view's
+            // parameter from the template its render names
+            // (`crate::completion::yii_views`).  A hook name is
             // completed with its patterns as snippets, which only the
             // WordPress completion builds.
             StringKeyKind::SymfonyTranslation
+            | StringKeyKind::YiiTranslation
             | StringKeyKind::WordPressHook
             | StringKeyKind::SymfonyConfigKey
             | StringKeyKind::YiiRouteArgument
+            | StringKeyKind::YiiUrlArgument
+            | StringKeyKind::YiiViewParameter
+            | StringKeyKind::YiiDefinitionArgument
+            | StringKeyKind::DrupalRouteParameter
+            | StringKeyKind::DrupalConfigKey
+            | StringKeyKind::DrupalThemeHookVariable
+            | StringKeyKind::DrupalPlugin
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::TwigBlock
             | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
-            | StringKeyKind::YiiView => Arc::new([]),
+            | StringKeyKind::YiiView
+            | StringKeyKind::YiiViewPath
+            | StringKeyKind::TempestView { .. } => Arc::new([]),
+            // Any string can start with an alias, so the names are offered
+            // wherever one is typed (`crate::completion::yii_aliases`).
+            StringKeyKind::YiiAlias => Arc::new([]),
+            // A string holds several class names, and only the one being
+            // typed is replaced (`crate::completion::css_classes`).
+            StringKeyKind::CssClass => Arc::new([]),
+            // The keys of a params read are offered a level at a time, under
+            // the keys read before it (`crate::completion::yii_params`).
+            StringKeyKind::YiiParam => Arc::new([]),
+            // A path is completed a directory at a time from the files on
+            // disk (see `try_laravel_string_key_completion_inner`).
+            StringKeyKind::Asset | StringKeyKind::ViteAsset => Arc::new([]),
+            // So is a file an asset bundle lists, from the directory the
+            // bundle names (`crate::completion::yii_assets`).
+            StringKeyKind::YiiAssetFile => Arc::new([]),
         }
     }
 
@@ -269,6 +348,18 @@ impl Backend {
         position: Position,
         ctx: LaravelStringKeyContext<'_>,
     ) -> Option<CompletionResponse> {
+        // `public/` and the project root hold far too much to list whole, so
+        // a path is offered one directory at a time, like a path helper's.
+        if let Some(base) = self.asset_completion_base(ctx.kind) {
+            return crate::completion::laravel_paths::directory_entry_completion(
+                &base,
+                ctx.prefix,
+                ctx.content_start_offset,
+                content,
+                position,
+            );
+        }
+
         // The candidate lists are shared with every other consumer, so only
         // the names the typed prefix keeps are copied out of them.
         let candidates = self.string_key_candidates(&ctx.kind, ctx.prefix);

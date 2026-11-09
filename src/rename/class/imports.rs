@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use tower_lsp_server::gen_lsp_types::*;
 
+use crate::completion::use_edit::{import_alias, import_name_taken};
 use crate::text_position::offset_to_position;
 use crate::util::strip_fqn_prefix;
 
@@ -77,37 +78,16 @@ pub(super) fn has_import_collision(
     false
 }
 
-/// Pick an alias name to avoid a collision.
-///
-/// Tries `"{name}Alias"` first, then `"{name}Alias2"`, etc.  An alias is
-/// a class name, so a candidate that differs from an existing import only
-/// in casing still collides.
-pub(super) fn pick_collision_alias(base_name: &str, use_map: &HashMap<String, String>) -> String {
-    let is_free = |candidate: &str| {
-        !use_map
-            .keys()
-            .any(|alias| alias.eq_ignore_ascii_case(candidate))
-    };
-
-    let candidate = format!("{}Alias", base_name);
-    if is_free(&candidate) {
-        return candidate;
-    }
-    for i in 2..100 {
-        let candidate = format!("{}Alias{}", base_name, i);
-        if is_free(&candidate) {
-            return candidate;
-        }
-    }
-    // Extremely unlikely fallback.
-    format!("{}Alias99", base_name)
+/// Pick an alias for importing `new_fqn` when its short name collides
+/// with another import (see [`import_alias`]).
+pub(super) fn pick_collision_alias(new_fqn: &str, use_map: &HashMap<String, String>) -> String {
+    import_alias(new_fqn, |candidate| import_name_taken(candidate, use_map))
 }
 
 /// What a class is being renamed/moved to, bundled so
 /// [`build_use_statement_edit`] stays under clippy's argument-count limit.
 pub(super) struct RenameTarget<'a> {
     pub(super) new_fqn: &'a str,
-    pub(super) new_short_name: &'a str,
     /// Whether the new short name collides with another import already in
     /// the file, so the rewritten import needs an alias.
     pub(super) has_collision: bool,
@@ -148,7 +128,6 @@ pub(super) fn build_use_statement_edit(
 ) -> Option<(Range, Vec<TextEdit>)> {
     let &RenameTarget {
         new_fqn,
-        new_short_name,
         has_collision,
     } = target;
 
@@ -178,7 +157,7 @@ pub(super) fn build_use_statement_edit(
     let whole_statement_edit = |range: Range| {
         let new_line = format!(
             "use {};",
-            build_member_text(new_fqn, info, has_collision, new_short_name, use_map)
+            build_member_text(new_fqn, new_fqn, info, has_collision, use_map)
         );
         (
             range,
@@ -206,7 +185,7 @@ pub(super) fn build_use_statement_edit(
     };
 
     if let Some(relative) = strip_matching_prefix(new_fqn, location.prefix) {
-        let new_text = build_member_text(relative, info, has_collision, new_short_name, use_map);
+        let new_text = build_member_text(relative, new_fqn, info, has_collision, use_map);
         return Some((
             member_range,
             vec![TextEdit {
@@ -231,7 +210,7 @@ pub(super) fn build_use_statement_edit(
     }];
 
     let alias_for_new = if has_collision {
-        Some(pick_collision_alias(new_short_name, use_map))
+        Some(pick_collision_alias(new_fqn, use_map))
     } else if info.has_explicit_alias {
         Some(info.alias.clone())
     } else {
@@ -260,13 +239,13 @@ pub(super) fn build_use_statement_edit(
 /// collision or an explicit alias requires.
 fn build_member_text(
     name: &str,
+    new_fqn: &str,
     import_info: &ImportInfo,
     has_collision: bool,
-    new_short_name: &str,
     use_map: &HashMap<String, String>,
 ) -> String {
     if has_collision {
-        let alias = pick_collision_alias(new_short_name, use_map);
+        let alias = pick_collision_alias(new_fqn, use_map);
         format!("{} as {}", name, alias)
     } else if import_info.has_explicit_alias {
         format!("{} as {}", name, import_info.alias)

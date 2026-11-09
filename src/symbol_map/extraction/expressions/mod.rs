@@ -118,6 +118,13 @@ pub(super) fn extract_from_expression<'a>(
     ) {
         // A route chain is read whole, from its outermost call.
         record_yii_route_chain(expr, ctx);
+        // And so is a query chain, whose names are read against the tables
+        // the whole chain names.
+        record_yii_query_chain(expr, ctx, scope_start);
+        // So is the subject text of each link, which spells the chain
+        // before it: rendering the links one by one, innermost first,
+        // would render each from scratch.
+        ctx.spine_texts.prime(expr, ctx.content);
         let mut links: Vec<&'a Call<'a>> = Vec::new();
         let mut receiver = expr;
         while let Expression::Call(call) = receiver {
@@ -186,7 +193,11 @@ pub(super) fn extract_from_expression<'a>(
         // ── Binary operations ──
         Expression::Binary(bin) => {
             record_morph_column_comparison(bin, ctx.content, &mut ctx.morph_column_sites);
+            let lhs_spans = ctx.spans.len();
             extract_from_expression(bin.lhs, ctx, scope_start);
+            if ctx.yii_params && bin.operator.is_null_coalesce() {
+                mark_yii_param_reads_optional(lhs_spans, ctx);
+            }
             // Tag the RHS of `instanceof` with the Instanceof context.
             if bin.operator.is_instanceof()
                 && let Expression::Identifier(ident) = bin.rhs
@@ -242,10 +253,20 @@ pub(super) fn extract_from_expression<'a>(
         // ── Array ──
         Expression::Array(array) => {
             try_emit_array_callable_span(&array.elements, ctx.content, &mut ctx.spans);
+            emit_drupal_config_target_entry_spans(&array.elements, ctx);
+            emit_drupal_render_element_reads(&array.elements, ctx);
+            emit_drupal_render_array_spans(&array.elements, ctx);
+            emit_drupal_attached_array_spans(&array.elements, ctx);
+            emit_yii_definition_spans(&array.elements, array.span().start.offset, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::LegacyArray(array) => {
             try_emit_array_callable_span(&array.elements, ctx.content, &mut ctx.spans);
+            emit_drupal_config_target_entry_spans(&array.elements, ctx);
+            emit_drupal_render_element_reads(&array.elements, ctx);
+            emit_drupal_render_array_spans(&array.elements, ctx);
+            emit_drupal_attached_array_spans(&array.elements, ctx);
+            emit_yii_definition_spans(&array.elements, array.span().start.offset, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::List(list) => {
@@ -254,6 +275,9 @@ pub(super) fn extract_from_expression<'a>(
 
         // ── Array access ──
         Expression::ArrayAccess(access) => {
+            if ctx.yii_params {
+                record_yii_param_read(access, ctx);
+            }
             extract_from_expression(access.array, ctx, scope_start);
             // An index that is still a bare `Identifier` can only have come
             // from the unquoted offset of a simple interpolation
@@ -384,6 +408,11 @@ pub(super) fn extract_from_expression<'a>(
         // `strlen(...)`, `$obj->method(...)`, `Class::method(...)`
         Expression::PartialApplication(partial) => {
             extract_partial_application_expr(partial, ctx, scope_start)
+        }
+
+        // ── A Yii path alias a string starts with: `'@runtime/logs'` ──
+        Expression::Literal(Literal::String(literal)) if ctx.yii => {
+            record_yii_alias(literal, ctx);
         }
 
         // Any expression variant without an explicit arm: descend generically

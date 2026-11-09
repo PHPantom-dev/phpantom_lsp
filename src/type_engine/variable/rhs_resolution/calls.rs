@@ -58,11 +58,7 @@ pub(crate) fn build_function_template_subs(
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> HashMap<String, PhpType> {
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
-    let callee = crate::type_engine::call_resolution::TemplateCallee {
-        parameters: &func_info.parameters,
-        template_bindings: &func_info.template_bindings,
-        template_param_bounds: &func_info.template_param_bounds,
-    };
+    let callee = crate::type_engine::call_resolution::TemplateCallee::of_function(func_info);
     let mut subs = crate::type_engine::call_resolution::bind_template_args(
         &callee,
         &arg_refs,
@@ -150,7 +146,19 @@ pub(crate) fn resolve_arg_variable_raw_type(
                     prop,
                     rctx.file.class_loader,
                 ) {
-                    return Some(hint);
+                    // `(self::VARIANCE_*)[]` names its values only once the
+                    // constants are read, against the class that declares
+                    // them rather than the caller's.
+                    let owner_ctx = crate::type_engine::resolver::ResolutionCtx {
+                        current_class: Some(cls),
+                        ..*rctx
+                    };
+                    return Some(
+                        crate::type_engine::call_resolution::evaluate_constant_operands(
+                            &hint, &owner_ctx,
+                        )
+                        .unwrap_or(hint),
+                    );
                 }
             }
         }
@@ -533,6 +541,24 @@ fn closure_generator_type(expr: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> 
     ))
 }
 
+/// Whether returning `body` through the declared return type `declared`
+/// turns an integer into a float.
+///
+/// An `int` is accepted where `float` is declared, so it passes the subtype
+/// check, but PHP converts it on the way out: `fn (int $x): float => $x / 2`
+/// returns a `float`, never the `int` the body can produce. Only a declared
+/// type with no member that holds an integer as itself does this.
+fn int_becomes_float(body: &PhpType, declared: &PhpType, ctx: &VarResolutionCtx<'_>) -> bool {
+    let loader = ctx.file.class_loader;
+    let int = PhpType::named(atom("int"));
+    body.union_members()
+        .iter()
+        .any(|member| crate::class_lookup::is_subtype_of_typed(member, &int, loader))
+        && !declared.union_members().iter().any(|member| {
+            !member.is_float() && crate::class_lookup::is_subtype_of_typed(&int, member, loader)
+        })
+}
+
 pub(crate) fn infer_closure_literal_type(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
@@ -616,6 +642,7 @@ pub(crate) fn infer_closure_literal_type(
         Some(declared) => {
             let narrowed = body_return().filter(|body| {
                 crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.file.class_loader)
+                    && !int_becomes_float(body, &declared, ctx)
             });
             Some(narrowed.unwrap_or(declared))
         }

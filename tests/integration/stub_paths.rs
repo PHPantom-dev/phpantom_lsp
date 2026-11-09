@@ -127,7 +127,7 @@ async fn a_theme_subproject_resolves_through_its_composer_stub_packages() {
     };
     assert_eq!(
         target,
-        Uri::from_file_path(wordpress.canonicalize().unwrap()).unwrap()
+        Uri::from_file_path(dunce::canonicalize(&wordpress).unwrap()).unwrap()
     );
 }
 

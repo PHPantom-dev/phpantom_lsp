@@ -1,0 +1,82 @@
+<?php
+
+/**
+ * @file
+ * Procedural hook implementations, the style most contrib modules still use.
+ */
+
+declare(strict_types=1);
+
+use Drupal\acme\Greeter;
+use Drupal\Core\Routing\RouteMatchInterface;
+
+/**
+ * Implements hook_form_alter().
+ */
+function acme_form_alter(array &$form, $form_state, string $form_id): void
+{
+    // Try: hover `$form_state`, typed by hook_form_alter()'s documentation
+    // in core. Hover the function's name to read that documentation, with
+    // the hook's signature and parameters. Go to the definition of `form_alter` in the function's name,
+    // which lists the alter() call in core's FormBuilder and the
+    // documentation. Type `function acme_` on a new line to complete a hook.
+    if ($form_id === 'user_login_form') {
+        $form_state->disableCache();
+    }
+}
+
+/**
+ * Implements hook_help().
+ */
+function acme_help(string $route_name, RouteMatchInterface $route_match): ?string
+{
+    // Try: complete after `$route_match->`. The methods come from core's
+    // RouteMatchInterface.
+    if ($route_name === 'help.page.acme' && $route_match->getParameter('name') === 'acme') {
+        // Try: hover `$greeter`, typed by the class acme.services.yml
+        // declares, or go to the definition of 'acme.greeter'. Complete a
+        // service ID inside `\Drupal::service('')`. Misspell it as
+        // 'acme.greeterr' and a warning reports a service nothing declares.
+        $greeter = \Drupal::service('acme.greeter');
+        // Try: hover `$sameGreeter`. acme.services.yml also registers the
+        // service under its class name, and a lookup by class name is typed
+        // as that class.
+        $sameGreeter = \Drupal::service(Greeter::class);
+
+        return '<p>' . $greeter->greet('Ada') . ' ' . $sameGreeter->greet('Grace') . '</p>';
+    }
+
+    return null;
+}
+
+/**
+ * The site name in French, when the language module translates it.
+ */
+function acme_french_site_name(): ?string
+{
+    if (!\Drupal::moduleHandler()->moduleExists('language')) {
+        return null;
+    }
+    // Try: hover `$languageManager`. core.services.yml builds
+    // language_manager from LanguageManager, and the language module's
+    // LanguageServiceProvider swaps in ConfigurableLanguageManager, so it is
+    // either class and the methods of both complete after `$languageManager->`.
+    $languageManager = \Drupal::service('language_manager');
+    $name = $languageManager->getLanguageConfigOverride('fr', 'system.site')->get('name');
+
+    return is_string($name) ? $name : null;
+}
+
+/**
+ * How many seconds the current request has run.
+ */
+function acme_request_age(): int
+{
+    // Try: hover `$clock`. core.services.yml builds datetime.time from
+    // Time, and acme.services.yml decorates it with RequestClock, so it is
+    // either class. Go to the definition of secondsSinceRequest(), which
+    // only RequestClock declares.
+    $clock = \Drupal::service('datetime.time');
+
+    return $clock->secondsSinceRequest();
+}

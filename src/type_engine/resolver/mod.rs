@@ -51,7 +51,7 @@ pub(crate) use context::{
 pub(crate) use subject_outcome::{
     SubjectOutcome, UnionBranch, UnionBranches, resolve_subject_outcome,
 };
-pub(crate) use variable_subjects::resolve_dynamic_member_name;
+pub(crate) use variable_subjects::resolve_dynamic_member_names;
 pub(in crate::type_engine) use written_names::WrittenNames;
 
 use std::sync::Arc;
@@ -319,6 +319,44 @@ fn resolve_target_classes_expr_inner(
         // ── Bare variable ───────────────────────────────────────
         SubjectExpr::Variable(var_name) => resolve_variable_fallback(var_name, access_kind, ctx),
 
+        // ── The entity a DQL variable joined through an association
+        //    stands for ─────────────────────────────────────────────
+        SubjectExpr::DqlAssociation { base, association } => {
+            let owners = ResolvedType::into_arced_classes(resolve_target_classes_expr(
+                base,
+                AccessKind::Arrow,
+                ctx,
+            ));
+            crate::doctrine::association_targets(
+                owners,
+                association,
+                class_loader,
+                ctx.resolved_class_cache,
+            )
+            .into_iter()
+            .map(ResolvedType::from_arc)
+            .collect()
+        }
+
+        // ── The entity a query builder's DQL variable stands for ──
+        SubjectExpr::DqlBuilderAlias { base, alias } => {
+            let builders = resolve_target_classes_expr(base, AccessKind::Arrow, ctx);
+            let mut out: Vec<Arc<ClassInfo>> = Vec::new();
+            for builder in &builders {
+                for member in builder.type_string.union_members() {
+                    let Some((_, state)) = member.as_dql_builder() else {
+                        continue;
+                    };
+                    for class in dql_builder_alias_entities(state, alias, ctx) {
+                        if !out.iter().any(|known| known.fqn() == class.fqn()) {
+                            out.push(class);
+                        }
+                    }
+                }
+            }
+            out.into_iter().map(ResolvedType::from_arc).collect()
+        }
+
         // ── Callee-only variants (MethodCall, StaticMethodCall,
         //    FunctionCall) should not appear as top-level subjects;
         //    they are wrapped in CallExpr.  If they do appear
@@ -336,6 +374,46 @@ fn resolve_target_classes_expr_inner(
                 .collect()
         }
     }
+}
+
+/// The entities the DQL variable `alias` a query builder in `state` has
+/// declared stands for, following each join back to the entity it starts
+/// from.  A variable joined from itself, directly or not, stands for
+/// nothing.
+fn dql_builder_alias_entities(
+    state: &crate::doctrine::query::QueryBuilderState,
+    alias: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    use crate::doctrine::query::AliasRoot;
+    let class_loader = ctx.file.class_loader;
+    let mut path: Vec<&str> = Vec::new();
+    let mut current = alias;
+    let entity = loop {
+        if path.len() > state.alias_count() {
+            return Vec::new();
+        }
+        match state.alias_root(current) {
+            Some(AliasRoot::Entity(entity)) => break entity,
+            Some(AliasRoot::Association { alias, field }) => {
+                path.push(field);
+                current = alias;
+            }
+            None => return Vec::new(),
+        }
+    };
+    let mut classes: Vec<Arc<ClassInfo>> = class_loader(Fqn::new(entity.trim_start_matches('\\')))
+        .into_iter()
+        .collect();
+    for field in path.into_iter().rev() {
+        classes = crate::doctrine::association_targets(
+            classes,
+            field,
+            class_loader,
+            ctx.resolved_class_cache,
+        );
+    }
+    classes
 }
 
 /// Resolve `Foo::MEMBER` / `Foo::$prop`: the type a static property or a
@@ -472,9 +550,17 @@ fn resolve_call_subject(
     // of alternatives.  The same holds for an intersection inside a
     // union (`(A&I)|B`).
     if let Some(h) = hint {
-        let hint_names_a_class = matches!(h.kind(), TypeKind::Generic(g) if classes
-            .iter()
-            .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()));
+        let generic_names_a_class = |t: &PhpType| {
+            matches!(t.kind(), TypeKind::Generic(g) if classes
+                .iter()
+                .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()))
+        };
+        // A union of such generics (`Config<'a'>|ImmutableConfig<'a'>`)
+        // carries them for each of its classes.
+        let hint_names_a_class = match h.kind() {
+            TypeKind::Union(members) => members.iter().any(generic_names_a_class),
+            _ => generic_names_a_class(&h),
+        };
         let is_intersection = match h.kind() {
             TypeKind::Intersection(_) => true,
             TypeKind::Union(members) => members
@@ -482,9 +568,25 @@ fn resolve_call_subject(
                 .any(|m| matches!(m.kind(), TypeKind::Intersection(_))),
             _ => false,
         };
+        // A closure signature resolves to the `Closure` class, which
+        // cannot say what calling it returns; the hint can.
+        let is_closure_signature = |t: &PhpType| match t.kind() {
+            TypeKind::Callable(c) => c.is_closure(),
+            _ => false,
+        };
+        let carries_closure_signature = match h.kind() {
+            TypeKind::Nullable(inner) => is_closure_signature(inner),
+            TypeKind::Union(members) => members.iter().any(is_closure_signature),
+            _ => is_closure_signature(&h),
+        };
+        // A Doctrine query builder carries the DQL it has built, which the
+        // class alone has lost.
+        let carries_dql = h.has_dql_builder();
         if is_intersection
             || classes.iter().any(|c| !c.template_params.is_empty())
             || hint_names_a_class
+            || carries_closure_signature
+            || carries_dql
         {
             return ResolvedType::from_classes_with_hint(classes, h);
         }
@@ -517,9 +619,40 @@ fn resolve_property_chain_subject(
     // to has already been consulted by the spine walk in
     // `resolve_target_classes_expr`, which reads it before
     // resolving anything below the property.
-    let base_arcs = resolved_to_arcs(
+    let names = variable_subjects::resolve_dynamic_member_names(property, ctx);
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let mut base_arcs = resolved_to_arcs(
         receiver.unwrap_or_else(|| resolve_target_classes_expr(base, access_kind, ctx)),
     );
+    // Inside a trait, a property neither the trait nor what its users are
+    // all guaranteed to be declares is what each user declares on its own.
+    if let Some(current) = ctx.current_class {
+        let mut hosts: Vec<Arc<ClassInfo>> = Vec::new();
+        for name in &names {
+            ClassInfo::extend_unique_arc(
+                &mut hosts,
+                crate::type_engine::trait_context::trait_hosts_declaring_property(
+                    current,
+                    base_arcs.iter().map(Arc::as_ref),
+                    name,
+                    all_classes,
+                    class_loader,
+                    ctx.file.backend,
+                ),
+            );
+        }
+        ClassInfo::extend_unique_arc(&mut base_arcs, hosts);
+    }
+    // Every property the name can pick, on every class the base can be.
+    let property_hints = || {
+        base_arcs.iter().flat_map(|cls| {
+            names.iter().filter_map(move |property| {
+                resolve_property_type_hint(cls, property, class_loader).map(|hint| (cls, hint))
+            })
+        })
+    };
     let mut arc_results: Vec<Arc<ClassInfo>> = Vec::new();
     // The generic members of the property's hint, e.g.
     // `Collection<int, Post>`.  The classes resolved from it carry
@@ -531,10 +664,7 @@ fn resolve_property_chain_subject(
     // alternatives `Foo|MockObject`, so each is tagged with the whole
     // intersection below the way a call's return type is.
     let mut intersection_hints: Vec<PhpType> = Vec::new();
-    for cls in &base_arcs {
-        let Some(hint) = resolve_property_type_hint(cls, property, class_loader) else {
-            continue;
-        };
+    for (cls, hint) in property_hints() {
         let resolved = super::type_resolution::type_hint_to_classes_typed(
             &hint,
             &cls.fqn(),
@@ -567,12 +697,9 @@ fn resolve_property_chain_subject(
     // static members against `T` instead of leaving
     // `arc_results` empty.
     if arc_results.is_empty() && access_kind == AccessKind::DoubleColon {
-        for cls in &base_arcs {
-            if let Some(raw_type) = resolve_property_type_hint(cls, property, class_loader) {
-                let classes =
-                    classes_named_by_type(&raw_type, &cls.fqn(), all_classes, class_loader);
-                ClassInfo::extend_unique_arc(&mut arc_results, classes);
-            }
+        for (cls, raw_type) in property_hints() {
+            let classes = classes_named_by_type(&raw_type, &cls.fqn(), all_classes, class_loader);
+            ClassInfo::extend_unique_arc(&mut arc_results, classes);
         }
     }
 
