@@ -67,6 +67,7 @@ fn format_params_with_types() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$age"),
@@ -80,6 +81,7 @@ fn format_params_with_types() {
             closure_this_type: None,
             param_out_type: None,
             callable_invocation: None,
+            expected_values: None,
         },
     ];
     assert_eq!(
@@ -102,6 +104,7 @@ fn format_params_variadic() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     assert_eq!(format_native_params(&params), "string ...$items");
 }
@@ -120,6 +123,7 @@ fn format_params_reference() {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }];
     assert_eq!(format_native_params(&params), "array &$arr");
 }
@@ -423,6 +427,20 @@ fn html_to_markdown_code() {
     assert_eq!(
         formatting::html_to_markdown("use <code>foo()</code> instead"),
         "use `foo()` instead"
+    );
+}
+
+#[test]
+fn html_to_markdown_multiline_code_is_fenced() {
+    assert_eq!(
+        formatting::html_to_markdown(
+            "Example:\n<code>\n    $qb->where('u.id = ?');\n    $qb->setParameter(1, 2);\n</code>\nThen <code>run()</code>."
+        ),
+        "Example:\n\n```php\n    $qb->where('u.id = ?');\n    $qb->setParameter(1, 2);\n```\n\nThen `run()`."
+    );
+    assert_eq!(
+        formatting::html_to_markdown("<pre>\nline one\nline two\n</pre>"),
+        "\n```php\nline one\nline two\n```\n"
     );
 }
 

@@ -551,7 +551,9 @@ impl<'b> ExprWalk<'b> {
     /// it writes through by-reference parameters (see
     /// [`process_pass_by_ref`]), what was known about an object it changed
     /// (see [`process_call_effects`]), and the type a `@phpstan-self-out`
-    /// method leaves its receiver with (see [`process_self_out_narrowing`]).
+    /// method leaves its receiver with (see [`process_self_out_narrowing`])
+    /// or a Doctrine query builder call leaves the builder's variable with
+    /// (see [`process_dql_builder_call`]).
     #[inline(never)]
     fn effects(
         &mut self,
@@ -563,6 +565,7 @@ impl<'b> ExprWalk<'b> {
         process_pass_by_ref(expr, &mut after, ctx);
         process_call_effects(expr, &mut after, ctx);
         process_self_out_narrowing(expr, &mut after, ctx);
+        process_dql_builder_call(expr, &mut after, ctx);
         // A cursor on a variable the call wrote through asks about what the
         // call left there: `$m` in `preg_match('/(a)/', $s, $m)`.
         if let Some(cursor_scope) = ctx.cursor_scope

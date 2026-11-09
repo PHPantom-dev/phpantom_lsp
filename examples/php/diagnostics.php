@@ -6,7 +6,7 @@
  * The diagnostics PHPantom reports: unknown classes and members, member
  * access on a scalar, argument counts, writes to readonly properties,
  * the properties clone() writes, typed properties nothing initializes,
- * docblocks that contradict their type hint, an invalid class-like kind,
+ * private members nothing uses, docblocks that contradict their type hint, an invalid class-like kind,
  * and deprecation. These files deliberately contain a fixed set of errors,
  * so the squiggles you see here are the demo, not a mistake.
  *
@@ -32,12 +32,12 @@ class DeprecationDemo
     {
         $src = new Scaffolding\ScaffoldingDeprecation();
 
-        // Diagnostic: "'sendLegacy' is deprecated: Use sendAsync() instead.
-        //   (see: Scaffolding\ScaffoldingDeprecation::sendAsync())"
+        // Diagnostic: "Method Demo\Scaffolding\ScaffoldingDeprecation::sendLegacy()
+        //   is deprecated: Use sendAsync() instead; see ScaffoldingDeprecation::sendAsync()"
         $src->sendLegacy();
 
-        // Diagnostic: "'oldProcess' is deprecated: See: Scaffolding\ScaffoldingDeprecation::sendAsync()"
-        // (bare @deprecated + @see → "See:" becomes the main text)
+        // Diagnostic: "Method Demo\Scaffolding\ScaffoldingDeprecation::oldProcess()
+        //   is deprecated; see ScaffoldingDeprecation::sendAsync()"
         $src->oldProcess();
 
         // Diagnostic includes @see reference for the property too
@@ -96,7 +96,7 @@ class DeprecationDemo
 
 // ── Diagnostic: Unknown Class ───────────────────────────────────────────────
 // `MutateArrayInsertSpec` and `Cluster` below are not imported and cannot be
-// resolved — they get a yellow "Class 'X' not found" warning underline.
+// resolved — they get a yellow "Class X not found" warning underline.
 // This diagnostic fires for any ClassReference that PHPantom cannot resolve
 // through use-map, local classes, same-namespace, class_index, classmap,
 // PSR-4, or stubs.  It pairs with the "Import Class" code action: press
@@ -105,7 +105,7 @@ class DeprecationDemo
 // ── Diagnostic: Unknown Member Access ───────────────────────────────────────
 // When PHPantom resolves the subject type but the member does not exist after
 // full resolution (inheritance, traits, virtual members), a yellow "Method
-// 'X' not found on class 'Y'" warning appears.  Suppressed when __call,
+// Y::x() not found" warning appears.  Suppressed when __call,
 // __callStatic, or __get magic methods are present on the resolved class.
 
 class UnknownMemberDemo
@@ -223,10 +223,70 @@ class PartialUnionMembersDemo
     {
         $tool->label();     // fine: both Pen and Pencil declare it
         // With the diagnostic enabled, a warning appears on the next line:
-        $tool->write();     // Method 'write' exists on Pen but not on Pencil
+        $tool->write();     // Method write() exists on Pen but not on Pencil
 
         if ($tool instanceof Scaffolding\Pen) {
             $tool->write(); // fine: narrowed to Pen
+        }
+    }
+}
+
+
+// ── Diagnostic: Unhandled Exceptions (opt-in) ───────────────────────────────
+// An exception a method throws, or a callee's @throws passes on, that no
+// `try` catches and the method's own @throws does not list.  Exceptions
+// extending RuntimeException, LogicException or Error are not reported.
+// Enable it in .phpantom.toml:
+//
+//   [diagnostics]
+//   unhandled-exceptions = true
+
+class UnhandledExceptionDemo
+{
+    public function load(string $path): string
+    {
+        // With the diagnostic enabled, a hint appears on the next line.
+        // Try: the "Add @throws StorageException" quick fix on it.
+        return Scaffolding\readStorageFile($path);
+    }
+
+    /** @throws Scaffolding\StorageException */
+    public function documented(string $path): string
+    {
+        return Scaffolding\readStorageFile($path);     // fine: listed in @throws
+    }
+
+    public function caught(string $path): string
+    {
+        try {
+            return Scaffolding\readStorageFile($path); // fine: caught below
+        } catch (Scaffolding\StorageException) {
+            return '';
+        }
+    }
+
+    public function unchecked(): never
+    {
+        throw new \InvalidArgumentException('no');      // fine: a LogicException
+    }
+}
+
+
+// ── Diagnostic: Dead Catch ──────────────────────────────────────────────────
+// A `catch` for an exception nothing in its `try` can throw.  It only judges
+// a `try` whose every call declares what it throws with @throws: a call that
+// declares nothing could throw anything.
+
+class DeadCatchDemo
+{
+    public function load(string $path): string
+    {
+        try {
+            return Scaffolding\readStorageFile($path);  // @throws StorageException
+        } catch (\JsonException) {                     // warning: never thrown
+            return '{}';
+        } catch (Scaffolding\StorageException) {       // fine: thrown above
+            return '';
         }
     }
 }
@@ -542,6 +602,65 @@ final class UninitializedReadDemo
 }
 
 
+// ── Diagnostic: Unused Private Members ──────────────────────────────────────
+// Only its own class can reach a private member, so the class alone decides
+// whether anything uses it.  A constant or method nothing reads or calls,
+// and a property nothing reads, are dimmed: dead code is tidying, not a
+// defect.  A property nothing writes and that has no default always holds
+// null, which is flagged too.  A name spelled in a string counts as a use,
+// since it may be a callable.
+// Try: put the cursor on `recalculate` and trigger code actions to see
+// "Remove unused method".
+
+final class UnusedPrivateMemberDemo
+{
+    // Dimmed — nothing reads `LEGACY_PREFIX`:
+    private const LEGACY_PREFIX = 'INV-';
+
+    // No diagnostic — `format()` reads `PREFIX`:
+    private const PREFIX = 'N-';
+
+    // Dimmed — nothing reads or writes `$legacyNumber`:
+    private string $legacyNumber = '';
+
+    // Dimmed — `bill()` writes `$billedAt`, but nothing reads it back:
+    private ?\DateTimeImmutable $billedAt = null;
+
+    // Information — nothing writes `$discount`, so it is always null:
+    private $discount;
+
+    /**
+     * @param list<int> $amounts
+     * @return list<int>
+     */
+    public function sorted(array $amounts): array
+    {
+        // No diagnostic on `compare()` — the callable names it:
+        usort($amounts, [$this, 'compare']);
+        return $amounts;
+    }
+
+    public function bill(int $number): string
+    {
+        $this->billedAt = new \DateTimeImmutable();
+        return $this->format($number) . ($this->discount ?? '');
+    }
+
+    private function format(int $number): string
+    {
+        return self::PREFIX . $number;
+    }
+
+    private function compare(int $a, int $b): int
+    {
+        return $a <=> $b;
+    }
+
+    // Dimmed — nothing calls `recalculate()`:
+    private function recalculate(): void {}
+}
+
+
 // ── Diagnostic: Discarded #[\NoDiscard] Results ─────────────────────────────
 // PHP 8.5 warns when a function or method marked `#[\NoDiscard]` is called as
 // a statement of its own, throwing its result away.  Cast the call to
@@ -565,6 +684,103 @@ class DiscardedResultDemo
 
         // No diagnostic — discarded on purpose:
         (void) $this->reserveSlot();
+    }
+}
+
+
+// ── Diagnostic: Used void Results ───────────────────────────────────────────
+// A function or method declared `void` returns nothing, so reading its result
+// always gets `null`.  The call usually meant to return something, or the
+// caller meant to write `null`.
+
+class VoidResultDemo
+{
+    public function flush(): void {}
+
+    public function demo(bool $ready): void
+    {
+        // Warning — `$flushed` is always null:
+        $flushed = $this->flush();
+        echo $flushed;
+
+        // Warning — the condition is never true:
+        if ($this->flush()) {
+            echo 'flushed';
+        }
+
+        // No diagnostic — the call is a statement of its own:
+        $this->flush();
+
+        // No diagnostic — the value of the whole expression goes nowhere:
+        $ready && $this->flush();
+    }
+
+    public function relay()
+    {
+        // Warning — returns null, and reads better as two statements:
+        return $this->flush();
+    }
+}
+
+
+// ── Diagnostic: Objects Used as Strings ─────────────────────────────────────
+// `echo`, concatenation, interpolation and a `(string)` cast call an object's
+// `__toString()`, and an object without one throws an `Error`.  It is an error
+// when the class is final or an enum, and a warning when a subclass could
+// still add the method.
+
+class StringConversionDemo
+{
+    public function demo(
+        Scaffolding\TextTag $tag,
+        Scaffolding\User $user,
+        Scaffolding\ScaffoldingFieldLabel $label,
+    ): void {
+        // Error — TextTag is final and has no __toString():
+        echo $tag;
+        echo 'Tag: ' . $tag;
+        echo "Tag: {$tag}";
+
+        // Error — an enum can never have __toString():
+        echo Scaffolding\Mode::Manual;
+
+        // Warning — a subclass of User could add __toString():
+        echo (string) $user;
+
+        // No diagnostic — the class declares __toString():
+        echo $label;
+    }
+}
+
+
+// ── Diagnostic: Missing Return ──────────────────────────────────────────────
+// Running off the end of a function returns `null`, which a return type that
+// does not accept it turns into a `TypeError`.
+
+class MissingReturnDemo
+{
+    // Error on the closing brace — a negative `$x` falls off the end:
+    public function sign(int $x): int
+    {
+        if ($x > 0) {
+            return 1;
+        } elseif ($x === 0) {
+            return 0;
+        }
+    }
+
+    // No diagnostic — every way out returns or throws:
+    public function parse(string $raw): int
+    {
+        if (is_numeric($raw)) {
+            return (int) $raw;
+        }
+        $this->fail($raw);
+    }
+
+    private function fail(string $raw): never
+    {
+        throw new \InvalidArgumentException($raw);
     }
 }
 
@@ -607,6 +823,27 @@ class UnhandledMatchDemo
             Scaffolding\Status::Active => 'A',
             Scaffolding\Status::Inactive => 'I',
         };
+    }
+}
+
+
+// ── Diagnostic: Values No Enum Case Is Backed By ────────────────────────────
+// `from()` throws a `ValueError` for a value no case of the enum is backed by,
+// and `tryFrom()` returns `null` for it.  When the value is known, a call that
+// can never find a case is reported.
+
+class EnumFromDemo
+{
+    public function parse(): void
+    {
+        // Error — the case is named Active, but backed by 'active':
+        Scaffolding\Status::from('Active');
+
+        // Warning — no Priority case is backed by 4, so this is always null:
+        Scaffolding\Priority::tryFrom(4);
+
+        // No diagnostic — Status::Pending is backed by 'pending':
+        Scaffolding\Status::from('pending');
     }
 }
 
@@ -778,51 +1015,53 @@ class UnreachableCodeDemo
 
 // ── Diagnostic: Docblock Contradicts the Type Hint ──────────────────────────
 // A `@param` or `@return` tag refines the native declaration; it must not
-// disagree with it.  When the signature admits `null` and the tag does not,
-// the two describe different sets of values: a caller reading the signature
-// may legally pass `null`, and the callee has been promised it never receives
-// one.  A tag that keeps the `null` while narrowing the rest is the annotation
-// doing its job and is left alone, and so is a name PHPantom cannot settle,
-// since a `@template` parameter or an imported type alias may itself be
-// nullable.
+// widen it.  When the tag admits `null` and the signature does not, the two
+// describe different sets of values: the runtime rejects the `null` the
+// docblock promises callers they may pass.  The other way round is not a
+// contradiction, since a nullable hint hands its `null` to the documented
+// type.  A tag that merely copies a nullable hint and drops the `null` gets a
+// Hint, though, and the "Update docblock" action adds it back.
 
 class DocblockNativeMismatchDemo
 {
-    private ?string $path = null;
+    private string $path = '';
 
     /**
-     * @param string $name
+     * @param ?string $name
      */
-    // Warning — `string` denies the null that `?string` accepts:
-    public function greet(?string $name): void
+    // Warning — `?string` admits a null the native `string` rejects:
+    public function greet(string $name): void
     {
         echo $name;
     }
 
     /**
-     * @param list<int> $items
-     */
-    // Warning — an array type reads the same way:
-    public function takesItems(?array $items): void
-    {
-        echo count($items ?? []);
-    }
-
-    /**
-     * @return string
+     * @return string|null
      */
     // Warning — on the return type this time:
-    public function getPath(): ?string
+    public function getPath(): string
     {
         return $this->path;
     }
 
     /**
-     * @param list<int>|null $items
-     * @return non-empty-string|null
+     * @param string $label
+     * @return string
      */
-    // No diagnostic — both tags narrow the type and keep the null:
-    public function narrowedButStillNullable(?array $items): ?string
+    // Hint on both tags — each copies its `?string` hint without the null.
+    // Try: put the cursor in the docblock and run "Update docblock".
+    public function rename(?string $label): ?string
+    {
+        return $label;
+    }
+
+    /**
+     * @param list<int> $items
+     * @return non-empty-string
+     */
+    // No diagnostic — both tags refine their nullable hint, which keeps
+    // its null:
+    public function narrowed(?array $items): ?string
     {
         return $items === null ? null : 'ok';
     }

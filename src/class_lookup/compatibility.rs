@@ -41,6 +41,17 @@ fn is_unloadable_short_name(ty: &PhpType, class_loader: &ResolvedClassLoader<'_>
         && class_loader(Fqn::new(name)).is_none()
 }
 
+/// The class a `Foo` or `Foo<Bar>` names, or `None` for any other type,
+/// including a keyword such as `object` or `array<int>`.
+fn class_like_base_name(ty: &PhpType) -> Option<&str> {
+    let name = match ty.kind() {
+        TypeKind::Named(n) => n.as_str(),
+        TypeKind::Generic(g) => g.name.as_str(),
+        _ => return None,
+    };
+    (crate::php_type::is_class_like_name(name) && !is_array_like_name(name)).then_some(name)
+}
+
 /// Returns `true` when the type is an array that says nothing about its
 /// values: bare `array`, `mixed[]`, or `array<K, mixed>`.
 ///
@@ -108,7 +119,7 @@ pub(crate) fn undeclared_shape_keys(
     let (Some(arg), Some(param)) = (arg_type.shape_parts(), param_type.shape_parts()) else {
         return Vec::new();
     };
-    if param.tail.is_some() {
+    if param.tail.is_some() || arg_lists_keys_loosely(&arg) {
         return Vec::new();
     }
     let param_keys = shape_keys(param.entries);
@@ -262,9 +273,10 @@ fn shape_is_compatible(
         return false;
     }
     let Some((tail_key, tail_value)) = param.tail else {
-        return arg_keys
-            .iter()
-            .all(|key| param_keys.contains(key) || may_be_listed(key, &param_keys, class_loader));
+        return arg_lists_keys_loosely(arg)
+            || arg_keys.iter().all(|key| {
+                param_keys.contains(key) || may_be_listed(key, &param_keys, class_loader)
+            });
     };
 
     // The tail is judged the way the type arguments of an array are: its
@@ -286,8 +298,29 @@ fn shape_is_compatible(
         });
     extras_fit
         && arg.tail.is_none_or(|(arg_tail_key, arg_tail_value)| {
-            (any_key || key_fits(arg_tail_key)) && value_fits(arg_tail_value)
+            tail_says_nothing(arg_tail_value)
+                || ((any_key || key_fits(arg_tail_key)) && value_fits(arg_tail_value))
         })
+}
+
+/// Whether an unsealed argument's tail says nothing about the entries
+/// beyond the ones it lists, the way a plain `array` says nothing about any
+/// of them, and so might fit whatever the parameter asks of them.
+fn tail_says_nothing(tail_value: &PhpType) -> bool {
+    tail_value.is_mixed()
+}
+
+/// Whether the keys an argument shape lists are no more held to a sealed
+/// parameter shape than those of a plain `array` are.
+///
+/// A key written into a plain `array` is recorded as an entry of an
+/// unsealed shape whose tail says nothing, so it can be read back. The
+/// array was never checked against the keys a sealed shape declares, and
+/// the write does not change that; only the value of an entry the
+/// parameter does declare is held to it.
+fn arg_lists_keys_loosely(arg: &ShapeParts<'_>) -> bool {
+    arg.tail
+        .is_some_and(|(_, tail_value)| tail_says_nothing(tail_value))
 }
 
 /// Whether `key`, which `listed` does not hold as spelled, may still be one
@@ -348,10 +381,10 @@ fn shape_fits_array(
         });
     listed_fit
         && arg.tail.is_none_or(|(tail_key, tail_value)| {
-            demand
-                .key
-                .is_none_or(|key_type| is_type_compatible(tail_key, key_type, class_loader, true))
-                && demand.value.is_none_or(|value_type| {
+            tail_says_nothing(tail_value)
+                || demand.key.is_none_or(|key_type| {
+                    is_type_compatible(tail_key, key_type, class_loader, true)
+                }) && demand.value.is_none_or(|value_type| {
                     is_type_compatible(tail_value, value_type, class_loader, true)
                 })
         })
@@ -746,6 +779,18 @@ impl Compat<'_> {
             return Some(true);
         }
 
+        // An argument whose class does not load has no known parents or
+        // interfaces, so whether it extends or implements the class the
+        // parameter names cannot be decided either way. The missing class
+        // is reported where it is named; failing every parameter it is
+        // passed to as well would report one missing package over and over.
+        if let Some(arg_name) = class_like_base_name(arg_type)
+            && self.may_be_extended_by_unknown_class(param_type)
+            && (self.class_loader)(Fqn::new(arg_name)).is_none()
+        {
+            return Some(true);
+        }
+
         // Skip anonymous class arguments.  Anonymous classes are stored
         // with synthetic names (`__anonymous@<offset>`) that are not
         // indexed globally, so the class loader cannot resolve their
@@ -766,6 +811,19 @@ impl Compat<'_> {
             return Some(true);
         }
         None
+    }
+
+    /// Whether some class we know nothing about could satisfy `param_type`:
+    /// a class or interface that is not final, or `iterable`, which any
+    /// class reaching `Traversable` does.
+    fn may_be_extended_by_unknown_class(self, param_type: &PhpType) -> bool {
+        if let TypeKind::Named(name) = param_type.kind()
+            && name.eq_ignore_ascii_case("iterable")
+        {
+            return true;
+        }
+        class_like_base_name(param_type)
+            .is_some_and(|name| (self.class_loader)(Fqn::new(name)).is_none_or(|cls| !cls.is_final))
     }
 
     /// Callable specifications and the values a `callable` accepts.
@@ -1158,10 +1216,15 @@ impl Compat<'_> {
         // we can't verify the generic type arguments covariantly at this
         // phase.  Stay silent (MAYBE) when the base types are compatible.
         if let TypeKind::Generic(g) = param_type.kind()
-            && (g.name.eq_ignore_ascii_case("iterable")
-                || class_loader(Fqn::new(&g.name)).is_some_and(|cls| {
-                    crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader)
-                }))
+            && let Some(required) = if g.name.eq_ignore_ascii_case("iterable") {
+                Some(crate::atom::atom("Traversable"))
+            } else {
+                class_loader(Fqn::new(&g.name))
+                    .filter(|cls| {
+                        crate::class_lookup::is_subtype_of(cls, "Traversable", class_loader)
+                    })
+                    .map(|cls| cls.fqn())
+            }
         {
             // Array-like args always satisfy iterable/Traversable generics.
             if arg_type.is_array_like()
@@ -1173,12 +1236,14 @@ impl Compat<'_> {
             {
                 return Some(true);
             }
-            // Object-like args: check hierarchy for Traversable.
+            // Object-like args: check the hierarchy for the parameter's own
+            // class (`Traversable` for `iterable`), so an `ArrayIterator`
+            // is still no `RecursiveIterator<K, V>`.
             // Can't load → stay permissive; bare `object` → stay permissive.
             if let Some(class_name) = arg_type.base_name() {
                 match class_loader(Fqn::new(class_name)) {
                     Some(cls) => {
-                        if crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader) {
+                        if crate::class_lookup::is_subtype_of(&cls, &required, class_loader) {
                             return Some(true);
                         }
                     }

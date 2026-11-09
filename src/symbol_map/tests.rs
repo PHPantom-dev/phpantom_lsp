@@ -2,6 +2,27 @@ use super::docblock::is_navigable_type;
 use super::extraction::{extract_symbol_map, extract_symbol_map_with_resolved_names};
 use super::*;
 
+#[test]
+fn typed_receivers_do_not_record_function_only_keys_in_mixed_framework_projects() {
+    let frameworks = ReceiverFrameworks {
+        laravel: true,
+        service_container: true,
+        symfony: true,
+        twig: true,
+        yii: true,
+        drupal: true,
+    };
+    for kind in [
+        StringKeyKind::WordPressHook,
+        StringKeyKind::TempestView { relative: false },
+        StringKeyKind::TempestView { relative: true },
+    ] {
+        assert!(!frameworks.enables(kind), "{kind:?}");
+    }
+    assert!(ReceiverClass::ViewFactory.names_any(|kind| frameworks.enables(kind)));
+    assert!(ReceiverClass::ContainerLookup.names_any(|kind| frameworks.enables(kind)));
+}
+
 /// Pair a map with the source it was extracted from, for the subject-text
 /// assertions below.
 fn mapped<'a>(map: &SymbolMap, php: &'a str) -> MappedSource<'a> {
@@ -462,6 +483,107 @@ fn chained_method_call_subject_text() {
     } else {
         panic!("Expected MemberAccess");
     }
+}
+
+/// The member-access spans named `member`, in source order.
+fn member_subjects<'a>(map: &'a SymbolMap, member: &str) -> Vec<&'a SubjectText> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::MemberAccess {
+                subject_text,
+                member_name,
+                ..
+            } if member_name == member => Some(subject_text),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn chain_links_share_one_subject_text() {
+    let php = concat!(
+        "<?php\n",
+        "$db->insert('t')\n",
+        "    ->fields(['a', 'b'])\n",
+        "    ->values([1, 'x'])\n",
+        "    ->values(row: [2, 'y'])\n",
+        "    ->values([3, 'z']);\n",
+    );
+    let map = parse_and_extract(php);
+    let source = mapped(&map, php);
+    let base = "$db->insert('t')->fields(['a', 'b'])";
+    let subjects = member_subjects(&map, "values");
+    let texts: Vec<_> = subjects.iter().map(|s| s.as_str(source)).collect();
+    assert_eq!(
+        texts,
+        [
+            base.to_string(),
+            format!("{base}->values([1, 'x'])"),
+            format!("{base}->values([1, 'x'])->values(row: [2, 'y'])"),
+        ]
+    );
+    // Every link written across lines slices one rendering of the chain
+    // rather than holding its own copy of everything before it.
+    let shared: Vec<_> = subjects
+        .iter()
+        .map(|subject| match subject {
+            SubjectText::Owned { text, .. } => text,
+            other => panic!("expected a stored subject, got {other:?}"),
+        })
+        .collect();
+    assert!(
+        shared
+            .windows(2)
+            .all(|w| std::sync::Arc::ptr_eq(w[0], w[1]))
+    );
+    assert!(shared[0].len() < texts.iter().map(|text| text.len()).sum());
+
+    let calls: Vec<_> = map
+        .call_sites
+        .iter()
+        .filter(|site| site.call_expression.ends_with("->values"))
+        .map(|site| {
+            (
+                site.call_expression,
+                site.named_arg_names.iter().collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            (format!("{base}->values").as_str(), vec![]),
+            (
+                format!("{base}->values([1, 'x'])->values").as_str(),
+                vec!["row"]
+            ),
+            (
+                format!("{base}->values([1, 'x'])->values(row: [2, 'y'])->values").as_str(),
+                vec![]
+            ),
+        ]
+    );
+}
+
+#[test]
+fn chain_written_as_rendered_slices_the_source() {
+    let php = "<?php\n$a->b()->c->d($x)->e();\n";
+    let map = parse_and_extract(php);
+    let [subject] = member_subjects(&map, "e")[..] else {
+        panic!("expected one `e` access");
+    };
+    assert!(matches!(subject, SubjectText::Range { .. }), "{subject:?}");
+    assert_eq!(subject.as_str(mapped(&map, php)), "$a->b()->c->d($x)");
+}
+
+#[test]
+fn chain_links_past_a_dynamic_property_have_no_subject() {
+    let php = "<?php\n$a->b()->{$p . 'x'}->c()->d();\n";
+    let map = parse_and_extract(php);
+    let source = mapped(&map, php);
+    assert_eq!(member_subjects(&map, "c")[0].as_str(source), "");
+    assert_eq!(member_subjects(&map, "d")[0].as_str(source), "");
 }
 
 #[test]
@@ -5994,4 +6116,85 @@ fn an_environment_variable_is_read_from_both_spellings() {
             "`{call}` should name an environment variable"
         );
     }
+}
+
+/// The class names of the `Annotation` references in `map`, with the text
+/// each span covers in `php`.
+fn annotation_refs<'a>(map: &SymbolMap, php: &'a str) -> Vec<(String, &'a str)> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::ClassReference {
+                name,
+                context: ClassRefContext::Annotation,
+                ..
+            } => Some((
+                name.to_string(),
+                &php[span.start as usize..span.end as usize],
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn doctrine_annotations_name_their_classes() {
+    let php = r#"<?php
+/**
+ * @ORM\Entity
+ * @ORM\Table(name="users", indexes={@ORM\Index(columns={"a"}), @ORM\Index(name="@Fake")},
+ *     uniqueConstraints={
+ *         @ORM\UniqueConstraint(name="email")
+ *     })
+ */
+final class User
+{
+    /**
+     * @Route("/users", name="users")
+     * @Block(admin_label = @Translation("Users"))
+     */
+    public function list() {}
+}
+"#;
+    let map = parse_and_extract(php);
+    let refs = annotation_refs(&map, php);
+    let names: Vec<&str> = refs.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "ORM\\Entity",
+            "ORM\\Table",
+            "ORM\\Index",
+            "ORM\\Index",
+            "ORM\\UniqueConstraint",
+            "Route",
+            "Block",
+            "Translation",
+        ]
+    );
+    for (name, text) in &refs {
+        assert_eq!(name, text, "the span covers the name, without the `@`");
+    }
+}
+
+#[test]
+fn phpdoc_and_lowercase_tags_are_not_annotations() {
+    let php = r#"<?php
+/**
+ * @param string $name
+ * @phpstan-param non-empty-string $name
+ * @psalm-pure
+ * @group slow
+ * @todo something @Later
+ * @see Other
+ * @inheritDoc
+ */
+function f(string $name) {}
+"#;
+    let map = parse_and_extract(php);
+    assert!(
+        annotation_refs(&map, php).is_empty(),
+        "{:?}",
+        annotation_refs(&map, php)
+    );
 }

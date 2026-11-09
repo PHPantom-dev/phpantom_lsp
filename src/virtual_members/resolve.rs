@@ -19,7 +19,7 @@ use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance::{
     ClassRef, apply_substitution_to_method, apply_substitution_to_property, build_generic_subs,
     build_substitution_map, enrich_method_arc_from_ancestor, enrich_property_arc_from_ancestor,
-    resolve_class_with_inheritance,
+    fill_template_bounds, resolve_class_with_inheritance,
 };
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
@@ -98,7 +98,7 @@ impl Drop for PendingWaitGuard<'_> {
 /// (see [`PendingClaim::OwnedByThreadWaitingOnCaller`]), so this only
 /// fires if the owning thread is abnormally stuck — mirroring
 /// `ParseInflight`'s escape hatch in `resolution/inflight.rs`.
-pub(super) const PENDING_WAIT_ESCAPE_HATCH: std::time::Duration = std::time::Duration::from_secs(5);
+const PENDING_WAIT_ESCAPE_HATCH: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Wait for another thread's first-time resolution of `key` to land in
 /// the cache, ending the wait the claim recorded.
@@ -106,17 +106,12 @@ pub(super) const PENDING_WAIT_ESCAPE_HATCH: std::time::Duration = std::time::Dur
 /// Returns `None` when the caller should give up waiting and resolve
 /// the class itself instead: either the owning thread released its
 /// claim without inserting a result (e.g. it hit its own cycle break
-/// at this very key from a different angle), this thread is computing
-/// the auth model, or the wait exceeded [`PENDING_WAIT_ESCAPE_HATCH`].
+/// at this very key from a different angle), or the wait exceeded [`PENDING_WAIT_ESCAPE_HATCH`].
 fn wait_for_pending(
     cache: &ResolvedClassCache,
     key: &ResolvedClassCacheKey,
 ) -> Option<Arc<ClassInfo>> {
     let _wait = PendingWaitGuard { cache };
-    // The owner may be waiting for the auth model this thread is computing.
-    if laravel::is_computing_auth_model() {
-        return None;
-    }
     let deadline = std::time::Instant::now() + PENDING_WAIT_ESCAPE_HATCH;
     loop {
         std::thread::sleep(std::time::Duration::from_micros(50));
@@ -646,6 +641,27 @@ pub fn resolve_class_for_type_hint(
     // through `Relation`) gets Builder's own methods from the mixin
     // expansion, but the model's scopes only once the model is known.
     laravel::try_inject_mixin_builder_scopes(&mut result, class, generic_args, class_loader);
+    // `ObjectProphecy<Foo>` answers `Foo`'s methods with a `MethodProphecy`.
+    crate::prophecy::apply_to_object_prophecy(
+        &mut result,
+        class,
+        generic_args,
+        class_loader,
+        cache,
+    );
+    // `EntityRepository<User>` finds the entity its argument names.
+    if !generic_args.is_empty() {
+        let doctrine = cache
+            .map(|c| c.read().doctrine().clone())
+            .unwrap_or_default();
+        crate::doctrine::apply_to_repository(
+            &mut result,
+            class,
+            generic_args,
+            class_loader,
+            &doctrine,
+        );
+    }
 
     let result = Arc::new(result);
     if let Some(c) = cache
@@ -923,6 +939,12 @@ fn apply_post_merge_stages(
                 if level_subs.is_empty() && !active_subs.is_empty() {
                     level_subs = active_subs.clone();
                 }
+                // A parent template the subclass leaves unbound (`extends
+                // \ArrayObject` with no `@extends`) falls back to its bound,
+                // as it does in the member merge, so the parent's
+                // `@implements ArrayAccess<TKey, TValue>` does not reach the
+                // subclass with raw template names.
+                fill_template_bounds(&parent, &mut level_subs);
 
                 for iface in &parent.interfaces {
                     let iface_str = iface.to_string();
@@ -1070,6 +1092,15 @@ fn apply_post_merge_stages(
     // non-Laravel projects.
     if is_laravel {
         apply_laravel_patches(merged, &fqn);
+    }
+
+    // ── Doctrine magic finders ─────────────────────────────────────
+    // A repository bound to its entity through its own `@extends` chain
+    // (`UserRepository extends ServiceEntityRepository<User>`); one bound
+    // by a type argument gets them in `resolve_class_for_type_hint`.
+    if effective_class.parent_class.is_some() {
+        let doctrine = cache.read().doctrine().clone();
+        crate::doctrine::apply_to_repository(merged, effective_class, &[], class_loader, &doctrine);
     }
 }
 

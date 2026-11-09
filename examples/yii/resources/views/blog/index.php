@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Blog\Post;
+use Yiisoft\Html\Html;
 use Yiisoft\Router\UrlGeneratorInterface;
 use Yiisoft\View\WebView;
 
@@ -10,15 +11,16 @@ use Yiisoft\View\WebView;
  * @var WebView $this
  * @var UrlGeneratorInterface $urlGenerator
  * @var list<Post> $posts
+ * @var string $title
  */
 
-$this->setTitle('Blog');
+$this->setTitle($title);
 ?>
 
-<h1>Blog</h1>
+<h1><?= Html::encode($title) ?></h1>
 
 <?php foreach ($posts as $post): ?>
     <?php // Try: hover $post, or complete after $post->. The list is typed by the @var above. ?>
-    <?php // Try: go-to-definition on 'blog/post', which lands on ->name('post') in config/common/routes.php under its group's blog/ prefix. Complete the name, or the 'slug' key, which is the placeholder the route's path declares. ?>
+    <?php // Try: go-to-definition on 'blog/post', which lands on ->name('post') in config/common/routes.php under its group's blog/ prefix. Complete the name, or the 'slug' key, which goes to the {slug} placeholder the route's path declares and shows that path on hover. ?>
     <?= $this->render('_card', ['post' => $post, 'url' => $urlGenerator->generate('blog/post', ['slug' => $post->slug])]) ?>
 <?php endforeach ?>

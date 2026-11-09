@@ -123,6 +123,11 @@ impl Backend {
         &self,
         candidate_uris: Option<&HashSet<Arc<str>>>,
     ) -> Vec<(String, Arc<SymbolMap>)> {
+        // A file the index let go of is read the way the editor would
+        // have it, which takes its parse.
+        if let Some(uris) = candidate_uris {
+            self.wake_dormant_files(uris.iter().map(|uri| &**uri));
+        }
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
 
         let maps = self.files.read();
@@ -145,8 +150,8 @@ impl Backend {
     /// Read content in the coordinate space used by the file's symbol map.
     /// Blade maps describe generated PHP; locations are translated for the client later.
     pub(crate) fn reference_file_content_arc(&self, uri: &str) -> Option<Arc<String>> {
-        if self.is_blade_file(uri)
-            && let Some(content) = self.blade_virtual_php_arc(uri)
+        if self.is_php_template(uri)
+            && let Some(content) = self.template_virtual_php_arc(uri)
         {
             return Some(content);
         }
@@ -271,6 +276,38 @@ impl<'a> SpanFqnResolver<'a> {
         const GLOBAL: &Option<String> = &None;
         crate::types::NamespaceSpan::containing(&self.spans, offset)
             .map_or(GLOBAL, |span| &span.namespace)
+    }
+
+    /// The fully-qualified name the class reference span at `span_start`
+    /// refers to: [`Self::fqn`], except that a Drupal plugin's annotation
+    /// no import names is found the way plugin discovery finds it.
+    pub(super) fn class_fqn(
+        &self,
+        name: &str,
+        is_fqn: bool,
+        context: crate::symbol_map::ClassRefContext,
+        span_start: u32,
+    ) -> String {
+        if context == crate::symbol_map::ClassRefContext::Annotation
+            && !is_fqn
+            && let Some(fqn) =
+                self.backend
+                    .drupal_annotation_class(self.file_uri, name, span_start, |first| {
+                        let imports = match crate::types::NamespaceSpan::containing(
+                            &self.spans,
+                            span_start,
+                        ) {
+                            Some(block) if self.spans.len() > 1 => &block.use_map,
+                            _ => self
+                                .use_map
+                                .get_or_init(|| self.backend.file_use_map(self.file_uri)),
+                        };
+                        crate::names::lookup_import(imports, first).is_some()
+                    })
+        {
+            return fqn;
+        }
+        self.fqn(name, is_fqn, span_start)
     }
 
     /// The fully-qualified name the span at `span_start` refers to.

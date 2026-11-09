@@ -36,6 +36,13 @@ pub(crate) fn is_view_render_method(method: &str) -> bool {
     .any(|name| method.eq_ignore_ascii_case(name))
 }
 
+/// Whether `method` is a view renderer's `withLayout()`, whose argument
+/// names a view the way a render call's does: relative to the renderer's
+/// view path unless it is an alias or an absolute path.
+pub(crate) fn is_layout_method(method: &str) -> bool {
+    method.eq_ignore_ascii_case("withLayout")
+}
+
 /// The directory a renderer's `withController()` adds to its view path
 /// for the controller class `fqn`, as `ViewRenderer` derives it: the
 /// namespace after a `Controller\` or `Controllers\` segment and the class
@@ -71,12 +78,35 @@ fn pascal_case_to_id(name: &str) -> String {
     id.trim_matches('-').to_lowercase()
 }
 
-/// Collapse the `.` and `..` segments of a view path.  An alias is the
-/// root of the path it starts, so `..` never climbs out of it.
+/// The length of the root an absolute filesystem path starts with: `/`,
+/// or a Windows drive (`C:\`, `C:/`).
+fn absolute_root_len(path: &str) -> Option<usize> {
+    match path.as_bytes() {
+        [b'/' | b'\\', ..] => Some(1),
+        [drive, b':', b'/' | b'\\', ..] if drive.is_ascii_alphabetic() => Some(3),
+        _ => None,
+    }
+}
+
+/// Whether a view path is an absolute filesystem path rather than one
+/// starting with an alias or relative to a directory.
+pub(crate) fn is_absolute_view_path(path: &str) -> bool {
+    absolute_root_len(path).is_some()
+}
+
+/// Collapse the `.` and `..` segments of a view path, spelled with `/`
+/// whatever separators the platform built it with.  An alias, or the
+/// root of an absolute path, is the root of the path it starts, so `..`
+/// never climbs out of it.
 pub(crate) fn normalize_view_path(path: &str) -> String {
-    let absolute = path.starts_with('/');
+    let path: std::borrow::Cow<'_, str> = if path.contains('\\') {
+        path.replace('\\', "/").into()
+    } else {
+        path.into()
+    };
+    let (root, rest) = path.split_at(absolute_root_len(&path).unwrap_or(0));
     let mut segments: Vec<&str> = Vec::new();
-    for segment in path.split('/') {
+    for segment in rest.split('/') {
         match segment {
             "" | "." => {}
             ".." => {
@@ -88,11 +118,25 @@ pub(crate) fn normalize_view_path(path: &str) -> String {
         }
     }
     let joined = segments.join("/");
-    if absolute {
-        format!("/{joined}")
-    } else {
+    if root.is_empty() {
         joined
+    } else {
+        format!("{root}{joined}")
     }
+}
+
+/// The directory a path value written in a file in `dir` names: an alias
+/// or an absolute path, written out or built from `__DIR__`, as a
+/// `withViewPath()` argument or an asset bundle's `$sourcePath` gives one.
+pub(crate) fn path_value(value: &mago_syntax::cst::Expression<'_>, dir: &Path) -> Option<String> {
+    if let mago_syntax::cst::Expression::Literal(mago_syntax::cst::Literal::String(literal)) = value
+    {
+        let text = literal.value.and_then(crate::atom::literal_bytes_to_str)?;
+        return (text.starts_with('@') || is_absolute_view_path(text))
+            .then(|| normalize_view_path(text));
+    }
+    let path = crate::document_links::try_evaluate_path_expr(value, dir)?;
+    is_absolute_view_path(&path).then(|| normalize_view_path(&path))
 }
 
 /// The key a view `name` passed to a render call names, as
@@ -109,7 +153,7 @@ pub(crate) fn view_key(
     if name.is_empty() || name.starts_with("//") {
         return None;
     }
-    let path = if name.starts_with('/') {
+    let path = if is_absolute_view_path(name) {
         name.to_string()
     } else if name.starts_with("./") || name.starts_with("../") {
         format!("{}/{name}", current_dir?)
@@ -119,9 +163,23 @@ pub(crate) fn view_key(
     Some(normalize_view_path(&path))
 }
 
+/// The key a `withLayout()` argument names: the renderer resolves an alias
+/// in it before rendering it as a view, and a view renderer has no
+/// template of its own for `./` to be relative to.
+pub(crate) fn layout_key(name: &str, base: Option<&str>) -> Option<String> {
+    if name.starts_with('@') {
+        return Some(normalize_view_path(name));
+    }
+    if name.starts_with("./") || name.starts_with("../") {
+        return None;
+    }
+    view_key(name, base, None)
+}
+
 /// The completion candidates for a view whose key so far is `typed`,
 /// relative to the directory `base` names: the views and the directories
 /// in the directory `typed` has reached, spelled as `typed` spells it.
+/// A `typed` that starts with an alias is not relative to `base`.
 /// `exclude` is the file the completion is in, which is no view of its
 /// own.
 pub(crate) fn view_candidates(
@@ -131,7 +189,9 @@ pub(crate) fn view_candidates(
     exclude: Option<&Path>,
 ) -> Vec<String> {
     let typed_dir = typed.rfind('/').map_or("", |slash| &typed[..=slash]);
-    let joined = if typed_dir.starts_with('/') {
+    let joined = if typed_dir.starts_with('@') {
+        typed_dir.to_string()
+    } else if typed_dir.starts_with('/') {
         format!("{base}{typed_dir}")
     } else {
         format!("{base}/{typed_dir}")
@@ -172,8 +232,10 @@ impl Backend {
     fn yii_view_path(&self, key: &str) -> Option<PathBuf> {
         self.yii_aliases()
             .resolve(key)
-            .filter(|path| path.starts_with('/'))
-            .map(|path| PathBuf::from(normalize_view_path(&path)))
+            .filter(|path| is_absolute_view_path(path))
+            .map(|path| {
+                crate::util::canonical_path_for_comparison(Path::new(&normalize_view_path(&path)))
+            })
     }
 
     /// The template file a view key names, when there is one: the path
@@ -188,6 +250,12 @@ impl Backend {
     pub(crate) fn yii_view_exists(&self, key: &str) -> Option<bool> {
         let path = self.yii_view_path(key)?;
         Some(view_file(&path).is_some())
+    }
+
+    /// Whether the directory a view path key names exists, or `None` when
+    /// the key cannot be resolved.
+    pub(crate) fn yii_view_dir_exists(&self, key: &str) -> Option<bool> {
+        Some(self.yii_view_path(key)?.is_dir())
     }
 
     /// The file a view key names, or the `.php` file the renderer would
@@ -206,9 +274,9 @@ impl Backend {
         };
         let root = self.workspace.workspace_root.read().clone();
         root.and_then(|root| {
-            path.strip_prefix(&root)
+            path.strip_prefix(crate::util::canonical_path_for_comparison(&root))
                 .ok()
-                .map(|relative| relative.to_string_lossy().into_owned())
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
         })
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
     }
@@ -245,7 +313,7 @@ impl Backend {
     /// rest.
     pub(crate) fn yii_view_renders_of(&self, path: &Path) -> Vec<Location> {
         let snapshot = self.user_file_symbol_maps_nonblocking();
-        self.yii_view_usages(path, &snapshot)
+        self.yii_view_usages(&crate::util::canonical_path_for_comparison(path), &snapshot)
     }
 
     /// Every view key in `snapshot` that names the file `target`.
@@ -322,12 +390,13 @@ impl Backend {
 /// exists, else the path with the first fallback extension that exists.
 fn view_file(path: &Path) -> Option<PathBuf> {
     if path.extension().is_some() && path.is_file() {
-        return Some(path.to_path_buf());
+        return Some(crate::util::canonical_path_for_comparison(path));
     }
     FALLBACK_EXTENSIONS
         .iter()
         .map(|extension| with_extension(path, extension))
         .find(|candidate| candidate.is_file())
+        .map(|path| crate::util::canonical_path_for_comparison(&path))
 }
 
 /// `path` with `.extension` appended, keeping any dot its name already has.

@@ -41,7 +41,7 @@ function get_name(): string {
     );
     let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert!(
-        msgs.iter().any(|m| m.contains("incompatible")),
+        msgs.iter().any(|m| m.starts_with("Return expects")),
         "Expected message about incompatible return, got: {msgs:?}"
     );
 }
@@ -168,8 +168,7 @@ function get_name(): string {
     );
     let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert!(
-        msgs.iter()
-            .any(|m| m.contains("must not return without a value")),
+        msgs.iter().any(|m| m.contains("must return a value")),
         "Expected message about missing return value, got: {msgs:?}"
     );
 }
@@ -2455,7 +2454,7 @@ function wrongValue(): array {
     let messages = messages_with_code(&diags, "type_mismatch_return");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
-        messages[0].contains("array{foo: string, ...<array-key, mixed>}"),
+        messages[0].contains("array{foo: string, ...}"),
         "got {messages:?}"
     );
 }
@@ -5061,7 +5060,7 @@ trait HasFactory
 "#;
     let messages: Vec<String> = messages_with_code(&collect(php), "type_mismatch_return")
         .into_iter()
-        .filter(|m| !m.starts_with("Return type null"))
+        .filter(|m| !m.ends_with("got null"))
         .collect();
     assert!(
         messages.is_empty(),
@@ -5601,5 +5600,168 @@ function control(): ?int { return maybe() ?: null; }
     assert!(
         !msgs[0].contains("void"),
         "The control's truthy half should not carry `void`, got: {msgs:?}"
+    );
+}
+
+// ─── Compound bitwise assignments ─────────────────────────────────────────
+
+/// `&=`, `|=` and `^=` on two strings work byte by byte, like the binary
+/// operators, so the target stays a string — in a statement and when the
+/// assignment is itself the value.
+#[test]
+fn a_compound_bitwise_assignment_on_strings_leaves_a_string() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class Frames
+{
+    public function unmask(string $payload, string $mask): string
+    {
+        $payload ^= $mask;
+        return $payload;
+    }
+
+    public function both(string $a, string $b): string
+    {
+        $a |= $b;
+        $a &= $b;
+        return $a;
+    }
+
+    public function asValue(string $a, string $b): string
+    {
+        return $a ^= $b;
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Untyped operands could be strings as well as numbers, so neither the
+/// compound form nor the binary operator claims an int, however many of
+/// them are chained.
+#[test]
+fn a_compound_bitwise_assignment_on_untyped_operands_is_not_an_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class Frames
+{
+    public function unmask($payload, $mask): string
+    {
+        $payload ^= $mask;
+        return $payload;
+    }
+
+    public function asValue($a, $b): string
+    {
+        return $a |= $b;
+    }
+
+    public function repeated($a, $b, $c): string
+    {
+        $a |= $b;
+        $a |= $c;
+        return $a;
+    }
+
+    public function chained($a, $b, $c): string
+    {
+        return $a | $b | $c;
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Anything but two strings makes those operators produce an int, and a
+/// shift always does — in a statement or as a value — so neither
+/// satisfies a `string` return.
+#[test]
+fn a_compound_bitwise_assignment_on_ints_or_a_shift_leaves_an_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class Masks
+{
+    public function flags(int $flags): string
+    {
+        $flags |= 4;
+        return $flags;
+    }
+
+    public function shifted(string $s): string
+    {
+        $s <<= 1;
+        return $s;
+    }
+
+    public function mixedSides(string $s, int $n): string
+    {
+        return $s ^= $n;
+    }
+
+    public function shiftedValue(string $s): string
+    {
+        return $s <<= 1;
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert_eq!(messages.len(), 4, "got {messages:?}");
+    assert!(
+        messages.iter().all(|m| m.ends_with("got int")),
+        "{messages:?}"
+    );
+}
+
+/// A property a trait leaves to its users to declare is narrowed by a type
+/// check the way a property the trait declares is.
+#[test]
+fn trait_reads_users_property_narrowed_by_type_check() {
+    let php = r#"<?php
+trait RendersContent
+{
+    /** @return string */
+    protected function rendered()
+    {
+        if (is_array($this->content)) {
+            return '';
+        }
+        return $this->content;
+    }
+
+    /** @return int */
+    protected function wrong()
+    {
+        return $this->content;
+    }
+}
+
+class First
+{
+    use RendersContent;
+    /** @var string|array */
+    protected $content;
+}
+
+class Second
+{
+    use RendersContent;
+    /** @var string|array */
+    protected $content;
+}
+"#;
+    let mismatches = messages_with_code(&collect(php), "type_mismatch_return");
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "only the unnarrowed read should be flagged, got: {mismatches:?}"
+    );
+    assert!(
+        mismatches[0].contains("string|array"),
+        "the read should be typed from the users' declarations, got: {mismatches:?}"
     );
 }

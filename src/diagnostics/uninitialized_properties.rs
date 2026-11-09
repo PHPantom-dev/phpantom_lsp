@@ -434,6 +434,12 @@ impl DocTags {
     }
 }
 
+/// Whether a docblock marks its declaration for a framework to fill or
+/// call by reflection (see [`DocTags::injected`]).
+pub(super) fn marks_injected(docblock: &str) -> bool {
+    DocTags::read(docblock).injected
+}
+
 // ── AST walk ────────────────────────────────────────────────────────────────
 
 struct BodyWalker;
@@ -746,10 +752,7 @@ impl Backend {
                         owner
                     )
                 } else {
-                    format!(
-                        "Property {} is never initialized; give it a default value or assign it in the constructor",
-                        owner
-                    )
+                    format!("Property {} is never initialized", owner)
                 };
                 let Some(range) = self.offset_range_to_lsp_range(
                     uri,

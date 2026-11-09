@@ -196,7 +196,9 @@ fn walk_file_for_scopes(
         // foreach, etc.) that lives outside any function body.
         walk_top_level_statements(program.statements.iter(), &default_class, &diag_ctx);
     });
-    record_scope_unreachable(flow.into_unreachable());
+    let (unreachable, catch_types) = flow.into_unreachable();
+    record_scope_unreachable(unreachable);
+    record_scope_catch_types(catch_types);
 }
 
 /// Walk a sequence of top-level (or namespace-level) statements,
@@ -233,8 +235,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
 
     let mut top_level_scope = ScopeState::new();
 
-    // Seed superglobals for top-level code.
-    seed_superglobals(&mut top_level_scope);
+    seed_top_level(&mut top_level_scope, &ctx);
 
     walk_top_level_block(statements, default_class, diag_ctx, &mut top_level_scope);
 }
@@ -311,7 +312,7 @@ fn walk_top_level_block<'b>(
                     record_scope_snapshot(stmt.span().start.offset, top_level_scope);
                     let pre_stmt_scope = top_level_scope.clone();
                     process_statement(stmt, top_level_scope, &ctx);
-                    walk_closures_in_statement(stmt, &pre_stmt_scope, top_level_scope, &ctx);
+                    walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
                     record_scope_snapshot(stmt.span().end.offset, top_level_scope);
                 }
                 if diag_ctx.wants(stmt.span()) {
@@ -334,7 +335,7 @@ fn walk_top_level_block<'b>(
                 record_scope_snapshot(stmt.span().start.offset, top_level_scope);
                 let pre_stmt_scope = top_level_scope.clone();
                 process_statement(stmt, top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &pre_stmt_scope, top_level_scope, &ctx);
+                walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
                 record_scope_snapshot(stmt.span().end.offset, top_level_scope);
             }
         }

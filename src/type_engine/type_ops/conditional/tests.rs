@@ -19,6 +19,7 @@ fn param(name: &str) -> ParameterInfo {
         closure_this_type: None,
         param_out_type: None,
         callable_invocation: None,
+        expected_values: None,
     }
 }
 
@@ -114,6 +115,7 @@ fn nested_condition_sees_argument_narrowed_by_outer_condition() {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            default_type_resolver: None,
             this_type: None,
             subs: None,
         };
@@ -150,11 +152,13 @@ fn resolve_pathinfo(text_args: &str) -> Option<String> {
         "PATHINFO_FILENAME" => Some(PhpType::literal_int("8")),
         _ => None,
     };
+    let default_resolver = |t: &str, _: Option<&str>| resolver(t);
     let tpl = TemplateContext {
         defaults: None,
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: Some(&default_resolver),
         this_type: None,
         subs: None,
     };
@@ -210,8 +214,10 @@ fn omitted_default_self_const_resolves_against_declaring_class() {
     ];
     let loader: &ResolvedClassLoader<'_> = &|_| None;
     // Fully qualified, so a call site inside a namespace does not read
-    // the declaring class relative to its own.
-    let resolver = |t: &str| match t.trim() {
+    // the declaring class relative to its own.  The default is read where
+    // the method declares it, so only that resolver knows the constant.
+    let call_site_resolver = |_: &str| None;
+    let default_resolver = |t: &str, _: Option<&str>| match t.trim() {
         "\\Vendor\\Di\\ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE" => {
             Some(PhpType::literal_int("1"))
         }
@@ -221,7 +227,8 @@ fn omitted_default_self_const_resolves_against_declaring_class() {
         defaults: None,
         params: &[],
         bindings: &[],
-        arg_type_resolver: Some(&resolver),
+        arg_type_resolver: Some(&call_site_resolver),
+        default_type_resolver: Some(&default_resolver),
         this_type: None,
         subs: None,
     };
@@ -236,6 +243,7 @@ fn omitted_default_self_const_resolves_against_declaring_class() {
             calling: Some("App\\Controller"),
             declaring: Some("Vendor\\Di\\ContainerInterface"),
             written_class: None,
+            namespace: None,
         },
         loader,
         &tpl,
@@ -342,6 +350,7 @@ fn is_true_condition_needs_a_resolved_boolean_value() {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            default_type_resolver: None,
             this_type: None,
             subs: None,
         };
@@ -509,6 +518,7 @@ fn is_string_condition_uses_resolved_arg_type() {
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: None,
         this_type: None,
         subs: None,
     };
@@ -543,6 +553,7 @@ fn scalar_conditions_classify_resolved_int_and_float_literals() {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            default_type_resolver: None,
             this_type: None,
             subs: None,
         };
@@ -578,6 +589,7 @@ fn undecidable_is_string_condition_unions_branches() {
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: None,
         this_type: None,
         subs: None,
     };
@@ -609,6 +621,7 @@ fn closure_arg_refutes_array_or_string_condition() {
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: None,
         this_type: None,
         subs: None,
     };
@@ -702,6 +715,7 @@ fn nested_template_default_conditional_collapses_fully() {
         params: &[crate::atom::atom("T")],
         bindings: &[],
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: None,
         this_type: None,
         subs: None,
     };
@@ -755,6 +769,7 @@ fn resolve_find(arg_type: Option<PhpType>) -> Option<String> {
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: None,
         this_type: None,
         subs: None,
     };
@@ -808,6 +823,7 @@ fn resolve_is_null(text_args: &str, arg_type: Option<PhpType>) -> Option<String>
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: None,
         this_type: None,
         subs: None,
     };
@@ -877,6 +893,7 @@ fn value_condition_is_refuted_by_another_kind_of_argument() {
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: None,
         this_type: None,
         subs: None,
     };
@@ -909,6 +926,7 @@ fn template_subject_is_decided_through_its_parameter_binding() {
         params: &[atom("B")],
         bindings: &bindings,
         arg_type_resolver: None,
+        default_type_resolver: None,
         this_type: None,
         subs: None,
     };
@@ -1016,6 +1034,7 @@ fn array_shape_condition_from_argument_text() {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            default_type_resolver: None,
             this_type: None,
             subs: None,
         };
@@ -1060,6 +1079,7 @@ fn undecided_void_or_never_is_not_never() {
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: None,
         this_type: None,
         subs: None,
     };
@@ -1092,6 +1112,7 @@ fn void_branch_is_kept() {
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: None,
         this_type: None,
         subs: None,
     };
@@ -1379,6 +1400,7 @@ fn resolve_over_template(conditional: &str, bound_to: &str, bound: Option<&str>)
         params: &template,
         bindings: &bindings,
         arg_type_resolver: Some(&resolver),
+        default_type_resolver: None,
         this_type: None,
         subs: Some(&subs),
     };

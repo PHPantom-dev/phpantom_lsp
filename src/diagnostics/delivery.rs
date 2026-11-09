@@ -46,8 +46,8 @@ impl Backend {
             return;
         }
 
-        if self.is_twig_template_uri(uri_str) {
-            self.publish_template_diagnostics(uri_str, content).await;
+        if self.is_resource_uri(uri_str) {
+            self.publish_resource_diagnostics(uri_str, content).await;
             return;
         }
 
@@ -80,27 +80,10 @@ impl Backend {
                 "diagnostics",
                 move || {
                     let _project_guard = backend.enter_project_scope(&uri);
-                    let blade = backend.blade_virtual_php_arc(&uri);
-                    let effective = blade.clone().unwrap_or_else(|| Arc::clone(&content));
-                    // The kept parse carries its own copy of the text.  The
-                    // passes read that copy, so every lookup the cache
-                    // answers is a pointer comparison.
-                    let (effective, _parse_guard) =
-                        match backend.take_parsed_for_diagnostics(&uri, &effective) {
-                            Some(parsed) => (
-                                Arc::clone(parsed.content()),
-                                crate::parser::with_parsed_file_cache(parsed),
-                            ),
-                            None => (
-                                Arc::clone(&effective),
-                                crate::parser::with_parse_cache_arc(effective),
-                            ),
-                        };
-                    let content = if blade.is_some() {
-                        content
-                    } else {
-                        Arc::clone(&effective)
-                    };
+                    let effective = backend
+                        .template_virtual_php_arc(&uri)
+                        .unwrap_or_else(|| Arc::clone(&content));
+                    let _parse_guard = backend.enter_parse_cache(&uri, Arc::clone(&effective));
 
                     // ── Phase 1: fast diagnostics ───────────────────
                     let fast = crate::util::catch_panic_unwind_safe(
@@ -220,20 +203,20 @@ impl Backend {
         self.assemble_and_refresh(uri_str).await;
     }
 
-    /// [`Self::publish_diagnostics_for_file`] for a Twig template, which
-    /// has no PHP to parse or walk: only the names it holds are judged, on
-    /// the blocking pool since enumerating what the project declares can
-    /// read other files.
-    async fn publish_template_diagnostics(&self, uri_str: &str, content: &Arc<String>) {
+    /// [`Self::publish_diagnostics_for_file`] for a Twig template or a
+    /// validation mapping, which has no PHP to parse or walk: only the names
+    /// it holds are judged, on the blocking pool since enumerating what the
+    /// project declares can read other files.
+    async fn publish_resource_diagnostics(&self, uri_str: &str, content: &Arc<String>) {
         let backend = self.clone_for_blocking();
         let uri = uri_str.to_string();
         let content = Arc::clone(content);
         let diagnostics =
-            crate::server::run_blocking_cancel_safe("template diagnostics", move || {
+            crate::server::run_blocking_cancel_safe("resource diagnostics", move || {
                 let _project_guard = backend.enter_project_scope(&uri);
-                crate::util::catch_panic_unwind_safe("template diagnostics", &uri, None, || {
+                crate::util::catch_panic_unwind_safe("resource diagnostics", &uri, None, || {
                     let mut out = Vec::new();
-                    backend.collect_template_diagnostics(&uri, &content, &mut out);
+                    backend.collect_resource_diagnostics(&uri, &content, &mut out);
                     out
                 })
             })
@@ -252,35 +235,6 @@ impl Backend {
             .lock()
             .insert(uri_str.to_string(), diagnostics);
         self.assemble_and_refresh(uri_str).await;
-    }
-
-    /// Keep `parsed`, the parse of the open file `uri`, for the diagnostic
-    /// pass that follows, in place of whichever file's parse was kept
-    /// before.
-    pub(crate) fn keep_parsed_for_diagnostics(&self, uri: &str, parsed: crate::parser::ParsedFile) {
-        // The replaced parse is freed once the lock is released.
-        let _replaced = self
-            .parsed_for_diagnostics
-            .lock()
-            .replace((uri.to_string(), parsed));
-    }
-
-    /// The parse [`Self::keep_parsed_for_diagnostics`] kept for `uri`, if
-    /// it is a parse of `content`.  The slot is emptied for `uri` either
-    /// way: a parse of other text is one an edit has overtaken.
-    pub(crate) fn take_parsed_for_diagnostics(
-        &self,
-        uri: &str,
-        content: &str,
-    ) -> Option<crate::parser::ParsedFile> {
-        let (_, parsed) = {
-            let mut slot = self.parsed_for_diagnostics.lock();
-            if slot.as_ref().is_none_or(|(kept, _)| kept != uri) {
-                return None;
-            }
-            slot.take()?
-        };
-        (parsed.content().as_str() == content).then_some(parsed)
     }
 
     /// Assemble diagnostics from all per-source caches for a URI and
@@ -875,7 +829,7 @@ impl Backend {
         }
 
         // Remove all per-source caches so we don't leak memory.
-        drop(self.take_parsed_for_diagnostics(uri_str, ""));
+        self.forget_kept_parse(uri_str);
         self.diag.last_fast.lock().remove(uri_str);
         self.diag.last_slow.lock().remove(uri_str);
         self.diag.slow_baselines.lock().remove(uri_str);

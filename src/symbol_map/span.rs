@@ -1,5 +1,8 @@
 //! The navigable symbol occurrences a [`SymbolMap`] records and their kinds.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use crate::atom::Atom;
 use crate::php_type::PhpType;
 
@@ -99,11 +102,23 @@ pub(crate) enum ClassRefContext {
     /// backed enum (`value-of<Suit>`) is the one genuine class operand, so
     /// the reference is still recorded and still navigable.
     TypeOperatorOperand,
+    /// As a class name in Doctrine Query Language text, which DQL always
+    /// writes fully qualified.  The name lives in a string, so it is never
+    /// shortened to an import.
+    Dql,
     /// As the target of a `@see` or `{@see …}` docblock tag.
     ///
     /// `@see` legally carries URIs, prose, and naming suggestions in
     /// addition to FQSENs, so an unresolvable target is not an error.
     DocblockSee,
+    /// As the name of a Doctrine-style docblock annotation (`@ORM\Entity`,
+    /// `@Route("/users")`), at the start of a docblock line or nested in
+    /// another annotation's arguments.
+    ///
+    /// The name resolves through the file's imports like any class name, but
+    /// a docblock tag is not obliged to name a class (`@Given`, `@group`),
+    /// so one that resolves to nothing is not an error.
+    Annotation,
 }
 
 /// How a [`SymbolKind::MemberAccess`] span names its member.
@@ -153,6 +168,67 @@ pub(crate) enum DocblockMemberRef {
     /// resolves the subject keeps only what [`crate::mock_methods`]
     /// accepts as a mock, and drops the span otherwise.
     MockedMethod,
+    /// A field name a Doctrine repository call keys its criteria or order
+    /// by, `$users->findBy(['email' => $email])`, with the repository as
+    /// the subject, or one a DQL variable names, `u.email`, with the entity
+    /// or the repository the variable stands for as the subject.
+    ///
+    /// The name is the property of the entity that the field maps.  A
+    /// consumer that resolves the subject swaps each repository for the
+    /// entity it manages and keeps each entity (see
+    /// [`crate::doctrine::managed_entity_classes`]), and drops the span
+    /// when there is neither.
+    EntityField,
+    /// A named argument's label in an attribute, `#[Foo(bar: 1)]`, with the
+    /// attribute class as the subject.
+    ///
+    /// The label names a constructor parameter, which is the property `bar`
+    /// only when the constructor promotes it.  A consumer that resolves the
+    /// subject keeps only the classes whose constructor does (see
+    /// [`crate::class_lookup::constructor_promotes`]), and drops the span
+    /// otherwise.
+    AttributeNamedArg,
+    /// A method or property a Yii DI definition names by a key,
+    /// `'setLogger()'` or `'$pageSize'`, with the class the definition
+    /// builds as the subject (see [`crate::yii::definitions`]).
+    ///
+    /// The container calls the method or sets the property on the object
+    /// it builds, and throws for one the class does not have, so it is
+    /// checked.
+    YiiDefinition,
+    /// The constructor a Yii DI definition passes arguments to by its
+    /// `'__construct()'` key, with the class the definition builds as the
+    /// subject.
+    ///
+    /// A class that declares no constructor, nor inherits one, still takes
+    /// the key (PHP passes the arguments to nothing), so a target that
+    /// resolves to nothing is not an error.
+    YiiConstructor,
+    /// An attribute a Yii Active Record's `get()`, `set()`, or the rest of
+    /// its attribute API names, `$post->get('title')`, with the call's
+    /// receiver as the subject (see [`crate::yii::active_record`]).
+    ///
+    /// The attribute is the record's property of that name.  The extractor
+    /// cannot tell a record from any other object with a `get()`, so a
+    /// consumer that resolves the subject keeps only the records among it,
+    /// and drops the span when there are none.  A record that declares no
+    /// properties reads its attributes from its table's columns, so on one
+    /// of those a name that names nothing is not reported.
+    YiiAttribute,
+
+    /// A property a Yii form field or hydration map names by a string,
+    /// `Field::text($form, 'title')` or `map: ['title' => 'post_title']`,
+    /// with the object it is given as the subject (see
+    /// [`crate::yii::forms`]).
+    ///
+    /// The form model and the hydrator reach the property by reflection,
+    /// whatever its visibility, and a field throws for one the model does
+    /// not have, so it is checked.  With `form_model`, the call is one the
+    /// extractor cannot tell from any other method of the same name, so a
+    /// consumer that resolves the subject keeps only the form models among
+    /// its classes (see [`crate::yii::forms::form_model_classes`]), and
+    /// drops the span otherwise.
+    YiiProperty { form_model: bool },
 }
 
 impl DocblockMemberRef {
@@ -167,7 +243,10 @@ impl DocblockMemberRef {
     /// Whether a target that resolves to nothing is acceptable rather than
     /// a diagnostic.
     pub(crate) fn tolerates_missing_target(self) -> bool {
-        matches!(self, Self::See | Self::PropertyPath)
+        matches!(
+            self,
+            Self::See | Self::PropertyPath | Self::AttributeNamedArg | Self::YiiConstructor
+        )
     }
 }
 
@@ -207,14 +286,26 @@ impl<'a> MappedSource<'a> {
 /// Foo($x))->bar()` lowers to `"Foo"` (dropping `new` and the constructor
 /// arguments), whitespace around `->`/`::` is normalised away, and
 /// expressions the lowering can't represent collapse to `""`.
+///
+/// An `Owned` subject is a slice of a text other spans may share.  The
+/// links of a method chain do: each link's subject is the chain written up
+/// to that link, a prefix of the next one's, so they slice one rendering
+/// instead of each holding a copy of everything before it.  Extraction
+/// then gathers a file's synthesised subjects into one text
+/// ([`SubjectText::pool`]).  The thin `Arc<Box<str>>` keeps the type at two
+/// words, the size of every span in every file.
 #[derive(Debug, Clone)]
 pub(crate) enum SubjectText {
     /// Byte range `[start, end)` into the file content whose raw slice is
     /// exactly the synthesised subject text.
     Range { start: u32, end: u32 },
-    /// The synthesised subject text, stored because it diverges from (or
-    /// has no corresponding) raw source span.
-    Owned(Box<str>),
+    /// The `len` bytes at `start` of a synthesised text, stored because the
+    /// subject diverges from (or has no corresponding) raw source span.
+    Owned {
+        text: Arc<Box<str>>,
+        start: u32,
+        len: u32,
+    },
 }
 
 impl SubjectText {
@@ -224,7 +315,7 @@ impl SubjectText {
     pub(crate) fn new(text: String, start: u32, end: u32, content: &str) -> Self {
         match content.get(start as usize..end as usize) {
             Some(raw) if raw == text => Self::Range { start, end },
-            _ => Self::Owned(text.into_boxed_str()),
+            _ => Self::owned(text),
         }
     }
 
@@ -232,7 +323,17 @@ impl SubjectText {
     /// source span (e.g. a literal `"self"` fallback, or text resolved
     /// from elsewhere in a chain).
     pub(crate) fn owned(text: String) -> Self {
-        Self::Owned(text.into_boxed_str())
+        let len = text.len() as u32;
+        Self::prefix(Arc::new(text.into_boxed_str()), len)
+    }
+
+    /// The first `len` bytes of `text`.
+    pub(crate) fn prefix(text: Arc<Box<str>>, len: u32) -> Self {
+        Self::Owned {
+            text,
+            start: 0,
+            len,
+        }
     }
 
     /// The subject text, slicing the source the owning map was extracted
@@ -243,7 +344,61 @@ impl SubjectText {
     pub(crate) fn as_str<'a>(&'a self, source: MappedSource<'a>) -> &'a str {
         match self {
             Self::Range { start, end } => &source.text()[*start as usize..*end as usize],
-            Self::Owned(s) => s,
+            Self::Owned { .. } => self.synthesised().unwrap_or_default(),
+        }
+    }
+
+    /// The subject text when it is stored rather than read from the source.
+    pub(crate) fn synthesised(&self) -> Option<&str> {
+        match self {
+            Self::Range { .. } => None,
+            Self::Owned { text, start, len } => {
+                Some(&text[*start as usize..(*start + *len) as usize])
+            }
+        }
+    }
+
+    /// Gather the synthesised subjects of `spans` into one text, each
+    /// distinct one stored once, so that a file holds one allocation for
+    /// them all rather than one or two per subject.
+    pub(crate) fn pool(spans: &mut [SymbolSpan]) {
+        fn owned(span: &SymbolSpan) -> Option<(&Arc<Box<str>>, u32)> {
+            match &span.kind {
+                SymbolKind::MemberAccess {
+                    subject_text: SubjectText::Owned { text, start, .. },
+                    ..
+                } => Some((text, *start)),
+                _ => None,
+            }
+        }
+
+        let mut pool = String::new();
+        let mut placed: HashMap<&str, u32> = HashMap::new();
+        let mut moves: Vec<(usize, u32)> = Vec::new();
+        for (index, span) in spans.iter().enumerate() {
+            let Some((text, start)) = owned(span) else {
+                continue;
+            };
+            let at = *placed.entry(&***text).or_insert_with(|| {
+                let at = pool.len() as u32;
+                pool.push_str(text);
+                at
+            });
+            moves.push((index, at + start));
+        }
+        if moves.is_empty() {
+            return;
+        }
+        let pool = Arc::new(pool.into_boxed_str());
+        for (index, at) in moves {
+            if let SymbolKind::MemberAccess {
+                subject_text: SubjectText::Owned { text, start, .. },
+                ..
+            } = &mut spans[index].kind
+            {
+                *text = Arc::clone(&pool);
+                *start = at;
+            }
         }
     }
 
@@ -252,7 +407,8 @@ impl SubjectText {
     pub(crate) fn heap_bytes(&self) -> usize {
         match self {
             Self::Range { .. } => 0,
-            Self::Owned(s) => s.len(),
+            // Split between the spans sharing the text.
+            Self::Owned { text, .. } => text.len() / Arc::strong_count(text),
         }
     }
 }

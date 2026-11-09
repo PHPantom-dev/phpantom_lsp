@@ -245,7 +245,7 @@ class Shop {
     public function gadget(): Gadget {}
 }
 "#;
-    assert_eq!(unused_imports(content), ["Unused import 'Lib\\Unused'"]);
+    assert_eq!(unused_imports(content), ["Unused import Lib\\Unused"]);
 }
 
 /// A statement the end of the file cuts off, still missing its `)` and
@@ -262,7 +262,7 @@ Route::get('/', [HomeController::class, 'index']
 "#;
     assert_eq!(
         unused_imports(content),
-        ["Unused import 'App\\Http\\Controllers\\Unused'"]
+        ["Unused import App\\Http\\Controllers\\Unused"]
     );
 }
 
@@ -275,7 +275,7 @@ fn an_import_used_by_an_empty_call_at_the_end_of_the_file_is_used() {
     for last in ["$mailer = new Mailer(\n", "$mailer = new Mailer("] {
         assert_eq!(
             unused_imports(&format!("{head}{last}")),
-            ["Unused import 'App\\Services\\Unused'"],
+            ["Unused import App\\Services\\Unused"],
             "{last:?}"
         );
     }
@@ -295,13 +295,13 @@ fn an_import_used_by_a_static_access_at_the_end_of_the_file_is_used() {
     ] {
         assert_eq!(
             unused_imports(&format!("{head}{last}")),
-            ["Unused import 'App\\Services\\Unused'"],
+            ["Unused import App\\Services\\Unused"],
             "{last:?}"
         );
     }
 }
 
-/// The `Unused import '…'` messages for `content`.
+/// The `Unused import …` messages for `content`.
 fn unused_imports(content: &str) -> Vec<String> {
     let backend = create_test_backend();
     let mut messages: Vec<String> = crate::common::collect_diagnostics_with(
@@ -331,10 +331,29 @@ used_fn(USED_CONST);
     assert_eq!(
         unused_imports(content),
         [
-            "Unused import 'Lib\\UNUSED_CONST'",
-            "Unused import 'Lib\\unused_fn'",
+            "Unused import Lib\\UNUSED_CONST",
+            "Unused import Lib\\unused_fn",
         ]
     );
+}
+
+/// `Foo::class` and `Foo::BAR` written as docblock types name the class.
+#[test]
+fn an_import_named_by_a_class_constant_docblock_type_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use Lib\C as E;
+use Lib\D;
+use Lib\Unused;
+
+/** @param E::class $s */
+function foo(string $s): void {}
+
+/** @return D::FIRST|D::SECOND */
+function bar(): int { return 1; }
+"#;
+    assert_eq!(unused_imports(content), ["Unused import Lib\\Unused"]);
 }
 
 /// A function import is used by a call, not by a class or constant of the
@@ -352,7 +371,46 @@ table();
 "#;
     assert_eq!(
         unused_imports(content),
-        ["Unused import 'Lib\\TABLE'", "Unused import 'Lib\\Table'"]
+        ["Unused import Lib\\TABLE", "Unused import Lib\\Table"]
+    );
+}
+
+/// A name written with a leading `\` is resolved without the import table,
+/// so it does not use an import of the same name.
+#[test]
+fn a_fully_qualified_name_does_not_use_an_import() {
+    let content = r#"<?php
+namespace App;
+
+use DateTimeImmutable;
+use ArrayObject;
+use Lib\Models;
+use Countable;
+use function strlen;
+use function trim;
+use const PHP_EOL;
+use const E_ALL;
+
+final class Season implements Countable {
+    public function a(): \DateTimeImmutable {
+        echo \PHP_EOL, E_ALL;
+        trim('');
+        new \Models\User();
+        return \DateTimeImmutable::createFromMutable(new \DateTime());
+    }
+    public function b(): int { return \strlen(\ArrayObject::class); }
+    public function count(): int { return 0; }
+}
+"#;
+    assert_eq!(
+        unused_imports(content),
+        [
+            "Unused import ArrayObject",
+            "Unused import DateTimeImmutable",
+            "Unused import Lib\\Models",
+            "Unused import PHP_EOL",
+            "Unused import strlen",
+        ]
     );
 }
 
@@ -431,8 +489,39 @@ final class SanctumSession {
     assert_eq!(
         unused_imports(content),
         [
-            "Unused import 'Http\\Emailed'",
-            "Unused import 'Http\\Mentioned'",
+            "Unused import Http\\Emailed",
+            "Unused import Http\\Mentioned",
         ]
+    );
+}
+
+/// A Doctrine-style annotation names its class through the file's imports,
+/// at the start of a docblock line or nested in another one's arguments.
+#[test]
+fn an_import_named_by_an_annotation_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Routing\Annotation\Route;
+use Drupal\Core\Annotation\Translation;
+use Drupal\Core\Block\Annotation\Block;
+use Http\Mentioned;
+use Http\Group;
+
+/**
+ * @ORM\Entity
+ * @Block(admin_label = @Translation("Users"))
+ * @group slow
+ */
+final class User
+{
+    /** @Route("/users", name="Mentioned") */
+    public function list(): void {}
+}
+"#;
+    assert_eq!(
+        unused_imports(content),
+        ["Unused import Http\\Group", "Unused import Http\\Mentioned",]
     );
 }

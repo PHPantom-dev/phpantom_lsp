@@ -434,6 +434,71 @@ class Foo {
     );
 }
 
+// ── Modifiers lead the detail and open the full range ───────────────
+
+#[allow(deprecated)]
+#[test]
+fn modifiers_lead_detail_and_open_the_range() {
+    let php = r#"<?php
+final class InvoiceService {
+    private const int RETRIES = 3;
+    public static int $count = 0;
+    public function __construct(private readonly Gateway $gateway) {}
+    public function createAndPay(int $id): bool { return true; }
+    abstract protected function charge(): void;
+}
+"#;
+    let resp = get_symbols(php).expect("should have symbols");
+    let symbols = unwrap_nested(resp);
+    let lines: Vec<&str> = php.lines().collect();
+    // The source text from the start of the full range to the end of the
+    // selection range, which is what Zed shows as the outline label.
+    let label = |sym: &DocumentSymbol| -> String {
+        assert_eq!(sym.range.start.line, sym.selection_range.start.line);
+        let line = lines[sym.range.start.line as usize];
+        line[sym.range.start.character as usize..sym.selection_range.end.character as usize]
+            .to_string()
+    };
+
+    let class = &symbols[0];
+    assert_eq!(class.detail.as_deref(), Some("final"));
+    assert_eq!(label(class), "final class InvoiceService");
+
+    let child = |name: &str| {
+        class
+            .children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap_or_else(|| panic!("{name} is in the outline"))
+    };
+    let expected = [
+        ("RETRIES", "private int", "private const int RETRIES"),
+        ("$count", "public static int", "public static int $count"),
+        (
+            "$gateway",
+            "private readonly Gateway",
+            "private readonly Gateway $gateway",
+        ),
+        (
+            "createAndPay",
+            "public (int $id): bool",
+            "public function createAndPay",
+        ),
+        (
+            "charge",
+            "abstract protected (): void",
+            "abstract protected function charge",
+        ),
+    ];
+    for (name, detail, source) in expected {
+        let sym = child(name);
+        assert_eq!(sym.detail.as_deref(), Some(detail), "detail of {name}");
+        assert_eq!(label(sym), source, "range start of {name}");
+    }
+}
+
 // ── Class and function in same file ─────────────────────────────────
 
 #[test]

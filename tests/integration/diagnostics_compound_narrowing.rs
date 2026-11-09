@@ -1680,3 +1680,43 @@ function f(string $h): void {
         "got: {diags:?}"
     );
 }
+
+/// The fall-through of `isset($a[$k]) && !is_array($a[$k])` is where the
+/// element is an array or the key is missing, so its non-array alternative
+/// is gone and a missing key reads as `null`, exactly as the same guard
+/// leaves a plain variable.
+#[test]
+fn isset_and_type_guard_on_an_element_narrows_its_fall_through() {
+    let backend = create_test_backend();
+    let text = r#"<?php
+/** @param array<mixed> $a */
+function needsArray(array $a): void {}
+
+/** @param array<string, 'free_text'|array<mixed>> $values */
+function filled(array $values, string $k): void {
+    if (isset($values[$k]) && !is_array($values[$k])) {
+        return;
+    }
+    if (!isset($values[$k])) {
+        $values[$k] = [];
+    }
+    needsArray($values[$k]);
+}
+
+/** @param array<string, 'free_text'|array<mixed>> $values */
+function literal_key(array $values): void {
+    if (isset($values['x']) && !is_array($values['x'])) {
+        return;
+    }
+    needsArray($values['x']);
+}
+"#;
+    let messages = type_error_messages(&backend, "file:///isset_element_guard.php", text);
+    assert_eq!(
+        messages,
+        [
+            "Argument 1 ($a) expects array<mixed>, got null|array<mixed> (null does not satisfy array<mixed>)"
+        ],
+        "got {messages:?}"
+    );
+}

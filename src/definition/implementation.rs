@@ -169,7 +169,31 @@ impl Backend {
         let target = resolved_class_loader(Fqn::new(&fqn))
             .or_else(|| class_loader(name))
             .map(Arc::unwrap_or_clone)?;
-        self.class_implementation(uri, content, target, &resolved_class_loader)
+        // What a Yii container hands out for a class is what its DI
+        // definitions say, so those come first, from the class and from a
+        // `$container->get()` or `Reference::to()` that names it alike.
+        // What handles an event is the listeners the events configuration
+        // attaches to it.
+        let mut locations = if self.is_yii_project() {
+            let mut locations = self.yii_definition_locations(target.fqn().as_str());
+            locations.extend(self.yii_event_listener_locations(target.fqn().as_str()));
+            locations
+        } else {
+            Vec::new()
+        };
+        // A Drupal plugin manager's plugins implement what it hands out,
+        // and so do those of the one manager an interface stands for.
+        locations.extend(
+            self.drupal_plugin_implementations(target.fqn().as_str())
+                .iter()
+                .filter_map(|class| self.class_declaration_location(class)),
+        );
+        if let Some(implementations) =
+            self.class_implementation(uri, content, target, &resolved_class_loader)
+        {
+            locations.extend(implementations);
+        }
+        (!locations.is_empty()).then_some(locations)
     }
 
     /// Go-to-implementation for the class `target`.
@@ -563,7 +587,41 @@ impl Backend {
     /// (`Countable`, `Iterator`, …) are implemented across the whole
     /// dependency tree, so scanning it for them would cost far more than
     /// the answer is worth.
+    ///
+    /// Under the full indexing strategy this first waits for the workspace
+    /// index, running it on this thread when no other thread is.
     pub(crate) fn find_implementors(
+        &self,
+        target_short: &str,
+        target_fqn: &str,
+        class_loader: &ResolvedClassLoader<'_>,
+        include_abstract: bool,
+        direct_only: bool,
+        project_only: bool,
+    ) -> Vec<Arc<ClassInfo>> {
+        if self.config().indexing.strategy() == IndexingStrategy::Full
+            && !self.workspace_index.indexed.load(Ordering::Acquire)
+        {
+            self.ensure_workspace_indexed_for_request();
+        }
+        self.find_implementors_without_index_wait(
+            target_short,
+            target_fqn,
+            class_loader,
+            include_abstract,
+            direct_only,
+            project_only,
+        )
+    }
+
+    /// [`find_implementors`](Self::find_implementors) without waiting for
+    /// the workspace index.  While the index is incomplete, the source scans
+    /// cover the files it has not reached yet.
+    ///
+    /// For lookups made while a class is being loaded: the workspace index
+    /// loads classes too, so waiting on it from there can deadlock, and
+    /// running it there would do the whole pass inside that one load.
+    pub(crate) fn find_implementors_without_index_wait(
         &self,
         target_short: &str,
         target_fqn: &str,
@@ -579,11 +637,6 @@ impl Backend {
             include_abstract,
             direct_only,
         };
-        if self.config().indexing.strategy() == IndexingStrategy::Full
-            && !self.workspace_index.indexed.load(Ordering::Acquire)
-        {
-            self.ensure_workspace_indexed_for_request();
-        }
         let workspace_index_ready = self.workspace_index.indexed.load(Ordering::Acquire);
 
         // A target that ships in a Composer package is answered from the
@@ -661,7 +714,7 @@ impl Backend {
     /// The FQNs the reverse inheritance index lists below `target_fqn`:
     /// only the direct children in `direct_only` mode, otherwise every
     /// transitive descendant.
-    fn gti_descendants(&self, target_fqn: &str, direct_only: bool) -> Vec<String> {
+    pub(crate) fn gti_descendants(&self, target_fqn: &str, direct_only: bool) -> Vec<String> {
         let gti = self.symbols.gti_index.read();
         if direct_only {
             return gti.get(target_fqn).cloned().unwrap_or_default();

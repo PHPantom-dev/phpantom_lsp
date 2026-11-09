@@ -96,11 +96,15 @@ impl Backend {
             .filter(|r| r.contains_conditional())
         {
             let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, rctx);
+            let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+                Self::resolve_arg_text_to_type(t, &rctx.written_in(namespace))
+            };
             let tpl = TemplateContext {
                 defaults: Some(&method_subs),
                 params: bound.template_params(),
                 bindings: bound.template_bindings(),
                 arg_type_resolver: Some(&arg_ty_resolver),
+                default_type_resolver: Some(&default_ty_resolver),
                 this_type: None,
                 subs: None,
             };
@@ -114,6 +118,7 @@ impl Backend {
                         calling: rctx.current_class.map(|c| c.fqn().as_str()),
                         declaring: Some(owner.fqn().as_str()),
                         written_class: Some(&|name: &str| rctx.written_names().resolve_class(name)),
+                        namespace: bound.default_namespace(),
                     },
                     rctx.file.class_loader,
                     &tpl,
@@ -149,9 +154,20 @@ impl Backend {
             )
         };
 
-        resolved_types
+        let mut target = resolved_types
             .iter()
-            .find_map(|rt| Self::method_target_on_receiver(rt, method_name, rctx, args_text))
+            .find_map(|rt| Self::method_target_on_receiver(rt, method_name, rctx, args_text))?;
+
+        // The call returns nothing only if every receiver that answers it,
+        // through the method itself or `__call`, returns nothing.
+        if target.native_void && resolved_types.len() > 1 {
+            target.native_void = resolved_types.iter().all(|rt| {
+                Self::method_target_on_receiver(rt, method_name, rctx, None)
+                    .or_else(|| Self::method_target_on_receiver(rt, "__call", rctx, None))
+                    .is_none_or(|t| t.native_void)
+            });
+        }
+        Some(target)
     }
 
     /// The method `method_name` on one resolved receiver type as a
@@ -253,6 +269,17 @@ impl Backend {
         );
 
         if let Some(m) = effective.get_method_ci(&method_lower) {
+            // Whether this call site can see the method is not part of the
+            // cache key, so a target whose answer depends on it is not
+            // cached.
+            let site_dependent = reachability_depends_on_call_site(m, &effective);
+            if site_dependent
+                && let Some(target) =
+                    unreachable_method_target(m, &effective, method_name, false, rctx)
+            {
+                return Some(target);
+            }
+
             let (result_method, self_bound_params) =
                 Self::bind_method_to_call_site(m, &effective, method_name, args_text, rctx);
 
@@ -260,14 +287,19 @@ impl Backend {
                 parameters: result_method.parameters.clone(),
                 return_type: result_method.return_type.clone(),
                 reads_func_args: result_method.reads_func_args,
+                binds_named_args: !m.is_virtual,
                 no_discard: result_method.is_no_discard,
+                native_void: result_method
+                    .native_return_type
+                    .as_ref()
+                    .is_some_and(PhpType::is_void),
                 owner_class: Some(owner.fqn()),
                 self_bound_params,
                 ..Default::default()
             };
 
             // Store positive result in the callable target cache.
-            if let Some(ref key) = callable_cache_key {
+            if !site_dependent && let Some(ref key) = callable_cache_key {
                 CALLABLE_TARGET_CACHE.with(|cell| {
                     let mut borrow = cell.borrow_mut();
                     if let Some(ref mut map) = *borrow {
@@ -284,17 +316,26 @@ impl Backend {
         // injected onto Builder<Model>) that the FQN-keyed
         // cache does not have.
         if let Some(m) = owner.get_method_ci(method_name) {
+            let site_dependent = reachability_depends_on_call_site(m, &owner);
+            if site_dependent
+                && let Some(target) = unreachable_method_target(m, &owner, method_name, false, rctx)
+            {
+                return Some(target);
+            }
+
             let target = ResolvedCallableTarget {
                 parameters: m.parameters.clone(),
                 return_type: m.return_type.clone(),
                 reads_func_args: m.reads_func_args,
+                binds_named_args: !m.is_virtual,
                 no_discard: m.is_no_discard,
+                native_void: m.native_return_type.as_ref().is_some_and(PhpType::is_void),
                 owner_class: Some(owner.fqn()),
                 ..Default::default()
             };
 
             // Store the owner-candidate fallback in the callable target cache.
-            if let Some(ref key) = callable_cache_key {
+            if !site_dependent && let Some(ref key) = callable_cache_key {
                 CALLABLE_TARGET_CACHE.with(|cell| {
                     let mut borrow = cell.borrow_mut();
                     if let Some(ref mut map) = *borrow {
@@ -375,6 +416,12 @@ impl Backend {
 
         let m = merged.get_method_ci(method_name)?;
 
+        if reachability_depends_on_call_site(m, &merged)
+            && let Some(target) = unreachable_method_target(m, &merged, method_name, true, rctx)
+        {
+            return Some(target);
+        }
+
         let (result_method, self_bound_params) =
             Self::bind_method_to_call_site(m, &merged, method_name, args_text, rctx);
 
@@ -382,7 +429,12 @@ impl Backend {
             parameters: result_method.parameters.clone(),
             return_type: result_method.return_type.clone(),
             reads_func_args: result_method.reads_func_args,
+            binds_named_args: !m.is_virtual,
             no_discard: result_method.is_no_discard,
+            native_void: result_method
+                .native_return_type
+                .as_ref()
+                .is_some_and(PhpType::is_void),
             owner_class: Some(owner.fqn()),
             self_bound_params,
             ..Default::default()
@@ -395,7 +447,12 @@ impl Backend {
             parameters: func.parameters.clone(),
             return_type: func.return_type.clone(),
             reads_func_args: func.reads_func_args,
+            binds_named_args: !func.from_unbundled_extension,
             no_discard: func.is_no_discard,
+            native_void: func
+                .native_return_type
+                .as_ref()
+                .is_some_and(PhpType::is_void),
             overloads: func.overloads.clone(),
             ..Default::default()
         }
@@ -439,7 +496,13 @@ impl Backend {
                 return ResolvedCallableTarget {
                     parameters: parameters.into(),
                     return_type: func.return_type.clone(),
+                    reads_func_args: func.reads_func_args,
+                    binds_named_args: !func.from_unbundled_extension,
                     no_discard: func.is_no_discard,
+                    native_void: func
+                        .native_return_type
+                        .as_ref()
+                        .is_some_and(PhpType::is_void),
                     self_bound_params: super::template_subs::self_bound_template_params(
                         &func.template_bindings,
                         &func.parameters,
@@ -506,6 +569,16 @@ impl Backend {
             let split_args = crate::text_scan::split_top_level_commas(at);
             let subs = Self::build_method_template_subs(&merged, "__construct", &split_args, rctx);
             if !subs.is_empty() {
+                // A bound naming sibling templates
+                // (`T of RecursiveIterator<TKey, TValue>`) is checked for
+                // its class alone: those are read off the same argument,
+                // and left as raw names they would be looked up as classes.
+                let siblings: std::collections::HashMap<String, PhpType> = ctor
+                    .template_params()
+                    .iter()
+                    .chain(merged.template_params.iter())
+                    .map(|t| (t.to_string(), PhpType::mixed()))
+                    .collect();
                 let self_bound_params = super::template_subs::self_bound_template_params(
                     ctor.template_bindings(),
                     &ctor.parameters,
@@ -514,7 +587,7 @@ impl Backend {
                         ctor.template_param_bounds()
                             .get(tpl)
                             .or_else(|| merged.template_param_bounds.get(tpl))
-                            .cloned()
+                            .map(|bound| bound.substitute(&siblings))
                     },
                     &subs,
                     rctx.file.class_loader,
@@ -524,6 +597,8 @@ impl Backend {
                 return Some(ResolvedCallableTarget {
                     parameters: result_ctor.parameters.clone(),
                     return_type: result_ctor.return_type.clone(),
+                    reads_func_args: result_ctor.reads_func_args,
+                    binds_named_args: true,
                     owner_class: Some(ci.fqn()),
                     self_bound_params,
                     ..Default::default()
@@ -535,6 +610,7 @@ impl Backend {
             parameters: ctor.parameters.clone(),
             return_type: ctor.return_type.clone(),
             reads_func_args: ctor.reads_func_args,
+            binds_named_args: true,
             owner_class: Some(ci.fqn()),
             ..Default::default()
         })
@@ -795,6 +871,7 @@ impl Backend {
                             crate::call_args::partial_application_params(&target.parameters, bound)
                                 .into();
                         target.overloads.clear();
+                        target.binds_named_args = false;
                         Some(target)
                     }
                     (resolved, _) => resolved,
@@ -899,6 +976,90 @@ impl Backend {
         untyped
             .or_else(|| Self::resolve_instance_method_callable(value, "__invoke", rctx, args_text))
     }
+}
+
+/// Whether a call to `method` on `class` reaches the method or a magic
+/// call handler depending on whether the call site can see it.
+///
+/// A virtual member (`@method`, a mixin, a macro, a Laravel scope) is
+/// always reached through `__call` / `__callStatic` and never depends on
+/// the call site; neither does a public method.
+fn reachability_depends_on_call_site(method: &MethodInfo, class: &ClassInfo) -> bool {
+    method.visibility != Visibility::Public
+        && !method.is_virtual
+        && (class.get_method_ci("__call").is_some()
+            || class.get_method_ci("__callStatic").is_some())
+}
+
+/// The target a call to `method` really runs when the call site cannot
+/// see it and `class` routes it to `__call` / `__callStatic`, which takes
+/// any arguments under any names.
+///
+/// `None` when the call site can see the method, or when no handler
+/// takes the call (PHP rejects it, which the visibility diagnostic
+/// reports), so the call is checked against the method's own signature.
+fn unreachable_method_target(
+    method: &MethodInfo,
+    class: &Arc<ClassInfo>,
+    method_name: &str,
+    is_static: bool,
+    rctx: &ResolutionCtx<'_>,
+) -> Option<ResolvedCallableTarget> {
+    let handler = if is_static {
+        // A `::` call PHP cannot route to the method goes to `__call` when
+        // made from an instance of the class (`parent::hidden()`), which is
+        // only possible from inside its hierarchy, else to `__callStatic`.
+        let in_hierarchy = rctx.current_class.is_some_and(|current| {
+            current.fqn() == class.fqn()
+                || crate::class_lookup::is_subtype_of(
+                    current,
+                    class.fqn().as_str(),
+                    rctx.file.class_loader,
+                )
+        });
+        in_hierarchy
+            .then(|| class.get_method_ci("__call"))
+            .flatten()
+            .or_else(|| class.get_method_ci("__callStatic"))
+    } else {
+        class.get_method_ci("__call")
+    }?;
+    if crate::diagnostics::member_visibility::call_site_reaches_method(
+        class,
+        method_name,
+        method.visibility,
+        is_static,
+        rctx.current_class,
+        rctx.file.class_loader,
+    ) {
+        return None;
+    }
+    Some(ResolvedCallableTarget {
+        parameters: vec![ParameterInfo {
+            name: atom("$arguments"),
+            is_required: false,
+            type_hint: Some(PhpType::mixed()),
+            native_type_hint: None,
+            description: None,
+            default_value: None,
+            is_variadic: true,
+            is_reference: false,
+            closure_this_type: None,
+            param_out_type: None,
+            callable_invocation: None,
+            expected_values: None,
+        }]
+        .into(),
+        return_type: handler.return_type.clone(),
+        native_void: handler
+            .native_return_type
+            .as_ref()
+            .is_some_and(PhpType::is_void),
+        accepts_any_args: true,
+        binds_named_args: false,
+        owner_class: Some(class.fqn()),
+        ..Default::default()
+    })
 }
 
 /// The types a value invoked as a callable can hold, from its resolved
@@ -1013,6 +1174,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                     closure_this_type: None,
                     param_out_type: None,
                     callable_invocation: None,
+                    expected_values: None,
                 })
                 .collect();
             Some(ResolvedCallableTarget {

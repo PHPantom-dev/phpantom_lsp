@@ -61,7 +61,7 @@ impl Backend {
     /// every completion, hover, go-to-definition, code-action and
     /// diagnostic request against it.
     pub(crate) fn analysable_content(&self, uri: &str) -> Option<Arc<String>> {
-        self.blade_virtual_php_arc(uri)
+        self.template_virtual_php_arc(uri)
             .or_else(|| self.get_file_content_arc(uri))
     }
 
@@ -72,8 +72,8 @@ impl Backend {
         uri: &str,
         position: Position,
     ) -> Option<(Arc<String>, Position)> {
-        match self.blade_virtual_php_arc(uri) {
-            Some(virtual_php) => Some((virtual_php, self.translate_blade_to_php(uri, position))),
+        match self.template_virtual_php_arc(uri) {
+            Some(virtual_php) => Some((virtual_php, self.translate_template_to_php(uri, position))),
             None => Some((self.get_file_content_arc(uri)?, position)),
         }
     }
@@ -85,7 +85,7 @@ impl Backend {
         uri: &str,
         content: &'a str,
     ) -> AnalysableContent<'a> {
-        match self.blade_virtual_php_arc(uri) {
+        match self.template_virtual_php_arc(uri) {
             Some(virtual_php) => AnalysableContent::Shared(virtual_php),
             None => AnalysableContent::Borrowed(content),
         }
@@ -339,6 +339,18 @@ impl Backend {
         self.whole_file_import_block(uri)
     }
 
+    /// [`import_block_at`](Self::import_block_at) for a file whose source is
+    /// `content`, read from the source itself when the file has no parse
+    /// state.  A file loaded on demand (PSR-4, the class map, a vendor
+    /// package) records only its classes, so its imports would otherwise
+    /// come back empty.
+    pub(crate) fn import_block_in(&self, uri: &str, content: &str, offset: usize) -> ImportBlock {
+        if self.files.read().contains_key(uri) {
+            return self.import_block_at(uri, offset);
+        }
+        Self::import_block_in_source(content, offset as u32)
+    }
+
     /// The one [`ImportBlock`] of a file that does not declare several
     /// `namespace` blocks.
     fn whole_file_import_block(&self, uri: &str) -> ImportBlock {
@@ -453,6 +465,7 @@ impl Backend {
         // not just open ones, so a deleted or renamed one would stay in the
         // template lists the Blade refresh passes enumerate.
         self.files.write().remove(uri);
+        self.dormant_files.write().remove(uri);
         self.evict_typed_receiver_spans(uri);
         // Another file's entry is stamped with the class-lookup generation,
         // which a class this file withdraws bumps, so only this file's own
@@ -557,6 +570,7 @@ pub(crate) fn namespace_in_spans(spans: &[NamespaceSpan], byte_offset: u32) -> O
 }
 
 /// One `namespace` block's imports, from [`Backend::import_blocks`].
+#[derive(Default)]
 pub(crate) struct ImportBlock {
     /// The block's namespace, or `None` for the global namespace.
     pub(crate) namespace: Option<String>,
@@ -571,7 +585,7 @@ pub(crate) struct ImportBlock {
 
 impl ImportBlock {
     /// The block `span` covers, in a file that declares several.
-    fn of_span(span: &NamespaceSpan) -> ImportBlock {
+    pub(crate) fn of_span(span: &NamespaceSpan) -> ImportBlock {
         ImportBlock {
             namespace: span.namespace.clone(),
             use_map: span.use_map.clone(),

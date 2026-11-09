@@ -11,7 +11,7 @@ use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::virtual_members::laravel::config_values::{ConfigNode, ConfigValue};
 
-use super::formatting::{inline_code, make_hover};
+use super::formatting::{function_markdown, inline_code, make_hover};
 
 impl Backend {
     /// Where a Laravel string key resolves to, with the path shortened to
@@ -113,6 +113,12 @@ impl Backend {
         let view_path;
         let (label, detail) = match kind {
             StringKeyKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
+            StringKeyKind::DrupalPermission => ("Permission", self.drupal_permission_detail(key)),
+            StringKeyKind::DrupalConfigName => ("Configuration", self.drupal_config_detail(key)),
+            StringKeyKind::DrupalConfigKey => {
+                shown = crate::drupal::config_keys::split_config_key(key).1;
+                ("Configuration key", self.drupal_config_key_detail(key))
+            }
             StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
             StringKeyKind::TwigBlock => (
                 "Block",
@@ -173,7 +179,7 @@ impl Backend {
                     );
                 (descriptor.hover_label, detail)
             }
-            StringKeyKind::View => {
+            StringKeyKind::View | StringKeyKind::TempestView { .. } => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,
                 );
@@ -189,6 +195,22 @@ impl Backend {
                     "View template".to_string()
                 };
                 ("View", detail)
+            }
+            StringKeyKind::Asset
+            | StringKeyKind::MixAsset
+            | StringKeyKind::ViteAsset
+            | StringKeyKind::InertiaPage => {
+                let (label, missing) = match kind {
+                    StringKeyKind::Asset => ("Asset", "Not found under `public/`"),
+                    StringKeyKind::MixAsset => ("Mix asset", "Not in `public/mix-manifest.json`"),
+                    StringKeyKind::ViteAsset => ("Vite asset", "Not found in the project"),
+                    _ => ("Inertia page", "Not found in the page directories"),
+                };
+                let detail = self
+                    .asset_file(*kind, key)
+                    .and_then(|file| self.workspace_relative_path(&crate::util::path_to_uri(&file)))
+                    .map_or_else(|| missing.to_string(), |path| format!("`{path}`"));
+                (label, detail)
             }
             StringKeyKind::TwigTemplate => {
                 let detail = self
@@ -301,15 +323,24 @@ impl Backend {
             | StringKeyKind::ContainerParameter
             | StringKeyKind::SymfonyRoute
             | StringKeyKind::SymfonyTranslation
-            | StringKeyKind::TranslationDomain => {
+            | StringKeyKind::TranslationDomain
+            | StringKeyKind::DrupalEntityType
+            | StringKeyKind::DrupalRoute
+            | StringKeyKind::DrupalHook => {
                 let label = match kind {
                     StringKeyKind::ServiceId => "Service",
+                    StringKeyKind::DrupalEntityType => "Entity type",
+                    StringKeyKind::DrupalHook => "Hook",
                     StringKeyKind::ContainerParameter => "Parameter",
-                    StringKeyKind::SymfonyRoute => "Route",
+                    StringKeyKind::SymfonyRoute | StringKeyKind::DrupalRoute => "Route",
                     StringKeyKind::SymfonyTranslation => "Translation",
                     _ => "Translation domain",
                 };
-                let declared = self.symfony_declaration_locations(*kind, key);
+                let declared = if *kind == StringKeyKind::DrupalHook {
+                    self.drupal_hook_documentation(key)
+                } else {
+                    self.symfony_declaration_locations(*kind, key)
+                };
                 let mut detail = match declared
                     .first()
                     .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
@@ -326,6 +357,18 @@ impl Backend {
                     shown = message;
                     detail = format!("Domain `{}`\n\n{}", domain, detail);
                 }
+                // A hook reads as the `hook_*()` function that documents
+                // it: its parameters and what it returns are what an
+                // implementation has to match.
+                if *kind == StringKeyKind::DrupalHook
+                    && let Some(function) = self.drupal_hook_documented_function(key)
+                {
+                    detail = format!(
+                        "{}\n\n{}",
+                        function_markdown(&function, None, None, false),
+                        detail
+                    );
+                }
                 (label, detail)
             }
             // Every listener declares the event it subscribes to, so the
@@ -338,6 +381,16 @@ impl Backend {
                     count => format!("{count} listeners in the project"),
                 };
                 ("Event", detail)
+            }
+            // Every member a group holds declares it.
+            StringKeyKind::SerializerGroup => {
+                let members = self.symfony_declaration_locations(*kind, key).len();
+                let detail = match members {
+                    0 => "Nothing in the project is in the group".to_string(),
+                    1 => "1 declaration in the project".to_string(),
+                    count => format!("{count} declarations in the project"),
+                };
+                ("Serializer group", detail)
             }
             StringKeyKind::MessengerBus => {
                 let detail = self
@@ -364,6 +417,22 @@ impl Backend {
                 }
                 ("Route", detail)
             }
+            // A parameter is shown by its name, with the type the template
+            // declares it with.
+            StringKeyKind::YiiViewParameter => {
+                let (view, name) = crate::yii::view_parameters::split_parameter_key(key);
+                shown = name;
+                let detail = match self.yii_view_parameter_type(key) {
+                    Some(ty) => format!(
+                        "`{}` in `{}`",
+                        crate::diagnostics::helpers::shown_type(&ty),
+                        self.yii_view_display(view)
+                    ),
+                    None if view.is_empty() => "Shared by every view".to_string(),
+                    None => format!("Not declared by `{}`", self.yii_view_display(view)),
+                };
+                ("View parameter", detail)
+            }
             // An argument is shown by its name, under the paths that
             // declare it.
             StringKeyKind::YiiRouteArgument => {
@@ -381,6 +450,47 @@ impl Backend {
                 };
                 ("Route argument", detail)
             }
+            // An argument is shown by its name, under the paths of the
+            // routes it names.
+            StringKeyKind::YiiUrlArgument => {
+                let (route, name) = crate::yii::routes::split_url_argument_key(key);
+                shown = name;
+                let mut detail = format!("Route `{}`", route);
+                let paths = self.yii_route_paths(route);
+                if paths.is_empty() {
+                    detail.push_str("\n\nNot declared in the project's routes");
+                }
+                for path in paths {
+                    detail.push_str(&format!("\n\nPath `{}`", path));
+                }
+                ("Route argument", detail)
+            }
+            // An argument is shown by its name, as the parameter it fills.
+            StringKeyKind::YiiDefinitionArgument => {
+                let (class, method, name) =
+                    crate::yii::definitions::split_definition_argument_key(key);
+                shown = name;
+                (
+                    "Argument",
+                    self.yii_definition_argument_detail(class, method, name),
+                )
+            }
+            // A parameter is shown by its name, under the paths of its
+            // route.
+            StringKeyKind::DrupalRouteParameter => {
+                let (route, name) = crate::drupal::routing::split_route_parameter_key(key);
+                shown = name;
+                let mut detail = format!("Route `{}`", route);
+                let paths = self.drupal_route_paths(route);
+                if paths.is_empty() {
+                    detail.push_str("\n\nNot declared in the project's routing files");
+                }
+                for path in paths {
+                    detail.push_str(&format!("\n\nPath `{}`", path));
+                }
+                ("Route parameter", detail)
+            }
+            StringKeyKind::DrupalLibrary => ("Library", self.drupal_library_detail(key)),
             // An installed bundle's schema is not read, so a key no schema
             // of the project's declares is only not one of its own.
             StringKeyKind::SymfonyConfigKey => {
@@ -399,15 +509,90 @@ impl Backend {
                 shown = &view_path;
                 let detail = self
                     .yii_view_file(key)
-                    .and_then(|file| crate::util::path_to_url(&file))
-                    .and_then(|uri| self.workspace_relative_path(uri.as_str()))
+                    .map(|file| self.yii_view_display(&file.to_string_lossy()))
                     .map_or_else(
                         || "No template is there".to_string(),
                         |path| format!("`{}`", path),
                     );
                 ("View", detail)
             }
+            StringKeyKind::YiiViewPath => {
+                view_path = self.yii_view_display(key);
+                shown = &view_path;
+                let detail = if self.yii_view_dir_exists(key) == Some(true) {
+                    "Views are named relative to this directory"
+                } else {
+                    "No directory is there"
+                };
+                ("View directory", detail.to_string())
+            }
+            StringKeyKind::YiiAssetFile => {
+                view_path = self.yii_asset_display(key);
+                shown = &view_path;
+                let detail = if self.yii_asset_file(key).is_some() {
+                    "A file of the asset bundle"
+                } else {
+                    "No file is there"
+                };
+                ("Asset file", detail.to_string())
+            }
+            // Strings start with an `@` for many reasons besides an alias,
+            // so only a declared one is shown.
+            StringKeyKind::YiiAlias => ("Alias", self.yii_alias_detail(key)?),
+            StringKeyKind::CssClass => ("CSS class", self.css_class_detail(key)),
+            // A params key is keyed by the whole path the read names.
+            StringKeyKind::YiiParam => {
+                view_path = crate::yii::params::param_key_display(key);
+                shown = &view_path;
+                let detail = self
+                    .yii_param_detail(key)
+                    .unwrap_or_else(|| "No params file declares it".to_string());
+                ("Param", detail)
+            }
+            // Shown by its ID, under the category it is looked up in.
+            StringKeyKind::YiiTranslation => {
+                shown = crate::yii::translations::split_message_key(key).1;
+                let found = self.yii_message_detail(key);
+                let mut detail = format!("Category {}", inline_code(&found.category));
+                if let Some((locale, text)) = &found.text {
+                    detail.push_str(&format!(
+                        "\n\n{}: {}",
+                        inline_code(locale),
+                        inline_code(text)
+                    ));
+                }
+                if found.locales.is_empty() {
+                    detail.push_str("\n\nNo message file of the category declares it");
+                } else {
+                    let locales: Vec<String> = found
+                        .locales
+                        .iter()
+                        .map(|locale| inline_code(locale))
+                        .collect();
+                    detail.push_str(&format!("\n\nDeclared for {}", locales.join(", ")));
+                }
+                ("Translation", detail)
+            }
             StringKeyKind::WordPressHook => ("Hook", self.wordpress_hook_detail(key)),
+            StringKeyKind::DrupalRenderElement => {
+                ("Render element", self.drupal_render_element_detail(key))
+            }
+            StringKeyKind::DrupalThemeHook => ("Theme hook", self.drupal_theme_hook_detail(key)),
+            // Shown by its ID, under the manager it belongs to.
+            StringKeyKind::DrupalPlugin => {
+                shown = crate::drupal::plugins::split_plugin_key(key).1;
+                ("Plugin", self.drupal_plugin_detail(key))
+            }
+            // A variable is shown by its key, under the hook it belongs to;
+            // any other `#` key of the array is a property of the render API.
+            StringKeyKind::DrupalThemeHookVariable => {
+                let (hook, name) = crate::drupal::theme_hooks::split_theme_variable_key(key);
+                if self.drupal_theme_variable_definitions(key).is_empty() {
+                    return None;
+                }
+                shown = name;
+                ("Theme hook variable", format!("Theme hook `{hook}`"))
+            }
         };
 
         Some(make_hover(format!(

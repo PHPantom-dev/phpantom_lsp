@@ -15,54 +15,6 @@ within the same impact tier.
 
 ---
 
-## T26. Class constants named as docblock types (`Foo::BAR`, `Foo::BAR_*`)
-
-**Impact: Medium · Complexity: Medium**
-
-A class constant named in a type position is not read at all: `@param
-Foo::BAR $x`, `@param self::FOO|self::BAR $x` and `@param C::class|D::class
-$x` all stay as unresolved text (or fall back to the native hint), where
-PHPStan and Psalm give the constant's value (`'bar'`, `'bar'|'foo'`,
-`'App\C'|'App\D'`). The same constants are read when they are the operand
-of `key-of<>`/`value-of<>`, through `constant_operand_shape`, so the value
-lookup exists; the bare reference just never reaches it. Found porting
-Psalm's `ConstValuesTest` and `ReconcilerTest`; the assertions are `// SKIP`
-in `tests/psalm_assertions/const_values.php` and
-`tests/psalm_assertions/type_reconciliation_reconciler.php`.
-
-Falling back to the native hint is not harmless. A method declared
-`@return self::STATUS_*` over a native `int` reads as `int`, so passing its
-result to a parameter typed `1|2` is reported.
-
-The wildcard form resolves a pattern like `Foo::BAR_*` to the union of all
-matching constant types on the class. PHPStan supports this syntax in
-docblock type strings:
-
-```php
-class Status {
-    const STATUS_ACTIVE = 1;
-    const STATUS_INACTIVE = 2;
-    const STATUS_PENDING = 3;
-}
-
-/** @param Status::STATUS_* $status */
-function setStatus(int $status): void { ... }
-// $status should resolve to 1|2|3
-```
-
-When the type engine encounters a constant pattern containing `*`,
-it should:
-
-1. Resolve the class (`Status`).
-2. Enumerate all constants matching the glob pattern (`STATUS_*`).
-3. Build a union of their literal types.
-
-**References:**
-- PHPStan: `ConstantWildcardType` / constant enum resolution.
-- Phpactor: `GlobbedConstantUnionType`.
-
----
-
 ## T49. A closure passed to a constructor gets no parameter types from it
 
 **Impact: Medium · Complexity: Medium**
@@ -464,40 +416,6 @@ ported once this lands.
 
 ---
 
-## T45. Doctrine `getRepository(Entity::class)` is typed as the generic repository
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$repo = $entityManager->getRepository(User::class);
-$repo->findActive(); // PHPantom: EntityRepository<User>, so findActive() is unknown
-```
-
-Doctrine's stubs type `getRepository()` as `EntityRepository<T>` (or
-`ObjectRepository<T>`), but the object it returns is the entity's own
-repository: the class named by `#[ORM\Entity(repositoryClass: ...)]` or by
-the `repositoryClass`/`repository-class` key of a YAML/XML mapping.
-PHPStan's Doctrine extension answers this with a dynamic return type
-extension. Completion, hover, diagnostics, and Find References on the
-repository's own methods all miss it today.
-
-The return type belongs in the type engine, as a return-type hook for
-`getRepository()` with a class-string argument, so every consumer sees
-the concrete repository. The Doctrine mapping index built from YAML/XML
-resources already knows those pairs; the attribute form needs the
-`ClassInfo` support F24 describes.
-
-**Where to look:** `src/framework.rs`
-(`framework_doctrine_repository_fqns_for_entity`) for the YAML/XML
-mapping pairs, and method-call return resolution under
-`src/type_engine/variable/rhs_resolution/` for where the hook goes. The
-extension's fixture, `tests/phpstan_doctrine/data/namedManagerRepository.php`,
-has an entity whose repository depends on the entity manager; its
-`named-manager-registry.php` is the registry that says which.
-
-
----
-
 ## T52. Symfony return types an argument decides
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -627,9 +545,84 @@ extension's fixtures declare theirs that way, in
 
 ---
 
-## T56. A DBAL result's row count ignores the connection's driver
+## T65. The expression builder's fragments are not literal strings
 
 **Impact: Low · Complexity: Low-Medium**
+
+```php
+$qb->expr()->isNull('u.name'); // string, not 'u.name IS NULL'
+```
+
+The expression builder's methods that build a DQL fragment as a string
+(`isNull()`, `between()`, `countDistinct()`, …) return `string`. PHPStan's
+Doctrine extension folds them into the literal string they build when
+their arguments are literal, so the fragment is known where a builder or
+a query takes it.
+
+The fixtures are the SKIP lines of `expressionBuilderGetQuery.php` and
+`expressionBuilderGetQueryNoObjectManager.php` in
+`tests/phpstan_doctrine/data/QueryResult/`.
+
+**Where to look:** PHPStan's Doctrine extension
+(`Type/Doctrine/QueryBuilder/Expr/`).
+
+---
+
+## T68. A DQL field is typed by its property, not its column's type
+
+**Impact: Low · Complexity: Medium**
+
+```php
+#[ORM\Column(type: 'bigint')]
+public int $views;
+
+$em->createQuery('SELECT u.views FROM App\Entity\User u')
+    ->getResult(); // list<array{views: int}>, though DBAL 4 gives int|string
+```
+
+A selected field is typed by the type its entity declares for the
+property, but a scalar result is converted by the column's Doctrine type,
+which can differ: `bigint` is `int|string` on DBAL 4, and `decimal` is a
+`numeric-string` whatever the property says. Inside a DQL expression, where
+the database's own value counts, a field is read by its property too: a
+`string`, `int`, or `bool` property is taken for a column of that type, and
+any other (a `float` one, which may map a `float` or a `decimal` column) is
+`mixed`, so `SUM()` of it is too. PHPStan's Doctrine extension maps each
+Doctrine type to the PHP type it converts to, and to the value each driver
+fetches for it.
+
+**Where to look:** `ResolverModel::field` in `src/doctrine/query.rs`, the
+column type the mapping attributes and files record, and PHPStan's
+Doctrine extension (`Type/Doctrine/Descriptors/`).
+
+---
+
+## T69. `IDENTITY()` in a DQL `SELECT` is `mixed`
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$em->createQuery('SELECT IDENTITY(p.author) AS author FROM App\Entity\Post p')
+    ->getResult(); // list<array{author: mixed}>
+```
+
+`IDENTITY()` gives the foreign key a to-one association holds: the
+identifier column of the entity it targets, `null` when the join column is
+nullable (as it is unless `#[JoinColumn(nullable: false)]` says otherwise).
+Typing it needs the target's identifier field and the join column's
+nullability, which the parsed mapping does not record. PHPStan's Doctrine
+extension types it like any other column of the target, by the connection's
+driver.
+
+**Where to look:** `Scope::call` in `src/doctrine/query.rs`, the identifier
+and join-column attributes the parser reads into `DoctrineMapping`, and
+PHPStan's Doctrine extension (`QueryResultTypeWalker::walkFunction()`).
+
+---
+
+## T56. A DBAL result's row count ignores the connection's driver
+
+**Impact: Low · Complexity: Low**
 
 ```php
 $rows = $result->rowCount(); // int|numeric-string, though only mysqli returns a string
@@ -639,17 +632,16 @@ DBAL 4 declares `Result::rowCount()` as `int|numeric-string`, because the
 `mysqli` driver can return a row count too large for an `int` as a string.
 Every other driver returns an `int`, and PHPStan's Doctrine extension
 narrows the return type by the driver the project's connection uses. The
-driver is in the connection's configuration: the `driver` or `url` of
-`DriverManager::getConnection()`, or the `dbal` section of a Symfony
-project's `doctrine.yaml`.
+driver is read already, for typing DQL expressions:
+`doctrine::connection::project_connection()` gives the one the project's
+`DriverManager::getConnection()` calls and Symfony configuration agree on.
 
 The fixtures are `tests/phpstan_doctrine/data/DBAL/pdo/` and
 `tests/phpstan_doctrine/data/DBAL/mysqli/`, each a project whose
 `entity-manager.php` builds the connection.
 
-**Where to look:** PHPStan's Doctrine extension
-(`Type/Doctrine/DBAL/*RowCountReturnTypeExtension`,
-`Doctrine/Driver/DriverDetector`).
+**Where to look:** `src/doctrine/connection.rs`, and PHPStan's Doctrine
+extension (`Type/Doctrine/DBAL/*RowCountReturnTypeExtension`).
 
 ---
 
@@ -711,21 +703,55 @@ API endpoint that types its request this way gets every parameter wrong.
 
 ---
 
-## T60. A float literal is typed `float`, not its value
+## T62. A sealed hierarchy is not narrowed by ruling out its other members
 
-**Impact: Low · Complexity: Low**
+**Impact: Medium · Complexity: Medium**
 
 ```php
-/**
- * @template T
- * @param T $data
- * @return (T is array|object|string ? string : T)
- */
-function maybe_serialize($data) { … }
+/** @psalm-inheritors LeafNode|TreeNode */
+interface NodeInterface {}
 
-maybe_serialize(0.0);   // want 0.0, get float
+function at_index(NodeInterface $node): mixed {
+    if ($node instanceof LeafNode) {
+        return null;
+    }
+    $node->getChildren();   // Method NodeInterface::getChildren() not found
+}
 ```
 
-Integer, string and boolean literals keep their value as their type;
-float literals become `float`. A template bound to one, or a condition
-over one, loses the value. 2 assertions of the WordPress stubs fixtures.
+`@psalm-inheritors` and `@phpstan-sealed` list every class that may extend
+or implement the type. Once a guard rules out all but one, the subject is
+that one (`TreeNode` here), and a `match` over them is exhaustive. The tags
+are recognised (`src/docblock/tag_kind.rs`) but nothing reads them, so
+the subject keeps the declared interface. Store the permitted list on
+`ClassInfo` and subtract from it in the `instanceof` narrowing, the way an
+enum's cases are subtracted.
+
+Found by `analyze` on azjezz/psl, whose tree nodes are sealed this way.
+
+---
+
+## T71. A service `#[AsDecorator]` registers does not take over the ID
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+#[AsDecorator(decorates: 'app.mailer')]
+final class LoggingMailer extends Mailer
+{
+    public function sentCount(): int { return 0; }
+}
+
+$container->get('app.mailer')->sentCount(); // Method Mailer::sentCount() not found
+```
+
+A lookup of a service that a services file or a PHP configurator
+decorates is typed as the decorator's class too (`service_decorators` in
+`src/symfony/container.rs`, fed by `SymbolMap::service_decorations`).
+A class that the resource loader registers and that decorates a service
+with Symfony's `#[AsDecorator]` attribute is not read, though that is how
+most applications decorate. Record a `ServiceDecoration` for the
+attribute's `decorates` argument (a string or `Foo::class`) with the
+class as the decorator, where `#[AsMessageHandler]` is read in
+`src/symbol_map/extraction/symfony.rs`, and count the file as one that
+declares in `declares_symfony_keys`.

@@ -144,11 +144,14 @@ impl Backend {
                 // them when it is re-parsed below.
                 self.laravel.runtime_config_keys.write().remove(uri);
                 // The Laravel registries a file fed (macros, storage drivers,
-                // commands, morph aliases, gates, provider resources) are
+                // commands, morph aliases, gates, provider resources), and the
+                // classes a Drupal service provider gives services, are
                 // refreshed only when the file is parsed, which a deleted
                 // file never is again.
                 if *change_type == FileChangeType::Deleted {
                     self.forget_laravel_file_contributions(uri);
+                    self.forget_drupal_service_provider(uri);
+                    self.forget_drupal_service_definitions(uri);
                 }
             }
             if *change_type == FileChangeType::Deleted {

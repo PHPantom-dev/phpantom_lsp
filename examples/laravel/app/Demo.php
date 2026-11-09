@@ -21,6 +21,7 @@ use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\CastSample;
 use App\Models\Customer;
+use App\Models\CustomerProfile;
 use App\Models\Danish;
 use App\Models\Delivery;
 use App\Models\Loaf;
@@ -68,6 +69,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\View;
+use Illuminate\Support\Facades\Vite;
 use Illuminate\View\Factory as ViewFactory;
 
 class Demo
@@ -119,7 +121,7 @@ class Demo
         $bakery->unbaked();           // scope method               → Builder
         $bakery->vendor;              // body-inferred morphTo      → Model
         $bakery->vendor_count;        // relationship count         → int
-        $bakery->warmth;              // $appends (no cast/attr)    → mixed
+        $bakery->warmth;              // appended accessor        → string
         // MUST NOT appear: secret_ingredient (private $attributes field)
 
         // Relation properties resolve case-insensitively, matching Laravel's
@@ -455,10 +457,29 @@ class Demo
             ->keyBy(static fn (Review $review): string => $review->getTitle())
             ->get('Sourdough');             // → ReviewCollection<string, Review>
 
-        // Keying by a column name can only promise an array key.
+        // Try: hover the keyBy() result; the title cast supplies string keys.
         Review::query()->get()
             ->keyBy('title')
-            ->get('Sourdough');             // → ReviewCollection<array-key, Review>
+            ->get('Sourdough');             // keyBy() → ReviewCollection<string, Review>
+    }
+
+    /** @param ReviewCollection<string, Review> $reviews */
+    public function collectionPropertyTypes(ReviewCollection $reviews): void
+    {
+        // Try: hover each result. Literal paths use the model's property types.
+        $byTitle = $reviews->keyBy('title');        // ReviewCollection<string, Review>
+        $byRelatedId = $reviews->keyBy('reviewable.id'); // ReviewCollection<int, Review>
+        $titles = $reviews->pluck('title', 'id');   // Collection<int, string>
+
+        // Try: compare the innermost keys with and without preserveKeys.
+        $groups = $reviews->groupBy('rating');     // ReviewCollection<int, ReviewCollection<int, Review>>
+        $preserved = $reviews->groupBy('rating', preserveKeys: true); // ReviewCollection<int, ReviewCollection<string, Review>>
+        $nested = $reviews->groupBy(['rating', 'title'], true); // Collection<int, ReviewCollection<string, ReviewCollection<string, Review>>>
+
+        // Try: the property proxy and the argument form agree on string keys.
+        $proxy = $reviews->keyBy->title;           // ReviewCollection<string, Review>
+        echo count($byTitle), count($byRelatedId), count($titles),
+            count($groups), count($preserved), count($nested), count($proxy);
     }
 
     /**
@@ -510,8 +531,8 @@ class Demo
         $reviews->sortBy->getRating();      // → Collection<int, Review>
         $reviews->unique->getTitle();       // → Collection<int, Review>
 
-        $reviews->keyBy->getTitle();        // → Collection<array-key, Review>
-        $reviews->groupBy->getTitle();      // → Collection<array-key, Collection<int, Review>>
+        $reviews->keyBy->getTitle();        // → Collection<string, Review>
+        $reviews->groupBy->getTitle();      // → Collection<string, Collection<int, Review>>
         $reviews->partition->getRating();   // → Collection<int, Collection<int, Review>>
 
         $reviews->first->getRating();       // → Review|null
@@ -717,9 +738,35 @@ class Demo
         lang_path('en/messages.php');             // → lang/en/messages.php
         resource_path('views/welcome.blade.php'); // → resources/views/welcome.blade.php
 
-        // public_path() and storage_path() work the same way; this demo
-        // project ships no public/ or storage/ directory to point them at.
+        public_path('css/app.css');               // → public/css/app.css
+
+        // storage_path() works the same way; this demo project ships no
+        // storage/ directory to point it at.
         database_path('factories');               // a directory — completes, no link
+    }
+
+
+    // ── Laravel Assets ──────────────────────────────────────────────────────
+
+    /**
+     * Asset helpers name files on disk: asset() a path under public/, and
+     * Vite::asset() and @vite a source file Vite builds, relative to the
+     * project root. Inertia's Inertia::render() names a page under
+     * resources/js/Pages the same way.
+     *
+     * Try:
+     *  1. Ctrl+Click "css/app.css" to jump to public/css/app.css.
+     *  2. Trigger completion inside `asset('|')` — offers the entries of
+     *     public/, a directory at a time.
+     *  3. Change "resources/js/app.js" to "resources/js/ap.js" to see the
+     *     unknown Vite asset reported.
+     */
+    public function laravelAssets(): void
+    {
+        asset('css/app.css');                     // → public/css/app.css
+        asset('images/logo.svg?v=2');             // the query string is not part of the path
+        URL::asset('css/app.css');
+        Vite::asset('resources/js/app.js');       // → resources/js/app.js
     }
 
 
@@ -784,9 +831,9 @@ class Demo
         // WelcomeData::toArray() returns is what the template receives.
         view('welcome', new WelcomeData());
 
-        // A declared variable this call leaves out → `missing_view_variable`,
+        // A declared variable this call leaves out → `missing_blade_variable`,
         // and a key nothing in welcome.blade.php (or anything it @includes)
-        // reads → `unused_view_variable`.  Both are intentional.
+        // reads → `unused_blade_variable`.  Both are intentional.
         view('welcome', ['user' => $user, 'pots' => $posts]);
 
         // View under a custom path from config/view.php (resources/theme/views).
@@ -1117,7 +1164,8 @@ class Demo
 
     public function eloquentAttributeArrays(): void
     {
-        // Model PHP attributes complete columns too: see Hidden in Models/Customer.php.
+        // Class attributes supply columns too: see Fillable in Models/Customer.php.
+        // Try: complete name; #[Fillable] merges it with the $fillable property's email.
         // Try: complete each array key. Fillable attributes appear first.
         $customer = Customer::create(['name' => 'Ada', 'email' => 'ada@example.test']);
 
@@ -1131,6 +1179,21 @@ class Demo
 
         // Flour is fillable, so it ranks ahead of other known Bakery attributes.
         Bakery::make(['flour' => 'whole wheat']);
+    }
+
+    public function computedAttributes(): void
+    {
+        // Try: complete these keys. full_name has a setter; display_name and initials do not.
+        $profile = CustomerProfile::make(['full_name' => 'Ada']);
+        $profile->fill(['full_name' => 'Grace']);
+
+        // Try: complete the column. name stays because it has a backing column;
+        // display_name, initials, and full_name are computed attributes.
+        CustomerProfile::where('name', 'Grace')->orderBy('name');
+
+        // Try: complete the properties; computed values still belong to the model.
+        $profile->display_name; // string, from a legacy accessor
+        $profile->initials;     // string, from a modern accessor
     }
 
 
@@ -1747,6 +1810,17 @@ class Demo
 
         // The bare `Redis` short name still resolves to the imported facade.
         Redis::connection();              // Facades\Redis static method
+    }
+
+    public function containerInvocation(): mixed
+    {
+        // Try: complete the parameter keys and follow them to importBooks().
+        return app()->call([self::class, 'importBooks'], ['path' => '/books', 'limit' => 2]);
+    }
+
+    public static function importBooks(string $path, int $limit = 1): string
+    {
+        return "{$path}:{$limit}";
     }
 
     public function dateHelpers(): \DateTime

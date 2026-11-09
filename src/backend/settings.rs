@@ -35,6 +35,30 @@ impl Backend {
             .possibly_empty_mismatches_enabled()
     }
 
+    /// Whether a type mismatch some members of the value's union fit is
+    /// reported; see
+    /// [`DiagnosticsConfig::partial_union_mismatches_enabled`](config::DiagnosticsConfig::partial_union_mismatches_enabled).
+    /// Reads the one flag without cloning the whole config.
+    pub(crate) fn partial_union_mismatches_enabled(&self) -> bool {
+        self.workspace
+            .config
+            .lock()
+            .diagnostics
+            .partial_union_mismatches_enabled()
+    }
+
+    /// Whether type mismatches are checked against docblock types, not
+    /// just native ones; see
+    /// [`DiagnosticsConfig::docblock_type_mismatches_enabled`](config::DiagnosticsConfig::docblock_type_mismatches_enabled).
+    /// Reads the one flag without cloning the whole config.
+    pub(crate) fn docblock_type_mismatches_enabled(&self) -> bool {
+        self.workspace
+            .config
+            .lock()
+            .diagnostics
+            .docblock_type_mismatches_enabled()
+    }
+
     /// The directory symlinks the workspace walks have indexed through.
     ///
     /// Walks report into it as they discover links; the watcher
@@ -110,7 +134,8 @@ impl Backend {
 
     /// Record that a Composer project of the workspace is a Drupal site,
     /// so every workspace walk reads Drupal's `.module`, `.install`, …
-    /// files as PHP the way the web-root class scan does.
+    /// files as PHP the way the web-root class scan does, and Drupal's own
+    /// declarations, such as its services, are read (see [`crate::drupal`]).
     ///
     /// Only ever turned on: a workspace whose subprojects include one
     /// Drupal site treats those extensions as PHP throughout.
@@ -138,7 +163,7 @@ impl Backend {
         true
     }
 
-    /// The inlay hint kinds in force, from `[inlay_hints]` and the
+    /// The inlay hint kinds in force, from `[inlay-hints]` and the
     /// editor's toggles together. Reads the one section without cloning
     /// the whole config.
     pub(crate) fn inlay_hint_kinds(&self) -> config::InlayHintKinds {

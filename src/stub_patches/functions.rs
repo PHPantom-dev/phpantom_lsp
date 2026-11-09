@@ -104,15 +104,36 @@ fn mark_benevolent(return_type: &mut Option<PhpType>) {
 /// whose own docblock is wrong.
 ///
 /// Separate from [`apply_function_stub_patches`], which is confined to the
-/// embedded stubs. Only Mockery's global `mock()` / `spy()` /
-/// `namedMock()` helpers are patched, recognised by their `$args`
-/// docblock as well as their name; see [`super::mockery`].
+/// embedded stubs. Mockery's mock helpers and Tempest's `query()` are
+/// recognised by their names and the incorrect parameter annotation.
 pub fn apply_third_party_function_patches(func: &mut FunctionInfo) {
     if func.namespace.is_none()
         && super::mockery::is_mock_helper(&func.name)
         && super::mockery::declares_mock_args(&func.parameters, &func.template_params)
     {
         super::mockery::widen_mock_args(func.parameters.make_mut(), &func.template_params);
+    }
+    if func.name.eq_ignore_ascii_case("query")
+        && func
+            .namespace
+            .as_ref()
+            .is_some_and(|namespace| namespace.eq_ignore_ascii_case("Tempest\\Database"))
+        && let [template] = func.template_params.as_slice()
+        && let [parameter] = &func.parameters[..]
+        && parameter.name == "$model"
+        && parameter
+            .type_hint
+            .as_ref()
+            .is_some_and(|hint| hint.is_named(template))
+    {
+        // Match QueryBuilder's constructor: a class name binds the model
+        // type to the class, while an object binds it to its own type.
+        let model = PhpType::named(*template);
+        func.parameters.make_mut()[0].type_hint = Some(PhpType::union(vec![
+            PhpType::class_string(Some(model.clone())),
+            model,
+            PhpType::string(),
+        ]));
     }
 }
 

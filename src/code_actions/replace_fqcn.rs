@@ -1,13 +1,14 @@
 //! Import a qualified symbol and replace its usages with a short name.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::blade::template_edits::TemplateText;
 use crate::completion::use_edit::{
-    UseBlockInfo, build_aliased_typed_use_edit, build_aliased_use_edit,
+    UseBlockInfo, build_aliased_typed_use_edit, build_aliased_use_edit, import_alias,
+    import_name_taken,
 };
 use crate::symbol_map::{ClassRefContext, SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::position_to_byte_offset;
@@ -91,7 +92,7 @@ impl ImportBatch {
 fn symbol_name_and_kind(span: &SymbolSpan) -> Option<(&str, ImportKind)> {
     match &span.kind {
         SymbolKind::ClassReference { name, context, .. }
-            if !matches!(context, ClassRefContext::UseImport) =>
+            if !matches!(context, ClassRefContext::UseImport | ClassRefContext::Dql) =>
         {
             Some((name, ImportKind::Class))
         }
@@ -203,7 +204,7 @@ impl Backend {
         };
 
         let template = self.template_text(uri);
-        if template.is_none() && self.is_blade_file(uri) {
+        if template.is_none() && self.is_php_template(uri) {
             return;
         }
         let symbols = self.qualified_symbols(
@@ -381,8 +382,7 @@ fn plan_import(
 }
 
 /// Pick an alias for `fqn` when its natural short name is already bound
-/// to something else, preferring a name derived from the parent
-/// namespace segment (`Node\Expr\Call` → `ExprCall`).
+/// to something else (see [`import_alias`]).
 fn import_alias_for(
     fqn: &str,
     natural_name: &str,
@@ -393,20 +393,7 @@ fn import_alias_for(
     }) {
         return None;
     }
-
-    let occupied: HashSet<String> = imports.keys().map(|name| name.to_lowercase()).collect();
-    let mut parts = fqn.rsplit('\\');
-    let short = parts.next().unwrap_or(natural_name);
-    let parent = parts.next().unwrap_or("Imported");
-    let base = format!("{}{}", parent, short);
-    if !occupied.contains(&base.to_lowercase()) {
-        return Some(base);
-    }
-    for suffix in 2.. {
-        let candidate = format!("{}{}", base, suffix);
-        if !occupied.contains(&candidate.to_lowercase()) {
-            return Some(candidate);
-        }
-    }
-    unreachable!()
+    Some(import_alias(fqn, |candidate| {
+        import_name_taken(candidate, imports)
+    }))
 }

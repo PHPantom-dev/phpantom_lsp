@@ -550,7 +550,7 @@ impl Backend {
                 crate::text_position::byte_range_to_lsp_range(&content, span.start, span.end);
             out.push(Location {
                 uri: url.clone(),
-                range: self.translate_blade_range_to_php(&entry.uri, range),
+                range: self.translate_template_range_to_php(&entry.uri, range),
             });
         }
     }

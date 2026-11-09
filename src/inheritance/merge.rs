@@ -21,9 +21,10 @@ use crate::virtual_members::{
 use super::{
     ClassRef, apply_substitution_to_method, apply_substitution_to_property,
     bind_inherited_class_keywords, bind_inherited_class_keywords_in_property,
-    build_substitution_map, enrich_method_arc_from_ancestor, enrich_property_arc_from_ancestor,
-    fill_template_bounds, method_has_inherited_class_keyword, method_references_params,
-    property_has_inherited_class_keyword, property_references_params, traits,
+    build_substitution_map, declared_self_type, enrich_method_arc_from_ancestor,
+    enrich_property_arc_from_ancestor, fill_template_bounds, method_has_inherited_class_keyword,
+    method_references_params, property_has_inherited_class_keyword, property_references_params,
+    traits,
 };
 
 /// Bundles the trait-level configuration passed through
@@ -148,7 +149,7 @@ pub(crate) fn resolve_class_with_inheritance(
         class_loader,
         0,
         &mut dedup,
-        &class.fqn(),
+        &declared_self_type(class, &HashMap::new()),
     );
 
     // 2. Walk up the `extends` chain and merge parent members.
@@ -226,6 +227,9 @@ fn inherit_class_metadata(merged: &mut ClassInfo, parent: &ClassInfo) {
     // readonly whether or not it repeats the keyword, and the
     // properties it inherits are readonly as well.
     merged.is_readonly |= parent.is_readonly;
+    // PHP checks `#[\AllowDynamicProperties]` on the class and every
+    // ancestor, so a subclass takes dynamic properties too.
+    merged.allows_dynamic_properties |= parent.allows_dynamic_properties;
 
     // Eloquent model configuration (`$fillable`, `$casts`,
     // `$primaryKey`, …) comes from the nearest class that declares it.
@@ -296,14 +300,21 @@ struct LevelTransform<'a> {
     /// member keeps its shared `Arc` / avoids the substitution
     /// walk (copy-on-write).
     sub_keys: Vec<String>,
-    parent_fqn: Atom,
+    /// What a bare `self` in the parent's members stands for: the parent,
+    /// with the arguments this level gives its template parameters.
+    self_type: PhpType,
+    /// Whether the parent is generic, so that `self_type` depends on this
+    /// level's substitutions as well as on the parent.
+    generic_self: bool,
     declaring_parent: Option<String>,
     /// Interning fingerprints for the three transform shapes a parent
     /// member can need (substitution, relative-keyword binding, or
-    /// both), computed once per level.  The keyword binding is fully
-    /// determined by the declaring parent (its own parent is what a bare
-    /// `parent` binds to), so the transformed copies are identical for
-    /// every subclass and can be shared through the interning store.
+    /// both), computed once per level.  The keyword binding of a
+    /// non-generic parent is fully determined by the parent (its own
+    /// parent is what a bare `parent` binds to), so the transformed copies
+    /// are identical for every subclass and can be shared through the
+    /// interning store.  A generic parent's `self` carries this level's
+    /// arguments, so its binding is fingerprinted with them.
     fp_sub: TransformFingerprint,
     fp_self: TransformFingerprint,
     fp_both: TransformFingerprint,
@@ -315,7 +326,8 @@ impl<'a> LevelTransform<'a> {
         Self {
             subs,
             sub_keys: subs.keys().cloned().collect(),
-            parent_fqn,
+            self_type: declared_self_type(parent, subs),
+            generic_self: !parent.template_params.is_empty(),
             declaring_parent: parent.parent_class.map(|a| a.to_string()),
             fp_sub: TransformFingerprint::new(Some(subs), None, 0),
             fp_self: TransformFingerprint::new(None, Some(parent_fqn.as_str()), 0),
@@ -327,7 +339,7 @@ impl<'a> LevelTransform<'a> {
     fn fingerprint(&self, needs_sub: bool, needs_keywords: bool) -> TransformFingerprint {
         match (needs_sub, needs_keywords) {
             (true, false) => self.fp_sub,
-            (false, true) => self.fp_self,
+            (false, true) if !self.generic_self => self.fp_self,
             _ => self.fp_both,
         }
     }
@@ -380,7 +392,7 @@ fn merge_parent_members(
         class_loader,
         0,
         dedup,
-        &parent.fqn(),
+        &declared_self_type(parent, level_subs),
     );
 
     let transform = LevelTransform::new(parent, level_subs);
@@ -466,7 +478,7 @@ fn merge_parent_methods(
             if needs_keywords {
                 bind_inherited_class_keywords(
                     &mut ancestor_method,
-                    &transform.parent_fqn,
+                    &transform.self_type,
                     transform.declaring_parent.as_deref(),
                 );
             }
@@ -510,7 +522,7 @@ fn merge_parent_properties(
                 if needs_keywords {
                     bind_inherited_class_keywords_in_property(
                         &mut p,
-                        &transform.parent_fqn,
+                        &transform.self_type,
                         transform.declaring_parent.as_deref(),
                     );
                 }

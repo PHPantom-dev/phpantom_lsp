@@ -49,7 +49,7 @@ pub fn run() -> String {
         "contextual",
     );
     if tokens_mode != "contextual" {
-        sections.push(format!("[semantic_tokens]\nmode = \"{tokens_mode}\"\n"));
+        sections.push(format!("[semantic-tokens]\nmode = \"{tokens_mode}\"\n"));
     }
 
     let mut content = CONFIG_HEADER.to_string();
@@ -92,7 +92,7 @@ fn prompt_diagnostic_toggles() -> Vec<&'static str> {
         "Report unknown properties on classes with __get that also declare virtual properties?",
         false,
     ) {
-        diagnostics.push("report-magic-properties = true");
+        diagnostics.push("magic-properties = true");
     }
     if prompt_bool(
         "Report a member that only some classes of a union declare?",
@@ -101,10 +101,31 @@ fn prompt_diagnostic_toggles() -> Vec<&'static str> {
         diagnostics.push("partial-union-members = true");
     }
     if prompt_bool(
+        "Report exceptions a function throws without catching them or listing them in @throws?",
+        false,
+    ) {
+        diagnostics.push("unhandled-exceptions = true");
+    }
+    if prompt_bool("Report parameters a function never reads?", false) {
+        diagnostics.push("unused-parameters = true");
+    }
+    if prompt_bool(
         "Report a type mismatch when the only problem is a possible null or false?",
         false,
     ) {
         diagnostics.push("possibly-empty-mismatches = true");
+    }
+    if !prompt_bool(
+        "Report a type mismatch when some members of a union fit?",
+        true,
+    ) {
+        diagnostics.push("partial-union-mismatches = false");
+    }
+    if !prompt_bool(
+        "Check type mismatches against docblock types, not just native ones?",
+        true,
+    ) {
+        diagnostics.push("docblock-type-mismatches = false");
     }
     diagnostics
 }

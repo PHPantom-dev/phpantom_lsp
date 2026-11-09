@@ -67,11 +67,7 @@ impl Backend {
             _ => return HashMap::new(),
         };
 
-        let callee = super::TemplateCallee {
-            parameters: &method.parameters,
-            template_bindings: method.template_bindings(),
-            template_param_bounds: method.template_param_bounds(),
-        };
+        let callee = super::TemplateCallee::of_method(&method);
         let mut subs = super::bind_template_args(&callee, arg_texts, None, ctx);
 
         finish_template_subs(
@@ -655,9 +651,32 @@ fn callable_param_seeds(
 /// bare one.  The bare alternative matches anything, so it is only used when
 /// no other alternative fits.
 ///
+/// An argument that is a union the hint's shape cannot take whole (the
+/// `TypeInterface<int>|TypeInterface<string>` values of an array literal
+/// against `TypeInterface<T>`) binds the template from each alternative, and
+/// the bindings union.
+///
 /// Returns `None` when the hint does not name the template, or when the two
 /// shapes disagree, leaving the caller's positional extraction to run.
 pub(super) fn unify_template(
+    param_hint: &PhpType,
+    arg_type: &PhpType,
+    tpl_name: &str,
+) -> Option<PhpType> {
+    if let Some(unified) = unify_template_shape(param_hint, arg_type, tpl_name) {
+        return Some(unified);
+    }
+    let TypeKind::Union(arg_members) = arg_type.kind() else {
+        return None;
+    };
+    let bound: Vec<PhpType> = arg_members
+        .iter()
+        .filter_map(|member| unify_template(param_hint, member, tpl_name))
+        .collect();
+    (!bound.is_empty()).then(|| PhpType::union(bound))
+}
+
+fn unify_template_shape(
     param_hint: &PhpType,
     arg_type: &PhpType,
     tpl_name: &str,
@@ -754,6 +773,38 @@ pub(super) fn unify_template(
             })
         }
         TypeKind::Nullable(inner) => unify_template(inner, arg_type.unwrap_nullable(), tpl_name),
+        // `Closure(): T` against `Closure(): Foo`: what the argument returns,
+        // else what it takes at the parameter the hint names `T` in.
+        // A union of callables binds from each of them, below.
+        //
+        // The callable is nested in a larger hint here (the value type of
+        // `iterable<Tk, (Closure(): Tv)>`), so what it returns ends up held
+        // as a value, and a `void` closure's value is `null`.
+        TypeKind::Callable(hint) => {
+            let TypeKind::Callable(arg) = arg_type.kind() else {
+                return None;
+            };
+            let null;
+            let arg_return = match arg.return_type.as_ref() {
+                Some(ret) if ret.is_void() => {
+                    null = PhpType::null();
+                    Some(&null)
+                }
+                ret => ret,
+            };
+            if let Some(unified) = hint
+                .return_type
+                .as_ref()
+                .zip(arg_return)
+                .and_then(|(h, a)| unify_template(h, a, tpl_name))
+            {
+                return Some(unified);
+            }
+            hint.params
+                .iter()
+                .zip(&arg.params)
+                .find_map(|(h, a)| unify_template(&h.type_hint, &a.type_hint, tpl_name))
+        }
         _ => None,
     }
 }

@@ -1,0 +1,11 @@
+# Try: find the references of greeting to see every place that attaches
+# acme/greeting: the controller, the template, and acme_theme's library.
+greeting:
+  version: 1.x
+  css:
+    component:
+      css/acme-greeting.css: {}
+  # Try: go to the definition of core/drupal, which lands on its key in
+  # core's core.libraries.yml, or complete a library name in this list.
+  dependencies:
+    - core/drupal

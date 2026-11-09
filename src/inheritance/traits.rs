@@ -12,7 +12,8 @@ use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MAX_TRAIT_DEPTH};
 use crate::virtual_members::laravel::{
-    extends_eloquent_model, is_has_factory_trait, model_to_factory_fqn,
+    extends_eloquent_model, inherit_model_column_attributes, is_has_factory_trait,
+    model_to_factory_fqn,
 };
 use crate::virtual_members::{
     TransformFingerprint, intern_transformed_method, intern_transformed_property,
@@ -46,7 +47,7 @@ pub(crate) fn merge_traits_into(
     class_loader: &ResolvedClassLoader<'_>,
     depth: u32,
     dedup: &mut MergeDedup,
-    self_class_name: &str,
+    self_type: &PhpType,
 ) {
     if depth > MAX_TRAIT_DEPTH {
         return;
@@ -58,6 +59,17 @@ pub(crate) fn merge_traits_into(
         } else {
             continue;
         };
+
+        // Laravel examines only the traits directly used at each class level.
+        if depth == 0
+            && let Some(metadata) = trait_info.laravel()
+            && metadata.declared
+                & (crate::types::model_declaration::COLUMN_ATTRIBUTES
+                    | crate::types::model_declaration::UNGUARDED_ATTRIBUTE)
+                != 0
+        {
+            inherit_model_column_attributes(merged.laravel_mut(), metadata);
+        }
 
         // Build a substitution map for this trait if the using class
         // declared `@use TraitName<Type1, Type2>` and the trait has
@@ -126,7 +138,7 @@ pub(crate) fn merge_traits_into(
                 class_loader,
                 depth + 1,
                 dedup,
-                self_class_name,
+                self_type,
             );
         }
 
@@ -163,7 +175,7 @@ pub(crate) fn merge_traits_into(
                     class_loader,
                     parent_depth + 1,
                     dedup,
-                    self_class_name,
+                    self_type,
                 );
             }
 
@@ -224,8 +236,9 @@ pub(crate) fn merge_traits_into(
                 .next_back();
 
             let needs_sub = method_references_params(method, &sub_keys);
-            // Replace bare `self` with the using class name so that
-            // `self` resolves to the class that imports the trait.
+            // Replace bare `self` with the using class (and its template
+            // parameters) so that `self` resolves to the class that
+            // imports the trait.
             let needs_bare_self = method_has_bare_self(method);
             if vis_change.is_none() && !needs_sub && !needs_bare_self {
                 // Nothing to rewrite: keep the shared `Arc` instead of
@@ -243,7 +256,7 @@ pub(crate) fn merge_traits_into(
                     apply_substitution_to_method(&mut method, &trait_subs);
                 }
                 if needs_bare_self {
-                    replace_bare_self_in_method(&mut method, self_class_name);
+                    replace_bare_self_in_method(&mut method, self_type);
                 }
                 method
             };

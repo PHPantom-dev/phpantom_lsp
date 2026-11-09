@@ -2551,7 +2551,7 @@ fn undefined_var_diagnostics_in_project(files: &[(&str, &str)]) -> Vec<Diagnosti
         let full = dir.path().join(rel_path);
         std::fs::create_dir_all(full.parent().unwrap()).unwrap();
         std::fs::write(&full, content).unwrap();
-        uris.push(format!("file://{}", full.display()));
+        uris.push(crate::common::file_uri(&full));
     }
     let backend = create_test_backend();
     for (uri, (_, content)) in uris.iter().zip(files) {
@@ -2596,7 +2596,7 @@ function helper() {
     ]);
     assert_eq!(
         flagged_names(&diags),
-        vec!["Undefined variable '$missing'".to_string()]
+        vec!["Undefined variable $missing".to_string()]
     );
 }
 
@@ -2661,7 +2661,7 @@ define('WPINC', 'wp-includes');
     ]);
     assert_eq!(
         flagged_names(&diags),
-        vec!["Undefined variable '$missing'".to_string()]
+        vec!["Undefined variable $missing".to_string()]
     );
 }
 
@@ -2685,7 +2685,7 @@ function test(): void {
     ]);
     assert_eq!(
         flagged_names(&diags),
-        vec!["Undefined variable '$missing'".to_string()]
+        vec!["Undefined variable $missing".to_string()]
     );
 }
 

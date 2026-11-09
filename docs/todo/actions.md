@@ -8,48 +8,6 @@ within the same impact tier.
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
-## A34. Unified code action handler architecture
-
-**Impact: Medium · Complexity: Very High**
-
-Refactor the code action system to use a unified handler architecture
-inspired by rust-analyzer's assist system. Currently each code action
-has a separate `collect_*` method called from a hand-maintained list in
-`handle_code_action`, and deferred actions have a separate `resolve_*`
-method dispatched via a string match in `resolve_code_action`. PHPStan
-quick-fixes and refactoring actions use different code paths.
-
-### Changes
-
-1. **Unified handler signature.** Each code action becomes a function
-   `fn(&mut Actions, &ActionContext) -> Option<()>`. Handlers are
-   collected in a static array. `handle_code_action` iterates the array
-   instead of calling methods one by one.
-
-2. **Closure-based lazy resolve.** Handlers call
-   `actions.add(id, label, range, |builder| { ... })`. The closure
-   only runs when the action is being resolved, eliminating separate
-   `collect_*` / `resolve_*` method pairs. The same handler function
-   serves both Phase 1 (applicability check + lightweight stub) and
-   Phase 2 (compute edit).
-
-3. **Unified type for actions and diagnostic fixes.** Use the same
-   struct for PHPStan quick-fixes and refactoring actions. The LSP
-   layer gets one conversion path. Diagnostic fixes attach the same
-   type as their quick-fix data.
-
-4. **Sort by target range size.** Sort results by `target.len()` as
-   a tiebreaker. Smaller target = more specific = higher priority.
-   No manual priority numbers needed.
-
-### When to implement
-
-Do this when the next batch of code actions is added (A25, A28, etc.).
-The refactoring pays for itself by making each subsequent action
-cheaper to add: write one function, append it to an array.
-
----
-
 ## A16. Snippet Placeholder for Extracted Method Name
 
 **Impact: Medium · Complexity: Medium**
@@ -132,26 +90,6 @@ offset has different semantics).
 
 **Code action kind:** `refactor.rewrite`.
 **Guard:** `php_version >= 8.0`.
-
----
-
-### A28. Explicit nullable parameter type (PHP 8.4 deprecation)
-
-**Impact: Medium · Complexity: Low**
-
-Convert implicit nullable parameters to explicit nullable syntax:
-`function foo(string $p = null)` → `function foo(?string $p = null)`.
-
-PHP 8.4 deprecates the implicit nullable form. PHPStorm flags this.
-PHP-CS-Fixer's `NullableTypeDeclarationForDefaultNullValueFixer`
-handles union types, intersection types (DNF), and constructor
-property promotion.
-
-Only offer when the parameter has a type hint, a `= null` default, and
-the type does not already include `null` (no `?` prefix, no `|null`
-in a union).
-
-**Code action kind:** `quickfix`.
 
 ---
 
@@ -419,3 +357,46 @@ something to produce as output.
   `Simplification` enum rather than a new module.
 
 **Code action kind:** `refactor.rewrite`.
+
+---
+
+### A46. Convert nested calls to the pipe operator (PHP 8.5+)
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$slug = strtolower(trim(str_replace(' ', '-', $title)));
+// →
+$slug = $title
+    |> (fn($x) => str_replace(' ', '-', $x))
+    |> trim(...)
+    |> strtolower(...);
+```
+
+PhpStorm offers this on any call nested in another call's sole or first
+argument. A call whose only argument is the inner result becomes a
+first-class callable (`trim(...)`); one with other arguments becomes an
+arrow function, since `|>` passes exactly one argument. Offer it only when
+the project's PHP version is 8.5 or later, and the reverse ("Inline pipe
+into nested calls") on a `|>` chain.
+
+---
+
+### A47. Convert a getter or setter method into a property hook (PHP 8.4+)
+
+**Impact: Low · Complexity: Medium**
+
+```php
+private string $name;
+public function getName(): string { return strtoupper($this->name); }
+// →
+public string $name { get => strtoupper($this->name); }
+```
+
+"Generate property hooks" (`src/code_actions/generate_property_hooks.rs`)
+adds an empty hook to a property. PhpStorm also offers the migration: when
+a method only returns (or only assigns) one property, move its body into
+the property's hook, make the property public, and rewrite the callers
+(`$x->getName()` → `$x->name`) through the rename machinery. Skip it when
+the method is part of an interface or overrides a parent, since the
+callers through that contract cannot be rewritten.

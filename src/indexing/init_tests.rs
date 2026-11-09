@@ -81,9 +81,7 @@ async fn monorepo_subprojects_register_path_repository_mappings() {
     let module = mapping_base(&backend, "Demo\\Common\\")
         .expect("the path-repository module's namespace must be mapped");
     assert!(
-        module
-            .trim_end_matches('/')
-            .ends_with("app/modules/common/src"),
+        Path::new(&module).ends_with("app/modules/common/src"),
         "got {module}"
     );
     let own = mapping_base(&backend, "App\\").expect("the subproject's own namespace");
@@ -326,4 +324,346 @@ async fn a_drupal_site_reads_its_hook_files_as_php_everywhere() {
             .any(|loc| loc.uri.as_str().ends_with("demo.install")),
         "the call in demo.install must be found: {locations:?}"
     );
+}
+
+/// A Drupal tree with its web root at `web_root` and no `composer.json`
+/// of the project's own, only core's and a module's.  The module sits in a
+/// vendor folder, outside `contrib` and `custom`, and the tree ignores
+/// every module the way a site's `.gitignore` ignores contributed ones.
+fn write_drupal_tree(web_root: &Path) {
+    write(
+        &web_root.join("core/lib/Drupal.php"),
+        "<?php\nclass Drupal {}\n",
+    );
+    write(
+        &web_root.join("core/composer.json"),
+        r#"{ "name": "drupal/core", "autoload": { "psr-4": { "Drupal\\Core\\": "lib/Drupal/Core" } } }"#,
+    );
+    let module = web_root.join("modules/acme/acme_greeter");
+    write(
+        &module.join("composer.json"),
+        r#"{ "name": "acme/acme_greeter", "type": "drupal-module" }"#,
+    );
+    write(
+        &module.join("src/Greeter.php"),
+        "<?php\nnamespace Drupal\\acme_greeter;\nclass Greeter {}\n",
+    );
+    write(
+        &module.join("acme_greeter.services.yml"),
+        "services:\n  acme_greeter.greeter:\n    class: Drupal\\acme_greeter\\Greeter\n",
+    );
+    write(&web_root.join(".gitignore"), "/modules/\n");
+}
+
+/// What every Drupal tree without a `composer.json` must give, with its
+/// web root at `web_root` inside the workspace at `root`, a git checkout
+/// so that the tree's `.gitignore` holds.
+async fn assert_indexed_as_a_drupal_site(root: &Path, web_root: &Path) {
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    assert!(
+        !crate::composer::discover_subproject_roots(root).is_empty(),
+        "the tree must hold the composer.json files a monorepo would be made of"
+    );
+
+    let backend = index_workspace(root).await;
+
+    assert!(backend.is_drupal_project());
+    assert!(indexes(&backend, "Drupal\\acme_greeter\\Greeter"));
+    // The workspace walk leaves core to the Drupal scan.
+    assert!(indexes(&backend, "Drupal"));
+    let services = web_root.join("modules/acme/acme_greeter/acme_greeter.services.yml");
+    assert!(
+        backend.drupal_declaration_files().contains(&services),
+        "{:?}",
+        backend.drupal_declaration_files()
+    );
+    for project in ["core", "modules/acme/acme_greeter"] {
+        assert!(
+            !is_composer_project(&backend, &web_root.join(project)),
+            "{project} must not be indexed as a project of its own"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_drupal_tree_without_composer_json_is_a_drupal_site() {
+    let dir = tempfile::tempdir().unwrap();
+    write_drupal_tree(dir.path());
+    assert_indexed_as_a_drupal_site(dir.path(), dir.path()).await;
+}
+
+#[tokio::test]
+async fn a_drupal_tree_under_web_without_composer_json_is_a_drupal_site() {
+    let dir = tempfile::tempdir().unwrap();
+    let web_root = dir.path().join("web");
+    write_drupal_tree(&web_root);
+    assert_indexed_as_a_drupal_site(dir.path(), &web_root).await;
+}
+
+/// Without Drupal core, a workspace holding a `core/` folder with a
+/// `composer.json` is still a monorepo, and one without any is still a
+/// plain workspace; neither is a Drupal site.
+#[tokio::test]
+async fn a_workspace_without_drupal_core_is_no_drupal_site() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("core/composer.json"),
+        r#"{ "autoload": { "psr-4": { "Core\\": "src/" } } }"#,
+    );
+    write(
+        &dir.path().join("core/src/Kernel.php"),
+        "<?php\nnamespace Core;\nclass Kernel {}\n",
+    );
+    let backend = index_workspace(dir.path()).await;
+    assert!(!backend.is_drupal_project());
+    assert!(is_composer_project(&backend, &dir.path().join("core")));
+
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("lib/Thing.php"),
+        "<?php\nnamespace Plain;\nclass Thing {}\n",
+    );
+    let backend = index_workspace(dir.path()).await;
+    assert!(!backend.is_drupal_project());
+    assert!(indexes(&backend, "Plain\\Thing"));
+}
+
+/// A Drupal project in `docroot/` of a workspace without a `composer.json`
+/// of its own owns the site: it is indexed as a Composer project, with the
+/// dependencies its gitignored `vendor/` holds.
+#[tokio::test]
+async fn a_drupal_project_in_a_workspace_folder_keeps_its_dependencies() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    let docroot = dir.path().join("docroot");
+    write_subproject(&docroot, &["Client"]);
+    write(
+        &docroot.join("composer.json"),
+        r#"{ "require": { "drupal/core-recommended": "^11", "acme/lib": "*" } }"#,
+    );
+    write(
+        &docroot.join("core/lib/Drupal.php"),
+        "<?php\nclass Drupal {}\n",
+    );
+    write(&docroot.join(".gitignore"), "/vendor/\n");
+
+    let backend = index_workspace(dir.path()).await;
+
+    assert!(backend.is_drupal_project());
+    assert!(is_composer_project(&backend, &docroot));
+    assert!(indexes(&backend, "Acme\\Lib\\Client"));
+}
+
+/// A Composer project with its own dependencies beside a Drupal tree that
+/// has no `composer.json`, or inside it when the tree is the workspace, is
+/// still indexed as a project, and the tree as a Drupal site.
+#[tokio::test]
+async fn a_drupal_tree_without_composer_json_keeps_a_project_beside_it() {
+    for web in ["", "web"] {
+        let dir = tempfile::tempdir().unwrap();
+        let web_root = if web.is_empty() {
+            dir.path().to_path_buf()
+        } else {
+            dir.path().join(web)
+        };
+        write_drupal_tree(&web_root);
+        let behat = dir.path().join("tests/behat");
+        write_subproject(&behat, &["Client"]);
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+
+        let backend = index_workspace(dir.path()).await;
+
+        assert!(backend.is_drupal_project(), "{web:?}");
+        assert!(is_composer_project(&backend, &behat), "{web:?}");
+        assert!(indexes(&backend, "Acme\\Lib\\Client"), "{web:?}");
+        assert!(
+            indexes(&backend, "Drupal\\acme_greeter\\Greeter"),
+            "{web:?}"
+        );
+        assert!(
+            !is_composer_project(&backend, &web_root.join("core")),
+            "{web:?}"
+        );
+    }
+}
+
+/// A root project using `bamarni/composer-bin-plugin`, whose `phpunit` bin
+/// namespace installs `PHPUnit\Framework\<class>` for each of `classes`
+/// at PHPUnit `version`.
+fn write_bin_plugin_project(root: &Path, plugin: bool, classes: &[&str], version: &str) {
+    let require = if plugin {
+        r#""require-dev": { "bamarni/composer-bin-plugin": "^1.8" },"#
+    } else {
+        ""
+    };
+    write(
+        &root.join("composer.json"),
+        &format!(r#"{{ {require} "autoload": {{ "psr-4": {{ "App\\": "src/" }} }} }}"#),
+    );
+    let namespace = root.join("vendor-bin/phpunit");
+    write(
+        &namespace.join("composer.json"),
+        r#"{ "require": { "phpunit/phpunit": "*" } }"#,
+    );
+    write(
+        &namespace.join("composer.lock"),
+        &format!(r#"{{ "packages": [{{ "name": "phpunit/phpunit", "version": "{version}" }}] }}"#),
+    );
+    write(
+        &namespace.join("vendor/composer/installed.json"),
+        r#"{ "packages": [ {
+            "name": "phpunit/phpunit",
+            "install-path": "../phpunit/phpunit",
+            "autoload": { "psr-4": { "PHPUnit\\": "src/" } }
+        } ] }"#,
+    );
+    let src = namespace.join("vendor/phpunit/phpunit/src");
+    if src.exists() {
+        std::fs::remove_dir_all(&src).unwrap();
+    }
+    for class in classes {
+        write(
+            &src.join(format!("Framework/{class}.php")),
+            &format!("<?php\nnamespace PHPUnit\\Framework;\nclass {class} {{}}\n"),
+        );
+    }
+}
+
+fn indexed_uri(backend: &Backend, fqn: &str) -> Option<String> {
+    backend.symbols.fqn_uri_index.read().get(fqn).cloned()
+}
+
+fn is_composer_project(backend: &Backend, dir: &Path) -> bool {
+    backend
+        .workspace
+        .composer_projects
+        .read()
+        .iter()
+        .any(|project| project.root == dir)
+}
+
+#[tokio::test]
+async fn a_bin_namespace_installs_tools_for_the_root_project() {
+    let dir = tempfile::tempdir().unwrap();
+    write_bin_plugin_project(dir.path(), true, &["TestCase"], "10.5.38");
+    // A nested project of its own, so the root's files run in a scope.
+    write_subproject(&dir.path().join("platform"), &["Client"]);
+
+    let backend = index_root_project(dir.path()).await;
+
+    let namespace = dir.path().join("vendor-bin/phpunit");
+    assert!(!is_composer_project(&backend, &namespace));
+    let uri = indexed_uri(&backend, "PHPUnit\\Framework\\TestCase")
+        .expect("the class the bin namespace installs must be indexed");
+    let test_uri = crate::util::path_to_uri(&dir.path().join("tests/FooTest.php"));
+    let scope = backend
+        .project_scope_for(&test_uri)
+        .expect("the root has a scope beside platform/");
+    assert!(scope.sees(&uri), "the root's files must see {uri}");
+    let platform_uri = crate::util::path_to_uri(&dir.path().join("platform/src/A.php"));
+    let platform_scope = backend.project_scope_for(&platform_uri).unwrap();
+    assert!(
+        !platform_scope.sees(&uri),
+        "another project must not see the root's tools"
+    );
+
+    // Library code: never analysed or edited as the project's own.
+    assert!(
+        backend
+            .workspace
+            .vendor_dir_paths
+            .lock()
+            .contains(&namespace.join("vendor")),
+        "the bin namespace's vendor must be registered as library code"
+    );
+    assert_eq!(
+        backend
+            .symbols
+            .fqn_origin_index
+            .read()
+            .get("PHPUnit\\Framework\\TestCase")
+            .copied(),
+        Some(ClassCompletionOrigin::VendorExplicit)
+    );
+    assert_eq!(backend.phpunit_major(), Some(10));
+}
+
+#[tokio::test]
+async fn without_the_plugin_a_vendor_bin_project_stays_a_nested_project() {
+    let dir = tempfile::tempdir().unwrap();
+    write_bin_plugin_project(dir.path(), false, &["TestCase"], "10.5.38");
+
+    let backend = index_root_project(dir.path()).await;
+
+    assert!(is_composer_project(
+        &backend,
+        &dir.path().join("vendor-bin/phpunit")
+    ));
+    assert!(indexes(&backend, "PHPUnit\\Framework\\TestCase"));
+}
+
+#[tokio::test]
+async fn the_root_vendor_wins_over_a_bin_namespace() {
+    let dir = tempfile::tempdir().unwrap();
+    write_bin_plugin_project(dir.path(), true, &["TestCase"], "10.5.38");
+    write(
+        &dir.path().join("vendor/composer/installed.json"),
+        r#"{ "packages": [ {
+            "name": "phpunit/phpunit",
+            "install-path": "../phpunit/phpunit",
+            "autoload": { "psr-4": { "PHPUnit\\": "src/" } }
+        } ] }"#,
+    );
+    write(
+        &dir.path()
+            .join("vendor/phpunit/phpunit/src/Framework/TestCase.php"),
+        "<?php\nnamespace PHPUnit\\Framework;\nclass TestCase {}\n",
+    );
+    // Package files are indexed under their canonical path, which on
+    // Windows is the long form of the temp dir's 8.3 short name.
+    let root_copy = crate::util::path_to_uri(
+        &dunce::canonicalize(
+            dir.path()
+                .join("vendor/phpunit/phpunit/src/Framework/TestCase.php"),
+        )
+        .unwrap(),
+    );
+
+    let backend = index_root_project(dir.path()).await;
+    assert_eq!(
+        indexed_uri(&backend, "PHPUnit\\Framework\\TestCase"),
+        Some(root_copy.clone())
+    );
+
+    // …and still does after the bin namespace is updated.
+    let lock = dir.path().join("vendor-bin/phpunit/composer.lock");
+    backend.rescan_composer_indexes(dir.path(), &[lock]);
+    assert_eq!(
+        indexed_uri(&backend, "PHPUnit\\Framework\\TestCase"),
+        Some(root_copy)
+    );
+}
+
+#[tokio::test]
+async fn an_update_inside_a_bin_namespace_is_picked_up() {
+    let dir = tempfile::tempdir().unwrap();
+    write_bin_plugin_project(dir.path(), true, &["TestCase"], "9.6.20");
+
+    let backend = index_root_project(dir.path()).await;
+    assert_eq!(backend.phpunit_major(), Some(9));
+
+    write_bin_plugin_project(dir.path(), true, &["Assert"], "10.5.38");
+    let lock = dir.path().join("vendor-bin/phpunit/composer.lock");
+    backend.rescan_composer_indexes(dir.path(), &[lock]);
+
+    assert!(indexes(&backend, "PHPUnit\\Framework\\Assert"));
+    assert!(
+        !indexes(&backend, "PHPUnit\\Framework\\TestCase"),
+        "a class the update removed must stop resolving"
+    );
+    assert!(
+        !is_composer_project(&backend, &dir.path().join("vendor-bin/phpunit")),
+        "the update must not index the namespace as a nested project"
+    );
+    assert_eq!(backend.phpunit_major(), Some(10));
 }

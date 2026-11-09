@@ -977,3 +977,41 @@ async fn moving_a_class_written_on_the_open_tag_line_declares_the_namespace_ahea
 
     assert_eq!(result, "<?php namespace App; class Foo {}\n");
 }
+
+#[tokio::test]
+async fn a_class_rename_rewrites_a_tempest_view_in_its_own_coordinates() {
+    // A view's attributes are reordered in the PHP it lowers to, so the
+    // rename's edits have to come back through its source map.
+    const VIEW: &str = concat!(
+        "<?php use App\\Internal\\Widget; ?>\n",
+        "<p :title=\"Widget::label()\" :if=\"true\">{{ \\App\\Internal\\Widget::label() }}</p>\n",
+    );
+    let (backend, dir) = blade_move_workspace(&[
+        (
+            "src/Internal/Widget.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Widget {\n    public static function label(): string { return ''; }\n}\n",
+        ),
+        ("views/panel.view.php", VIEW),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Widget.php");
+    let ws = rename(&backend, &uri, 3, 7, "Gadget")
+        .await
+        .expect("expected an edit");
+
+    let view = ws_uri(&dir, "views/panel.view.php");
+    let result = apply_edits(VIEW, &edits_for_uri(&ws, &view));
+
+    assert!(
+        result.starts_with("<?php use App\\Internal\\Gadget;"),
+        "the import must be renamed in place:\n{result}"
+    );
+    assert!(
+        result.ends_with(concat!(
+            "?>\n",
+            "<p :title=\"Gadget::label()\" :if=\"true\">{{ \\App\\Internal\\Gadget::label() }}</p>\n",
+        )),
+        "the markup must keep its shape:\n{result}"
+    );
+}

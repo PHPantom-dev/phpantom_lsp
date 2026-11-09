@@ -350,15 +350,7 @@ fn fold_scalar_expression(text: &str, resolve: TextResolver<'_>) -> Option<PhpTy
     let text = strip_wrapping_parens(text.trim());
 
     if let Some(operands) = split_top_level_concat(text) {
-        let mut operands = operands.into_iter();
-        let mut folded = fold_concat_operand(operands.next()?, resolve)?;
-        for operand in operands {
-            folded = crate::type_engine::variable::rhs_resolution::fold_concat_types(
-                &folded,
-                &fold_concat_operand(operand, resolve)?,
-            )?;
-        }
-        return Some(folded);
+        return fold_concat_operands(operands, resolve);
     }
     // An operator expression is folded operand by operand.
     if has_top_level_int_operator(text) || text.starts_with(['~', '-', '+']) {
@@ -371,6 +363,24 @@ fn fold_scalar_expression(text: &str, resolve: TextResolver<'_>) -> Option<PhpTy
     // not it is an integer. Asking the resolver directly rather than through
     // the fold covers the non-integer values too, and asks only once.
     resolve(text).filter(|ty| matches!(ty.kind(), TypeKind::Literal(_)))
+}
+
+/// Fold a concatenation without treating a quoted compound expression as
+/// one literal or passing that same expression back to its own resolver.
+pub(crate) fn fold_string_concatenation(text: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
+    fold_concat_operands(split_top_level_concat(text)?, resolve)
+}
+
+fn fold_concat_operands(operands: Vec<&str>, resolve: TextResolver<'_>) -> Option<PhpType> {
+    let mut operands = operands.into_iter();
+    let mut folded = fold_concat_operand(operands.next()?, resolve)?;
+    for operand in operands {
+        folded = crate::type_engine::variable::rhs_resolution::fold_concat_types(
+            &folded,
+            &fold_concat_operand(operand, resolve)?,
+        )?;
+    }
+    Some(folded)
 }
 
 /// One operand of a concatenation: a literal is read as written, anything
@@ -445,6 +455,16 @@ fn is_decimal_point(bytes: &[u8], i: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn concatenation_does_not_fold_nonfinite_numbers() {
+        assert_eq!(
+            super::fold_string_concatenation("'value=' . HUGE", &|name| {
+                (name == "HUGE").then(|| crate::php_type::PhpType::literal_float("1e999"))
+            }),
+            None
+        );
+    }
+
     use super::*;
 
     /// Stands in for the shared resolver: the flags a `json_encode()` call

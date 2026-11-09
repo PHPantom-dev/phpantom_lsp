@@ -122,6 +122,10 @@ const fn offer_in_resource(kinds: &'static [&'static str], collect: CollectFn) -
 static COLLECTORS: &[Collector] = &[
     offer(QUICKFIX, Backend::collect_import_class_actions),
     offer(REWRITE, Backend::collect_replace_fqcn_actions),
+    skip_in_template(
+        &["refactor.rewrite", "refactor.inline"],
+        Backend::collect_import_alias_actions,
+    ),
     offer(
         ADD_MISSING_IMPORTS,
         Backend::collect_import_all_classes_action,
@@ -136,9 +140,12 @@ static COLLECTORS: &[Collector] = &[
     ),
     offer(QUICKFIX, Backend::collect_implement_methods_actions),
     offer(QUICKFIX, Backend::collect_replace_deprecated_actions),
+    offer(QUICKFIX, Backend::collect_explicit_nullable_actions),
     skip_in_template(QUICKFIX, Backend::collect_phpstan_actions),
     skip_in_template(QUICKFIX, Backend::collect_data_provider_actions),
     skip_in_template(QUICKFIX, Backend::collect_parent_call_actions),
+    skip_in_template(QUICKFIX, Backend::collect_remove_unused_member_actions),
+    skip_in_template(QUICKFIX, Backend::collect_unhandled_exception_actions),
     skip_in_template(QUICKFIX, Backend::collect_mago_fix_actions),
     offer(
         &["quickfix", "refactor.rewrite"],
@@ -165,6 +172,7 @@ static COLLECTORS: &[Collector] = &[
     skip_in_template(QUICKFIX, Backend::collect_fix_namespace_actions),
     skip_in_template(QUICKFIX, Backend::collect_fix_class_name_actions),
     offer(QUICKFIX, Backend::collect_fix_class_case_actions),
+    offer(QUICKFIX, Backend::collect_yii_definition_key_actions),
     offer(EXTRACT, Backend::collect_extract_interface_actions),
     skip_in_template(REFACTOR, Backend::collect_create_test_actions),
     offer_in_resource(QUICKFIX, Backend::collect_create_missing_view_actions),
@@ -215,7 +223,7 @@ impl Backend {
         // context stay in the template's coordinates, which is where the
         // collectors report a template's diagnostics, and what the editor
         // matches an action's diagnostics against.
-        let is_template = self.is_blade_file(uri);
+        let is_template = self.is_php_template(uri);
         let template = if is_template {
             // Nothing to offer for a template edited since it was lowered.
             let Some(template) = self.template_text(uri) else {
@@ -229,7 +237,7 @@ impl Backend {
         let translated;
         let params = if is_template {
             let mut moved = params.clone();
-            moved.range = self.translate_blade_range_to_php(uri, params.range);
+            moved.range = self.translate_template_range_to_php(uri, params.range);
             translated = moved;
             &translated
         } else {
@@ -380,7 +388,7 @@ impl Backend {
         // resolve reads the same text, and has nothing to resolve to once
         // the template no longer matches it.
         let template = self.template_text(&data.uri);
-        if template.is_none() && self.is_blade_file(&data.uri) {
+        if template.is_none() && self.is_php_template(&data.uri) {
             return (action, None);
         }
         let Some(content) = self.analysable_content(&data.uri) else {
@@ -469,6 +477,7 @@ impl Backend {
 
                 edit
             }
+            "phpantom.addThrows" => self.resolve_add_throws(data, content),
             "phpstan.removeThrows" => self.resolve_remove_throws(data, content),
             "phpstan.addOverride" | "phpstan.addReturnTypeWillChange" => {
                 self.resolve_add_attribute(data, content)

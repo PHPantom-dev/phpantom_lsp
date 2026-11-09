@@ -59,7 +59,7 @@ async fn autoload_function_index_deduplicates_with_global_functions() {
 
     // The function exists in both global_functions (already parsed) and
     // the autoload index.  It should appear only once.
-    let uri_helpers = format!("file://{}", helper_path.display());
+    let uri_helpers = crate::common::file_uri(&helper_path);
     backend.update_ast(&uri_helpers, "<?php\nfunction myFunc(): void {}");
 
     {
@@ -122,7 +122,7 @@ async fn autoload_constant_index_deduplicates_with_global_defines() {
     std::fs::write(&config_path, "<?php\ndefine('MY_CONST', 42);").unwrap();
 
     // Parse the file so it's in global_defines.
-    let uri_config = format!("file://{}", config_path.display());
+    let uri_config = crate::common::file_uri(&config_path);
     backend.update_ast(&uri_config, "<?php\ndefine('MY_CONST', 42);");
 
     // Also add to autoload index.
@@ -547,7 +547,7 @@ fn preload_autoload_files_skips_already_parsed() {
     // Parse a file up front with one signature.
     let dir = tempfile::tempdir().unwrap();
     let helper_path = dir.path().join("helpers.php");
-    let uri = format!("file://{}", helper_path.display());
+    let uri = crate::common::file_uri(&helper_path);
     backend.update_ast(&uri, "<?php\nfunction stableFunc(): string { return ''; }");
 
     // The on-disk content differs (a stale copy).  Preloading must not

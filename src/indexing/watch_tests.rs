@@ -71,8 +71,8 @@ fn deleting_a_template_drops_its_lowered_php_and_source_map() {
 
     let backend = Backend::new_test();
     backend.update_ast(&uri, "<div>{{ $name }}</div>\n");
-    assert!(backend.blade_virtual_php_arc(&uri).is_some());
-    assert!(backend.blade_source_map(&uri).is_some());
+    assert!(backend.template_virtual_php_arc(&uri).is_some());
+    assert!(backend.template_source_map(&uri).is_some());
 
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
@@ -82,8 +82,8 @@ fn deleting_a_template_drops_its_lowered_php_and_source_map() {
     };
     backend.apply_watched_file_changes(&params, dir.path());
 
-    assert!(backend.blade_virtual_php_arc(&uri).is_none());
-    assert!(backend.blade_source_map(&uri).is_none());
+    assert!(backend.template_virtual_php_arc(&uri).is_none());
+    assert!(backend.template_source_map(&uri).is_none());
 }
 
 /// The registrations a provider contributes are replaced when the file
@@ -581,6 +581,20 @@ fn the_startup_watcher_registration_is_recorded_for_a_client_that_opted_in() {
         .expect("a client that opted in should be asked to register its watchers");
 
     assert_eq!(registration.method, "workspace/didChangeWatchedFiles");
+    let options = registration.register_options.as_ref().unwrap();
+    assert!(
+        options["watchers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|watcher| {
+                watcher["globPattern"] == "**/tempest"
+                    && watcher["kind"]
+                        == serde_json::json!(
+                            WatchKind::Create | WatchKind::Change | WatchKind::Delete
+                        )
+            })
+    );
     assert_eq!(
         backend.registered_watcher_state.read().clone(),
         Some(crate::WatchedFileInputs {
@@ -588,8 +602,42 @@ fn the_startup_watcher_registration_is_recorded_for_a_client_that_opted_in() {
             is_laravel: true,
             is_symfony: true,
             is_twig: true,
+            is_tempest: true,
+            is_yii: true,
             followed_links: Vec::new(),
         })
+    );
+}
+
+/// Every directory named `tempest` is only worth watching in a Tempest
+/// project, where it is the extensionless CLI bootstrap. Classifying the
+/// project as Tempest later must add the watcher.
+#[test]
+fn the_tempest_bootstrap_watcher_follows_the_project_classification() {
+    let backend = backend_whose_client_accepts_watcher_registration();
+    backend.set_is_tempest(false);
+    let watches_tempest = |backend: &Backend| {
+        let (registration, _) = backend.build_watched_file_registration();
+        registration.register_options.unwrap()["watchers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|watcher| watcher["globPattern"] == "**/tempest")
+    };
+
+    backend.reregister_watched_files_if_changed();
+    assert!(!watches_tempest(&backend));
+
+    backend.set_is_tempest(true);
+    backend.reregister_watched_files_if_changed();
+    assert!(watches_tempest(&backend));
+    assert!(
+        backend
+            .registered_watcher_state
+            .read()
+            .as_ref()
+            .is_some_and(|inputs| inputs.is_tempest),
+        "a reclassified project must re-register its watchers"
     );
 }
 
@@ -633,6 +681,8 @@ fn reload_config_updates_the_registered_watcher_state_for_a_new_extension() {
             is_laravel: true,
             is_symfony: true,
             is_twig: true,
+            is_tempest: true,
+            is_yii: true,
             followed_links: Vec::new(),
         })
     );
@@ -651,6 +701,8 @@ fn reload_config_updates_the_registered_watcher_state_for_a_new_extension() {
             is_laravel: true,
             is_symfony: true,
             is_twig: true,
+            is_tempest: true,
+            is_yii: true,
             followed_links: Vec::new(),
         }),
         "a reload that adds an extension must update the registered watcher state"
@@ -681,6 +733,8 @@ fn reload_config_leaves_the_registered_watcher_state_untouched_for_an_unrelated_
             is_laravel: true,
             is_symfony: true,
             is_twig: true,
+            is_tempest: true,
+            is_yii: true,
             followed_links: Vec::new(),
         })
     );
@@ -796,7 +850,8 @@ fn a_real_path_event_is_respelled_through_the_link() {
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
             // Resolve system temp-directory symlinks as well as the watched link.
-            uri: Uri::from_file_path(real.join("src/Help.php").canonicalize().unwrap()).unwrap(),
+            uri: Uri::from_file_path(dunce::canonicalize(real.join("src/Help.php")).unwrap())
+                .unwrap(),
             kind: FileChangeType::Created,
         }],
     };
@@ -838,6 +893,8 @@ fn a_client_extension_update_updates_the_registered_watcher_state() {
             is_laravel: true,
             is_symfony: true,
             is_twig: true,
+            is_tempest: true,
+            is_yii: true,
             followed_links: Vec::new(),
         }),
         "a client-forwarded extension must be watched"

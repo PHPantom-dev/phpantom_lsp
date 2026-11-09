@@ -29,7 +29,8 @@
 //!   trait method.  Traits are incomplete by nature — they expect to
 //!   be mixed into classes that provide the missing members.  Flagging
 //!   accesses that only exist on host classes produces a high rate of
-//!   false positives.
+//!   false positives.  A chain from them (`$this->manager->x()`) is
+//!   checked once it resolves to a class other than the trait.
 //!
 //! ## Performance: subject resolution cache
 //!
@@ -74,8 +75,10 @@
 
 mod access;
 mod chains;
+mod doctrine;
 mod eloquent;
 mod member_check;
+mod yii;
 
 use std::collections::HashMap;
 
@@ -100,6 +103,14 @@ use chains::BrokenChains;
 /// Diagnostic code used for unknown-member diagnostics so that code
 /// actions can match on it.
 pub(crate) const UNKNOWN_MEMBER_CODE: &str = "unknown_member";
+
+/// Diagnostic code for a field a Doctrine repository call names that the
+/// entity does not map.
+pub(crate) const UNKNOWN_ENTITY_FIELD_CODE: &str = "invalid_doctrine_field";
+
+/// Diagnostic code for an attribute a Yii Active Record call names that the
+/// record does not have.
+pub(crate) const INVALID_YII_ATTRIBUTE_CODE: &str = "invalid_yii_attribute";
 
 /// Diagnostic code for a member that some classes of a union declare and
 /// others do not.  Opt-in through `partial-union-members`.
@@ -137,7 +148,7 @@ struct UnknownMemberPass<'a> {
     content: &'a str,
     loaders: FileLoaders<'a>,
     /// Whether a magic method stands in for undeclared members
-    /// (`report_magic_properties`).  Read once for the whole file:
+    /// (`magic-properties`).  Read once for the whole file:
     /// `config()` clones the config behind a lock, and the flags cannot
     /// change mid-pass.
     report_magic: bool,
@@ -187,7 +198,7 @@ impl Backend {
             uri,
             content,
             loaders: self.file_loaders(&ctx.file),
-            report_magic: config.diagnostics.report_magic_properties_enabled(),
+            report_magic: config.diagnostics.magic_properties_enabled(),
             report_unresolved: config.diagnostics.unresolved_member_access_enabled(),
             report_partial_union: config.diagnostics.partial_union_members_enabled(),
             strict_attributes: self
@@ -200,6 +211,7 @@ impl Backend {
             local_classes: &ctx.file.classes,
             existence_guards: compute_existence_guards(content),
             isset_empty_ranges: compute_isset_empty_argument_ranges(content),
+            called_array_callables: self.yii_listener_method_offsets(uri, content),
         };
 
         // ── Parse cache for this diagnostic pass ────────────────────────
@@ -287,6 +299,44 @@ impl UnknownMemberPass<'_> {
         outcome: &SubjectOutcome,
         out: &mut Vec<Diagnostic>,
     ) -> MemberCheckResult {
+        if access.trait_self_chain && !self.trait_chain_is_known(access, outcome) {
+            return MemberCheckResult::Ok;
+        }
+        if access.yii_attribute {
+            if let SubjectOutcome::Resolved { classes, .. } = outcome {
+                self.report_unknown_yii_attribute(access, classes, out);
+            }
+            return MemberCheckResult::Ok;
+        }
+        if access.entity_field {
+            // Only a repository whose entity is known takes field names:
+            // on anything else the key is an ordinary array key.
+            if let SubjectOutcome::Resolved { classes, .. } = outcome {
+                self.report_unmapped_field(access, classes, out);
+            }
+            return MemberCheckResult::Ok;
+        }
+        if access.form_model_property {
+            // Only a form model takes property names there: on anything
+            // else the string is an ordinary argument.
+            return match outcome {
+                SubjectOutcome::Resolved {
+                    classes,
+                    branches,
+                    types,
+                } if !classes.is_empty()
+                    && crate::yii::forms::form_model_classes(
+                        classes.to_vec(),
+                        self.class_loader(),
+                    )
+                    .len()
+                        == classes.len() =>
+                {
+                    self.report_on_resolved(access, classes, branches, types, out)
+                }
+                _ => MemberCheckResult::Ok,
+            };
+        }
         if access.mock_expectation {
             // Only a mock has mocked methods: on anything else the string
             // is an ordinary argument, and not this check's business.
@@ -309,9 +359,14 @@ impl UnknownMemberPass<'_> {
                 DiagnosticSeverity::Error,
                 SCALAR_MEMBER_ACCESS_CODE,
                 format!(
-                    "Cannot access {} '{}' on type '{}'",
+                    "Cannot {} {} {} on {}",
+                    if access.is_method_call {
+                        "call"
+                    } else {
+                        "access"
+                    },
                     access.kind_label(),
-                    access.member_name,
+                    access.spelled(None),
                     scalar,
                 ),
                 out,
@@ -324,15 +379,17 @@ impl UnknownMemberPass<'_> {
                 if type_str == "SoapClient" || type_str == "\\SoapClient" {
                     return MemberCheckResult::Ok;
                 }
+                // The class the subject's type names cannot be found, so
+                // what is missing is the class, not the member.
                 self.push_chain_break(
                     access,
                     DiagnosticSeverity::Warning,
-                    UNKNOWN_MEMBER_CODE,
+                    super::unknown_classes::UNKNOWN_CLASS_CODE,
                     format!(
-                        "Cannot verify {} '{}' — subject type '{}' could not be resolved",
+                        "Cannot check {} {}, because type {} could not be resolved",
                         access.kind_label(),
-                        access.member_name,
-                        unresolved,
+                        access.spelled(None),
+                        super::helpers::shown_type(unresolved),
                     ),
                     out,
                 )
@@ -357,22 +414,22 @@ impl UnknownMemberPass<'_> {
                     // engine can resolve (a dynamic property name, an
                     // arithmetic result), so there is nothing to quote.
                     format!(
-                        "Cannot verify {} '{}' — the type of its subject could not be resolved",
+                        "Cannot check {} {}, because the type of its subject could not be resolved",
                         access.kind_label(),
-                        access.member_name,
+                        access.spelled(None),
                     )
                 } else if matches!(outcome, SubjectOutcome::Mixed) {
                     format!(
-                        "Cannot verify {} '{}' — type of '{}' is 'mixed'",
+                        "Cannot check {} {}, because {} is mixed",
                         access.kind_label(),
-                        access.member_name,
+                        access.spelled(None),
                         subject_display,
                     )
                 } else {
                     format!(
-                        "Cannot verify {} '{}' — type of '{}' could not be resolved",
+                        "Cannot check {} {}, because the type of {} could not be resolved",
                         access.kind_label(),
-                        access.member_name,
+                        access.spelled(None),
                         subject_display,
                     )
                 };
@@ -389,6 +446,25 @@ impl UnknownMemberPass<'_> {
                 branches,
                 types,
             } => self.report_on_resolved(access, classes, branches, types, out),
+        }
+    }
+
+    /// Whether a chain rooted at a trait's own `$this` / `self` /
+    /// `static` / `parent` resolved to something its members can be
+    /// judged on.  A chain that lands back on the trait (a fluent
+    /// `return $this`) only knows the members the trait declares, not
+    /// the ones its hosts provide, and one the type engine could not
+    /// answer for may rest on a host member it does not see.
+    fn trait_chain_is_known(&self, access: &MemberAccessSite, outcome: &SubjectOutcome) -> bool {
+        match outcome {
+            SubjectOutcome::Mixed | SubjectOutcome::Untyped => false,
+            SubjectOutcome::Resolved { classes, .. } => {
+                let Some(trait_fqn) = access.current_class.map(|c| c.fqn()) else {
+                    return true;
+                };
+                !classes.iter().any(|c| c.fqn() == trait_fqn)
+            }
+            SubjectOutcome::Scalar(_) | SubjectOutcome::UnresolvableClass(_) => true,
         }
     }
 

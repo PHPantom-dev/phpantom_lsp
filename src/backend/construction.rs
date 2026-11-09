@@ -75,6 +75,14 @@ impl BackendState {
     /// Each public constructor customises only the fields that differ.
     fn defaults_with(workspace: WorkspaceEnv, stubs: StubIndices) -> Self {
         let (laravel_aliases, resolved_class_cache) = new_alias_slot_and_cache();
+        let is_doctrine = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let doctrine_mapping_files = crate::doctrine::new_mapping_file_index();
+        resolved_class_cache
+            .write()
+            .set_doctrine(crate::doctrine::DoctrineCacheState::new(
+                Arc::clone(&is_doctrine),
+                Arc::clone(&doctrine_mapping_files),
+            ));
         Self {
             name: "PHPantom".to_string(),
             version: env!("PHPANTOM_GIT_VERSION").to_string(),
@@ -83,16 +91,19 @@ impl BackendState {
             files: Arc::new(RwLock::new(HashMap::new())),
             framework_references: framework::new_framework_reference_index(),
             framework_doctrine_repositories: framework::new_doctrine_repository_index(),
+            doctrine_mapping_files,
+            doctrine_connections: crate::doctrine::connection::new_connection_index(),
             reference_index: reference_index::new_reference_index(),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace,
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
-            parsed_for_diagnostics: Mutex::new(None),
+            kept_parse: Mutex::new(None),
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
+            dormant_files: RwLock::new(HashSet::new()),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
             stub_index: Arc::new(RwLock::new(stubs.classes)),
             stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(stubs.functions))),
@@ -102,16 +113,21 @@ impl BackendState {
             resolved_class_cache,
             laravel: crate::backend::laravel::LaravelState::new(laravel_aliases),
             blade: blade::state::BladeState::default(),
+            tempest: crate::tempest::TempestState::default(),
             is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            is_doctrine: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            is_doctrine,
             is_symfony: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             symfony: crate::symfony::SymfonyState::default(),
             is_twig: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             is_yii: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            is_tempest: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            is_tempest_database: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             phpunit_major: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             twig: crate::twig::TwigState::default(),
             yii: crate::yii::YiiState::default(),
+            stylesheets: crate::stylesheets::StylesheetState::default(),
             wordpress_hooks: crate::wordpress::hooks::HookFiles::default(),
+            drupal: crate::drupal::DrupalState::default(),
             pest_configs: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             diag: crate::diagnostics::state::DiagnosticState::new(),

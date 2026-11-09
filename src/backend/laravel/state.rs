@@ -21,11 +21,6 @@ pub(crate) struct LaravelState {
     /// whenever files are re-parsed, so edits to `config/auth.php` take
     /// effect without a restart.
     pub(crate) auth_user_type_cache: RwLock<HashMap<String, Option<PhpType>>>,
-    /// Held while an auth model is computed, so other threads wait for the
-    /// result instead of seeing the class without it.
-    /// Reentrant because computing one guard can load a class that resolves
-    /// the default guard.
-    pub(crate) auth_user_type_compute_lock: parking_lot::ReentrantMutex<()>,
     /// Memoized concrete type every configured filesystem disk resolves to,
     /// derived from `config/filesystems.php` and
     /// [`storage_drivers`](Self::storage_drivers).
@@ -99,6 +94,13 @@ pub(crate) struct LaravelState {
     /// `$user->can()`, `$this->authorize()`, and `@can` check.  Empty for
     /// non-Laravel projects.  See [`virtual_members::laravel::gates`].
     pub(crate) gates: RwLock<laravel::LaravelGateIndex>,
+    /// Event listeners and model observers registered in service-provider
+    /// source (`Event::listen()`, `$listen`, `$observers`,
+    /// `Model::observe()`).  Built during `initialized` for Laravel projects
+    /// and refreshed when a registering file changes.  Powers the code
+    /// lenses that link a model to its observers and an event to its
+    /// listeners.  See [`virtual_members::laravel::events`].
+    pub(crate) events: RwLock<laravel::events::LaravelEventIndex>,
     /// Middleware aliases and groups: the framework's defaults, an HTTP
     /// kernel's, the ones `bootstrap/app.php` configures, and the ones a
     /// service provider registers on the router.  Built during
@@ -180,7 +182,6 @@ impl LaravelState {
     pub(crate) fn new(aliases: laravel::LaravelAliasSlot) -> Self {
         Self {
             auth_user_type_cache: RwLock::new(HashMap::new()),
-            auth_user_type_compute_lock: parking_lot::ReentrantMutex::new(()),
             storage_disk_type_cache: RwLock::new(None),
             config_facts_generation: AtomicU64::new(0),
             storage_drivers: RwLock::default(),
@@ -190,6 +191,7 @@ impl LaravelState {
             commands: GatedIndex::default(),
             morph_map: RwLock::default(),
             gates: RwLock::default(),
+            events: RwLock::default(),
             middleware: RwLock::default(),
             runtime_config_keys: RwLock::default(),
             macro_seeds: RwLock::default(),

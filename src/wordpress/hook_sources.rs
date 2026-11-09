@@ -109,8 +109,21 @@ pub(crate) fn hook_firings(content: &str) -> Vec<Firing> {
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, bytes);
     let resolver = mago_names::resolver::NameResolver::new(&arena);
     let names = crate::names::OwnedResolvedNames::from_resolved(&resolver.resolve(program));
-    let map = crate::symbol_map::extract_symbol_map_for_index(
-        program, content, &names, false, false, None,
+    let map = crate::symbol_map::extraction::extract_symbol_map_for_file(
+        program,
+        content,
+        &names,
+        crate::symbol_map::extraction::Frameworks {
+            symfony: false,
+            service_container: false,
+            drupal: false,
+            twig: false,
+            doctrine: false,
+            yii_params: false,
+            tempest: false,
+        },
+        None,
+        crate::drupal::hooks::DrupalFile::Other,
     );
     map.spans
         .into_iter()

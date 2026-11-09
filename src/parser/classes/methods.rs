@@ -74,6 +74,14 @@ pub(super) fn extract_method<'a>(
     // (`$this->hasMany(Post::class)`) when the declared type does not name
     // it.
     let return_type = relationship_return_type(return_type, method, doc_ctx);
+    // So is a Yii Active Record relation getter's.
+    let return_type =
+        crate::yii::active_record::relation_getter_return_type(return_type, method, doc_ctx);
+    let has_attribute_setter = crate::virtual_members::laravel::has_attribute_setter(
+        return_type.as_ref(),
+        method,
+        doc_ctx,
+    );
 
     // Merge `@param` docblock types into parameter type hints so that
     // callable signatures like `callable(User): void` are preserved.  This
@@ -148,6 +156,7 @@ pub(super) fn extract_method<'a>(
         reads_func_args,
         is_no_discard: crate::parser::has_no_discard_attribute(&method.attribute_lists, doc_ctx),
         extras: MethodExtras {
+            has_attribute_setter,
             return_description: info.and_then(docblock::extract_return_description_from_info),
             links: info
                 .map(docblock::extract_link_urls_from_info)
@@ -183,6 +192,10 @@ pub(super) fn extract_method<'a>(
             // walker can re-bind the receiver's template arguments after a
             // call, the way an assignment re-binds a variable's type.
             self_out: info.and_then(docblock::extract_self_out_type_from_info),
+            record_relations: crate::yii::active_record::declared_relations(method, doc_ctx),
+            record_table: crate::yii::active_record::declared_table(method),
+            // Set when the names are qualified, which knows the namespace.
+            default_namespace: None,
         }
         .into_option(),
     })
@@ -287,7 +300,7 @@ fn push_promoted_properties<'a>(
             deprecated_replacement: None,
             see_refs: Vec::new(),
             is_virtual: false,
-            source: None,
+            source: Some(PropertySource::PromotedParameter),
         });
     }
 }

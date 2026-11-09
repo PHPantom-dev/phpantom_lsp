@@ -43,6 +43,27 @@ pub(crate) fn record_unreachable_range(flow: &WalkFlow, range: (u32, u32)) {
     }
 }
 
+/// Record whether a class a `catch` clause names can be reached.
+///
+/// A `try` the walk visits more than once (in a loop body, or once per
+/// path into a `finally` block) is reached if any visit found it so.
+pub(crate) fn record_catch_type(flow: &WalkFlow, entry: CatchTypeReach) {
+    if let Some(entries) = &flow.catch_types {
+        merge_catch_type(&mut entries.borrow_mut(), entry);
+    }
+}
+
+/// Add `entry` to `entries`, keeping one per written class name.
+pub(crate) fn merge_catch_type(entries: &mut Vec<CatchTypeReach>, entry: CatchTypeReach) {
+    match entries
+        .iter_mut()
+        .find(|known| known.start == entry.start && known.end == entry.end)
+    {
+        Some(known) => known.reached |= entry.reached,
+        None => entries.push(entry),
+    }
+}
+
 /// Record the span a sequence of statements covers as unreachable.
 ///
 /// The alternative-syntax branch bodies (`if (…): … endif;`) are lists of

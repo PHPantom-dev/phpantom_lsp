@@ -159,24 +159,7 @@ message.
 
 ## Tier 4 — Unique to PHPantom
 
-### H20. `generics.callSiteVarianceRedundant` — Remove redundant variance annotation
-
-**Identifier:** `generics.callSiteVarianceRedundant`
-**Tip (in message):** `You can safely remove the call-site variance annotation.`
-
-Strip `covariant` or `contravariant` keywords from generic type arguments
-in the docblock. Requires parsing PHPDoc generic syntax
-(e.g. `Collection<covariant Foo>` becomes `Collection<Foo>`).
-Also expose it through `phpantom_lsp fix --with-phpstan` as the
-`phpstan.generics.callSiteVarianceRedundant` rule (see
-[fix-cli.md](fix-cli.md#phpstan-integration)).
-
-No other tool (PHPStorm, Rector, PHP-CS-Fixer) offers a quickfix for this
-PHPStan-specific diagnostic. Users currently have to edit the PHPDoc manually
-or suppress with `@phpstan-ignore`.
-
-**Stale detection:** no `covariant`/`contravariant` in the PHPDoc on the
-diagnostic line.
+No outstanding items.
 
 ---
 
@@ -205,7 +188,7 @@ let (message, tip) = match diag.message.split_once('\n') {
 };
 ```
 
-Actions that depend on tip text (H4, H15, H20) should use this
+Actions that depend on tip text (H4, H15) should use this
 pattern. The tip text has ANSI/HTML tags already stripped by `strip_ansi_tags`.
 
 ### Stale diagnostic detection

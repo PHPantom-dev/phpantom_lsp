@@ -182,7 +182,7 @@ async fn reports_unknown_method_on_model_instance() {
     let diags = diagnostics(&[], &consumer("        $order->getTotl();")).await;
     assert_eq!(
         messages(&diags),
-        vec!["Method 'getTotl' not found on class 'App\\Models\\Order'"],
+        vec!["Method App\\Models\\Order::getTotl() not found"],
     );
 }
 
@@ -191,7 +191,7 @@ async fn reports_unknown_static_method_on_model() {
     let diags = diagnostics(&[], &consumer("        Order::findPaid();")).await;
     assert_eq!(
         messages(&diags),
-        vec!["Method 'findPaid' not found on class 'App\\Models\\Order'"],
+        vec!["Method App\\Models\\Order::findPaid() not found"],
     );
 }
 
@@ -200,7 +200,7 @@ async fn reports_unknown_method_on_model_builder() {
     let diags = diagnostics(&[], &consumer("        Order::query()->paidd();")).await;
     assert_eq!(
         messages(&diags),
-        vec!["Method 'paidd' not found on class 'Illuminate\\Database\\Eloquent\\Builder'"],
+        vec!["Method Illuminate\\Database\\Eloquent\\Builder::paidd() not found"],
     );
 }
 
@@ -319,7 +319,7 @@ async fn accepts_names_registered_in_ways_the_scan_cannot_type() {
     .await;
     assert_eq!(
         messages(&diags),
-        vec!["Method 'stillUnknown' not found on class 'App\\Models\\Order'"],
+        vec!["Method App\\Models\\Order::stillUnknown() not found"],
     );
 }
 
@@ -390,7 +390,7 @@ async fn attribute_diagnostics(boot: &str) -> Vec<String> {
 async fn reports_unknown_attribute_when_missing_attributes_throw() {
     assert_eq!(
         attribute_diagnostics("        Model::preventAccessingMissingAttributes();").await,
-        vec!["Property 'statsu' not found on class 'App\\Models\\Order'"],
+        vec!["Property App\\Models\\Order::$statsu not found"],
     );
 }
 
@@ -398,7 +398,7 @@ async fn reports_unknown_attribute_when_missing_attributes_throw() {
 async fn strict_mode_turns_missing_attribute_reports_on() {
     assert_eq!(
         attribute_diagnostics("        Model::shouldBeStrict(! app()->isProduction());").await,
-        vec!["Property 'statsu' not found on class 'App\\Models\\Order'"],
+        vec!["Property App\\Models\\Order::$statsu not found"],
     );
 }
 

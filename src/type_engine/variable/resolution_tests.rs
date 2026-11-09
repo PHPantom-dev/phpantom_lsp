@@ -1206,7 +1206,8 @@ function test() {
 }
 
 /// Multiple push assignments inside a loop, with different types, should
-/// union into the list element type.
+/// union into the list element type. A constant writes the same value on
+/// every pass, so it keeps its literal.
 #[test]
 fn resolve_var_list_from_push_union() {
     let content = r#"<?php
@@ -1232,10 +1233,7 @@ function test() {
 
     assert!(!results.is_empty(), "Should resolve $items to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert!(
-        ts.contains("string") && ts.contains("int"),
-        "List should contain string|int union, got: {ts}"
-    );
+    assert_eq!(ts, "non-empty-list<'hello'|42>");
 }
 
 /// Repeated pushes of the same type inside a loop should not duplicate the
@@ -1266,14 +1264,14 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $items to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert_eq!(
-        ts, "non-empty-list<string>",
+        ts, "non-empty-list<'a'|'b'>",
         "Duplicate pushes of same type should not duplicate, got: {ts}"
     );
 }
 
 /// Reassignment resets push tracking inside a loop: pushing an `int` before
 /// reassigning `$x` back to `[]` and pushing a `string` should produce
-/// `list<string>`, not `list<int|string>`.
+/// `list<'hello'>`, not `list<1|'hello'>`.
 #[test]
 fn resolve_var_reassignment_resets_push_tracking() {
     let content = r#"<?php
@@ -1301,8 +1299,8 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $x to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert_eq!(
-        ts, "non-empty-list<string>",
-        "Reassignment should reset; only 'string' push should remain, got: {ts}"
+        ts, "non-empty-list<'hello'>",
+        "Reassignment should reset; only the 'hello' push should remain, got: {ts}"
     );
 }
 
@@ -1335,7 +1333,7 @@ function test($rest) {
 "#;
     assert_eq!(
         resolve_literal_test_var(content, "$merged"),
-        "array{a: mixed, ...<array-key, mixed>}"
+        "array{a: mixed, ...}"
     );
 }
 
@@ -2268,6 +2266,31 @@ $foo;
 }
 
 #[test]
+fn by_ref_closure_capture_sees_the_assignment_it_is_written_inside() {
+    // The assignment stores its value once the closure exists, so the
+    // closure never sees the `null` the variable held before.
+    let content = r#"<?php
+/** @var int */
+$foo = \Some\Unknown\make(function () use (&$foo) {
+    $foo;
+});
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(query(
+        "$foo",
+        content,
+        cursor_offset,
+        &ClassInfo::default(),
+        &[],
+        &|_| None,
+    ));
+
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "int");
+}
+
+#[test]
 fn by_ref_closure_capture_sees_a_narrowed_push_on_a_returning_path() {
     // The gather-into-an-array idiom: the closure narrows its parameter
     // with `instanceof`, pushes it onto a captured array and returns.  The
@@ -2414,6 +2437,7 @@ fn stub_function_info(name: &str, return_type: Option<PhpType>) -> crate::types:
         template_param_bounds: Default::default(),
         throws: Vec::new(),
         is_polyfill: false,
+        from_unbundled_extension: false,
         overloads: vec![],
         is_pure: false,
         is_impure: false,

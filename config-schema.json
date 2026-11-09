@@ -35,7 +35,7 @@
           "description": "Report calls that pass more arguments than the function accepts. PHP silently ignores extra arguments to user-defined functions, and many libraries exploit this for flexible APIs.",
           "default": false
         },
-        "report-magic-properties": {
+        "magic-properties": {
           "type": "boolean",
           "description": "Report unknown property access on classes with __get when virtual properties are defined (via @property docblock tags, Laravel Eloquent column inference, or other providers). Matches PHPStan's reportMagicProperties behaviour.",
           "default": false
@@ -49,6 +49,32 @@
           "type": "boolean",
           "description": "Report a type_mismatch_argument, type_mismatch_return or type_mismatch_property whose only failing members are null or false, such as a string|false passed to a string parameter. Off by default, since the code only fails if the value turns out empty. Matches PHPStan's checkUnionTypes and checkNullables (levels 7 and 8).",
           "default": false
+        },
+        "partial-union-mismatches": {
+          "type": "boolean",
+          "description": "Report a type_mismatch_argument, type_mismatch_return or type_mismatch_property where some members of the value's union fit the declared type, such as an array|string passed to a string parameter. On by default. Set to false to only report a value no member of which fits, the way PHPStan below level 7 judges unions. That also leaves out the mismatches possibly-empty-mismatches covers.",
+          "default": true
+        },
+        "docblock-type-mismatches": {
+          "type": "boolean",
+          "description": "Check arguments, return values and property assignments against the types docblocks declare. On by default. Set to false to report a type_mismatch_argument, type_mismatch_return or type_mismatch_property only when the value breaks the native type, so a parameter, return or property typed only in a docblock is not checked. Useful on legacy code whose docblocks have drifted from what the code does.",
+          "default": true
+        },
+        "unhandled-exceptions": {
+          "type": "boolean",
+          "description": "Report a throw, or a call whose callee declares @throws, where the exception is neither caught nor covered by a @throws tag of the enclosing function or method. Exceptions extending a class in unchecked-exceptions are not reported.",
+          "default": false
+        },
+        "unused-parameters": {
+          "type": "boolean",
+          "description": "Report a parameter a function, closure, or method never reads, after the last one it does read. Methods whose signature an interface, a parent class, or a possible override dictates are left alone, and so are parameters named with a $_ prefix.",
+          "default": false
+        },
+        "unchecked-exceptions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Exception classes, fully qualified, that unhandled-exceptions does not report, along with every class extending them.",
+          "default": ["Error", "LogicException", "RuntimeException"]
         },
         "workspace": {
           "type": "boolean",
@@ -139,7 +165,7 @@
         }
       }
     },
-    "semantic_tokens": {
+    "semantic-tokens": {
       "type": "object",
       "description": "Controls LSP semantic token highlighting.",
       "properties": {
@@ -152,6 +178,22 @@
             "off"
           ],
           "default": "contextual"
+        }
+      }
+    },
+    "inlay-hints": {
+      "type": "object",
+      "description": "Controls which kinds of inlay hint are shown. The editor can switch a kind off too, but cannot switch one back on over this section.",
+      "properties": {
+        "parameter-names": {
+          "type": "boolean",
+          "description": "Parameter names before the arguments of a call, such as `needle:`, along with the `&` of a by-reference parameter.",
+          "default": true
+        },
+        "closure-types": {
+          "type": "boolean",
+          "description": "Inferred parameter and return types on closures and arrow functions that do not declare them.",
+          "default": true
         }
       }
     },

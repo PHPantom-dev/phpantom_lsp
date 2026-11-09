@@ -43,6 +43,7 @@ Doctrine\ORM\Query\Expr\Comparison
 Doctrine\ORM\Query\Expr\From
 Doctrine\ORM\Query\Expr\Func
 Doctrine\ORM\Query\Expr\Literal
+Doctrine\ORM\Query\Expr\OrderBy
 Doctrine\ORM\Query\Expr\Orx
 Doctrine\ORM\QueryBuilder
 Doctrine\Persistence\ManagerRegistry

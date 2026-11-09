@@ -4,6 +4,7 @@ use crate::common::{
     complete_at, create_psr4_workspace, item_labels, position_after, split_cursor,
 };
 use phpantom_lsp::Backend;
+use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemTextEdit, Range, Uri,
 };
@@ -40,6 +41,8 @@ namespace Illuminate\Database\Eloquent;
 class Builder {
     /** @return $this */
     public function where($column, $operator = null, $value = null) { return $this; }
+    /** @return $this */
+    public function orderBy($column, $direction = 'asc') { return $this; }
     /** @return TModel */
     public function create(array $attributes = []) {}
     /** @return TModel */
@@ -106,14 +109,26 @@ class Post extends \Illuminate\Database\Eloquent\Model {
 "#;
 
 fn workspace() -> (Backend, tempfile::TempDir, Uri) {
+    workspace_with_models(ACCOUNT, USER)
+}
+
+fn workspace_with_models(account: &str, user: &str) -> (Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(
         COMPOSER,
         &[
             ("framework/Model.php", MODEL),
             ("framework/Builder.php", BUILDER),
+            (
+                "framework/Casts/Attribute.php",
+                "<?php namespace Illuminate\\Database\\Eloquent\\Casts; /** @template TGet @template TSet */ class Attribute { public function __construct(?callable $get = null, ?callable $set = null) {} public static function make(?callable $get = null, ?callable $set = null): static {} public static function get(callable $get): static {} public static function set(callable $set): static {} public function shouldCache(): static {} }",
+            ),
             ("framework/Relations/HasMany.php", HAS_MANY),
-            ("app/Models/Account.php", ACCOUNT),
-            ("app/Models/User.php", USER),
+            (
+                "framework/Relations/Pivot.php",
+                "<?php namespace Illuminate\\Database\\Eloquent\\Relations; class Pivot extends \\Illuminate\\Database\\Eloquent\\Model { protected $guarded = []; }",
+            ),
+            ("app/Models/Account.php", account),
+            ("app/Models/User.php", user),
             ("app/Models/Post.php", POST),
         ],
     );
@@ -148,21 +163,20 @@ async fn attribute_arrays_offer_inherited_and_local_column_sources() {
     let (backend, _dir, uri) = workspace();
     let items = complete_statement(&backend, &uri, "User::create(['§' => 'Ada']);").await;
     let labels = item_labels(items);
-    for column in [
-        "name",
-        "email",
-        "age",
-        "status",
-        "locked",
-        "tenant_id",
-        "display_name",
-    ] {
+    for column in ["name", "email", "age", "status", "locked", "tenant_id"] {
         assert!(
             labels.iter().any(|label| label == column),
             "missing {column}: {labels:?}"
         );
     }
-    for non_column in ["fillable", "guarded", "casts", "attributes", "posts"] {
+    for non_column in [
+        "fillable",
+        "guarded",
+        "casts",
+        "attributes",
+        "posts",
+        "display_name",
+    ] {
         assert!(
             !labels.iter().any(|label| label == non_column),
             "offered {non_column}: {labels:?}"
@@ -416,6 +430,556 @@ async fn scalar_values_and_where_column_operators_do_not_offer_columns() {
         assert!(
             !labels.iter().any(|label| label == "name"),
             "{statement}: {labels:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn model_column_attributes_supply_columns_and_fillable_ordering() {
+    let user = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes as Columns;
+#[Columns\Fillable(['nickname', 'email'])]
+#[Columns\Guarded('secret')]
+#[Columns\Hidden(array('token'))]
+#[Columns\Visible([0 => 'public_name'])]
+#[Columns\Appends(['display_name'])]
+class User extends Account {
+    protected $fillable = ['local'];
+    protected $casts = ['nickname' => 'string'];
+}
+"#;
+    let (backend, _dir, uri) = workspace_with_models(ACCOUNT, user);
+    for statement in [
+        "User::create(['§']);",
+        "$user->fill(['§']);",
+        "User::where('§', 1);",
+    ] {
+        let items = complete_statement(&backend, &uri, statement).await;
+        for name in [
+            "nickname",
+            "email",
+            "secret",
+            "token",
+            "public_name",
+            "local",
+        ] {
+            assert!(
+                items.iter().any(|item| item.label == name),
+                "missing {name}: {items:?}"
+            );
+        }
+        assert!(!items.iter().any(|item| item.label == "name"));
+        assert!(!items.iter().any(|item| item.label == "display_name"));
+        if !statement.contains("where") {
+            for name in ["nickname", "email", "local"] {
+                assert_eq!(
+                    items
+                        .iter()
+                        .find(|item| item.label == name)
+                        .unwrap()
+                        .sort_text
+                        .as_deref(),
+                    Some(format!("0_{name}").as_str())
+                );
+            }
+        }
+    }
+    let items = complete_statement(&backend, &uri, "$user->§").await;
+    assert!(items.iter().any(|item| {
+        item.label == "nickname"
+            && item
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("string"))
+    }));
+}
+
+#[tokio::test]
+async fn model_column_attributes_and_properties_inherit_independently() {
+    let account = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\{Fillable, Hidden, Visible};
+#[Fillable(['parent_attribute'])]
+#[Hidden(['parent_secret'])]
+#[Visible(['parent_visible'])]
+class Account extends \Illuminate\Database\Eloquent\Model {
+    protected $fillable = ['parent_property'];
+    protected $hidden = ['property_secret'];
+}
+"#;
+    let user = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\{Fillable, Visible};
+#[Fillable(['child_attribute'])]
+#[Visible([])]
+class User extends Account { protected $hidden = []; }
+"#;
+    let (backend, _dir, uri) = workspace_with_models(account, user);
+    let items = complete_statement(&backend, &uri, "User::create(['§']);").await;
+    for name in ["parent_property", "child_attribute", "parent_secret"] {
+        assert!(
+            items.iter().any(|item| item.label == name),
+            "missing {name}: {items:?}"
+        );
+    }
+    for name in ["parent_attribute", "parent_visible", "property_secret"] {
+        assert!(
+            !items.iter().any(|item| item.label == name),
+            "unexpected {name}: {items:?}"
+        );
+    }
+    for name in ["parent_property", "child_attribute"] {
+        assert_eq!(
+            items
+                .iter()
+                .find(|item| item.label == name)
+                .unwrap()
+                .sort_text
+                .as_deref(),
+            Some(format!("0_{name}").as_str())
+        );
+    }
+}
+
+#[tokio::test]
+async fn model_column_attributes_respect_guarded_property_and_unguarded_precedence() {
+    for (property, attributes, expect_attribute) in [
+        ("", "#[Guarded(['attribute_secret'])]", true),
+        (
+            "protected $guarded = ['*'];",
+            "#[Guarded(['attribute_secret'])]",
+            true,
+        ),
+        (
+            "protected $guarded = [];",
+            "#[Guarded(['attribute_secret'])]",
+            false,
+        ),
+        (
+            "protected $guarded = ['property_secret'];",
+            "#[Guarded(['attribute_secret'])]",
+            false,
+        ),
+        ("", "#[Guarded(['attribute_secret']), Unguarded]", false),
+        (
+            "protected $guarded = ['property_secret'];",
+            "#[Guarded(['attribute_secret']), Unguarded]",
+            false,
+        ),
+    ] {
+        let account = format!(
+            "<?php namespace App\\Models; class Account extends \\Illuminate\\Database\\Eloquent\\Model {{ {property} }}"
+        );
+        let user = format!(
+            "<?php namespace App\\Models; use Illuminate\\Database\\Eloquent\\Attributes\\{{Guarded, Unguarded}}; {attributes} class User extends Account {{}}"
+        );
+        let (backend, _dir, uri) = workspace_with_models(&account, &user);
+        let items = complete_statement(&backend, &uri, "User::where('§', 1);").await;
+        assert_eq!(
+            items.iter().any(|item| item.label == "attribute_secret"),
+            expect_attribute,
+            "{property} {attributes}: {items:?}"
+        );
+        assert_eq!(
+            items.iter().any(|item| item.label == "property_secret"),
+            property.contains("property_secret")
+        );
+        assert!(!items.iter().any(|item| item.label == "*"));
+    }
+}
+
+const ACCESSOR_MODEL: &str = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Casts\Attribute as Value;
+use Illuminate\Database\Eloquent\Attributes as Columns;
+/** @property-read string $legacy_only */
+#[Columns\Fillable(['fillable_column', 'overlapping'])]
+#[Columns\Appends(['attribute_only', 'overlapping'])]
+class User extends Account {
+    protected $casts = ['cast_column' => 'string'];
+    protected $attributes = ['default_column' => 'default'];
+    protected $hidden = ['hidden_computed', 'hidden_column'];
+    protected $visible = ['visible_computed', 'visible_column'];
+    protected $appends = ['legacy_only', 'modern_only', 'appended_unknown', 'overlapping'];
+
+    public function getLegacyOnlyAttribute(): string { return 'computed'; }
+    protected function modernOnly(): Value { return Value::make(get: fn () => 'computed'); }
+    protected function getterFactory(): Value { return Value::get(fn () => 'computed'); }
+    protected function nullSetter(): Value { return Value::make(set: null, get: fn () => 'computed'); }
+    public function getHiddenComputedAttribute(): string { return 'computed'; }
+    public function getVisibleComputedAttribute(): string { return 'computed'; }
+    public function getNameAttribute(): string { return 'stored'; }
+    public function getCastColumnAttribute(): string { return 'stored'; }
+    public function getDefaultColumnAttribute(): string { return 'stored'; }
+    public function getFillableColumnAttribute(): string { return 'stored'; }
+
+    public function getLegacyWritableAttribute(): string { return 'writable'; }
+    public function setLegacyWritableAttribute($value): void { $this->attributes['name'] = $value; }
+    protected function modernWritable(): Value { return Value::make(get: fn () => 'writable', set: fn ($value) => ['name' => $value]); }
+    protected function setterFactory(): Value { return Value::set(set: fn ($value) => ['name' => $value]); }
+    protected function positionalSetter(): Value { return Value::make(null, fn ($value) => ['name' => $value]); }
+    protected function constructorSetter(): Value { return new Value(set: fn ($value) => ['name' => $value]); }
+    protected function chainedSetter(): Value { return (Value::make(set: fn ($value) => ['name' => $value]))->shouldCache(); }
+    /** @return Value<string, string> */
+    protected function documentedSetter(): Value { return $this->attributeFactory(); }
+}
+"#;
+
+#[tokio::test]
+async fn computed_accessors_do_not_complete_as_query_columns() {
+    let (backend, _dir, uri) = workspace_with_models(ACCOUNT, ACCESSOR_MODEL);
+    for statement in ["User::where('§', 1);", "$query->orderBy('§');"] {
+        let items = item_labels(complete_statement(&backend, &uri, statement).await);
+        for column in [
+            "name",
+            "email",
+            "cast_column",
+            "default_column",
+            "fillable_column",
+            "hidden_column",
+            "visible_column",
+            "overlapping",
+        ] {
+            assert!(
+                items.iter().any(|item| item == column),
+                "missing {column}: {items:?}"
+            );
+        }
+        for computed in [
+            "legacy_only",
+            "modern_only",
+            "getter_factory",
+            "null_setter",
+            "hidden_computed",
+            "visible_computed",
+            "appended_unknown",
+            "attribute_only",
+            "legacy_writable",
+            "modern_writable",
+            "setter_factory",
+            "positional_setter",
+            "constructor_setter",
+            "chained_setter",
+            "documented_setter",
+        ] {
+            assert!(
+                !items.iter().any(|item| item == computed),
+                "offered {computed}: {items:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn computed_accessors_do_not_create_dynamic_where_methods() {
+    let (backend, _dir, uri) = workspace_with_models(ACCOUNT, ACCESSOR_MODEL);
+    for statement in ["User::where§", "$query->where§"] {
+        let items = complete_statement(&backend, &uri, statement).await;
+        let names: Vec<_> = items
+            .iter()
+            .map(|item| item.filter_text.as_deref().unwrap_or(&item.label))
+            .collect();
+        for column in [
+            "whereName",
+            "whereCastColumn",
+            "whereDefaultColumn",
+            "whereFillableColumn",
+        ] {
+            assert!(
+                names.iter().any(|name| name.starts_with(column)),
+                "missing {column}: {names:?}"
+            );
+        }
+        for computed in [
+            "whereLegacyOnly",
+            "whereModernOnly",
+            "whereHiddenComputed",
+            "whereVisibleComputed",
+            "whereLegacyWritable",
+            "whereModernWritable",
+            "whereAppendedUnknown",
+            "whereAttributeOnly",
+        ] {
+            assert!(
+                !names.iter().any(|name| name.starts_with(computed)),
+                "offered {computed}: {names:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn computed_accessors_with_setters_complete_in_attribute_arrays() {
+    let (backend, _dir, uri) = workspace_with_models(ACCOUNT, ACCESSOR_MODEL);
+    for statement in ["User::create(['§']);", "$user->fill(['§']);"] {
+        let items = item_labels(complete_statement(&backend, &uri, statement).await);
+        for writable in [
+            "name",
+            "cast_column",
+            "default_column",
+            "fillable_column",
+            "legacy_writable",
+            "modern_writable",
+            "setter_factory",
+            "positional_setter",
+            "constructor_setter",
+            "chained_setter",
+            "documented_setter",
+        ] {
+            assert!(
+                items.iter().any(|item| item == writable),
+                "missing {writable}: {items:?}"
+            );
+        }
+        for readonly in [
+            "legacy_only",
+            "modern_only",
+            "getter_factory",
+            "null_setter",
+            "hidden_computed",
+            "visible_computed",
+            "appended_unknown",
+            "attribute_only",
+        ] {
+            assert!(
+                !items.iter().any(|item| item == readonly),
+                "offered {readonly}: {items:?}"
+            );
+        }
+    }
+    // The lookup array is queried before it is assigned, so it takes
+    // columns only; the values array takes writable attributes.
+    let lookup =
+        item_labels(complete_statement(&backend, &uri, "User::firstOrCreate(['§']);").await);
+    assert!(lookup.iter().any(|item| item == "name"), "{lookup:?}");
+    assert!(
+        !lookup.iter().any(|item| item == "modern_writable"),
+        "{lookup:?}"
+    );
+    let values =
+        item_labels(complete_statement(&backend, &uri, "User::firstOrCreate([], ['§']);").await);
+    assert!(
+        values.iter().any(|item| item == "modern_writable"),
+        "{values:?}"
+    );
+}
+
+#[tokio::test]
+async fn computed_accessors_remain_model_properties() {
+    let (backend, _dir, uri) = workspace_with_models(ACCOUNT, ACCESSOR_MODEL);
+    let items = item_labels(complete_statement(&backend, &uri, "$user->§").await);
+    for property in [
+        "legacy_only",
+        "modern_only",
+        "getter_factory",
+        "hidden_computed",
+        "visible_computed",
+    ] {
+        assert!(
+            items.iter().any(|item| item == property),
+            "missing {property}: {items:?}"
+        );
+    }
+    assert!(!items.iter().any(|item| item == "appended_unknown"));
+    assert!(!items.iter().any(|item| item == "attribute_only"));
+}
+
+#[tokio::test]
+async fn computed_accessor_setter_changes_refresh_completions() {
+    let (backend, dir, uri) = workspace_with_models(ACCOUNT, ACCESSOR_MODEL);
+    let statement = "$user->fill(['modern_§']);";
+    assert_eq!(
+        item_labels(complete_statement(&backend, &uri, statement).await),
+        ["modern_writable"]
+    );
+    let changed = ACCESSOR_MODEL.replace(
+        "get: fn () => 'writable', set: fn ($value) => ['name' => $value]",
+        "get: fn () => 'writable'",
+    );
+    let model_uri = Uri::from_file_path(dir.path().join("app/Models/User.php")).unwrap();
+    crate::common::open_php(&backend, &model_uri, &changed).await;
+    assert!(
+        complete_statement(&backend, &uri, statement)
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn computed_accessors_preserve_schema_backed_columns() {
+    let user = "<?php namespace App\\Models; class User extends Account { public function getSchemaColumnAttribute(): string { return 'stored'; } }";
+    let (backend, dir, uri) = workspace_with_models(ACCOUNT, user);
+    std::fs::create_dir_all(dir.path().join("config")).unwrap();
+    std::fs::create_dir_all(dir.path().join("database/migrations")).unwrap();
+    std::fs::write(dir.path().join("config/database.php"), "<?php return ['default' => 'sqlite', 'connections' => ['sqlite' => ['driver' => 'sqlite']]];").unwrap();
+    std::fs::write(
+        dir.path()
+            .join("database/migrations/2026_01_01_create_users.php"),
+        r#"<?php
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\Schema\Blueprint;
+return new class extends \Illuminate\Database\Migrations\Migration {
+    public function up(): void {
+        Schema::create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('schema_column');
+        });
+    }
+};
+"#,
+    )
+    .unwrap();
+    backend
+        .initialized(tower_lsp_server::gen_lsp_types::InitializedParams {})
+        .await;
+    for statement in ["User::where('schema_§', 1);", "$user->fill(['schema_§']);"] {
+        assert_eq!(
+            item_labels(complete_statement(&backend, &uri, statement).await),
+            ["schema_column"]
+        );
+    }
+}
+
+#[tokio::test]
+async fn computed_accessors_inherit_setters_and_respect_method_overrides() {
+    let account = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Casts\Attribute as Value;
+trait AttributeFields {
+    protected function inheritedWritable(): Value { return Value::make(set: fn ($value) => ['name' => $value]); }
+    protected function overridden(): Value { return Value::make(set: fn ($value) => ['name' => $value]); }
+    public function getInheritedReadonlyAttribute(): string { return ''; }
+}
+class Account extends \Illuminate\Database\Eloquent\Model { use AttributeFields; }
+"#;
+    let user = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Casts\Attribute;
+class User extends Account {
+    protected function overridden(): Attribute { return Attribute::make(get: fn () => 'computed'); }
+    protected function unrelated(): \Attribute { return new \Attribute(); }
+}
+"#;
+    let (backend, _dir, uri) = workspace_with_models(account, user);
+    let writable = item_labels(complete_statement(&backend, &uri, "$user->fill(['§']);").await);
+    assert!(
+        writable.iter().any(|name| name == "inherited_writable"),
+        "{writable:?}"
+    );
+    for excluded in ["overridden", "inherited_readonly", "unrelated"] {
+        assert!(
+            !writable.iter().any(|name| name == excluded),
+            "{writable:?}"
+        );
+    }
+    let properties = item_labels(complete_statement(&backend, &uri, "$user->§").await);
+    assert!(
+        properties.iter().any(|name| name == "inherited_readonly"),
+        "{properties:?}"
+    );
+    assert!(
+        !properties.iter().any(|name| name == "unrelated"),
+        "{properties:?}"
+    );
+}
+
+#[tokio::test]
+async fn model_column_attributes_from_direct_traits_follow_class_precedence() {
+    let account = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\{Fillable, Hidden};
+#[Fillable(['ancestor'])]
+class Account extends \Illuminate\Database\Eloquent\Model {}
+#[Fillable(['trait_fillable']), Hidden(['trait_hidden'])]
+trait Columns {}
+#[Hidden(['nested_hidden'])]
+trait NestedColumns {}
+trait Wrapper { use NestedColumns; }
+"#;
+    let user = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
+#[Hidden(['own_hidden'])]
+class User extends Account { use Columns, Wrapper; }
+"#;
+    let (backend, _dir, uri) = workspace_with_models(account, user);
+    let items = complete_statement(&backend, &uri, "User::create(['§']);").await;
+    for name in ["trait_fillable", "own_hidden"] {
+        assert!(items.iter().any(|item| item.label == name), "{items:?}");
+    }
+    for name in ["ancestor", "trait_hidden", "nested_hidden"] {
+        assert!(!items.iter().any(|item| item.label == name), "{items:?}");
+    }
+}
+
+#[tokio::test]
+async fn model_column_attributes_update_after_provider_file_edits() {
+    let source = "<?php namespace App\\Models; #[\\Illuminate\\Database\\Eloquent\\Attributes\\Fillable(['before'])] class User extends Account {}";
+    let (backend, dir, uri) = workspace_with_models(ACCOUNT, source);
+    let items = complete_statement(&backend, &uri, "User::create(['§']);").await;
+    assert!(items.iter().any(|item| item.label == "before"));
+    let model_uri = Uri::from_file_path(dir.path().join("app/Models/User.php")).unwrap();
+    backend.update_ast(model_uri.as_str(), &source.replace("before", "after"));
+    let items = complete_statement(&backend, &uri, "User::create(['§']);").await;
+    assert!(items.iter().any(|item| item.label == "after"));
+    assert!(!items.iter().any(|item| item.label == "before"));
+}
+
+#[tokio::test]
+async fn model_column_attributes_index_imports_and_namespaces_before_extraction() {
+    for source in [
+        r#"<?php
+use Illuminate\Database\Eloquent\Attributes\Fillable as Fields;
+#[Fields(['nickname'])]
+class User extends \App\Models\Account {}
+(new User())->§
+"#,
+        r#"<?php
+namespace App;
+use Illuminate\Database\Eloquent\Attributes as Columns;
+#[Columns\Fillable(['nickname'])]
+class User extends \App\Models\Account {}
+(new User())->§
+"#,
+        r#"<?php
+namespace Other { use Other\Fillable as Fields; #[Fields(['wrong'])] class Other {} }
+namespace App {
+use Illuminate\Database\Eloquent\Attributes\Fillable as Fields;
+#[Fields(['nickname'])]
+class User extends \App\Models\Account {}
+(new User())->§
+}
+"#,
+    ] {
+        let (backend, _dir, uri) = workspace();
+        let (source, position) = split_cursor(source);
+        let items = complete_at(&backend, &uri, &source, position.line, position.character).await;
+        assert!(
+            items.iter().any(|item| item.label == "nickname"),
+            "{source}: {items:?}"
+        );
+        assert!(!items.iter().any(|item| item.label == "wrong"));
+    }
+}
+
+#[tokio::test]
+async fn model_column_attributes_use_pivots_empty_guarded_default() {
+    for (property, expected) in [("", true), ("protected $guarded = ['*'];", false)] {
+        let user = format!(
+            r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\Guarded;
+#[Guarded(['secret'])]
+class User extends \Illuminate\Database\Eloquent\Relations\Pivot {{ {property} }}
+"#
+        );
+        let (backend, _dir, uri) = workspace_with_models(ACCOUNT, &user);
+        let items = complete_statement(&backend, &uri, "User::where('§', 1);").await;
+        assert_eq!(
+            items.iter().any(|item| item.label == "secret"),
+            expected,
+            "{property}: {items:?}"
         );
     }
 }

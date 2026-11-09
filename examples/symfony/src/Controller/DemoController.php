@@ -5,10 +5,12 @@ namespace App\Controller;
 use App\Entity\User;
 use App\Event\OrderPlaced;
 use App\Message\SendWelcomeEmail;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Attribute\Route;
@@ -20,6 +22,7 @@ final class DemoController extends AbstractController
         private readonly TranslatorInterface $translator,
         private readonly EventDispatcherInterface $events,
         private readonly MessageBusInterface $commandBus,
+        private readonly EntityManagerInterface $entityManager,
         // Try: go-to-definition on the parameter name, declared in
         // config/services.php.
         #[Autowire(param: 'app.sender_name')]
@@ -46,6 +49,23 @@ final class DemoController extends AbstractController
         // container builder, or complete inside get('') to see the services
         // the installed bundles declare too, such as 'cache.app'.
         $container->get('app.default_mailer')->send($userId);
+        // Try: hover $slugger. config/services.yaml builds app.slugger from
+        // Slugger and decorates it with CachingSlugger, so it is either
+        // class, and cachedCount(), which only CachingSlugger declares, is
+        // no unknown method.
+        $slugger = $container->get('app.slugger');
+        $slugger->cachedCount();
+        // Try: hover $users, or complete after $users->. The mapping in
+        // config/doctrine/User.orm.xml names UserRepository as the entity's
+        // repository, so getRepository() returns it, not EntityRepository.
+        $users = $this->entityManager->getRepository(User::class);
+        $users->withEmail('ada@example.com');
+        // Try: complete after $users->findOneBy, or inside the keys of
+        // findBy(). The mapping maps email and displayName, so the
+        // repository answers findOneByEmail(), a key jumps to the property
+        // it maps, and a key the mapping does not map is reported.
+        $users->findOneByEmail('ada@example.com');
+        $users->findBy(['displayName' => 'Ada'], ['email' => 'ASC']);
         // Try: complete a route name inside generateUrl('').
         $this->generateUrl('app_demo', ['userId' => $userId]);
         // Try: go-to-definition on a translation key, or complete one inside
@@ -72,6 +92,15 @@ final class DemoController extends AbstractController
             'title' => $title,
             'user' => new User('ada@example.com', 'Ada'),
         ]);
+    }
+
+    // Try: go-to-definition on 'user:list' to reach the #[Groups] on
+    // User::getDisplayName(), find the references of 'user:read', or
+    // complete a group inside a new '' in the list.
+    #[Route('/demo/{userId}/profile', name: 'app_demo_profile')]
+    public function profile(string $userId): JsonResponse
+    {
+        return $this->json(new User('ada@example.com', $userId), context: ['groups' => ['user:list']]);
     }
 
     // Try: find references on legacy(). The route in config/routes.yaml points

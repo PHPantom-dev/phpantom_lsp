@@ -68,6 +68,33 @@ $capsule->schema()->create('customers', function (\Illuminate\Database\Schema\Bl
     $table->timestamps();
 });
 $customerDraft = \App\Models\Customer::make(['name' => 'Ada', 'email' => 'ada@example.test']);
+$profile = \App\Models\CustomerProfile::make(['full_name' => 'Ada']);
+check('A modern setter writes the backing name column', $profile->getAttributes() === ['name' => 'Ada']);
+$profile->fill(['full_name' => 'Grace']);
+check('fill accepts a computed attribute with a setter', $profile->getAttributes() === ['name' => 'Grace']);
+check('A read-only accessor can override a real column', $profile->name === 'GRACE' && $capsule->schema()->hasColumn('customers', 'name'));
+check('Read-only computed attributes remain readable', $profile->display_name === 'GRACE' && $profile->initials === 'G');
+check('Read-only computed attributes have no setters', !$profile->hasSetMutator('display_name') && !$profile->hasAttributeSetMutator('initials'));
+check('Appended attributes are serialized without becoming columns', $profile->toArray() === ['name' => 'GRACE', 'display_name' => 'GRACE', 'initials' => 'G']);
+foreach (['display_name', 'initials', 'full_name'] as $computed) {
+    check("$computed has no backing database column", !$capsule->schema()->hasColumn('customers', $computed));
+}
+check(
+    'Fillable combines class attributes with the model property',
+    $customerDraft->getFillable() === ['email', 'name']
+        && $customerDraft->isFillable('name')
+        && $customerDraft->isFillable('email')
+);
+check(
+    'Guarded replaces the default guarded property',
+    $customerDraft->getGuarded() === ['id'] && ! $customerDraft->isFillable('id')
+);
+check(
+    'Visible and Appends supply the serialized model attributes',
+    $customerDraft->getVisible() === ['name', 'email', 'display_name']
+        && $customerDraft->getAppends() === ['display_name']
+        && $customerDraft->toArray() === ['name' => 'Ada', 'display_name' => 'Ada']
+);
 check(
     'The Hidden model attribute accepts column names',
     $customerDraft->getHidden() === ['email']
@@ -109,6 +136,12 @@ check(
         && \App\Models\Customer::whereColumn('name', '!=', 'email')->count() === 1
 );
 $fillableBakery = \App\Models\Bakery::make(['flour' => 'whole wheat']);
+check(
+    'Bakery appends the computed warmth accessor',
+    $fillableBakery->warmth === 'warm'
+        && in_array('warmth', $fillableBakery->getAppends(), true)
+        && $fillableBakery->makeVisible('warmth')->toArray()['warmth'] === 'warm'
+);
 check(
     'Bakery exposes flour as fillable and kitchen_id as guarded',
     $fillableBakery->isFillable('flour')
@@ -1593,6 +1626,24 @@ check(
 
 // ─── Higher-order collection proxies ────────────────────────────────────────
 
+$projectionReview = (new \App\Models\Review())->setRawAttributes(['id' => 3, 'title' => 'Sourdough', 'rating' => '5']);
+$projectionReview->setRelation('reviewable', (new \App\Models\Loaf())->setRawAttributes(['id' => 7]));
+$projectionReviews = new \App\Models\ReviewCollection(['first' => $projectionReview]);
+check('Review casts title to string and rating to int', $projectionReview->title === 'Sourdough' && $projectionReview->rating === 5);
+$byTitle = $projectionReviews->keyBy('title');
+check('keyBy uses a property as the key and keeps the custom collection', $byTitle::class === \App\Models\ReviewCollection::class && $byTitle->all() === ['Sourdough' => $projectionReview]);
+check('keyBy follows a dotted relation property', $projectionReviews->keyBy('reviewable.id')->all() === [7 => $projectionReview]);
+$pluckedTitles = $projectionReviews->pluck('title', 'id');
+check('Eloquent pluck returns a base collection with typed keys and values', $pluckedTitles::class === \Illuminate\Support\Collection::class && $pluckedTitles->all() === [3 => 'Sourdough']);
+$ratingGroups = $projectionReviews->groupBy('rating');
+check('groupBy resets item keys by default', $ratingGroups::class === \App\Models\ReviewCollection::class && $ratingGroups->keys()->all() === [5] && $ratingGroups[5]::class === \App\Models\ReviewCollection::class && $ratingGroups[5]->all() === [$projectionReview]);
+check('groupBy can preserve the original item keys', $projectionReviews->groupBy('rating', preserveKeys: true)[5]->all() === ['first' => $projectionReview]);
+$nestedGroups = $projectionReviews->groupBy(['rating', 'title'], true);
+check('multiple groupers nest groups and preserve only the innermost keys', $nestedGroups::class === \Illuminate\Support\Collection::class && $nestedGroups->keys()->all() === [5] && $nestedGroups[5]::class === \App\Models\ReviewCollection::class && $nestedGroups[5]->keys()->all() === ['Sourdough'] && $nestedGroups[5]['Sourdough']->all() === ['first' => $projectionReview]);
+check('keyBy property and method proxies keep string keys', $projectionReviews->keyBy->title->all() === $byTitle->all() && $projectionReviews->keyBy->getTitle()->keys()->all() === ['']);
+check('groupBy method proxies keep string group keys', $projectionReviews->groupBy->getTitle()->keys()->all() === ['']);
+
+
 // Every proxy the LSP knows how to type must actually be proxyable, and
 // every proxyable method must be one the LSP knows how to type — otherwise
 // `$reviews->somethingElse->x` would resolve against a proxy Laravel never
@@ -2378,6 +2429,40 @@ check(
 check(
     'cancel() is reached by one route',
     ($bakeryActionRoutes['cancel'] ?? []) === ['bakeries.cancel']
+);
+
+// ─── Related classes ────────────────────────────────────────────────────────
+
+// The code lens above BlogPost links it to the factory `HasFactory` guesses
+// and the observer its `#[ObservedBy]` attribute registers.
+check(
+    'BlogPost::factory() guesses Database\\Factories\\BlogPostFactory',
+    \Illuminate\Database\Eloquent\Factories\Factory::resolveFactoryName(\App\Models\BlogPost::class)
+        === \Database\Factories\BlogPostFactory::class
+);
+$observedBy = (new ReflectionClass(\App\Models\BlogPost::class))
+    ->getAttributes(\Illuminate\Database\Eloquent\Attributes\ObservedBy::class);
+check(
+    'BlogPost is observed by BlogPostObserver',
+    count($observedBy) === 1
+        && (array) $observedBy[0]->newInstance()->classes === [\App\Observers\BlogPostObserver::class]
+);
+
+// Event discovery pairs NotifyBlogAuthor with the event its handle() names,
+// which is what the lenses on BlogPostPublished and the listener show.
+\Illuminate\Foundation\Events\DiscoverEvents::guessClassNamesUsing(
+    fn (SplFileInfo $file) => 'App\\Listeners\\' . $file->getBasename('.php')
+);
+$discovered = \Illuminate\Foundation\Events\DiscoverEvents::within(__DIR__ . '/app/Listeners', __DIR__);
+check(
+    'event discovery registers NotifyBlogAuthor@handle for BlogPostPublished',
+    ($discovered[\App\Events\BlogPostPublished::class] ?? [])
+        === [\App\Listeners\NotifyBlogAuthor::class . '@handle']
+);
+
+check(
+    'container call forwards parameter keys to the callable',
+    new \App\Demo()->containerInvocation() === '/books:2'
 );
 
 // ─── Summary ────────────────────────────────────────────────────────────────

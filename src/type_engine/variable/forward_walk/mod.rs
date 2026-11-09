@@ -72,6 +72,7 @@ mod includes;
 mod loop_control;
 mod loops;
 mod param_seeding;
+mod query_builder;
 mod reachability;
 mod readonly_properties;
 mod receiver_mutation;
@@ -107,6 +108,7 @@ pub(crate) use includes::*;
 pub(crate) use loop_control::*;
 pub(crate) use loops::*;
 pub(crate) use param_seeding::*;
+pub(crate) use query_builder::*;
 pub(crate) use reachability::*;
 pub(crate) use receiver_mutation::*;
 pub(crate) use relation_callbacks::*;
@@ -204,7 +206,7 @@ pub(crate) fn walk_body_forward<'b>(
         // block.
         if record_snapshots {
             let closure_scope = pre_stmt_scope.as_ref().unwrap_or(scope);
-            walk_closures_in_statement(stmt, closure_scope, scope, ctx);
+            walk_closures_in_statement(stmt, closure_scope, ctx);
             record_scope_snapshot(stmt_span.end.offset, scope);
         }
     }
@@ -437,7 +439,7 @@ pub(crate) fn top_level_scope_for_globals<'b>(
     );
     walked_scope(ctx, span, || {
         let mut scope = ScopeState::new();
-        seed_superglobals(&mut scope);
+        seed_top_level(&mut scope, ctx);
         walk_top_level(&statements, &mut scope, ctx);
         scope
     })

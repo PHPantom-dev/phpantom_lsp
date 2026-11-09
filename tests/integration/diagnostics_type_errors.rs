@@ -283,6 +283,65 @@ function test(): void {
     );
 }
 
+// ─── Argument whose class does not load ─────────────────────────────────────
+
+#[test]
+fn no_diagnostic_for_unloadable_class_passed_to_interface() {
+    // Nothing is known of the missing class's interfaces, so whether it
+    // implements the parameter's cannot be decided.
+    let php = r#"<?php
+namespace App;
+
+use Vendor\Missing\TestLogger;
+
+interface LoggerInterface {}
+
+class Factory {
+    public function addLogger(LoggerInterface $logger): void {}
+    public function addNullable(?LoggerInterface $logger): void {}
+}
+
+function test(Factory $factory): void {
+    $logger = new TestLogger();
+    $factory->addLogger($logger);
+    $factory->addNullable($logger);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "An unloadable class should leave the subtype check undecided, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_unloadable_class_where_it_cannot_fit() {
+    // A final class has no subclasses, and an object is never an int, so
+    // these stay mismatches however the missing class is declared.
+    let php = r#"<?php
+namespace App;
+
+use Vendor\Missing\TestLogger;
+
+final class Sealed {}
+
+function takes_sealed(Sealed $s): void {}
+function takes_int(int $n): void {}
+
+function test(): void {
+    $logger = new TestLogger();
+    takes_sealed($logger);
+    takes_int($logger);
+}
+"#;
+    let diags = collect(php);
+    assert_eq!(
+        type_error_count(&diags),
+        2,
+        "Expected mismatches for the final class and int parameters, got: {diags:?}"
+    );
+}
+
 // ─── No diagnostic: mixed parameter accepts anything ────────────────────────
 
 #[test]
@@ -1325,6 +1384,10 @@ fn message_always_shows_fqn() {
     // namespace which is the very information needed to resolve a
     // mismatch.
     let php = r#"<?php
+namespace Vendor { class Foo {} }
+namespace App { class Foo {} }
+
+namespace {
 /** @param \Vendor\Foo $f */
 function takes_vendor(\Vendor\Foo $f): void {}
 
@@ -1332,6 +1395,7 @@ function test(): void {
     /** @var \App\Foo $f */
     $f = null;
     takes_vendor($f);
+}
 }
 "#;
     let diags = collect(php);
@@ -2447,7 +2511,7 @@ function test(): void {
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
-        messages[0].contains("void") && messages[0].contains("returns no value"),
+        messages[0].contains("void") && messages[0].contains("returns nothing"),
         "the message should say the expression yields nothing, got {messages:?}"
     );
 }
@@ -3142,13 +3206,10 @@ class ExplorerController {
     // Index every file up front, mirroring the CLI's eager scan so the
     // call target and its `@template` docblock are available.
     for (rel_path, php) in &files {
-        let file_uri = format!("file://{}/{}", dir.path().display(), rel_path);
+        let file_uri = crate::common::file_uri(&dir.path().join(rel_path));
         backend.update_ast(&file_uri, php);
     }
-    let uri = format!(
-        "file://{}/src/Http/ExplorerController.php",
-        dir.path().display()
-    );
+    let uri = crate::common::file_uri(&dir.path().join("src/Http/ExplorerController.php"));
     let content = files[2].1;
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
@@ -4398,7 +4459,7 @@ function test(): void {
     takes_user($o);
 }
 "#;
-    let diags = collect(php);
+    let diags = collect_with_full_stubs(php);
     assert!(
         has_type_error(&diags),
         "Should flag stdClass passed to unrelated class param, got: {diags:?}"
@@ -5253,6 +5314,65 @@ function normalize(mixed $steps): void {
         "A dim-write to the foreach value variable must not leak into the \
          next iteration's binding, got: {diags:?}"
     );
+}
+
+#[test]
+fn no_diagnostic_for_constant_written_into_array_in_loop() {
+    // A constant writes the same value on every pass of the loop, so the
+    // array keeps the literal instead of widening it to `int`.
+    let php = r#"<?php
+final class Graph {
+    private const int WHITE = 0;
+    private const int GRAY = 1;
+    private const int BLACK = 2;
+
+    /** @param array<int, self::WHITE|self::GRAY|self::BLACK> $labels */
+    private static function check(array $labels): void {}
+
+    /** @param list<int> $nodes */
+    public static function hasCycle(array $nodes): void {
+        $labels = [];
+        foreach ($nodes as $node) {
+            $labels[$node] = self::WHITE;
+        }
+        self::check($labels);
+        $pushed = [];
+        foreach ($nodes as $node) {
+            $pushed[] = self::GRAY;
+            array_push($pushed, self::BLACK);
+        }
+        self::check($pushed);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A constant written in a loop should keep its literal, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_counter_written_into_array_in_loop() {
+    // A value computed from the previous pass changes on every pass, so
+    // the array only knows its base type.
+    let php = r#"<?php
+/** @param array<int, 0|1|2> $labels */
+function check(array $labels): void {}
+
+/** @param list<int> $nodes */
+function build(array $nodes): void {
+    $labels = [];
+    $state = 0;
+    foreach ($nodes as $node) {
+        $labels[$node] = $state;
+        $state = $state + 1;
+    }
+    check($labels);
+}
+"#;
+    let diags = collect(php);
+    assert_eq!(type_error_count(&diags), 1, "got: {diags:?}");
 }
 
 #[test]
@@ -7265,7 +7385,7 @@ class TestCase {
 
     let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
     let (backend, dir) = create_psr4_workspace(composer, &files);
-    let uri = format!("file://{}/src/TestCase.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/TestCase.php"));
     let content = files[3].1;
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
@@ -9670,10 +9790,10 @@ class Caller {
     let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
     let (backend, dir) = create_psr4_workspace(composer, &files);
     for (rel_path, php) in &files {
-        let file_uri = format!("file://{}/{}", dir.path().display(), rel_path);
+        let file_uri = crate::common::file_uri(&dir.path().join(rel_path));
         backend.update_ast(&file_uri, php);
     }
-    let uri = format!("file://{}/src/Caller.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Caller.php"));
     let content = files[2].1;
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
@@ -10323,7 +10443,7 @@ class Helper {
             ),
         ],
     );
-    let uri = format!("file://{}/app/Run.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("app/Run.php"));
     let php = "<?php\n\\App\\Helper::formatPrice(new \\Acme\\Decimal\\Decimal('0.00'));\n";
     backend.update_ast(&uri, php);
     let mut out = Vec::new();
@@ -11007,6 +11127,141 @@ acceptsInt(firstValue());
         messages.is_empty(),
         "expected no type error while the operand is unreadable, got {messages:?}"
     );
+}
+
+/// A class constant named as a type is the value it holds, so a method
+/// declared `@return self::STATUS_*` over a native `int` returns `1|2`,
+/// which fits a parameter typed `1|2` and not one typed `9`.
+#[test]
+fn class_constant_wildcard_return_is_its_constants_values() {
+    let php = r#"<?php
+namespace App;
+
+class Task {
+    public const STATUS_OPEN = 1;
+    public const STATUS_DONE = 2;
+    public const OTHER = 9;
+
+    /** @return self::STATUS_* */
+    public function status(): int { return self::STATUS_OPEN; }
+}
+
+/** @param 1|2 $status */
+function acceptsStatus(int $status): void {}
+
+/** @param 9 $other */
+function acceptsOther(int $other): void {}
+
+acceptsStatus((new Task())->status());
+acceptsOther((new Task())->status());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("got 1|2"), "{messages:?}");
+}
+
+/// A parameter declared as class constants accepts their values and
+/// nothing else, whichever spelling names them.
+#[test]
+fn class_constant_param_is_enforced_as_its_values() {
+    let php = r#"<?php
+namespace App;
+
+class Status {
+    public const ACTIVE = 'active';
+    public const INACTIVE = 'inactive';
+}
+
+/** @param Status::* $status */
+function setStatus(string $status): void {}
+
+/** @param Status::ACTIVE $status */
+function activate(string $status): void {}
+
+setStatus('active');
+setStatus('inactive');
+setStatus('deleted');
+activate(Status::ACTIVE);
+activate('inactive');
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(messages[0].contains("'deleted'"), "{messages:?}");
+    assert!(messages[1].contains("'inactive'"), "{messages:?}");
+}
+
+/// The class half of `Foo::BAR` is read where the docblock was written:
+/// through that file's imports and namespace, never the caller's, and a
+/// global class that shares the short name is not the one meant.
+#[test]
+fn class_constant_type_names_its_class_where_it_was_written() {
+    let php = r#"<?php
+namespace {
+    class Mode {
+        public const FAST = 'global';
+    }
+}
+
+namespace Lib\Config {
+    class Mode {
+        public const FAST = 'fast';
+        public const SLOW = 'slow';
+    }
+}
+
+namespace Lib {
+    use Lib\Config\Mode as M;
+
+    class Runner {
+        /** @param M::FAST|Config\Mode::SLOW $mode */
+        public static function run(string $mode): void {}
+    }
+}
+
+namespace App {
+    use Lib\Runner;
+
+    Runner::run('fast');
+    Runner::run('slow');
+    Runner::run('global');
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'global'"), "{messages:?}");
+}
+
+/// `Foo::class` named as a type is the name of that class, read through the
+/// imports of the file it was written in: `E::class` with `E` an alias is
+/// the aliased class, not a class `E` nor the local `C`.
+#[test]
+fn class_name_reference_type_is_the_name_of_the_class_it_imports() {
+    let php = r#"<?php
+namespace App {
+    use Other\C as E;
+
+    class C {}
+
+    /** @param class-string<C> $name */
+    function acceptsLocal(string $name): void {}
+
+    /**
+     * @param C::class $local
+     * @param E::class $imported
+     */
+    function check(string $local, string $imported): void {
+        acceptsLocal($local);
+        acceptsLocal($imported);
+    }
+}
+
+namespace Other {
+    class C {}
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("Other\\C"), "{messages:?}");
 }
 
 /// A constant naming an array literal is a readable operand: `CONST[T]`
@@ -12322,7 +12577,7 @@ takeMatching(makeOpen());
         "got {messages:?}"
     );
     assert!(
-        messages[1].contains("expects array{foo: array<string>, ...<array-key, mixed>}"),
+        messages[1].contains("expects array{foo: array<string>, ...}"),
         "got {messages:?}"
     );
 }
@@ -12434,7 +12689,7 @@ takeMap(['foo' => 1]);
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 2, "got {messages:?}");
     assert!(
-        messages[0].contains("got array{foo: string, ...<array-key, mixed>}"),
+        messages[0].contains("got array{foo: string, ...}"),
         "got {messages:?}"
     );
     assert!(
@@ -12480,7 +12735,7 @@ takeIntKeyed(makeOpen());
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 3, "got {messages:?}");
     assert!(
-        messages[0].contains("got array{0: int, ...<array-key, mixed>}"),
+        messages[0].contains("got array{0: int, ...}"),
         "got {messages:?}"
     );
     assert!(
@@ -12488,7 +12743,7 @@ takeIntKeyed(makeOpen());
         "got {messages:?}"
     );
     assert!(
-        messages[2].contains("got array{foo: int, ...<array-key, mixed>}"),
+        messages[2].contains("got array{foo: int, ...}"),
         "got {messages:?}"
     );
 }
@@ -12562,7 +12817,7 @@ takeNames(makeNamed());
         "got {messages:?}"
     );
     assert!(
-        messages[1].contains("got array{name: string, ...<array-key, mixed>}"),
+        messages[1].contains("got array{name: string, ...}"),
         "got {messages:?}"
     );
 }
@@ -14570,7 +14825,7 @@ class Analyser
     *backend.workspace_root().write() = Some(dir.path().to_path_buf());
     *backend.psr4_mappings().write() = mappings;
 
-    let uri = format!("file://{}/src/Analyser/Analyser.php", dir.path().display());
+    let uri = crate::common::file_uri(&dir.path().join("src/Analyser/Analyser.php"));
     let content = files[1].1;
     backend.update_ast(&uri, content);
     let mut diags = Vec::new();
@@ -15202,6 +15457,87 @@ function g(array $wider): void {
         messages
             .iter()
             .all(|m| m.contains("(undeclared key 'buz')")),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn a_key_written_into_a_plain_array_leaves_its_other_keys_open() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{settings?: string, label?: string} $args */
+function add_control(array $args): void {}
+/** @param array $args */
+function add(string $id, array $args, mixed $default): void {
+    $args['settings'] = $id;
+    $args['defaultValue'] = $default;
+    add_control($args);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+#[test]
+fn a_key_written_into_a_plain_array_is_read_back_and_held_to_the_parameter() {
+    let php = r#"<?php
+declare(strict_types=1);
+class Foo {}
+function takes_int(int $i): void {}
+/** @param array{settings?: string} $args */
+function add_control(array $args): void {}
+/** @param array<string, string> $map */
+function add_map(array $map): void {}
+/** @param array $args */
+function add(array $args, Foo $foo): void {
+    $args['settings'] = $foo;
+    takes_int($args['settings']);
+    add_control($args);
+    add_map($args);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(messages[0].contains("got Foo"), "got {messages:?}");
+    assert!(
+        messages[1].contains("got array{settings: Foo, ...}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[2].contains("got array{settings: Foo, ...}"),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn a_class_string_key_written_into_a_constant_shape_keeps_its_keys_class_names() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace App;
+class NodeTraverser {}
+function takes_int(int $i): void {}
+final class Builder {
+    private const PAIRS = [NodeTraverser::class => ['a']];
+    public function run(string $className): void {
+        $pairs = self::PAIRS;
+        if (class_exists($className)) {
+            $pairs[$className] = ['b'];
+        }
+        foreach (array_keys($pairs) as $class) {
+            new \ReflectionClass($class);
+        }
+        $a = ['x' => 1];
+        if (class_exists($className)) {
+            $a[$className] = 2;
+        }
+        takes_int($a);
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("got non-empty-array<'x'|class-string, 1|2>"),
         "got {messages:?}"
     );
 }
@@ -15858,6 +16194,48 @@ function f(\ArrayIterator $it): void {
         has_type_error(&diags),
         "an ArrayIterator is neither a RecursiveIterator nor an IteratorAggregate: {diags:?}"
     );
+}
+
+/// A generic iterator parameter still names a class: being `Traversable`
+/// is not enough to pass for a `RecursiveIterator<…>`.
+#[test]
+fn a_generic_iterator_parameter_checks_the_class_it_names() {
+    let wrong = r#"<?php
+/** @param RecursiveIterator<int, string> $it */
+function g($it): void {}
+g(new ArrayIterator([]));
+"#;
+    let diags = collect_with_full_stubs(wrong);
+    assert!(
+        has_type_error(&diags),
+        "an ArrayIterator is no RecursiveIterator: {diags:?}"
+    );
+    let right = r#"<?php
+/** @param RecursiveIterator<int, string> $it */
+function g($it): void {}
+g(new RecursiveArrayIterator([]));
+"#;
+    let diags = collect_with_full_stubs(right);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+/// A `RecursiveIteratorIterator` yields the leaves of the iterator it
+/// wraps, not that iterator.
+#[test]
+fn recursive_iterator_iterator_yields_the_wrapped_elements() {
+    let php = r#"<?php
+/** @param array<string, int> $data */
+function size(array $data): int {
+    $total = 0;
+    $leaves = new RecursiveIteratorIterator(new RecursiveArrayIterator($data));
+    foreach ($leaves as $datum) {
+        $total += strlen((string) $datum);
+    }
+    return $total;
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(diags.is_empty(), "{diags:?}");
 }
 
 const BARE_GENERIC_DEFAULT_PRELUDE: &str = r#"<?php
@@ -17172,4 +17550,381 @@ function f(array $data, Dog $actual): void {
 }"#,
     );
     assert_eq!(got, ["Dog"]);
+}
+
+// ─── Mismatches against docblock types (docblock-type-mismatches) ───────────
+
+/// Every kind of type mismatch in `php`, with `docblock-type-mismatches`
+/// as given; `None` leaves it unset.
+fn docblock_type_mismatches(php: &str, docblock_types: Option<bool>) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///docblock_types.php";
+    let mut cfg = backend.config();
+    cfg.diagnostics.docblock_type_mismatches = docblock_types;
+    backend.set_config(cfg);
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    backend.collect_return_type_diagnostics(uri, php, &mut diags);
+    backend.collect_property_type_diagnostics(uri, php, &mut diags);
+    diags
+}
+
+/// Each mismatch here breaks only a docblock type: the native type, where
+/// there is one, accepts the value.
+const DOCBLOCK_ONLY: &str = r#"<?php
+declare(strict_types=1);
+
+class Response {}
+
+/** @param Response $r */
+function takes_response($r): void {}
+
+/** @param Response $r */
+function takes_response_or_string(Response|string $r): void {}
+
+/** @return string */
+function untyped_return() {
+    return new Response();
+}
+
+/** @return Response */
+function narrowed_return(): Response|string {
+    return 'plain text';
+}
+
+class Holder {
+    /** @var Response */
+    public $untyped;
+
+    /** @var Response */
+    public Response|string $narrowed;
+
+    public function run(): void {
+        takes_response('x');
+        takes_response_or_string('x');
+        $this->untyped = 'x';
+        $this->narrowed = 'x';
+    }
+}
+"#;
+
+#[test]
+fn docblock_types_are_checked_by_default() {
+    let diags = docblock_type_mismatches(DOCBLOCK_ONLY, None);
+    assert_eq!(diags.len(), 6, "got {diags:?}");
+}
+
+#[test]
+fn switching_docblock_types_off_checks_only_native_types() {
+    let diags = docblock_type_mismatches(DOCBLOCK_ONLY, Some(false));
+    assert!(diags.is_empty(), "got {diags:?}");
+}
+
+#[test]
+fn native_mismatches_are_reported_with_docblock_types_off() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Response {}
+
+/** @param Response $r */
+function takes_response(Response $r): void {}
+
+/** @return Response */
+function wrong_return(): Response {
+    return 'many';
+}
+
+class Holder {
+    /** @var Response */
+    public Response $prop;
+
+    public function run(): void {
+        takes_response('x');
+        $this->prop = 'x';
+    }
+}
+"#;
+    let diags = docblock_type_mismatches(php, Some(false));
+    let codes: Vec<_> = diags
+        .iter()
+        .map(|d| match &d.code {
+            Some(Code::String(code)) => code.as_str(),
+            other => panic!("unexpected code {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        codes,
+        vec![
+            "type_mismatch_argument",
+            "type_mismatch_return",
+            "type_mismatch_property",
+        ],
+        "got {diags:?}"
+    );
+}
+
+/// A method's own parameters and return go through the class's
+/// `MethodInfo` rather than the function index.
+#[test]
+fn methods_are_checked_against_native_types_with_docblock_types_off() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Response {}
+
+class Controller {
+    /** @param Response $module */
+    public function __construct($id, $module) {}
+
+    /** @return string */
+    public function actionIndex() {
+        return new Response();
+    }
+
+    /** @return Response */
+    public function actionSave(): Response|string {
+        return 'plain text';
+    }
+
+    /** @return Response */
+    public function actionBroken(): Response {
+        return 'plain text';
+    }
+}
+
+new Controller('test', []);
+"#;
+    assert_eq!(docblock_type_mismatches(php, None).len(), 4);
+    let diags = docblock_type_mismatches(php, Some(false));
+    assert_eq!(diags.len(), 1, "got {diags:?}");
+    assert_eq!(
+        diags[0].code,
+        Some(Code::String("type_mismatch_return".into())),
+        "got {diags:?}"
+    );
+}
+
+// ─── Unions some members of which fit (partial-union-mismatches) ────────────
+
+/// Every kind of type mismatch in `php`, with `partial-union-mismatches`
+/// as given; `None` leaves it unset.
+fn partial_union_mismatches(php: &str, partial_union: Option<bool>) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///partial_union.php";
+    let mut cfg = backend.config();
+    cfg.diagnostics.partial_union_mismatches = partial_union;
+    backend.set_config(cfg);
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    backend.collect_return_type_diagnostics(uri, php, &mut diags);
+    backend.collect_property_type_diagnostics(uri, php, &mut diags);
+    diags
+}
+
+const PARTIAL_UNION: &str = r#"<?php
+declare(strict_types=1);
+function label(string $text): void {}
+
+class Holder {
+    public string $name = '';
+
+    public function run(array|string $a, array|string $b, int|string $c, ?string $d): string {
+        label($a);
+        $this->name = $b;
+        label($d);
+        return $c;
+    }
+}
+"#;
+
+#[test]
+fn a_union_some_members_of_which_fit_is_reported_by_default() {
+    // `possibly-empty-mismatches` is on in the test environment, so the
+    // `?string` argument is reported too.
+    let diags = partial_union_mismatches(PARTIAL_UNION, None);
+    assert_eq!(diags.len(), 4, "got {diags:?}");
+}
+
+#[test]
+fn switching_partial_union_mismatches_off_leaves_them_out() {
+    let diags = partial_union_mismatches(PARTIAL_UNION, Some(false));
+    assert!(diags.is_empty(), "got {diags:?}");
+}
+
+/// No member fits, so there is no value for which the code works.
+#[test]
+fn a_union_no_member_of_which_fits_is_always_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+function label(string $text): void {}
+
+class Holder {
+    public string $name = '';
+
+    public function run(array|int $a, array|float $b, int|float $c): string {
+        label($a);
+        $this->name = $b;
+        return $c;
+    }
+}
+"#;
+    assert_eq!(partial_union_mismatches(php, Some(false)).len(), 3);
+}
+
+/// A call that cannot see a method goes to `__call`, which takes any
+/// arguments, while a call from inside the class is checked against the
+/// method's own signature.  Both orders are checked so a target resolved
+/// for one call site is never reused for the other.
+#[test]
+fn unreachable_method_with_magic_handler_is_not_type_checked() {
+    let class = r#"
+class Magic {
+    public function __call(string $name, array $args): mixed { return null; }
+    protected function hidden(int $value): void {}
+    public function inside(): void { $this->hidden('x'); }
+}
+"#;
+    let outside = "function test(Magic $magic): void { $magic->hidden('x'); }\n";
+    for php in [
+        format!("<?php\n{class}{outside}"),
+        format!("<?php\n{outside}{class}"),
+    ] {
+        let diags = collect_slow(&php);
+        let inside_line = php
+            .lines()
+            .position(|l| l.contains("function inside"))
+            .unwrap() as u32;
+        let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+        assert_eq!(lines, vec![inside_line], "got: {diags:?}");
+    }
+}
+
+/// A value that passed `ctype_digit()` holds only digits, so casting it to
+/// `int` cannot give a negative number, until the value is written again.
+#[test]
+fn int_cast_of_a_ctype_digit_checked_value_is_non_negative() {
+    let php = r#"<?php
+namespace App;
+
+function guarded(string $delay): void {
+    if (!ctype_digit($delay)) {
+        return;
+    }
+    sleep((int) $delay);
+}
+
+function inBody(mixed $delay): void {
+    if (\ctype_digit($delay) && $delay !== '') {
+        sleep((int) $delay);
+    }
+}
+
+function inElse(string $delay): void {
+    if (!ctype_digit($delay)) {
+        return;
+    } else {
+        sleep(intval($delay));
+    }
+}
+
+function unchecked(string $delay): void {
+    sleep((int) $delay);
+}
+
+function wrongBranch(string $delay): void {
+    if (ctype_digit($delay)) {
+        return;
+    }
+    sleep((int) $delay);
+}
+
+function rewritten(string $delay, string $other): void {
+    if (ctype_digit($delay)) {
+        $delay = $other;
+        sleep((int) $delay);
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    let lines: Vec<u32> = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "type_mismatch_argument"))
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(lines, vec![25, 32, 38], "got: {diags:?}");
+}
+
+/// The non-negative cast survives being assigned to a variable first.
+#[test]
+fn int_cast_of_a_ctype_digit_checked_value_assigned_to_a_variable_is_non_negative() {
+    let php = r#"<?php
+namespace App;
+
+function inBody(string $delay): void {
+    if (ctype_digit($delay)) {
+        $seconds = (int) $delay;
+        sleep($seconds);
+    }
+}
+
+function guarded(string $delay): void {
+    if (!ctype_digit($delay)) {
+        return;
+    }
+    $seconds = (int) $delay;
+    sleep($seconds);
+}
+
+function unchecked(string $delay): void {
+    $seconds = (int) $delay;
+    sleep($seconds);
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    let lines: Vec<u32> = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "type_mismatch_argument"))
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(lines, vec![20], "got: {diags:?}");
+}
+
+/// A constant named in a class constant's initializer is never looked up
+/// through the reading file's namespace.
+#[test]
+fn constant_initializer_does_not_read_constants_through_the_readers_namespace() {
+    use crate::common::create_psr4_workspace;
+
+    let caller = r#"<?php
+namespace App;
+
+const LIMIT = 'text';
+
+function takes(array $a): void {}
+
+function test(): void {
+    takes(\Lib\Box::MAX);
+}
+"#;
+    let files = vec![
+        (
+            "src/Lib/Box.php",
+            "<?php\nnamespace Lib;\n\nconst LIMIT = 5;\n\nclass Box\n{\n    const MAX = LIMIT;\n}\n",
+        ),
+        ("src/App/run.php", caller),
+    ];
+    let composer = r#"{"autoload":{"psr-4":{"Lib\\":"src/Lib/","App\\":"src/App/"}}}"#;
+    let (backend, dir) = create_psr4_workspace(composer, &files);
+    let uri = crate::common::file_uri(&dir.path().join("src/App/run.php"));
+    backend.update_ast(&uri, caller);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(&uri, caller, &mut diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        msgs.iter().all(|m| !m.contains("'text'")),
+        "`Lib\\Box`'s initializers are not read in `App`'s namespace, got: {msgs:?}"
+    );
 }

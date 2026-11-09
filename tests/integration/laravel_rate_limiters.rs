@@ -134,7 +134,7 @@ new RateLimited('typo');
     assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
     assert_eq!(
         message_text(&diagnostics[0].message),
-        "Unknown rate limiter: 'missing'"
+        "Unknown rate limiter 'missing'"
     );
     assert_eq!(
         diagnostics[0].range.start,
@@ -142,7 +142,7 @@ new RateLimited('typo');
     );
     assert_eq!(
         message_text(&diagnostics[1].message),
-        "Unknown rate limiter: 'typo'"
+        "Unknown rate limiter 'typo'"
     );
 }
 
@@ -223,7 +223,7 @@ class AppServiceProvider { public function boot() { RateLimiter::for('fake', fn 
             source,
             "invalid_laravel_rate_limiter"
         ),
-        ["Unknown rate limiter: 'fake'"]
+        ["Unknown rate limiter 'fake'"]
     );
 }
 
@@ -255,7 +255,7 @@ async fn rate_limiters_refresh_after_provider_buffer_edits() {
             source,
             "invalid_laravel_rate_limiter"
         ),
-        ["Unknown rate limiter: 'uploads'"]
+        ["Unknown rate limiter 'uploads'"]
     );
     open_php_at(
         &backend,

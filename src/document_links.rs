@@ -2,7 +2,8 @@
 //!
 //! Provides clickable links for `require` / `require_once` / `include` /
 //! `include_once` paths that resolve to existing files on disk, and for the
-//! arguments of Laravel's path helpers (`base_path('routes/web.php')`).
+//! arguments of Laravel's path helpers (`base_path('routes/web.php')`), and
+//! for the paths Yii aliases name (`'@runtime/logs'`).
 
 use std::path::{Path, PathBuf};
 
@@ -62,6 +63,20 @@ impl Backend {
         for (start, end, target) in
             crate::virtual_members::laravel::collect_path_helper_links(self, content, program)
         {
+            if let Some(target_url) = crate::util::path_to_url(&target) {
+                links.push(DocumentLink {
+                    range: Range {
+                        start: offset_to_position(content, start),
+                        end: offset_to_position(content, end),
+                    },
+                    target: Some(target_url),
+                    tooltip: Some(target.display().to_string()),
+                    data: None,
+                });
+            }
+        }
+
+        for (start, end, target) in self.yii_alias_links(uri, content) {
             if let Some(target_url) = crate::util::path_to_url(&target) {
                 links.push(DocumentLink {
                     range: Range {
@@ -378,11 +393,10 @@ fn normalize_and_resolve(file_dir: &Path, path_str: &str) -> PathBuf {
         // Canonicalize to resolve `..` and `.` components.
         // If canonicalize fails (path doesn't exist yet), use
         // a manual normalization.
-        path.canonicalize()
-            .unwrap_or_else(|_| normalize_path(&path))
+        dunce::canonicalize(&path).unwrap_or_else(|_| normalize_path(&path))
     } else {
         let abs = file_dir.join(&path);
-        abs.canonicalize().unwrap_or_else(|_| normalize_path(&abs))
+        dunce::canonicalize(&abs).unwrap_or_else(|_| normalize_path(&abs))
     }
 }
 

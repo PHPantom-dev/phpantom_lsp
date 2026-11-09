@@ -228,8 +228,8 @@ Route::middleware('EnsureAdmin')->get('/b', fn () => 'b');
     assert_eq!(
         middleware_diagnostics(&diags),
         vec![
-            "Unknown middleware: 'admn'".to_string(),
-            "Unknown middleware: 'EnsureAdmin'".to_string(),
+            "Unknown middleware 'admn'".to_string(),
+            "Unknown middleware 'EnsureAdmin'".to_string(),
         ]
     );
 }
@@ -310,8 +310,8 @@ class PostController implements HasMiddleware
     assert_eq!(
         middleware_diagnostics(&diags),
         vec![
-            "Unknown middleware: 'admn'".to_string(),
-            "Unknown middleware: 'gest'".to_string(),
+            "Unknown middleware 'admn'".to_string(),
+            "Unknown middleware 'gest'".to_string(),
         ]
     );
 

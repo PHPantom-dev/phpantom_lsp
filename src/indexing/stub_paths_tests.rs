@@ -357,9 +357,7 @@ fn a_composer_stub_package_is_a_stub_path() {
     assert!(backend.find_or_load_function(&["acme_ext"]).is_some());
     assert!(backend.find_or_load_class("NotAStub").is_none());
     let stub_uri = crate::util::path_to_uri(
-        &root
-            .join("vendor/php-stubs/wordpress-stubs/wordpress-stubs.php")
-            .canonicalize()
+        &dunce::canonicalize(root.join("vendor/php-stubs/wordpress-stubs/wordpress-stubs.php"))
             .unwrap(),
     );
     assert!(backend.is_external_stub_uri(&stub_uri));
@@ -490,6 +488,58 @@ fn a_phpstorm_stubs_checkout_gets_the_embedded_corrections() {
         "range comes from the installed checkout, got {uri}"
     );
     assert!(range.conditional_return.is_some());
+}
+
+/// A by-reference built-in keeps the element type the variable already
+/// had, which needs the function counted as a built-in when an installed
+/// phpstorm-stubs checkout, not the embedded copy, declares it.
+#[test]
+fn a_built_in_from_a_phpstorm_stubs_checkout_is_still_a_built_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    install_packages(
+        root,
+        &[(
+            "jetbrains/phpstorm-stubs",
+            "library",
+            &[
+                (
+                    "PhpStormStubsMap.php",
+                    "<?php\nnamespace JetBrains\\PHPStormStub;\nfinal class PhpStormStubsMap\n{\nconst CLASSES = array (\n);\n\nconst FUNCTIONS = array (\n  'array_splice' => 'standard/standard_8.php',\n);\n\nconst CONSTANTS = array (\n);\n}\n",
+                ),
+                (
+                    "standard/standard_8.php",
+                    "<?php\nfunction array_splice(array &$array, int $offset, ?int $length = null, mixed $replacement = []): array {}\n",
+                ),
+            ],
+        )],
+    );
+    let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
+    backend.rescan_composer_indexes(root, &[]);
+
+    let splice = backend.find_or_load_function(&["array_splice"]).unwrap();
+    let uri = backend
+        .symbols
+        .global_functions
+        .read()
+        .get("array_splice")
+        .unwrap()
+        .0
+        .clone();
+    assert!(
+        uri.ends_with("/standard/standard_8.php"),
+        "array_splice comes from the installed checkout, got {uri}"
+    );
+    // The test backend has no embedded stubs; the real index names every
+    // built-in.
+    backend.stub_function_index_mut().insert(
+        "array_splice",
+        "<?php\nfunction array_splice(array &$array, int $offset, ?int $length = null, mixed $replacement = []): array {}\n",
+    );
+    assert!(
+        crate::type_engine::call_resolution::OutParamCallee::Function(Box::new(splice))
+            .is_builtin(&backend)
+    );
 }
 
 #[test]

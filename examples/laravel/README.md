@@ -5,12 +5,16 @@ features against a real Laravel installation.
 
 ## What it demos
 
-- **Eloquent models.** Virtual properties from `$fillable`, `$casts`, `$attributes`, relationships, scopes, accessors, custom collections, and query builder forwarding. A method a model or its builder does not answer is reported, since Eloquent throws for it (see the "Try:" in `Demo::eloquentQuery()`).
+- **Collection property types.** Literal property paths determine collection keys and plucked values, including grouped collections and higher-order proxies. See `Demo::collectionPropertyTypes()`.
+- **Eloquent models.** Virtual properties from model column attributes, `$fillable`, `$casts`, `$attributes`, relationships, scopes, accessors, custom collections, and query builder forwarding. A method a model or its builder does not answer is reported, since Eloquent throws for it (see the "Try:" in `Demo::eloquentQuery()`).
+- **Computed attributes.** Column suggestions distinguish stored values from accessors, while assignment suggestions include attributes with setters. See `Demo::computedAttributes()`.
 - **Model factories.** Convention-based factories (no `@extends Factory<Model>` needed) get `create()`/`make()` returning the model, plus the dynamic `has{Relationship}()` / `for{Relationship}()` methods synthesized from the model's relationships, and `trashed()` when the model uses `SoftDeletes` — all chaining fluently (e.g. `BlogAuthor::factory()->hasPosts(3)->create()`). See `Demo::factories()`.
 - **Config and env navigation.** Go-to-definition and find-references for `config('app.name')` keys (resolves to `config/app.php`) and `env('APP_KEY')` vars (resolves to `.env`).
 - **View navigation.** Go-to-definition for `view('welcome')` and `View::make('admin.users.index')` (resolves to Blade templates in `resources/views/`).
+- **Asset paths.** `asset('css/app.css')` and `Vite::asset()`/`@vite` paths complete from the files on disk, jump to the file, and are reported when nothing is there. Inertia page names (`Inertia::render('Users/Index')`) work the same way in a project that installs Inertia.
 - **Route navigation.** Go-to-definition for `route('home')` (resolves to `->name('home')` in route files).
 - **Controller action navigation.** Go-to-definition, hover, rename, references, and completion for route action strings in `[Controller::class, 'method']` callables and `Route::controller(...)->group(...)` routes.
+- **Related classes.** Code lenses link a model to its factory, policy, observers, migrations, API resources, and custom collection, link a factory, policy, or observer back to its model, and link an event to its listeners and back. See `app/Models/BlogPost.php` and `app/Events/BlogPostPublished.php`.
 - **Routes on controller methods.** A code lens above each controller action lists the routes that reach it (verb, URI, and name) and jumps to where each is registered.
 - **Rate limiter names.** Complete, hover, navigate, and check the names registered by service providers in `throttle:name` and queue middleware. Try `Demo::rateLimiterNames()`.
 - **Middleware names.** Completion, hover, go-to-definition, find-references, and unknown-name diagnostics for the aliases and groups `->middleware(...)`, `->withoutMiddleware(...)`, and the `#[Middleware]` controller attribute name, from the framework's defaults and the ones `bootstrap/app.php` registers. See `Demo::middlewareNames()`.

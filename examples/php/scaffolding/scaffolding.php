@@ -40,10 +40,10 @@ class ReflectedWidget
     public function label(): string { return 'widget'; }
 }
 
-/** Holds the widget privately, so only reflection can read it back. */
+/** Holds the widget out of public reach, so only reflection can read it back. */
 class ReflectedHolder
 {
-    private ?ReflectedWidget $widget;
+    protected ?ReflectedWidget $widget;
 
     public function __construct(?ReflectedWidget $widget = null)
     {
@@ -620,12 +620,13 @@ class Zoo extends ZooBase implements ZooContract
     private string $ceo = 'invisible';        // trip wire — must NOT appear on $zoo->
 
     public function aardvark(): void {}
-    private function nocturnal(): void {}     // trip wire — must NOT appear on $zoo->
+    private function nocturnal(): void { assert($this->ceo !== ''); } // trip wire — must NOT appear on $zoo->
 
     public function __construct(
         public int $buffalo = 0,
     ) {
         parent::__construct();
+        $this->nocturnal();
     }
 
     public function __get(string $name): mixed
@@ -1321,6 +1322,11 @@ trait Indexable
     public function key() {}
 }
 
+trait KeepsCollection
+{
+    public function same(): self { return $this; }
+}
+
 // ─── Enums ──────────────────────────────────────────────────────────────────
 
 enum Status: string
@@ -1522,6 +1528,7 @@ class User extends Model implements Renderable
 
     protected function hashPassword(string $raw): string
     {
+        $this->secretInternalMethod();
         return password_hash($raw, PASSWORD_BCRYPT);
     }
 
@@ -1752,6 +1759,7 @@ class ItemIterableCollection extends IterableCollection {}
  */
 class TypedCollection
 {
+    use KeepsCollection;
     /** @var array<TKey, TValue> */
     protected array $items;
 
@@ -2120,7 +2128,7 @@ function openSealedEnvelope(): ?SealedEnvelope
 
 class Pen
 {
-    public function __construct(public string $ink = 'black') {}
+    public function __construct(public string $ink = 'black') { $this->refill(); }
     public function write(): string { return ''; }
     public function color(): string { return $this->ink; }
     public function label(): string { return 'pen'; }
@@ -2326,6 +2334,17 @@ class PenIndex
 class NotFoundException extends \RuntimeException {}
 class ValidationException extends \RuntimeException {}
 class AuthorizationException extends \RuntimeException {}
+class StorageException extends \Exception {}
+
+/** @throws StorageException */
+function readStorageFile(string $path): string
+{
+    $contents = is_file($path) ? file_get_contents($path) : false;
+    if ($contents === false) {
+        throw new StorageException("Cannot read {$path}");
+    }
+    return $contents;
+}
 
 // ─── Standalone Functions ───────────────────────────────────────────────────
 
@@ -2921,12 +2940,13 @@ class ScaffoldingVault
 
     public function open(): string
     {
+        self::$openCount++;
         return $this->pin;
     }
 
     protected function audit(): string
     {
-        return $this->branch;
+        return $this->branch . $this->rotate();
     }
 
     private function rotate(): string

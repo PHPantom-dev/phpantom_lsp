@@ -19,7 +19,7 @@ use crate::names::OwnedResolvedNames;
 use crate::symbol_map::{StringKeyDependency, SymbolMap};
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan};
 
-use super::ast_update::{AstIndexUpdate, BladeLowering};
+use super::ast_update::{AstIndexUpdate, TemplateLowering};
 
 /// An [`AstIndexUpdate`] alongside what the same file contributed on its
 /// previous parse, which the publication replaces.
@@ -44,7 +44,7 @@ struct PreparedAstIndexUpdate {
     functions: Vec<FunctionInfo>,
     defines: Vec<(String, DefineInfo)>,
     symbol_map: Arc<SymbolMap>,
-    blade: Option<BladeLowering>,
+    template: Option<TemplateLowering>,
     old_function_fqns: Vec<String>,
     old_define_names: Vec<String>,
     new_function_fqns: Vec<String>,
@@ -76,13 +76,20 @@ fn declared_function<'a>(
 
 /// Mirror the lowest-sorting declaration of `fqn` into the lookup map,
 /// dropping the name entirely once nothing declares it.
+///
+/// WordPress's script-loader no-ops only win a name nothing else declares
+/// (see [`crate::wordpress::function_file_outranks`]).
 fn publish_winning_function(
     fmap: &mut CiMap<(String, FunctionInfo)>,
     dupes: &mut CiMap<BTreeMap<String, FunctionInfo>>,
     fqn: &str,
 ) {
     let Some(decls) = dupes.get(fqn) else { return };
-    match decls.iter().next() {
+    let winner = decls
+        .iter()
+        .find(|(uri, _)| !crate::wordpress::is_script_loader_noops_uri(uri))
+        .or_else(|| decls.iter().next());
+    match winner {
         Some((uri, info)) => {
             let winner = (uri.clone(), info.clone());
             fmap.insert(fqn.to_string(), winner);
@@ -271,6 +278,16 @@ impl Backend {
             .epoch
             .begin_publication(updates.iter().map(|update| update.uri.as_str()));
 
+        let mut connections_changed = false;
+        for update in &updates {
+            self.note_tempest_php_change(&update.uri);
+            connections_changed |= crate::doctrine::connection::record(
+                &self.doctrine_connections,
+                &update.uri,
+                update.doctrine_connections.clone(),
+            );
+        }
+
         let old_classes_by_update: Vec<Vec<Arc<ClassInfo>>> = {
             let uri_classes = self.symbols.uri_classes_index.read();
             updates
@@ -340,7 +357,7 @@ impl Backend {
                 functions: update.functions,
                 defines: update.defines,
                 symbol_map: update.symbol_map,
-                blade: update.blade,
+                template: update.template,
                 old_function_fqns,
                 old_define_names,
                 new_function_fqns: Vec::new(),
@@ -503,7 +520,12 @@ impl Backend {
             }
         }
 
-        let changed = structural_changed || !refreshed_existing.is_empty();
+        // What a query's DQL selects is fetched as the connection's driver
+        // gives it, in every file.
+        if connections_changed {
+            self.clear_resolved_class_cache();
+        }
+        let changed = structural_changed || connections_changed || !refreshed_existing.is_empty();
 
         self.reindex_references_for_symbol_maps_batch(reference_items);
 
@@ -530,13 +552,13 @@ impl Backend {
     /// had.
     fn publish_file_states(&self, prepared: &mut [PreparedAstIndexUpdate]) {
         let mut files = self.files.write();
-        for update in prepared {
-            let blade = match update.blade.take() {
-                Some(blade) => Some(crate::file_state::BladeFileState {
+        for update in prepared.iter_mut() {
+            let template = match update.template.take() {
+                Some(blade) => Some(crate::file_state::TemplateFileState {
                     virtual_php: blade.virtual_php,
                     source_map: Arc::new(blade.source_map),
                 }),
-                None => files.get(&update.uri).and_then(|old| old.blade.clone()),
+                None => files.get(&update.uri).and_then(|old| old.template.clone()),
             };
             self.note_symfony_declarations(&update.uri, &update.symbol_map);
             self.note_wordpress_hooks(&update.uri, &update.symbol_map);
@@ -548,9 +570,16 @@ impl Backend {
                 resolved_names: Some(Arc::clone(&update.resolved_names)),
                 namespaces: std::mem::take(&mut update.namespace_spans),
                 pest_uses: update.pest_uses.take(),
-                blade,
+                template,
             };
             files.insert(update.uri.clone(), Arc::new(state));
+        }
+        drop(files);
+        if !self.dormant_files.read().is_empty() {
+            let mut dormant = self.dormant_files.write();
+            for update in prepared.iter() {
+                dormant.remove(&update.uri);
+            }
         }
     }
 
@@ -949,6 +978,7 @@ impl Backend {
         // workspace, so a signature change anywhere can turn a call that
         // was not a render into one, or the other way round.
         self.blade.typed_receiver_spans_cache.write().clear();
+        self.invalidate_container_index(true);
         self.laravel.morph_column_spans_cache.write().clear();
     }
 

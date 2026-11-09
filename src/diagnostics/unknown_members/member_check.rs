@@ -165,6 +165,7 @@ impl UnknownMemberPass<'_> {
                 access.is_method_call,
                 self.report_magic,
             ) || (!access.is_method_call && c.name == "stdClass")
+                || (!access.is_method_call && !access.is_static && c.allows_dynamic_properties)
         };
         let class_answers = |c: &Arc<ClassInfo>| {
             if answers(c) {
@@ -200,17 +201,10 @@ impl UnknownMemberPass<'_> {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        let kind_label = if access.is_method_call {
-            "Method"
-        } else if access.is_static {
-            "Member"
-        } else {
-            "Property"
-        };
         Some(format!(
-            "{} '{}' exists on {} but not on {}",
-            kind_label,
-            access.member_name,
+            "{} {} exists on {} but not on {}",
+            access.kind_title(),
+            access.spelled(None),
             names(&declaring),
             names(&lacking),
         ))
@@ -309,6 +303,12 @@ impl UnknownMemberPass<'_> {
         if base_classes.iter().any(|c| c.name == "stdClass") {
             return (MemberCheckResult::Ok, diagnostics);
         }
+        // `#[\AllowDynamicProperties]` lets an instance take any property.
+        let takes_dynamic_property =
+            |c: &Arc<ClassInfo>| !is_method_call && !is_static && c.allows_dynamic_properties;
+        if base_classes.iter().any(takes_dynamic_property) {
+            return (MemberCheckResult::Ok, diagnostics);
+        }
         // This shortcut may be looking at a class that has not been
         // merged yet, which is enough to confirm a member is reachable
         // but not enough to judge one that is not: a magic handler or
@@ -317,7 +317,7 @@ impl UnknownMemberPass<'_> {
         // through to the merged classes below.
         if base_classes.iter().any(|c| {
             member_is_public(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name))
+                || (access.relaxed_lookup && member_exists_relaxed(c, member_name))
         }) {
             return (MemberCheckResult::Ok, diagnostics);
         }
@@ -351,11 +351,14 @@ impl UnknownMemberPass<'_> {
         if resolved_classes.iter().any(|c| c.name == "stdClass") {
             return (MemberCheckResult::Ok, diagnostics);
         }
+        if resolved_classes.iter().any(takes_dynamic_property) {
+            return (MemberCheckResult::Ok, diagnostics);
+        }
 
         // ── Check whether the member exists on ANY branch ───────────
         if resolved_classes.iter().any(|c| {
             member_exists(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name))
+                || (access.relaxed_lookup && member_exists_relaxed(c, member_name))
         }) {
             self.push_inaccessible_member(access, &resolved_classes, &mut diagnostics);
             return (MemberCheckResult::Ok, diagnostics);
@@ -374,9 +377,9 @@ impl UnknownMemberPass<'_> {
         // false positive: the receiver has explicitly opted into handling
         // arbitrary method names.
         //
-        // Eloquent's handlers are the exception: they accept a closed set
-        // of names and throw for the rest, so a call they reject is
-        // reported like any other unknown method.
+        // Eloquent's and Doctrine's repository handlers are the exception:
+        // they accept a closed set of names and throw for the rest, so a
+        // call they reject is reported like any other unknown method.
         let has_magic_call_at = |i: usize| {
             has_magic_method_for_access(&base_classes[i], is_static, true, report_magic)
                 || has_magic_method_for_access(&resolved_classes[i], is_static, true, report_magic)
@@ -384,7 +387,16 @@ impl UnknownMemberPass<'_> {
         let has_magic_call = is_method_call && (0..base_classes.len()).any(has_magic_call_at);
         if has_magic_call
             && (is_docblock_ref
-                || !self.eloquent_rejects_call(access, &resolved_classes, types, has_magic_call_at))
+                || !(self.eloquent_rejects_call(
+                    access,
+                    &resolved_classes,
+                    types,
+                    has_magic_call_at,
+                ) || self.doctrine_rejects_call(
+                    base_classes,
+                    &resolved_classes,
+                    has_magic_call_at,
+                )))
         {
             return (MemberCheckResult::MagicFallback, diagnostics);
         }
@@ -403,37 +415,27 @@ impl UnknownMemberPass<'_> {
             return (MemberCheckResult::Ok, diagnostics);
         };
 
-        let kind_label = if is_method_call {
-            "Method"
-        } else if is_static {
-            // Static non-method could be a property ($prop) or constant
-            "Member"
-        } else {
-            "Property"
-        };
-
-        // Show the first resolved class name for context.  For union
-        // types we could list all of them, but keeping it short is
-        // more useful in the editor gutter.
-        let class_display = display_class_name(&resolved_classes[0]);
-
-        let message = if resolved_classes.len() > 1 {
-            format!(
-                "{} '{}' not found on any of the {} possible types ({})",
-                kind_label,
-                member_name,
-                resolved_classes.len(),
-                resolved_classes
+        let message = match &resolved_classes[..] {
+            [class] if class.name.starts_with("__anonymous@") => format!(
+                "{} {} not found on anonymous class",
+                access.kind_title(),
+                access.spelled(None),
+            ),
+            [class] => format!(
+                "{} {} not found",
+                access.kind_title(),
+                access.spelled(Some(&class.fqn())),
+            ),
+            classes => format!(
+                "{} {} not found on any of {}",
+                access.kind_title(),
+                access.spelled(None),
+                classes
                     .iter()
                     .map(|c| display_class_name(c))
                     .collect::<Vec<_>>()
                     .join(", "),
-            )
-        } else {
-            format!(
-                "{} '{}' not found on class '{}'",
-                kind_label, member_name, class_display,
-            )
+            ),
         };
 
         diagnostics.push(make_diagnostic(

@@ -1,5 +1,12 @@
 //! PHPantom — a fast, lightweight PHP language server.
 //!
+//! **This crate's Rust API is internal.** It is published only so that
+//! `cargo install phpantom_lsp` works. The supported interfaces are the
+//! language server protocol, the command line, and `.phpantom.toml`; the
+//! version number follows those. Any public item here, feature-gated
+//! modules such as `semantic_export` included, can change or disappear
+//! in any release, patch releases too.
+//!
 //! Diagnostics are debounced: each `did_change` bumps a per-file version
 //! counter and spawns a delayed task. The task only publishes if its
 //! version still matches (i.e. no newer edit arrived in the meantime).
@@ -146,6 +153,12 @@ pub(crate) struct WatchedFileInputs {
     pub(crate) is_symfony: bool,
     /// Whether the project uses Twig, which adds the template watchers.
     pub(crate) is_twig: bool,
+    /// Whether the project renders Tempest views, which adds the watcher
+    /// for Tempest's extensionless CLI bootstrap.
+    pub(crate) is_tempest: bool,
+    /// Whether the project is a Yii application, which adds the stylesheet
+    /// watchers.
+    pub(crate) is_yii: bool,
     /// Directory symlinks the index reached through, one relative-pattern
     /// watcher each. Empty when the client cannot match a relative
     /// pattern, since then there is nothing to ask it for.
@@ -258,11 +271,14 @@ mod code_lens;
 pub mod completion;
 pub mod composer;
 pub mod config;
+mod container_calls;
 mod definition;
 pub mod diagnostics;
 pub mod docblock;
+mod doctrine;
 mod document_links;
 mod document_symbols;
+mod drupal;
 mod file_state;
 pub mod fix;
 mod folding;
@@ -297,6 +313,7 @@ mod phpstan;
 pub(crate) mod phpstan_ignore;
 pub(crate) mod process;
 pub mod progress;
+mod prophecy;
 mod reference_counts;
 mod reference_index;
 mod references;
@@ -318,9 +335,12 @@ mod signature_render;
 pub mod stub_map;
 pub mod stub_patches;
 pub mod stubs;
+mod stylesheets;
 mod symbol_index;
 pub(crate) mod symbol_map;
 mod symfony;
+mod tempest;
+pub mod template;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
@@ -410,6 +430,14 @@ pub struct BackendState {
     /// Doctrine entity-to-repository pairs from YAML/XML mappings, keyed by
     /// source URI so a watched change replaces one file's entries.
     pub(crate) framework_doctrine_repositories: framework::DoctrineRepositoryIndex,
+    /// The fields Doctrine's XML and YAML mapping files map, keyed by
+    /// source URI.  Shared with the resolved-class cache, which gives a
+    /// repository its entity's magic finders from it.
+    pub(crate) doctrine_mapping_files: doctrine::MappingFileIndex,
+    /// The database connections the project's files configure, keyed by
+    /// source URI: what a DQL expression's value is fetched as depends on
+    /// the driver they agree on.
+    pub(crate) doctrine_connections: doctrine::connection::ConnectionIndex,
     /// Cross-file candidate index for find-references.
     ///
     /// Maintained from each file's symbol map (see [`files`](Self::files)) during parsing.
@@ -432,13 +460,14 @@ pub struct BackendState {
     /// handler also verifies that the captured text is still current before
     /// updating shared maps.
     pub(crate) did_change_parse_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
-    /// The last open file `update_ast` parsed, kept for the diagnostic
-    /// pass its edit schedules, keyed by URI.
+    /// The last open file `update_ast` parsed, keyed by URI, kept for the
+    /// diagnostic pass its edit schedules and the requests against the same
+    /// text until the next edit.
     ///
-    /// One slot rather than one per file: only the file being typed in is
-    /// diagnosed right after its parse, and the parse of a large file
-    /// holds tens of megabytes.
-    pub(crate) parsed_for_diagnostics: Mutex<Option<(String, crate::parser::ParsedFile)>>,
+    /// One slot rather than one per file: the file being typed in is the
+    /// one diagnosed and queried right after its parse, and the parse of a
+    /// large file holds tens of megabytes.
+    pub(crate) kept_parse: Mutex<Option<(String, Arc<crate::parser::ParsedFile>)>>,
     /// Coalescing state for expensive whole-file requests. See
     /// [`WholeFileCoalesce`] for why this exists.
     pub(crate) whole_file_coalesce: Arc<WholeFileCoalesce>,
@@ -464,6 +493,18 @@ pub struct BackendState {
     /// `find_implementors`).  Populated in `update_ast_inner` and
     /// `parse_and_cache_content_versioned`.
     pub(crate) parsed_uris: Arc<RwLock<HashSet<String>>>,
+    /// Files of an installed package (see
+    /// [`WorkspaceEnv::installed_package_uri_prefixes`](crate::workspace_env::WorkspaceEnv))
+    /// the workspace index has read and let go of again.
+    ///
+    /// A Drupal site holds all of core and its tests outside `vendor/`, and
+    /// keeping every one of those files' symbol maps resident cost the
+    /// better part of a gigabyte.  Such a file keeps what a vendor file
+    /// keeps (its declarations, its classes once loaded) plus its entries
+    /// in the reference index, so searches still select it, and is parsed
+    /// again when a search reads it (see
+    /// [`Backend::wake_dormant_files`]) or the editor opens it.
+    pub(crate) dormant_files: RwLock<HashSet<String>>,
     /// Set of file URIs currently being parsed by another thread.
     ///
     /// Used by [`parse_and_cache_file`](Self::parse_and_cache_file) to avoid
@@ -498,6 +539,7 @@ pub struct BackendState {
     pub(crate) laravel: backend::laravel::LaravelState,
     /// The project's Blade templates, beyond each one's own lowering.
     pub(crate) blade: blade::state::BladeState,
+    pub(crate) tempest: tempest::TempestState,
     /// Whether the workspace is an application rather than a library.
     ///
     /// A library's configuration is supplied by whatever application
@@ -529,14 +571,30 @@ pub struct BackendState {
     /// [`crate::composer::is_yii_project`].  Starts `true` so a workspace with
     /// no `composer.json` to classify behaves as before.
     pub(crate) is_yii: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project renders Tempest views, so its `.view.php` files
+    /// are lowered as templates.  See [`crate::composer::is_tempest_project`].
+    /// Starts `true` so a workspace with no `composer.json` to classify
+    /// behaves as before.
+    pub(crate) is_tempest: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project uses Tempest's database layer, which model
+    /// property names are read in.  See
+    /// [`crate::composer::is_tempest_database_project`].  Kept separate from
+    /// view detection: installing the database does not make PHP files with
+    /// a `.view.php` suffix Tempest templates.  Starts `true` so a workspace
+    /// with no `composer.json` to classify behaves as before.
+    pub(crate) is_tempest_database: Arc<std::sync::atomic::AtomicBool>,
     /// The major version of PHPUnit the project's `composer.lock` installs,
     /// `0` when it is not known.  In a workspace of several projects, the
     /// lowest of theirs.  Decides whether a data provider has to be static.
     pub(crate) phpunit_major: Arc<std::sync::atomic::AtomicU8>,
     /// The Yii path aliases the project's configuration declares.
     pub(crate) yii: yii::YiiState,
+    /// The CSS class names the project's stylesheets declare.
+    pub(crate) stylesheets: stylesheets::StylesheetState,
     /// The files that fire or use a WordPress hook.
     pub(crate) wordpress_hooks: wordpress::hooks::HookFiles,
+    /// The web roots of the workspace's Drupal projects.
+    pub(crate) drupal: drupal::DrupalState,
     /// The `Pest.php` files of the project's test directories, read on
     /// first use and dropped when one is saved.  `None` until then.
     pub(crate) pest_configs: Arc<RwLock<Option<pest::PestConfigs>>>,

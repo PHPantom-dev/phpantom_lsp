@@ -1204,6 +1204,10 @@ impl MethodReceiver for TextReceiver<'_, '_, '_> {
         ends_with_bare_helper_call(self.receiver, "config")
     }
 
+    fn is_url_generator(&self) -> bool {
+        ends_with_bare_helper_call(self.receiver, "url")
+    }
+
     fn is_container(&self) -> bool {
         ends_with_bare_helper_call(self.receiver, "app")
             || self.receiver.ends_with("$this->app")

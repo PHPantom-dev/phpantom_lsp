@@ -251,14 +251,13 @@ fn apply_schema_call(
 ) {
     match method {
         "create" | "table" => {
-            let Some(table_name) = args
-                .arguments
-                .iter()
-                .next()
-                .and_then(|arg| string_literal_value(arg.value(), content))
-            else {
+            let Some((table_name, offset)) = args.arguments.iter().next().and_then(|arg| {
+                let name = string_literal_value(arg.value(), content)?;
+                Some((name, arg.value().span().start.offset))
+            }) else {
                 return;
             };
+            index.record_table_migration(connection, &table_name, offset);
             if method == "create" {
                 index.insert_table(SchemaTable::new(
                     connection.to_string(),

@@ -270,6 +270,134 @@ impl Backend {
             };
         }
 
+        // Union the variables from every call site, per name.
+        let mut merged: HashMap<String, Vec<PhpType>> = HashMap::new();
+        for (_, sites) in self.view_render_sites(uri, &view_names, shared) {
+            for site in sites {
+                for var in site.vars {
+                    merged.entry(var.name).or_default().push(var.ty);
+                }
+            }
+        }
+
+        // The attributes each `<x-…>` tag passes, for a template
+        // addressable as a component tag (`components.*`, a namespaced
+        // view name, or a directory a provider registered a tag prefix
+        // for — see `component_tags::component_tag_names`).
+        let tag_names = crate::blade::component_names::component_tag_names(
+            &view_names,
+            &self.anonymous_component_namespaces(),
+        );
+        if !tag_names.is_empty() {
+            let own_blade_snapshot;
+            let blade_snapshot = match shared_blade {
+                Some(shared) => shared.as_slice(),
+                None => {
+                    own_blade_snapshot = self.blade_caller_snapshot();
+                    own_blade_snapshot.as_slice()
+                }
+            };
+            let needles = crate::blade::component_tags::component_tag_needles(&tag_names);
+            for (file_uri, content) in blade_snapshot {
+                if file_uri == uri {
+                    continue;
+                }
+                if !crate::blade::component_tags::may_contain_component_tag(content, &needles) {
+                    continue;
+                }
+                // The same partition the caller's own virtual PHP was
+                // built with, so the scan agrees with it about which
+                // attributes became arguments of the tag's call and are
+                // therefore not `blade_bound_attr_directive` calls to count.
+                let caller_components = self
+                    .blade
+                    .injected_vars
+                    .read()
+                    .get(file_uri)
+                    .map(|scope| scope.components.clone())
+                    .unwrap_or_default();
+                let occurrences = crate::blade::component_tags::scan_component_tag_calls(
+                    content,
+                    &tag_names,
+                    &|tag| component_argument_names(&caller_components, tag),
+                );
+                if occurrences.is_empty() {
+                    continue;
+                }
+                // A named slot (`<x-slot:title>` / the legacy `<x-slot
+                // name="title">`) is part of the *component's* template,
+                // not the caller's — see `component_tags::scan_component_tag_slots`.
+                // No bound-attribute correlation is needed here (a slot's
+                // body is not a `blade_bound_attr_directive` argument), so
+                // this reads straight off the caller's raw source.
+                for slot_name in
+                    crate::blade::component_tags::scan_component_tag_slots(content, &tag_names)
+                {
+                    merged
+                        .entry(slot_name)
+                        .or_default()
+                        .push(PhpType::named(crate::atom::atom(
+                            "\\Illuminate\\View\\ComponentSlot",
+                        )));
+                }
+                let Some(virtual_php) = self.template_virtual_php_arc(file_uri) else {
+                    continue;
+                };
+                for vars in
+                    self.extract_component_call_site_vars(file_uri, &virtual_php, occurrences)
+                {
+                    for (name, ty) in vars {
+                        merged.entry(name).or_default().push(ty);
+                    }
+                }
+            }
+        }
+
+        if merged.is_empty() {
+            return BladeScope {
+                vars: declared,
+                this_class,
+                components,
+            };
+        }
+
+        // A name a declared source already carries needs no inference: what
+        // the backing class holds, and what a provider writes into the view's
+        // data, beat what one caller happened to pass.
+        merged.retain(|name, _| !declared.iter().any(|(existing, _)| existing == name));
+
+        let mut result: Vec<(String, String)> = merged
+            .into_iter()
+            .map(|(name, types)| (name, join_call_site_types(types).to_reparseable_string()))
+            .collect();
+        // Deterministic prologue ordering so re-preprocessing an
+        // unchanged template produces identical virtual PHP.
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+        // The declared sources lead, so theirs are the declarations the
+        // prologue emits for the names more than one source carries.
+        let mut vars = declared;
+        vars.extend(result);
+        BladeScope {
+            vars,
+            this_class,
+            components,
+        }
+    }
+
+    /// Every render site outside the template at `uri` that names one of
+    /// its `view_names`, grouped by the file it is written in: the
+    /// `view()` calls of the project's PHP and the `@include` family of
+    /// the templates that render it.
+    ///
+    /// `shared` is a refresh pass's snapshot of the files that render any
+    /// view; without one, only what is already parsed is read, so this
+    /// never triggers (or waits on) workspace indexing.
+    pub(crate) fn view_render_sites(
+        &self,
+        uri: &str,
+        view_names: &[String],
+        shared: Option<&ViewCallerSnapshot>,
+    ) -> Vec<(String, Vec<ResolvedViewCall>)> {
         // Find every file whose symbol map contains a View string key
         // matching one of this template's names.
         let keys: Vec<crate::reference_index::ReferenceIndexKey> = view_names
@@ -305,8 +433,7 @@ impl Backend {
             .filter(|_| local_candidates.is_none())
             .and_then(|_| self.reference_candidate_uris_for_keys(&keys));
 
-        // Union the variables from every call site, per name.
-        let mut merged: HashMap<String, Vec<PhpType>> = HashMap::new();
+        let mut found = Vec::new();
         for (snapshot_index, (file_uri, snapshot_map)) in snapshot.iter().enumerate() {
             // A template must not feed itself: a recursive `@include` names
             // the template the spans it would be read from belong to.
@@ -379,115 +506,10 @@ impl Backend {
             let Some(content) = self.caller_source(file_uri, is_blade, &symbol_map) else {
                 continue;
             };
-            for site in self.extract_call_site_vars(file_uri, &content, &offsets) {
-                for var in site.vars {
-                    merged.entry(var.name).or_default().push(var.ty);
-                }
-            }
+            let sites = self.extract_call_site_vars(file_uri, &content, &offsets);
+            found.push((file_uri.clone(), sites));
         }
-
-        // The attributes each `<x-…>` tag passes, for a template
-        // addressable as a component tag (`components.*`, a namespaced
-        // view name, or a directory a provider registered a tag prefix
-        // for — see `component_tags::component_tag_names`).
-        let tag_names = crate::blade::component_names::component_tag_names(
-            &view_names,
-            &self.anonymous_component_namespaces(),
-        );
-        if !tag_names.is_empty() {
-            let own_blade_snapshot;
-            let blade_snapshot = match shared_blade {
-                Some(shared) => shared.as_slice(),
-                None => {
-                    own_blade_snapshot = self.blade_caller_snapshot();
-                    own_blade_snapshot.as_slice()
-                }
-            };
-            let needles = crate::blade::component_tags::component_tag_needles(&tag_names);
-            for (file_uri, content) in blade_snapshot {
-                if file_uri == uri {
-                    continue;
-                }
-                if !crate::blade::component_tags::may_contain_component_tag(content, &needles) {
-                    continue;
-                }
-                // The same partition the caller's own virtual PHP was
-                // built with, so the scan agrees with it about which
-                // attributes became arguments of the tag's call and are
-                // therefore not `blade_bound_attr_directive` calls to count.
-                let caller_components = self
-                    .blade
-                    .injected_vars
-                    .read()
-                    .get(file_uri)
-                    .map(|scope| scope.components.clone())
-                    .unwrap_or_default();
-                let occurrences = crate::blade::component_tags::scan_component_tag_calls(
-                    content,
-                    &tag_names,
-                    &|tag| component_argument_names(&caller_components, tag),
-                );
-                if occurrences.is_empty() {
-                    continue;
-                }
-                // A named slot (`<x-slot:title>` / the legacy `<x-slot
-                // name="title">`) is part of the *component's* template,
-                // not the caller's — see `component_tags::scan_component_tag_slots`.
-                // No bound-attribute correlation is needed here (a slot's
-                // body is not a `blade_bound_attr_directive` argument), so
-                // this reads straight off the caller's raw source.
-                for slot_name in
-                    crate::blade::component_tags::scan_component_tag_slots(content, &tag_names)
-                {
-                    merged
-                        .entry(slot_name)
-                        .or_default()
-                        .push(PhpType::named(crate::atom::atom(
-                            "\\Illuminate\\View\\ComponentSlot",
-                        )));
-                }
-                let Some(virtual_php) = self.blade_virtual_php_arc(file_uri) else {
-                    continue;
-                };
-                for vars in
-                    self.extract_component_call_site_vars(file_uri, &virtual_php, occurrences)
-                {
-                    for (name, ty) in vars {
-                        merged.entry(name).or_default().push(ty);
-                    }
-                }
-            }
-        }
-
-        if merged.is_empty() {
-            return BladeScope {
-                vars: declared,
-                this_class,
-                components,
-            };
-        }
-
-        // A name a declared source already carries needs no inference: what
-        // the backing class holds, and what a provider writes into the view's
-        // data, beat what one caller happened to pass.
-        merged.retain(|name, _| !declared.iter().any(|(existing, _)| existing == name));
-
-        let mut result: Vec<(String, String)> = merged
-            .into_iter()
-            .map(|(name, types)| (name, join_call_site_types(types).to_reparseable_string()))
-            .collect();
-        // Deterministic prologue ordering so re-preprocessing an
-        // unchanged template produces identical virtual PHP.
-        result.sort_by(|a, b| a.0.cmp(&b.0));
-        // The declared sources lead, so theirs are the declarations the
-        // prologue emits for the names more than one source carries.
-        let mut vars = declared;
-        vars.extend(result);
-        BladeScope {
-            vars,
-            this_class,
-            components,
-        }
+        found
     }
 
     /// The text one caller file's symbol map offsets index: a Blade
@@ -502,7 +524,7 @@ impl Backend {
         if !is_blade {
             return self.get_file_content_arc(uri);
         }
-        let content = self.blade_virtual_php_arc(uri)?;
+        let content = self.template_virtual_php_arc(uri)?;
         map.matches_source(&content).then_some(content)
     }
 
@@ -585,7 +607,7 @@ impl Backend {
     /// Blade file once per refresh pass.
     pub(super) fn blade_caller_snapshot(&self) -> BladeCallerSnapshot {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
-        let uris = self.lowered_template_uris();
+        let uris = self.lowered_blade_uris();
         uris.into_iter()
             .filter(|uri| !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str())))
             .filter_map(|uri| {

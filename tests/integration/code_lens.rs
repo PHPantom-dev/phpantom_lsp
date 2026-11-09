@@ -1173,8 +1173,8 @@ class Handler extends Base {
         ],
     );
 
-    let base_uri = format!("file://{}", _dir.path().join("src/Base.php").display());
-    let handler_uri = format!("file://{}", _dir.path().join("src/Handler.php").display());
+    let base_uri = crate::common::file_uri(&_dir.path().join("src/Base.php"));
+    let handler_uri = crate::common::file_uri(&_dir.path().join("src/Handler.php"));
 
     let base_content = std::fs::read_to_string(_dir.path().join("src/Base.php")).unwrap();
     let handler_content = std::fs::read_to_string(_dir.path().join("src/Handler.php")).unwrap();
@@ -1307,8 +1307,8 @@ class Document implements Printable {
         ],
     );
 
-    let iface_uri = format!("file://{}", _dir.path().join("src/Printable.php").display());
-    let doc_uri = format!("file://{}", _dir.path().join("src/Document.php").display());
+    let iface_uri = crate::common::file_uri(&_dir.path().join("src/Printable.php"));
+    let doc_uri = crate::common::file_uri(&_dir.path().join("src/Document.php"));
 
     let iface_content = std::fs::read_to_string(_dir.path().join("src/Printable.php")).unwrap();
     let doc_content = std::fs::read_to_string(_dir.path().join("src/Document.php")).unwrap();
@@ -1341,13 +1341,13 @@ fn covers_lens_titles_for(files: &[(&str, &str)], subject: &str) -> Vec<String> 
 
     for (rel_path, _) in files {
         let path = dir.path().join(rel_path);
-        let uri = format!("file://{}", path.display());
+        let uri = crate::common::file_uri(&path);
         let content = std::fs::read_to_string(&path).unwrap();
         backend.update_ast(&uri, &content);
     }
 
     let subject_path = dir.path().join(subject);
-    let subject_uri = format!("file://{}", subject_path.display());
+    let subject_uri = crate::common::file_uri(&subject_path);
     let subject_content = std::fs::read_to_string(&subject_path).unwrap();
 
     backend
@@ -2310,12 +2310,12 @@ fn pairing_lenses(
 ) -> Vec<PairingLens> {
     let (backend, dir) = create_psr4_workspace(composer, files);
     for (rel_path, content) in files {
-        let uri = format!("file://{}", dir.path().join(rel_path).display());
+        let uri = crate::common::file_uri(&dir.path().join(rel_path));
         backend.update_ast(&uri, content);
     }
-    let uri = format!("file://{}", dir.path().join(file).display());
+    let uri = crate::common::file_uri(&dir.path().join(file));
     let content = std::fs::read_to_string(dir.path().join(file)).unwrap();
-    let root = format!("file://{}/", dir.path().display());
+    let root = format!("{}/", crate::common::file_uri(dir.path()));
 
     backend
         .handle_code_lens(&uri, &content)

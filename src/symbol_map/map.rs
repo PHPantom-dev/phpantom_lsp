@@ -257,6 +257,13 @@ pub(crate) struct SymbolMap {
     /// A call cast to `(void)`, or used in any other way, is not one of
     /// these.
     pub discarded_calls: Vec<(u32, u32)>,
+    /// `(start, args_start)` of every function, method, and static method
+    /// call whose value something reads, sorted by `args_start`.  A call is left out when its
+    /// value goes nowhere: a call statement, a call cast to `(void)`, the
+    /// right-hand side of `&&`, `||`, `and`, `or` or `??` and a branch of
+    /// a ternary or `match` whose own value goes nowhere, a `for` header
+    /// expression whose value is dropped, and an arrow function's body.
+    pub used_result_calls: Vec<(u32, u32)>,
     /// Breakable block boundaries `(start_offset, end_offset)` where
     /// `break` is valid (loops and `switch`).
     pub breakable_scopes: Vec<(u32, u32)>,
@@ -304,13 +311,98 @@ pub(crate) struct SymbolMap {
     /// parameter declarations give, sorted by `start`.  Empty for every file
     /// that declares none.
     pub container_values: Vec<ContainerValueSite>,
+    /// The services the file's declarations say decorate another, in
+    /// source order.  Empty for every file that declares none.
+    pub service_decorations: Vec<ServiceDecoration>,
+    /// The entity types the file's entity classes declare, sorted by
+    /// `start`.  Empty for every file that declares none.
+    pub entity_types: Vec<EntityTypeSite>,
+    /// The classes the file's Drupal plugin declarations are written on,
+    /// sorted by `start`.  Empty for every file that declares none.
+    pub drupal_plugin_classes: Vec<PluginClassSite>,
+    /// The plugin types the file's plugin managers declare.  Empty for
+    /// every file that declares none.
+    pub drupal_plugin_managers: Vec<PluginManagerSite>,
+    /// The IDs the attributes and annotations of the file's classes in a
+    /// `Drupal\` namespace give them, sorted by `start`: the plugins among
+    /// them are told apart by the plugin types (see `drupal::plugins`).
+    pub drupal_plugins: Vec<PluginDeclarationSite>,
+    /// The code the file runs only when a module is installed, by a
+    /// `moduleExists('m')` check (see [`ModuleGuard`]).  Empty for every
+    /// file that checks none.
+    pub drupal_module_guards: Vec<ModuleGuard>,
+    /// The shapes of the Drupal route names the file's route builders give
+    /// routes they build from parts, `*` for each part that is not
+    /// written out (`search.view_*`).  Empty for every file that builds
+    /// none.
+    pub drupal_route_patterns: Vec<String>,
+    /// The `Class::method` and `Class` names Drupal's attribute route
+    /// discovery gives the file's controller routes besides their own,
+    /// which no text of the file spells out.  Empty for every file that
+    /// declares none.
+    pub drupal_route_aliases: Vec<String>,
+    /// The Drupal routes the file declares, in source order.  Empty for
+    /// every file that declares none.
+    pub drupal_routes: Vec<DrupalRouteSite>,
+    /// What each Drupal hook implementation and invocation of the file is,
+    /// sorted by `start`.  Empty for every file that has none.
+    pub drupal_hooks: Vec<HookSite>,
+    /// The invoking calls of the core methods that fire hooks under
+    /// computed names.  Empty for every other file.
+    pub drupal_computed_hooks: Vec<ComputedHookSite>,
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,
+    /// Method attributes whose URI argument may declare a Tempest route.
+    /// Their classes are confirmed through the `Route` interface on lookup.
+    pub tempest_routes: Box<[crate::tempest::routes::RouteAttribute]>,
+    /// Sorted argument-list starts of calls to the resolved Tempest `uri()` helper.
+    pub tempest_uri_calls: Box<[u32]>,
+    /// The classes the file's Yii DI definitions bind and build, in source
+    /// order.  Empty for every file that writes none.
+    pub yii_definitions: Vec<YiiDefinitionSite>,
+    /// The file's Yii DI definition arrays that build a known class, in
+    /// source order.  Empty for every file that writes none.
+    pub yii_definition_bodies: Vec<YiiDefinitionBody>,
+    /// The relations the file's Yii Active Record calls name, in source
+    /// order.  Empty for every file that names none.
+    pub yii_relations: Vec<YiiRelationSite>,
+    /// The file's `yiisoft/db` query chains that name tables or columns,
+    /// each outer chain before the chains its arguments hold.  Empty for
+    /// every file that writes none.
+    pub yii_queries: Vec<YiiQuerySite>,
+    /// The table and column names those chains write, chain by chain in
+    /// the same order.
+    pub yii_query_names: Vec<YiiQueryName>,
+    /// The DQL identification variables the file's queries and query
+    /// builders declare, with what each stands for.  Empty for every file
+    /// that declares none.
+    pub dql_aliases: Vec<DqlAliasSite>,
+    /// Where the DQL the file's queries and query builders hold stops
+    /// following the grammar, in source order.  Empty for every file whose
+    /// DQL parses.
+    pub dql_syntax_errors: Vec<DqlSyntaxSite>,
+    /// The DQL variables each method declares on a query builder it
+    /// returns or is passed, for the callers that build a query on it.
+    /// Empty for every file whose methods hand no builder on.
+    pub dql_builder_methods: Vec<DqlBuilderMethod>,
+    /// The DQL variables declared in each function body whose undeclared
+    /// variables wait on what other methods declare.  Empty for every file
+    /// with no such body.
+    pub dql_bodies: Vec<DqlBody>,
+    /// Each `getQuery()` call made on a query builder that other methods
+    /// hand to the function body it is in, which keeps it to itself, for
+    /// the variables those methods use and leave undeclared.  Empty for
+    /// every file with no such call.
+    pub dql_runs: Vec<DqlRun>,
     /// Whether the file declares a Twig loader of the project's own: a
     /// class that is one, or a service tagged `twig.loader`.  Such a loader
     /// can serve any template name, so no name can be told missing.
     pub declares_twig_loader: bool,
+    /// Whether the file sets parameters every Yii view shares in a way that
+    /// cannot be read (`setParameters($parameters)`), so that any name could
+    /// be one of them.
+    pub sets_unread_yii_view_parameters: bool,
     /// The Symfony routes the file loads from elsewhere, and the ones it
     /// declares in a way that cannot be read, including every route of a
     /// kernel that loads them itself or a router configured to load them
@@ -704,5 +796,140 @@ impl SymbolMap {
     /// Returns `true` when `offset` falls inside a `static` method body.
     pub fn is_in_static_method(&self, offset: u32) -> bool {
         Self::offset_in_sorted_ranges(&self.static_method_scopes, offset)
+    }
+}
+
+/// A DQL identification variable a query or the query builder calls of a
+/// function body declare, and what it stands for.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DqlAliasSite {
+    /// Where the variable can be used: the query, or the function body.
+    pub start: u32,
+    pub end: u32,
+    pub alias: crate::atom::Atom,
+    /// The subject text of what the variable stands for: an entity class,
+    /// or a repository whose entity it is.
+    pub subject: Box<str>,
+}
+
+/// Where a piece of DQL stops following the grammar, or uses a variable
+/// nothing declares.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DqlSyntaxSite {
+    /// The token the grammar does not allow, or the whole argument when
+    /// the text ends too early or the token is not written out; or the
+    /// variable.
+    pub start: u32,
+    pub end: u32,
+    pub message: Box<str>,
+    /// The diagnostic code the site is reported with.
+    pub code: &'static str,
+    /// Where the method name of the call that takes the DQL starts, or
+    /// the class name of the `new` that does.
+    pub call: u32,
+    /// The class the call's receiver, or the object the `new` makes, must
+    /// be for the DQL to be judged: a method of that name on anything else
+    /// takes something else.
+    pub receiver: &'static str,
+    /// The calls of other methods that create or are handed the query
+    /// builder the variable is used on.  The variable is undeclared only
+    /// when each of them is known to declare what it declares, and the
+    /// ones that declare the variable leave some path through the function
+    /// body without it.
+    pub requires: Box<[DqlProvider]>,
+    /// Where the function body the variable is used in starts, when the
+    /// paths through it are followed again once the calls in `requires`
+    /// are known (see [`SymbolMap::dql_bodies`]).
+    pub body: Option<u32>,
+}
+
+/// Where a method's query builder comes in or goes out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum DqlSlot {
+    /// The builder the method returns.
+    Returned,
+    /// The builder passed as the argument at the index.
+    Parameter(u32),
+}
+
+/// A call of another method that a query builder comes from or is passed
+/// to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct DqlProvider {
+    /// Where the method name of the call starts.
+    pub call: u32,
+    pub slot: DqlSlot,
+}
+
+/// The DQL variables a method declares on a query builder it creates and
+/// returns, or is passed and keeps to itself.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DqlBuilderMethod {
+    /// Where the method's name starts.
+    pub name_offset: u32,
+    pub slot: DqlSlot,
+    /// The variables its own body declares.
+    pub aliases: Box<[crate::atom::Atom]>,
+    /// The variables its own body uses on the builder and leaves for the
+    /// callers to declare, on some path through it.
+    pub uses: Box<[crate::atom::Atom]>,
+    /// The calls of other methods in its body that the builder comes from
+    /// or is passed to, which declare variables on it too.
+    pub requires: Box<[DqlProvider]>,
+}
+
+/// The DQL variables a function body's query builder calls declare, and
+/// where, for following the paths through the body again once the other
+/// methods it calls are known.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DqlBody {
+    /// Where the body starts.
+    pub start: u32,
+    /// Where the method name of each declaring call starts, and the
+    /// variable it declares.
+    pub decls: Box<[(u32, crate::atom::Atom)]>,
+}
+
+/// A `getQuery()` call made on a query builder that other methods create
+/// or are passed, where the variables those methods use on the builder
+/// without declaring them must have been declared.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DqlRun {
+    /// Where the method name of the call starts and ends.
+    pub start: u32,
+    pub end: u32,
+    /// Where the function body the call is made in starts (see
+    /// [`SymbolMap::dql_bodies`]).
+    pub body: u32,
+    /// The calls of other methods that create or are handed the builder.
+    pub requires: Box<[DqlProvider]>,
+}
+
+impl SymbolMap {
+    /// What the DQL variable `alias` stands for at `offset`, as a subject
+    /// text.
+    pub(crate) fn dql_alias_subject(&self, alias: &str, offset: u32) -> Option<&str> {
+        self.dql_aliases
+            .iter()
+            .filter(|site| site.start <= offset && offset <= site.end && site.alias == alias)
+            .min_by_key(|site| site.end - site.start)
+            .map(|site| &*site.subject)
+    }
+
+    /// What the method whose name starts at `name_offset` declares on the
+    /// builder in `slot`, when it is known to declare nothing else.
+    pub(crate) fn dql_builder_method(
+        &self,
+        name_offset: u32,
+        slot: DqlSlot,
+    ) -> Option<&DqlBuilderMethod> {
+        self.dql_builder_methods
+            .iter()
+            .find(|method| method.name_offset == name_offset && method.slot == slot)
+    }
+
+    /// The DQL variables the function body starting at `start` declares.
+    pub(crate) fn dql_body(&self, start: u32) -> Option<&DqlBody> {
+        self.dql_bodies.iter().find(|body| body.start == start)
     }
 }

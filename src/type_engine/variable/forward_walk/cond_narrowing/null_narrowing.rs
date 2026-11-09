@@ -47,7 +47,7 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     // `!isset($x)` — truthy branch means $x is null: narrow to null.
     for var_name in extract_not_isset_vars(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        narrow_to_null_in_scope(&var_name, scope);
+        narrow_unset_to_null_in_scope(&var_name, scope);
     }
     // `$x === null` narrows to null only; `$x == null` to everything that
     // compares equal to it.
@@ -275,7 +275,7 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // `isset($x)` — inverse (else) means $x was null: narrow to null.
     for var_name in extract_isset_vars(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        narrow_to_null_in_scope(&var_name, scope);
+        narrow_unset_to_null_in_scope(&var_name, scope);
     }
     // `!isset($x)` — inverse (guard after `!isset` return) means $x
     // is not null: strip null.

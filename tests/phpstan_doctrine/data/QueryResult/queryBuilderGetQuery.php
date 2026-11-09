@@ -25,12 +25,12 @@ class QueryBuilderGetQuery
 	public function addAndWhereAndGetQuery(EntityManagerInterface $em): void
 	{
 		$qb = $this->getQueryBuilderMany($em)->andWhere('m.intColumn = 1');
-		assertType('list<QueryResult\Entities\Many>', $qb->getQuery()->getResult()); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('list<QueryResult\Entities\Many>', $qb->getQuery()->getResult());
 	}
 
 	public function getQueryDirectly(EntityManagerInterface $em): void
 	{
-		assertType('list<QueryResult\Entities\Many>', $this->getQueryBuilderMany($em)->getQuery()->getResult()); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('list<QueryResult\Entities\Many>', $this->getQueryBuilderMany($em)->getQuery()->getResult());
 	}
 
 	public function testQueryTypeParametersAreInfered(EntityManagerInterface $em): void
@@ -40,14 +40,14 @@ class QueryBuilderGetQuery
 			->from(Many::class, 'm')
 			->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $query);
 
 		$query = $em->createQueryBuilder()
 			->select(['m.intColumn', 'm.stringNullColumn'])
 			->from(Many::class, 'm')
 			->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, array{intColumn: int, stringNullColumn: string|null}>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, array{intColumn: int, stringNullColumn: string|null}>', $query);
 	}
 
 	public function testIndexByInfering(EntityManagerInterface $em): void
@@ -57,14 +57,14 @@ class QueryBuilderGetQuery
 			->from(Many::class, 'm', 'm.intColumn')
 			->getQuery();
 
-		assertType('Doctrine\ORM\Query<int, QueryResult\Entities\Many>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<int, QueryResult\Entities\Many>', $query);
 
 		$query = $em->createQueryBuilder()
 			->select('m')
 			->from(Many::class, 'm', 'm.stringColumn')
 			->getQuery();
 
-		assertType('Doctrine\ORM\Query<string, QueryResult\Entities\Many>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<string, QueryResult\Entities\Many>', $query);
 
 		$query = $em->createQueryBuilder()
 			->select(['m.intColumn', 'm.stringNullColumn'])
@@ -72,7 +72,11 @@ class QueryBuilderGetQuery
 			->indexBy('m', 'm.stringColumn')
 			->getQuery();
 
-		assertType('Doctrine\ORM\Query<string, array{intColumn: int, stringNullColumn: string|null}>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		// Upstream expects `Query<string, …>`. Doctrine keys rows of scalars
+		// by INDEX BY only when the field is selected itself
+		// (`SqlWalker::walkIndexBy()`), and `m.stringColumn` is not, so the
+		// rows are a list.
+		assertType('Doctrine\ORM\Query<null, array{intColumn: int, stringNullColumn: string|null}>', $query);
 	}
 
 	public function testIndexByResultInfering(EntityManagerInterface $em): void
@@ -83,7 +87,7 @@ class QueryBuilderGetQuery
 			->getQuery()
 			->getResult();
 
-		assertType('array<int, QueryResult\Entities\Many>', $result); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('array<int, QueryResult\Entities\Many>', $result);
 
 		$result = $em->createQueryBuilder()
 			->select('m')
@@ -91,7 +95,7 @@ class QueryBuilderGetQuery
 			->getQuery()
 			->getResult();
 
-		assertType('array<string, QueryResult\Entities\Many>', $result); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('array<string, QueryResult\Entities\Many>', $result);
 
 		$result = $em->createQueryBuilder()
 			->select(['m.intColumn', 'm.stringNullColumn'])
@@ -100,7 +104,8 @@ class QueryBuilderGetQuery
 			->getQuery()
 			->getResult();
 
-		assertType('array<string, array{intColumn: int, stringNullColumn: string|null}>', $result); // SKIP: Doctrine DQL and query builder result types are not read
+		// Upstream expects `array<string, …>`; a list, as above.
+		assertType('list<array{intColumn: int, stringNullColumn: string|null}>', $result);
 	}
 
 	public function testConditionalAddSelect(EntityManagerInterface $em, bool $bool): void
@@ -113,14 +118,17 @@ class QueryBuilderGetQuery
 		}
 		$query = $qb->from(Many::class, 'm')->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, array{intColumn: int}>|Doctrine\ORM\Query<null, array{intColumn: int, stringNullColumn: string|null}>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, array{intColumn: int}>|Doctrine\ORM\Query<null, array{intColumn: int, stringNullColumn: string|null}>', $query);
 	}
 
 	public function testQueryResultTypeIsMixedWhenDQLIsNotKnown(QueryBuilder $builder): void
 	{
 		$query = $builder->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, mixed>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		// Upstream expects `Query<null, mixed>`. DQL that is not known may
+		// index its rows by anything, so the key is no more known than the
+		// row, the way `createQuery()` with unknown DQL has it.
+		assertType('Doctrine\ORM\Query<mixed, mixed>', $query);
 	}
 
 	public function testQueryResultTypeIsMixedWhenDQLIsInvalid(EntityManagerInterface $em): void
@@ -130,7 +138,7 @@ class QueryBuilderGetQuery
 			->from(Many::class, 'm')
 			->getQuery();
 
-		assertType('Doctrine\ORM\Query<mixed, mixed>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<mixed, mixed>', $query);
 	}
 
 	public function testQueryResultTypeIsMixedWhenDQLIsUsingAnInterfaceTypeDefinition(EntityManagerInterface $em): void
@@ -144,7 +152,9 @@ class QueryBuilderGetQuery
 			->from(get_class($vehicle), 'v')
 			->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, mixed>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		// Upstream expects `Query<null, mixed>`; an interface is no entity,
+		// so the DQL is not read, as above.
+		assertType('Doctrine\ORM\Query<mixed, mixed>', $query);
 	}
 
 	public function testQueryResultTypeIsVoidWithDeleteOrUpdate(EntityManagerInterface $em): void
@@ -156,7 +166,7 @@ class QueryBuilderGetQuery
 				 ->delete()
 				 ->getQuery();
 
-		assertType('Doctrine\ORM\Query<void, void>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<void, void>', $query);
 
 		$query = $em->getRepository(Many::class)
 				 ->createQueryBuilder('m')
@@ -166,7 +176,7 @@ class QueryBuilderGetQuery
 				 ->set('m.intColumn', '42')
 				 ->getQuery();
 
-		assertType('Doctrine\ORM\Query<void, void>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<void, void>', $query);
 	}
 
 
@@ -190,7 +200,7 @@ class QueryBuilderGetQuery
 			->getQuery()
 			->getResult();
 
-		assertType('list<QueryResult\Entities\Many>', $result); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('list<QueryResult\Entities\Many>', $result);
 
 		$result = $em->createQueryBuilder()
 			->select(['m.stringNullColumn'])
@@ -201,7 +211,7 @@ class QueryBuilderGetQuery
 			->getQuery()
 			->getResult();
 
-		assertType('list<array{stringNullColumn: string|null}>', $result); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('list<array{stringNullColumn: string|null}>', $result);
 
 		$result = $em->createQueryBuilder()
 			->select(['m.intColumn', 'm.stringNullColumn'])
@@ -278,7 +288,7 @@ class QueryBuilderGetQuery
 			->getQuery()
 			->getResult();
 
-		assertType('list<QueryResult\Entities\Many>', $result); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('list<QueryResult\Entities\Many>', $result);
 	}
 	/**
 	 * @param class-string<T> $many
@@ -292,7 +302,7 @@ class QueryBuilderGetQuery
 			->getQuery()
 			->getResult();
 
-		assertType('list<QueryResult\Entities\Many>', $result); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('list<QueryResult\Entities\Many>', $result);
 	}
 
 
@@ -317,7 +327,7 @@ class QueryBuilderGetQuery
 			->from(Many::class, 'event')
 			->getQuery();
 
-		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $query); // SKIP: Doctrine DQL and query builder result types are not read
+		assertType('Doctrine\ORM\Query<null, QueryResult\Entities\Many>', $query);
 	}
 
 }

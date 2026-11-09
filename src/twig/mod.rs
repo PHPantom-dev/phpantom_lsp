@@ -72,10 +72,13 @@ impl Backend {
     }
 
     /// Whether `uri` is a resource document (see
-    /// [`crate::resource_navigation`]): one whose extension says so, or a
-    /// template whose extension alone does not.
+    /// [`crate::resource_navigation`]): one whose extension says so, a
+    /// template whose extension alone does not, or a Yii project's
+    /// `composer.json`, read for its `config-plugin`.
     pub(crate) fn is_resource_uri(&self, uri: &str) -> bool {
-        crate::resource_navigation::is_resource_document(uri) || self.is_twig_template_uri(uri)
+        crate::resource_navigation::is_resource_document(uri)
+            || self.is_twig_template_uri(uri)
+            || self.is_yii_config_plugin_uri(uri)
     }
 
     /// Where the Twig template named `name` is created, when it is a name

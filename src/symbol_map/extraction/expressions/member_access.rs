@@ -72,7 +72,7 @@ fn extract_property_access<'a>(
     ctx: &mut ExtractionCtx<'a>,
     scope_start: u32,
 ) {
-    let subject_text = subject_text_of(object, ctx.content);
+    let subject_text = ctx.spine_texts.subject_text_of(object, ctx.content);
     extract_from_expression(object, ctx, scope_start);
 
     match property {

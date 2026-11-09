@@ -11,6 +11,9 @@ use crate::type_engine::call_resolution::{
     facade_concrete_owner, is_reflected_property_call, is_reflected_property_class,
     resolve_reflected_property_at_call, resolve_reflected_property_at_new,
 };
+use crate::virtual_members::laravel::collection_projection::{
+    ProjectionMethod, collection_property_return,
+};
 
 impl Backend {
     /// `base->method(…)`: the instance method call arm of
@@ -54,6 +57,211 @@ impl Backend {
                 **hint_out = Some(ty);
             }
             return classes;
+        }
+
+        // `->__invoke()` / `->call()` on a closure signature returns what
+        // the signature says, which the `Closure` class cannot know.
+        if crate::type_engine::call_resolution::is_closure_invoke_call(method_name)
+            && let Some(ty) =
+                crate::type_engine::call_resolution::closure_invoke_return(&lhs_resolved)
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
+
+        // A service or a parameter looked up in the container by its name.
+        if (method_name.eq_ignore_ascii_case("get")
+            || method_name.eq_ignore_ascii_case("getParameter"))
+            && let Some(backend) = ctx.file.backend
+            && let Some(key) = split_top_level_commas(text_args)
+                .first()
+                .and_then(|first| crate::text_scan::unquote_php_string(first.trim()))
+            && let Some(lookup) = lhs_resolved
+                .iter()
+                .filter_map(|resolved| resolved.class_info.as_deref())
+                .find_map(|owner| {
+                    backend.container_lookup(owner, method_name, key, ctx.file.class_loader)
+                })
+        {
+            match lookup {
+                crate::symfony::container::ContainerLookup::Classes(classes) => return classes,
+                crate::symfony::container::ContainerLookup::Type(ty) => {
+                    let classes =
+                        crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                            &ty,
+                            "",
+                            ctx.file.all_classes,
+                            ctx.file.class_loader,
+                        );
+                    if let Some(ref mut hint_out) = return_type_hint_out {
+                        **hint_out = Some(ty);
+                    }
+                    return classes;
+                }
+            }
+        }
+
+        // Drupal: a load or an entity query on an entity storage tagged with
+        // its entity class, the count and IDs of a tagged query, and
+        // `getStorage('node')` on an entity type manager (see
+        // `crate::drupal::types`).
+        let in_drupal = ctx
+            .file
+            .backend
+            .filter(|backend| backend.is_drupal_project());
+        if in_drupal.is_some()
+            && let Some(ty) =
+                crate::drupal::types::load_type(method_name, &lhs_resolved, ctx.file.class_loader)
+                    .or_else(|| {
+                        crate::drupal::types::query_call_type(
+                            method_name,
+                            &lhs_resolved,
+                            ctx.file.class_loader,
+                        )
+                    })
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
+        // A configuration object read by its name carries the name.
+        if let Some(backend) = in_drupal
+            && (method_name.eq_ignore_ascii_case("config")
+                || method_name.eq_ignore_ascii_case("get")
+                || method_name.eq_ignore_ascii_case("getEditable"))
+            && let Some(name) = first_literal_text_arg(text_args, "name")
+            && let Some(ty) = lhs_resolved
+                .iter()
+                .filter_map(|resolved| resolved.class_info.as_deref())
+                .find_map(|owner| {
+                    crate::drupal::types::config_object_type(
+                        backend,
+                        owner,
+                        method_name,
+                        name,
+                        ctx.file.class_loader,
+                        ctx.resolved_class_cache,
+                    )
+                })
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
+        if method_name.eq_ignore_ascii_case("getStorage")
+            && let Some(backend) = in_drupal
+            && let Some(id) = first_literal_text_arg(text_args, "entity_type_id")
+        {
+            for owner in lhs_resolved.iter().filter_map(|r| r.class_info.as_deref()) {
+                if let Some(storages) = crate::drupal::types::storage_type(
+                    backend,
+                    owner,
+                    method_name,
+                    id,
+                    ctx.file.uri,
+                    ctx.file.class_loader,
+                ) {
+                    // A chain carries one hint: with two declarations of the
+                    // ID it is the union of their tagged storages, and a
+                    // load on it gives either entity.
+                    let (classes, types): (Vec<_>, Vec<_>) = storages.into_iter().unzip();
+                    if let Some(ref mut hint_out) = return_type_hint_out {
+                        **hint_out = Some(crate::php_type::PhpType::union(types));
+                    }
+                    return classes;
+                }
+            }
+        }
+
+        // Drupal: `createInstance('id')` on a plugin manager gives the
+        // plugin's class.
+        if method_name.eq_ignore_ascii_case("createInstance")
+            && let Some(backend) = in_drupal
+            && let Some(id) = first_literal_text_arg(text_args, "plugin_id")
+            && let Some(classes) = lhs_resolved
+                .iter()
+                .filter_map(|r| r.class_info.as_deref())
+                .find_map(|owner| {
+                    crate::drupal::plugins::instance_classes(
+                        backend,
+                        owner,
+                        method_name,
+                        id,
+                        ctx.file.class_loader,
+                    )
+                })
+        {
+            return classes;
+        }
+
+        // Doctrine: a query typed by its DQL, and its results.
+        if let Some(ty) = crate::type_engine::call_resolution::query_at_call(
+            method_name,
+            text_args,
+            &lhs_resolved,
+            ctx,
+        ) {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
+
+        // Doctrine: the repository the entity's mapping names.
+        if method_name.eq_ignore_ascii_case("getRepository") {
+            let args = split_top_level_commas(text_args);
+            if let Some(ty) = lhs_resolved
+                .iter()
+                .filter_map(|r| r.class_info.as_deref())
+                .find_map(|owner| {
+                    crate::type_engine::call_resolution::repository_at_call(
+                        owner,
+                        method_name,
+                        &args,
+                        ctx,
+                    )
+                })
+            {
+                let classes =
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                        &ty,
+                        "",
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
+                    );
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(ty);
+                }
+                return classes;
+            }
         }
 
         // Guard-aware auth user model: a `user()` call on a
@@ -121,12 +329,42 @@ impl Backend {
         // type gets flattened into ClassInfo.
         let mut hint_captured = false;
         let mut results = Vec::new();
+        let projection = ProjectionMethod::from_name(method_name);
+        let split_args = std::cell::LazyCell::new(|| split_top_level_commas(text_args));
 
         for rt in &lhs_resolved {
             let owner = match &rt.class_info {
                 Some(ci) => Arc::clone(ci),
                 None => continue,
             };
+
+            if let Some(method) = projection
+                && let Some(hint) = collection_property_return(
+                    &owner,
+                    Some(&rt.type_string),
+                    method,
+                    &split_args,
+                    ctx,
+                )
+            {
+                ClassInfo::extend_unique_arc(
+                    &mut results,
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &hint,
+                        "",
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
+                    ),
+                );
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(match hint_out.take() {
+                        Some(previous) if hint_captured => PhpType::union(vec![previous, hint]),
+                        _ => hint,
+                    });
+                    hint_captured = true;
+                }
+                continue;
+            }
 
             // Extract class-level generic type arguments from the
             // resolved type string (e.g. `Collection<Product>` →
@@ -151,9 +389,8 @@ impl Backend {
                 _ => HashMap::new(),
             };
 
-            let split_args = split_top_level_commas(text_args);
-            let arg_refs = split_args.to_vec();
-            let method_subs = Self::build_method_template_subs(&owner, method_name, &arg_refs, ctx);
+            let arg_refs = split_args.as_slice();
+            let method_subs = Self::build_method_template_subs(&owner, method_name, arg_refs, ctx);
 
             // Merge class-level generic substitutions with
             // method-level template substitutions.  Class-level
@@ -219,8 +456,19 @@ impl Backend {
                     hint_captured = true;
                 }
             }
-            let mr_ctx =
-                MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, false);
+            let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+            let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+                Self::resolve_arg_text_to_type(t, &ctx.written_in(namespace))
+            };
+            let mr_ctx = MethodReturnCtx::for_call(
+                ctx,
+                &template_subs,
+                &var_resolver,
+                &arg_ty_resolver,
+                &default_ty_resolver,
+                &written,
+                false,
+            );
             if let Some((date_class, date_return_type)) =
                 Self::configured_laravel_date_return(&owner, method_name, ctx.file.class_loader)
             {
@@ -280,8 +528,19 @@ impl Backend {
                 let template_subs =
                     Self::build_method_template_subs(owner, method_name, &arg_refs, ctx);
                 let var_resolver = build_var_resolver(ctx);
-                let mr_ctx =
-                    MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, true);
+                let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+                let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+                    Self::resolve_arg_text_to_type(t, &ctx.written_in(namespace))
+                };
+                let mr_ctx = MethodReturnCtx::for_call(
+                    ctx,
+                    &template_subs,
+                    &var_resolver,
+                    &arg_ty_resolver,
+                    &default_ty_resolver,
+                    &written,
+                    true,
+                );
                 ClassInfo::extend_unique_arc(
                     &mut union_results,
                     Self::resolve_method_return_types_with_args(
@@ -297,6 +556,99 @@ impl Backend {
             }
         }
         let owner_class = all_owners.into_iter().next();
+
+        // `ArrayHelper::getValueByPath($user, 'profile')` is typed by the
+        // value the path reaches (see `crate::yii::array_helper`).
+        if let Some(ref owner) = owner_class
+            && let Some(method) = crate::yii::array_helper::path_method(&owner.fqn(), method_name)
+            && let Some(ty) = crate::yii::array_helper::call_return_type(
+                method,
+                &split_top_level_commas(text_args),
+                &|text| Self::resolve_arg_text_to_type(text, ctx),
+                ctx,
+            )
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
+
+        // `\Drupal::service('id')` is typed by the class the ID is built
+        // from (see `crate::drupal::types`).
+        if method_name.eq_ignore_ascii_case("service")
+            && let Some(ref owner) = owner_class
+            && let Some(backend) = ctx.file.backend
+            && backend.is_drupal_project()
+            && let Some(id) = first_literal_text_arg(text_args, "id")
+            && let Some(classes) = crate::drupal::types::service_classes(
+                backend,
+                &owner.fqn(),
+                method_name,
+                id,
+                ctx.file.class_loader,
+            )
+        {
+            return classes;
+        }
+        // `\Drupal::config('acme.settings')` carries the name it reads.
+        if method_name.eq_ignore_ascii_case("config")
+            && let Some(ref owner) = owner_class
+            && let Some(backend) = ctx.file.backend
+            && backend.is_drupal_project()
+            && let Some(name) = first_literal_text_arg(text_args, "name")
+            && let Some(ty) = crate::drupal::types::config_object_type(
+                backend,
+                owner,
+                method_name,
+                name,
+                ctx.file.class_loader,
+                ctx.resolved_class_cache,
+            )
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
+        // `\Drupal::entityQuery('node')` is a query tagged with the entity
+        // type's classes (see `crate::drupal::types`).
+        if method_name.eq_ignore_ascii_case("entityQuery")
+            && let Some(ref owner) = owner_class
+            && let Some(backend) = ctx.file.backend
+            && backend.is_drupal_project()
+            && let Some(id) = first_literal_text_arg(text_args, "entity_type")
+            && let Some(ty) = crate::drupal::types::entity_query_type(
+                backend,
+                &owner.fqn(),
+                method_name,
+                id,
+                ctx.file.uri,
+            )
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
 
         if let Some(ref owner) = owner_class {
             // A static call through a Laravel facade is typed by the
@@ -330,6 +682,42 @@ impl Backend {
             let template_subs =
                 Self::build_method_template_subs(&merged, method_name, &arg_refs, ctx);
 
+            // `parent::` forwards late static binding, so a `static`
+            // return names the calling class rather than the parent that
+            // declares it.  (`self::`/`static::` already name the caller.)
+            let target = merged.get_method_ci(method_name);
+            let lsb_caller = ctx
+                .current_class
+                .filter(|caller| !caller.name.is_empty() && class.eq_ignore_ascii_case("parent"));
+            if let Some(caller) = lsb_caller
+                && target
+                    .and_then(|m| m.return_type.as_ref())
+                    .is_some_and(PhpType::is_late_static_bound)
+            {
+                if let Some(ref mut hint_out) = return_type_hint_out
+                    && let Some(m) = target
+                    && let Some(substituted) = method_call_return_hint(
+                        m,
+                        &merged,
+                        text_args,
+                        &template_subs,
+                        &build_var_resolver(ctx),
+                        &written,
+                        ctx,
+                    )
+                {
+                    **hint_out = Some(resolve_hint_keywords(
+                        substituted,
+                        &merged,
+                        ctx.file.class_loader,
+                        |s| s.replace_self_bound(&merged.fqn(), Some(&caller.fqn())),
+                    ));
+                }
+                let caller = (ctx.file.class_loader)(Fqn::new(&caller.fqn()))
+                    .unwrap_or_else(|| Arc::new(caller.clone()));
+                return vec![caller];
+            }
+
             if let Some(ref mut hint_out) = return_type_hint_out
                 && let Some(m) = merged.get_method_ci(method_name)
                 && let Some(substituted) = method_call_return_hint(
@@ -357,8 +745,19 @@ impl Backend {
             }
 
             let var_resolver = build_var_resolver(ctx);
-            let mr_ctx =
-                MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, true);
+            let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+            let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+                Self::resolve_arg_text_to_type(t, &ctx.written_in(namespace))
+            };
+            let mr_ctx = MethodReturnCtx::for_call(
+                ctx,
+                &template_subs,
+                &var_resolver,
+                &arg_ty_resolver,
+                &default_ty_resolver,
+                &written,
+                true,
+            );
             if let Some((date_class, date_return_type)) =
                 Self::configured_laravel_date_return(&merged, method_name, ctx.file.class_loader)
             {
@@ -414,11 +813,14 @@ impl Backend {
             // are all literals has one answer, and other arguments
             // can still decide a refinement of `string`.  It names
             // no class, so it travels purely as the hint.
-            if crate::type_engine::variable::string_func_rules::has_string_func_rule(func_name)
-                && let Some(folded) =
-                    crate::type_engine::variable::string_func_rules::string_func_return_type(
-                        func_name, &fn_args,
-                    )
+            if crate::type_engine::variable::string_func_rules::is_builtin_string_function(
+                func_name,
+                ctx.function_loader,
+                ctx.cursor_offset,
+            ) && let Some(folded) =
+                crate::type_engine::variable::string_func_rules::string_func_return_type(
+                    func_name, &fn_args,
+                )
             {
                 if let Some(ref mut hint_out) = return_type_hint_out {
                     **hint_out = Some(folded);
@@ -486,6 +888,9 @@ impl Backend {
                 // decided by the argument's resolved type, so the
                 // branch a call takes matches what it was handed.
                 let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+                let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+                    Self::resolve_arg_text_to_type(t, &ctx.written_in(namespace))
+                };
                 // A function whose arguments decide its result
                 // (`json_encode(…, JSON_THROW_ON_ERROR)` never returning
                 // `false`, `filter_var()` returning what its filter
@@ -528,6 +933,7 @@ impl Backend {
                             params: &func_info.template_params,
                             bindings: &func_info.template_bindings,
                             arg_type_resolver: Some(&arg_ty_resolver),
+                            default_type_resolver: Some(&default_ty_resolver),
                             this_type: None,
                             subs: subs.as_ref(),
                         };
@@ -540,6 +946,7 @@ impl Backend {
                                 calling: ctx.current_class.map(|c| c.fqn().as_str()),
                                 declaring: None,
                                 written_class: Some(&written),
+                                namespace: func_info.namespace.as_deref(),
                             },
                             ctx.file.class_loader,
                             &tpl,
@@ -1019,40 +1426,41 @@ fn method_call_return_hint(
     written: &dyn Fn(&str) -> String,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    let substituted = resolve_conditional_return_hint(
-        m,
-        text_args,
-        Some(var_resolver),
+    let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, ctx);
+    let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+        Backend::resolve_arg_text_to_type(t, &ctx.written_in(namespace))
+    };
+    let mr_ctx = MethodReturnCtx::for_call(
+        ctx,
         template_subs,
-        crate::type_engine::conditional_resolution::ConditionalClassContext {
-            calling: ctx.current_class.map(|c| c.fqn().as_str()),
-            declaring: None,
-            written_class: Some(written),
-        },
-        owner,
-        ctx.file.class_loader,
-    )
-    .or_else(|| {
-        m.return_type.as_ref().map(|ret| {
-            if template_subs.is_empty() {
-                ret.clone()
-            } else {
-                ret.substitute(template_subs)
-            }
-        })
-    })?;
+        var_resolver,
+        &arg_ty_resolver,
+        &default_ty_resolver,
+        written,
+        false,
+    );
+    let substituted = resolve_conditional_return_hint(m, text_args, template_subs, &mr_ctx, owner)
+        .or_else(|| {
+            m.return_type.as_ref().map(|ret| {
+                if template_subs.is_empty() {
+                    ret.clone()
+                } else {
+                    ret.substitute(template_subs)
+                }
+            })
+        })?;
     // Collapse any conditional nested inside the return type (e.g.
     // `Collection<($k is array|string ? array-key : TGroupKey), …>`)
     // against this call's arguments.
     if !substituted.contains_conditional() {
         return Some(substituted);
     }
-    let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, ctx);
     let tpl = TemplateContext {
         defaults: Some(template_subs),
         params: m.template_params(),
         bindings: m.template_bindings(),
         arg_type_resolver: Some(&arg_ty_resolver),
+        default_type_resolver: Some(&default_ty_resolver),
         this_type: None,
         subs: None,
     };
@@ -1066,9 +1474,75 @@ fn method_call_return_hint(
                 calling: ctx.current_class.map(|c| c.fqn().as_str()),
                 declaring: Some(owner.fqn().as_str()),
                 written_class: Some(written),
+                namespace: m.default_namespace(),
             },
             ctx.file.class_loader,
             &tpl,
         ),
     )
+}
+
+/// The value of the argument that binds a call's first parameter, named
+/// `name`, when it is a plain string literal.
+fn first_literal_text_arg<'t>(text_args: &'t str, name: &str) -> Option<&'t str> {
+    let args = split_top_level_commas(text_args);
+    let first = crate::call_args::first_param_text_arg(&args, name)?;
+    crate::text_scan::unquote_php_string(first.trim())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Backend;
+    use crate::php_type::PhpType;
+
+    #[test]
+    fn text_call_resolution_keeps_a_builtin_path_literal() {
+        let backend = Backend::new_test();
+        let directory = tempfile::tempdir().unwrap();
+        let uri = crate::util::path_to_uri(&directory.path().join("path.php"));
+        let file = backend.file_context(&uri);
+        let loaders = backend.file_loaders(&file);
+        let ctx = loaders.resolution_ctx_at("<?php", 0);
+        let mut hint = None;
+        let classes = Backend::return_types_of_function_call(
+            "\\dirname",
+            "'views/page.php'",
+            &ctx,
+            Some(&mut hint),
+        );
+        assert!(classes.is_empty());
+        assert_eq!(hint, Some(PhpType::literal_string_value("views")));
+        Backend::return_types_of_function_call("dirname", "__FILE__", &ctx, Some(&mut hint));
+        assert_eq!(
+            hint,
+            Some(PhpType::literal_string_value(
+                directory.path().to_string_lossy()
+            ))
+        );
+    }
+
+    #[test]
+    fn text_call_resolution_does_not_fold_an_interpolated_string() {
+        let backend = Backend::new_test();
+        let directory = tempfile::tempdir().unwrap();
+        let uri = crate::util::path_to_uri(&directory.path().join("path.php"));
+        let file = backend.file_context(&uri);
+        let loaders = backend.file_loaders(&file);
+        let ctx = loaders.resolution_ctx_at("<?php", 0);
+        let mut hint = None;
+        Backend::return_types_of_function_call("strtoupper", "\"a $name\"", &ctx, Some(&mut hint));
+        assert!(hint.as_ref().is_none_or(|ty| ty.as_literal().is_none()));
+        Backend::return_types_of_function_call("strtoupper", "\"a\"", &ctx, Some(&mut hint));
+        assert_eq!(hint, Some(PhpType::literal_string_value("A")));
+        Backend::return_types_of_function_call(
+            "strtoupper",
+            "\"a $name\" . 'b'",
+            &ctx,
+            Some(&mut hint),
+        );
+        assert!(
+            hint.as_ref().is_none_or(|ty| ty.as_literal().is_none()),
+            "{hint:?}"
+        );
+    }
 }

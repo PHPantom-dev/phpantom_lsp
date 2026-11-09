@@ -529,7 +529,7 @@ add_action('wp_lo');
 /// A project whose core and a plugin are installed with Composer, core
 /// under a web root the way Bedrock lays it out.
 async fn installed_workspace() -> (Backend, tempfile::TempDir) {
-    let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+    let dir = tempfile::tempdir_in(dunce::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let files = [
         ("composer.json", COMPOSER),
         ("vendor/composer/installed.json", INSTALLED),

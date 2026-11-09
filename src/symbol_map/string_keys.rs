@@ -9,7 +9,7 @@ use super::{LaravelConfigResource, SymbolKind, SymbolMap, SymbolSpan};
 ///
 /// One flat list for every framework: each variant names what its key
 /// resolves against, so a framework's kinds sit beside the others rather
-/// than behind a per-framework wrapper. [`Self::is_symfony`] says which
+/// than behind a per-framework wrapper. [`Self::framework`] says which
 /// framework a variant belongs to.
 ///
 /// Adding a new string-key navigation feature only requires adding a variant
@@ -25,6 +25,9 @@ pub(crate) enum StringKeyKind {
     ConfigResource(LaravelConfigResource),
     /// A `view('name')` or `View::make('name')` call.
     View,
+    /// A path passed to `Tempest\View\view`; `relative` marks a literal
+    /// concatenated to `__DIR__`, which is resolved only beside its caller.
+    TempestView { relative: bool },
     /// A `route('name')` call.
     Route,
     /// A `__('key')`, `trans('key')`, or `Lang::get('key')` call.
@@ -69,6 +72,21 @@ pub(crate) enum StringKeyKind {
     /// `Env::get('APP_NAME')` reads, resolving to the line that declares it
     /// in the project's `.env`.
     Env,
+    /// A public asset: the path under `public/` that `asset('css/app.css')`,
+    /// `secure_asset()`, `URL::asset()`, and `url()->asset()` link to.
+    Asset,
+    /// A Laravel Mix asset: the key of `public/mix-manifest.json` that
+    /// `mix('js/app.js')` looks up.
+    MixAsset,
+    /// A Vite entry point or asset: the source file, relative to the project
+    /// root, that `@vite('resources/js/app.js')`, `Vite::asset()`, and
+    /// `Vite::content()` name.
+    ViteAsset,
+    /// An Inertia page: the component under the page directories
+    /// `config/inertia.php` configures (`resources/js/Pages` by default)
+    /// that `Inertia::render('Users/Index')`, `inertia()`, and
+    /// `Route::inertia()` render, named without its extension.
+    InertiaPage,
     /// A Symfony service ID: the key a service is declared under in
     /// `services.yaml`, `services.xml`, or a PHP configurator's `->set()`,
     /// and the string `$container->get()`, `service()`, or
@@ -134,10 +152,28 @@ pub(crate) enum StringKeyKind {
     /// `framework.messenger.buses`, and read by `default_bus`,
     /// `#[AsMessageHandler(bus: …)]`, and a `BusNameStamp`.
     MessengerBus,
+    /// A Symfony serializer group: declared by each `#[Groups]` that puts a
+    /// property or method in it and by the `groups` of a YAML or XML
+    /// serializer mapping, and read by the `groups` of a serialization
+    /// context (see `symfony::serializer`).
+    SerializerGroup,
     /// A Yii view: the template a view renderer's `render()` family or a
-    /// view's own `render()` loads, keyed by the path it names (see
+    /// view's own `render()` loads, or the layout a renderer's
+    /// `withLayout()` wraps them in, keyed by the path it names (see
     /// `yii::views`).
     YiiView,
+    /// The directory of views a Yii renderer's `withViewPath()` gives it,
+    /// keyed by the path it names, alias and all.
+    YiiViewPath,
+    /// A parameter a Yii render call passes its view, `'post'` in
+    /// `render('blog/post', ['post' => $post])`, keyed by the view as well
+    /// as the name (see `yii::view_parameters::parameter_key`).  Declared by
+    /// the `@var` block the template opens with.
+    YiiViewParameter,
+    /// A file a Yii asset bundle's `$css` or `$js` lists, keyed by the path
+    /// it names under the bundle's `$sourcePath` (or `$basePath`), alias
+    /// and all (see `yii::assets`).
+    YiiAssetFile,
     /// A Yii route name: declared by a `Route` definition's `->name()`,
     /// after the name prefixes of the groups around it, and read by a URL
     /// generator's `generate()`, `generateAbsolute()`, and
@@ -150,6 +186,38 @@ pub(crate) enum StringKeyKind {
     /// under the routes that dispatch to that handler, whose paths declare
     /// it.
     YiiRouteArgument,
+    /// An argument a Yii URL generator's `generate()` or
+    /// `generateAbsolute()` passes the route it names, `'slug'` in
+    /// `generate('blog/post', ['slug' => $slug])`, keyed by the route as
+    /// well as the name (see `yii::routes::url_argument_key`).  Declared by
+    /// the placeholders of the paths of the routes of that name; an
+    /// argument none of them declares is sent as the query string.
+    YiiUrlArgument,
+    /// A Yii path alias: the `@name` a string starts with (`'@runtime/logs'`
+    /// names `@runtime`), in any string of a Yii project.  Declared under
+    /// `params['yiisoft/aliases']['aliases']` (see `yii::aliases`).
+    YiiAlias,
+    /// A key a Yii configuration file reads from the `$params` it is
+    /// handed, keyed by the whole path of keys it reads
+    /// (`$params['application']['name']`, see `yii::params::param_key`),
+    /// on the string of the last one.  Declared by the params files the
+    /// merge plan lists.
+    YiiParam,
+    /// A message ID a Yii translator's `translate()` names, keyed by the
+    /// category it is looked up in as well as the ID (see
+    /// `yii::translations::message_key`).  Declared by the message files of
+    /// the directories the DI definitions give their message sources.
+    YiiTranslation,
+    /// An argument a Yii DI definition passes by name, `'transport'` in
+    /// `'__construct()' => ['transport' => …]` or in the arguments of a
+    /// `'setLogger()'` key, keyed by the class and the method as well as the
+    /// name (see `yii::definitions::definition_argument_key`).  Declared by
+    /// the method's parameter of that name.
+    YiiDefinitionArgument,
+    /// A CSS class name: one of the whitespace-separated names a Yii HTML
+    /// tag's `class()` or `addClass()` takes.  Declared by the class
+    /// selectors of the project's stylesheets (see `stylesheets`).
+    CssClass,
     /// A WordPress hook name: declared by each place that fires it (a
     /// `do_action()`, an `apply_filters()`, and their `_ref_array` and
     /// `_deprecated` forms), and read by `add_action()`, `add_filter()`, and
@@ -158,6 +226,75 @@ pub(crate) enum StringKeyKind {
     /// `wordpress::hooks`), which a literal name matches by its literal
     /// parts.
     WordPressHook,
+    /// A Drupal entity type ID: declared by the `id` of an entity class's
+    /// `#[ContentEntityType]`-family attribute or annotation, and read by
+    /// the entity type manager's `getStorage()` and the other methods that
+    /// take one.
+    DrupalEntityType,
+    /// A Drupal route name: declared by a top-level key of a routing file,
+    /// and read by `Url::fromRoute()`, `Link::createFromRoute()`, a form
+    /// state's `setRedirect()`, a controller's or form's `redirect()`, and
+    /// the URL generator, access manager, and route provider methods that
+    /// take one.
+    DrupalRoute,
+    /// A parameter of a Drupal route, keyed by the route as well as the
+    /// name (see `drupal::routing::route_parameter_key`): a `{node}` only
+    /// means something under its route.  Declared by each placeholder of
+    /// the route's path, and read by the keys of the parameters a route
+    /// call or a links file's `route_parameters:` passes.
+    DrupalRouteParameter,
+    /// A Drupal hook name: declared by the `hook_<name>()` function that
+    /// documents it in an `*.api.php` file and by the module handler's and
+    /// theme manager's calls that invoke it, and read by the implementations
+    /// a `#[Hook]` attribute or a procedural function's name make.
+    DrupalHook,
+    /// A Drupal permission name: declared by a top-level key of a
+    /// permissions file, and read by an account's or a role's
+    /// `hasPermission()`, the access result helpers, a route's
+    /// `_permission` requirement, and an entity type's `admin_permission`.
+    DrupalPermission,
+    /// A Drupal configuration name: declared by a default configuration
+    /// file's name and by a configuration schema entry (see
+    /// `drupal::config`), and read by `\Drupal::config()`, the config
+    /// factory, the `config()` shortcut of controllers and forms, a config
+    /// form's `getEditableConfigNames()`, and a form element's
+    /// `#config_target`.
+    DrupalConfigName,
+    /// A key of a Drupal configuration object, keyed by the object's name
+    /// as well as the key (see `drupal::config_keys::config_key`):
+    /// declared by the object's configuration schema, and read by a config
+    /// object's `get()`, `set()`, and `clear()`, the part after the `:` of
+    /// a `#config_target`, and a `ConfigTarget`'s property path.
+    DrupalConfigKey,
+    /// A Drupal render element name: declared by the ID of a class's
+    /// `#[RenderElement]` or `#[FormElement]` attribute, or of the
+    /// annotation older code uses, and read by the `#type` of a render
+    /// array.
+    DrupalRenderElement,
+    /// A Drupal theme hook name: declared by a key of the array a
+    /// `hook_theme()` implementation returns (see `drupal::theme_hooks`),
+    /// and read by a render array's `#theme` and `#theme_wrappers`.  A
+    /// suggestion (`node__article`) reads as the hook it falls back to.
+    DrupalThemeHook,
+    /// A variable of a Drupal theme hook, keyed by the hook as written as
+    /// well as the name (see `drupal::theme_hooks::theme_variable_key`):
+    /// declared by a key of the hook's `variables`, and read by the `#`
+    /// keys of a render array whose `#theme` names the hook.
+    DrupalThemeHookVariable,
+    /// A Drupal library, `<extension>/<name>`: declared by a top-level key
+    /// of an extension's libraries file, and read by the `library` list of
+    /// a render array's `#attached`, a template's `attach_library()`, the
+    /// `dependencies` of a library, and the `libraries` of a theme's info
+    /// file (see `drupal::libraries`).
+    DrupalLibrary,
+    /// A Drupal plugin ID, keyed by the plugin manager as well as the ID
+    /// (see `drupal::plugins::plugin_key`): `'string'` is a field type to
+    /// one manager and a widget to another.  Declared by the attribute or
+    /// annotation of a plugin class, and read by a plugin manager's
+    /// `createInstance()`, `getDefinition()`, and `hasDefinition()`,
+    /// `BaseFieldDefinition::create()`, the `type` of a field's display
+    /// options, and `addConstraint()`.
+    DrupalPlugin,
 }
 
 impl StringKeyKind {
@@ -171,45 +308,70 @@ impl StringKeyKind {
         matches!(self, Self::SymfonyTranslation | Self::TranslationDomain)
     }
 
-    /// Whether this key belongs to Symfony rather than to Laravel.
-    pub(crate) const fn is_symfony(self) -> bool {
-        matches!(
-            self,
-            Self::ServiceId
-                | Self::ContainerParameter
-                | Self::SymfonyRoute
-                | Self::SymfonyTranslation
-                | Self::TranslationDomain
-                | Self::TwigTemplate
-                | Self::SymfonyConfigKey
-                | Self::SymfonyEvent
-                | Self::MessengerBus
-        )
-    }
-
-    /// Whether this key belongs to Twig, whatever the framework around it.
-    pub(crate) const fn is_twig(self) -> bool {
-        matches!(
-            self,
+    /// The framework whose declarations this key resolves against.
+    ///
+    /// Exhaustive on purpose: a new kind has to say which framework turns
+    /// it on.
+    pub(crate) const fn framework(self) -> KeyFramework {
+        match self {
+            Self::TempestView { .. } => KeyFramework::Tempest,
+            Self::Config
+            | Self::ConfigResource(_)
+            | Self::View
+            | Self::Route
+            | Self::Trans
+            | Self::Command
+            | Self::MorphAlias
+            | Self::Section
+            | Self::Stack
+            | Self::GateAbility
+            | Self::ContainerBinding
+            | Self::Middleware
+            | Self::RateLimiter
+            | Self::Env
+            | Self::Asset
+            | Self::MixAsset
+            | Self::ViteAsset
+            | Self::InertiaPage => KeyFramework::Laravel,
+            Self::ServiceId | Self::ContainerParameter => KeyFramework::ServiceContainer,
+            Self::SymfonyRoute
+            | Self::SymfonyTranslation
+            | Self::TranslationDomain
+            | Self::SymfonyConfigKey
+            | Self::SymfonyEvent
+            | Self::MessengerBus
+            | Self::SerializerGroup => KeyFramework::Symfony,
             Self::TwigTemplate
-                | Self::TwigBlock
-                | Self::TwigFilter
-                | Self::TwigFunction
-                | Self::TwigVariable
-        )
-    }
-
-    /// Whether this key belongs to Yii.
-    pub(crate) const fn is_yii(self) -> bool {
-        matches!(
-            self,
-            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument
-        )
-    }
-
-    /// Whether this key belongs to WordPress.
-    pub(crate) const fn is_wordpress(self) -> bool {
-        matches!(self, Self::WordPressHook)
+            | Self::TwigBlock
+            | Self::TwigFilter
+            | Self::TwigFunction
+            | Self::TwigVariable => KeyFramework::Twig,
+            Self::YiiView
+            | Self::YiiViewPath
+            | Self::YiiViewParameter
+            | Self::YiiAssetFile
+            | Self::YiiRoute
+            | Self::YiiRouteArgument
+            | Self::YiiUrlArgument
+            | Self::YiiAlias
+            | Self::YiiParam
+            | Self::YiiTranslation
+            | Self::YiiDefinitionArgument
+            | Self::CssClass => KeyFramework::Yii,
+            Self::WordPressHook => KeyFramework::WordPress,
+            Self::DrupalEntityType
+            | Self::DrupalRoute
+            | Self::DrupalRouteParameter
+            | Self::DrupalHook
+            | Self::DrupalPermission
+            | Self::DrupalConfigName
+            | Self::DrupalConfigKey
+            | Self::DrupalRenderElement
+            | Self::DrupalThemeHook
+            | Self::DrupalThemeHookVariable
+            | Self::DrupalLibrary
+            | Self::DrupalPlugin => KeyFramework::Drupal,
+        }
     }
 
     /// The bit a [`LookupGuards`] mask holds this kind under: the kinds a
@@ -302,6 +464,62 @@ pub(crate) fn declares_another_name(kept: &SymbolSpan, next: &SymbolSpan) -> boo
     )
 }
 
+/// The framework a [`StringKeyKind`] belongs to, which is what decides
+/// whether a project reads keys of that kind at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyFramework {
+    Laravel,
+    /// Tempest's explicitly qualified view helper, including standalone use.
+    Tempest,
+    /// Symfony's service IDs and container parameters, which any project
+    /// that builds a Symfony service container declares.
+    ServiceContainer,
+    /// The rest of Symfony: routes, translations, bundle configuration,
+    /// events, and Messenger.
+    Symfony,
+    /// Twig's template, block, filter, function, and variable names,
+    /// read in any project that uses Twig.
+    Twig,
+    Yii,
+    /// WordPress's hook names, read wherever the hook functions are called.
+    WordPress,
+    /// Drupal's own declarations, read in a Drupal project.
+    Drupal,
+}
+
+/// Frameworks whose method receivers may contribute string-key candidates.
+/// Function-only keys do not participate, even in a mixed-framework project.
+pub(crate) struct ReceiverFrameworks {
+    /// Laravel's typed helpers are available.
+    pub laravel: bool,
+    /// Service-container keys are available for this operation.
+    pub service_container: bool,
+    /// Symfony's application keys are available.
+    pub symfony: bool,
+    /// Twig's template keys are available.
+    pub twig: bool,
+    /// Yii's application keys are available.
+    pub yii: bool,
+    /// Drupal's application keys are available.
+    pub drupal: bool,
+}
+
+impl ReceiverFrameworks {
+    /// Whether a receiver may record a key of this kind in this project.
+    #[inline]
+    pub(crate) fn enables(&self, kind: StringKeyKind) -> bool {
+        match kind.framework() {
+            KeyFramework::Laravel => self.laravel,
+            KeyFramework::ServiceContainer => self.service_container,
+            KeyFramework::Symfony => self.symfony,
+            KeyFramework::Twig => self.twig,
+            KeyFramework::Yii => self.yii,
+            KeyFramework::Drupal => self.drupal,
+            KeyFramework::WordPress | KeyFramework::Tempest => false,
+        }
+    }
+}
+
 /// A workspace symbol whose presence suppresses an otherwise-valid framework
 /// runtime fallback.
 ///
@@ -336,11 +554,12 @@ impl StringKeyDependency {
             .iter()
             .any(|alias| name.eq_ignore_ascii_case(alias))
             || match name.len() {
-                3 => name.eq_ignore_ascii_case("App"),
+                3 => name.eq_ignore_ascii_case("App") || name.eq_ignore_ascii_case("URL"),
                 4 => {
                     name.eq_ignore_ascii_case("Gate")
                         || name.eq_ignore_ascii_case("Lang")
                         || name.eq_ignore_ascii_case("View")
+                        || name.eq_ignore_ascii_case("Vite")
                 }
                 5 => name.eq_ignore_ascii_case("Route"),
                 6 => name.eq_ignore_ascii_case("Config"),
@@ -524,12 +743,14 @@ pub(crate) enum TwigCallableTarget {
 }
 
 /// The variables one render of a Twig template hands it: the keys of a
-/// `render()`'s context array, of a templated email's `context()`, or of
-/// what a `#[Template]` action returns.
+/// `render()`'s context array, of a templated email's `context()`, of
+/// what a `#[Template]` action returns, or the `#` keys of a Drupal render
+/// array, without the `#`.
 ///
 /// Keyed by the template name it renders, whose span (or typed receiver
 /// site, for a `render()` only its receiver's type confirms) starts at
-/// [`Self::template_start`].
+/// [`Self::template_start`]; a render array's by the theme hook its
+/// `#theme` names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TwigContextSite {
     pub template_start: u32,
@@ -580,6 +801,141 @@ pub(crate) struct ContainerValueSite {
     pub value: ContainerValue,
 }
 
+/// What a Drupal hook span is, keyed back to its [`SymbolKind::StringKey`]
+/// span by `start`.  A hook span with no site is the documentation.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HookSite {
+    pub start: u32,
+    pub role: HookRole,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum HookRole {
+    /// An implementation, for `extension`.  Whether that extension is a
+    /// theme is known for a procedural function, whose file says, and
+    /// looked up by name for a hook class.  An implementation Drupal does
+    /// not collect (an install-time hook, an update function) only links
+    /// to its documentation.
+    Implementation {
+        extension: Atom,
+        is_theme: Option<bool>,
+        collected: bool,
+    },
+    /// An invocation, limited to `extension` when it names one.
+    Invocation { extension: Option<Atom> },
+}
+
+/// An invoking call inside one of the core methods that fire hooks under
+/// computed names (see `drupal::computed_hooks`), with the shape of the
+/// name it builds: `*` for each part not written out, and `_alter` after
+/// an alter type.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ComputedHookSite {
+    /// The method the call is in.
+    pub method: Atom,
+    /// The byte range of the call's hook argument.
+    pub start: u32,
+    pub end: u32,
+    pub shape: String,
+    /// The call is an alter call.
+    pub alter: bool,
+    /// The call reaches themes (a theme manager's) or modules (a module
+    /// handler's), when its receiver says which.
+    pub themes: Option<bool>,
+}
+
+/// What a Drupal entity type declaration gives its ID: the entity class,
+/// and the storage handler that loads it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct EntityTypeSite {
+    /// Byte offset of the ID's first character, matching the declaration's
+    /// [`SymbolKind::StringKey`] span.
+    pub start: u32,
+    /// The class the attribute or annotation is written on.
+    pub class: crate::atom::Atom,
+    /// The `storage` handler the declaration names, or the default storage
+    /// of its kind of entity type; `None` when it names none and has no
+    /// default.
+    pub storage: Option<crate::atom::Atom>,
+}
+
+/// The class a Drupal plugin declaration is written on, such as a render
+/// element's.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PluginClassSite {
+    /// Byte offset of the plugin ID's first character, matching the
+    /// declaration's [`SymbolKind::StringKey`] span.
+    pub start: u32,
+    /// The class the attribute or annotation is written on.
+    pub class: crate::atom::Atom,
+}
+
+/// What a class's constructor passes to `DefaultPluginManager`'s, which is
+/// what makes the class a plugin manager with a type of its own (see
+/// `drupal::plugins`).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PluginManagerSite {
+    /// The class whose constructor it is.
+    pub class: crate::atom::Atom,
+    /// The plugin subdirectory, `Plugin/Block`, as written.
+    pub subdir: String,
+    /// The class named fifth: the attribute plugins declare themselves
+    /// with, or, in older managers, the annotation.
+    pub fifth: Option<crate::atom::Atom>,
+    /// The class named sixth: the annotation, beside an attribute.
+    pub sixth: Option<crate::atom::Atom>,
+    /// Whether the class sets its discovery itself, and so may find
+    /// plugins no attribute, annotation, or `setDefinition()` call declares.
+    pub sets_discovery: bool,
+    /// Whether the class declares a `getDiscovery()` that only decorates
+    /// its parent's, adding derivatives and [`Self::static_plugins`].
+    pub decorates_discovery: bool,
+    /// The plugins the class declares itself by `setDefinition()`.
+    pub static_plugins: Vec<StaticPluginSite>,
+}
+
+/// A byte range a Drupal file runs only when the module `module` is
+/// installed: the branch of an `if (…moduleExists('m'))`, or the rest of a
+/// block after `if (!…moduleExists('m')) { return; }`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ModuleGuard {
+    pub start: u32,
+    pub end: u32,
+    pub module: String,
+}
+
+/// A plugin a manager declares by `setDefinition('id', ['class' => …])`
+/// on its discovery.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StaticPluginSite {
+    pub id: String,
+    /// The definition's `class`.
+    pub class: crate::atom::Atom,
+}
+
+/// An attribute or annotation on a class in a `Drupal\` namespace that
+/// gives it an ID, which makes the class a plugin when the marker is a
+/// plugin type's (see `drupal::plugins`).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PluginDeclarationSite {
+    /// Byte range of the ID's contents.
+    pub start: u32,
+    pub end: u32,
+    /// Empty when the ID is not a string literal, such as a class constant,
+    /// and the range is then the argument's.
+    pub id: String,
+    /// The class the marker is written on.
+    pub class: crate::atom::Atom,
+    /// An attribute's resolved class, or an annotation's name as written.
+    pub marker: crate::atom::Atom,
+    pub is_annotation: bool,
+    /// Byte range of the docblock an annotation is written in, which the
+    /// annotations nested in its arguments share; the ID's for an
+    /// attribute.
+    pub doc_start: u32,
+    pub doc_end: u32,
+}
+
 /// The value a container declaration gives, read by the kind of name it
 /// turns out to declare.
 #[derive(Debug, Clone, PartialEq)]
@@ -596,6 +952,128 @@ pub(crate) enum ContainerValue {
     Parent(Atom),
     /// The type of a parameter's value, generalized (`'en'` is a `string`).
     Type(crate::php_type::PhpType),
+}
+
+/// A service that decorates another: the container returns the decorator
+/// for the decorated ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ServiceDecoration {
+    /// The decorator's own service ID, a class name without the leading
+    /// `\` when the ID is spelled as one.
+    pub decorator: Atom,
+    /// The ID it decorates, spelled the same way.
+    pub decorated: Atom,
+}
+
+/// A class a Yii DI definition names: the ID a definition is keyed by
+/// (`MailerInterface::class => …`), or the class it builds
+/// (`'class' => Mailer::class`).  The range is that of the class's name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct YiiDefinitionSite {
+    pub start: u32,
+    pub end: u32,
+    /// The class, fully qualified, without the leading `\`.
+    pub class: Atom,
+}
+
+/// A Yii DI definition array whose keys configure the class it builds,
+/// kept so its keys and values can be checked against that class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct YiiDefinitionBody {
+    /// Where the array literal starts.
+    pub start: u32,
+    /// The class the definition builds, fully qualified, without the
+    /// leading `\`.
+    pub class: Atom,
+}
+
+/// A relation a Yii Active Record call names: `'author'` in
+/// `$post->relation('author')` or `Post::query()->with('author')`, or one
+/// segment of a path of them, `'author.profile'` (see
+/// [`crate::yii::active_record`]).
+///
+/// Kept beside the spans rather than in them, since a relation is not a
+/// member of the record: what declares it is an arm of the record's
+/// `relationQuery()` or a `get{Name}Query()` method.
+#[derive(Debug, Clone)]
+pub(crate) struct YiiRelationSite {
+    /// The byte range of the relation's name.
+    pub start: u32,
+    pub end: u32,
+    /// The call's receiver: a record, or a query for one.
+    pub subject: crate::symbol_map::SubjectText,
+    /// Whether the receiver is a query, whose record the path starts from.
+    pub on_query: bool,
+    /// The relations before this one in its path, joined with `.`, which
+    /// lead from the receiver's record to the one this is a relation of.
+    /// Empty for the first.
+    pub path: Atom,
+}
+
+/// A `yiisoft/db` query chain that names tables or columns (see
+/// [`crate::yii::queries`]): `$query->from('post p')->where(['p.id' => 1])`.
+#[derive(Debug, Clone)]
+pub(crate) struct YiiQuerySite {
+    /// The byte range of the whole chain, which completion finds the query
+    /// it is typing in by.
+    pub start: u32,
+    pub end: u32,
+    /// The receiver of the chain's first call that takes a table or a
+    /// column: a query, or an Active Record query for a record.
+    pub subject: crate::symbol_map::SubjectText,
+    /// The tables `from()` and the joins name, in the order they are named.
+    pub tables: Vec<YiiQueryTable>,
+    /// Whether the chain sets its `FROM`, which replaces the table of the
+    /// record an Active Record query is for.
+    pub sets_from: bool,
+    /// The alias an Active Record query's `alias()` gives the record's
+    /// table.
+    pub alias: Option<Atom>,
+    /// Whether the chain takes rows from a table it does not name (a
+    /// subquery, an expression, a relation `joinWith()` joins), so that a
+    /// column not qualified by a table may be one of its columns.
+    pub open: bool,
+}
+
+/// A table a `yiisoft/db` query reads from or joins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct YiiQueryTable {
+    pub name: YiiTableName,
+    /// The alias the query gives it (`p` in `'post p'`).
+    pub alias: Option<Atom>,
+}
+
+/// How a query writes a table's name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum YiiTableName {
+    /// As a string, without the `{{%…}}` that marks the table prefix.
+    Literal(Atom),
+    /// As a class constant that holds it (`Table::POST`): the class, fully
+    /// qualified, and the constant.
+    Constant { class: Atom, constant: Atom },
+}
+
+/// A table or column name a `yiisoft/db` query writes as a string.
+#[derive(Debug, Clone)]
+pub(crate) struct YiiQueryName {
+    /// The byte range of the name, without the table qualifying a column.
+    pub start: u32,
+    pub end: u32,
+    /// The query, as an index into [`SymbolMap::yii_queries`].
+    ///
+    /// [`SymbolMap::yii_queries`]: crate::symbol_map::SymbolMap::yii_queries
+    pub query: u32,
+    pub kind: YiiQueryNameKind,
+}
+
+/// What a [`YiiQueryName`] names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum YiiQueryNameKind {
+    /// A table, in `from()` or a join.
+    Table,
+    /// A column, with the alias or table qualifying it (`p` in
+    /// `'p.status'`).
+    Column { qualifier: Option<Atom> },
 }
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
@@ -621,6 +1099,73 @@ pub(crate) struct RouteSite {
     /// The handler the route dispatches to, as
     /// `yii::routes::handler_key` spells it, when it names one.
     pub handler: Option<String>,
+}
+
+/// A route a Drupal routing file or `#[Route]` declares, with what Drupal
+/// reads from it besides its name to upcast its parameters (see
+/// `drupal::upcasting`): the path, the controller and title callback, the
+/// parameters its `options` declare, the values its `defaults` give, and
+/// the entity type an `_entity_view` or `_entity_form` default names.
+///
+/// Kept beside the spans, which hold the name and the path's parameters,
+/// since only the type engine and hover read the rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DrupalRouteSite {
+    pub name: String,
+    pub path: String,
+    /// The method the route dispatches to, as `Class::method` without the
+    /// leading `\`: its `_form`'s `buildForm()`, else its `_controller`
+    /// (a class alone is its `__invoke()`).  `None` for a controller
+    /// written as `service:method`, whose class only the container knows.
+    pub controller: Option<String>,
+    /// The `_title_callback`, spelled like [`Self::controller`].
+    pub title_callback: Option<String>,
+    /// Each parameter `options.parameters` declares, with or without a
+    /// `type`.
+    pub parameters: Vec<DeclaredParameter>,
+    /// Each `defaults` key that is not one of Drupal's own (`_controller`,
+    /// `_title`, …), with whether its value is `NULL`.  Drupal converts a
+    /// parameter only when the path or a default gives it a value.
+    pub defaults: Vec<(String, bool)>,
+    /// The entity type the `_entity_view` default names, else the
+    /// `_entity_form` one.
+    pub entity_type: Option<String>,
+}
+
+/// A parameter a route's `options.parameters` declares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeclaredParameter {
+    pub name: String,
+    /// The `type` it declares, as written (`entity:node`).
+    pub ty: Option<String>,
+    /// Whether it names a `converter` or a `tempstore`, which convert it
+    /// some other way than Drupal's entity converter.
+    pub converted_otherwise: bool,
+}
+
+impl DrupalRouteSite {
+    /// What `options.parameters` declares for the parameter `name`.
+    pub(crate) fn declared(&self, name: &str) -> Option<&DeclaredParameter> {
+        self.parameters
+            .iter()
+            .find(|parameter| parameter.name == name)
+    }
+
+    /// Whether Drupal gives the parameter `name` a value to convert: the
+    /// path declares it, or a default gives it one.
+    pub(crate) fn passes(&self, name: &str) -> bool {
+        crate::drupal::routing::path_parameter_names(&self.path)
+            .any(|placeholder| placeholder == name)
+            || self.defaults.iter().any(|(default, _)| default == name)
+    }
+
+    /// Whether a default gives the parameter `name` the value `NULL`, which
+    /// Drupal leaves as it is.
+    pub(crate) fn defaults_to_null(&self, name: &str) -> bool {
+        self.defaults
+            .iter()
+            .any(|(default, is_null)| *is_null && default == name)
+    }
 }
 
 /// One `{name}` in a route's path.
@@ -672,6 +1217,7 @@ const SYMFONY_PARAMETERS_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ParametersConfigurator";
 const SYMFONY_URL_GENERATOR: &str = "Symfony\\Component\\Routing\\Generator\\UrlGeneratorInterface";
 const YII_URL_GENERATOR: &str = "Yiisoft\\Router\\UrlGeneratorInterface";
+const YII_TRANSLATOR: &str = "Yiisoft\\Translator\\TranslatorInterface";
 pub(crate) const SYMFONY_ROUTING_CONFIGURATOR: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator";
 const SYMFONY_COLLECTION_CONFIGURATOR: &str =
@@ -692,11 +1238,40 @@ const YII_WEB_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\Renderer\\WebViewRender
 /// The renderer before `yiisoft/yii-view-renderer` 7 moved it.
 const YII_LEGACY_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\ViewRenderer";
 const YII_VIEW: &str = "Yiisoft\\View\\ViewInterface";
+const YII_HTML_TAG: &str = "Yiisoft\\Html\\Tag\\Base\\Tag";
+pub(crate) const DRUPAL_ENTITY_TYPE_MANAGER: &str =
+    "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
+pub(crate) const DRUPAL_PLUGIN_MANAGER: &str = "Drupal\\Component\\Plugin\\PluginManagerInterface";
+const DRUPAL_FIELD_DEFINITION: &str = "Drupal\\Core\\Field\\FieldDefinitionInterface";
+const DRUPAL_ENTITY_TYPE: &str = "Drupal\\Core\\Entity\\EntityTypeInterface";
+const DRUPAL_DATA_DEFINITION: &str = "Drupal\\Core\\TypedData\\DataDefinitionInterface";
+const DRUPAL_FIELD_CONFIG: &str = "Drupal\\Core\\Field\\FieldConfigInterface";
+const DRUPAL_URL_GENERATOR: &str = "Drupal\\Core\\Routing\\UrlGeneratorInterface";
+const DRUPAL_FORM_STATE: &str = "Drupal\\Core\\Form\\FormStateInterface";
+const DRUPAL_CONTROLLER_BASE: &str = "Drupal\\Core\\Controller\\ControllerBase";
+const DRUPAL_FORM_BASE: &str = "Drupal\\Core\\Form\\FormBase";
+const DRUPAL_ENTITY_CONTROLLER: &str = "Drupal\\Core\\Entity\\Controller\\EntityController";
+const DRUPAL_ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterface";
+const DRUPAL_ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
+pub(crate) const DRUPAL_MODULE_HANDLER: &str = "Drupal\\Core\\Extension\\ModuleHandlerInterface";
+pub(crate) const DRUPAL_THEME_MANAGER: &str = "Drupal\\Core\\Theme\\ThemeManagerInterface";
+pub(crate) const DRUPAL_CONFIG_FACTORY: &str = "Drupal\\Core\\Config\\ConfigFactoryInterface";
+const DRUPAL_CONFIG_BASE: &str = "Drupal\\Core\\Config\\ConfigBase";
+const DRUPAL_CONFIG: &str = "Drupal\\Core\\Config\\Config";
+const DRUPAL_ACCOUNT: &str = "Drupal\\Core\\Session\\AccountInterface";
+const DRUPAL_ROLE: &str = "Drupal\\user\\RoleInterface";
+const DRUPAL_PERMISSION_CHECKER: &str = "Drupal\\Core\\Session\\PermissionCheckerInterface";
+const DRUPAL_CALCULATED_PERMISSIONS_ITEM: &str =
+    "Drupal\\Core\\Session\\CalculatedPermissionsItemInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
 pub(crate) const SYMFONY_CONTAINER_CONFIGURATOR_NS: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\";
+const SYMFONY_SERIALIZER: &str = "Symfony\\Component\\Serializer\\SerializerInterface";
+const SYMFONY_NORMALIZER: &str = "Symfony\\Component\\Serializer\\Normalizer\\NormalizerInterface";
+const SYMFONY_DENORMALIZER: &str =
+    "Symfony\\Component\\Serializer\\Normalizer\\DenormalizerInterface";
 /// The namespace of the PHP configurators that build Symfony's routes.
 pub(crate) const SYMFONY_ROUTING_CONFIGURATOR_NS: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\";
@@ -718,7 +1293,10 @@ pub(crate) enum ReceiverClass {
     MailTemplate,
     /// What `get()` and `has()` look a name up in: a service container, or
     /// one of Symfony's parameter bags, whose same two methods take a
-    /// parameter name instead.
+    /// parameter name instead, or Drupal's config factory, whose `get()`
+    /// takes a configuration name, or a Drupal config object, whose `get()`
+    /// takes one of its keys; the object it is comes from its type (see
+    /// `drupal::types`).
     ContainerLookup,
     /// What `getParameter()`, `hasParameter()`, and `setParameter()` take a
     /// container parameter name in: the container itself, and the
@@ -741,14 +1319,16 @@ pub(crate) enum ReceiverClass {
     /// The container builder a kernel, a bundle, an extension, or a
     /// compiler pass defines services on: `register()`, `autowire()`,
     /// `setDefinition()`, and `setAlias()` declare a service ID, and the
-    /// rest of its definition API looks one up.
+    /// rest of its definition API looks one up, `getDefinition()` and
+    /// `hasDefinition()` through [`Self::DefinitionLookup`].
     ContainerBuilder,
     /// What `generateUrl()` and `redirectToRoute()` take a route name in:
     /// the shortcuts a Symfony controller inherits.
     ControllerRouting,
     /// A URL generator, the router included, whose `generate()` takes a
-    /// route name: Symfony's, and Yii's, whose `generateAbsolute()` takes
-    /// one too and whose `generateFromCurrent()` takes a fallback.
+    /// route name: Symfony's, Drupal's, whose `generateFromRoute()` takes
+    /// one too, and Yii's, whose `generateAbsolute()` takes one too and
+    /// whose `generateFromCurrent()` takes a fallback.
     UrlGenerator,
     /// A PHP routing configurator, a collection of one, or the route one
     /// of them just added, whose `add()` declares a route.
@@ -774,9 +1354,100 @@ pub(crate) enum ReceiverClass {
     /// `hasListeners()`, `getListeners()`, and `getListenerPriority()`
     /// look listeners up by it.
     EventListeners,
+    /// A Yii translator, whose `translate()` takes a message ID.
+    YiiTranslator,
     /// What renders a Yii view by its first argument: a view renderer's
-    /// `render()` family, and a view's own `render()` inside a template.
+    /// `render()` family and `withLayout()`, and a view's own `render()`
+    /// inside a template.
     YiiViewRenderer,
+    /// A Yii view renderer, whose `withViewPath()` takes the directory its
+    /// views are named relative to.
+    YiiViewPath,
+    /// What renders a Yii view again, for the parameters its render call
+    /// passes after the view's name.
+    YiiViewParameters,
+    /// A Yii URL generator again, for the route arguments its `generate()`
+    /// and `generateAbsolute()` pass after the route name.
+    YiiUrlArguments,
+    /// A Yii HTML tag, whose `class()` and `addClass()` take CSS class
+    /// names.
+    HtmlTag,
+    /// Drupal's entity type manager, whose `getStorage()` and the other
+    /// handler getters take an entity type ID first, `getDefinition()` and
+    /// `hasDefinition()` through [`Self::DefinitionLookup`].
+    EntityTypeManager,
+    /// The definition lookups, `getDefinition()` and `hasDefinition()`, that
+    /// Symfony's container builder, Drupal's entity type manager, and every
+    /// other Drupal plugin manager have: a service ID, an entity type ID,
+    /// or a plugin ID.
+    DefinitionLookup,
+    /// A Drupal plugin manager, whose `createInstance()` takes a plugin ID.
+    /// The manager the ID belongs to comes from the receiver's type (see
+    /// `drupal::plugins`).
+    PluginManager,
+    /// A field definition, whose `setDisplayOptions('form' | 'view', …)`
+    /// names a widget or a formatter by its options' `type`.  The site's key
+    /// holds the manager already, read from the first argument.
+    FieldDisplayOptions,
+    /// What `addConstraint()` takes a validation constraint plugin ID on:
+    /// an entity type, a data definition, and a field's configuration.
+    ConstraintTarget,
+    /// A Drupal form state, whose `setRedirect()` takes a route name.
+    FormRedirect,
+    /// What has Drupal's `redirect()` shortcut, which takes a route name: a
+    /// controller or a form.
+    RouteRedirect,
+    /// Drupal's access manager, whose `checkNamedRoute()` takes a route
+    /// name.
+    AccessCheck,
+    /// Drupal's route provider, whose `getRouteByName()` takes a route
+    /// name.
+    RouteLookup,
+    /// A Drupal form state again, for the route parameters its
+    /// `setRedirect()` takes after the route name.
+    FormRedirectParameters,
+    /// What has Drupal's `redirect()` shortcut again, for the route
+    /// parameters it takes after the route name.
+    RouteRedirectParameters,
+    /// Drupal's URL generator, for the route parameters its
+    /// `generateFromRoute()` and `generate()` take after the route name.
+    UrlGeneratorParameters,
+    /// Drupal's access manager, for the route parameters its
+    /// `checkNamedRoute()` takes after the route name.
+    AccessCheckParameters,
+    /// Drupal's module handler, whose `invokeAll()`, `alter()`, and the
+    /// rest invoke the hooks of modules and install profiles.
+    ModuleHooks,
+    /// Drupal's theme manager, whose `invoke()`, `alter()`, and the rest
+    /// invoke the hooks of themes.
+    ThemeHooks,
+    /// Either of the two, for the methods they share.
+    Hooks,
+    /// What `hasPermission()` takes a permission name first on: an
+    /// account, a role, the permission checker, and a calculated
+    /// permissions item.
+    PermissionCheck,
+    /// A Drupal role, whose `grantPermission()` and `revokePermission()`
+    /// take a permission name.
+    RolePermissions,
+    /// Drupal's config factory, whose `getEditable()` takes a
+    /// configuration name and `loadMultiple()` a list of them; its `get()`
+    /// is a [`Self::ContainerLookup`].
+    ConfigFactory,
+    /// What has Drupal's `config()` shortcut, which takes a configuration
+    /// name: a controller or a form, a config form included.
+    ConfigShortcut,
+    /// An editable Drupal config object, whose `set()` and `clear()` take
+    /// one of its keys; an `ImmutableConfig` throws on both.  Its `get()`
+    /// is a [`Self::ContainerLookup`], as every config object's is.
+    EditableConfigKeys,
+    /// Symfony's serializer, normalizers, and denormalizers, whose
+    /// `serialize()`, `deserialize()`, `normalize()`, and `denormalize()`
+    /// take a context whose `groups` name serializer groups.
+    Serializer,
+    /// The `json()` shortcut a Symfony controller inherits, whose context
+    /// does too.
+    ControllerJson,
 }
 
 impl ReceiverClass {
@@ -799,6 +1470,8 @@ impl ReceiverClass {
             // A container bag is a PSR container too, so it has to be asked
             // about first.
             Self::ContainerLookup => &[
+                (DRUPAL_CONFIG_FACTORY, StringKeyKind::DrupalConfigName),
+                (DRUPAL_CONFIG_BASE, StringKeyKind::DrupalConfigKey),
                 (SYMFONY_CONTAINER_BAG, ContainerParameter),
                 (SYMFONY_PARAMETER_BAG, ContainerParameter),
                 (PSR_CONTAINER, ServiceId),
@@ -825,7 +1498,10 @@ impl ReceiverClass {
             Self::ConfiguratorArgument => &[(SYMFONY_ABSTRACT_CONFIGURATOR, ContainerParameter)],
             Self::ContainerBuilder => &[(SYMFONY_CONTAINER_BUILDER, ServiceId)],
             Self::ControllerRouting => &[(SYMFONY_ABSTRACT_CONTROLLER, SymfonyRoute)],
+            // Drupal's generator extends Symfony's, so it has to be asked
+            // about first.
             Self::UrlGenerator => &[
+                (DRUPAL_URL_GENERATOR, StringKeyKind::DrupalRoute),
                 (SYMFONY_URL_GENERATOR, SymfonyRoute),
                 (YII_URL_GENERATOR, YiiRoute),
             ],
@@ -849,12 +1525,98 @@ impl ReceiverClass {
             // contract covers both.
             Self::EventDispatcher => &[(SYMFONY_EVENT_DISPATCHER_CONTRACT, SymfonyEvent)],
             Self::EventListeners => &[(SYMFONY_EVENT_DISPATCHER, SymfonyEvent)],
+            Self::YiiTranslator => &[(YII_TRANSLATOR, StringKeyKind::YiiTranslation)],
             Self::YiiViewRenderer => &[
                 (YII_WEB_VIEW_RENDERER, YiiView),
                 (YII_VIEW_RENDERER, YiiView),
                 (YII_LEGACY_VIEW_RENDERER, YiiView),
                 (YII_VIEW, YiiView),
             ],
+            Self::YiiViewParameters => &[
+                (YII_WEB_VIEW_RENDERER, StringKeyKind::YiiViewParameter),
+                (YII_VIEW_RENDERER, StringKeyKind::YiiViewParameter),
+                (YII_LEGACY_VIEW_RENDERER, StringKeyKind::YiiViewParameter),
+                (YII_VIEW, StringKeyKind::YiiViewParameter),
+            ],
+            Self::YiiUrlArguments => &[(YII_URL_GENERATOR, StringKeyKind::YiiUrlArgument)],
+            Self::YiiViewPath => &[
+                (YII_WEB_VIEW_RENDERER, StringKeyKind::YiiViewPath),
+                (YII_VIEW_RENDERER, StringKeyKind::YiiViewPath),
+                (YII_LEGACY_VIEW_RENDERER, StringKeyKind::YiiViewPath),
+            ],
+            Self::HtmlTag => &[(YII_HTML_TAG, StringKeyKind::CssClass)],
+            Self::EntityTypeManager => {
+                &[(DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType)]
+            }
+            // The entity type manager is a plugin manager too, so it has to
+            // be asked about first.
+            Self::DefinitionLookup => &[
+                (SYMFONY_CONTAINER_BUILDER, ServiceId),
+                (DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType),
+                (DRUPAL_PLUGIN_MANAGER, StringKeyKind::DrupalPlugin),
+            ],
+            Self::PluginManager => &[(DRUPAL_PLUGIN_MANAGER, StringKeyKind::DrupalPlugin)],
+            Self::FieldDisplayOptions => &[(DRUPAL_FIELD_DEFINITION, StringKeyKind::DrupalPlugin)],
+            Self::ConstraintTarget => &[
+                (DRUPAL_ENTITY_TYPE, StringKeyKind::DrupalPlugin),
+                (DRUPAL_DATA_DEFINITION, StringKeyKind::DrupalPlugin),
+                (DRUPAL_FIELD_CONFIG, StringKeyKind::DrupalPlugin),
+            ],
+            Self::FormRedirect => &[(DRUPAL_FORM_STATE, StringKeyKind::DrupalRoute)],
+            Self::RouteRedirect => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalRoute),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalRoute),
+                (DRUPAL_ENTITY_CONTROLLER, StringKeyKind::DrupalRoute),
+            ],
+            Self::AccessCheck => &[(DRUPAL_ACCESS_MANAGER, StringKeyKind::DrupalRoute)],
+            Self::RouteLookup => &[(DRUPAL_ROUTE_PROVIDER, StringKeyKind::DrupalRoute)],
+            Self::FormRedirectParameters => {
+                &[(DRUPAL_FORM_STATE, StringKeyKind::DrupalRouteParameter)]
+            }
+            Self::RouteRedirectParameters => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalRouteParameter),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalRouteParameter),
+                (
+                    DRUPAL_ENTITY_CONTROLLER,
+                    StringKeyKind::DrupalRouteParameter,
+                ),
+            ],
+            Self::UrlGeneratorParameters => {
+                &[(DRUPAL_URL_GENERATOR, StringKeyKind::DrupalRouteParameter)]
+            }
+            Self::AccessCheckParameters => {
+                &[(DRUPAL_ACCESS_MANAGER, StringKeyKind::DrupalRouteParameter)]
+            }
+            Self::ModuleHooks => &[(DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook)],
+            Self::ThemeHooks => &[(DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook)],
+            Self::Hooks => &[
+                (DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook),
+                (DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook),
+            ],
+            Self::PermissionCheck => &[
+                (DRUPAL_ACCOUNT, StringKeyKind::DrupalPermission),
+                (DRUPAL_ROLE, StringKeyKind::DrupalPermission),
+                (DRUPAL_PERMISSION_CHECKER, StringKeyKind::DrupalPermission),
+                (
+                    DRUPAL_CALCULATED_PERMISSIONS_ITEM,
+                    StringKeyKind::DrupalPermission,
+                ),
+            ],
+            Self::RolePermissions => &[(DRUPAL_ROLE, StringKeyKind::DrupalPermission)],
+            Self::ConfigFactory => &[(DRUPAL_CONFIG_FACTORY, StringKeyKind::DrupalConfigName)],
+            Self::EditableConfigKeys => &[(DRUPAL_CONFIG, StringKeyKind::DrupalConfigKey)],
+            Self::ConfigShortcut => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalConfigName),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalConfigName),
+            ],
+            Self::Serializer => &[
+                (SYMFONY_SERIALIZER, StringKeyKind::SerializerGroup),
+                (SYMFONY_NORMALIZER, StringKeyKind::SerializerGroup),
+                (SYMFONY_DENORMALIZER, StringKeyKind::SerializerGroup),
+            ],
+            Self::ControllerJson => {
+                &[(SYMFONY_ABSTRACT_CONTROLLER, StringKeyKind::SerializerGroup)]
+            }
         }
     }
 
@@ -887,6 +1649,16 @@ impl ReceiverClass {
     /// one is followed.
     pub(crate) fn follows_wrappers(self) -> bool {
         self == Self::UrlGenerator
+    }
+
+    /// Whether a plugin ID the call names is recorded alone, the manager
+    /// it belongs to coming with the receiver's type or with the call
+    /// itself, rather than read from the call's other arguments.
+    pub(crate) fn bare_plugin_key(self) -> bool {
+        matches!(
+            self,
+            Self::PluginManager | Self::DefinitionLookup | Self::ConstraintTarget
+        )
     }
 
     /// Whether the call names a template.
@@ -944,6 +1716,15 @@ impl TypedReceiverSite {
     /// Whether this site, once confirmed, could name `key` as a `kind`.
     /// The reference index files a site under each kind it could become.
     pub(crate) fn may_name(&self, kind: StringKeyKind, key: &str) -> bool {
+        // A configuration key's site holds the key alone; the object's
+        // name comes with its receiver's type.
+        let key = if kind == StringKeyKind::DrupalConfigKey {
+            crate::drupal::config_keys::split_config_key(key).1
+        } else if kind == StringKeyKind::DrupalPlugin && self.receiver.bare_plugin_key() {
+            crate::drupal::plugins::split_plugin_key(key).1
+        } else {
+            key
+        };
         self.key == key
             && self
                 .receiver

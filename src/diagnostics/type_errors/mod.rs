@@ -12,6 +12,9 @@
 //! [`CallSite`]: crate::symbol_map::CallSite
 
 mod arguments;
+mod enum_from;
+
+pub(crate) use arguments::{PassedArgument, PassedCall};
 
 use mago_syntax::cst::Program;
 use mago_syntax::cst::expression::Expression;
@@ -70,6 +73,28 @@ pub(super) fn fails_only_on_empty(
                 .peekable();
             others.peek().is_some() && others.all(fits)
         }
+        _ => false,
+    }
+}
+
+/// Whether a `value` that does not fit `declared` is a union with at least
+/// one member that does, such as an `array|string` passed to a `string`
+/// parameter.
+///
+/// The code fails only when the value turns out to be one of the other
+/// members, so `partial-union-mismatches = false` leaves these unreported,
+/// the way PHPStan below level 7 accepts a union it judges "maybe".
+pub(super) fn fits_partially(
+    value: &crate::php_type::PhpType,
+    declared: &crate::php_type::PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+    strict_types: bool,
+) -> bool {
+    use crate::php_type::{PhpType, TypeKind};
+    let fits = |ty: &PhpType| is_type_compatible(ty, declared, class_loader, strict_types);
+    match value.kind() {
+        TypeKind::Nullable(inner) => fits(inner) || fits(&PhpType::null()),
+        TypeKind::Union(members) => members.iter().any(fits),
         _ => false,
     }
 }

@@ -12,6 +12,9 @@ catalogues together, the way a real Symfony project does.
   `controller`.
 - Use find references on a class or method mentioned there, such as
   `DemoController::legacy()`. The YAML and XML occurrences are included.
+- A method a service's `calls:` names in `config/services.yaml`, such as
+  `setSender`, goes to its declaration and completes from the public
+  methods of the service's class.
 - Rename `legacy` in `config/routes.yaml`, or rename `UserRepository` from
   `config/doctrine/User.orm.xml`. The PHP declaration and every configuration
   file that names it are renamed together.
@@ -74,6 +77,19 @@ catalogues together, the way a real Symfony project does.
   to the definition of `email`, find the references of `$displayName` in
   `src/Entity/User.php`, or complete a field inside `->add('')`. A constraint
   such as `NotBlank` goes to its class.
+- Form options complete from the form type. In
+  `src/Form/RegistrationType.php`, complete a key in the options array of
+  the `email` field, go to the definition of `'help'`, or misspell it to see
+  it reported. A constraint's options are its constructor's parameters, so a
+  misspelled `max` in `Length(max: 180)` is reported too.
+- Constraint options complete and are checked in validation mappings too. In
+  `config/validator/User.yaml`, complete an option of `Length` on a new line
+  under `max`, or misspell `min` to see it reported.
+- Serializer groups navigate between the `#[Groups]` that put a member in
+  them and the contexts that serialize with them. In `DemoController`, go to
+  the definition of `user:list` in `profile()` to reach
+  `User::getDisplayName()`, find the references of `user:read` in
+  `src/Entity/User.php`, or complete a group in the `groups` list.
 - Bundle configuration keys navigate between the schema in
   `src/DependencyInjection/Configuration.php` and
   `config/packages/acme_demo.yaml`. Go to the definition of `dsn`, find the
@@ -95,8 +111,59 @@ catalogues together, the way a real Symfony project does.
   the service ID `app.mailer`, or `$supportEmail`, read with
   `getParameter()`. In `src/Query/QueryBus.php`, hover `$count`, which
   `HandleTrait::handle()` gets back from the message's handler.
+- A service that decorates another takes over its ID. In `DemoController`,
+  hover `$slugger`: `config/services.yaml` builds `app.slugger` from
+  `Slugger` and decorates it with `CachingSlugger`, so it is either class.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
+- In `DemoController`, hover `$users`. `getRepository(User::class)` returns
+  the `UserRepository` the Doctrine mapping names, so its own
+  `withEmail()` completes.
+- Below it, complete after `$users->findOneBy`. The repository answers a
+  `findBy<Field>()`, `findOneBy<Field>()`, and `countBy<Field>()` for each
+  field `config/doctrine/User.orm.xml` maps, and the keys of `findBy()`
+  complete those fields and jump to their properties.
+- In `UserRepository::named()`, complete after `u.` in the query builder
+  or the DQL string. The fields of the entity the variable stands for
+  complete and jump to their properties, the entity class in `FROM` jumps
+  to the class, and a field the mapping does not map is reported. DQL
+  that Doctrine cannot parse, such as a query whose entity class has no
+  identification variable, is reported too.
+- In `UserRepository::inTeam()`, complete after `t.`. A variable a join
+  declares stands for the entity its association targets, here the
+  `Team` that `team` maps to, and a variable nothing declares is reported.
+- In `UserRepository::search()`, move the `andWhere()` out of the `if`.
+  A variable is reported when some path through the method builds the
+  query without declaring it, here the path that skips the join.
+- In `UserRepository::named()`, hover `$byBuilder` or `$byQuery`: a query
+  is typed by what its DQL selects, so both are a `list<User>`. In
+  `displayNamesByEmail()`, hover `$rows`, a shape of the selected fields
+  keyed by the `INDEX BY` field. In `teamSizes()`, hover `$rows`: an
+  aggregate or a function is typed where every database driver agrees,
+  so `COUNT()` is an `int<0, max>` and `UPPER()` a `string`, and `AVG()`
+  is typed for the SQLite driver `config/packages/doctrine.yaml` names, a
+  `float`. In
+  `searchByName()`, hover `$users`: the
+  builder `byEmail()` returns carries its DQL into a variable and through
+  a branch, so the result is still a `list<User>`, and the `u` that
+  `byEmail()` declared stands for `User` in the `andWhere()`.
+- In `UserRepository::searchByName()`, change `u.displayName` to
+  `t.displayName`, or in `inTeamByEmail()`, delete the `joinTeam()` call.
+  The variables a builder uses are checked against the ones declared by
+  the method that creates it and the methods it is passed to, so the `t`
+  nothing joins is reported.
+- In `UserRepository::teamMembers()`, change `t.name` to `x.name`. The
+  builder comes from a method that gets it from another and passes it on
+  to a third, and the variables each declares are followed along the
+  chain, so only `x` is reported. In `inTeamByEmail()`, wrap the
+  `joinTeam()` call in an `if`: what another method declares counts only
+  on the paths that call it.
+- In `UserRepository::namedTeamMembers()`, delete the `joinTeam()` call.
+  `onlyNamedTeams()` uses `t` and leaves it to its callers to declare, so
+  the query run without it is reported at `getQuery()`.
+- In `UserRepository::sortedByName()`, go-to-definition on `displayName`
+  in the `Expr\OrderBy`. The DQL an expression object is built from reads
+  like any other fragment.
 
 ## Getting started
 

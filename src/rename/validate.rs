@@ -257,7 +257,7 @@ pub(super) fn is_valid_new_name(kind: &SymbolKind, new_name: &str) -> bool {
 
 /// Whether `text` is one complete PHP name: `$var`, `Foo`, `Ns\Foo`, or
 /// `\Ns\Foo`.
-fn is_name_token(text: &str) -> bool {
+pub(super) fn is_name_token(text: &str) -> bool {
     let body = text.strip_prefix('$').unwrap_or(text);
     let body = body.strip_prefix('\\').unwrap_or(body);
     !body.is_empty()

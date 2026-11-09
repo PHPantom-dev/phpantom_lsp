@@ -1571,12 +1571,14 @@ fn schema_backed_modern_accessor_keeps_accessor_source() {
 }
 
 #[test]
-fn synthesizes_modern_accessor_property_short_name_generic() {
+fn synthesizes_modern_accessor_property_integer_generic() {
     let provider = LaravelModelProvider;
     let mut user = make_class("App\\Models\\User");
     user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
-    user.methods
-        .push(Arc::new(make_method("age", Some("Attribute<int>"))));
+    user.methods.push(Arc::new(make_method(
+        "age",
+        Some("Illuminate\\Database\\Eloquent\\Casts\\Attribute<int>"),
+    )));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
     let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {

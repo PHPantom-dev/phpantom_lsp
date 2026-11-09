@@ -24,7 +24,7 @@ const CONFIG_FILES: [&str; 2] = [".bladeformatterrc.json", ".bladeformatterrc"];
 const PACKAGE: &str = "blade-formatter";
 
 /// The binary npm links into `node_modules/.bin`.
-const BINARY: &str = if cfg!(windows) {
+pub(super) const BINARY: &str = if cfg!(windows) {
     "blade-formatter.cmd"
 } else {
     "blade-formatter"

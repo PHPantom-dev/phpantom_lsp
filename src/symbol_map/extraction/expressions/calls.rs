@@ -60,9 +60,13 @@ pub(super) fn extract_instantiation_expr<'a>(
             );
         }
         emit_twig_callable_instantiation(inst.class, args, ctx);
+        emit_drupal_url_spans(inst.class, args, ctx);
+        emit_drupal_route_permission_spans(inst.class, args, ctx);
+        emit_drupal_config_target_spans(inst.class, args, ctx);
+        record_dql_instantiation(inst.class, args, ctx, scope_start);
         if !class_text.is_empty() {
             emit_call_site(
-                format!("new {}", class_text),
+                CallText::Owned(format!("new {}", class_text)),
                 args,
                 &mut ctx.call_sites,
                 &mut ctx.untyped_closure_sites,
@@ -368,6 +372,7 @@ fn extract_function_call<'a>(
                 );
             }
             emit_clone_with_spans(func_call, ctx);
+            super::super::tempest::emit_function_call(func_call, ident, ctx);
             ctx.spans.push(SymbolSpan {
                 start: ident.span().start.offset,
                 end: ident.span().end.offset,
@@ -422,6 +427,20 @@ fn extract_function_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                // `@vite(['resources/css/app.css', 'resources/js/app.js'])`
+                // names every entry point it loads.
+                Some(kind @ crate::symbol_map::StringKeyKind::ViteAsset) => {
+                    try_emit_laravel_string_spans_listed(
+                        kind,
+                        &func_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // A second argument points `mix()` at the manifest of
+                // another build directory, which is not the one read.
+                Some(crate::symbol_map::StringKeyKind::MixAsset)
+                    if func_call.argument_list.arguments.len() > 1 => {}
                 Some(kind) => {
                     try_emit_laravel_string_span(
                         kind,
@@ -438,6 +457,7 @@ fn extract_function_call<'a>(
                 ctx,
             );
             emit_wordpress_hook_span(raw, &func_call.argument_list, ctx);
+            emit_drupal_function_permission_spans(raw, &func_call.argument_list, ctx);
             if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
                 ctx.content,
                 name_clean,
@@ -467,10 +487,14 @@ fn extract_function_call<'a>(
             extract_from_expression(func_call.function, ctx, scope_start);
         }
     }
+    ctx.value_calls.push((
+        func_call.span().start.offset,
+        func_call.argument_list.left_parenthesis.end.offset,
+    ));
     let func_text = invoked_callee_text(func_call.function);
     if !func_text.is_empty() {
         emit_call_site(
-            func_text,
+            CallText::Owned(func_text),
             &func_call.argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
@@ -494,7 +518,6 @@ fn extract_method_call<'a>(
     scope_start: u32,
     visit_receiver: bool,
 ) {
-    let subject_text = expr_to_subject_text(object);
     if visit_receiver {
         extract_from_expression(object, ctx, scope_start);
     }
@@ -503,27 +526,51 @@ fn extract_method_call<'a>(
         let member_name = crate::atom::atom_bytes(ident.value);
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
         record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
+        record_drupal_route_parameter_sites(&member_name, argument_list, ctx);
+        record_yii_url_argument_sites(&member_name, argument_list, ctx);
+        record_drupal_hook_invocations(&member_name, argument_list, ctx);
+        emit_drupal_requirement_permission_spans(&member_name, argument_list, ctx);
+        record_drupal_config_list_sites(&member_name, argument_list, ctx);
+        record_drupal_config_key_sites(&member_name, argument_list, ctx);
+        record_drupal_plugin_sites(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
+        record_yii_css_class_sites(&member_name, argument_list, ctx);
+        emit_yii_form_property_spans(&member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
+        emit_entity_field_spans(object, &member_name, argument_list, ctx);
+        emit_yii_active_record_spans(object, &member_name, argument_list, ctx);
+        record_dql_call(
+            object,
+            &member_name,
+            ident.span.start.offset,
+            argument_list,
+            ctx,
+            scope_start,
+        );
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
+        ctx.value_calls.push((
+            object.span().start.offset,
+            argument_list.left_parenthesis.end.offset,
+        ));
+        let call_text = ctx.spine_texts.method_call_text(
+            object,
+            argument_list.right_parenthesis.end.offset,
+            &member_name,
+            ctx.content,
+            &mut ctx.call_sites,
+        );
         emit_call_site(
-            format!("{}->{}", subject_text, member_name),
+            call_text,
             argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
         );
-        let object_span = object.span();
         ctx.spans.push(SymbolSpan {
             start: ident.span.start.offset,
             end: ident.span.end.offset,
             kind: SymbolKind::MemberAccess {
-                subject_text: SubjectText::new(
-                    subject_text,
-                    object_span.start.offset,
-                    object_span.end.offset,
-                    ctx.content,
-                ),
+                subject_text: ctx.spine_texts.subject_text_of(object, ctx.content),
                 member_name,
                 is_static: false,
                 is_method_call: true,
@@ -565,6 +612,12 @@ fn extract_static_method_call<'a>(
 
     if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
         let member_name = crate::atom::atom_bytes(ident.value);
+        record_dql_passes(
+            ident.span.start.offset,
+            &static_call.argument_list,
+            ctx,
+            scope_start,
+        );
         if member_name.eq_ignore_ascii_case("macro") {
             try_emit_laravel_macro_string_span(
                 &static_call.argument_list,
@@ -572,14 +625,19 @@ fn extract_static_method_call<'a>(
                 &mut ctx.spans,
             );
         }
+        emit_yii_form_property_spans(&member_name, &static_call.argument_list, ctx);
         emit_facade_mock_method_spans(
             static_call.class,
             &member_name,
             &static_call.argument_list,
             ctx,
         );
+        ctx.value_calls.push((
+            static_call.span().start.offset,
+            static_call.argument_list.left_parenthesis.end.offset,
+        ));
         emit_call_site(
-            format!("{}::{}", subject_text, member_name),
+            CallText::Owned(format!("{}::{}", subject_text, member_name)),
             &static_call.argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
@@ -610,6 +668,54 @@ fn extract_static_method_call<'a>(
             .unwrap_or(clean_subject);
         emit_laravel_static_call_spans(
             clean_subject,
+            semantic_subject,
+            &member_name,
+            &static_call.argument_list,
+            ctx,
+        );
+        if ctx.drupal
+            && crate::drupal::is_service_lookup(semantic_subject, &member_name)
+            && let Some(id) = static_call.argument_list.arguments.first()
+        {
+            // `hasService()` asks whether a service exists.
+            push_laravel_string_span(
+                crate::symbol_map::StringKeyKind::ServiceId,
+                false,
+                member_name.eq_ignore_ascii_case("hasService"),
+                id.value(),
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
+        if ctx.drupal && crate::drupal::is_config_lookup(semantic_subject, &member_name) {
+            try_emit_laravel_string_span(
+                crate::symbol_map::StringKeyKind::DrupalConfigName,
+                &static_call.argument_list,
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
+        if ctx.drupal && crate::drupal::is_entity_query(semantic_subject, &member_name) {
+            try_emit_laravel_string_span(
+                crate::symbol_map::StringKeyKind::DrupalEntityType,
+                &static_call.argument_list,
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
+        if ctx.drupal
+            && let Some(index) =
+                crate::drupal::static_route_argument(semantic_subject, &member_name)
+        {
+            emit_drupal_route_span(index, &static_call.argument_list, ctx);
+        }
+        emit_drupal_static_plugin_span(
+            semantic_subject,
+            &member_name,
+            &static_call.argument_list,
+            ctx,
+        );
+        emit_drupal_static_permission_spans(
             semantic_subject,
             &member_name,
             &static_call.argument_list,
@@ -694,6 +800,53 @@ mod tests {
     use crate::names::OwnedResolvedNames;
     use crate::symbol_map::StringKeyDependency;
 
+    /// The service IDs `\Drupal::service()` names in `php`, extracted for a
+    /// project that builds a Symfony service container, and is a Drupal
+    /// site when `drupal` holds.
+    fn drupal_service_ids(php: &str, drupal: bool) -> Vec<String> {
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: true,
+                service_container: true,
+                drupal,
+                twig: false,
+                doctrine: false,
+                yii_params: false,
+                tempest: false,
+            },
+            None,
+        );
+        map.spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                crate::symbol_map::SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::ServiceId,
+                    key,
+                    ..
+                } => Some(key.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn drupal_service_lookups_name_a_service_only_in_a_drupal_site() {
+        let php = "<?php\n\\Drupal::service('acme.greeter');\n";
+        assert_eq!(
+            drupal_service_ids(php, true),
+            vec!["acme.greeter".to_string()]
+        );
+        assert!(drupal_service_ids(php, false).is_empty());
+    }
+
     #[test]
     fn route_can_span_waits_for_the_root_alias_shadow_check() {
         let php = "<?php\nRoute::get('/posts/{post}', $action)->can('update', 'post');\n";
@@ -704,7 +857,19 @@ mod tests {
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
 
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, true, true, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: true,
+                service_container: true,
+                drupal: false,
+                twig: true,
+                doctrine: false,
+                yii_params: false,
+                tempest: false,
+            },
+            None,
         );
 
         assert_eq!(map.conditional_string_key_spans.len(), 1);

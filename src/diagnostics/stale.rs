@@ -160,6 +160,11 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
         );
     }
 
+    // ── parameter.implicitlyNullable — `null` written into the type ─
+    if identifier == "parameter.implicitlyNullable" {
+        return crate::code_actions::explicit_nullable::is_explicit_nullable_stale(content, diag);
+    }
+
     false
 }
 
@@ -504,6 +509,27 @@ mod tests {
             !is_stale_phpstan_diagnostic(&other_diag, content),
             "method.notFound should NOT be stale (not listed)"
         );
+    }
+
+    #[test]
+    fn implicitly_nullable_stale_once_the_type_admits_null() {
+        let diag = make_phpstan_diag(
+            1,
+            "parameter.implicitlyNullable",
+            "Deprecated in PHP 8.4: Parameter #1 $p (string) is implicitly nullable via default value null.",
+        );
+        assert!(!is_stale_phpstan_diagnostic(
+            &diag,
+            "<?php\nfunction foo(string $p = null) {}\n"
+        ));
+        assert!(is_stale_phpstan_diagnostic(
+            &diag,
+            "<?php\nfunction foo(?string $p = null) {}\n"
+        ));
+        assert!(is_stale_phpstan_diagnostic(
+            &diag,
+            "<?php\nfunction foo(string $q = null) {}\n"
+        ));
     }
 
     #[test]

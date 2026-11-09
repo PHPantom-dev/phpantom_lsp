@@ -1,16 +1,18 @@
 //! Quick-fixes for a template name nothing resolves: "Change to" the
-//! closest declared names, and "Create missing view".
+//! closest declared names, and "Create missing view" (or Inertia page).
 //!
 //! `view('name')` / `View::make('name')` resolve against Blade templates on
 //! disk, and `render('name.html.twig')` against a Symfony project's Twig
-//! templates; `invalid_laravel_view` and `invalid_symfony_template`
+//! templates; `invalid_laravel_view` and `invalid_twig_template`
 //! (`diagnostics/laravel_string_keys.rs`) fire when a name matches none of
 //! them. A typo is the likelier mistake, so the declared names within a
 //! small edit distance are offered first. After them comes the offer to
 //! create the missing file at the location the framework would actually
 //! look for it, then open it: for a view, under
 //! the project's configured view roots (or the matching package namespace's
-//! own view directory), and for a Twig template under `templates/`.
+//! own view directory), for a Twig template under `templates/`, and for an
+//! Inertia page (`invalid_inertia_page`) under the first page directory,
+//! with the extension the project's other pages use.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -29,6 +31,13 @@ use crate::text_position::ranges_overlap;
 struct KnownTemplates {
     views: Option<Arc<[String]>>,
     twig: Option<Vec<String>>,
+    inertia: Option<InertiaPageNames>,
+}
+
+/// The Inertia pages the project holds and where a missing one would go.
+struct InertiaPageNames {
+    pages: Arc<crate::virtual_members::laravel::InertiaPages>,
+    names: Vec<String>,
 }
 
 impl Backend {
@@ -56,7 +65,10 @@ impl Backend {
 
         for span in symbol_map.spans.iter().chain(extra.iter()) {
             let SymbolKind::StringKey {
-                kind: kind @ (StringKeyKind::View | StringKeyKind::TwigTemplate),
+                kind:
+                    kind @ (StringKeyKind::View
+                    | StringKeyKind::TwigTemplate
+                    | StringKeyKind::InertiaPage),
                 key,
                 is_write: false,
                 is_optional: false,
@@ -74,7 +86,38 @@ impl Backend {
                 continue;
             }
 
+            let mut file_content = String::new();
             let (declared, file_path, code, label) = match kind {
+                StringKeyKind::InertiaPage => {
+                    let inertia = known.inertia.get_or_insert_with(|| {
+                        let pages = self.inertia_pages();
+                        InertiaPageNames {
+                            names: pages.page_names(),
+                            pages,
+                        }
+                    });
+                    // Only a page the diagnostic reports: one the page
+                    // directories could hold and do not.
+                    if self
+                        .asset_world(|kind| kind == StringKeyKind::InertiaPage)
+                        .judge(*kind, key)
+                        != Some(false)
+                    {
+                        continue;
+                    }
+                    let path = can_create
+                        .then(|| inertia.pages.new_page_file(key))
+                        .flatten();
+                    if let Some(path) = &path {
+                        file_content = new_page_content(path);
+                    }
+                    (
+                        &inertia.names[..],
+                        path,
+                        "invalid_inertia_page",
+                        "Inertia page",
+                    )
+                }
                 StringKeyKind::View => {
                     let views = known.views.get_or_insert_with(|| self.cached_view_names());
                     if is_declared(views, key) {
@@ -101,7 +144,7 @@ impl Backend {
                     (
                         &templates[..],
                         can_create.then_some(path),
-                        "invalid_symfony_template",
+                        "invalid_twig_template",
                         "template",
                     )
                 }
@@ -169,7 +212,7 @@ impl Backend {
                 diagnostics: Some(vec![diagnostic]),
                 edit: Some(super::create_file_edit(
                     new_file_uri.clone(),
-                    String::new(),
+                    file_content,
                     Vec::new(),
                 )),
                 command: Some(self.build_code_lens_command(
@@ -224,6 +267,16 @@ impl Backend {
             .read()
             .clone()
             .map(|root| root.join("resources/views"))
+    }
+}
+
+/// What a new page starts out as: an empty single-file component for Vue,
+/// and an empty file for the frameworks whose pages have no fixed shell.
+fn new_page_content(path: &std::path::Path) -> String {
+    if path.extension().is_some_and(|extension| extension == "vue") {
+        "<script setup>\n\n</script>\n\n<template>\n\n</template>\n".to_string()
+    } else {
+        String::new()
     }
 }
 

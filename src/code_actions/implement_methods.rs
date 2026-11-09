@@ -133,14 +133,41 @@ pub(crate) fn collect_missing_methods(
                 .map(|m| m.name.to_lowercase()),
         );
     };
+    // A trait method imported under another name (`isLocal as isSafe`)
+    // implements an abstract method of that other name.
+    let add_aliases = |user: &ClassInfo, implemented: &mut HashSet<String>| {
+        if user.trait_aliases.is_empty() {
+            return;
+        }
+        let traits: Vec<_> = used_traits_deep(&user.used_traits, class_loader)
+            .into_iter()
+            .collect();
+        for alias in &user.trait_aliases {
+            let Some(name) = &alias.alias else { continue };
+            let concrete = traits.iter().any(|(_, used)| {
+                used.methods
+                    .iter()
+                    .any(|m| !m.is_abstract && m.name.eq_ignore_ascii_case(&alias.method_name))
+            });
+            if concrete {
+                implemented.insert(name.to_lowercase());
+            }
+        }
+    };
     for (_, used) in used_traits_deep(&class.used_traits, class_loader) {
         add_concrete(&used);
     }
+    let mut parents = Vec::new();
     for (_, parent) in ancestors(class, class_loader) {
         add_concrete(&parent);
         for (_, used) in used_traits_deep(&parent.used_traits, class_loader) {
             add_concrete(&used);
         }
+        parents.push(parent);
+    }
+    add_aliases(class, &mut implemented);
+    for parent in &parents {
+        add_aliases(parent, &mut implemented);
     }
 
     // PHP provides an enum's `from()`, `tryFrom()`, and `cases()` itself,
@@ -574,6 +601,7 @@ mod tests {
                     closure_this_type: None,
                     param_out_type: None,
                     callable_invocation: None,
+                    expected_values: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$options"),
@@ -587,6 +615,7 @@ mod tests {
                     closure_this_type: None,
                     param_out_type: None,
                     callable_invocation: None,
+                    expected_values: None,
                 },
             ]
             .into(),

@@ -93,6 +93,9 @@ pub struct NamedArgContext {
     pub positional_count: usize,
     /// The partial identifier prefix the user has typed (e.g. `"na"` from `foo(na|)`).
     pub prefix: String,
+    /// The argument text from just after the call's `(` up to the start of
+    /// `prefix`, which ends with the start of the argument being typed.
+    pub args_text: String,
 }
 
 // ─── Detection ──────────────────────────────────────────────────────────────
@@ -149,6 +152,7 @@ pub fn detect_named_arg_context(content: &str, position: Position) -> Option<Nam
         existing_named_args: existing_named,
         positional_count,
         prefix,
+        args_text,
     })
 }
 

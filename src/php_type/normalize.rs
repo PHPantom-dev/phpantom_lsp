@@ -676,6 +676,11 @@ pub(super) fn equivalent_for_dedup(left: &PhpType, right: &PhpType) -> bool {
     if left.as_class_name_literal().is_some() != right.as_class_name_literal().is_some() {
         return false;
     }
+    // Two builders are the same value only when they built the same DQL,
+    // which the interned comparison above already answered.
+    if left.as_dql_builder().is_some() || right.as_dql_builder().is_some() {
+        return false;
+    }
     if left.as_enum_case().is_some() || right.as_enum_case().is_some() {
         return match (left.as_enum_case(), right.as_enum_case()) {
             (Some((left_enum, left_case)), Some((right_enum, right_case))) => {
@@ -1347,11 +1352,14 @@ pub(crate) fn absorb_scalar_refinements(types: &mut Vec<PhpType>) {
         let TypeKind::Named(subtype) = types[index].kind() else {
             continue;
         };
-        if types[index].as_enum_case().is_some() {
+        if types[index].as_enum_case().is_some() || types[index].as_dql_builder().is_some() {
             continue;
         }
         for (candidate, candidate_type) in types.iter().enumerate() {
-            if index == candidate || candidate_type.as_enum_case().is_some() {
+            if index == candidate
+                || candidate_type.as_enum_case().is_some()
+                || candidate_type.as_dql_builder().is_some()
+            {
                 continue;
             }
             let TypeKind::Named(supertype) = candidate_type.kind() else {

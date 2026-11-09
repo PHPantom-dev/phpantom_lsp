@@ -21,7 +21,9 @@ impl Backend {
     /// preprocessor emits for a Blade file, so its ranges are translated
     /// back to the original template through the source map before
     /// Blade-native fold regions (directive blocks, component tag bodies)
-    /// are added on top, in Blade coordinates directly.
+    /// are added on top, in Blade coordinates directly.  In a Yii project,
+    /// each string that starts with a path alias also folds, within its
+    /// line, to the path it resolves to.
     pub fn handle_folding_range(&self, uri: &str, content: &str) -> Option<Vec<FoldingRange>> {
         let mut ranges: Vec<FoldingRange> =
             crate::parser::with_parsed_program(content, "folding_range", |program, content| {
@@ -42,17 +44,24 @@ impl Backend {
                 ranges
             });
 
-        if self.is_blade_file(uri) {
+        if self.is_php_template(uri) {
             ranges = ranges
                 .into_iter()
                 .filter_map(|r| self.translate_folding_range(uri, r))
                 .collect();
-            if let Some(raw) = self.get_file_content_arc(uri) {
-                collect_blade_native_folds(&raw, &self.blade.directives.read(), &mut ranges);
-            }
+        }
+        if self.is_blade_file(uri)
+            && let Some(raw) = self.get_file_content_arc(uri)
+        {
+            collect_blade_native_folds(&raw, &self.blade.directives.read(), &mut ranges);
         }
 
         ranges.retain(|r| r.start_line < r.end_line);
+        // An aliased path folds within its line, to the path it resolves
+        // to, which is only worth sending to a client that shows it.
+        if self.caps().folding_collapsed_text {
+            ranges.extend(self.yii_alias_folds(uri, content));
+        }
         ranges.sort_by(|a, b| {
             a.start_line
                 .cmp(&b.start_line)
@@ -66,14 +75,14 @@ impl Backend {
     /// original Blade template, dropping it when either end lands in the
     /// injected prologue (no template text to attach to).
     fn translate_folding_range(&self, uri: &str, range: FoldingRange) -> Option<FoldingRange> {
-        let start = self.try_translate_php_to_blade(
+        let start = self.try_translate_php_to_template(
             uri,
             tower_lsp_server::gen_lsp_types::Position {
                 line: range.start_line,
                 character: range.start_character.unwrap_or(0),
             },
         )?;
-        let end = self.try_translate_php_to_blade(
+        let end = self.try_translate_php_to_template(
             uri,
             tower_lsp_server::gen_lsp_types::Position {
                 line: range.end_line,

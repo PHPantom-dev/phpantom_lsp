@@ -4,7 +4,7 @@
 use crate::Backend;
 use crate::class_lookup::Fqn;
 use crate::inheritance::ancestry::find_declaring_ancestor;
-use crate::symbol_map::SymbolMap;
+use crate::symbol_map::{DocblockMemberRef, SymbolMap};
 use crate::types::{ClassInfo, FileContext};
 
 use super::ranges::{argument_expression_range, function_fqn};
@@ -98,7 +98,7 @@ fn resolve_call(
                 offset,
                 method,
                 OccurrenceKind::Method,
-                false,
+                DocblockMemberRef::No,
             ),
         );
     }
@@ -111,7 +111,14 @@ fn resolve_call(
                 source,
                 memo: member_targets,
             }
-            .resolve(subject, true, offset, method, OccurrenceKind::Method, false),
+            .resolve(
+                subject,
+                true,
+                offset,
+                method,
+                OccurrenceKind::Method,
+                DocblockMemberRef::No,
+            ),
         );
     }
     let loader = backend.function_loader_with(
@@ -141,7 +148,7 @@ impl MemberTargetResolver<'_> {
         offset: u32,
         member_name: &str,
         kind: OccurrenceKind,
-        mock_expectation: bool,
+        docblock_ref: DocblockMemberRef,
     ) -> Option<String> {
         let owner = resolve_member_owner(
             self.backend,
@@ -150,7 +157,7 @@ impl MemberTargetResolver<'_> {
             subject,
             is_static,
             offset,
-            mock_expectation,
+            docblock_ref,
         )?;
         let key = (owner.clone(), member_name.to_string(), kind);
         let declaring_owner = self
@@ -188,7 +195,7 @@ fn resolve_member_owner(
     subject: &str,
     is_static: bool,
     offset: u32,
-    mock_expectation: bool,
+    docblock_ref: DocblockMemberRef,
 ) -> Option<String> {
     let use_map = context.use_map_at(offset);
     let namespace = context.namespace_at(offset);
@@ -216,13 +223,31 @@ fn resolve_member_owner(
         offset,
         &resolution_context,
     )?;
+    if docblock_ref == DocblockMemberRef::EntityField {
+        let mut names = crate::doctrine::managed_entity_names(
+            &resolved,
+            &context.classes,
+            &class_loader,
+            &backend.resolved_class_cache,
+        );
+        return (names.len() == 1).then(|| names.swap_remove(0));
+    }
     let mut names: Vec<String> = resolved
         .top_level_class_names()
         .into_iter()
         .map(|name| name.trim_start_matches('\\').to_string())
         .collect();
-    if mock_expectation {
+    if docblock_ref == DocblockMemberRef::MockedMethod {
         names = crate::mock_methods::mocked_class_names(names, is_static, &class_loader);
+    }
+    if docblock_ref == DocblockMemberRef::YiiAttribute {
+        names.retain(|name| {
+            class_loader(crate::class_lookup::Fqn::new(name))
+                .is_some_and(|class| crate::yii::active_record::is_record(&class, &class_loader))
+        });
+    }
+    if docblock_ref == (DocblockMemberRef::YiiProperty { form_model: true }) {
+        names = crate::yii::forms::form_model_class_names(names, &class_loader);
     }
     (names.len() == 1).then(|| names.swap_remove(0))
 }

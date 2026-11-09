@@ -113,13 +113,24 @@ impl ProjectScopes {
         let installed: Vec<(usize, &ComposerProjectPaths)> = projects
             .iter()
             .enumerate()
-            .filter(|(_, project)| !project.vendor_paths.is_empty())
+            .filter(|(_, project)| {
+                !project.vendor_paths.is_empty() || !project.bin_vendor_paths.is_empty()
+            })
             .collect();
         if installed.len() < 2 {
             return Self::default();
         }
         let prefixes = |paths: &[PathBuf]| -> Vec<String> {
             paths.iter().map(|p| dir_uri_prefix(p)).collect()
+        };
+        // A bin namespace's vendor directory is its project's own.
+        let vendor_prefixes = |project: &ComposerProjectPaths| -> Vec<String> {
+            project
+                .vendor_paths
+                .iter()
+                .chain(&project.bin_vendor_paths)
+                .map(|p| dir_uri_prefix(p))
+                .collect()
         };
         let roots: Vec<Vec<String>> = installed
             .iter()
@@ -129,7 +140,7 @@ impl ProjectScopes {
             .iter()
             .enumerate()
             .map(|(position, &(index, project))| {
-                let own_vendor = prefixes(&project.vendor_paths);
+                let own_vendor = vendor_prefixes(project);
                 let own_roots = roots[position].clone();
                 let others = || {
                     installed
@@ -138,7 +149,7 @@ impl ProjectScopes {
                         .filter(move |((other, _), _)| *other != index)
                 };
                 let foreign_vendor = others()
-                    .flat_map(|((_, other), _)| prefixes(&other.vendor_paths))
+                    .flat_map(|((_, other), _)| vendor_prefixes(other))
                     .filter(|prefix| !own_vendor.contains(prefix))
                     .collect();
                 let foreign_roots = others()
@@ -232,10 +243,16 @@ impl Backend {
     }
 
     /// The file declaring the class `fqn` as the file whose work is running
-    /// sees it: the one the index holds, unless that is another Composer
-    /// project's dependency, in which case the project's own copy if it
-    /// installed one.
+    /// sees it: a stub path's declaration first, then the one the index
+    /// holds, unless that is another Composer project's dependency, in
+    /// which case the project's own copy if it installed one.
     pub(crate) fn class_declaration_uri(&self, fqn: &str) -> Option<String> {
+        if self.has_external_stubs() {
+            let stubs = self.external_stubs();
+            if let Some(path) = stubs.classes.get(fqn) {
+                return Some(crate::util::path_to_uri(path));
+            }
+        }
         let indexed = self.symbols.fqn_uri_index.read().get(fqn).cloned()?;
         let Some(scope) = active() else {
             return Some(indexed);

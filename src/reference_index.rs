@@ -18,7 +18,9 @@ use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
 use crate::backend::file_access::namespace_in_spans;
 use crate::names::resolve_to_fqn;
-use crate::symbol_map::{SelfStaticParentKind, StringKeyKind, SymbolKind, SymbolMap};
+use crate::symbol_map::{
+    ReceiverFrameworks, SelfStaticParentKind, StringKeyKind, SymbolKind, SymbolMap,
+};
 use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, short_name, strip_fqn_prefix};
 
@@ -57,6 +59,13 @@ pub(crate) enum ReferenceIndexKey {
 /// changing the exact source range consumers return.
 pub(crate) fn string_key_reference_key(kind: StringKeyKind, key: &str) -> ReferenceIndexKey {
     match kind {
+        // The same view has different spellings relative to its callers.
+        // Index Tempest callers together; the path resolver compares the
+        // actual targets after this inexpensive candidate selection.
+        StringKeyKind::TempestView { .. } => ReferenceIndexKey::StringKey {
+            kind: StringKeyKind::TempestView { relative: false },
+            key: String::new(),
+        },
         StringKeyKind::ConfigResource(resource)
             if !crate::symbol_map::laravel_resources::is_implicit_resource_name(resource, key) =>
         {
@@ -65,6 +74,20 @@ pub(crate) fn string_key_reference_key(kind: StringKeyKind, key: &str) -> Refere
                 key: crate::symbol_map::laravel_resources::config_key(resource, key),
             }
         }
+        // A config object's `get()` holds the key alone, its object's name
+        // coming with the receiver's type, so a key is filed and found
+        // without the name.
+        StringKeyKind::DrupalConfigKey => ReferenceIndexKey::StringKey {
+            kind,
+            key: crate::drupal::config_keys::split_config_key(key)
+                .1
+                .to_string(),
+        },
+        // Likewise a plugin manager's lookup holds the plugin ID alone.
+        StringKeyKind::DrupalPlugin => ReferenceIndexKey::StringKey {
+            kind,
+            key: crate::drupal::plugins::split_plugin_key(key).1.to_string(),
+        },
         _ => ReferenceIndexKey::StringKey {
             kind,
             key: key.to_string(),
@@ -492,6 +515,31 @@ impl Backend {
         Some(uris)
     }
 
+    /// Every key of a `kind` string key some file of the workspace names,
+    /// in no particular order.
+    ///
+    /// `None` means the workspace index cannot answer yet.
+    pub(crate) fn indexed_string_keys(&self, kind: StringKeyKind) -> Option<Vec<String>> {
+        if self.skip_reference_index || !self.workspace_index.indexed.load(Ordering::Acquire) {
+            return None;
+        }
+        let index = self.reference_index.read();
+        Some(
+            index
+                .by_key
+                .iter()
+                .filter_map(|(key, uris)| match key {
+                    ReferenceIndexKey::StringKey { kind: found, key }
+                        if *found == kind && !uris.is_empty() =>
+                    {
+                        Some(key.clone())
+                    }
+                    _ => None,
+                })
+                .collect(),
+        )
+    }
+
     /// Candidate files for method names, matching PHP's case-insensitive
     /// lookup across static and instance calls. Existing member keys retain
     /// their spelling because property and constant names are case-sensitive.
@@ -739,27 +787,22 @@ impl Backend {
         // never be confirmed, and morph sites are recorded for every plain
         // `$x->prop === 'literal'`, so skip them there.
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
-        let is_symfony = self.is_symfony_project();
-        let is_twig = self.is_twig_project();
-        let is_yii = self.is_yii_project();
-        let enabled = |kind: StringKeyKind| {
-            if kind.is_twig() {
-                is_twig
-            } else if kind.is_yii() {
-                is_yii
-            } else if kind.is_symfony() {
-                is_symfony
-            } else {
-                is_laravel
-            }
+        let frameworks = ReceiverFrameworks {
+            laravel: is_laravel,
+            symfony: self.is_symfony_project(),
+            service_container: self.reads_service_container(),
+            twig: self.is_twig_project(),
+            yii: self.is_yii_project(),
+            drupal: self.is_drupal_project(),
         };
+        let enabled = |kind| frameworks.enables(kind);
         for site in &symbol_map.typed_receiver_sites {
             if !site.receiver.names_any(enabled) {
                 continue;
             }
             let mut kinds: Vec<StringKeyKind> = Vec::with_capacity(2);
             for (_, kind) in site.receiver.targets() {
-                if !kinds.contains(kind) {
+                if enabled(*kind) && !kinds.contains(kind) {
                     kinds.push(*kind);
                 }
             }
@@ -1518,6 +1561,39 @@ mod tests {
             }])
             .expect("workspace should be marked indexed");
         assert!(candidates.is_empty());
+    }
+
+    /// A typed receiver's candidate is filed only under the kinds the
+    /// project reads: a Symfony `->get('page')` could be a Drupal config
+    /// factory's or config object's read, but never is outside Drupal.
+    #[test]
+    fn typed_receiver_candidates_file_only_enabled_kinds() {
+        let backend = Backend::new_test();
+        backend.set_is_symfony(true);
+        let map = SymbolMap {
+            typed_receiver_sites: vec![crate::symbol_map::TypedReceiverSite {
+                start: 0,
+                end: 4,
+                key: "page".to_string(),
+                is_write: false,
+                is_optional: false,
+                guards: 0,
+                receiver: crate::symbol_map::ReceiverClass::ContainerLookup,
+            }],
+            ..SymbolMap::default()
+        };
+        let kinds: Vec<StringKeyKind> = backend
+            .reference_entries_for_symbol_map("file:///project/src/Foo.php", &map)
+            .into_iter()
+            .filter_map(|(key, _)| match key {
+                ReferenceIndexKey::StringKey { kind, .. } => Some(kind),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [StringKeyKind::ContainerParameter, StringKeyKind::ServiceId]
+        );
     }
 
     #[test]

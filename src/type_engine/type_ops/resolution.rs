@@ -171,7 +171,8 @@ fn type_hint_to_classes_typed_depth(
         | TypeKind::ListShape(inner)
         | TypeKind::TemplateParam(_, inner)
         | TypeKind::ClassNameLiteral(inner)
-        | TypeKind::EnumCase(inner, _) => type_hint_to_classes_typed_depth(
+        | TypeKind::EnumCase(inner, _)
+        | TypeKind::DqlBuilder(inner, _) => type_hint_to_classes_typed_depth(
             inner,
             owning_class_name,
             all_classes,
@@ -334,6 +335,18 @@ fn type_hint_to_classes_typed_depth(
                 produced,
             )
         }
+
+        // ── Closure signature (`Closure(int): string`) ─────────────
+        // An instance of the `Closure` class whatever its signature.
+        TypeKind::Callable(c) if c.is_closure() => resolve_named_type(
+            "Closure",
+            &[],
+            owning_class_name,
+            all_classes,
+            class_loader,
+            depth,
+            produced,
+        ),
 
         // ── Array slice (T[]) ──────────────────────────────────────
         // Not a class type itself; skip.

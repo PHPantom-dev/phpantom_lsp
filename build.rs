@@ -296,6 +296,20 @@ fn generate_stub_map(stubs_path: &Path) {
     }
     out.push_str("];\n\n");
 
+    // The extension directory each embedded file sits in, parallel to
+    // `STUB_FILES`.
+    out.push_str("/// The phpstorm-stubs directory (one per extension) each entry of\n");
+    out.push_str("/// [`STUB_FILES`] comes from.\n");
+    out.push_str(&format!(
+        "pub(crate) static STUB_FILE_EXTENSIONS: [&str; {}] = [\n",
+        existing_files.len()
+    ));
+    for rel_path in &existing_files {
+        let dir = rel_path.split('/').next().unwrap_or_default();
+        out.push_str(&format!("    \"{}\",\n", escape(dir)));
+    }
+    out.push_str("];\n\n");
+
     // 2. Class name → file index mapping.
     let class_entries: Vec<(&str, usize)> = class_map
         .iter()
@@ -622,6 +636,7 @@ fn fetch_stubs(stubs_root: &Path, lock: &StubsLock) -> Result<(), Box<dyn std::e
 fn write_empty_stubs() {
     let content = concat!(
         "pub(crate) static STUB_FILES: [&str; 0] = [];\n",
+        "pub(crate) static STUB_FILE_EXTENSIONS: [&str; 0] = [];\n",
         "pub(crate) static STUB_CLASS_MAP: [(&str, usize); 0] = [];\n",
         "pub(crate) static STUB_FUNCTION_MAP: [(&str, usize); 0] = [];\n",
         "pub(crate) static STUB_CONSTANT_MAP: [(&str, usize); 0] = [];\n",

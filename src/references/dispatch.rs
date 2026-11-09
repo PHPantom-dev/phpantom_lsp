@@ -55,13 +55,17 @@ impl Backend {
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
         self.ensure_workspace_index_ready_for_request();
-        self.find_references_inner(
+        let mut locations = self.find_references_inner(
             uri,
             content,
             position,
             include_declaration,
             ReferenceSearchMode::Rename,
-        )
+        )?;
+        // Drupal core and contributed extensions are references worth
+        // finding but files a rename must not edit: Composer overwrites them.
+        locations.retain(|location| !self.is_drupal_read_only_uri(location.uri.as_str()));
+        Some(locations)
     }
 
     fn find_references_inner(
@@ -224,12 +228,17 @@ impl Backend {
                 }
                 self.find_variable_references(uri, content, name, span_start, include_declaration)
             }
-            SymbolKind::ClassReference { name, is_fqn, .. } => {
-                let ctx = self.file_context(uri);
-                let fqn = if *is_fqn {
-                    name.to_string()
-                } else {
-                    ctx.resolve_name_at(name, span_start)
+            SymbolKind::ClassReference {
+                name,
+                is_fqn,
+                context,
+            } => {
+                let discovered =
+                    self.drupal_annotation_class_at(uri, name, *is_fqn, *context, span_start);
+                let fqn = match discovered {
+                    Some(fqn) => fqn,
+                    None if *is_fqn => name.to_string(),
+                    None => self.file_context(uri).resolve_name_at(name, span_start),
                 };
                 self.find_class_references(&fqn, include_declaration)
             }
@@ -252,22 +261,32 @@ impl Backend {
 
                 // Resolve the subject to determine the class hierarchy
                 // so we only return references on related classes.
-                let (hierarchy, declaration_scope) = self.resolve_member_access_scopes(
-                    uri,
-                    super::member_scope::AccessReceiver {
-                        subject_text: subject_text.as_str(source),
-                        is_static: *is_static,
-                        docblock_ref: *docblock_ref,
-                    },
-                    span_start,
-                    member_name,
-                    mode,
-                );
+                let receiver = super::member_scope::AccessReceiver {
+                    subject_text: subject_text.as_str(source),
+                    is_static: *is_static,
+                    docblock_ref: *docblock_ref,
+                };
+                let member_is_static = receiver.member_is_static();
+                let (hierarchy, declaration_scope) =
+                    self.resolve_member_access_scopes(uri, receiver, span_start, member_name, mode);
                 // A string passed to `allows()` on something that is not a
                 // mock names no method, so there is nothing to search for;
                 // the name-only search an unresolved receiver falls back to
-                // would match every method of that name.
-                if hierarchy.is_none() && *docblock_ref == DocblockMemberRef::MockedMethod {
+                // would match every method of that name.  Likewise an
+                // attribute's named-argument label whose parameter the
+                // constructor does not promote names no property, and a
+                // field helper's string given something other than a form
+                // model names none either.
+                if hierarchy.is_none()
+                    && matches!(
+                        docblock_ref,
+                        DocblockMemberRef::MockedMethod
+                            | DocblockMemberRef::AttributeNamedArg
+                            | DocblockMemberRef::EntityField
+                            | DocblockMemberRef::YiiAttribute
+                            | DocblockMemberRef::YiiProperty { form_model: true }
+                    )
+                {
                     return Vec::new();
                 }
 
@@ -302,7 +321,7 @@ impl Backend {
                 };
                 let mut locations = self.find_member_references(
                     member_name,
-                    *is_static,
+                    member_is_static,
                     target_kind,
                     include_declaration,
                     hierarchy.as_ref(),

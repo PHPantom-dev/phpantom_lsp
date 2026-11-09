@@ -76,6 +76,43 @@ impl OutParamCallee {
         }
     }
 
+    /// Whether the callee is declared by the embedded stubs rather than by
+    /// project or library code.
+    ///
+    /// A built-in's by-reference parameter type is often looser than what
+    /// it actually writes (`array_shift(array &$array)` keeps the element
+    /// type), while a user callee is held to its declaration.
+    ///
+    /// A function is judged by its name alone: PHP cannot redeclare a
+    /// built-in, so a declaration of one found in the project is a stub
+    /// package (`phpstan/php-8-stubs`) or a polyfill describing it.
+    pub(crate) fn is_builtin(&self, backend: &Backend) -> bool {
+        match self {
+            Self::Function(fi) => {
+                let fqn = match fi.namespace {
+                    Some(ref ns) => format!("{ns}\\{}", fi.name),
+                    None => fi.name.to_string(),
+                };
+                backend
+                    .stub_function_index
+                    .read()
+                    .contains_key(fqn.as_str())
+            }
+            Self::Method(cls, name) => {
+                let loader = |n: Fqn<'_>| backend.find_or_load_class(&n);
+                let declaring = crate::hover::find_declaring_class(
+                    cls,
+                    name,
+                    &crate::hover::MemberKindForOrigin::Method,
+                    &loader,
+                );
+                let fqn = declaring.fqn();
+                !backend.symbols.fqn_uri_index.read().contains_key(&fqn)
+                    && backend.stub_index.read().contains_key(fqn.as_str())
+            }
+        }
+    }
+
     /// The receiver's FQN, for resolving `self`/`static` inside a
     /// `@param-out` conditional's own text. `None` for a plain function,
     /// which has no such receiver.
@@ -83,6 +120,14 @@ impl OutParamCallee {
         match self {
             Self::Function(_) => None,
             Self::Method(cls, _) => Some(cls.fqn()),
+        }
+    }
+
+    /// The namespace the callee's parameter defaults were written in.
+    fn default_namespace(&self) -> Option<&str> {
+        match self {
+            Self::Function(fi) => fi.namespace.as_deref(),
+            Self::Method(cls, name) => cls.get_method_ci(name)?.default_namespace(),
         }
     }
 
@@ -248,11 +293,15 @@ pub(crate) fn resolve_out_type_for_call(
     )
     .join(", ");
     let arg_type_resolver = |text: &str| Backend::resolve_arg_text_to_type(text, resolution_ctx);
+    let default_type_resolver = |text: &str, namespace: Option<&str>| {
+        Backend::resolve_arg_text_to_type(text, &resolution_ctx.written_in(namespace))
+    };
     let tpl = TemplateContext {
         defaults: None,
         params: &[],
         bindings: &[],
         arg_type_resolver: Some(&arg_type_resolver),
+        default_type_resolver: Some(&default_type_resolver),
         this_type: None,
         subs: None,
     };
@@ -266,6 +315,7 @@ pub(crate) fn resolve_out_type_for_call(
             calling: resolution_ctx.current_class.map(|c| c.fqn().as_str()),
             declaring: declaring_fqn.as_deref(),
             written_class: Some(&|name: &str| resolution_ctx.written_names().resolve_class(name)),
+            namespace: callee.default_namespace(),
         },
         resolution_ctx.file.class_loader,
         &tpl,
