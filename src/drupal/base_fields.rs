@@ -683,6 +683,156 @@ impl Backend {
         }
     }
 
+    /// The IDs of the entity types a receiver of type `ty` may hold, each
+    /// once: the ones a field name asked of it belongs to.
+    pub(crate) fn drupal_receiver_entity_types(
+        &self,
+        ty: &PhpType,
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Vec<String> {
+        let Some(index) = self.drupal_field_index() else {
+            return Vec::new();
+        };
+        let mut ids: Vec<String> = Vec::new();
+        for class in ty.top_level_class_names() {
+            let Some(class) = class_loader(Fqn::new(&class)) else {
+                continue;
+            };
+            let held = super::fields::receiver_entity_types(
+                &class,
+                index
+                    .entity_types
+                    .iter()
+                    .map(|entity_type| (entity_type.id.as_str(), entity_type.class)),
+                class_loader,
+            );
+            for id in held {
+                if !ids.iter().any(|known| known == id) {
+                    ids.push(id.to_string());
+                }
+            }
+        }
+        ids
+    }
+
+    /// The names of the fields a receiver of type `ty` has.
+    pub(crate) fn drupal_receiver_field_names(
+        &self,
+        ty: &PhpType,
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Vec<String> {
+        let Some(index) = self.drupal_field_index() else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = Vec::new();
+        for class in ty.top_level_class_names() {
+            let Some(class) = class_loader(Fqn::new(&class)) else {
+                continue;
+            };
+            for field in index.fields_of(&class, class_loader) {
+                if !names.contains(&field.name) {
+                    names.push(field.name);
+                }
+            }
+        }
+        names
+    }
+
+    /// The field a field name's span `key` names, as the field index has it
+    /// now, with the entity type's ID.
+    pub(crate) fn drupal_field_named(&self, key: &str) -> Option<Field> {
+        let name = super::fields::split_field_key(key).1;
+        let index = self.drupal_field_index()?;
+        let mut shared: Option<Field> = None;
+        // The field every entity type of the key has, as the property is.
+        for entity_type in super::fields::field_key_entity_types(key) {
+            let mut found: Option<Field> = None;
+            // An ID declared twice has the fields of either declaration.
+            for declared in index.entity_types.iter().filter(|e| e.id == entity_type) {
+                let Some(field) = declared.fields.iter().find(|field| field.name == name) else {
+                    continue;
+                };
+                match &mut found {
+                    Some(known) => super::fields::merge_field(known, field),
+                    None => found = Some(field.clone()),
+                }
+            }
+            let found = found?;
+            match &mut shared {
+                Some(known) => super::fields::merge_field(known, &found),
+                None => shared = Some(found),
+            }
+        }
+        shared
+    }
+
+    /// Whether the field name spans `a` and `b` name the same field: the
+    /// same span, or a field both name, of an entity type both may hold.
+    pub(crate) fn drupal_field_keys_match(&self, a: &str, b: &str) -> bool {
+        if a == b {
+            return true;
+        }
+        if super::fields::split_field_key(a).1 != super::fields::split_field_key(b).1 {
+            return false;
+        }
+        super::fields::field_key_entity_types(a)
+            .any(|entity_type| super::fields::field_key_entity_types(b).any(|e| e == entity_type))
+            && self.drupal_field_named(a).is_some()
+            && self.drupal_field_named(b).is_some()
+    }
+
+    /// Where the field a field name's span `key` names is declared.
+    pub(crate) fn drupal_field_name_locations(&self, key: &str) -> Vec<Location> {
+        self.drupal_field_named(key)
+            .map(|field| self.field_locations(&field))
+            .unwrap_or_default()
+    }
+
+    /// The hover text of the field a field name's span `key` names: its
+    /// field type, its type, its entity type, and the files that declare
+    /// it.
+    pub(crate) fn drupal_field_name_detail(&self, key: &str) -> String {
+        let entity_types: Vec<String> = super::fields::field_key_entity_types(key)
+            .map(|entity_type| format!("`{entity_type}`"))
+            .collect();
+        let Some(field) = self.drupal_field_named(key) else {
+            return if entity_types.len() == 1 {
+                format!("Not a known field of {}", entity_types[0])
+            } else {
+                format!("Not a field all of {} have", entity_types.join(", "))
+            };
+        };
+        let mut parts = Vec::new();
+        if !field.field_types.is_empty() {
+            let field_types: Vec<String> = field
+                .field_types
+                .iter()
+                .map(|field_type| format!("`{field_type}`"))
+                .collect();
+            parts.push(format!("Field type {}", field_types.join(", ")));
+        }
+        parts.push(format!("Type `{}`", field.ty.shorten()));
+        parts.push(if entity_types.len() == 1 {
+            format!("Entity type {}", entity_types[0])
+        } else {
+            format!("Entity types {}", entity_types.join(", "))
+        });
+        let mut files: Vec<String> = Vec::new();
+        for location in self.field_locations(&field) {
+            let path = self
+                .workspace_relative_path(location.uri.as_str())
+                .unwrap_or_else(|| location.uri.path().to_string());
+            if !files.contains(&path) {
+                files.push(path);
+            }
+        }
+        if !files.is_empty() {
+            let files: Vec<String> = files.iter().map(|file| format!("`{file}`")).collect();
+            parts.push(format!("Declared in {}", files.join(", ")));
+        }
+        parts.join("\n\n")
+    }
+
     /// Where the field `name` of `receiver` is declared, every declaration
     /// of the entity types it may hold, when the property `name` of
     /// `receiver` is that field.

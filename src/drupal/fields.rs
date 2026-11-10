@@ -36,6 +36,48 @@ use crate::virtual_members::{ResolvedClassCache, VirtualMemberProvider, VirtualM
 /// The interface every entity with fields implements.
 pub(crate) const FIELDABLE_ENTITY: &str = "Drupal\\Core\\Entity\\FieldableEntityInterface";
 
+/// The methods of a fieldable entity that take a field's name, each with
+/// the name of the parameter that takes it, first.
+const FIELD_NAME_CALLS: &[(&str, &str)] = &[
+    ("get", "field_name"),
+    ("set", "field_name"),
+    ("hasField", "field_name"),
+    ("getFieldDefinition", "name"),
+];
+
+/// The name of the parameter a call of `method` on a fieldable entity takes
+/// a field's name in, when it takes one.
+pub(crate) fn field_name_call(method: &str) -> Option<&'static str> {
+    FIELD_NAME_CALLS
+        .iter()
+        .find(|(name, _)| method.eq_ignore_ascii_case(name))
+        .map(|(_, parameter)| *parameter)
+}
+
+/// The key of a [`crate::symbol_map::StringKeyKind::DrupalFieldName`]
+/// span: the field `name` of the entity types `entity_types` a receiver
+/// may hold, sorted and joined with commas, written as the ID of a field
+/// storage is (`node.title`, `node,user.uid`).
+pub(crate) fn field_key(entity_types: &[String], name: &str) -> String {
+    let mut sorted: Vec<&str> = entity_types.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    format!("{}.{name}", sorted.join(","))
+}
+
+/// The entity types, joined with commas, and the field name of a field
+/// name's span key.
+pub(crate) fn split_field_key(key: &str) -> (&str, &str) {
+    key.split_once('.').unwrap_or(("", key))
+}
+
+/// The entity types of a field name's span key.
+pub(crate) fn field_key_entity_types(key: &str) -> impl Iterator<Item = &str> {
+    split_field_key(key)
+        .0
+        .split(',')
+        .filter(|entity_type| !entity_type.is_empty())
+}
+
 /// What the resolved-class cache carries for Drupal, since virtual member
 /// providers receive the cache but never the `Backend`.
 pub(crate) struct DrupalCacheState {
@@ -329,7 +371,7 @@ impl FieldIndex {
 }
 
 /// Make `field` the same field as it is and as `other` is.
-fn merge_field(field: &mut Field, other: &Field) {
+pub(super) fn merge_field(field: &mut Field, other: &Field) {
     if field.ty != other.ty {
         field.ty = PhpType::union(vec![field.ty.clone(), other.ty.clone()]);
     }

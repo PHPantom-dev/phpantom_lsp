@@ -223,7 +223,18 @@ const CORE: &[(&str, &str)] = &[
     ),
     (
         "web/core/lib/Drupal/Core/Entity/FieldableEntityInterface.php",
-        "<?php\nnamespace Drupal\\Core\\Entity;\ninterface FieldableEntityInterface extends EntityInterface {\n    public function get($field_name);\n}\n",
+        r#"<?php
+namespace Drupal\Core\Entity;
+interface FieldableEntityInterface extends EntityInterface {
+    public function hasField($field_name);
+    /** @return \Drupal\Core\Field\FieldDefinitionInterface|null */
+    public function getFieldDefinition($name);
+    /** @return \Drupal\Core\Field\FieldItemListInterface */
+    public function get($field_name);
+    /** @return $this */
+    public function set($field_name, $value, $notify = TRUE);
+}
+"#,
     ),
     (
         "web/core/lib/Drupal/Core/Entity/ContentEntityInterface.php",
@@ -1975,4 +1986,410 @@ async fn editing_base_fields_refreshes_interfaces_further_down() {
     let after = members_of(&backend, &dir, "Drupal\\acme\\Entity\\MemoInterface").await;
     assert!(offers(&after, "topic"), "{after:?}");
     assert!(!offers(&after, "subject"), "{after:?}");
+}
+
+// ─── Field names in code ────────────────────────────────────────────────────
+
+const NAMED_PATH: &str = "web/modules/custom/acme/src/Named.php";
+
+/// The calls that take a field name, each written with the arguments after
+/// the name.
+const FIELD_NAME_CALLS: &[(&str, &str)] = &[
+    ("get", ""),
+    ("set", ", 'Example'"),
+    ("hasField", ""),
+    ("getFieldDefinition", ""),
+];
+
+/// Every call that takes a field name, on an interface receiver and on a
+/// class receiver, for a base field and a configurable field, one per
+/// line, then the fields read as properties, and the same calls on
+/// receivers that are not fieldable.
+fn named() -> String {
+    let mut body = String::new();
+    for field in ["title", "field_tags"] {
+        for receiver in ["$node", "$entity"] {
+            for (method, rest) in FIELD_NAME_CALLS {
+                body.push_str(&format!("        {receiver}->{method}('{field}'{rest});\n"));
+            }
+        }
+    }
+    format!(
+        r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\node\Entity\Node;
+use Drupal\node\NodeInterface;
+
+final class Named {{
+    public function read(NodeInterface $node, Node $entity, Bag $bag, Fake $fake, EntityInterface $plain, string $name): void {{
+{body}        $node->title;
+        $entity->field_tags;
+        $bag->get('title');
+        $fake->get('title');
+        $plain->get('title');
+        $node->get($name);
+    }}
+}}
+
+final class Bag {{
+    public function get($key) {{}}
+}}
+
+final class Fake implements \FieldableEntityInterface {{
+    public function get($field_name) {{}}
+}}
+"#
+    )
+}
+
+/// An interface named like core's, outside core's namespace.
+const GLOBAL_FIELDABLE: (&str, &str) = (
+    "web/modules/custom/acme/src/FieldableEntityInterface.php",
+    "<?php\ninterface FieldableEntityInterface {\n    public function get($field_name);\n}\n",
+);
+
+fn tags_storage() -> String {
+    storage(
+        "node",
+        "field_tags",
+        "entity_reference",
+        Some("taxonomy_term"),
+    )
+}
+
+/// A site with node's `field_tags` exported, and `open` open.
+async fn named_site(open: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+    let tags = tags_storage();
+    site_with(&[(SYNC_TAGS, &tags), GLOBAL_FIELDABLE], open).await
+}
+
+/// The position in the string the first `call` in `content` opens,
+/// `inside` characters past its quote.
+fn named_site_at(
+    content: &str,
+    call: &str,
+    inside: usize,
+) -> tower_lsp_server::gen_lsp_types::Position {
+    position_in(content, call, call.find('\'').unwrap() + 1 + inside)
+}
+
+/// The line of `call` in `content`.
+fn line_of(content: &str, call: &str) -> u32 {
+    position_in(content, call, 0).line
+}
+
+/// Completion, go-to-definition, hover, and references work on each call
+/// that takes a field name, for a base field and a configurable field, on
+/// an interface receiver and on a class receiver.
+#[tokio::test]
+async fn field_names_complete_navigate_and_hover_at_every_call() {
+    let named = named();
+    let (backend, dir) = named_site(&[(NAMED_PATH, &named)]).await;
+    let uri = uri_for(&dir, NAMED_PATH);
+    let tags = tags_storage();
+    // Each field: where it is declared, what its hover says, and the lines
+    // that read it as a property.
+    let title_declared = (
+        uri_for(&dir, NODE_PATH),
+        position_in(NODE, "$fields['title']", 9),
+    );
+    let tags_declared = (
+        uri_for(&dir, SYNC_TAGS),
+        position_in(&tags, "field_name: field_tags", "field_name: ".len()),
+    );
+    let fields = [
+        (
+            "title",
+            &title_declared,
+            [
+                "Field type `string`",
+                "FieldItemList<StringItem>",
+                "Node.php",
+            ],
+            "$node->title;",
+        ),
+        (
+            "field_tags",
+            &tags_declared,
+            [
+                "Field type `entity_reference`",
+                "EntityReferenceFieldItemList<EntityReferenceItem, Term>",
+                "field.storage.node.field_tags.yml",
+            ],
+            "$entity->field_tags;",
+        ),
+    ];
+    for (field, (declared_uri, declared_at), hover_parts, property_read) in fields {
+        // Every line that names the field, and the file that declares it.
+        let mut expected: Vec<(tower_lsp_server::gen_lsp_types::Uri, u32)> = Vec::new();
+        for receiver in ["$node", "$entity"] {
+            for (method, _) in FIELD_NAME_CALLS {
+                let call = format!("{receiver}->{method}('{field}'");
+                expected.push((uri.clone(), line_of(&named, &call)));
+            }
+        }
+        expected.push((uri.clone(), line_of(&named, property_read)));
+        expected.push((declared_uri.clone(), declared_at.line));
+        expected.sort();
+        for receiver in ["$node", "$entity"] {
+            for (method, _) in FIELD_NAME_CALLS {
+                let call = format!("{receiver}->{method}('{field}'");
+                let at = named_site_at(&named, &call, 1);
+
+                let found = definitions_at(&backend, &uri, at).await;
+                assert_eq!(found.len(), 1, "{call}: {found:?}");
+                assert_eq!(&found[0].uri, declared_uri, "{call}");
+                assert_eq!(found[0].range.start, *declared_at, "{call}");
+
+                let hover = hover_at(&backend, uri.as_str(), &named, at.line, at.character)
+                    .unwrap_or_else(|| panic!("no hover on {call}"));
+                let text = hover_text(&hover);
+                for part in hover_parts.iter().chain(&["Entity type `node`"]) {
+                    assert!(text.contains(part), "{call}: {part} not in {text}");
+                }
+
+                let found = crate::drupal_services::references_at(&backend, &uri, at).await;
+                assert_eq!(found, expected, "{call}");
+
+                let at = named_site_at(&named, &call, 0);
+                let labels = crate::common::response_labels(
+                    crate::common::completion_response(&backend, &uri, at.line, at.character, None)
+                        .await,
+                );
+                for offered in ["title", "field_tags", "nid", "uid"] {
+                    assert!(offers(&labels, offered), "{call}: {offered} in {labels:?}");
+                }
+                for not_offered in ["name", "body", "acme.settings"] {
+                    assert!(!offers(&labels, not_offered), "{call}: {not_offered}");
+                }
+            }
+        }
+    }
+}
+
+/// A receiver that is not fieldable, core's interface's namesake outside
+/// its namespace included, and a name built at runtime name no field.
+#[tokio::test]
+async fn other_receivers_and_runtime_names_name_no_field() {
+    let named = named();
+    let (backend, dir) = named_site(&[(NAMED_PATH, &named)]).await;
+    let uri = uri_for(&dir, NAMED_PATH);
+    for call in [
+        "$bag->get('title'",
+        "$fake->get('title'",
+        "$plain->get('title'",
+    ] {
+        let at = named_site_at(&named, call, 1);
+        assert!(
+            definitions_at(&backend, &uri, at).await.is_empty(),
+            "{call}"
+        );
+        let hover = hover_at(&backend, uri.as_str(), &named, at.line, at.character)
+            .map(|hover| hover_text(&hover).to_string())
+            .unwrap_or_default();
+        assert!(!hover.contains("Entity type"), "{call}: {hover}");
+        let at = named_site_at(&named, call, 0);
+        let labels = crate::common::response_labels(
+            crate::common::completion_response(&backend, &uri, at.line, at.character, None).await,
+        );
+        assert!(!offers(&labels, "title"), "{call}: {labels:?}");
+    }
+    let at = position_in(&named, "get($name)", 5);
+    let hover = hover_at(&backend, uri.as_str(), &named, at.line, at.character)
+        .map(|hover| hover_text(&hover).to_string())
+        .unwrap_or_default();
+    assert!(!hover.contains("Entity type"), "{hover}");
+}
+
+const SHARED_PATH: &str = "web/modules/custom/acme/src/Shared.php";
+const SHARED: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\node\NodeInterface;
+
+final class Shared {
+    public function read(Authored $authored, ContentEntityInterface $content, NodeInterface $node): void {
+        $authored->get('uid');
+        $authored->get('title');
+        $content->get('uuid');
+        $content->get('title');
+        $node->get('uid');
+        $node->get('title');
+    }
+}
+"#;
+
+/// An interface only node's and user's entity classes implement.
+const AUTHORED: (&str, &str) = (
+    "web/modules/custom/acme/src/Authored.php",
+    "<?php\nnamespace Drupal\\acme;\ninterface Authored extends \\Drupal\\Core\\Entity\\ContentEntityInterface {}\n",
+);
+
+/// A field name on a receiver that holds several entity types is the field
+/// all of them have, declared wherever each declares it, as the property
+/// is; a name some of them lack is no field there.
+#[tokio::test]
+async fn a_field_name_on_several_entity_types_is_the_field_they_share() {
+    const USER_PATH: &str = "web/core/modules/user/src/Entity/User.php";
+    let user = CORE
+        .iter()
+        .find(|(path, _)| *path == USER_PATH)
+        .map(|(_, content)| {
+            content.replace(
+                "implements UserInterface",
+                "implements UserInterface, \\Drupal\\acme\\Authored",
+            )
+        })
+        .unwrap();
+    let node = NODE.replace(
+        "implements NodeInterface",
+        "implements NodeInterface, \\Drupal\\acme\\Authored",
+    );
+    let (backend, dir) = site(&[
+        AUTHORED,
+        (NODE_PATH, &node),
+        (USER_PATH, &user),
+        (SHARED_PATH, SHARED),
+    ])
+    .await;
+    let uri = uri_for(&dir, SHARED_PATH);
+    let hover = |call: &str| {
+        let at = named_site_at(SHARED, call, 1);
+        hover_at(&backend, uri.as_str(), SHARED, at.line, at.character)
+            .map(|hover| hover_text(&hover).to_string())
+            .unwrap_or_default()
+    };
+
+    // `uid` is the owner on node and the ID on user.
+    let at = named_site_at(SHARED, "$authored->get('uid'", 1);
+    let mut found: Vec<_> = definitions_at(&backend, &uri, at)
+        .await
+        .into_iter()
+        .map(|location| location.uri)
+        .collect();
+    found.sort();
+    let mut expected = vec![
+        uri_for(
+            &dir,
+            "web/core/lib/Drupal/Core/Entity/ContentEntityBase.php",
+        ),
+        uri_for(&dir, "web/core/modules/user/src/EntityOwnerTrait.php"),
+    ];
+    expected.sort();
+    assert_eq!(found, expected);
+    let text = hover("$authored->get('uid'");
+    assert!(text.contains("Entity types `node`, `user`"), "{text}");
+    assert!(text.contains("EntityOwnerTrait.php"), "{text}");
+    assert!(text.contains("ContentEntityBase.php"), "{text}");
+    let found = crate::drupal_services::references_at(&backend, &uri, at).await;
+    for call in ["$authored->get('uid'", "$node->get('uid'"] {
+        assert!(
+            found.contains(&(uri.clone(), line_of(SHARED, call))),
+            "{call}: {found:?}"
+        );
+    }
+
+    // Every content entity type has a UUID.
+    let at = named_site_at(SHARED, "$content->get('uuid'", 1);
+    assert_eq!(definitions_at(&backend, &uri, at).await.len(), 1);
+    assert!(!hover("$content->get('uuid'").contains("Not a"));
+
+    // Only node has a title.
+    for call in ["$authored->get('title'", "$content->get('title'"] {
+        let at = named_site_at(SHARED, call, 1);
+        assert!(
+            definitions_at(&backend, &uri, at).await.is_empty(),
+            "{call}"
+        );
+        let text = hover(call);
+        assert!(!text.contains("Field type"), "{call}: {text}");
+    }
+    let at = named_site_at(SHARED, "$node->get('title'", 1);
+    let found = crate::drupal_services::references_at(&backend, &uri, at).await;
+    for call in ["$authored->get('title'", "$content->get('title'"] {
+        assert!(
+            !found.contains(&(uri.clone(), line_of(SHARED, call))),
+            "{call}: {found:?}"
+        );
+    }
+}
+
+/// Outside a Drupal project the same calls name nothing.
+#[tokio::test]
+async fn field_names_are_plain_strings_outside_drupal() {
+    let named = named();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("composer.json"), "{}").unwrap();
+    let tags = tags_storage();
+    for (path, content) in CORE
+        .iter()
+        .copied()
+        .chain([(NAMED_PATH, named.as_str()), (SYNC_TAGS, tags.as_str())])
+    {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let backend = Backend::new_test();
+    initialize_with_options(&backend, dir.path(), None).await;
+    let uri = uri_for(&dir, NAMED_PATH);
+    open_document(&backend, &uri, "php", &named).await;
+    let at = named_site_at(&named, "$node->get('title'", 1);
+    assert!(definitions_at(&backend, &uri, at).await.is_empty());
+    let at = named_site_at(&named, "$node->get('title'", 0);
+    let labels = crate::common::response_labels(
+        crate::common::completion_response(&backend, &uri, at.line, at.character, None).await,
+    );
+    assert!(!offers(&labels, "title"), "{labels:?}");
+}
+
+const TYPED_NAMES: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\node\Entity\Node;
+use Drupal\node\NodeInterface;
+
+final class TypedNames {
+    public function read(NodeInterface $node, Node $entity, string $name): void {
+        $title = $node->get('title');
+        $class_title = $entity->get('title');
+        $tags = $node->get('field_tags');
+        $unknown = $node->get('field_missing');
+        $dynamic = $node->get($name);
+        $first_tag = $node->get('field_tags')->entity;
+        $class_first_tag = $entity->get('field_tags')->entity;
+    }
+}
+"#;
+const TYPED_NAMES_PATH: &str = "web/modules/custom/acme/src/TypedNames.php";
+
+/// `get('name')` is the field `->name` reads, assigned or chained, on an
+/// interface and on a class; an unknown or a runtime name keeps the
+/// declared item list interface.
+#[tokio::test]
+async fn get_with_a_field_name_is_typed_as_the_field() {
+    let (backend, dir) = named_site(&[(TYPED_NAMES_PATH, TYPED_NAMES)]).await;
+    let uri = uri_for(&dir, TYPED_NAMES_PATH);
+    let hover = |var: &str| hovered_type(&backend, uri.as_str(), TYPED_NAMES, var);
+    for var in ["$title", "$class_title"] {
+        let text = hover(var);
+        assert!(text.contains("FieldItemList<StringItem>"), "{var}: {text}");
+    }
+    let text = hover("$tags");
+    assert!(
+        text.contains("EntityReferenceFieldItemList<EntityReferenceItem, Term>"),
+        "{text}"
+    );
+    for var in ["$unknown", "$dynamic"] {
+        let text = hover(var);
+        assert!(text.contains("FieldItemListInterface"), "{var}: {text}");
+        assert!(!text.contains("StringItem"), "{var}: {text}");
+    }
+    for var in ["$first_tag", "$class_first_tag"] {
+        let text = hover(var);
+        assert!(text.contains("Term"), "{var}: {text}");
+    }
 }

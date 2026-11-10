@@ -44,4 +44,21 @@ final class NoteSummary
 
         return sprintf('%s (%d, %d tags, first %s, by %s)', (string) $titleText, count($author), count($tags), (string) $firstTag?->label(), (string) $authorAccount?->label());
     }
+
+    public function isTagged(NoteInterface $note): bool
+    {
+        // Try: the name `hasField()` takes is one of acme_note's fields:
+        // complete inside `hasField('')` to see the base and configurable
+        // fields, go to the definition of `'field_tags'`, which lands in its
+        // field storage file, hover it for its field type, or find its
+        // references, which include the `$note->field_tags` reads.
+        if (!$note->hasField('field_tags')) {
+            return FALSE;
+        }
+        // Try: `get('field_tags')` reads the same field `$note->field_tags`
+        // does, so `$tags` is an entity reference list that names `Term`;
+        // complete, navigate, and hover the name as in `hasField()`.
+        $tags = $note->get('field_tags');
+        return !$tags->isEmpty();
+    }
 }

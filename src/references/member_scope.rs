@@ -545,6 +545,51 @@ impl Backend {
         MemberScope::descendants_of(roots, indexed)
     }
 
+    /// The classes a property read of the Drupal field a field name's span
+    /// `key` names is on: the classes of its entity type and the ones under
+    /// them, and the classes and interfaces above them that have the field,
+    /// as `NodeInterface` has node's.
+    pub(super) fn drupal_field_scope(&self, key: &str) -> Option<MemberScope> {
+        let name = crate::drupal::fields::split_field_key(key).1;
+        // A name some of the entity types lack is no field there.
+        if crate::drupal::fields::field_key_entity_types(key)
+            .nth(1)
+            .is_some()
+        {
+            self.drupal_field_named(key)?;
+        }
+        let index = self.drupal_field_index()?;
+        let class_loader =
+            |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { self.find_or_load_class(&name) };
+        let mut roots: HashSet<String> = HashSet::new();
+        let mut above: HashSet<String> = HashSet::new();
+        for declared in index.entity_types.iter().filter(|e| {
+            crate::drupal::fields::field_key_entity_types(key)
+                .any(|entity_type| e.id == entity_type)
+        }) {
+            let class = normalize_fqn(&declared.class);
+            self.collect_ancestors(&class, &class_loader, &mut above);
+            roots.insert(class);
+        }
+        if roots.is_empty() {
+            return None;
+        }
+        let mut indexed = self.descendants_closure(roots.iter().cloned());
+        indexed.extend(roots.iter().cloned());
+        for ancestor in above {
+            let has_field = class_loader(Fqn::new(&ancestor)).is_some_and(|class| {
+                index
+                    .fields_of(&class, &class_loader)
+                    .iter()
+                    .any(|field| field.name == name)
+            });
+            if has_field {
+                indexed.insert(ancestor);
+            }
+        }
+        Some(MemberScope::descendants_of(roots, indexed))
+    }
+
     /// Whether `fqn` inherits from any of `roots`, walking up from the class
     /// itself.
     ///

@@ -50,7 +50,9 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         | StringKeyKind::YiiTranslation => CompletionItemKind::Text,
         StringKeyKind::DrupalPermission => CompletionItemKind::Constant,
         StringKeyKind::DrupalConfigName => CompletionItemKind::File,
-        StringKeyKind::DrupalConfigKey => CompletionItemKind::Field,
+        StringKeyKind::DrupalConfigKey | StringKeyKind::DrupalFieldName => {
+            CompletionItemKind::Field
+        }
         StringKeyKind::TranslationDomain => CompletionItemKind::Module,
         StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
         StringKeyKind::Middleware => CompletionItemKind::Class,
@@ -242,7 +244,8 @@ impl Backend {
             // definition's argument from the method it is passed to, and a
             // plugin ID from the manager its receiver is, and a Yii view's
             // parameter from the template its render names
-            // (`crate::completion::yii_views`).  A hook name is
+            // (`crate::completion::yii_views`), and a field name from the
+            // entity types its receiver may hold.  A hook name is
             // completed with its patterns as snippets, which only the
             // WordPress completion builds.
             StringKeyKind::SymfonyTranslation
@@ -257,6 +260,7 @@ impl Backend {
             | StringKeyKind::DrupalConfigKey
             | StringKeyKind::DrupalThemeHookVariable
             | StringKeyKind::DrupalPlugin
+            | StringKeyKind::DrupalFieldName
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::TwigBlock
