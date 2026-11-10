@@ -152,6 +152,12 @@ impl Backend {
         let (name, range) =
             self.renameable_symbol_info(uri, content, &span.kind, span.start, span.end)?;
 
+        // A Drupal field is also named by `get()` calls and the files that
+        // declare it, which a property rename does not edit.
+        if self.is_drupal_field_access(uri, content, &span) {
+            return None;
+        }
+
         // Reject vendor symbols: if the definition lives under the
         // vendor directory the user shouldn't rename it.
         if self.is_vendor_symbol(uri, content, position) {
@@ -278,6 +284,10 @@ impl Backend {
         }
 
         if self.is_vendor_symbol(uri, content, position) {
+            return Ok(None);
+        }
+
+        if self.is_drupal_field_access(uri, content, &span) {
             return Ok(None);
         }
 

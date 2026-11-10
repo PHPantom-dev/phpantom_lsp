@@ -28,7 +28,8 @@ use crate::atom::Atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::symbol_map::{
-    BaseFieldMethodSite, BaseFieldName, EntityTypeSite, FieldStorageSite, MethodScope, SymbolMap,
+    BaseFieldMethodSite, BaseFieldName, DefaultTarget, EntityTypeSite, FieldItemSite,
+    FieldStorageSite, FieldTarget, MethodScope, SymbolMap,
 };
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 
@@ -46,6 +47,8 @@ pub(crate) struct FieldSources {
     /// The entity types the file declares, by ID.
     entity_types: Vec<(String, EntityTypeSite)>,
     methods: Vec<BaseFieldMethodSite>,
+    /// What the file's field item classes declare about their items.
+    field_items: Vec<FieldItemSite>,
     /// The configurable field the file declares, when it is a field
     /// storage file.
     storage: Option<FieldStorageSite>,
@@ -61,11 +64,14 @@ impl FieldSources {
         declarations: impl FnOnce() -> bool,
         storage: impl FnOnce() -> bool,
     ) -> Option<Self> {
-        let declares = (!map.entity_types.is_empty() || !map.drupal_base_field_methods.is_empty())
+        let fields = map.drupal_fields.as_deref();
+        let declares = (!map.entity_types.is_empty()
+            || fields.is_some_and(|fields| {
+                !fields.base_field_methods.is_empty() || !fields.field_items.is_empty()
+            }))
             && declarations();
-        let storage = map
-            .drupal_field_storage
-            .as_deref()
+        let storage = fields
+            .and_then(|fields| fields.storage.as_ref())
             .filter(|_| storage())
             .cloned();
         if !declares && storage.is_none() {
@@ -80,10 +86,13 @@ impl FieldSources {
             } else {
                 Vec::new()
             },
-            methods: if declares {
-                map.drupal_base_field_methods.clone()
-            } else {
-                Vec::new()
+            methods: match fields {
+                Some(fields) if declares => fields.base_field_methods.clone(),
+                _ => Vec::new(),
+            },
+            field_items: match fields {
+                Some(fields) if declares => fields.field_items.clone(),
+                _ => Vec::new(),
             },
             storage,
         })
@@ -109,6 +118,7 @@ impl FieldSources {
                 .iter()
                 .zip(&other.methods)
                 .all(|(a, b)| a.declares_as(b))
+            && self.field_items == other.field_items
             && match (&self.storage, &other.storage) {
                 (Some(a), Some(b)) => a.declares_as(b),
                 (a, b) => a.is_none() && b.is_none(),
@@ -124,6 +134,8 @@ pub(crate) type FieldSourceMap = BTreeMap<String, Arc<FieldSources>>;
 struct EntityKeys<'a> {
     keys: HashMap<&'a str, &'a str>,
     revision_metadata: HashMap<&'a str, &'a str>,
+    /// The entity type's `bundle_entity_type`.
+    bundle_entity_type: Option<&'a str>,
 }
 
 impl<'a> EntityKeys<'a> {
@@ -157,6 +169,7 @@ impl<'a> EntityKeys<'a> {
         Self {
             keys,
             revision_metadata,
+            bundle_entity_type: site.bundle_entity_type.as_deref(),
         }
     }
 
@@ -215,7 +228,7 @@ impl<'a> BaseFieldReader<'a> {
         keys: &EntityKeys<'a>,
         path: &mut Vec<(Atom, String)>,
     ) -> Created<'a> {
-        let Some((owner, uri, site)) = self.find(start, method) else {
+        let Some((owner, using, uri, site)) = self.find(start, method) else {
             return Vec::new();
         };
         let step = (owner, method.to_ascii_lowercase());
@@ -226,10 +239,12 @@ impl<'a> BaseFieldReader<'a> {
         let mut fields: Created<'a> = Vec::new();
         // `$fields + static::helper()` keeps the fields already there.
         for include in &site.includes {
+            // A trait's `self::` and `parent::` are those of the class that
+            // uses it.
             let from = match include.scope {
                 MethodScope::Static => Some(entity_class),
-                MethodScope::Self_ => Some(owner),
-                MethodScope::Parent => self.load(owner).and_then(|class| class.parent_class),
+                MethodScope::Self_ => Some(using),
+                MethodScope::Parent => self.load(using).and_then(|class| class.parent_class),
             };
             let Some(from) = from else {
                 continue;
@@ -240,15 +255,31 @@ impl<'a> BaseFieldReader<'a> {
                 }
             }
         }
+        fields.retain(|(name, _)| {
+            !site
+                .removed
+                .iter()
+                .any(|removed| keys.name_of(removed) == Some(name.as_str()))
+        });
         // The method's own statements replace what it took from others.
         let mut own: Created<'a> = Vec::new();
         for (statement, field) in site.fields.iter().enumerate() {
             let Some(name) = keys.name_of(&field.name) else {
                 continue;
             };
+            if field
+                .bundle_condition
+                .is_some_and(|bundled| bundled != keys.bundle_entity_type.is_some())
+            {
+                continue;
+            }
             let creation = Creation {
                 field_type: &field.field_type,
-                target_type: field.target_type.as_deref(),
+                target_type: match &field.target {
+                    Some(FieldTarget::EntityType(target)) => Some(target),
+                    Some(FieldTarget::BundleEntityType) => keys.bundle_entity_type,
+                    None => None,
+                },
                 declaration: Some(FieldDeclaration::BaseField {
                     uri: Arc::clone(uri),
                     owner: site.owner,
@@ -269,53 +300,62 @@ impl<'a> BaseFieldReader<'a> {
     }
 
     /// The class or trait that declares the base field method `method` for
-    /// `start`, as PHP finds it: the class's own, then its traits', then
-    /// its parent's.
+    /// `start`, and the class that has it.
     fn find(
         &self,
         start: Atom,
         method: &str,
-    ) -> Option<(Atom, &'a Arc<str>, &'a BaseFieldMethodSite)> {
+    ) -> Option<(Atom, Atom, &'a Arc<str>, &'a BaseFieldMethodSite)> {
         let method = method.to_ascii_lowercase();
-        let mut current = Some(start);
-        let mut depth = 0;
-        while let Some(class) = current
-            && depth < MAX_INHERITANCE_DEPTH
-        {
-            depth += 1;
-            if let Some(found) = self.declared_in(class, &method, 0) {
-                return Some(found);
-            }
-            current = self.load(class).and_then(|info| info.parent_class);
-        }
-        None
-    }
-
-    /// The base field method `method` of `class` or of a trait it uses.
-    fn declared_in(
-        &self,
-        class: Atom,
-        method: &str,
-        depth: u32,
-    ) -> Option<(Atom, &'a Arc<str>, &'a BaseFieldMethodSite)> {
-        if let Some((uri, site)) = self
-            .methods
-            .get(&(class.to_ascii_lowercase(), method.to_string()))
-        {
-            return Some((class, uri, site));
-        }
-        if depth >= MAX_INHERITANCE_DEPTH {
-            return None;
-        }
-        self.load(class)?
-            .used_traits
-            .iter()
-            .find_map(|used| self.declared_in(*used, method, depth + 1))
+        find_static_method(start, self.class_loader, |class| {
+            self.methods
+                .get(&(class.to_ascii_lowercase(), method.clone()))
+                .copied()
+        })
+        .map(|(owner, using, (uri, site))| (owner, using, uri, site))
     }
 
     fn load(&self, class: Atom) -> Option<Arc<ClassInfo>> {
         (self.class_loader)(Fqn::new(&class))
     }
+}
+
+/// The class or trait that declares a static method for `start`, as PHP
+/// finds it: the class's own, then its traits', then its parent's, with
+/// the class among them that has the method, which a trait's `self::` and
+/// `parent::` are bound to.  `declared` gives what a class or trait
+/// declares itself.
+pub(super) fn find_static_method<T>(
+    start: Atom,
+    class_loader: &ResolvedClassLoader<'_>,
+    declared: impl Fn(Atom) -> Option<T>,
+) -> Option<(Atom, Atom, T)> {
+    let declared_in = |class: Atom| -> Option<(Atom, T)> {
+        let mut pending = vec![(class, 0)];
+        while let Some((class, depth)) = pending.pop() {
+            if let Some(found) = declared(class) {
+                return Some((class, found));
+            }
+            if depth < MAX_INHERITANCE_DEPTH
+                && let Some(info) = class_loader(Fqn::new(&class))
+            {
+                pending.extend(info.used_traits.iter().rev().map(|used| (*used, depth + 1)));
+            }
+        }
+        None
+    };
+    let mut current = Some(start);
+    let mut depth = 0;
+    while let Some(class) = current
+        && depth < MAX_INHERITANCE_DEPTH
+    {
+        depth += 1;
+        if let Some((owner, found)) = declared_in(class) {
+            return Some((owner, class, found));
+        }
+        current = class_loader(Fqn::new(&class)).and_then(|info| info.parent_class);
+    }
+    None
 }
 
 /// Make `creations` the field `name` of `fields`, in place of any there.
@@ -361,6 +401,17 @@ impl Backend {
             (Some(old), Some(new)) => old.declares_as(new),
             _ => false,
         };
+        // The item classes whose declarations changed.
+        let mut item_classes: Vec<Atom> = Vec::new();
+        let old_items = old.as_deref().map_or(&[][..], |old| &old.field_items);
+        let new_items = sources.as_ref().map_or(&[][..], |new| &new.field_items);
+        if old_items != new_items {
+            for site in old_items.iter().chain(new_items) {
+                if !item_classes.contains(&site.owner) {
+                    item_classes.push(site.owner);
+                }
+            }
+        }
         {
             let mut stored = self.drupal.field_sources.write();
             match sources {
@@ -375,20 +426,98 @@ impl Backend {
         if !same_fields {
             self.invalidate_drupal_fields();
         }
+        // They go with the index, or one resolved before it does would keep
+        // the properties it read from the old one.
+        if !item_classes.is_empty() {
+            let mut pending = self.drupal.changed_item_classes.lock();
+            for class in item_classes {
+                if !pending.contains(&class) {
+                    pending.push(class);
+                }
+            }
+        }
+    }
+
+    /// Evict `classes` and every class that extends or implements one, with
+    /// the generic specialisations that name them: a class resolved from
+    /// its parent's members records no dependency on an ancestor further
+    /// up, so an ancestor's eviction does not reach a class whose parent
+    /// is not cached.  The names of every class the eviction reached, as
+    /// dependencies are recorded.
+    fn evict_with_descendants(&self, classes: Vec<String>) -> Vec<Atom> {
+        let descendants = self.descendants_closure(classes.iter().cloned());
+        let mut changed: Vec<Atom> = Vec::with_capacity(descendants.len());
+        let mut cache = self.resolved_class_cache.write();
+        // Most descendants are neither cached nor named by a cached class.
+        for fqn in &descendants {
+            changed.push(crate::resolution_deps::dep_key(fqn));
+            if classes.contains(fqn) || cache.holds_or_depends_on(fqn) {
+                for evicted in crate::virtual_members::evict_fqn(&mut cache, fqn) {
+                    changed.push(crate::resolution_deps::dep_key(&evicted));
+                }
+            }
+        }
+        changed
+    }
+
+    /// Note that what the fields are read from changed.  They go when the
+    /// publish that brought the change ends (see
+    /// [`drupal_field_flush`](Self::drupal_field_flush)), so the many
+    /// changes one batch of indexing brings drop them once.
+    pub(crate) fn invalidate_drupal_fields(&self) {
+        self.drupal
+            .fields_changed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// A guard that drops the fields as it goes when a change was noted
+    /// meanwhile.  Taken before the locks a publish holds, so it runs after
+    /// they are released.
+    pub(crate) fn drupal_field_flush(&self) -> DrupalFieldFlush<'_> {
+        DrupalFieldFlush(self)
     }
 
     /// Drop the field index and the resolved classes that have fields: the
     /// fields of an entity class show on interfaces that do not depend on
     /// it, so every class under `FieldableEntityInterface` goes.
-    pub(crate) fn invalidate_drupal_fields(&self) {
-        self.drupal.fields.invalidate();
+    fn flush_drupal_field_changes(&self) {
+        if !self
+            .drupal
+            .fields_changed
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
         {
-            let mut cache = self.resolved_class_cache.write();
-            crate::virtual_members::evict_fqn(&mut cache, FIELDABLE_ENTITY);
+            return;
         }
-        // A cached receiver resolution, or member completion, records no
-        // dependency on the files the fields are read from.
-        self.clear_resolved_member_files();
+        // A class takes fields only from an index handed out to it, so
+        // while none was, as through most of indexing, there is nothing to
+        // walk for.
+        let mut changed = if self.drupal.fields.invalidate() {
+            self.evict_with_descendants(vec![FIELDABLE_ENTITY.to_string()])
+        } else {
+            let mut cache = self.resolved_class_cache.write();
+            crate::virtual_members::evict_fqn(&mut cache, FIELDABLE_ENTITY)
+                .iter()
+                .map(|fqn| crate::resolution_deps::dep_key(fqn))
+                .chain(std::iter::once(crate::resolution_deps::dep_key(
+                    FIELDABLE_ENTITY,
+                )))
+                .collect()
+        };
+        // The item classes whose properties changed, and the classes that
+        // extend them.
+        let item_classes: Vec<String> =
+            std::mem::take(&mut *self.drupal.changed_item_classes.lock())
+                .iter()
+                .map(Atom::to_string)
+                .collect();
+        if !item_classes.is_empty() {
+            changed.extend(self.evict_with_descendants(item_classes));
+        }
+        // A cached receiver resolution depends on the classes that have the
+        // fields, while member completion records nothing to tell.
+        changed.sort_unstable();
+        changed.dedup();
+        self.retain_resolved_member_files(&changed);
         self.member_completion_cache.lock().clear();
     }
 
@@ -407,7 +536,13 @@ impl Backend {
         // Copied out, since loading a class may publish a file.
         let sources: Vec<Arc<FieldSources>> =
             self.drupal.field_sources.read().values().cloned().collect();
-        let loader = self.resolved_class_loader_with(&[]);
+        let resolved = self.resolved_class_loader_with(&[]);
+        // Every class the read looks at, so that a change to what one of
+        // them extends, implements, or uses reads the fields again.
+        let loader = |name: Fqn<'_>| {
+            self.drupal.fields.note_read_class(name.as_str());
+            resolved(name)
+        };
         let mut methods = HashMap::new();
         let mut declared: Vec<(&str, &EntityTypeSite)> = Vec::new();
         let mut storages: Vec<(&Arc<str>, &FieldStorageSite)> = Vec::new();
@@ -436,7 +571,17 @@ impl Backend {
         };
         let mut field_types: HashMap<&str, Vec<(Atom, Option<Atom>)>> = HashMap::new();
         let mut index = FieldIndex::default();
+        for source in &sources {
+            for site in &source.field_items {
+                index
+                    .field_items
+                    .entry(site.owner.to_ascii_lowercase())
+                    .or_insert_with(|| site.clone());
+            }
+        }
         for &(id, site) in declared.iter().filter(|(_, site)| site.content) {
+            // Which receivers hold the entity type depends on all of it.
+            load_class_graph(site.class, &loader);
             let keys = EntityKeys::of(site);
             let mut created = reader.fields(
                 site.class,
@@ -477,7 +622,9 @@ impl Backend {
                                     field_types.entry(creation.field_type).or_insert_with(|| {
                                         self.drupal_field_type_classes(creation.field_type)
                                     });
-                                field_type(classes, creation.target_type, &declared)
+                                field_type(classes, creation.target_type, &declared, |item| {
+                                    default_target(&index.field_items, item, &loader)
+                                })
                             })
                             .collect(),
                     );
@@ -502,7 +649,30 @@ impl Backend {
                 fields,
             });
         }
+        index.classes = self.drupal.fields.read_classes();
         index
+    }
+
+    /// Note that the classes named `changed` were declared, dropped, or
+    /// given another parent, other interfaces, or other traits: the fields
+    /// go when the index was read through one of them, or is being read.
+    pub(crate) fn note_drupal_class_graph_changes(&self, changed: &[&str]) {
+        if changed.is_empty() || !self.is_drupal_project() {
+            return;
+        }
+        let stale = match self.drupal.fields.published() {
+            Some(index) => changed.iter().any(|class| {
+                index
+                    .classes
+                    .contains(&class.trim_start_matches('\\').to_ascii_lowercase())
+            }),
+            // A read in progress restarts only for a class it has looked at,
+            // or every publish of indexing would restart it.
+            None => self.drupal.fields.read_looked_at(changed),
+        };
+        if stale {
+            self.invalidate_drupal_fields();
+        }
     }
 
     /// Where the field `name` of `receiver` is declared, every declaration
@@ -539,6 +709,59 @@ impl Backend {
             return Vec::new();
         };
         self.field_locations(&field)
+    }
+
+    /// Whether the property access `span` of the file at `uri` reads a
+    /// field of an entity or a property of a field item, which the
+    /// entity's `get()` calls, field storage files, and property
+    /// definitions also name.
+    pub(crate) fn is_drupal_field_access(
+        &self,
+        uri: &str,
+        content: &str,
+        span: &crate::symbol_map::SymbolSpan,
+    ) -> bool {
+        let crate::symbol_map::SymbolKind::MemberAccess {
+            subject_text,
+            member_name,
+            is_static: false,
+            is_method_call: false,
+            ..
+        } = &span.kind
+        else {
+            return false;
+        };
+        if !self.is_drupal_project() {
+            return false;
+        }
+        let Some(source) = self.symbol_map_source(uri, content) else {
+            return false;
+        };
+        let subject = subject_text.as_str(source);
+        let ctx = self.file_context_at(uri, span.start);
+        let loaders = self.file_loaders(&ctx);
+        let class_loader = loaders.resolved_class_loader();
+        crate::type_engine::resolver::resolve_target_classes(
+            subject,
+            crate::AccessKind::Arrow,
+            &loaders.resolution_ctx_at(content, span.start),
+        )
+        .into_iter()
+        .filter_map(|resolved| resolved.class_info)
+        .any(|class| {
+            let is_field = |class: &ClassInfo| {
+                class.properties.iter().any(|property| {
+                    property.name == member_name.as_str() && property.writes_through_magic_set()
+                })
+            };
+            // A field's item list comes resolved for its type arguments.
+            is_field(&class)
+                || is_field(&crate::virtual_members::resolve_class_fully_cached(
+                    &class,
+                    class_loader,
+                    &self.resolved_class_cache,
+                ))
+        })
     }
 
     /// Where each declaration of `field` is written now.
@@ -592,6 +815,32 @@ impl Backend {
     }
 }
 
+/// Load `class` and everything it extends, implements, and uses.
+fn load_class_graph(class: Atom, class_loader: &ResolvedClassLoader<'_>) {
+    let mut pending = vec![class];
+    let mut seen: Vec<Atom> = Vec::new();
+    while let Some(name) = pending.pop() {
+        if seen.contains(&name) {
+            continue;
+        }
+        seen.push(name);
+        if let Some(info) = class_loader(Fqn::new(&name)) {
+            pending.extend(info.parent_class);
+            pending.extend(info.interfaces.iter().copied());
+            pending.extend(info.used_traits.iter().copied());
+        }
+    }
+}
+
+/// See [`Backend::drupal_field_flush`].
+pub(crate) struct DrupalFieldFlush<'a>(&'a Backend);
+
+impl Drop for DrupalFieldFlush<'_> {
+    fn drop(&mut self) {
+        self.0.flush_drupal_field_changes();
+    }
+}
+
 /// Add the boolean fields `EntityFieldManager::buildBaseFieldDefinitions()`
 /// adds to those of a translatable or revisionable entity type, under the
 /// same conditions.
@@ -622,31 +871,41 @@ fn add_manager_fields<'a>(created: &mut Created<'a>, site: &EntityTypeSite, keys
 }
 
 /// The item list a field of a field type with the item and list `classes`
-/// holds, tagged with the class of the entity type `target_type` names.
+/// holds, tagged with the class of the entity type `target_type` names, or
+/// when it names none, the one the item class's
+/// `defaultStorageSettings()` gives (`default_target`).
 fn field_type(
     classes: &[(Atom, Option<Atom>)],
     target_type: Option<&str>,
     entity_types: &[(&str, &EntityTypeSite)],
+    default_target: impl Fn(Atom) -> Option<String>,
 ) -> PhpType {
     if classes.is_empty() {
         return PhpType::named(crate::atom::atom(FIELD_ITEM_LIST_INTERFACE));
     }
-    let mut targets: Vec<PhpType> = Vec::new();
-    if let Some(target_type) = target_type {
+    let targets = |target_type: &str| {
+        let mut targets: Vec<PhpType> = Vec::new();
         for (id, site) in entity_types {
             let target = PhpType::named(site.class);
             if *id == target_type && !targets.contains(&target) {
                 targets.push(target);
             }
         }
-    }
+        targets
+    };
     PhpType::union(
         classes
             .iter()
             .map(|(item, list)| {
                 let mut args = vec![PhpType::named(*item)];
+                let targets = match target_type {
+                    Some(target_type) => targets(target_type),
+                    None => default_target(*item)
+                        .map(|target_type| targets(&target_type))
+                        .unwrap_or_default(),
+                };
                 if !targets.is_empty() {
-                    args.push(PhpType::union(targets.clone()));
+                    args.push(PhpType::union(targets));
                 }
                 PhpType::generic_atom(
                     list.unwrap_or_else(|| crate::atom::atom(FIELD_ITEM_LIST)),
@@ -655,6 +914,44 @@ fn field_type(
             })
             .collect(),
     )
+}
+
+/// The entity type the `defaultStorageSettings()` PHP calls for the field
+/// item class `item` gives as its `target_type`, following
+/// `parent::defaultStorageSettings()`: the furthest ancestor's setting wins,
+/// as `+` keeps its left operand's keys.
+fn default_target(
+    field_items: &HashMap<String, FieldItemSite>,
+    item: Atom,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<String> {
+    let mut start = Some(item);
+    let mut depth = 0;
+    // What the furthest class that adds its parent's settings writes after
+    // them, for when no ancestor writes one.
+    let mut otherwise: Option<Option<String>> = None;
+    while let Some(from) = start
+        && depth < MAX_INHERITANCE_DEPTH
+    {
+        depth += 1;
+        let Some((_, using, declared)) = find_static_method(from, class_loader, |class| {
+            field_items
+                .get(&class.to_ascii_lowercase())
+                .and_then(|site| site.default_target.as_ref())
+        }) else {
+            break;
+        };
+        match declared {
+            DefaultTarget::Declared(target) => return target.clone(),
+            DefaultTarget::FromParent { otherwise: then } => {
+                if then.is_some() {
+                    otherwise.clone_from(then);
+                }
+                start = class_loader(Fqn::new(&using)).and_then(|class| class.parent_class);
+            }
+        }
+    }
+    otherwise.flatten()
 }
 
 #[cfg(test)]

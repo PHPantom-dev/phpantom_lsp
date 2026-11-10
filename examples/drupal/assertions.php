@@ -285,6 +285,19 @@ check('field_tags is an entity_reference field, kept in an EntityReferenceFieldI
 check('field_tags points to taxonomy terms, whose class is Term', ($tagsStorage['settings']['target_type'] ?? null) === 'taxonomy_term' && (attributeArguments(new ReflectionClass(Term::class), ContentEntityType::class)['id'] ?? null) === 'taxonomy_term');
 check('the exported field attaches field_tags to the acme_note bundle', ($sync->read('field.field.acme_note.acme_note.field_tags')['field_name'] ?? null) === 'field_tags');
 check('NoteSummary reads the field_tags field of a NoteInterface', str_contains($summarySource, '$note->field_tags;'));
+
+// Field properties: an item list reads a property on its first item, and
+// the item's propertyDefinitions() declares the property, taking its
+// parent's (core's FieldItemList and the field type item classes).
+$fieldItemListSource = (string) file_get_contents((string) (new ReflectionClass(FieldItemList::class))->getFileName());
+$referenceItemSource = (string) file_get_contents((string) (new ReflectionClass(EntityReferenceItem::class))->getFileName());
+$stringDefinitions = new ReflectionMethod(StringItem::class, 'propertyDefinitions');
+$stringDefinitionsSource = (string) file_get_contents((string) $stringDefinitions->getDeclaringClass()->getFileName());
+check('FieldItemList reads a property on its first item', str_contains($fieldItemListSource, 'if ($item = $this->first()) {') && str_contains($fieldItemListSource, 'return $item->__get($property_name);'));
+check("EntityReferenceItem declares the target_id and entity properties, entity as a reference to an entity", str_contains($referenceItemSource, "\$properties['target_id'] = \$target_id_definition;") && str_contains($referenceItemSource, "\$properties['entity'] = DataReferenceDefinition::create('entity')"));
+check("StringItem takes its value property from the item class it extends", $stringDefinitions->getDeclaringClass()->getName() !== StringItem::class && is_subclass_of(StringItem::class, $stringDefinitions->getDeclaringClass()->getName()) && str_contains($stringDefinitionsSource, "\$properties['value'] = DataDefinition::create('string')"));
+check('NoteSummary reads the entity of field_tags and uid, and the value of the title field', str_contains($summarySource, '$note->field_tags->entity;') && str_contains($summarySource, '$note->uid->entity;') && str_contains($summarySource, '$titleText = $title->value;'));
+check('NoteSummary allows for an empty reference field, whose entity is null', str_contains($summarySource, '$firstTag?->label()') && str_contains($summarySource, '$authorAccount?->label()'));
 check('NoteSummary returns a string', (new ReflectionMethod(NoteSummary::class, 'summarize'))->getReturnType()?->getName() === 'string');
 
 // Drupal upcasts a controller's parameter named after an entity type and

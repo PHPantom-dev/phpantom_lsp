@@ -862,6 +862,9 @@ pub(crate) struct EntityTypeSite {
     pub translatable: bool,
     /// The declaration is a content entity type's.
     pub content: bool,
+    /// The entity type its `bundle_entity_type` names, whose entities are
+    /// its bundles.
+    pub bundle_entity_type: Option<String>,
 }
 
 /// A method that declares the base fields of Drupal content entities: an
@@ -880,6 +883,8 @@ pub(crate) struct BaseFieldMethodSite {
     /// The other base field methods it calls on `parent::`, `static::`, or
     /// `self::`, in source order.
     pub includes: Vec<BaseFieldInclude>,
+    /// The fields it unsets from what it takes from those.
+    pub removed: Vec<BaseFieldName>,
 }
 
 impl BaseFieldMethodSite {
@@ -888,9 +893,13 @@ impl BaseFieldMethodSite {
         self.owner == other.owner
             && self.method == other.method
             && self.includes == other.includes
+            && self.removed == other.removed
             && self.fields.len() == other.fields.len()
             && self.fields.iter().zip(&other.fields).all(|(a, b)| {
-                a.name == b.name && a.field_type == b.field_type && a.target_type == b.target_type
+                a.name == b.name
+                    && a.field_type == b.field_type
+                    && a.target == b.target
+                    && a.bundle_condition == b.bundle_condition
             })
     }
 }
@@ -902,10 +911,23 @@ pub(crate) struct BaseFieldSite {
     /// The field type `create()` names.
     pub field_type: String,
     /// The entity type a `setSetting('target_type', …)` on it names.
-    pub target_type: Option<String>,
+    pub target: Option<FieldTarget>,
+    /// Whether it is created only when the entity type has a bundle entity
+    /// type (`true`) or only when it has none (`false`), as the branches
+    /// of an `if ($entity_type->getBundleEntityType())` decide.
+    pub bundle_condition: Option<bool>,
     /// Byte range of the name: a string's contents, or the key lookup.
     pub start: u32,
     pub end: u32,
+}
+
+/// The entity type a base field points to.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum FieldTarget {
+    EntityType(String),
+    /// `$entity_type->getBundleEntityType()`: the entity type's own
+    /// `bundle_entity_type`.
+    BundleEntityType,
 }
 
 /// What a Drupal field storage file, `field.storage.<entity type>.<field>.yml`,
@@ -959,12 +981,22 @@ pub(crate) enum MethodScope {
     Self_,
 }
 
-/// A Drupal field item class's `propertyDefinitions()`, which declares the
-/// properties of its field type's items.
+/// What a Drupal field item class declares about its field type's items
+/// in `propertyDefinitions()` and `defaultStorageSettings()`.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ItemPropertyMethodSite {
-    /// The class that declares the method.
+pub(crate) struct FieldItemSite {
+    /// The class that declares the methods.
     pub owner: crate::atom::Atom,
+    /// What its `propertyDefinitions()` declares, when it declares one.
+    pub property_definitions: Option<PropertyDefinitionsSite>,
+    /// What its `defaultStorageSettings()` says the `target_type` setting
+    /// is, when it declares one that says.
+    pub default_target: Option<DefaultTarget>,
+}
+
+/// The properties a field item class's `propertyDefinitions()` declares.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PropertyDefinitionsSite {
     /// Each `$properties['name'] = …`, in source order.
     pub properties: Vec<ItemPropertySite>,
     /// Each `unset($properties['name'])`.
@@ -974,7 +1006,21 @@ pub(crate) struct ItemPropertyMethodSite {
     pub takes_parent: bool,
 }
 
-/// A property an [`ItemPropertyMethodSite`] declares.
+/// What a field item class's `defaultStorageSettings()` says the
+/// `target_type` setting is: the entity type a reference field of its
+/// field type points to when the field sets none.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum DefaultTarget {
+    /// The setting it writes: the entity type, or `None` for a value that
+    /// is not a string literal.
+    Declared(Option<String>),
+    /// It adds `parent::defaultStorageSettings()` before it writes any, so
+    /// the parent's setting wins, as `+` keeps its left operand's keys:
+    /// `otherwise` is the one it writes after, if it writes one.
+    FromParent { otherwise: Option<Option<String>> },
+}
+
+/// A property a [`PropertyDefinitionsSite`] declares.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ItemPropertySite {
     pub name: String,

@@ -21,6 +21,7 @@ pub(crate) mod computed_hooks;
 pub(crate) mod config;
 pub(crate) mod config_keys;
 pub(crate) mod elements;
+pub(crate) mod field_items;
 pub(crate) mod field_storage;
 pub(crate) mod fields;
 pub(crate) mod hooks;
@@ -108,6 +109,11 @@ pub(crate) struct DrupalState {
     field_sources: RwLock<base_fields::FieldSourceMap>,
     /// The fields read from them, shared with the resolved-class cache.
     fields: std::sync::Arc<fields::FieldSlot>,
+    /// Whether what the fields are read from changed since they were last
+    /// dropped.
+    fields_changed: std::sync::atomic::AtomicBool,
+    /// The field item classes whose declarations changed since then.
+    changed_item_classes: parking_lot::Mutex<Vec<crate::atom::Atom>>,
 }
 
 impl DrupalState {

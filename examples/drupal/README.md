@@ -57,6 +57,12 @@ Run `composer install` here first. Composer puts core and contrib into
   completes after `$note->` too; hover `$tags`, an entity reference list
   that names `Term`, or go to the definition of `field_tags`, which lands in
   `config/sync/field.storage.acme_note.field_tags.yml`.
+- A field reads the properties of its first item, the ones its item class
+  declares in `propertyDefinitions()`, inherited ones included. In
+  `NoteSummary.php`, complete after `$note->field_tags->` to see
+  `target_id` and `entity`; hover `$firstTag`, a `?Term`, and
+  `$authorAccount`, a `?User`, the class of the entity type each field
+  points to. Every stored value, such as `$titleText`, stays `mixed`.
 - Route names navigate between the routing file that declares them and the
   code, links files, and templates that name them. In
   `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the

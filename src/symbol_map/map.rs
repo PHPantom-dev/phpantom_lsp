@@ -317,16 +317,9 @@ pub(crate) struct SymbolMap {
     /// The entity types the file's entity classes declare, sorted by
     /// `start`.  Empty for every file that declares none.
     pub entity_types: Vec<EntityTypeSite>,
-    /// The methods of the file's classes and traits that declare Drupal
-    /// base fields.  Empty for every file that declares none.
-    pub drupal_base_field_methods: Vec<BaseFieldMethodSite>,
-    /// The `propertyDefinitions()` methods of the file's Drupal field item
-    /// classes.  Empty for every file that declares none.
-    #[cfg_attr(not(any(test, feature = "mem-audit")), expect(dead_code))]
-    pub drupal_item_property_methods: Vec<ItemPropertyMethodSite>,
-    /// The configurable field the file declares, when it is a Drupal field
-    /// storage file.  Boxed, since nearly every file declares none.
-    pub drupal_field_storage: Option<Box<FieldStorageSite>>,
+    /// What the file declares about Drupal entity fields.  Boxed, since
+    /// nearly every file declares nothing.
+    pub drupal_fields: Option<Box<DrupalFieldSites>>,
     /// The classes the file's Drupal plugin declarations are written on,
     /// sorted by `start`.  Empty for every file that declares none.
     pub drupal_plugin_classes: Vec<PluginClassSite>,
@@ -431,6 +424,30 @@ pub(crate) struct SymbolMap {
     /// A hash of the source text, recorded only for a file open in the
     /// editor when it was parsed.  See [`Self::built_from`].
     pub source_hash: Option<u64>,
+}
+
+/// What a file declares about Drupal entity fields (see
+/// [`crate::drupal::base_fields`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct DrupalFieldSites {
+    /// The methods of the file's classes and traits that declare base
+    /// fields.
+    pub base_field_methods: Vec<BaseFieldMethodSite>,
+    /// What the file's field item classes declare about their items.
+    pub field_items: Vec<FieldItemSite>,
+    /// The configurable field the file declares, when it is a field storage
+    /// file.
+    pub storage: Option<FieldStorageSite>,
+}
+
+impl DrupalFieldSites {
+    /// The sites, unless there are none.
+    pub(crate) fn boxed(self) -> Option<Box<Self>> {
+        (!self.base_field_methods.is_empty()
+            || !self.field_items.is_empty()
+            || self.storage.is_some())
+        .then(|| Box::new(self))
+    }
 }
 
 impl SymbolMap {

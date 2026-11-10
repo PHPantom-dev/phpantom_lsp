@@ -1160,8 +1160,8 @@ fn default_providers_omits_laravel_when_not_laravel() {
 fn default_providers_adds_drupal_only_in_drupal() {
     assert_eq!(
         default_providers(false, true).len(),
-        2,
-        "a Drupal project should register the PHPDoc and fieldable entity providers"
+        3,
+        "a Drupal project should register the PHPDoc, fieldable entity, and field item providers"
     );
 }
 

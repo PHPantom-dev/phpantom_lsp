@@ -259,6 +259,7 @@ impl Backend {
 
     /// Forget a file that no longer exists.
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
+        let _fields = self.drupal_field_flush();
         self.note_drupal_routes(uri, None);
         self.note_drupal_hook_declarations(uri, None);
         self.note_drupal_theme_hook_sources(uri, None);

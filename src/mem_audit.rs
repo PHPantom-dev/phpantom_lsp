@@ -483,7 +483,8 @@ fn property_source(src: &PropertySource) -> Sz {
         PropertySource::Pivot
         | PropertySource::DocblockTag
         | PropertySource::PromotedParameter
-        | PropertySource::DrupalField => {}
+        | PropertySource::DrupalField
+        | PropertySource::DrupalItemProperty => {}
     }
     z
 }
@@ -1424,50 +1425,90 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                         .map(|(key, value)| {
                             size_of::<(String, String)>() + key.capacity() + value.capacity()
                         })
+                        .sum::<usize>()
+                    + sm.entity_types
+                        .iter()
+                        .filter_map(|site| site.bundle_entity_type.as_ref())
+                        .map(String::capacity)
                         .sum::<usize>(),
             );
-            sym.add(
-                sm.drupal_base_field_methods.capacity()
-                    * size_of::<crate::symbol_map::BaseFieldMethodSite>(),
-            );
-            for site in &sm.drupal_base_field_methods {
+            if let Some(fields) = &sm.drupal_fields {
+                sym.add(size_of::<crate::symbol_map::DrupalFieldSites>());
                 sym.add(
-                    site.fields.capacity() * size_of::<crate::symbol_map::BaseFieldSite>()
-                        + site.includes.capacity()
-                            * size_of::<crate::symbol_map::BaseFieldInclude>(),
+                    fields.base_field_methods.capacity()
+                        * size_of::<crate::symbol_map::BaseFieldMethodSite>(),
                 );
-                for field in &site.fields {
+                for site in &fields.base_field_methods {
                     sym.add(
-                        field.field_type.capacity()
-                            + field.target_type.as_ref().map_or(0, String::capacity),
+                        site.fields.capacity() * size_of::<crate::symbol_map::BaseFieldSite>()
+                            + site.includes.capacity()
+                                * size_of::<crate::symbol_map::BaseFieldInclude>()
+                            + site.removed.capacity()
+                                * size_of::<crate::symbol_map::BaseFieldName>()
+                            + site
+                                .removed
+                                .iter()
+                                .map(|name| match name {
+                                    crate::symbol_map::BaseFieldName::Literal(name)
+                                    | crate::symbol_map::BaseFieldName::Key(name)
+                                    | crate::symbol_map::BaseFieldName::RevisionMetadataKey(
+                                        name,
+                                    ) => name.capacity(),
+                                })
+                                .sum::<usize>(),
+                    );
+                    for field in &site.fields {
+                        sym.add(
+                            field.field_type.capacity()
+                                + match &field.target {
+                                    Some(crate::symbol_map::FieldTarget::EntityType(target)) => {
+                                        target.capacity()
+                                    }
+                                    _ => 0,
+                                },
+                        );
+                    }
+                }
+                sym.add(
+                    fields.field_items.capacity() * size_of::<crate::symbol_map::FieldItemSite>(),
+                );
+                for site in &fields.field_items {
+                    if let Some(definitions) = &site.property_definitions {
+                        sym.add(
+                            definitions.properties.capacity()
+                                * size_of::<crate::symbol_map::ItemPropertySite>()
+                                + definitions.removed.capacity() * size_of::<String>()
+                                + definitions
+                                    .removed
+                                    .iter()
+                                    .map(String::capacity)
+                                    .sum::<usize>(),
+                        );
+                        for property in &definitions.properties {
+                            sym.add(
+                                property.name.capacity()
+                                    + property.data_type.as_ref().map_or(0, String::capacity),
+                            );
+                        }
+                    }
+                    if let Some(
+                        crate::symbol_map::DefaultTarget::Declared(Some(target))
+                        | crate::symbol_map::DefaultTarget::FromParent {
+                            otherwise: Some(Some(target)),
+                        },
+                    ) = &site.default_target
+                    {
+                        sym.add(target.capacity());
+                    }
+                }
+                if let Some(storage) = &fields.storage {
+                    sym.add(
+                        storage.entity_type.capacity()
+                            + storage.field_name.capacity()
+                            + storage.field_type.capacity()
+                            + storage.target_type.as_ref().map_or(0, String::capacity),
                     );
                 }
-            }
-            sym.add(
-                sm.drupal_item_property_methods.capacity()
-                    * size_of::<crate::symbol_map::ItemPropertyMethodSite>(),
-            );
-            for site in &sm.drupal_item_property_methods {
-                sym.add(
-                    site.properties.capacity() * size_of::<crate::symbol_map::ItemPropertySite>()
-                        + site.removed.capacity() * size_of::<String>()
-                        + site.removed.iter().map(String::capacity).sum::<usize>(),
-                );
-                for property in &site.properties {
-                    sym.add(
-                        property.name.capacity()
-                            + property.data_type.as_ref().map_or(0, String::capacity),
-                    );
-                }
-            }
-            if let Some(storage) = &sm.drupal_field_storage {
-                sym.add(
-                    size_of::<crate::symbol_map::FieldStorageSite>()
-                        + storage.entity_type.capacity()
-                        + storage.field_name.capacity()
-                        + storage.field_type.capacity()
-                        + storage.target_type.as_ref().map_or(0, String::capacity),
-                );
             }
             sym.add(
                 sm.drupal_plugin_classes.capacity()

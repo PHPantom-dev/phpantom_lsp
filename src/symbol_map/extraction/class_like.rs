@@ -35,7 +35,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_drupal_route_builder_spans(&class.members, class.name.span.start.offset, ctx);
     emit_drupal_editable_config_spans(&class.members, ctx);
     emit_drupal_base_field_methods(&class.members, class.name.span.start.offset, ctx);
-    emit_drupal_item_property_methods(&class.members, class.name.span.start.offset, ctx);
+    emit_drupal_field_item_sites(&class.members, class.name.span.start.offset, ctx);
 
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {
