@@ -151,6 +151,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Controller methods of a Drupal service.** In a routing file, the method of a `_controller` or `_title_callback` written as `service:method` jumps to the method of the service's class, completes from its public methods, and is listed among the method's references.
 - **Drupal form and render callbacks.** In a Drupal project, a callback named in a form or render array, such as a `#submit`, `#validate`, `#pre_render`, or `#ajax` callback, jumps to its method or function, completes, shows it on hover, is renamed with it, and lists its references. A callback that names nothing, or that cannot be called, is reported. Contributed by @giuseppe-esposito-87.
 - **Drupal event subscribers.** In a Drupal project, event subscribers are read as they are in Symfony: the methods a subscriber's map names navigate and are checked, and an event name passed to the event dispatcher completes and leads to the constant that names it, if any, and to every subscription that listens to it. Contributed by @giuseppe-esposito-87.
+- **Drupal entity fields.** In a Drupal project, a content entity's fields are typed properties of the entity and of its interfaces, down to the entity a reference field points to. Field names written in code complete, show their type on hover, and jump to where the field is declared. Contributed by @giuseppe-esposito-87.
 
 #### WordPress
 
