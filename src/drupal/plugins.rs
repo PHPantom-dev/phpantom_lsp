@@ -293,6 +293,27 @@ pub(crate) struct PluginSources {
     pub(super) from_test: bool,
 }
 
+impl PluginSources {
+    /// The field types the file declares, wherever they are written: the
+    /// ID, the item class, and the item list class of each.
+    fn field_types(&self) -> Vec<(&str, Atom, Option<Atom>)> {
+        self.plugins
+            .iter()
+            .filter(|site| short_name(&site.marker).eq_ignore_ascii_case("FieldType"))
+            .map(|site| (site.id.as_str(), site.class, site.list_class))
+            .collect()
+    }
+
+    /// The field type manager's declarations the file holds, which decide
+    /// which plugins are field types.
+    fn field_type_managers(&self) -> Vec<&PluginManagerSite> {
+        self.managers
+            .iter()
+            .filter(|site| site.class.eq_ignore_ascii_case(FIELD_TYPES))
+            .collect()
+    }
+}
+
 /// Whether the symbol map holds anything the plugin index reads.
 fn feeds_index(map: &SymbolMap) -> bool {
     !map.drupal_plugins.is_empty() || !map.drupal_plugin_managers.is_empty()
@@ -461,7 +482,27 @@ impl Backend {
                 from_test,
             })
         });
-        let unchanged = self.drupal.plugin_sources.read().get(uri) == sources.as_ref();
+        let (unchanged, field_types_changed) = {
+            let stored = self.drupal.plugin_sources.read();
+            let old = stored.get(uri);
+            let unchanged = old == sources.as_ref();
+            (
+                unchanged,
+                !unchanged
+                    && (old.map(PluginSources::field_types).unwrap_or_default()
+                        != sources
+                            .as_ref()
+                            .map(PluginSources::field_types)
+                            .unwrap_or_default()
+                        || old
+                            .map(PluginSources::field_type_managers)
+                            .unwrap_or_default()
+                            != sources
+                                .as_ref()
+                                .map(PluginSources::field_type_managers)
+                                .unwrap_or_default()),
+            )
+        };
         if !unchanged {
             let mut stored = self.drupal.plugin_sources.write();
             match sources {
@@ -486,6 +527,12 @@ impl Backend {
             if slot.is_some() {
                 *slot = None;
             }
+        }
+        // The fields are typed by the field types, read from the plugin
+        // index, so they go once it has, or the manager that says which
+        // plugins are field types has.
+        if field_types_changed {
+            self.invalidate_drupal_fields();
         }
     }
 
@@ -654,10 +701,6 @@ impl Backend {
     /// The item class and the item list class of each declaration of the
     /// field type `id`; a list class of `None` for a declaration that names
     /// none, whose items Drupal keeps in a `FieldItemList`.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the field readers are its callers")
-    )]
     pub(crate) fn drupal_field_type_classes(&self, id: &str) -> Vec<(Atom, Option<Atom>)> {
         let mut classes: Vec<(Atom, Option<Atom>)> = self
             .drupal_plugin_index()

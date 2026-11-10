@@ -2112,9 +2112,7 @@ fn class_with_magic_set() -> ClassInfo {
         .properties
         .push(Arc::new(make_property("tagged", Some("string"))));
     class.properties.push(Arc::new(PropertyInfo {
-        source: Some(crate::types::PropertySource::DrupalField {
-            declarations: Arc::from([]),
-        }),
+        source: Some(crate::types::PropertySource::DrupalField),
         ..make_property("title", Some("FieldItemList"))
     }));
     class

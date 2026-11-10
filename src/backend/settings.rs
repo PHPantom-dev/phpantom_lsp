@@ -140,6 +140,8 @@ impl Backend {
     /// Only ever turned on: a workspace whose subprojects include one
     /// Drupal site treats those extensions as PHP throughout.
     pub(crate) fn mark_drupal_project(&self) {
+        // Before the flag, so no provider finds the fields unreadable.
+        self.drupal.bind_fields(&self.state);
         if !self.workspace.is_drupal.swap(true, Ordering::AcqRel) {
             *self.workspace.index_filters.write() = None;
         }

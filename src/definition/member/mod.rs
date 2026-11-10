@@ -321,6 +321,14 @@ impl Backend {
             return Some(location);
         }
 
+        // A Drupal entity field goes to where its entity type declares it.
+        if lookup.access_hint == MemberAccessHint::PropertyAccess
+            && let Some(location) =
+                self.drupal_field_location(lookup_class, &effective_name, lookup.class_loader)
+        {
+            return Some(location);
+        }
+
         let is_model = extends_eloquent_model(lookup_class, lookup.class_loader);
         if is_model
             && let Some(location) =

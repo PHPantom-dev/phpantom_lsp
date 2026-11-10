@@ -864,6 +864,76 @@ pub(crate) struct EntityTypeSite {
     pub content: bool,
 }
 
+/// A method that declares the base fields of Drupal content entities: an
+/// entity class's `baseFieldDefinitions()`, or a helper such as a trait's
+/// `ownerBaseFieldDefinitions()`, whose result joins them.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BaseFieldMethodSite {
+    /// The class or trait that declares the method.
+    pub owner: crate::atom::Atom,
+    /// The method's name, as declared.
+    pub method: crate::atom::Atom,
+    /// Each `$fields[NAME] = BaseFieldDefinition::create('type')` and each
+    /// `NAME => BaseFieldDefinition::create('type')` array entry, in source
+    /// order.
+    pub fields: Vec<BaseFieldSite>,
+    /// The other base field methods it calls on `parent::`, `static::`, or
+    /// `self::`, in source order.
+    pub includes: Vec<BaseFieldInclude>,
+}
+
+impl BaseFieldMethodSite {
+    /// Whether the two declare the same fields, wherever they are written.
+    pub(crate) fn declares_as(&self, other: &Self) -> bool {
+        self.owner == other.owner
+            && self.method == other.method
+            && self.includes == other.includes
+            && self.fields.len() == other.fields.len()
+            && self.fields.iter().zip(&other.fields).all(|(a, b)| {
+                a.name == b.name && a.field_type == b.field_type && a.target_type == b.target_type
+            })
+    }
+}
+
+/// A base field a [`BaseFieldMethodSite`] creates.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BaseFieldSite {
+    pub name: BaseFieldName,
+    /// The field type `create()` names.
+    pub field_type: String,
+    /// The entity type a `setSetting('target_type', …)` on it names.
+    pub target_type: Option<String>,
+    /// Byte range of the name: a string's contents, or the key lookup.
+    pub start: u32,
+    pub end: u32,
+}
+
+/// The name of a base field, as written.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum BaseFieldName {
+    Literal(String),
+    /// `$entity_type->getKey('key')`: the field the entity type names for
+    /// the entity key.
+    Key(String),
+    /// `$entity_type->getRevisionMetadataKey('key')`.
+    RevisionMetadataKey(String),
+}
+
+/// A base field method another one calls, whose fields join its own.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BaseFieldInclude {
+    pub scope: MethodScope,
+    pub method: crate::atom::Atom,
+}
+
+/// The class a `parent::`, `static::`, or `self::` call is made on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MethodScope {
+    Parent,
+    Static,
+    Self_,
+}
+
 /// The class a Drupal plugin declaration is written on, such as a render
 /// element's.
 #[derive(Debug, Clone, PartialEq)]

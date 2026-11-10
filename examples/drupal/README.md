@@ -43,6 +43,14 @@ Run `composer install` here first. Composer puts core and contrib into
   `$count`: an entity query gives the IDs of its entity type, or their
   number once it counts, and the ID inside `\Drupal::entityQuery('')`
   navigates and completes too.
+- An entity's base fields are typed properties of its class and of its
+  interfaces. In `web/modules/custom/acme/src/NoteSummary.php`, complete
+  after `$note->`: `title` comes from `Note`, `id` and `uuid` from core's
+  `ContentEntityBase` under the names the entity keys give, and `uid` from
+  core's owner trait. Hover `$title`, a list of `StringItem` items, and
+  `$author`, an entity reference list that names `User`, or go to the
+  definition of `title`, which lands on its `$fields['title']` line in
+  `Note`.
 - Route names navigate between the routing file that declares them and the
   code, links files, and templates that name them. In
   `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the

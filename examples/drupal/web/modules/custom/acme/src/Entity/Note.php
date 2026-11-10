@@ -9,6 +9,7 @@ use Drupal\Core\Entity\ContentEntityBase;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\user\EntityOwnerTrait;
 
 /**
  * A short note, declared by attribute the way Drupal 11 core declares
@@ -21,19 +22,27 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
         'id' => 'id',
         'uuid' => 'uuid',
         'label' => 'title',
+        'owner' => 'uid',
     ],
     base_table: 'acme_note',
     // Try: complete a permission inside `admin_permission: ''`.
     admin_permission: 'administer acme',
 )]
-final class Note extends ContentEntityBase
+final class Note extends ContentEntityBase implements NoteInterface
 {
+    use EntityOwnerTrait;
+
     /**
      * @return array<string, \Drupal\Core\Field\FieldDefinitionInterface>
      */
     public static function baseFieldDefinitions(EntityTypeInterface $entity_type): array
     {
+        // Try: in `src/NoteSummary.php`, `$note->` offers the fields this
+        // method declares, its parent's and the owner trait's: `id` and
+        // `uuid` come from ContentEntityBase under the names the attribute
+        // gives the keys, and `uid` from core's EntityOwnerTrait.
         $fields = parent::baseFieldDefinitions($entity_type);
+        $fields += static::ownerBaseFieldDefinitions($entity_type);
 
         // Try: complete after `BaseFieldDefinition::create('string')->`. Each
         // setter returns the definition, so the chain keeps completing. Go to

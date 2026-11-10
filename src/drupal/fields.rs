@@ -8,16 +8,26 @@
 //! [`FieldableEntityProvider`] gives them the same untyped ones the class
 //! has.
 //!
-//! [`receiver_entity_types`] maps such a receiver to the entity types it may
-//! hold, whose fields it has.
+//! The fields an entity type is known to have are typed properties on top of
+//! that: a field is its field type's item list, `FieldItemList<StringItem>`.
+//! [`receiver_entity_types`] maps a receiver to the entity types it may
+//! hold, and the receiver has the fields all of them have.  The fields are
+//! read into a [`FieldIndex`] on first use (see [`super::base_fields`]),
+//! which the provider reads from the resolved-class cache: providers never
+//! see the `Backend`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+use parking_lot::{Mutex, RwLock};
 
 use crate::atom::{Atom, atom};
 use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of};
+use crate::php_type::PhpType;
 use crate::types::{
-    ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, MethodInfo, ParameterInfo, SharedVec,
+    ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, MethodInfo, ParameterInfo, PropertyInfo,
+    PropertySource, SharedVec,
 };
 use crate::virtual_members::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
 
@@ -32,21 +42,241 @@ pub(crate) struct DrupalCacheState {
     /// Off in a cache made without a `Backend`, so code that resolves
     /// without a project pays nothing for Drupal.
     enabled: Arc<AtomicBool>,
+    /// The fields of the project's entity types, shared with the `Backend`
+    /// that reads them.
+    fields: Arc<FieldSlot>,
 }
 
 impl Default for DrupalCacheState {
     fn default() -> Self {
-        Self::new(Arc::new(AtomicBool::new(false)))
+        Self::new(Arc::new(AtomicBool::new(false)), Arc::default())
     }
 }
 
 impl DrupalCacheState {
-    pub(crate) fn new(enabled: Arc<AtomicBool>) -> Self {
-        Self { enabled }
+    pub(crate) fn new(enabled: Arc<AtomicBool>, fields: Arc<FieldSlot>) -> Self {
+        Self { enabled, fields }
     }
 
     pub(crate) fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::Acquire)
+    }
+}
+
+/// Where the [`FieldIndex`] lives once read, shared between the `Backend`
+/// that reads it and the resolved-class cache the provider reads it from.
+///
+/// It is published only once complete, and read by one thread at a time:
+/// a half-read index would look like entity types without fields.
+#[derive(Default)]
+pub(crate) struct FieldSlot {
+    index: RwLock<Option<Arc<FieldIndex>>>,
+    /// Serializes reads, so a thread that arrives during one waits for it.
+    build: Mutex<()>,
+    /// Moves with every [`invalidate`](Self::invalidate), so a read that
+    /// spans one is read again.
+    generation: AtomicU64,
+    /// Whether an index was handed out since the last invalidation, so a
+    /// resolved class may hold fields read from it.
+    handed_out: AtomicBool,
+    /// The state of the `Backend` that reads the index, for the providers,
+    /// which never see the `Backend`.  Weak, since the state holds the
+    /// cache that holds this slot.
+    backend: std::sync::OnceLock<std::sync::Weak<crate::BackendState>>,
+}
+
+thread_local! {
+    /// Whether this thread is reading a field index, during which the
+    /// class loads it makes must not start another.
+    static READING_FIELDS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Marks this thread as reading a field index for as long as it lives,
+/// panics included.
+struct ReadingFields;
+
+impl ReadingFields {
+    fn enter() -> Self {
+        READING_FIELDS.set(true);
+        Self
+    }
+}
+
+impl Drop for ReadingFields {
+    fn drop(&mut self) {
+        READING_FIELDS.set(false);
+    }
+}
+
+impl FieldSlot {
+    /// The index, or `None` when nothing has read it since the last change.
+    pub(crate) fn peek(&self) -> Option<Arc<FieldIndex>> {
+        let slot = self.index.read();
+        let index = slot.clone()?;
+        // Marked under the lock, so an invalidation either sees the mark
+        // or finds the index gone.
+        self.handed_out.store(true, Ordering::Release);
+        Some(index)
+    }
+
+    /// The index, read by `read` unless it is there already.  `None` on
+    /// the thread that is reading it.  A read an invalidation overtakes is
+    /// read again, so what is handed out is always what was published.
+    pub(crate) fn get_or_read(
+        &self,
+        mut read: impl FnMut() -> FieldIndex,
+    ) -> Option<Arc<FieldIndex>> {
+        if let Some(index) = self.peek() {
+            return Some(index);
+        }
+        if READING_FIELDS.get() {
+            return None;
+        }
+        let _build = self.build.lock();
+        loop {
+            if let Some(index) = self.peek() {
+                return Some(index);
+            }
+            let generation = self.generation.load(Ordering::Acquire);
+            let index = {
+                let _reading = ReadingFields::enter();
+                Arc::new(read())
+            };
+            let mut slot = self.index.write();
+            if self.generation.load(Ordering::Acquire) == generation {
+                self.handed_out.store(true, Ordering::Release);
+                *slot = Some(Arc::clone(&index));
+                return Some(index);
+            }
+        }
+    }
+
+    /// The index, read by the `Backend` [`bind`](Self::bind) names unless
+    /// it is there already.  `None` before the workspace is a Drupal
+    /// project, and on the thread that is reading it.
+    pub(crate) fn get(&self) -> Option<Arc<FieldIndex>> {
+        if let Some(index) = self.peek() {
+            return Some(index);
+        }
+        let state = self.backend.get()?.upgrade()?;
+        crate::Backend {
+            state,
+            request_progress: None,
+        }
+        .drupal_field_index()
+    }
+
+    /// Name the state of the `Backend` that reads the index.
+    pub(crate) fn bind(&self, backend: &Arc<crate::BackendState>) {
+        let _ = self.backend.set(Arc::downgrade(backend));
+    }
+
+    /// Drop the index, so the next reader reads it again.  Whether an index
+    /// was handed out since the last invalidation, so the classes that may
+    /// have fields from it have to go.
+    pub(crate) fn invalidate(&self) -> bool {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        let mut slot = self.index.write();
+        *slot = None;
+        self.handed_out.swap(false, Ordering::AcqRel)
+    }
+}
+
+/// One field of an entity type.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Field {
+    pub name: String,
+    /// The item list the field holds, with its item class as type argument
+    /// and, for a reference field, its target entity class after it.
+    pub ty: PhpType,
+    /// Where the field is declared.  None for the fields Drupal's entity
+    /// field manager adds itself.
+    pub declarations: Vec<FieldDeclaration>,
+}
+
+/// A statement that declares a field: the one at `statement` among those
+/// the base field method `method` of `owner` in the file at `uri` creates
+/// fields with.  Where it is written is looked up when asked, since an
+/// edit above it moves it without changing the fields.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FieldDeclaration {
+    pub uri: Arc<str>,
+    pub owner: Atom,
+    pub method: Atom,
+    pub statement: usize,
+}
+
+/// The fields of one entity type declaration.
+#[derive(Debug)]
+pub(crate) struct EntityTypeFields {
+    pub id: String,
+    pub class: Atom,
+    pub fields: Vec<Field>,
+}
+
+/// The fields of every content entity type the project declares.
+#[derive(Debug, Default)]
+pub(crate) struct FieldIndex {
+    pub entity_types: Vec<EntityTypeFields>,
+}
+
+impl FieldIndex {
+    /// The fields `receiver` has: those every entity type it may hold has,
+    /// each typed by all of theirs.
+    pub(crate) fn fields_of(
+        &self,
+        receiver: &ClassInfo,
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Vec<Field> {
+        let ids = receiver_entity_types(
+            receiver,
+            self.entity_types
+                .iter()
+                .map(|entity_type| (entity_type.id.as_str(), entity_type.class)),
+            class_loader,
+        );
+        let mut per_type = ids.iter().map(|id| {
+            // An ID declared twice has the fields of either declaration.
+            let mut fields: Vec<Field> = Vec::new();
+            for entity_type in self.entity_types.iter().filter(|e| e.id == *id) {
+                for field in &entity_type.fields {
+                    match fields.iter_mut().find(|known| known.name == field.name) {
+                        Some(known) => merge_field(known, field),
+                        None => fields.push(field.clone()),
+                    }
+                }
+            }
+            fields
+        });
+        let Some(mut shared) = per_type.next() else {
+            return Vec::new();
+        };
+        for fields in per_type {
+            let by_name: HashMap<&str, &Field> = fields
+                .iter()
+                .map(|field| (field.name.as_str(), field))
+                .collect();
+            shared.retain_mut(|field| match by_name.get(field.name.as_str()) {
+                Some(other) => {
+                    merge_field(field, other);
+                    true
+                }
+                None => false,
+            });
+        }
+        shared
+    }
+}
+
+/// Make `field` the same field as it is and as `other` is.
+fn merge_field(field: &mut Field, other: &Field) {
+    if field.ty != other.ty {
+        field.ty = PhpType::union(vec![field.ty.clone(), other.ty.clone()]);
+    }
+    for declaration in &other.declarations {
+        if !field.declarations.contains(declaration) {
+            field.declarations.push(declaration.clone());
+        }
     }
 }
 
@@ -70,29 +300,60 @@ pub(super) fn extends_or_implements(class: &ClassInfo) -> bool {
 pub(crate) struct FieldableEntityProvider;
 
 impl VirtualMemberProvider for FieldableEntityProvider {
-    /// Interfaces only: an entity class has its own `__get()` and `__set()`
-    /// from `ContentEntityBase`, and passes the interface's on to a class
-    /// that lacks them.
     fn applies_to(&self, class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
-        class.kind == ClassLikeKind::Interface
+        matches!(class.kind, ClassLikeKind::Interface | ClassLikeKind::Class)
+            && is_fieldable(class, class_loader)
+    }
+
+    /// The magic methods go on interfaces only: an entity class has its own
+    /// `__get()` and `__set()` from `ContentEntityBase`, and passes the
+    /// interface's on to a class that lacks them.
+    fn provide(
+        &self,
+        class: &ClassInfo,
+        class_loader: &ResolvedClassLoader<'_>,
+        cache: Option<&ResolvedClassCache>,
+    ) -> VirtualMembers {
+        let methods = if class.kind == ClassLikeKind::Interface
             && !class
                 .methods
                 .iter()
                 .any(|method| method.name.eq_ignore_ascii_case("__get"))
-            && is_fieldable(class, class_loader)
-    }
-
-    fn provide(
-        &self,
-        _class: &ClassInfo,
-        _class_loader: &ResolvedClassLoader<'_>,
-        _cache: Option<&ResolvedClassCache>,
-    ) -> VirtualMembers {
+        {
+            vec![Arc::new(magic_get()), Arc::new(magic_set())]
+        } else {
+            Vec::new()
+        };
+        let properties = cache
+            .and_then(field_index)
+            .map(|index| {
+                index
+                    .fields_of(class, class_loader)
+                    .into_iter()
+                    .map(|field| field_property(&field))
+                    .collect()
+            })
+            .unwrap_or_default();
         VirtualMembers {
-            methods: vec![Arc::new(magic_get()), Arc::new(magic_set())],
-            properties: Vec::new(),
+            methods,
+            properties,
             constants: Vec::new(),
         }
+    }
+}
+
+/// The field index the `Backend` reads into `cache`.
+fn field_index(cache: &ResolvedClassCache) -> Option<Arc<FieldIndex>> {
+    // Out of the cache's lock: reading the index resolves classes.
+    let slot = Arc::clone(&cache.read().drupal().fields);
+    slot.get()
+}
+
+/// The property `field` reads as.
+fn field_property(field: &Field) -> PropertyInfo {
+    PropertyInfo {
+        source: Some(PropertySource::DrupalField),
+        ..PropertyInfo::virtual_property_typed(&field.name, Some(&field.ty))
     }
 }
 
@@ -140,10 +401,6 @@ fn untyped_parameter(name: &str) -> ParameterInfo {
 /// class extends its entity type's class.  None unless `receiver` is
 /// fieldable: an `EntityInterface` holds every entity type, but has no
 /// fields.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the field readers are its callers")
-)]
 pub(crate) fn receiver_entity_types<'a>(
     receiver: &ClassInfo,
     entity_types: impl IntoIterator<Item = (&'a str, Atom)>,

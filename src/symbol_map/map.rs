@@ -317,6 +317,9 @@ pub(crate) struct SymbolMap {
     /// The entity types the file's entity classes declare, sorted by
     /// `start`.  Empty for every file that declares none.
     pub entity_types: Vec<EntityTypeSite>,
+    /// The methods of the file's classes and traits that declare Drupal
+    /// base fields.  Empty for every file that declares none.
+    pub drupal_base_field_methods: Vec<BaseFieldMethodSite>,
     /// The classes the file's Drupal plugin declarations are written on,
     /// sorted by `start`.  Empty for every file that declares none.
     pub drupal_plugin_classes: Vec<PluginClassSite>,

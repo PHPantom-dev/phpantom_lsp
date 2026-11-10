@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 
 use parking_lot::RwLock;
 
+pub(crate) mod base_fields;
 pub(crate) mod computed_hooks;
 pub(crate) mod config;
 pub(crate) mod config_keys;
@@ -101,6 +102,24 @@ pub(crate) struct DrupalState {
     service_definition_files: RwLock<std::collections::HashSet<String>>,
     /// What those files define, once read.
     php_service_ids: RwLock<Option<std::sync::Arc<services::PhpServiceIds>>>,
+    /// The entity types and base field methods each file declares, by URI,
+    /// copied out of its symbol map; see [`base_fields`].
+    field_sources: RwLock<base_fields::FieldSourceMap>,
+    /// The fields read from them, shared with the resolved-class cache.
+    fields: std::sync::Arc<fields::FieldSlot>,
+}
+
+impl DrupalState {
+    /// The slot the fields are read into, for the resolved-class cache.
+    pub(crate) fn field_slot(&self) -> std::sync::Arc<fields::FieldSlot> {
+        std::sync::Arc::clone(&self.fields)
+    }
+
+    /// Let the providers read the fields through the `Backend` whose state
+    /// `backend` is.
+    pub(crate) fn bind_fields(&self, backend: &std::sync::Arc<crate::BackendState>) {
+        self.fields.bind(backend);
+    }
 }
 
 /// A kind of file Drupal reads declarations from.
@@ -353,6 +372,13 @@ pub(crate) fn is_hook_php_file(path: &Path, web_root: &Path) -> bool {
 /// The entity types `map` declares: each ID, with the class and storage
 /// handler of its declaration.
 fn entity_type_sites(map: &SymbolMap) -> impl Iterator<Item = (&str, Atom, Option<Atom>)> + '_ {
+    entity_type_declarations(map).map(|(id, site)| (id, site.class, site.storage))
+}
+
+/// Each entity type declaration of `map`, with the ID it declares.
+fn entity_type_declarations(
+    map: &SymbolMap,
+) -> impl Iterator<Item = (&str, &crate::symbol_map::EntityTypeSite)> + '_ {
     map.entity_types.iter().filter_map(|site| {
         let at = map.spans.partition_point(|span| span.start < site.start);
         map.spans[at..]
@@ -363,7 +389,7 @@ fn entity_type_sites(map: &SymbolMap) -> impl Iterator<Item = (&str, Atom, Optio
                     kind: StringKeyKind::DrupalEntityType,
                     key,
                     ..
-                } => Some((key.as_str(), site.class, site.storage)),
+                } => Some((key.as_str(), site)),
                 _ => None,
             })
     })
@@ -426,6 +452,7 @@ impl Backend {
             .write()
             .retain(|_, sources| !sources.from_test);
         self.drupal.entity_type_test_sources.write().clear();
+        self.drupal.fields.invalidate();
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
         self.drupal.service_definition_files.write().clear();

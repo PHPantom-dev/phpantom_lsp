@@ -191,6 +191,27 @@ fn an_entity_class_with_entity_subclasses_holds_theirs_too() {
     );
 }
 
+/// A read an invalidation overtakes is read again, so the index handed out
+/// is always the one published, and the next invalidation says the classes
+/// that may have fields from it have to go.
+#[test]
+fn an_overtaken_read_is_read_again_and_published() {
+    let slot = super::FieldSlot::default();
+    let reads = std::cell::Cell::new(0);
+    let index = slot.get_or_read(|| {
+        reads.set(reads.get() + 1);
+        if reads.get() == 1 {
+            assert!(!slot.invalidate(), "nothing was handed out yet");
+        }
+        super::FieldIndex::default()
+    });
+    assert!(index.is_some());
+    assert_eq!(reads.get(), 2);
+    assert!(slot.peek().is_some());
+    assert!(slot.invalidate(), "an index was handed out");
+    assert!(!slot.invalidate(), "nothing was handed out since");
+}
+
 #[test]
 fn a_receiver_without_fields_holds_no_entity_type() {
     for receiver in [

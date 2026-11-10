@@ -8,7 +8,8 @@ use crate::symbol_map::extraction::symfony::{
     RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
 use crate::symbol_map::{
-    DeclaredParameter, DrupalRouteSite, EntityTypeSite, ModuleGuard, PluginClassSite,
+    BaseFieldInclude, BaseFieldMethodSite, BaseFieldName, BaseFieldSite, DeclaredParameter,
+    DrupalRouteSite, EntityTypeSite, MethodScope, ModuleGuard, PluginClassSite,
     PluginDeclarationSite, PluginManagerSite, ReceiverClass, StaticPluginSite, StringKeyKind,
     TypedReceiverSite,
 };
@@ -190,7 +191,11 @@ fn string_pairs(array: &Expression<'_>, content: &str) -> Vec<(String, String)> 
                 return None;
             };
             let (key, _, _) = resolved_string_literal(entry.key, content)?;
-            let (value, _, _) = crate::virtual_members::laravel::helpers::resolved_string_literal_including_empty(entry.value, content)?;
+            let (value, _, _) =
+                crate::virtual_members::laravel::helpers::resolved_string_literal_including_empty(
+                    entry.value,
+                    content,
+                )?;
             Some((key.to_string(), value.to_string()))
         })
         .collect()
@@ -1263,6 +1268,248 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_builder_spans(
                     ctx.drupal_route_patterns.push(pattern);
                 }
             }
+        }
+    }
+}
+
+// ─── Base fields ────────────────────────────────────────────────────────────
+
+const BASE_FIELD_DEFINITION: &str = "Drupal\\Core\\Field\\BaseFieldDefinition";
+
+/// Whether a method named `name` declares base fields: an entity class's
+/// `baseFieldDefinitions()`, or a helper such as
+/// `ownerBaseFieldDefinitions()`.
+fn is_base_field_method(name: &[u8]) -> bool {
+    name.eq_ignore_ascii_case(b"baseFieldDefinitions") || name.ends_with(b"BaseFieldDefinitions")
+}
+
+/// Record the base fields each base field method of a class or trait
+/// creates, and the base field methods it calls (see
+/// [`crate::drupal::fields`]).  `name_offset` is that of the class's or
+/// trait's name.
+pub(in crate::symbol_map::extraction) fn emit_drupal_base_field_methods(
+    members: &Sequence<'_, ClassLikeMember<'_>>,
+    name_offset: u32,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || !ctx.content.contains("BaseFieldDefinition") {
+        return;
+    }
+    let mut owner = None;
+    for member in members.iter() {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        if !is_base_field_method(method.name.value) {
+            continue;
+        }
+        let Some(owner) = *owner.get_or_insert_with(|| {
+            ctx.resolved_name_at(name_offset)
+                .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
+        }) else {
+            return;
+        };
+        let mut found = BaseFieldSites::default();
+        mago_syntax::walker::Walker::walk_method(&BaseFieldWalker, method, &mut found);
+        let fields: Vec<BaseFieldSite> = found
+            .keyed
+            .into_iter()
+            .filter_map(|(name, value)| base_field(name, value, ctx))
+            .collect();
+        let includes: Vec<BaseFieldInclude> = found
+            .calls
+            .into_iter()
+            .filter_map(|call| {
+                let scope = match call.class {
+                    Expression::Parent(_) => MethodScope::Parent,
+                    Expression::Static(_) => MethodScope::Static,
+                    Expression::Self_(_) => MethodScope::Self_,
+                    _ => return None,
+                };
+                let ClassLikeMemberSelector::Identifier(name) = &call.method else {
+                    return None;
+                };
+                is_base_field_method(name.value).then(|| BaseFieldInclude {
+                    scope,
+                    method: crate::atom::atom_bytes(name.value),
+                })
+            })
+            .collect();
+        ctx.drupal_base_field_methods.push(BaseFieldMethodSite {
+            owner,
+            method: crate::atom::atom_bytes(method.name.value),
+            fields,
+            includes,
+        });
+    }
+}
+
+/// The base field `NAME` keys to `VALUE`, when `VALUE` is a
+/// `BaseFieldDefinition::create('type')` chain and `NAME` a string or an
+/// entity type's key lookup.
+fn base_field(
+    name: &Expression<'_>,
+    value: &Expression<'_>,
+    ctx: &ExtractionCtx<'_>,
+) -> Option<BaseFieldSite> {
+    let (field_type, target_type) = base_field_creation(value, ctx)?;
+    let (name, start, end) = match name {
+        Expression::Call(Call::Method(call)) => {
+            let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+                return None;
+            };
+            let Some(Argument::Positional(argument)) = call.argument_list.arguments.first() else {
+                return None;
+            };
+            let (key, _, _) = resolved_string_literal(argument.value, ctx.content)?;
+            let name = if method.value.eq_ignore_ascii_case(b"getKey") {
+                BaseFieldName::Key(key.to_string())
+            } else if method.value.eq_ignore_ascii_case(b"getRevisionMetadataKey") {
+                BaseFieldName::RevisionMetadataKey(key.to_string())
+            } else {
+                return None;
+            };
+            let span = name_span(call);
+            (name, span.0, span.1)
+        }
+        _ => {
+            let (literal, start, end) = resolved_string_literal(name, ctx.content)?;
+            (
+                BaseFieldName::Literal(literal.to_string()),
+                start as u32,
+                end as u32,
+            )
+        }
+    };
+    Some(BaseFieldSite {
+        name,
+        field_type,
+        target_type,
+        start,
+        end,
+    })
+}
+
+/// The byte range of a key lookup call.
+fn name_span(call: &MethodCall<'_>) -> (u32, u32) {
+    let span = call.span();
+    (span.start.offset, span.end.offset)
+}
+
+/// The field type a `BaseFieldDefinition::create('type')` chain creates a
+/// field of, and the entity type the last `setSetting('target_type', …)`
+/// of the chain names.
+fn base_field_creation(
+    value: &Expression<'_>,
+    ctx: &ExtractionCtx<'_>,
+) -> Option<(String, Option<String>)> {
+    let mut target_type = None;
+    let mut current = value;
+    loop {
+        match current {
+            Expression::Parenthesized(inner) => current = inner.expression,
+            Expression::Call(Call::Method(call)) => {
+                // The outermost call runs last, so its setting wins.
+                if target_type.is_none()
+                    && let ClassLikeMemberSelector::Identifier(method) = &call.method
+                    && method.value.eq_ignore_ascii_case(b"setSetting")
+                    && let [
+                        Argument::Positional(setting),
+                        Argument::Positional(target),
+                        ..,
+                    ] = call.argument_list.arguments.as_slice()
+                    && resolved_string_literal(setting.value, ctx.content)
+                        .is_some_and(|(setting, _, _)| setting == "target_type")
+                {
+                    target_type = resolved_string_literal(target.value, ctx.content)
+                        .map(|(target, _, _)| target.to_string());
+                }
+                current = call.object;
+            }
+            Expression::Call(Call::StaticMethod(call)) => {
+                let Expression::Identifier(class) = call.class else {
+                    return None;
+                };
+                let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+                    return None;
+                };
+                let class = ctx
+                    .resolved_name_at(class.span().start.offset)
+                    .unwrap_or_else(|| bytes_to_str(class.value()));
+                if !method.value.eq_ignore_ascii_case(b"create")
+                    || !class
+                        .trim_start_matches('\\')
+                        .eq_ignore_ascii_case(BASE_FIELD_DEFINITION)
+                {
+                    return None;
+                }
+                let (field_type, _, _) =
+                    crate::call_args::first_param_arg(&call.argument_list, "type").and_then(
+                        |argument| resolved_string_literal(argument.value(), ctx.content),
+                    )?;
+                return Some((field_type.to_string(), target_type));
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// The keyed values and the static calls of a base field method.
+#[derive(Default)]
+struct BaseFieldSites<'ast, 'arena> {
+    /// The key and the value of each `$fields[KEY] = VALUE` and each
+    /// `KEY => VALUE` array entry.
+    keyed: Vec<(&'ast Expression<'arena>, &'ast Expression<'arena>)>,
+    calls: Vec<&'ast StaticMethodCall<'arena>>,
+}
+
+struct BaseFieldWalker;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BaseFieldSites<'ast, 'arena>>
+    for BaseFieldWalker
+{
+    fn walk_in_assignment(
+        &self,
+        assignment: &'ast Assignment<'arena>,
+        found: &mut BaseFieldSites<'ast, 'arena>,
+    ) {
+        if let (AssignmentOperator::Assign(_), Expression::ArrayAccess(access)) =
+            (&assignment.operator, assignment.lhs)
+        {
+            found.keyed.push((access.index, assignment.rhs));
+        }
+    }
+
+    fn walk_in_array(&self, array: &'ast Array<'arena>, found: &mut BaseFieldSites<'ast, 'arena>) {
+        push_base_field_entries(array.elements.iter(), found);
+    }
+
+    fn walk_in_legacy_array(
+        &self,
+        array: &'ast LegacyArray<'arena>,
+        found: &mut BaseFieldSites<'ast, 'arena>,
+    ) {
+        push_base_field_entries(array.elements.iter(), found);
+    }
+
+    fn walk_in_static_method_call(
+        &self,
+        call: &'ast StaticMethodCall<'arena>,
+        found: &mut BaseFieldSites<'ast, 'arena>,
+    ) {
+        found.calls.push(call);
+    }
+}
+
+fn push_base_field_entries<'ast, 'arena>(
+    elements: impl Iterator<Item = &'ast ArrayElement<'arena>>,
+    found: &mut BaseFieldSites<'ast, 'arena>,
+) where
+    'arena: 'ast,
+{
+    for element in elements {
+        if let ArrayElement::KeyValue(entry) = element {
+            found.keyed.push((entry.key, entry.value));
         }
     }
 }
@@ -2591,11 +2838,15 @@ fn annotation_entity_type(doc: &str, offset: u32) -> Option<DeclaredEntityType> 
         let value = &doc[entry.value_start..entry.value_end];
         match (entry.path.as_slice(), entry.key, entry.quoted) {
             ([], "id", true) => id = Some((entry.value_start, entry.value_end)),
-            ([], "translatable", false) => declared.translatable = value.eq_ignore_ascii_case("true"),
+            ([], "translatable", false) => {
+                declared.translatable = value.eq_ignore_ascii_case("true")
+            }
             (["handlers"], "storage", true) => {
                 declared.storage = Some(value.trim_start_matches('\\').to_string());
             }
-            (["entity_keys"], key, true) => declared.keys.push((key.to_string(), value.to_string())),
+            (["entity_keys"], key, true) => {
+                declared.keys.push((key.to_string(), value.to_string()))
+            }
             (["revision_metadata_keys"], key, true) => declared
                 .revision_metadata_keys
                 .push((key.to_string(), value.to_string())),
@@ -3866,6 +4117,141 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
         )
     }
 
+    /// A base field's name as written, the text the name spans, its field
+    /// type, and its target.
+    type ReadField = (BaseFieldName, String, String, Option<String>);
+
+    /// Each base field method of `php`: its class or trait, its name, the
+    /// fields it creates, and the methods it calls.
+    fn base_fields(php: &str) -> Vec<(String, String, Vec<ReadField>, Vec<BaseFieldInclude>)> {
+        drupal_index_map(php)
+            .drupal_base_field_methods
+            .into_iter()
+            .map(|site| {
+                let fields = site
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        (
+                            field.name.clone(),
+                            php[field.start as usize..field.end as usize].to_string(),
+                            field.field_type.clone(),
+                            field.target_type.clone(),
+                        )
+                    })
+                    .collect();
+                (
+                    site.owner.to_string(),
+                    site.method.to_string(),
+                    fields,
+                    site.includes,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn base_field_methods_keep_their_fields_and_includes() {
+        let php = r#"<?php
+namespace Drupal\acme\Entity;
+use Drupal\Core\Entity\ContentEntityBase;
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+class Note extends ContentEntityBase {
+    public static function baseFieldDefinitions(EntityTypeInterface $entity_type) {
+        $fields = parent::baseFieldDefinitions($entity_type);
+        $fields += static::ownerBaseFieldDefinitions($entity_type);
+        $fields['title'] = BaseFieldDefinition::create('string')
+            ->setLabel('Title')
+            ->setRequired(TRUE);
+        $fields[$entity_type->getKey('bundle')] = BaseFieldDefinition::create('entity_reference')
+            ->setSetting('target_type', 'acme_note_type');
+        $fields[$entity_type->getRevisionMetadataKey('revision_user')] = BaseFieldDefinition::create('entity_reference');
+        $fields['title']->setDisplayOptions('form', ['weight' => 1]);
+        $fields[$name] = BaseFieldDefinition::create('string');
+        $fields['other'] = \Other\BaseFieldDefinition::create('string');
+        $fields['no_type'] = BaseFieldDefinition::create($type);
+        return $fields;
+    }
+    public function label() {
+        $fields['ignored'] = BaseFieldDefinition::create('string');
+    }
+}
+trait OwnerTrait {
+    public static function ownerBaseFieldDefinitions(EntityTypeInterface $entity_type) {
+        return [
+            $entity_type->getKey('owner') => BaseFieldDefinition::create('entity_reference')
+                ->setSetting('target_type', 'user')
+                ->setLabel('Owner'),
+        ];
+    }
+}
+class Page extends Note {
+    public static function baseFieldDefinitions(EntityTypeInterface $entity_type) {
+        return parent::baseFieldDefinitions($entity_type) + self::publishedBaseFieldDefinitions($entity_type);
+    }
+}
+"#;
+        let key = |name: &str| BaseFieldName::Key(name.to_string());
+        let include = |scope, method: &str| BaseFieldInclude {
+            scope,
+            method: crate::atom::atom(method),
+        };
+        assert_eq!(
+            base_fields(php),
+            [
+                (
+                    "Drupal\\acme\\Entity\\Note".to_string(),
+                    "baseFieldDefinitions".to_string(),
+                    vec![
+                        (
+                            BaseFieldName::Literal("title".to_string()),
+                            "title".to_string(),
+                            "string".to_string(),
+                            None
+                        ),
+                        (
+                            key("bundle"),
+                            "$entity_type->getKey('bundle')".to_string(),
+                            "entity_reference".to_string(),
+                            Some("acme_note_type".to_string())
+                        ),
+                        (
+                            BaseFieldName::RevisionMetadataKey("revision_user".to_string()),
+                            "$entity_type->getRevisionMetadataKey('revision_user')".to_string(),
+                            "entity_reference".to_string(),
+                            None
+                        ),
+                    ],
+                    vec![
+                        include(MethodScope::Parent, "baseFieldDefinitions"),
+                        include(MethodScope::Static, "ownerBaseFieldDefinitions"),
+                    ],
+                ),
+                (
+                    "Drupal\\acme\\Entity\\OwnerTrait".to_string(),
+                    "ownerBaseFieldDefinitions".to_string(),
+                    vec![(
+                        key("owner"),
+                        "$entity_type->getKey('owner')".to_string(),
+                        "entity_reference".to_string(),
+                        Some("user".to_string())
+                    )],
+                    vec![],
+                ),
+                (
+                    "Drupal\\acme\\Entity\\Page".to_string(),
+                    "baseFieldDefinitions".to_string(),
+                    vec![],
+                    vec![
+                        include(MethodScope::Parent, "baseFieldDefinitions"),
+                        include(MethodScope::Self_, "publishedBaseFieldDefinitions"),
+                    ],
+                ),
+            ]
+        );
+    }
+
     #[test]
     fn a_field_type_keeps_its_list_class() {
         let php = r#"<?php
@@ -3888,7 +4274,12 @@ class LegacyItem {}
         let found: Vec<(String, Option<String>)> = drupal_index_map(php)
             .drupal_plugins
             .iter()
-            .map(|site| (site.id.clone(), site.list_class.map(|class| class.to_string())))
+            .map(|site| {
+                (
+                    site.id.clone(),
+                    site.list_class.map(|class| class.to_string()),
+                )
+            })
             .collect();
         assert_eq!(
             found,
