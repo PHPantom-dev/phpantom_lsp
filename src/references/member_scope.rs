@@ -583,7 +583,10 @@ impl Backend {
 
     /// `seeds` and every class that extends or implements one of them,
     /// transitively.
-    fn descendants_closure(&self, seeds: impl IntoIterator<Item = String>) -> HashSet<String> {
+    pub(crate) fn descendants_closure(
+        &self,
+        seeds: impl IntoIterator<Item = String>,
+    ) -> HashSet<String> {
         let mut closure: HashSet<String> = HashSet::new();
         let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
         for seed in seeds {

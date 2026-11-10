@@ -26,6 +26,7 @@ use parking_lot::{Mutex, RwLock};
 use crate::atom::{Atom, atom};
 use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of};
 use crate::php_type::PhpType;
+use crate::symbol_map::FieldItemSite;
 use crate::types::{
     ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, MethodInfo, ParameterInfo, PropertyInfo,
     PropertySource, SharedVec,
@@ -84,6 +85,10 @@ pub(crate) struct FieldSlot {
     /// which never see the `Backend`.  Weak, since the state holds the
     /// cache that holds this slot.
     backend: std::sync::OnceLock<std::sync::Weak<crate::BackendState>>,
+    /// The classes, lowercased, the read in progress has looked at so far:
+    /// a publish that changes none of them leaves the read alone, as
+    /// nearly every publish during indexing does.
+    read_classes: Mutex<std::collections::HashSet<String>>,
 }
 
 thread_local! {
@@ -139,6 +144,7 @@ impl FieldSlot {
                 return Some(index);
             }
             let generation = self.generation.load(Ordering::Acquire);
+            self.read_classes.lock().clear();
             let index = {
                 let _reading = ReadingFields::enter();
                 Arc::new(read())
@@ -147,6 +153,7 @@ impl FieldSlot {
             if self.generation.load(Ordering::Acquire) == generation {
                 self.handed_out.store(true, Ordering::Release);
                 *slot = Some(Arc::clone(&index));
+                self.read_classes.lock().clear();
                 return Some(index);
             }
         }
@@ -165,6 +172,43 @@ impl FieldSlot {
             request_progress: None,
         }
         .drupal_field_index()
+    }
+
+    /// How many times the index was invalidated.
+    #[cfg(test)]
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    /// The index as published, without handing it out.
+    pub(crate) fn published(&self) -> Option<Arc<FieldIndex>> {
+        self.index.read().clone()
+    }
+
+    /// Note that the read in progress looked at the class `name`.  Noted
+    /// before the class is loaded, so a declaration published after
+    /// [`read_looked_at`](Self::read_looked_at) said no is one the read
+    /// finds.
+    pub(crate) fn note_read_class(&self, name: &str) {
+        self.read_classes
+            .lock()
+            .insert(name.trim_start_matches('\\').to_ascii_lowercase());
+    }
+
+    /// Whether the read in progress, if any, has looked at one of
+    /// `classes`, so what it read of them may have changed.
+    pub(crate) fn read_looked_at(&self, classes: &[&str]) -> bool {
+        let read = self.read_classes.lock();
+        !read.is_empty()
+            && classes
+                .iter()
+                .any(|class| read.contains(&class.trim_start_matches('\\').to_ascii_lowercase()))
+    }
+
+    /// The classes the read in progress has looked at.  They stay noted
+    /// until its index is published, which then answers for them.
+    pub(crate) fn read_classes(&self) -> std::collections::HashSet<String> {
+        self.read_classes.lock().clone()
     }
 
     /// Name the state of the `Backend` that reads the index.
@@ -219,10 +263,18 @@ pub(crate) struct EntityTypeFields {
     pub fields: Vec<Field>,
 }
 
-/// The fields of every content entity type the project declares.
+/// The fields of every content entity type the project declares, and the
+/// properties of every field item class.
 #[derive(Debug, Default)]
 pub(crate) struct FieldIndex {
     pub entity_types: Vec<EntityTypeFields>,
+    /// What each field item class declares about its items, by its
+    /// lowercased class.
+    pub field_items: HashMap<String, FieldItemSite>,
+    /// The classes, interfaces, and traits the index was read through,
+    /// lowercased: the entity classes with all they extend, implement, and
+    /// use, and the classes their base field methods were looked up in.
+    pub classes: std::collections::HashSet<String>,
 }
 
 impl FieldIndex {
@@ -348,7 +400,7 @@ impl VirtualMemberProvider for FieldableEntityProvider {
 }
 
 /// The field index the `Backend` reads into `cache`.
-fn field_index(cache: &ResolvedClassCache) -> Option<Arc<FieldIndex>> {
+pub(super) fn field_index(cache: &ResolvedClassCache) -> Option<Arc<FieldIndex>> {
     // Out of the cache's lock: reading the index resolves classes.
     let slot = Arc::clone(&cache.read().drupal().fields);
     slot.get()

@@ -61,12 +61,12 @@ pub use cache::{
 pub(crate) use cache::{
     TransformFingerprint, intern_transformed_method, intern_transformed_property,
 };
-pub(crate) use resolve::resolve_class_base_cached;
 pub use resolve::{
     populate_from_sorted, property_write_is_magic, resolve_class_for_type_hint,
     resolve_class_fully, resolve_class_fully_cached, resolve_class_fully_maybe_cached,
     resolve_class_fully_with_generics, resolve_class_fully_with_type_args,
 };
+pub(crate) use resolve::{resolve_class_base_cached, resolve_class_for_field_type_hint};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -365,6 +365,7 @@ pub fn default_providers(is_laravel: bool, is_drupal: bool) -> Vec<Box<dyn Virtu
     }
     if is_drupal {
         providers.push(Box::new(crate::drupal::fields::FieldableEntityProvider));
+        providers.push(Box::new(crate::drupal::field_items::FieldItemProvider));
     }
     providers
 }

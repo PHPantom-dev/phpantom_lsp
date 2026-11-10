@@ -537,21 +537,36 @@ fn resolve_named_type(
             // never bound (a `static<TNewKey, TValue>` rebind on a
             // concrete collection subclass, a custom Eloquent builder
             // specialised to its model).
-            if !generic_args.is_empty()
+            let generic = !generic_args.is_empty()
                 && (!cls.template_params.is_empty()
                     || crate::inheritance::is_extends_only_generic_rebindable(
                         &cls,
                         generic_args.len(),
                         class_loader,
-                    ))
-            {
+                    ));
+            // A Drupal field item list or item is asked about once.
+            let drupal = (!generic && !generic_args.is_empty())
+                .then(|| {
+                    crate::drupal::field_items::field_type_hint(&cls, generic_args, class_loader)
+                })
+                .flatten();
+            if generic || drupal.is_some() {
                 let generic_arg_strings: Vec<String> =
                     generic_args.iter().map(|a| a.to_string()).collect();
-                vec![virtual_members::resolve_class_for_type_hint(
+                vec![virtual_members::resolve_class_for_field_type_hint(
                     &cls,
                     class_loader,
                     &generic_arg_strings,
                     generic_args,
+                    || {
+                        drupal.or_else(|| {
+                            crate::drupal::field_items::field_type_hint(
+                                &cls,
+                                generic_args,
+                                class_loader,
+                            )
+                        })
+                    },
                 )]
             } else {
                 vec![cls]

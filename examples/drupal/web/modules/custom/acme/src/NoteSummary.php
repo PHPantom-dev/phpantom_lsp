@@ -31,7 +31,17 @@ final class NoteSummary
         // entity type its `target_type` gives, and go-to-definition on
         // `field_tags` lands in that file.
         $tags = $note->field_tags;
+        // Try: a field reads the properties of its first item, the ones its
+        // item class declares in `propertyDefinitions()`. Complete after
+        // `$note->field_tags->`: `target_id` and `entity` come from
+        // EntityReferenceItem. Hover `$firstTag`, a `?Term`, null when the
+        // field is empty, and `$authorAccount`, a `?User`; `->label()` after
+        // either navigates. `$titleText` is `mixed`, as every stored value
+        // is: the database gives it as it is.
+        $firstTag = $note->field_tags->entity;
+        $authorAccount = $note->uid->entity;
+        $titleText = $title->value;
 
-        return sprintf('%s (%d, %d tags)', (string) $title->value, count($author), count($tags));
+        return sprintf('%s (%d, %d tags, first %s, by %s)', (string) $titleText, count($author), count($tags), (string) $firstTag?->label(), (string) $authorAccount?->label());
     }
 }

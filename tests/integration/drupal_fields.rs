@@ -256,6 +256,15 @@ abstract class ContentEntityBase implements ContentEntityInterface {
         if ($entity_type->hasKey('langcode')) {
             $fields[$entity_type->getKey('langcode')] = BaseFieldDefinition::create('language');
         }
+        if ($entity_type->hasKey('bundle')) {
+            if ($bundle_entity_type_id = $entity_type->getBundleEntityType()) {
+                $fields[$entity_type->getKey('bundle')] = BaseFieldDefinition::create('entity_reference')
+                    ->setSetting('target_type', $bundle_entity_type_id);
+            }
+            else {
+                $fields[$entity_type->getKey('bundle')] = BaseFieldDefinition::create('string');
+            }
+        }
         return $fields;
     }
 }
@@ -286,15 +295,69 @@ trait EntityOwnerTrait {
     ),
     (
         "web/core/lib/Drupal/Core/Field/FieldItemListInterface.php",
-        "<?php\nnamespace Drupal\\Core\\Field;\n/**\n * @template T of FieldItemInterface\n * @property mixed $value\n */\ninterface FieldItemListInterface {\n    public function __get($property_name);\n}\n",
+        r#"<?php
+namespace Drupal\Core\Field;
+/**
+ * @template T of FieldItemInterface
+ * @property mixed $value
+ */
+interface FieldItemListInterface {
+    /**
+     * @return \Drupal\Core\TypedData\TypedDataInterface|null
+     * @phpstan-return ?T
+     */
+    public function first();
+    public function __get($property_name);
+    public function __set($property_name, $value);
+}
+"#,
     ),
     (
         "web/core/lib/Drupal/Core/Field/FieldItemList.php",
-        "<?php\nnamespace Drupal\\Core\\Field;\n/**\n * @template T of FieldItemInterface\n * @implements FieldItemListInterface<T>\n */\nclass FieldItemList implements FieldItemListInterface {\n    public function __get($property_name) {}\n}\n",
+        r#"<?php
+namespace Drupal\Core\Field;
+/**
+ * @template T of FieldItemInterface
+ * @implements FieldItemListInterface<T>
+ * @implements \IteratorAggregate<int, T>
+ */
+class FieldItemList implements \IteratorAggregate, FieldItemListInterface {
+    protected $langcode;
+    /** {@inheritdoc} */
+    public function first() {}
+    public function getIterator(): \ArrayIterator {}
+    public function __get($property_name) {}
+    public function __set($property_name, $value) {}
+}
+"#,
     ),
     (
         "web/core/lib/Drupal/Core/Field/EntityReferenceFieldItemList.php",
-        "<?php\nnamespace Drupal\\Core\\Field;\nclass EntityReferenceFieldItemList extends FieldItemList {}\n",
+        r#"<?php
+namespace Drupal\Core\Field;
+class EntityReferenceFieldItemList extends FieldItemList implements EntityReferenceFieldItemListInterface {
+    /**
+     * @return \Drupal\Core\Entity\EntityInterface[]
+     */
+    public function referencedEntities() {}
+}
+"#,
+    ),
+    (
+        "web/core/lib/Drupal/Core/Field/EntityReferenceFieldItemListInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Field;\ninterface EntityReferenceFieldItemListInterface extends FieldItemListInterface {\n    /** @return \\Drupal\\Core\\Entity\\EntityInterface[] */\n    public function referencedEntities();\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Field/FieldItemInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Field;\ninterface FieldItemInterface {\n    /** @return mixed */\n    public function __get($property_name);\n    public function __set($property_name, $value);\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Field/FieldItemBase.php",
+        "<?php\nnamespace Drupal\\Core\\Field;\nabstract class FieldItemBase implements FieldItemInterface {\n    public function __get($name) {}\n    public function __set($name, $value) {}\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Language/LanguageInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Language;\ninterface LanguageInterface {\n    public function getId();\n}\n",
     ),
     (
         "web/core/lib/Drupal/Component/Plugin/Attribute/AttributeInterface.php",
@@ -326,11 +389,38 @@ trait EntityOwnerTrait {
     ),
     (
         "web/core/lib/Drupal/Core/Field/Plugin/Field/FieldType/LanguageItem.php",
-        "<?php\nnamespace Drupal\\Core\\Field\\Plugin\\Field\\FieldType;\nuse Drupal\\Core\\Field\\Attribute\\FieldType;\n#[FieldType(id: 'language')]\nclass LanguageItem {}\n",
+        r#"<?php
+namespace Drupal\Core\Field\Plugin\Field\FieldType;
+use Drupal\Core\Field\Attribute\FieldType;
+use Drupal\Core\Field\FieldItemBase;
+use Drupal\Core\TypedData\DataDefinition;
+use Drupal\Core\TypedData\DataReferenceDefinition;
+#[FieldType(id: 'language')]
+class LanguageItem extends FieldItemBase {
+    public static function propertyDefinitions($field_definition) {
+        $properties['value'] = DataDefinition::create('string');
+        $properties['language'] = DataReferenceDefinition::create('language')
+            ->setComputed(TRUE);
+        return $properties;
+    }
+}
+"#,
     ),
     (
         "web/core/lib/Drupal/Core/Field/Plugin/Field/FieldType/StringItem.php",
-        "<?php\nnamespace Drupal\\Core\\Field\\Plugin\\Field\\FieldType;\nuse Drupal\\Core\\Field\\Attribute\\FieldType;\n#[FieldType(id: 'string')]\nclass StringItem {}\n",
+        r#"<?php
+namespace Drupal\Core\Field\Plugin\Field\FieldType;
+use Drupal\Core\Field\Attribute\FieldType;
+use Drupal\Core\Field\FieldItemBase;
+use Drupal\Core\TypedData\DataDefinition;
+#[FieldType(id: 'string')]
+class StringItem extends FieldItemBase {
+    public static function propertyDefinitions($field_definition) {
+        $properties['value'] = DataDefinition::create('string');
+        return $properties;
+    }
+}
+"#,
     ),
     (
         "web/core/lib/Drupal/Core/Field/Plugin/Field/FieldType/BooleanItem.php",
@@ -338,13 +428,40 @@ trait EntityOwnerTrait {
     ),
     (
         "web/core/lib/Drupal/Core/Field/Plugin/Field/FieldType/EntityReferenceItem.php",
-        "<?php\nnamespace Drupal\\Core\\Field\\Plugin\\Field\\FieldType;\nuse Drupal\\Core\\Field\\Attribute\\FieldType;\nuse Drupal\\Core\\Field\\EntityReferenceFieldItemList;\n#[FieldType(id: 'entity_reference', list_class: EntityReferenceFieldItemList::class)]\nclass EntityReferenceItem {}\n",
+        r#"<?php
+namespace Drupal\Core\Field\Plugin\Field\FieldType;
+use Drupal\Core\Field\Attribute\FieldType;
+use Drupal\Core\Field\EntityReferenceFieldItemList;
+use Drupal\Core\Field\FieldItemBase;
+use Drupal\Core\TypedData\DataReferenceDefinition;
+use Drupal\Core\TypedData\DataReferenceTargetDefinition;
+#[FieldType(id: 'entity_reference', list_class: EntityReferenceFieldItemList::class)]
+class EntityReferenceItem extends FieldItemBase {
+    public static function defaultStorageSettings() {
+        return [
+            'target_type' => \Drupal::moduleHandler()->moduleExists('node') ? 'node' : 'user',
+        ] + parent::defaultStorageSettings();
+    }
+    public static function propertyDefinitions($field_definition) {
+        $target_id_definition = DataReferenceTargetDefinition::create('integer');
+        $properties['target_id'] = $target_id_definition;
+        $properties['entity'] = DataReferenceDefinition::create('entity')
+            ->setComputed(TRUE)
+            ->setReadOnly(FALSE);
+        return $properties;
+    }
+}
+"#,
     ),
     (
         "web/core/modules/node/src/NodeInterface.php",
         "<?php\nnamespace Drupal\\node;\ninterface NodeInterface extends \\Drupal\\Core\\Entity\\ContentEntityInterface {}\n",
     ),
     (NODE_PATH, NODE),
+    (
+        "web/core/modules/node/src/Entity/NodeType.php",
+        "<?php\nnamespace Drupal\\node\\Entity;\nuse Drupal\\Core\\Entity\\Attribute\\ConfigEntityType;\n#[ConfigEntityType(id: 'node_type')]\nclass NodeType {}\n",
+    ),
     (
         "web/core/modules/user/src/UserInterface.php",
         "<?php\nnamespace Drupal\\user;\ninterface UserInterface extends \\Drupal\\Core\\Entity\\ContentEntityInterface {}\n",
@@ -395,9 +512,11 @@ use Drupal\user\EntityOwnerTrait;
 
 #[ContentEntityType(
   id: 'node',
+  bundle_entity_type: 'node_type',
   entity_keys: [
     'id' => 'nid',
     'revision' => 'vid',
+    'bundle' => 'type',
     'langcode' => 'langcode',
     'uuid' => 'uuid',
     'owner' => 'uid',
@@ -516,6 +635,90 @@ async fn an_entity_type_has_its_own_inherited_and_trait_fields() {
         for not_field in ["id", "owner", "bundle", "name", "body"] {
             assert!(!offers(&labels, not_field), "{receiver} has {not_field}");
         }
+    }
+}
+
+/// A custom entity type whose base field method is a trait's, which takes
+/// fields from its parent and from another trait of the class.
+const CARD: &[(&str, &str)] = &[
+    (
+        "web/modules/custom/acme/src/Entity/StampedTrait.php",
+        r#"<?php
+namespace Drupal\acme\Entity;
+
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+
+trait StampedTrait {
+    public static function baseFieldDefinitions(EntityTypeInterface $entity_type) {
+        $fields = parent::baseFieldDefinitions($entity_type);
+        $fields += self::stampBaseFieldDefinitions($entity_type);
+        $fields['label'] = BaseFieldDefinition::create('string');
+        return $fields;
+    }
+}
+"#,
+    ),
+    (
+        "web/modules/custom/acme/src/Entity/StampTrait.php",
+        r#"<?php
+namespace Drupal\acme\Entity;
+
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+
+trait StampTrait {
+    public static function stampBaseFieldDefinitions(EntityTypeInterface $entity_type) {
+        $fields['stamp'] = BaseFieldDefinition::create('integer');
+        return $fields;
+    }
+}
+"#,
+    ),
+    (
+        "web/modules/custom/acme/src/Entity/Card.php",
+        r#"<?php
+namespace Drupal\acme\Entity;
+
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+use Drupal\Core\Entity\ContentEntityBase;
+
+#[ContentEntityType(id: 'acme_card', entity_keys: ['id' => 'id', 'uuid' => 'uuid'])]
+class Card extends ContentEntityBase {
+    use StampedTrait;
+    use StampTrait;
+}
+"#,
+    ),
+];
+
+/// `parent::` and `self::` in a trait's base field method are the using
+/// class's, as PHP binds them.
+#[tokio::test]
+async fn a_trait_s_base_field_method_follows_the_class_that_uses_it() {
+    let (backend, dir) = site_with(CARD, &[]).await;
+    let labels = members_of(&backend, &dir, "Drupal\\acme\\Entity\\Card").await;
+    for field in ["id", "uuid", "stamp", "label"] {
+        assert!(offers(&labels, field), "{field}: {labels:?}");
+    }
+}
+
+/// A field a base field method unsets is gone, though the method it takes
+/// it from creates it.
+#[tokio::test]
+async fn a_field_a_base_field_method_unsets_is_gone() {
+    let unset = NOTE.replace(
+        "$fields['body']",
+        "unset($fields['uuid']);\n        $fields['body']",
+    );
+    let (backend, dir) = site(&[(NOTE_PATH, &unset)]).await;
+    for receiver in [
+        "Drupal\\acme\\Entity\\NoteInterface",
+        "Drupal\\acme\\Entity\\Note",
+    ] {
+        let labels = members_of(&backend, &dir, receiver).await;
+        assert!(offers(&labels, "body"), "{receiver}: {labels:?}");
+        assert!(!offers(&labels, "uuid"), "{receiver}: {labels:?}");
     }
 }
 
@@ -755,6 +958,105 @@ async fn editing_base_fields_refreshes_the_class_and_its_interfaces() {
     for labels in [&after_interface, &after_class] {
         assert!(offers(labels, "summary"), "{labels:?}");
         assert!(!offers(labels, "body"), "{labels:?}");
+    }
+}
+
+/// A base class between the entity class and `ContentEntityBase` that
+/// adds a field, and a trait that gives one.
+const EDITORIAL: &[(&str, &str)] = &[
+    (
+        "web/core/lib/Drupal/Core/Entity/EditorialContentEntityBase.php",
+        "<?php\nnamespace Drupal\\Core\\Entity;\nuse Drupal\\Core\\Field\\BaseFieldDefinition;\nabstract class EditorialContentEntityBase extends ContentEntityBase {\n    public static function baseFieldDefinitions(EntityTypeInterface $entity_type) {\n        $fields = parent::baseFieldDefinitions($entity_type);\n        $fields['status'] = BaseFieldDefinition::create('boolean');\n        return $fields;\n    }\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Entity/EntityPublishedTrait.php",
+        "<?php\nnamespace Drupal\\Core\\Entity;\nuse Drupal\\Core\\Field\\BaseFieldDefinition;\ntrait EntityPublishedTrait {\n    public static function publishedBaseFieldDefinitions(EntityTypeInterface $entity_type) {\n        return ['published' => BaseFieldDefinition::create('boolean')];\n    }\n}\n",
+    ),
+];
+
+/// Changing the parent, the traits, or the interfaces of an entity class
+/// refreshes its fields, on the class and on its interface, though its base
+/// field methods stay the same.
+#[tokio::test]
+async fn editing_an_entity_class_s_parent_traits_or_interfaces_refreshes_its_fields() {
+    let imported = NOTE.replace(
+        "use Drupal\\user\\EntityOwnerTrait;",
+        "use Drupal\\user\\EntityOwnerTrait;\nuse Drupal\\Core\\Entity\\EditorialContentEntityBase;\nuse Drupal\\Core\\Entity\\EntityPublishedTrait;",
+    );
+    let publishing = imported.replace(
+        "$fields['body']",
+        "$fields += static::publishedBaseFieldDefinitions($entity_type);\n        $fields['body']",
+    );
+    let unimplemented = imported.replace(" implements NoteInterface", "");
+    // Each edit: the text before and after it, and the field it gives.
+    for (before, after, field) in [
+        (
+            imported.clone(),
+            imported.replace(
+                "extends ContentEntityBase",
+                "extends EditorialContentEntityBase",
+            ),
+            "status",
+        ),
+        (
+            publishing.clone(),
+            publishing.replace(
+                "use EntityOwnerTrait;",
+                "use EntityOwnerTrait;\n    use EntityPublishedTrait;",
+            ),
+            "published",
+        ),
+        (unimplemented.clone(), imported.clone(), "body"),
+    ] {
+        let (backend, dir) = site_with(EDITORIAL, &[(NOTE_PATH, &before)]).await;
+        let receivers = [
+            "Drupal\\acme\\Entity\\NoteInterface",
+            "Drupal\\acme\\Entity\\Note",
+        ];
+        let receivers = if field == "body" {
+            &receivers[..1]
+        } else {
+            &receivers[..]
+        };
+        for receiver in receivers {
+            let labels = members_of(&backend, &dir, receiver).await;
+            assert!(!offers(&labels, field), "{receiver} before: {labels:?}");
+        }
+        edit(&backend, &uri_for(&dir, NOTE_PATH), &after).await;
+        for receiver in receivers {
+            let labels = members_of(&backend, &dir, receiver).await;
+            assert!(offers(&labels, field), "{receiver} after: {labels:?}");
+        }
+    }
+}
+
+/// A base class an entity class names before it exists gives its fields
+/// once it is created.
+#[tokio::test]
+async fn a_base_class_created_after_the_fields_are_read_gives_its_fields() {
+    let based = NOTE.replace(
+        "extends ContentEntityBase",
+        "extends \\Drupal\\acme\\Entity\\NoteBase",
+    );
+    let (backend, dir) = site_with(EDITORIAL, &[(NOTE_PATH, &based)]).await;
+    let receivers = [
+        "Drupal\\acme\\Entity\\NoteInterface",
+        "Drupal\\acme\\Entity\\Note",
+    ];
+    for receiver in receivers {
+        let labels = members_of(&backend, &dir, receiver).await;
+        assert!(!offers(&labels, "status"), "{receiver} before: {labels:?}");
+    }
+    open_document(
+        &backend,
+        &uri_for(&dir, "web/modules/custom/acme/src/Entity/NoteBase.php"),
+        "php",
+        "<?php\nnamespace Drupal\\acme\\Entity;\nabstract class NoteBase extends \\Drupal\\Core\\Entity\\EditorialContentEntityBase {}\n",
+    )
+    .await;
+    for receiver in receivers {
+        let labels = members_of(&backend, &dir, receiver).await;
+        assert!(offers(&labels, "status"), "{receiver} after: {labels:?}");
     }
 }
 
@@ -1222,4 +1524,455 @@ async fn a_storage_opened_before_indexing_ends_gives_its_field() {
     backend.ensure_workspace_indexed();
     let labels = members_of(&backend, &dir, "Drupal\\node\\NodeInterface").await;
     assert!(offers(&labels, "field_tags"), "{labels:?}");
+}
+
+// ─── Field properties ───────────────────────────────────────────────────────
+
+/// A custom field item that takes the reference item's properties and adds
+/// two.
+const ATTACHMENT_ITEM_PATH: &str =
+    "web/modules/custom/acme/src/Plugin/Field/FieldType/AttachmentItem.php";
+const ATTACHMENT_ITEM: &str = r#"<?php
+namespace Drupal\acme\Plugin\Field\FieldType;
+
+use Drupal\Core\Field\Plugin\Field\FieldType\EntityReferenceItem;
+use Drupal\Core\TypedData\DataDefinition;
+
+class AttachmentItem extends EntityReferenceItem {
+    public static function defaultStorageSettings() {
+        return ['target_type' => 'acme_note'] + parent::defaultStorageSettings();
+    }
+    public static function propertyDefinitions($field_definition) {
+        $properties = parent::propertyDefinitions($field_definition);
+        $properties['display'] = DataDefinition::create('boolean');
+        $properties['description'] = DataDefinition::create('string');
+        $properties['langcode'] = DataDefinition::create('string');
+        return $properties;
+    }
+}
+"#;
+
+/// A field type whose item takes the attachment's properties, drops two,
+/// and adds its own.
+const PICTURE_ITEM_PATH: &str =
+    "web/modules/custom/acme/src/Plugin/Field/FieldType/PictureItem.php";
+const PICTURE_ITEM: &str = r#"<?php
+namespace Drupal\acme\Plugin\Field\FieldType;
+
+use Drupal\Core\Field\Attribute\FieldType;
+use Drupal\Core\Field\EntityReferenceFieldItemList;
+use Drupal\Core\TypedData\DataDefinition;
+
+#[FieldType(id: 'acme_picture', list_class: EntityReferenceFieldItemList::class)]
+class PictureItem extends AttachmentItem {
+    public static function defaultStorageSettings() {
+        return ['default_image' => ['alt' => '']] + parent::defaultStorageSettings();
+    }
+    public static function propertyDefinitions($field_definition) {
+        $properties = parent::propertyDefinitions($field_definition);
+        unset($properties['display']);
+        unset($properties['description']);
+        $properties['alt'] = DataDefinition::create('string');
+        return $properties;
+    }
+}
+"#;
+
+const PICTURE: &str = "Drupal\\acme\\Plugin\\Field\\FieldType\\PictureItem";
+
+/// A Drupal site with the custom item classes and three configurable node
+/// fields: tags pointing to terms, a picture pointing to notes, and a
+/// reference that names no target; `open` open, indexed.
+async fn property_site(open: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+    let tags = storage(
+        "node",
+        "field_tags",
+        "entity_reference",
+        Some("taxonomy_term"),
+    );
+    // The picture field names no target: its field type's default one.
+    let picture = storage("node", "field_picture", "acme_picture", None);
+    let any = storage("node", "field_any", "entity_reference", None);
+    site_with(
+        &[
+            (ATTACHMENT_ITEM_PATH, ATTACHMENT_ITEM),
+            (PICTURE_ITEM_PATH, PICTURE_ITEM),
+            (SYNC_TAGS, &tags),
+            ("config/sync/field.storage.node.field_picture.yml", &picture),
+            ("config/sync/field.storage.node.field_any.yml", &any),
+        ],
+        open,
+    )
+    .await
+}
+
+/// The members completion offers after `{subject}->` in a function that
+/// takes `\Drupal\node\NodeInterface $node`.
+async fn members_after(backend: &Backend, dir: &tempfile::TempDir, subject: &str) -> Vec<String> {
+    members_after_on(backend, dir, "\\Drupal\\node\\NodeInterface $node", subject).await
+}
+
+/// The members completion offers after `{subject}->` in a function that
+/// takes `parameter`.
+async fn members_after_on(
+    backend: &Backend,
+    dir: &tempfile::TempDir,
+    parameter: &str,
+    subject: &str,
+) -> Vec<String> {
+    let probe = format!(
+        "<?php\nnamespace Drupal\\acme;\nfunction probe({parameter}): void {{\n    {subject}->\n}}\n"
+    );
+    let uri = uri_for(dir, PROBE_PATH);
+    open_document(backend, &uri, "php", &probe).await;
+    let typed = format!("{subject}->\n");
+    let position = position_in(&probe, &typed, typed.len() - 1);
+    crate::common::response_labels(
+        crate::common::completion_response(backend, &uri, position.line, position.character, None)
+            .await,
+    )
+}
+
+/// An item offers the properties its `propertyDefinitions()` declares, with
+/// those it takes from its parent's and without those it unsets, and so do
+/// the lists that hold it and their first item.
+#[tokio::test]
+async fn items_and_their_lists_offer_the_item_properties() {
+    let (backend, dir) = property_site(&[]).await;
+    let attachment = members_of(
+        &backend,
+        &dir,
+        "Drupal\\acme\\Plugin\\Field\\FieldType\\AttachmentItem",
+    )
+    .await;
+    for property in ["target_id", "entity", "display", "description"] {
+        assert!(offers(&attachment, property), "{property}: {attachment:?}");
+    }
+    let picture = members_of(&backend, &dir, PICTURE).await;
+    let list = members_after(&backend, &dir, "$node->field_picture").await;
+    let first = members_after(&backend, &dir, "$node->field_picture->first()").await;
+    for labels in [&picture, &list, &first] {
+        for property in ["alt", "target_id", "entity"] {
+            assert!(offers(labels, property), "{property}: {labels:?}");
+        }
+        for unset in ["display", "description"] {
+            assert!(!offers(labels, unset), "{unset}: {labels:?}");
+        }
+    }
+    let title = members_after(&backend, &dir, "$node->title").await;
+    assert!(offers(&title, "value"), "{title:?}");
+    assert!(!offers(&title, "entity"), "{title:?}");
+}
+
+const PROPERTIES: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Field\FieldItemListInterface;
+use Drupal\node\NodeInterface;
+
+final class Properties {
+    public function read(NodeInterface $node, FieldItemListInterface $list): void {
+        $value = $node->title->value;
+        $first = $node->title->first()->value;
+        $owner = $node->uid->entity;
+        $owner_id = $node->uid->target_id;
+        $item_owner = $node->uid->first()->entity;
+        $tag = $node->field_tags->entity;
+        $tags = $node->field_tags->referencedEntities();
+        $any = $node->field_any->entity;
+        $picture = $node->field_picture->entity;
+        $alt = $node->field_picture->alt;
+        $picture_langcode = $node->field_picture->langcode;
+        $language = $node->langcode->language;
+        $bundle = $node->type->entity;
+        $bundle_list = $node->type;
+        foreach ($node->title as $item) {
+            $looped = $item->value;
+        }
+        $untyped = $list->value;
+        $node->field_tags->entity->id();
+        $node->langcode->language->getId();
+        $list->anything;
+        $written = $node->title->first();
+        $written->value = 'Example';
+        $after = $written->value;
+    }
+}
+"#;
+const PROPERTIES_PATH: &str = "web/modules/custom/acme/src/Properties.php";
+
+/// A property read on a list is its first item's; a reference's `entity`
+/// is its target class, or any entity when the field names none, and null
+/// when the field is empty; the stored values stay `mixed`, written or not.
+#[tokio::test]
+async fn item_properties_are_typed_on_items_and_lists() {
+    let (backend, dir) = property_site(&[(PROPERTIES_PATH, PROPERTIES)]).await;
+    let uri = uri_for(&dir, PROPERTIES_PATH);
+    let hover = |var: &str| hovered_type(&backend, uri.as_str(), PROPERTIES, var);
+    for var in [
+        "$value",
+        "$first",
+        "$owner_id",
+        "$alt",
+        "$picture_langcode",
+        "$looped",
+        "$untyped",
+        "$after",
+    ] {
+        let text = hover(var);
+        assert!(text.contains("mixed"), "{var}: {text}");
+    }
+    for (var, class) in [
+        ("$owner", "User"),
+        ("$item_owner", "User"),
+        ("$tag", "Term"),
+        ("$any", "EntityInterface"),
+        ("$picture", "Note"),
+        ("$language", "LanguageInterface"),
+        ("$bundle", "NodeType"),
+    ] {
+        let text = hover(var);
+        assert!(text.contains(&format!("?{class}")), "{var}: {text}");
+    }
+    let text = hover("$tags");
+    assert!(text.contains("array<Term>"), "{text}");
+    // The bundle field is a reference only, since node names a bundle
+    // entity type.
+    let text = hover("$bundle_list");
+    assert!(
+        text.contains("EntityReferenceFieldItemList<EntityReferenceItem, NodeType>")
+            && !text.contains("StringItem"),
+        "{text}"
+    );
+
+    let mut messages = Vec::new();
+    backend.update_ast(uri.as_str(), PROPERTIES);
+    backend.collect_slow_diagnostics(uri.as_str(), PROPERTIES, &mut messages);
+    let messages: Vec<String> = messages
+        .iter()
+        .map(|diagnostic| format!("{:?}", diagnostic.message))
+        .collect();
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+const PAYLOAD_PATH: &str = "web/modules/custom/acme/src/Plugin/Field/FieldType/PayloadItem.php";
+const PAYLOAD: &str = r#"<?php
+namespace Drupal\acme\Plugin\Field\FieldType;
+
+use Drupal\Core\Field\FieldItemBase;
+
+/**
+ * @template T
+ */
+class PayloadItem extends FieldItemBase {
+    /** @return T */
+    public function payload() {}
+}
+"#;
+const PAYLOADS_PATH: &str = "web/modules/custom/acme/src/Payloads.php";
+const PAYLOADS: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\acme\Entity\Note;
+use Drupal\acme\Plugin\Field\FieldType\PayloadItem;
+use Drupal\Core\Field\FieldItemList;
+
+final class Payloads {
+    /**
+     * @param PayloadItem<Note> $item
+     * @param FieldItemList<PayloadItem<Note>> $list
+     */
+    public function read($item, $list): void {
+        $from_item = $item->payload();
+        $from_list = $list->first()->payload();
+    }
+}
+"#;
+
+/// A field item class with templates of its own keeps the type arguments a
+/// type hint gives it, alone or in a list.
+#[tokio::test]
+async fn a_templated_item_keeps_its_type_arguments() {
+    let (backend, dir) = site(&[(PAYLOAD_PATH, PAYLOAD), (PAYLOADS_PATH, PAYLOADS)]).await;
+    let uri = uri_for(&dir, PAYLOADS_PATH);
+    for var in ["$from_item", "$from_list"] {
+        let text = hovered_type(&backend, uri.as_str(), PAYLOADS, var);
+        assert!(text.contains("Note"), "{var}: {text}");
+    }
+}
+
+const RENAMED_PATH: &str = "web/modules/custom/acme/src/Renamed.php";
+const RENAMED: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\acme\Entity\NoteInterface;
+use Drupal\node\NodeInterface;
+
+final class Renamed {
+    public function read(NodeInterface $node, NoteInterface $note): void {
+        $note->body;
+        $node->field_tags;
+        $node->field_picture->alt;
+    }
+}
+"#;
+
+/// A field or an item property is named in places a property rename does
+/// not edit (`get()` calls, field storage files, their names), so neither
+/// is offered for renaming.
+#[tokio::test]
+async fn fields_and_item_properties_are_not_renamed() {
+    let (backend, dir) = property_site(&[(RENAMED_PATH, RENAMED)]).await;
+    let uri = uri_for(&dir, RENAMED_PATH);
+    for access in ["$note->body", "$node->field_tags", "->alt"] {
+        let at = position_in(RENAMED, access, access.len() - 1);
+        assert!(
+            crate::common::prepare_rename(&backend, &uri, at.line, at.character)
+                .await
+                .is_none(),
+            "{access}"
+        );
+        assert!(
+            crate::common::rename(&backend, &uri, at.line, at.character, "renamed")
+                .await
+                .is_none(),
+            "{access}"
+        );
+    }
+}
+
+/// Editing an item's `propertyDefinitions()` refreshes its properties on
+/// the item and on the lists that hold it.
+#[tokio::test]
+async fn editing_property_definitions_refreshes_items_and_lists() {
+    let (backend, dir) = property_site(&[(PICTURE_ITEM_PATH, PICTURE_ITEM)]).await;
+    for labels in [
+        members_of(&backend, &dir, PICTURE).await,
+        members_after(&backend, &dir, "$node->field_picture").await,
+    ] {
+        assert!(offers(&labels, "alt"), "{labels:?}");
+        assert!(!offers(&labels, "caption"), "{labels:?}");
+    }
+
+    let edited = PICTURE_ITEM.replace("$properties['alt']", "$properties['caption']");
+    edit(&backend, &uri_for(&dir, PICTURE_ITEM_PATH), &edited).await;
+
+    for labels in [
+        members_of(&backend, &dir, PICTURE).await,
+        members_after(&backend, &dir, "$node->field_picture").await,
+    ] {
+        assert!(offers(&labels, "caption"), "{labels:?}");
+        assert!(!offers(&labels, "alt"), "{labels:?}");
+    }
+}
+
+/// Outside a Drupal project an item class has only what it declares.
+#[tokio::test]
+async fn items_have_no_properties_outside_drupal() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("composer.json"), "{}").unwrap();
+    for (path, content) in CORE.iter().chain(&[
+        (ATTACHMENT_ITEM_PATH, ATTACHMENT_ITEM),
+        (PICTURE_ITEM_PATH, PICTURE_ITEM),
+    ]) {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let backend = Backend::new_test();
+    initialize_with_options(&backend, dir.path(), None).await;
+    let labels = members_of(&backend, &dir, PICTURE).await;
+    assert!(!offers(&labels, "alt"), "{labels:?}");
+}
+
+/// An item class the editor restores while the workspace is read gives its
+/// properties to the fields that hold it once it is.
+#[tokio::test]
+async fn item_files_opened_before_indexing_ends_give_their_properties() {
+    let picture = storage("node", "field_picture", "acme_picture", None);
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in CORE.iter().chain(&[
+        (".git/HEAD", "ref: refs/heads/main\n"),
+        (".gitignore", "/web/core/\n"),
+        ("config/sync/field.storage.node.field_picture.yml", &picture),
+    ]) {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let (backend, dir) = workspace_opened_early(
+        dir,
+        &[
+            (ATTACHMENT_ITEM_PATH, ATTACHMENT_ITEM),
+            (PICTURE_ITEM_PATH, PICTURE_ITEM),
+        ],
+    )
+    .await;
+    backend.ensure_workspace_indexed();
+    let labels = members_after(&backend, &dir, "$node->field_picture").await;
+    assert!(offers(&labels, "alt"), "{labels:?}");
+    assert!(!offers(&labels, "display"), "{labels:?}");
+}
+
+/// A custom entity type reached through two interfaces of its own.
+const MEMO_PATH: &str = "web/modules/custom/acme/src/Entity/Memo.php";
+const MEMO: &str = r#"<?php
+namespace Drupal\acme\Entity;
+
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+use Drupal\Core\Entity\ContentEntityBase;
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+
+#[ContentEntityType(
+  id: 'acme_memo',
+  entity_keys: ['id' => 'id', 'bundle' => 'kind'],
+)]
+class Memo extends ContentEntityBase implements MemoInterface {
+    public static function baseFieldDefinitions(EntityTypeInterface $entity_type) {
+        $fields = parent::baseFieldDefinitions($entity_type);
+        $fields['subject'] = BaseFieldDefinition::create('string');
+        return $fields;
+    }
+}
+"#;
+
+/// An interface whose fields come through an interface nothing else
+/// resolves refreshes when its entity class changes, and an entity type
+/// with a bundle key but no bundle entity type has a string bundle field.
+#[tokio::test]
+async fn editing_base_fields_refreshes_interfaces_further_down() {
+    let (backend, dir) = site_with(
+        &[
+            (
+                "web/modules/custom/acme/src/Entity/MemoBaseInterface.php",
+                "<?php\nnamespace Drupal\\acme\\Entity;\ninterface MemoBaseInterface extends \\Drupal\\Core\\Entity\\ContentEntityInterface {}\n",
+            ),
+            (
+                "web/modules/custom/acme/src/Entity/MemoInterface.php",
+                "<?php\nnamespace Drupal\\acme\\Entity;\ninterface MemoInterface extends MemoBaseInterface {}\n",
+            ),
+            (MEMO_PATH, MEMO),
+        ],
+        &[(MEMO_PATH, MEMO)],
+    )
+    .await;
+    let before = members_of(&backend, &dir, "Drupal\\acme\\Entity\\MemoInterface").await;
+    assert!(offers(&before, "subject"), "{before:?}");
+    let kind = members_after_on(
+        &backend,
+        &dir,
+        "\\Drupal\\acme\\Entity\\MemoInterface $memo",
+        "$memo->kind",
+    )
+    .await;
+    assert!(offers(&kind, "value"), "{kind:?}");
+    assert!(!offers(&kind, "entity"), "{kind:?}");
+
+    let edited = MEMO.replace("$fields['subject']", "$fields['topic']");
+    edit(&backend, &uri_for(&dir, MEMO_PATH), &edited).await;
+
+    let after = members_of(&backend, &dir, "Drupal\\acme\\Entity\\MemoInterface").await;
+    assert!(offers(&after, "topic"), "{after:?}");
+    assert!(!offers(&after, "subject"), "{after:?}");
 }
