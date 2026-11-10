@@ -1,0 +1,28 @@
+uuid: 2b7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f
+langcode: en
+status: true
+dependencies:
+  config:
+    - field.storage.acme_note.field_tags
+    - taxonomy.vocabulary.tags
+  module:
+    - acme
+id: acme_note.acme_note.field_tags
+field_name: field_tags
+entity_type: acme_note
+bundle: acme_note
+label: Tags
+description: ''
+required: false
+translatable: true
+default_value: {  }
+default_value_callback: ''
+settings:
+  handler: 'default:taxonomy_term'
+  handler_settings:
+    target_bundles:
+      tags: tags
+    sort:
+      field: _none
+    auto_create: true
+field_type: entity_reference

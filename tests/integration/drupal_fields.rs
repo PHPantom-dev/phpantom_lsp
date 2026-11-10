@@ -459,7 +459,11 @@ const PROBE_PATH: &str = "web/modules/custom/acme/src/Probe.php";
 /// A Drupal site with [`CORE`] on disk and the custom entity type, `files`
 /// open, indexed.
 async fn site(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
+    site_in(tempfile::tempdir().unwrap(), files).await
+}
+
+/// [`site`] in `dir`, which may hold files already.
+async fn site_in(dir: tempfile::TempDir, files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
     for (path, content) in CORE.iter().chain(&[
         (".git/HEAD", "ref: refs/heads/main\n"),
         (".gitignore", "/web/core/\n"),
@@ -890,4 +894,332 @@ async fn an_entity_file_opened_before_indexing_ends_gives_its_fields() {
     for field in ["body", "author", "uuid"] {
         assert!(offers(&labels, field), "{field}: {labels:?}");
     }
+}
+
+// ─── Configurable fields ────────────────────────────────────────────────────
+
+/// Core's taxonomy term entity type, which reference fields point to.
+const TERM: (&str, &str) = (
+    "web/core/modules/taxonomy/src/Entity/Term.php",
+    "<?php\nnamespace Drupal\\taxonomy\\Entity;\nuse Drupal\\Core\\Entity\\Attribute\\ContentEntityType;\nuse Drupal\\Core\\Entity\\ContentEntityBase;\n#[ContentEntityType(id: 'taxonomy_term', entity_keys: ['id' => 'tid', 'uuid' => 'uuid'])]\nclass Term extends ContentEntityBase {}\n",
+);
+
+/// A field storage file for the field `name` of `entity_type`, of the field
+/// type `field_type`, pointing to `target` when given.
+fn storage(entity_type: &str, name: &str, field_type: &str, target: Option<&str>) -> String {
+    let settings = match target {
+        Some(target) => format!("settings:\n  target_type: {target}\n"),
+        None => "settings: {  }\n".to_string(),
+    };
+    format!(
+        "uuid: 0d4c5b0e-0000-4000-8000-000000000000\nlangcode: en\nstatus: true\ndependencies:\n  module:\n    - {entity_type}\nid: {entity_type}.{name}\nfield_name: {name}\nentity_type: {entity_type}\ntype: {field_type}\n{settings}module: core\nlocked: false\ncardinality: -1\ntranslatable: true\n"
+    )
+}
+
+/// A Drupal site with [`CORE`], the custom entity type, the term entity
+/// type, and `disk` on disk, `open` open, indexed.
+async fn site_with(disk: &[(&str, &str)], open: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in disk.iter().chain([&TERM]) {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    site_in(dir, open).await
+}
+
+/// Configurable fields come from an extension's default configuration,
+/// core's included, and from the site's exported configuration beside the
+/// web root, each on its own entity type only.
+#[tokio::test]
+async fn configurable_fields_come_from_extensions_and_exported_configuration() {
+    let tags = storage(
+        "node",
+        "field_tags",
+        "entity_reference",
+        Some("taxonomy_term"),
+    );
+    let rating = storage("acme_note", "field_rating", "integer", None);
+    let picture = storage("user", "user_picture", "string", None);
+    let (backend, dir) = site_with(
+        &[
+            ("config/sync/field.storage.node.field_tags.yml", &tags),
+            (
+                "web/modules/custom/acme/config/install/field.storage.acme_note.field_rating.yml",
+                &rating,
+            ),
+            (
+                "web/core/profiles/standard/config/install/field.storage.user.user_picture.yml",
+                &picture,
+            ),
+        ],
+        &[],
+    )
+    .await;
+    let node = members_of(&backend, &dir, "Drupal\\node\\NodeInterface").await;
+    let user = members_of(&backend, &dir, "Drupal\\user\\UserInterface").await;
+    let note = members_of(&backend, &dir, "Drupal\\acme\\Entity\\Note").await;
+    let shared = members_of(
+        &backend,
+        &dir,
+        "Drupal\\Core\\Entity\\ContentEntityInterface",
+    )
+    .await;
+    for (labels, own) in [
+        (&node, "field_tags"),
+        (&user, "user_picture"),
+        (&note, "field_rating"),
+    ] {
+        for field in ["field_tags", "user_picture", "field_rating"] {
+            assert_eq!(offers(labels, field), field == own, "{field}: {labels:?}");
+        }
+    }
+    for field in ["field_tags", "user_picture", "field_rating"] {
+        assert!(!offers(&shared, field), "{field}: {shared:?}");
+    }
+}
+
+const CONFIGURED: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\acme\Entity\NoteInterface;
+use Drupal\node\NodeInterface;
+
+final class Configured {
+    public function read(NodeInterface $node, NoteInterface $note): void {
+        $tags = $node->field_tags;
+        $rating = $note->field_rating;
+    }
+}
+"#;
+const CONFIGURED_PATH: &str = "web/modules/custom/acme/src/Configured.php";
+const SYNC_TAGS: &str = "config/sync/field.storage.node.field_tags.yml";
+const MODULE_TAGS: &str =
+    "web/modules/custom/acme/config/install/field.storage.node.field_tags.yml";
+
+/// A configurable field is its field type's item list, and a reference
+/// field names the class of the entity type its `target_type` gives.
+#[tokio::test]
+async fn a_configurable_field_is_typed_by_its_field_type() {
+    let tags = storage(
+        "node",
+        "field_tags",
+        "entity_reference",
+        Some("taxonomy_term"),
+    );
+    let rating = storage("acme_note", "field_rating", "integer", None);
+    let (backend, dir) = site_with(
+        &[
+            (SYNC_TAGS, &tags),
+            (
+                "config/sync/field.storage.acme_note.field_rating.yml",
+                &rating,
+            ),
+        ],
+        &[(CONFIGURED_PATH, CONFIGURED)],
+    )
+    .await;
+    let uri = uri_for(&dir, CONFIGURED_PATH);
+    let tags = hovered_type(&backend, uri.as_str(), CONFIGURED, "$tags");
+    assert!(
+        tags.contains("EntityReferenceFieldItemList<EntityReferenceItem, Term>"),
+        "{tags}"
+    );
+    let rating = hovered_type(&backend, uri.as_str(), CONFIGURED, "$rating");
+    assert!(rating.contains("FieldItemList<IntegerItem>"), "{rating}");
+}
+
+/// A field a module installs and the site exports is one field, offered
+/// once, that goes to both files.
+#[tokio::test]
+async fn a_field_declared_twice_is_one_field_with_both_files() {
+    let tags = storage(
+        "node",
+        "field_tags",
+        "entity_reference",
+        Some("taxonomy_term"),
+    );
+    let (backend, dir) = site_with(
+        &[(SYNC_TAGS, &tags), (MODULE_TAGS, &tags)],
+        &[(CONFIGURED_PATH, CONFIGURED)],
+    )
+    .await;
+    let labels = members_of(&backend, &dir, "Drupal\\node\\NodeInterface").await;
+    assert_eq!(
+        labels.iter().filter(|label| *label == "field_tags").count(),
+        1,
+        "{labels:?}"
+    );
+    let uri = uri_for(&dir, CONFIGURED_PATH);
+    let found = definitions_at(
+        &backend,
+        &uri,
+        position_in(CONFIGURED, "$node->field_tags", "$node->field".len()),
+    )
+    .await;
+    let mut targets: Vec<_> = found.iter().map(|location| location.uri.clone()).collect();
+    targets.sort_by_key(|uri| uri.to_string());
+    let mut expected = vec![uri_for(&dir, SYNC_TAGS), uri_for(&dir, MODULE_TAGS)];
+    expected.sort_by_key(|uri| uri.to_string());
+    assert_eq!(targets, expected);
+    for location in &found {
+        assert_eq!(
+            location.range.start,
+            position_in(&tags, "field_name: field_tags", "field_name: ".len())
+        );
+    }
+}
+
+/// Files under `vendor/` and in recipes are no source, and a test module's
+/// counts only while it is open.
+#[tokio::test]
+async fn recipes_dependencies_and_closed_test_modules_declare_no_field() {
+    const TEST_MODULE: &str = "web/modules/custom/acme/tests/modules/acme_test/config/install/field.storage.node.field_test.yml";
+    const VENDOR: &str = "vendor/example/fields/config/install/field.storage.node.field_vendor.yml";
+    let recipe = storage("node", "field_recipe", "string", None);
+    let core_recipe = storage("node", "field_core_recipe", "string", None);
+    let test = storage("node", "field_test", "string", None);
+    let vendor = storage("node", "field_vendor", "string", None);
+    let (backend, dir) = site_with(
+        &[
+            (
+                "recipes/example/config/field.storage.node.field_recipe.yml",
+                &recipe,
+            ),
+            (
+                "web/core/recipes/example/config/field.storage.node.field_core_recipe.yml",
+                &core_recipe,
+            ),
+            (TEST_MODULE, &test),
+            (VENDOR, &vendor),
+        ],
+        &[(VENDOR, &vendor)],
+    )
+    .await;
+    let labels = members_of(&backend, &dir, "Drupal\\node\\NodeInterface").await;
+    for field in [
+        "field_recipe",
+        "field_core_recipe",
+        "field_test",
+        "field_vendor",
+    ] {
+        assert!(!offers(&labels, field), "{field}: {labels:?}");
+    }
+
+    let test_uri = uri_for(&dir, TEST_MODULE);
+    open_document(&backend, &test_uri, "yaml", &test).await;
+    let labels = members_of(&backend, &dir, "Drupal\\node\\NodeInterface").await;
+    assert!(offers(&labels, "field_test"), "{labels:?}");
+
+    close(&backend, &test_uri).await;
+    let labels = members_of(&backend, &dir, "Drupal\\node\\NodeInterface").await;
+    assert!(!offers(&labels, "field_test"), "{labels:?}");
+}
+
+async fn close(backend: &Backend, uri: &tower_lsp_server::gen_lsp_types::Uri) {
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
+    backend
+        .did_close(DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+        })
+        .await;
+}
+
+async fn notify(
+    backend: &Backend,
+    uri: &tower_lsp_server::gen_lsp_types::Uri,
+    kind: tower_lsp_server::gen_lsp_types::FileChangeType,
+) {
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: uri.clone(),
+                kind,
+            }],
+        })
+        .await;
+}
+
+/// Adding, editing, and deleting a field storage file refreshes the fields
+/// of its entity type, on the class and on its interface.
+#[tokio::test]
+async fn field_storage_changes_refresh_the_fields() {
+    use tower_lsp_server::gen_lsp_types::FileChangeType;
+    let tags = storage(
+        "node",
+        "field_tags",
+        "entity_reference",
+        Some("taxonomy_term"),
+    );
+    let (backend, dir) = site_with(&[(SYNC_TAGS, &tags)], &[]).await;
+    let receivers = ["Drupal\\node\\NodeInterface", "Drupal\\node\\Entity\\Node"];
+
+    let topics_path = "config/sync/field.storage.node.field_topics.yml";
+    let topics = dir.path().join(topics_path);
+    std::fs::write(&topics, storage("node", "field_topics", "string", None)).unwrap();
+    let topics_uri = uri_for(&dir, topics_path);
+    notify(&backend, &topics_uri, FileChangeType::Created).await;
+    for receiver in receivers {
+        let labels = members_of(&backend, &dir, receiver).await;
+        assert!(offers(&labels, "field_topics"), "{receiver}: {labels:?}");
+    }
+
+    let tags_uri = uri_for(&dir, SYNC_TAGS);
+    open_document(&backend, &tags_uri, "yaml", &tags).await;
+    edit(
+        &backend,
+        &tags_uri,
+        &tags.replace("field_name: field_tags", "field_name: field_labels"),
+    )
+    .await;
+    for receiver in receivers {
+        let labels = members_of(&backend, &dir, receiver).await;
+        assert!(offers(&labels, "field_labels"), "{receiver}: {labels:?}");
+        assert!(!offers(&labels, "field_tags"), "{receiver}: {labels:?}");
+    }
+
+    // An export or a checkout rewrites a closed file on disk.
+    std::fs::write(&topics, storage("node", "field_subjects", "string", None)).unwrap();
+    notify(&backend, &topics_uri, FileChangeType::Changed).await;
+    for receiver in receivers {
+        let labels = members_of(&backend, &dir, receiver).await;
+        assert!(offers(&labels, "field_subjects"), "{receiver}: {labels:?}");
+        assert!(!offers(&labels, "field_topics"), "{receiver}: {labels:?}");
+    }
+
+    std::fs::remove_file(&topics).unwrap();
+    notify(&backend, &topics_uri, FileChangeType::Deleted).await;
+    for receiver in receivers {
+        let labels = members_of(&backend, &dir, receiver).await;
+        assert!(!offers(&labels, "field_subjects"), "{receiver}: {labels:?}");
+    }
+}
+
+/// An exported field storage file the editor restores while the workspace
+/// is read gives its field once it is.
+#[tokio::test]
+async fn a_storage_opened_before_indexing_ends_gives_its_field() {
+    let tags = storage(
+        "node",
+        "field_tags",
+        "entity_reference",
+        Some("taxonomy_term"),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in CORE.iter().chain(&[
+        (".git/HEAD", "ref: refs/heads/main\n"),
+        (".gitignore", "/web/core/\n"),
+        TERM,
+    ]) {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let (backend, dir) = workspace_opened_early(dir, &[(SYNC_TAGS, &tags)]).await;
+    backend.ensure_workspace_indexed();
+    let labels = members_of(&backend, &dir, "Drupal\\node\\NodeInterface").await;
+    assert!(offers(&labels, "field_tags"), "{labels:?}");
 }

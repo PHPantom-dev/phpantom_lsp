@@ -1443,6 +1443,15 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                     );
                 }
             }
+            if let Some(storage) = &sm.drupal_field_storage {
+                sym.add(
+                    size_of::<crate::symbol_map::FieldStorageSite>()
+                        + storage.entity_type.capacity()
+                        + storage.field_name.capacity()
+                        + storage.field_type.capacity()
+                        + storage.target_type.as_ref().map_or(0, String::capacity),
+                );
+            }
             sym.add(
                 sm.drupal_plugin_classes.capacity()
                     * size_of::<crate::symbol_map::PluginClassSite>(),

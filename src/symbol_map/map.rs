@@ -320,6 +320,9 @@ pub(crate) struct SymbolMap {
     /// The methods of the file's classes and traits that declare Drupal
     /// base fields.  Empty for every file that declares none.
     pub drupal_base_field_methods: Vec<BaseFieldMethodSite>,
+    /// The configurable field the file declares, when it is a Drupal field
+    /// storage file.  Boxed, since nearly every file declares none.
+    pub drupal_field_storage: Option<Box<FieldStorageSite>>,
     /// The classes the file's Drupal plugin declarations are written on,
     /// sorted by `start`.  Empty for every file that declares none.
     pub drupal_plugin_classes: Vec<PluginClassSite>,

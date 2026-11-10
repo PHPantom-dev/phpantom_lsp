@@ -51,6 +51,12 @@ Run `composer install` here first. Composer puts core and contrib into
   `$author`, an entity reference list that names `User`, or go to the
   definition of `title`, which lands on its `$fields['title']` line in
   `Note`.
+- Configurable fields come from field storage files: the site's exported
+  configuration in `config/sync`, beside the web root, and the default
+  configuration of modules and profiles. In `NoteSummary.php`, `field_tags`
+  completes after `$note->` too; hover `$tags`, an entity reference list
+  that names `Term`, or go to the definition of `field_tags`, which lands in
+  `config/sync/field.storage.acme_note.field_tags.yml`.
 - Route names navigate between the routing file that declares them and the
   code, links files, and templates that name them. In
   `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the

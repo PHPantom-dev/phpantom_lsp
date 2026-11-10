@@ -21,6 +21,7 @@ pub(crate) mod computed_hooks;
 pub(crate) mod config;
 pub(crate) mod config_keys;
 pub(crate) mod elements;
+pub(crate) mod field_storage;
 pub(crate) mod fields;
 pub(crate) mod hooks;
 pub(crate) mod libraries;

@@ -873,6 +873,7 @@ fn extract_symbol_map_inner(
         service_decorations: ctx.service_decorations,
         entity_types: ctx.entity_types,
         drupal_base_field_methods: ctx.drupal_base_field_methods,
+        drupal_field_storage: None,
         drupal_plugin_classes: ctx.drupal_plugin_classes,
         drupal_plugin_managers: ctx.drupal_plugin_managers,
         drupal_plugins: ctx.drupal_plugins,

@@ -908,6 +908,31 @@ pub(crate) struct BaseFieldSite {
     pub end: u32,
 }
 
+/// What a Drupal field storage file, `field.storage.<entity type>.<field>.yml`,
+/// declares: a configurable field of an entity type.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FieldStorageSite {
+    pub entity_type: String,
+    pub field_name: String,
+    /// The field type, its `type`.
+    pub field_type: String,
+    /// The entity type its `settings.target_type` names.
+    pub target_type: Option<String>,
+    /// Byte range of the `field_name` value.
+    pub start: u32,
+    pub end: u32,
+}
+
+impl FieldStorageSite {
+    /// Whether the two declare the same field, wherever it is written.
+    pub(crate) fn declares_as(&self, other: &Self) -> bool {
+        self.entity_type == other.entity_type
+            && self.field_name == other.field_name
+            && self.field_type == other.field_type
+            && self.target_type == other.target_type
+    }
+}
+
 /// The name of a base field, as written.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum BaseFieldName {

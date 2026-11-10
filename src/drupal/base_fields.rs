@@ -13,8 +13,9 @@
 //!
 //! The entity types and base field methods each file declares are copied
 //! out of its symbol map as it is published, since core's traits and base
-//! classes let go of their parse once indexed, and read into a
-//! [`FieldIndex`] on first use.
+//! classes let go of their parse once indexed, with the configurable field
+//! each field storage file declares (see [`super::field_storage`]), and
+//! read into a [`FieldIndex`] on first use.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -27,7 +28,7 @@ use crate::atom::Atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::symbol_map::{
-    BaseFieldMethodSite, BaseFieldName, EntityTypeSite, MethodScope, SymbolMap,
+    BaseFieldMethodSite, BaseFieldName, EntityTypeSite, FieldStorageSite, MethodScope, SymbolMap,
 };
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 
@@ -45,20 +46,46 @@ pub(crate) struct FieldSources {
     /// The entity types the file declares, by ID.
     entity_types: Vec<(String, EntityTypeSite)>,
     methods: Vec<BaseFieldMethodSite>,
+    /// The configurable field the file declares, when it is a field
+    /// storage file.
+    storage: Option<FieldStorageSite>,
 }
 
 impl FieldSources {
-    /// What `map`, the symbol map of the file at `uri`, gives, if anything.
-    fn of(uri: &str, map: &SymbolMap) -> Option<Self> {
-        if map.entity_types.is_empty() && map.drupal_base_field_methods.is_empty() {
+    /// What `map`, the symbol map of the file at `uri`, gives, if anything:
+    /// its entity types and base field methods when `declarations` counts
+    /// them, and its configurable field when `storage` counts it.
+    fn of(
+        uri: &str,
+        map: &SymbolMap,
+        declarations: impl FnOnce() -> bool,
+        storage: impl FnOnce() -> bool,
+    ) -> Option<Self> {
+        let declares = (!map.entity_types.is_empty() || !map.drupal_base_field_methods.is_empty())
+            && declarations();
+        let storage = map
+            .drupal_field_storage
+            .as_deref()
+            .filter(|_| storage())
+            .cloned();
+        if !declares && storage.is_none() {
             return None;
         }
         Some(Self {
             uri: Arc::from(uri),
-            entity_types: super::entity_type_declarations(map)
-                .map(|(id, site)| (id.to_string(), site.clone()))
-                .collect(),
-            methods: map.drupal_base_field_methods.clone(),
+            entity_types: if declares {
+                super::entity_type_declarations(map)
+                    .map(|(id, site)| (id.to_string(), site.clone()))
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            methods: if declares {
+                map.drupal_base_field_methods.clone()
+            } else {
+                Vec::new()
+            },
+            storage,
         })
     }
 
@@ -82,6 +109,10 @@ impl FieldSources {
                 .iter()
                 .zip(&other.methods)
                 .all(|(a, b)| a.declares_as(b))
+            && match (&self.storage, &other.storage) {
+                (Some(a), Some(b)) => a.declares_as(b),
+                (a, b) => a.is_none() && b.is_none(),
+            }
     }
 }
 
@@ -218,7 +249,7 @@ impl<'a> BaseFieldReader<'a> {
             let creation = Creation {
                 field_type: &field.field_type,
                 target_type: field.target_type.as_deref(),
-                declaration: Some(FieldDeclaration {
+                declaration: Some(FieldDeclaration::BaseField {
                     uri: Arc::clone(uri),
                     owner: site.owner,
                     method: site.method,
@@ -301,21 +332,27 @@ impl Backend {
     /// are drops the index and evicts the classes that have them; one to
     /// where they are written, as any edit above them makes, keeps both.
     pub(crate) fn note_drupal_field_sources(&self, uri: &str, map: Option<&SymbolMap>) {
-        let sources = map
-            .filter(|_| self.is_drupal_project())
-            .and_then(|map| FieldSources::of(uri, map))
-            .filter(|_| {
-                // A test module's entity types are only seen by test code,
-                // while a class's fields are the same whoever asks, and a
-                // dependency's are never part of the project's own.
-                !crate::util::uri_to_path(uri).is_some_and(|path| self.is_drupal_test_path(&path))
-                    && !self
-                        .workspace
-                        .vendor_uri_prefixes
-                        .lock()
-                        .iter()
-                        .any(|prefix| uri.starts_with(prefix.as_str()))
-            });
+        let sources = map.filter(|_| self.is_drupal_project()).and_then(|map| {
+            FieldSources::of(
+                uri,
+                map,
+                || {
+                    // A test module's entity types are only seen by test
+                    // code, while a class's fields are the same whoever
+                    // asks, and a dependency's are never part of the
+                    // project's own.
+                    !crate::util::uri_to_path(uri)
+                        .is_some_and(|path| self.is_drupal_test_path(&path))
+                        && !self
+                            .workspace
+                            .vendor_uri_prefixes
+                            .lock()
+                            .iter()
+                            .any(|prefix| uri.starts_with(prefix.as_str()))
+                },
+                || self.is_drupal_field_storage_source(uri),
+            )
+        });
         let old = self.drupal.field_sources.read().get(uri).cloned();
         if old.as_deref() == sources.as_ref() {
             return;
@@ -349,9 +386,10 @@ impl Backend {
             let mut cache = self.resolved_class_cache.write();
             crate::virtual_members::evict_fqn(&mut cache, FIELDABLE_ENTITY);
         }
-        // A cached receiver resolution records no dependency on the files
-        // the fields are read from.
+        // A cached receiver resolution, or member completion, records no
+        // dependency on the files the fields are read from.
         self.clear_resolved_member_files();
+        self.member_completion_cache.lock().clear();
     }
 
     /// The fields of the project's content entity types, read on first use.
@@ -372,7 +410,11 @@ impl Backend {
         let loader = self.resolved_class_loader_with(&[]);
         let mut methods = HashMap::new();
         let mut declared: Vec<(&str, &EntityTypeSite)> = Vec::new();
+        let mut storages: Vec<(&Arc<str>, &FieldStorageSite)> = Vec::new();
         for source in &sources {
+            if let Some(storage) = &source.storage {
+                storages.push((&source.uri, storage));
+            }
             for site in &source.methods {
                 methods
                     .entry((
@@ -404,6 +446,26 @@ impl Backend {
                 &mut Vec::new(),
             );
             add_manager_fields(&mut created, site, &keys);
+            // A field declared by several files is one field.
+            for &(uri, storage) in storages
+                .iter()
+                .filter(|(_, storage)| storage.entity_type == id)
+            {
+                let creation = Creation {
+                    field_type: &storage.field_type,
+                    target_type: storage.target_type.as_deref(),
+                    declaration: Some(FieldDeclaration::Storage {
+                        uri: Arc::clone(uri),
+                    }),
+                };
+                match created
+                    .iter_mut()
+                    .find(|(known, _)| *known == storage.field_name)
+                {
+                    Some((_, creations)) => creations.push(creation),
+                    None => created.push((storage.field_name.clone(), vec![creation])),
+                }
+            }
             let fields = created
                 .into_iter()
                 .map(|(name, creations)| {
@@ -443,53 +505,85 @@ impl Backend {
         index
     }
 
-    /// Where the field `name` of `receiver` is declared: the first of the
-    /// declarations the entity types it may hold give, when the property
-    /// `name` of `receiver` is that field.
-    pub(crate) fn drupal_field_location(
+    /// Where the field `name` of `receiver` is declared, every declaration
+    /// of the entity types it may hold, when the property `name` of
+    /// `receiver` is that field.
+    pub(crate) fn drupal_field_locations(
         &self,
         receiver: &ClassInfo,
         name: &str,
         class_loader: &ResolvedClassLoader<'_>,
-    ) -> Option<Location> {
+    ) -> Vec<Location> {
         if !self.is_drupal_project() {
-            return None;
+            return Vec::new();
         }
         let resolved = crate::virtual_members::resolve_class_fully_cached(
             receiver,
             class_loader,
             &self.resolved_class_cache,
         );
-        if !resolved
-            .properties
-            .iter()
-            .any(|property| property.name == name && property.writes_through_magic_set())
-        {
-            return None;
+        if !resolved.properties.iter().any(|property| {
+            property.name == name
+                && property.source == Some(crate::types::PropertySource::DrupalField)
+        }) {
+            return Vec::new();
         }
-        let index = self.drupal_field_index()?;
-        let field = index
+        let Some(index) = self.drupal_field_index() else {
+            return Vec::new();
+        };
+        let Some(field) = index
             .fields_of(receiver, class_loader)
             .into_iter()
-            .find(|field| field.name == name)?;
-        let declaration = field.declarations.first()?;
-        let (start, end) = {
-            let sources = self.drupal.field_sources.read();
-            let site = sources
-                .get(&*declaration.uri)?
-                .methods
-                .iter()
-                .find(|site| {
-                    site.owner == declaration.owner && site.method == declaration.method
-                })?;
-            let statement = site.fields.get(declaration.statement)?;
-            (statement.start, statement.end)
+            .find(|field| field.name == name)
+        else {
+            return Vec::new();
         };
-        let uri = &*declaration.uri;
-        let content = self.get_file_content_arc(uri)?;
+        self.field_locations(&field)
+    }
+
+    /// Where each declaration of `field` is written now.
+    fn field_locations(&self, field: &Field) -> Vec<Location> {
+        let mut locations: Vec<Location> = Vec::new();
+        for declaration in &field.declarations {
+            if let Some(location) = self.field_declaration_location(declaration)
+                && !locations.contains(&location)
+            {
+                locations.push(location);
+            }
+        }
+        locations
+    }
+
+    /// Where `declaration` is written now.
+    fn field_declaration_location(&self, declaration: &FieldDeclaration) -> Option<Location> {
+        let (uri, start, end) = {
+            let sources = self.drupal.field_sources.read();
+            match declaration {
+                FieldDeclaration::BaseField {
+                    uri,
+                    owner,
+                    method,
+                    statement,
+                } => {
+                    let statement = sources
+                        .get(&**uri)?
+                        .methods
+                        .iter()
+                        .find(|site| site.owner == *owner && site.method == *method)?
+                        .fields
+                        .get(*statement)?;
+                    (Arc::clone(uri), statement.start, statement.end)
+                }
+                FieldDeclaration::Storage { uri } => {
+                    let storage = sources.get(&**uri)?.storage.as_ref()?;
+                    (Arc::clone(uri), storage.start, storage.end)
+                }
+            }
+        };
+        let content = self.get_file_content_arc(&uri)?;
         let lines = crate::text_position::LineIndex::new(&content);
         Some(Location {
-            uri: crate::util::parse_url(uri)?,
+            uri: crate::util::parse_url(&uri)?,
             range: Range {
                 start: lines.position(start as usize),
                 end: lines.position(end as usize),

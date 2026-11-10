@@ -44,6 +44,7 @@ use Drupal\Core\Field\Plugin\Field\FieldWidget\StringTextfieldWidget;
 use Drupal\Core\Validation\Attribute\Constraint;
 use Drupal\Core\Validation\Plugin\Validation\Constraint\UniqueFieldConstraint;
 use Drupal\Core\Config\ConfigBase;
+use Drupal\Core\Config\FileStorage;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
@@ -71,6 +72,7 @@ use Drupal\Core\Render\Element\RenderElementBase;
 use Drupal\Core\Url;
 use Drupal\language\ConfigurableLanguageManager;
 use Drupal\language\LanguageServiceProvider;
+use Drupal\taxonomy\Entity\Term;
 use Drupal\user\Entity\User;
 use Drupal\user\EntityOwnerInterface;
 use Drupal\user\EntityOwnerTrait;
@@ -106,10 +108,10 @@ $web = __DIR__ . '/web';
 $module = "$web/modules/custom/acme";
 $theme = "$web/themes/custom/acme_theme";
 
-// The demo's classes live in the module, and the language and user
-// modules' in core, which only a booted site adds to the autoloader.
+// The demo's classes live in the module, and the language, taxonomy, and
+// user modules' in core, which only a booted site adds to the autoloader.
 spl_autoload_register(static function (string $class) use ($module, $web): void {
-    foreach (['acme' => $module, 'language' => "$web/core/modules/language", 'user' => "$web/core/modules/user"] as $name => $dir) {
+    foreach (['acme' => $module, 'language' => "$web/core/modules/language", 'taxonomy' => "$web/core/modules/taxonomy", 'user' => "$web/core/modules/user"] as $name => $dir) {
         $prefix = "Drupal\\$name\\";
         if (str_starts_with($class, $prefix)) {
             $file = "$dir/src/" . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
@@ -271,6 +273,18 @@ check('StringItem is the string field type, kept in the default FieldItemList', 
 check('EntityReferenceItem is the entity_reference field type, kept in an EntityReferenceFieldItemList', ($referenceType['id'] ?? null) === 'entity_reference' && ($referenceType['list_class'] ?? null) === EntityReferenceFieldItemList::class);
 check('NoteSummary reads the title and uid fields of a NoteInterface, which Note implements', str_contains($summarySource, '$note->title;') && str_contains($summarySource, '$note->uid;') && $note->implementsInterface(NoteInterface::class));
 check('NoteInterface is a content entity interface, which has fields', is_subclass_of(NoteInterface::class, ContentEntityInterface::class));
+
+// Configurable fields: the site's exported field storage, read with core's
+// configuration file storage, declares field_tags on acme_note, an entity
+// reference to taxonomy terms (core's FieldStorageConfig).
+$sync = new FileStorage(__DIR__ . '/config/sync');
+$tagsStorage = $sync->read('field.storage.acme_note.field_tags');
+check('the exported configuration declares the field_tags storage', is_array($tagsStorage) && in_array('field.storage.acme_note.field_tags', $sync->listAll('field.storage.'), true));
+check('field_tags is a field of acme_note', ($tagsStorage['entity_type'] ?? null) === ($noteType['id'] ?? null) && ($tagsStorage['field_name'] ?? null) === 'field_tags' && ($tagsStorage['id'] ?? null) === 'acme_note.field_tags');
+check('field_tags is an entity_reference field, kept in an EntityReferenceFieldItemList', ($tagsStorage['type'] ?? null) === ($referenceType['id'] ?? null));
+check('field_tags points to taxonomy terms, whose class is Term', ($tagsStorage['settings']['target_type'] ?? null) === 'taxonomy_term' && (attributeArguments(new ReflectionClass(Term::class), ContentEntityType::class)['id'] ?? null) === 'taxonomy_term');
+check('the exported field attaches field_tags to the acme_note bundle', ($sync->read('field.field.acme_note.acme_note.field_tags')['field_name'] ?? null) === 'field_tags');
+check('NoteSummary reads the field_tags field of a NoteInterface', str_contains($summarySource, '$note->field_tags;'));
 check('NoteSummary returns a string', (new ReflectionMethod(NoteSummary::class, 'summarize'))->getReturnType()?->getName() === 'string');
 
 // Drupal upcasts a controller's parameter named after an entity type and
