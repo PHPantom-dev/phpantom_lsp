@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of};
+use crate::symbol_map::{CallbackKey, CallbackShape, DrupalCallbackSite};
 use crate::types::{ClassInfo, ClassLikeKind};
 
 /// The keys of a form or render array that hold a list of callbacks.
@@ -52,7 +53,7 @@ pub(crate) const RENDER_CALLBACK_KEYS: [&str; 4] = [
 const FORM_INTERFACE: &str = "Drupal\\Core\\Form\\FormInterface";
 
 /// Whether `'::method'` written in `class` names a method of it.
-fn names_own_method(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
+pub(crate) fn names_own_method(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
     class.kind == ClassLikeKind::Trait || is_subtype_of(class, FORM_INTERFACE, class_loader)
 }
 
@@ -64,6 +65,28 @@ pub(crate) fn form_callback_classes(
 ) -> Vec<Arc<ClassInfo>> {
     classes.retain(|class| names_own_method(class, class_loader));
     classes
+}
+
+/// Whether Drupal looks up the method the callback `site` names:
+/// `'::method'` only under a form callback key, and a service's method
+/// anywhere but under `#value_callback`.
+pub(crate) fn looks_up_method(site: &DrupalCallbackSite) -> bool {
+    match site.shape {
+        CallbackShape::FormMethod => site.key == CallbackKey::Form,
+        CallbackShape::ServiceMethod => site.key != CallbackKey::Value,
+        CallbackShape::ClassMethod { .. }
+        | CallbackShape::JoinedMethod
+        | CallbackShape::ArrayCallable => true,
+    }
+}
+
+/// The callback among `sites`, sorted by start, whose method span starts
+/// at `start`.
+pub(crate) fn callback_at(sites: &[DrupalCallbackSite], start: u32) -> Option<&DrupalCallbackSite> {
+    sites
+        .binary_search_by_key(&start, |site| site.start)
+        .ok()
+        .map(|at| &sites[at])
 }
 
 /// [`form_callback_classes`] for classes known by name.

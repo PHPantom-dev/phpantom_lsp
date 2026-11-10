@@ -132,6 +132,7 @@ struct ExtractionCtx<'a> {
     drupal_routes: Vec<crate::symbol_map::DrupalRouteSite>,
     drupal_hooks: Vec<crate::symbol_map::HookSite>,
     drupal_computed_hooks: Vec<crate::symbol_map::ComputedHookSite>,
+    drupal_callbacks: Vec<crate::symbol_map::DrupalCallbackSite>,
     /// What the file holds of Drupal hooks, which its path says.
     drupal_file: crate::drupal::hooks::DrupalFile,
     /// A procedural function with `#[ProceduralHookScanStop]` was read:
@@ -641,6 +642,7 @@ fn extract_symbol_map_inner(
         drupal_routes: Vec::new(),
         drupal_hooks: Vec::new(),
         drupal_computed_hooks: Vec::new(),
+        drupal_callbacks: Vec::new(),
         drupal_file,
         drupal_hook_scan_stopped: false,
         cond_nesting_depth: 0,
@@ -831,6 +833,9 @@ fn extract_symbol_map_inner(
     ctx.drupal_hooks.sort_by_key(|s| s.start);
     ctx.tempest_uri_calls.sort_unstable();
     ctx.drupal_hooks.dedup_by_key(|s| s.start);
+    ctx.drupal_callbacks.sort_by_key(|s| s.start);
+    ctx.drupal_callbacks.dedup_by_key(|s| s.start);
+    ctx.drupal_callbacks.shrink_to_fit();
     ctx.routes.shrink_to_fit();
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
@@ -883,6 +888,7 @@ fn extract_symbol_map_inner(
         drupal_routes: ctx.drupal_routes,
         drupal_hooks: ctx.drupal_hooks,
         drupal_computed_hooks: ctx.drupal_computed_hooks,
+        drupal_callbacks: ctx.drupal_callbacks,
         routes: ctx.routes,
         tempest_routes: ctx.tempest_routes.into_boxed_slice(),
         tempest_uri_calls: ctx.tempest_uri_calls.into_boxed_slice(),

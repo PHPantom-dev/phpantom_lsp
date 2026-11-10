@@ -164,7 +164,10 @@ Run `composer install` here first. Composer puts core and contrib into
   references of a callback method, or rename it, and the strings follow.
   Complete inside a callback string: after `'::` the form's public methods
   are offered, after `'Class::` the class's, after `'service:` the service
-  class's, and before any colon the functions.
+  class's, and before any colon the functions. A callback Drupal cannot
+  call is reported: misspell `'::validateName'`, make `validateName`
+  private, or make `trimName` non-static, which Drupal ignores as a value
+  callback.
   A `'service:method'` callback leads to the method of the service's
   class: in `card()` in
   `web/modules/custom/acme/src/Controller/GreetingController.php`, go to

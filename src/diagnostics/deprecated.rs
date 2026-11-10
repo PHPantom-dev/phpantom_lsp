@@ -250,13 +250,16 @@ impl Backend {
                         continue;
                     }
                     // A form callback's `'::method'` names a method only of a
-                    // form.
+                    // form, and only under a key Drupal looks it up for.
                     if *docblock_ref == crate::symbol_map::DocblockMemberRef::FormCallback
-                        && crate::drupal::forms::form_callback_classes(
-                            vec![Arc::clone(&base_class)],
+                        && (!crate::drupal::forms::names_own_method(
+                            &base_class,
                             resolved_class_loader,
+                        ) || crate::drupal::forms::callback_at(
+                            &symbol_map.drupal_callbacks,
+                            span.start,
                         )
-                        .is_empty()
+                        .is_some_and(|site| !crate::drupal::forms::looks_up_method(site)))
                     {
                         continue;
                     }

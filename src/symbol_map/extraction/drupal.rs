@@ -5,14 +5,17 @@
 //! [`crate::drupal`]).
 
 use super::*;
-use crate::drupal::forms::{AJAX, AJAX_CALLBACK, CALLBACK_KEYS, CALLBACK_LIST_KEYS, LAZY_BUILDER};
+use crate::drupal::forms::{
+    AJAX, AJAX_CALLBACK, CALLBACK_KEYS, CALLBACK_LIST_KEYS, LAZY_BUILDER, RENDER_CALLBACK_KEYS,
+    VALUE_CALLBACK,
+};
 use crate::symbol_map::extraction::symfony::{
     RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
 use crate::symbol_map::{
-    DeclaredParameter, DrupalRouteSite, EntityTypeSite, ModuleGuard, PluginClassSite,
-    PluginDeclarationSite, PluginManagerSite, ReceiverClass, StaticPluginSite, StringKeyKind,
-    TypedReceiverSite,
+    CallbackKey, CallbackShape, DeclaredParameter, DrupalCallbackSite, DrupalRouteSite,
+    EntityTypeSite, ModuleGuard, PluginClassSite, PluginDeclarationSite, PluginManagerSite,
+    ReceiverClass, StaticPluginSite, StringKeyKind, TypedReceiverSite,
 };
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
@@ -2824,17 +2827,21 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_callback_assignment(
                 && let Some((key, _, _)) = resolved_string_literal(access.index, ctx.content)
                 && CALLBACK_LIST_KEYS.contains(&key)
             {
-                push_callback(assign.rhs, ctx);
+                push_callback(assign.rhs, callback_key(key), ctx);
             }
         }
         Expression::ArrayAccess(access) => {
             let Some((key, _, _)) = resolved_string_literal(access.index, ctx.content) else {
                 return;
             };
-            if key == AJAX_CALLBACK {
-                if accesses_keys(access.array, &[AJAX], ctx.content) {
-                    push_callback(assign.rhs, ctx);
-                }
+            if key == AJAX_CALLBACK && accesses_keys(access.array, &[AJAX], ctx.content) {
+                push_callback(assign.rhs, CallbackKey::Form, ctx);
+            } else if let Expression::ArrayAccess(list) = access.array
+                && let Some((list_key, _, _)) = resolved_string_literal(list.index, ctx.content)
+                && CALLBACK_LIST_KEYS.contains(&list_key)
+            {
+                // `$form['#entity_builders']['name'] = …`, a keyed entry.
+                push_callback(assign.rhs, callback_key(list_key), ctx);
             } else {
                 push_keyed_callbacks(key, assign.rhs, ctx);
             }
@@ -2843,10 +2850,21 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_callback_assignment(
     }
 }
 
+/// How Drupal calls the callbacks under the callback key `key`.
+fn callback_key(key: &str) -> CallbackKey {
+    if key == VALUE_CALLBACK {
+        CallbackKey::Value
+    } else if RENDER_CALLBACK_KEYS.contains(&key) {
+        CallbackKey::Render
+    } else {
+        CallbackKey::Form
+    }
+}
+
 /// Record the callbacks `value`, written under `key`, names.
 fn push_keyed_callbacks(key: &str, value: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
     if CALLBACK_KEYS.contains(&key) {
-        push_callback(value, ctx);
+        push_callback(value, callback_key(key), ctx);
         return;
     }
     let lazy_builder = key == LAZY_BUILDER;
@@ -2858,11 +2876,16 @@ fn push_keyed_callbacks(key: &str, value: &Expression<'_>, ctx: &mut ExtractionC
     };
     for entry in entries.iter() {
         match entry {
-            ArrayElement::Value(item) if key != AJAX => push_callback(item.value, ctx),
+            ArrayElement::Value(item) if key != AJAX => {
+                push_callback(item.value, callback_key(key), ctx);
+            }
+            ArrayElement::KeyValue(entry) if !lazy_builder && key != AJAX => {
+                push_callback(entry.value, callback_key(key), ctx);
+            }
             ArrayElement::KeyValue(entry)
                 if key == AJAX && is_literal_key(entry.key, AJAX_CALLBACK, ctx.content) =>
             {
-                push_callback(entry.value, ctx);
+                push_callback(entry.value, CallbackKey::Form, ctx);
             }
             _ => {}
         }
@@ -2875,13 +2898,24 @@ fn push_keyed_callbacks(key: &str, value: &Expression<'_>, ctx: &mut ExtractionC
 /// Record what one callback names: a method of the form for `'::method'`,
 /// a method of the class for `'Class::method'` or a class name joined to
 /// `'::method'`, a service and a method of its class for
-/// `'service:method'`, and a function for a name without a colon.  An array
-/// callable is read wherever it is written.
-fn push_callback(callback: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+/// `'service:method'`, and a function for a name without a colon, each
+/// method under `key`.  An array callable is read wherever it is written,
+/// so only its key is recorded here.
+fn push_callback(callback: &Expression<'_>, key: CallbackKey, ctx: &mut ExtractionCtx<'_>) {
     if let Expression::Binary(binary) = callback
         && binary.operator.is_concatenation()
     {
-        push_joined_callback(binary.lhs, binary.rhs, ctx);
+        push_joined_callback(binary.lhs, binary.rhs, key, ctx);
+        return;
+    }
+    if let Some(elements) = crate::parser::array_literal_elements(callback) {
+        let mut items = elements.iter();
+        if let (Some(ArrayElement::Value(_)), Some(ArrayElement::Value(method)), None) =
+            (items.next(), items.next(), items.next())
+            && let Some((_, start, _)) = resolved_string_literal(method.value, ctx.content)
+        {
+            push_callback_site(start as u32, key, CallbackShape::ArrayCallable, ctx);
+        }
         return;
     }
     let Some((value, start, end)) = resolved_string_literal(callback, ctx.content) else {
@@ -2901,23 +2935,31 @@ fn push_callback(callback: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
                 method_start,
                 ctx,
             );
+            push_callback_site(method_start, key, CallbackShape::FormMethod, ctx);
             return;
         }
         // A class name in a string is a runtime name, which is fully
-        // qualified whether or not it says so.
+        // qualified whether or not it says so.  Drupal calls the method of
+        // an instance of the class unless the string is a native callable,
+        // which only `#value_callback` requires.
         let class = class.strip_prefix('\\').unwrap_or(class);
         if is_qualified_name(class) {
             push_callback_method(
                 SubjectText::owned(format!("\\{class}")),
-                true,
+                false,
                 DocblockMemberRef::No,
                 method,
                 method_start,
                 ctx,
             );
+            let class_end = method_start as usize - 2;
+            let class_start = class_end.saturating_sub(class.len());
+            let spelled = ctx.content.get(class_start..class_end) == Some(class);
+            let class = spelled.then_some((class_start as u32, class_end as u32));
+            push_callback_site(method_start, key, CallbackShape::ClassMethod { class }, ctx);
         }
     } else if let Some((service, method)) = value.split_once(':') {
-        push_service_callback(service, method, start, end, ctx);
+        push_service_callback(service, method, start, end, key, ctx);
     } else {
         let name = value.strip_prefix('\\').unwrap_or(value);
         if is_qualified_name(name) {
@@ -2944,6 +2986,7 @@ fn push_service_callback(
     method: &str,
     start: usize,
     end: usize,
+    key: CallbackKey,
     ctx: &mut ExtractionCtx<'_>,
 ) {
     if !crate::drupal::routing::is_plain_name(service)
@@ -2963,14 +3006,16 @@ fn push_service_callback(
             is_optional: false,
         },
     });
+    let method_start = (end - method.len()) as u32;
     push_callback_method(
         SubjectText::owned(crate::drupal::routing::service_subject(service)),
         false,
         DocblockMemberRef::No,
         method,
-        (end - method.len()) as u32,
+        method_start,
         ctx,
     );
+    push_callback_site(method_start, key, CallbackShape::ServiceMethod, ctx);
 }
 
 /// Record the method `X::class . '::method'`, `static::class . '::method'`,
@@ -2979,6 +3024,7 @@ fn push_service_callback(
 fn push_joined_callback(
     class: &Expression<'_>,
     method: &Expression<'_>,
+    key: CallbackKey,
     ctx: &mut ExtractionCtx<'_>,
 ) {
     let Some((value, _, end)) = resolved_string_literal(method, ctx.content) else {
@@ -3007,14 +3053,28 @@ fn push_joined_callback(
         }
         _ => return,
     };
+    let method_start = (end - name.len()) as u32;
+    // Read as `'Class::method'`, which Drupal calls on an instance.
     push_callback_method(
         subject,
-        true,
+        false,
         DocblockMemberRef::No,
         name,
-        (end - name.len()) as u32,
+        method_start,
         ctx,
     );
+    push_callback_site(method_start, key, CallbackShape::JoinedMethod, ctx);
+}
+
+/// Record that the method span at `start` is a callback under `key`.
+fn push_callback_site(
+    start: u32,
+    key: CallbackKey,
+    shape: CallbackShape,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    ctx.drupal_callbacks
+        .push(DrupalCallbackSite { start, key, shape });
 }
 
 /// Record the method `name`, at `start`, of `subject` that a callback

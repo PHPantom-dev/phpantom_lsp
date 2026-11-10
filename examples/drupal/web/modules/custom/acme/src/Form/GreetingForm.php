@@ -28,13 +28,17 @@ final class GreetingForm extends FormBase
         // callback on the form object. Find the references of
         // validateName(), or rename it, and the string follows. Delete
         // validateName and complete after the `::`: the form's public
-        // methods are offered.
+        // methods are offered. Misspell validateName, or make the method
+        // private, and the callback is reported: Drupal calls it from
+        // outside the form.
         $form['#validate'][] = '::validateName';
         $form['name'] = [
             '#type' => 'textfield',
             '#title' => 'Name',
             // Try: hover trimName. A class name joined to '::method' reads
-            // as one 'Class::method'.
+            // as one 'Class::method'. Make trimName non-static, or write
+            // '::trimName': Drupal ignores a value callback that is not a
+            // native callable, and the callback is reported.
             '#value_callback' => static::class . '::trimName',
             // Try: go to the definition of refreshGreeting, the callback
             // the `#ajax` array holds.
@@ -49,7 +53,8 @@ final class GreetingForm extends FormBase
             '#value' => 'Greet',
             // Try: go to the definition of acme_greeting_form_submit, a
             // function of acme.module. A function name in a callback string
-            // is global, whatever namespace the file is in.
+            // is global, whatever namespace the file is in. Misspell it, and
+            // it is reported.
             '#submit' => ['::submitForm', 'acme_greeting_form_submit'],
         ];
 

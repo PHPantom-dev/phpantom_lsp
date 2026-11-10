@@ -811,72 +811,663 @@ async fn renaming_a_method_or_function_rewrites_the_name_in_its_callbacks() {
     );
 }
 
-/// Callbacks that name nothing, or a method Drupal cannot call, which this
-/// support reads without warning about, next to a call and a method call
-/// that do get a warning.
-const UNCHECKED_PATH: &str = "web/modules/custom/acme/src/Form/UncheckedForm.php";
+/// The zero-based line, code and text of each diagnostic of the open file
+/// `path`.
+fn diagnostics_of(
+    backend: &phpantom_lsp::Backend,
+    dir: &tempfile::TempDir,
+    path: &str,
+    content: &str,
+) -> Vec<(u32, String, String)> {
+    let uri = uri_for(dir, path);
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
+    backend.collect_fast_diagnostics(uri.as_str(), content, &mut diagnostics);
+    let mut found: Vec<(u32, String, String)> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let code = match &diagnostic.code {
+                Some(Code::String(code)) => code.clone(),
+                _ => String::new(),
+            };
+            (
+                diagnostic.range.start.line,
+                code,
+                crate::common::message_text(&diagnostic.message).to_string(),
+            )
+        })
+        .collect();
+    found.sort();
+    found
+}
 
-const UNCHECKED: &str = r#"<?php
+/// Whether `found` holds exactly one diagnostic on the line of `needle` in
+/// `content`, under `code`, whose text contains `text`.
+#[track_caller]
+fn assert_reported(
+    found: &[(u32, String, String)],
+    content: &str,
+    needle: &str,
+    code: &str,
+    text: &str,
+) {
+    let line = line_of(content, needle);
+    let on_line: Vec<_> = found.iter().filter(|(at, _, _)| *at == line).collect();
+    assert!(
+        on_line.len() == 1 && on_line[0].1 == code && on_line[0].2.contains(text),
+        "{needle}: {found:?}"
+    );
+}
+
+const WARNED_PATH: &str = "web/modules/custom/acme/src/Form/WarnedForm.php";
+
+const WARNED: &str = r#"<?php
 namespace Drupal\acme\Form;
 
 use Drupal\Core\Form\FormBase;
 
-final class UncheckedForm extends FormBase {
-    public function buildForm(array $form, $form_state): array {
-        $form['#submit'] = [
-            '::nope',
-            'Drupal\acme\Helper::nope',
-            'Drupal\acme\Missing::nope',
-            'acme_nope_submit',
-            'Drupal\acme\Form\Guarded::hidden',
-            'acme.greeter:greet',
-        ];
-        acme_missing_function();
-        $this->missingMethod();
+final class WarnedForm extends FormBase {
+    public function buildForm(array $form, $form_state, $callback = null, string $prefix = ''): array {
+        $form['#validate'][] = '::missingCheck';
+        $form['#submit'] = [[$this, 'missingSave'], [static::class, 'processTitle']];
+        $form['#submit'][] = [static::class, 'save'];
+        $form['#process'][] = static::class . '::save';
+        $form['x']['#ajax']['callback'] = static::class . '::missingRefresh';
+        $form['y'] = ['#ajax' => ['callback' => [$this, 'missingAjax']]];
+        $form['#process'] = ['Drupal\acme\Helper::missingProcess', '\Drupal\acme\Helper::shout'];
+        $form['#markup'] = [$this, 'notACallback'];
+        $form['z']['#ajax']['callback'] = '::save';
+        $form['#after_build'][] = '::save';
+        $form['#entity_builders'] = ['::save'];
+        $form['#submit'][] = $callback;
+        $form['#submit'][] = $prefix . '::notRead';
         return $form;
     }
-}
 
-final class Guarded {
-    protected function hidden(): void {}
+    public static function processTitle(array $element): array {
+        $element['#process'][] = '::missingInStatic';
+        return $element;
+    }
+
+    public function save(): void {}
 }
 "#;
 
 #[tokio::test]
-async fn reading_callbacks_adds_no_warning() {
+async fn a_callback_naming_a_missing_method_is_reported() {
     let (backend, dir) = workspace(&[
         (FORM_INTERFACE_PATH, FORM_INTERFACE),
         (FORM_BASE_PATH, FORM_BASE),
         (HELPER_PATH, HELPER),
-        (UNCHECKED_PATH, UNCHECKED),
+        (WARNED_PATH, WARNED),
         (HOOKS_PATH, HOOKS),
+        (TRAIT_PATH, MISSING_TRAIT),
     ])
     .await;
     backend.ensure_workspace_indexed();
-    for (path, content, expected) in [
-        (
-            UNCHECKED_PATH,
-            UNCHECKED,
-            &["acme_missing_function()", "missingMethod"][..],
-        ),
-        (HOOKS_PATH, HOOKS, &[][..]),
+    let found = diagnostics_of(&backend, &dir, WARNED_PATH, WARNED);
+    for needle in [
+        "missingCheck",
+        "missingSave",
+        "missingRefresh",
+        "missingAjax",
+        "missingProcess",
+        "missingInStatic",
     ] {
-        let uri = uri_for(&dir, path);
-        let mut diagnostics = Vec::new();
-        backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
-        backend.collect_fast_diagnostics(uri.as_str(), content, &mut diagnostics);
-        let messages: Vec<&str> = diagnostics
-            .iter()
-            .map(|diagnostic| crate::common::message_text(&diagnostic.message))
-            .collect();
-        assert_eq!(messages.len(), expected.len(), "{path}: {messages:?}");
-        for name in expected {
-            assert!(
-                messages.iter().any(|message| message.contains(name)),
-                "{path}: {messages:?}"
-            );
-        }
+        assert_reported(&found, WARNED, needle, "unknown_member", needle);
     }
+    // Drupal calls an array callable that names its class only when the
+    // method is static, and instantiates the class a string names.
+    assert_reported(
+        &found,
+        WARNED,
+        "[static::class, 'save']",
+        "invalid_drupal_callback",
+        "WarnedForm::save() is not static",
+    );
+    assert_eq!(found.len(), 7, "{found:?}");
+
+    // `'::method'` outside a form names a method of a form the code does
+    // not know, and in a trait one the using form may declare.
+    assert_eq!(
+        diagnostics_of(&backend, &dir, HOOKS_PATH, HOOKS),
+        Vec::new()
+    );
+    assert_eq!(
+        diagnostics_of(&backend, &dir, TRAIT_PATH, MISSING_TRAIT),
+        Vec::new()
+    );
+}
+
+const KEYED_PATH: &str = "web/modules/custom/acme/src/Form/KeyedForm.php";
+
+/// A form whose callback lists hold keyed entries, as core's entity forms
+/// key their entity builders.
+const KEYED: &str = r#"<?php
+namespace Drupal\acme\Form;
+
+use Drupal\Core\Form\FormBase;
+
+final class KeyedForm extends FormBase {
+    public function buildForm(array $form, $form_state): array {
+        $form['#entity_builders']['acme_entity'] = '::buildEntity';
+        $form['actions']['submit'] = ['#submit' => ['acme_save' => '::saveKeyed']];
+        $form['#validate']['acme_missing'] = '::missingKeyed';
+        $form['#ajax']['wrapper'] = '::buildEntity';
+        $form['other']['acme_other'] = '::buildEntity';
+        $form['#lazy_builder'] = ['acme_builder' => '::buildEntity', []];
+        return $form;
+    }
+
+    public function buildEntity(): void {}
+
+    public function saveKeyed(): void {}
+}
+"#;
+
+#[tokio::test]
+async fn a_keyed_entry_of_a_callback_list_is_a_callback() {
+    let (backend, dir) = workspace(&[
+        (FORM_INTERFACE_PATH, FORM_INTERFACE),
+        (FORM_BASE_PATH, FORM_BASE),
+        (KEYED_PATH, KEYED),
+    ])
+    .await;
+    backend.ensure_workspace_indexed();
+    let keyed = (KEYED_PATH, KEYED);
+    let keyed_uri = uri_for(&dir, KEYED_PATH);
+    let build_entity = (keyed_uri.clone(), line_of(KEYED, "function buildEntity"));
+    let save_keyed = (keyed_uri.clone(), line_of(KEYED, "function saveKeyed"));
+    for (needle, inside, expected) in [
+        ("'::buildEntity'", 4, vec![build_entity]),
+        ("'::saveKeyed'", 4, vec![save_keyed]),
+        // Only a list key's entries are callbacks, and only the first item
+        // of `#lazy_builder`.
+        ("['wrapper'] = '::buildEntity'", 18, Vec::new()),
+        ("['acme_other'] = '::buildEntity'", 21, Vec::new()),
+        ("'acme_builder' => '::buildEntity'", 23, Vec::new()),
+    ] {
+        let found = definition_lines(&backend, &dir, keyed, needle, inside).await;
+        assert_eq!(found, expected, "{needle}");
+    }
+
+    let found = reference_lines(&backend, &dir, keyed, "function buildEntity", 10).await;
+    assert_eq!(
+        found,
+        lines(
+            &dir,
+            &[
+                (KEYED_PATH, KEYED, "function buildEntity"),
+                (KEYED_PATH, KEYED, "$form['#entity_builders']"),
+            ]
+        )
+    );
+
+    let position = position_in(KEYED, "function saveKeyed", 10);
+    let edit = rename(
+        &backend,
+        &keyed_uri,
+        position.line,
+        position.character,
+        "storeKeyed",
+    )
+    .await
+    .expect("an edit");
+    assert_eq!(
+        renamed(&edit, &dir, keyed),
+        KEYED.replace("saveKeyed", "storeKeyed")
+    );
+
+    let found = diagnostics_of(&backend, &dir, KEYED_PATH, KEYED);
+    assert_reported(
+        &found,
+        KEYED,
+        "missingKeyed",
+        "unknown_member",
+        "missingKeyed",
+    );
+    assert_eq!(found.len(), 1, "{found:?}");
+}
+
+/// A trait whose callbacks name a method it lacks.
+const MISSING_TRAIT: &str = r#"<?php
+namespace Drupal\acme\Form;
+
+trait ButtonsTrait {
+    public function addButtons(array &$form): void {
+        $form['#submit'][] = '::pressMissing';
+        $form['#validate'][] = static::class . '::pressMissing';
+        $form['#process'][] = [$this, 'pressMissing'];
+    }
+}
+"#;
+
+const HIDDEN_PATH: &str = "web/modules/custom/acme/src/Form/HiddenForm.php";
+
+/// A form whose callbacks name methods Drupal cannot call from outside the
+/// class, which the class itself may call.
+const HIDDEN: &str = r#"<?php
+namespace Drupal\acme\Form;
+
+use Drupal\Core\Form\FormBase;
+
+final class HiddenForm extends FormBase {
+    public function buildForm(array $form, $form_state): array {
+        $form['#validate'][] = '::privateCheck';
+        $form['#submit'] = [[$this, 'protectedSave']];
+        $form['#process'][] = static::class . '::privateProcess';
+        $form['#pre_render'] = ['Drupal\acme\Form\Hidden::secret'];
+        $this->privateCheck();
+        $this->protectedSave();
+        static::privateProcess();
+        return $form;
+    }
+
+    private function privateCheck(): void {}
+
+    protected function protectedSave(): void {}
+
+    private static function privateProcess(): void {}
+}
+
+final class Hidden {
+    protected function secret(): void {}
+}
+"#;
+
+#[tokio::test]
+async fn a_callback_naming_a_method_drupal_cannot_call_is_reported() {
+    let (backend, dir) = workspace(&[
+        (FORM_INTERFACE_PATH, FORM_INTERFACE),
+        (FORM_BASE_PATH, FORM_BASE),
+        (HIDDEN_PATH, HIDDEN),
+    ])
+    .await;
+    backend.ensure_workspace_indexed();
+    let found = diagnostics_of(&backend, &dir, HIDDEN_PATH, HIDDEN);
+    for (needle, text) in [
+        ("'::privateCheck'", "Cannot call private method"),
+        ("'protectedSave'", "Cannot call protected method"),
+        ("'::privateProcess'", "Cannot call private method"),
+        ("Hidden::secret", "Cannot call protected method"),
+    ] {
+        assert_reported(&found, HIDDEN, needle, "inaccessible_member", text);
+    }
+    assert_eq!(found.len(), 4, "{found:?}");
+}
+
+const NAMESPACED_FUNCTION_PATH: &str = "web/modules/custom/acme/src/Form/namespaced.php";
+
+/// A function only the form's namespace declares.
+const NAMESPACED_FUNCTION: &str =
+    "<?php\nnamespace Drupal\\acme\\Form;\n\nfunction acme_namespaced_submit(): void {}\n";
+
+const INVOKABLE_PATH: &str = "web/modules/custom/acme/src/Invokable.php";
+
+const INVOKABLE: &str = "<?php\nnamespace Drupal\\acme;\n\nfinal class Invokable {\n    public function __invoke(): void {}\n}\n";
+
+const INVOKABLE_SERVICES_PATH: &str = "web/modules/custom/acme/acme.services.yml";
+
+const INVOKABLE_SERVICES: &str =
+    "services:\n  acme_invokable:\n    class: Drupal\\acme\\Invokable\n";
+
+const FUNCTIONS_FORM_PATH: &str = "web/modules/custom/acme/src/Form/FunctionsForm.php";
+
+const FUNCTIONS_FORM: &str = r#"<?php
+namespace Drupal\acme\Form;
+
+use Drupal\Core\Form\FormBase;
+
+final class FunctionsForm extends FormBase {
+    public function buildForm(array $form, $form_state): array {
+        $form['#submit'] = [
+            'acme_log_submit',
+            'acme_missing_submit',
+            'acme_namespaced_submit',
+            'Drupal\acme\Form\acme_namespaced_submit',
+            'Drupal\acme\Invokable',
+            'acme_invokable',
+            'acme_same_file_submit',
+            'Drupal\acme\Form\acme_same_file_submit',
+        ];
+        $form['#markup'] = 'acme_missing_markup';
+        return $form;
+    }
+}
+
+function acme_same_file_submit(): void {}
+"#;
+
+#[tokio::test]
+async fn a_callback_naming_a_missing_function_is_reported() {
+    let (backend, dir) = workspace(&[
+        (FORM_INTERFACE_PATH, FORM_INTERFACE),
+        (FORM_BASE_PATH, FORM_BASE),
+        (MODULE_PATH, MODULE),
+        (NAMESPACED_FUNCTION_PATH, NAMESPACED_FUNCTION),
+        (INVOKABLE_PATH, INVOKABLE),
+        (INVOKABLE_SERVICES_PATH, INVOKABLE_SERVICES),
+        (FUNCTIONS_FORM_PATH, FUNCTIONS_FORM),
+    ])
+    .await;
+    backend.ensure_workspace_indexed();
+    let found = diagnostics_of(&backend, &dir, FUNCTIONS_FORM_PATH, FUNCTIONS_FORM);
+    // A function name is global: the form's namespace does not apply.  A
+    // name that is a class or a service names an invokable.
+    for needle in [
+        "'acme_missing_submit'",
+        "'acme_namespaced_submit'",
+        "'acme_same_file_submit'",
+    ] {
+        assert_reported(
+            &found,
+            FUNCTIONS_FORM,
+            needle,
+            "unknown_function",
+            "not found",
+        );
+    }
+    assert_eq!(found.len(), 3, "{found:?}");
+}
+
+const GUARDED_PATH: &str = "web/modules/custom/acme/src/Form/GuardedForm.php";
+
+/// A form that adds a callback only when its function exists.
+const GUARDED: &str = r#"<?php
+namespace Drupal\acme\Form;
+
+use Drupal\Core\Form\FormBase;
+
+final class GuardedForm extends FormBase {
+    public function buildForm(array $form, $form_state): array {
+        if (function_exists('acme_optional_submit')) {
+            $form['#submit'][] = 'acme_optional_submit';
+        }
+        if (function_exists('\acme_other_submit')) {
+            $form['#submit'][] = 'acme_other_submit';
+        }
+        $form['#validate'][] = 'acme_optional_submit';
+        return $form;
+    }
+}
+"#;
+
+#[tokio::test]
+async fn a_callback_function_guarded_by_function_exists_is_not_reported() {
+    let (backend, dir) = workspace(&[
+        (FORM_INTERFACE_PATH, FORM_INTERFACE),
+        (FORM_BASE_PATH, FORM_BASE),
+        (INVOKABLE_SERVICES_PATH, INVOKABLE_SERVICES),
+        (GUARDED_PATH, GUARDED),
+    ])
+    .await;
+    backend.ensure_workspace_indexed();
+    let found = diagnostics_of(&backend, &dir, GUARDED_PATH, GUARDED);
+    assert_reported(
+        &found,
+        GUARDED,
+        "$form['#validate'][] = 'acme_optional_submit'",
+        "unknown_function",
+        "Function acme_optional_submit() not found",
+    );
+    assert_eq!(found.len(), 1, "{found:?}");
+}
+
+const DEPRECATED_FORM_PATH: &str = "web/modules/custom/acme/src/Form/DeprecatedForm.php";
+
+/// A form whose render callbacks name its methods as `'::method'`, which
+/// Drupal resolves only in a form callback.
+const DEPRECATED_FORM: &str = r#"<?php
+namespace Drupal\acme\Form;
+
+use Drupal\Core\Form\FormBase;
+
+final class DeprecatedForm extends FormBase {
+    public function buildForm(array $form, $form_state): array {
+        $form['#pre_render'][] = '::oldRender';
+        $form['#submit'][] = '::oldRender';
+        $form['#post_render'][] = '::missingRender';
+        $form['#value_callback'] = '::oldRender';
+        return $form;
+    }
+
+    /** @deprecated Use buildForm() instead. */
+    public function oldRender(): void {}
+}
+"#;
+
+#[tokio::test]
+async fn a_form_method_drupal_does_not_look_up_is_reported_only_as_such() {
+    let (backend, dir) = workspace(&[
+        (FORM_INTERFACE_PATH, FORM_INTERFACE),
+        (FORM_BASE_PATH, FORM_BASE),
+        (DEPRECATED_FORM_PATH, DEPRECATED_FORM),
+    ])
+    .await;
+    backend.ensure_workspace_indexed();
+    let found = diagnostics_of(&backend, &dir, DEPRECATED_FORM_PATH, DEPRECATED_FORM);
+    for (needle, code, text) in [
+        (
+            "#pre_render",
+            "invalid_drupal_callback",
+            "only in a form callback",
+        ),
+        ("#submit", "deprecated_usage", "oldRender"),
+        (
+            "#post_render",
+            "invalid_drupal_callback",
+            "only in a form callback",
+        ),
+        ("#value_callback", "invalid_drupal_callback", "ignored"),
+    ] {
+        assert_reported(&found, DEPRECATED_FORM, needle, code, text);
+    }
+    assert_eq!(found.len(), 4, "{found:?}");
+}
+
+const MAGIC_PATH: &str = "web/modules/custom/acme/src/Magic.php";
+
+/// A class whose instances answer any method, which its class does not.
+const MAGIC: &str = "<?php\nnamespace Drupal\\acme;\n\nfinal class Magic {\n    public function __call(string $name, array $arguments): mixed { return null; }\n}\n";
+
+const MAGIC_FORM_PATH: &str = "web/modules/custom/acme/src/Form/MagicForm.php";
+
+const MAGIC_FORM: &str = r#"<?php
+namespace Drupal\acme\Form;
+
+use Drupal\Core\Form\FormBase;
+use Drupal\acme\Magic;
+
+final class MagicForm extends FormBase {
+    public function buildForm(array $form, $form_state): array {
+        $form['#submit'][] = 'Drupal\acme\Magic::anything';
+        $form['#validate'][] = Magic::class . '::anything';
+        $form['#process'][] = [Magic::class, 'anything'];
+        return $form;
+    }
+}
+"#;
+
+#[tokio::test]
+async fn a_class_callback_calls_the_method_of_an_instance() {
+    let (backend, dir) = workspace(&[
+        (FORM_INTERFACE_PATH, FORM_INTERFACE),
+        (FORM_BASE_PATH, FORM_BASE),
+        (MAGIC_PATH, MAGIC),
+        (MAGIC_FORM_PATH, MAGIC_FORM),
+    ])
+    .await;
+    backend.ensure_workspace_indexed();
+    let found = diagnostics_of(&backend, &dir, MAGIC_FORM_PATH, MAGIC_FORM);
+    // Drupal instantiates the class a callback string names, but calls an
+    // array callable that names its class statically.
+    assert_reported(
+        &found,
+        MAGIC_FORM,
+        "[Magic::class, 'anything']",
+        "unknown_member",
+        "anything",
+    );
+    assert_eq!(found.len(), 1, "{found:?}");
+}
+
+const ELEMENT_PATH: &str = "web/modules/custom/acme/src/Element/Widget.php";
+
+/// A form element whose render callbacks name `'::method'`, which Drupal
+/// resolves only in form callbacks, and whose value callbacks Drupal
+/// ignores unless they are native callables.
+const ELEMENT: &str = r#"<?php
+namespace Drupal\acme\Element;
+
+final class Widget {
+    public function info(): array {
+        $info = [
+            '#pre_render' => [
+                '::preRender',
+                static::class . '::preRender',
+                'Drupal\acme\Missing::build',
+                'acme_invokable::__invoke',
+            ],
+            '#lazy_builder' => ['::build', []],
+            '#access_callback' => '::access',
+        ];
+        $info['#post_render'][] = '::postRender';
+        $info['#value_callback'] = '::staticValue';
+        $info['a']['#value_callback'] = 'acme_invokable:__invoke';
+        $info['b']['#value_callback'] = 'Drupal\acme\Element\Widget::value';
+        $info['c']['#value_callback'] = static::class . '::value';
+        $info['d']['#value_callback'] = [static::class, 'value'];
+        $info['e']['#value_callback'] = [static::class, 'staticValue'];
+        $info['f']['#value_callback'] = 'Drupal\acme\Element\Widget::staticValue';
+        $info['g']['#value_callback'] = [$this, 'value'];
+        $info['h']['#value_callback'] = 'acme_log_submit';
+        return $info;
+    }
+
+    public function preRender(): void {}
+
+    public function postRender(): void {}
+
+    public function build(): void {}
+
+    public function access(): void {}
+
+    public function value(): void {}
+
+    public static function staticValue(): void {}
+}
+"#;
+
+#[tokio::test]
+async fn a_callback_drupal_cannot_resolve_or_ignores_is_reported() {
+    let (backend, dir) = workspace(&[
+        (MODULE_PATH, MODULE),
+        (INVOKABLE_PATH, INVOKABLE),
+        (INVOKABLE_SERVICES_PATH, INVOKABLE_SERVICES),
+        (ELEMENT_PATH, ELEMENT),
+    ])
+    .await;
+    backend.ensure_workspace_indexed();
+    let found = diagnostics_of(&backend, &dir, ELEMENT_PATH, ELEMENT);
+    for needle in ["'::preRender'", "'::build'", "'::access'", "'::postRender'"] {
+        assert_reported(
+            &found,
+            ELEMENT,
+            needle,
+            "invalid_drupal_callback",
+            "only in a form callback",
+        );
+    }
+    for needle in [
+        "'::staticValue'",
+        "'acme_invokable:__invoke'",
+        "'Drupal\\acme\\Element\\Widget::value'",
+        "static::class . '::value'",
+        "[static::class, 'value']",
+    ] {
+        assert_reported(
+            &found,
+            ELEMENT,
+            needle,
+            "invalid_drupal_callback",
+            "ignored",
+        );
+    }
+    // The class part of `'Class::method'` names a class, or a service.
+    assert_reported(
+        &found,
+        ELEMENT,
+        "Missing::build",
+        "unknown_class",
+        "Class Drupal\\acme\\Missing not found",
+    );
+    assert_eq!(found.len(), 10, "{found:?}");
+}
+
+const IMPORTING_PATH: &str = "web/modules/custom/acme/src/Render/Importing.php";
+
+/// A caller in another namespace that imports the namespaced `Helper`:
+/// the class name in a callback string is read as fully qualified all the
+/// same.
+const IMPORTING: &str = r#"<?php
+namespace Drupal\acme\Render;
+
+use Drupal\acme\Helper;
+
+final class Importing {
+    public function build(): array {
+        return [
+            '#pre_render' => [
+                'Helper::shout',
+                'Helper::whisper',
+                'Drupal\acme\Helper::whisper',
+                Helper::class . '::whisper',
+            ],
+        ];
+    }
+}
+"#;
+
+#[tokio::test]
+async fn the_class_of_a_callback_string_is_read_as_fully_qualified() {
+    // Without a global `Helper`, the short name names no class.
+    let (backend, dir) = workspace(&[
+        (HELPER_PATH, HELPER),
+        (INVOKABLE_SERVICES_PATH, INVOKABLE_SERVICES),
+        (IMPORTING_PATH, IMPORTING),
+    ])
+    .await;
+    backend.ensure_workspace_indexed();
+    let found = diagnostics_of(&backend, &dir, IMPORTING_PATH, IMPORTING);
+    for needle in ["'Helper::shout'", "'Helper::whisper'"] {
+        assert_reported(
+            &found,
+            IMPORTING,
+            needle,
+            "unknown_class",
+            "Class Helper not found",
+        );
+    }
+    assert_eq!(found.len(), 2, "{found:?}");
+
+    // With one, the short name names it, whatever the file imports.
+    let (backend, dir) = workspace(&[
+        (HELPER_PATH, HELPER),
+        (GLOBAL_HELPER_PATH, GLOBAL_HELPER),
+        (INVOKABLE_SERVICES_PATH, INVOKABLE_SERVICES),
+        (IMPORTING_PATH, IMPORTING),
+    ])
+    .await;
+    backend.ensure_workspace_indexed();
+    let found = diagnostics_of(&backend, &dir, IMPORTING_PATH, IMPORTING);
+    assert_reported(
+        &found,
+        IMPORTING,
+        "'Helper::whisper'",
+        "unknown_member",
+        "Method Helper::whisper() not found",
+    );
+    assert_eq!(found.len(), 1, "{found:?}");
 }
 
 /// The site with [`BUILDER`] on disk but not open, so the searches reach it
@@ -1240,9 +1831,21 @@ async fn a_service_callback_checks_its_service_like_any_service_id() {
         .iter()
         .map(|diagnostic| crate::common::message_text(&diagnostic.message))
         .collect();
-    // The method a declared service's class lacks is not reported here.
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(messages[0].contains("acme.missing_builder"), "{messages:?}");
+    // An unknown service is reported as a service, and the method a
+    // declared service's class lacks as a method.
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("'acme.missing_builder'")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("GreetingBuilder::nope()")),
+        "{messages:?}"
+    );
 }
 
 // ─── Completion ─────────────────────────────────────────────────────────────

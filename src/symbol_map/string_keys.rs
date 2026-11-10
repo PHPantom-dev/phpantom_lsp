@@ -890,6 +890,45 @@ pub(crate) struct PluginManagerSite {
     pub static_plugins: Vec<StaticPluginSite>,
 }
 
+/// A callback a Drupal form or render array names under one of its callback
+/// keys, keyed back by `start` to the span of the method it names.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DrupalCallbackSite {
+    pub start: u32,
+    pub key: CallbackKey,
+    pub shape: CallbackShape,
+}
+
+/// How Drupal calls the callbacks under a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CallbackKey {
+    /// A form callback, which Drupal rewrites `'::method'` in for the form
+    /// before it calls it.
+    Form,
+    /// A render callback (`#pre_render`, `#lazy_builder`, …), which Drupal
+    /// calls without that rewrite.
+    Render,
+    /// `#value_callback`, which Drupal calls only when it is a native
+    /// callable and ignores otherwise.
+    Value,
+}
+
+/// How a callback names its method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CallbackShape {
+    /// `'::method'`.
+    FormMethod,
+    /// `'service:method'`.
+    ServiceMethod,
+    /// `'Class::method'`, with where the class name runs in the string when
+    /// the source spells it as it reads.
+    ClassMethod { class: Option<(u32, u32)> },
+    /// A class name joined to `'::method'`.
+    JoinedMethod,
+    /// An array callable.
+    ArrayCallable,
+}
+
 /// A byte range a Drupal file runs only when the module `module` is
 /// installed: the branch of an `if (…moduleExists('m'))`, or the rest of a
 /// block after `if (!…moduleExists('m')) { return; }`.

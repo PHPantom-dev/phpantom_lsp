@@ -459,6 +459,16 @@ foreach ($greetingCallbacks as $callback) {
     check("Drupal can call GreetingForm's $callback", is_callable($greetingFormState->prepareCallback($callback)));
 }
 check("FormState rewrites '::validateName' as a call on the form object", $greetingFormState->prepareCallback('::validateName') === [$greetingForm, 'validateName']);
+// A value callback must be a native callable: a static method named by its
+// class is one, and an instance method named by its class or '::method' is
+// not.
+check('the value callback trimName is a native callable', is_callable(GreetingForm::class . '::trimName'));
+check('an instance method named by its class is no native callable', !is_callable(GreetingForm::class . '::validateName'));
+check("'::trimName' is no native callable", !is_callable('::trimName'));
+// Drupal calls a callback from outside the form, where only a public
+// method is callable.
+check('validateName is public', (new ReflectionMethod(GreetingForm::class, 'validateName'))->isPublic());
+check('a private method is not callable from outside its class', !is_callable([new class { public function run(): void { $this->hidden(); } private function hidden(): void {} }, 'hidden']));
 check('GreetingForm is a form', $greetingForm instanceof FormInterface);
 
 // The card's lazy builder names a method of the acme.greeter service, which
