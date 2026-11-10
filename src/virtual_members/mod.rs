@@ -341,6 +341,8 @@ pub fn apply_virtual_members(
 /// 2. Laravel factory provider (convention-based create/make methods)
 /// 3. PHPDoc provider (`@method` / `@property` / `@mixin` tags)
 /// 4. Laravel facade provider (concrete class forwarded as static)
+/// 5. Drupal fieldable entity provider (the magic `__get()` of content
+///    entity interfaces)
 ///
 /// The facade provider deliberately comes last: a facade that carries
 /// generated `@method static` tags should keep them, and only a facade
@@ -348,8 +350,10 @@ pub fn apply_virtual_members(
 ///
 /// When `is_laravel` is `false`, the Laravel providers are omitted so
 /// that a non-Laravel project does not pay for their parent-chain walks.
-/// The framework-agnostic PHPDoc provider is always included.
-pub fn default_providers(is_laravel: bool) -> Vec<Box<dyn VirtualMemberProvider>> {
+/// The framework-agnostic PHPDoc provider is always included.  The Drupal
+/// provider runs only in a Drupal project, after the PHPDoc provider, so an
+/// interface's own `@method __get` tag would win.
+pub fn default_providers(is_laravel: bool, is_drupal: bool) -> Vec<Box<dyn VirtualMemberProvider>> {
     let mut providers: Vec<Box<dyn VirtualMemberProvider>> = Vec::new();
     if is_laravel {
         providers.push(Box::new(laravel::LaravelModelProvider));
@@ -358,6 +362,9 @@ pub fn default_providers(is_laravel: bool) -> Vec<Box<dyn VirtualMemberProvider>
     providers.push(Box::new(phpdoc::PHPDocProvider));
     if is_laravel {
         providers.push(Box::new(laravel::LaravelFacadeProvider));
+    }
+    if is_drupal {
+        providers.push(Box::new(crate::drupal::fields::FieldableEntityProvider));
     }
     providers
 }

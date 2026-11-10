@@ -838,10 +838,13 @@ fn apply_post_merge_stages(
 ) {
     let fqn = effective_class.fqn();
 
-    // Whether Laravel-specific resolution should run.  A throwaway
-    // cache defaults to `true`, so behaviour is unchanged for
-    // cache-less code paths and tests.
-    let is_laravel = cache.read().laravel().is_enabled();
+    // Whether Laravel- and Drupal-specific resolution should run.  A
+    // throwaway cache has Laravel on, so behaviour is unchanged for
+    // cache-less code paths and tests, and Drupal off.
+    let (is_laravel, is_drupal) = {
+        let cache = cache.read();
+        (cache.laravel().is_enabled(), cache.drupal().is_enabled())
+    };
 
     // ── Pre-provider patches ────────────────────────────────────────
     // Inject missing `@mixin` annotations before virtual member
@@ -874,7 +877,7 @@ fn apply_post_merge_stages(
         }
     }
 
-    let providers = default_providers(is_laravel);
+    let providers = default_providers(is_laravel, is_drupal);
     if !providers.is_empty() {
         apply_virtual_members(merged, class_loader, &providers, Some(cache));
     }
