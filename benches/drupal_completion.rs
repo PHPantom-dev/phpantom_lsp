@@ -7,7 +7,8 @@ use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
 /// Custom modules in the generated site, each declaring `SERVICES`
-/// services, `ROUTES` routes, `ENTITY_TYPES` entity types, `PERMISSIONS`
+/// services, `ROUTES` routes, `ENTITY_TYPES` entity types with `FIELDS`
+/// base fields each, `PERMISSIONS`
 /// permissions, `CONFIGS` configuration objects, with their default
 /// configuration and schema, `ELEMENTS` render elements, `BLOCKS` block
 /// plugins, `THEME_HOOKS` theme hooks, and `LIBRARIES` libraries,
@@ -17,6 +18,7 @@ const MODULES: usize = 30;
 const SERVICES: usize = 10;
 const ROUTES: usize = 10;
 const ENTITY_TYPES: usize = 3;
+const FIELDS: usize = 10;
 const PERMISSIONS: usize = 10;
 const CONFIGS: usize = 10;
 const ELEMENTS: usize = 3;
@@ -32,7 +34,8 @@ const COMPOSER: &str = r#"{
 
 /// Just enough of core, where Composer puts it, for the type engine to
 /// tell a container, the entity type manager, the module handler, an
-/// account, a URL, and the block manager from any other receiver.
+/// account, a URL, the block manager, and a content entity from any other
+/// receiver.
 const STUBS: &[(&str, &str)] = &[
     (
         "web/core/lib/Drupal/Component/Plugin/PluginManagerInterface.php",
@@ -75,6 +78,22 @@ const STUBS: &[(&str, &str)] = &[
         "<?php\nnamespace Drupal\\Core\\Entity\\Attribute;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass ContentEntityType {\n    public function __construct(public readonly string $id) {}\n}\n",
     ),
     (
+        "web/core/lib/Drupal/Core/Entity/EntityInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Entity;\ninterface EntityInterface {\n    public function id();\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Entity/FieldableEntityInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Entity;\ninterface FieldableEntityInterface extends EntityInterface {\n    public function get($field_name);\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Entity/ContentEntityBase.php",
+        "<?php\nnamespace Drupal\\Core\\Entity;\nabstract class ContentEntityBase implements FieldableEntityInterface {\n    public function id() {}\n    public function get($field_name) {}\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Field/BaseFieldDefinition.php",
+        "<?php\nnamespace Drupal\\Core\\Field;\nclass BaseFieldDefinition {\n    public static function create($type): static { return new static(); }\n}\n",
+    ),
+    (
         "web/core/lib/Drupal/Core/Render/Attribute/RenderElement.php",
         "<?php\nnamespace Drupal\\Core\\Render\\Attribute;\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nclass RenderElement {\n    public function __construct(public readonly string $id) {}\n}\n",
     ),
@@ -103,11 +122,13 @@ use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Url;
+use Drupal\mod1\Entity\Entity0;
 
 final class Consumer
 {
     public function __construct(
         private EntityTypeManagerInterface $manager,
+        private Entity0 $entity,
         private ModuleHandlerInterface $modules,
         private AccountInterface $account,
         private BlockManagerInterface $blocks,
@@ -126,6 +147,7 @@ final class Consumer
         $this->blocks->createInstance('mod1_');
         $themed = ['#theme' => 'mod1_'];
         $build = ['#attached' => ['library' => ['mod1/']]];
+        $this->entity->get('mod1_');
     }
 }
 "#;
@@ -205,10 +227,17 @@ fn generate_site() -> Vec<(String, String)> {
         files.push((format!("{dir}/mod{m}.libraries.yml"), libraries));
 
         for e in 0..ENTITY_TYPES {
+            let mut fields = String::new();
+            for f in 0..FIELDS {
+                let _ = writeln!(
+                    fields,
+                    "        $fields['mod{m}_field{f}'] = BaseFieldDefinition::create('string');"
+                );
+            }
             files.push((
                 format!("{dir}/src/Entity/Entity{e}.php"),
                 format!(
-                    "<?php\nnamespace Drupal\\mod{m}\\Entity;\n\nuse Drupal\\Core\\Entity\\Attribute\\ContentEntityType;\n\n#[ContentEntityType(\n    id: 'mod{m}_entity{e}',\n)]\nclass Entity{e} {{}}\n"
+                    "<?php\nnamespace Drupal\\mod{m}\\Entity;\n\nuse Drupal\\Core\\Entity\\Attribute\\ContentEntityType;\nuse Drupal\\Core\\Entity\\ContentEntityBase;\nuse Drupal\\Core\\Field\\BaseFieldDefinition;\n\n#[ContentEntityType(\n    id: 'mod{m}_entity{e}',\n)]\nclass Entity{e} extends ContentEntityBase {{\n    public static function baseFieldDefinitions($entity_type) {{\n        $fields = [];\n{fields}        return $fields;\n    }}\n}}\n"
                 ),
             ));
         }
@@ -444,6 +473,13 @@ fn bench_drupal_name_completion(c: &mut Criterion) {
             CONSUMER_PHP,
             "['library' => ['mod1/'",
             "mod1/library7",
+        ),
+        (
+            "field_name",
+            &consumer,
+            CONSUMER_PHP,
+            "get('mod1_'",
+            "mod1_field7",
         ),
         (
             "hook_implementation",

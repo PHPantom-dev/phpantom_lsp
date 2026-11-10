@@ -2838,6 +2838,44 @@ fn push_config_key_span(
     });
 }
 
+/// Record the field name a call of a fieldable entity's method that takes
+/// one names (see [`crate::drupal::fields::field_name_call`]), for the type
+/// engine to confirm against its receiver.  A `get()` and a `set()` are a
+/// container lookup's and a configurator's too, which their own sites
+/// read.
+pub(in crate::symbol_map::extraction) fn record_drupal_field_name_sites(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some(parameter) = crate::drupal::fields::field_name_call(member_name) else {
+        return;
+    };
+    let Some(name) = argument_at(argument_list, 0, parameter.as_bytes()) else {
+        return;
+    };
+    // A field's name never has a dot, which the service IDs and
+    // configuration names other receivers' `get()` takes mostly have.
+    let Some((name, start, end)) = resolved_string_literal(name, ctx.content)
+        .filter(|(name, _, _)| !name.is_empty() && !name.contains('.'))
+    else {
+        return;
+    };
+    ctx.typed_receiver_sites.push(TypedReceiverSite {
+        start: start as u32,
+        end: end as u32,
+        key: name.to_string(),
+        is_write: false,
+        // `hasField()` asks whether the entity has it.
+        is_optional: member_name.eq_ignore_ascii_case("hasField"),
+        guards: 0,
+        receiver: ReceiverClass::FieldableEntity,
+    });
+}
+
 /// Record the key an editable config object's `set()` or `clear()` reads,
 /// for the type engine to confirm against its receiver, whose type carries
 /// the object's name.  Its `get()` is recorded as a container lookup's,
@@ -3815,6 +3853,115 @@ class SettingsForm {
                 ("six", ReceiverClass::EditableConfigKeys),
             ]
         );
+    }
+
+    /// The field names a fieldable entity's methods take, recorded for the
+    /// type engine with the name alone, written positionally or by name;
+    /// a name built at runtime is none, and so is a dotted service ID or
+    /// configuration name, which no field is named.
+    #[test]
+    fn field_names_are_left_for_the_type_engine() {
+        let php = r#"<?php
+namespace Drupal\acme;
+class Reader {
+    public function run($node, string $name): void {
+        $node->get('title');
+        $node->set('body', 'Example');
+        $node->hasField('field_tags');
+        $node->getFieldDefinition(name: 'uid');
+        $node->get($name);
+        $node->get('');
+        $node->get('acme.settings');
+        $node->set('acme.mode', 'Example');
+        $node->other('nid');
+    }
+}
+"#;
+        let sites_in = |drupal: bool| -> Vec<(String, bool)> {
+            let arena = mago_allocator::LocalArena::new();
+            let file_id = mago_database::file::FileId::new(b"test.php");
+            let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+            let resolver = mago_names::resolver::NameResolver::new(&arena);
+            let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+            let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+                program,
+                php,
+                &names,
+                crate::symbol_map::extraction::Frameworks {
+                    symfony: false,
+                    service_container: drupal,
+                    drupal,
+                    twig: false,
+                    doctrine: false,
+                    yii_params: false,
+                    tempest: false,
+                },
+                None,
+            );
+            map.typed_receiver_sites
+                .iter()
+                .filter(|site| site.receiver == ReceiverClass::FieldableEntity)
+                .map(|site| {
+                    assert_eq!(&php[site.start as usize..site.end as usize], site.key);
+                    assert!(!site.is_write, "{}", site.key);
+                    (site.key.clone(), site.is_optional)
+                })
+                .collect()
+        };
+        assert_eq!(
+            sites_in(true),
+            [
+                ("title".to_string(), false),
+                ("body".to_string(), false),
+                ("field_tags".to_string(), true),
+                ("uid".to_string(), false),
+            ]
+        );
+        assert!(sites_in(false).is_empty());
+    }
+
+    /// Each method that takes a field name reaches fieldable entities, and
+    /// the field name site stands beside what the other tables read the
+    /// call as, so neither shadows the other.
+    #[test]
+    fn every_field_name_method_reaches_fieldable_entities() {
+        for (method, other) in [
+            ("get", Some(ReceiverClass::ContainerLookup)),
+            ("set", Some(ReceiverClass::ConfiguratorSet)),
+            ("hasField", None),
+            ("getFieldDefinition", None),
+        ] {
+            assert!(
+                crate::drupal::fields::field_name_call(method).is_some(),
+                "{method}"
+            );
+            assert!(
+                ReceiverClass::FieldableEntity.targets().contains(&(
+                    crate::drupal::fields::FIELDABLE_ENTITY,
+                    StringKeyKind::DrupalFieldName
+                )),
+                "{method}"
+            );
+            assert_eq!(
+                crate::symbol_map::extraction::symfony_receiver_method(method, 0)
+                    .map(|(receiver, _)| receiver),
+                other,
+                "{method}"
+            );
+            for (receiver, _) in other.iter().flat_map(|receiver| receiver.targets()) {
+                assert_ne!(
+                    *receiver,
+                    crate::drupal::fields::FIELDABLE_ENTITY,
+                    "{method}"
+                );
+            }
+            assert!(hook_invocation(method, 0).is_none(), "{method}");
+            assert!(
+                crate::drupal::route_parameter_call(method).is_none(),
+                "{method}"
+            );
+        }
+        assert!(crate::drupal::fields::field_name_call("getFields").is_none());
     }
 
     /// Each permission a requirement, a list, or an entity type names is a

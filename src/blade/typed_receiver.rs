@@ -195,6 +195,25 @@ impl Backend {
                             }
                             continue;
                         }
+                        if kind == StringKeyKind::DrupalFieldName {
+                            // The name is the field every entity type the
+                            // receiver may hold has, known or not: the
+                            // fields are looked up when asked, so a field
+                            // storage file added later is not missed.
+                            let entity_types = self
+                                .drupal_receiver_entity_types(&ty, loaders.resolved_class_loader());
+                            if !entity_types.is_empty() {
+                                let mut span = site.to_span(kind);
+                                if let crate::symbol_map::SymbolKind::StringKey { key, .. } =
+                                    &mut span.kind
+                                {
+                                    *key =
+                                        crate::drupal::fields::field_key(&entity_types, &site.key);
+                                }
+                                confirmed.push(span);
+                            }
+                            continue;
+                        }
                         if kind == StringKeyKind::DrupalPlugin && site.receiver.bare_plugin_key() {
                             // The ID is one of the manager's the receiver
                             // is, or the one the call always looks it up in.

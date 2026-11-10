@@ -292,6 +292,13 @@ pub(crate) enum StringKeyKind {
     /// `BaseFieldDefinition::create()`, the `type` of a field's display
     /// options, and `addConstraint()`.
     DrupalPlugin,
+    /// A field of a Drupal content entity, keyed by the entity type as well
+    /// as the name (see `drupal::fields::field_key`): `title` is node's in
+    /// one place and another entity type's elsewhere.  Declared by an
+    /// entity class's base field definitions and by field storage files,
+    /// and read by a fieldable entity's `get()`, `set()`, `hasField()`, and
+    /// `getFieldDefinition()`.
+    DrupalFieldName,
 }
 
 impl StringKeyKind {
@@ -366,7 +373,8 @@ impl StringKeyKind {
             | Self::DrupalThemeHook
             | Self::DrupalThemeHookVariable
             | Self::DrupalLibrary
-            | Self::DrupalPlugin => KeyFramework::Drupal,
+            | Self::DrupalPlugin
+            | Self::DrupalFieldName => KeyFramework::Drupal,
         }
     }
 
@@ -1613,6 +1621,11 @@ pub(crate) enum ReceiverClass {
     /// one of its keys; an `ImmutableConfig` throws on both.  Its `get()`
     /// is a [`Self::ContainerLookup`], as every config object's is.
     EditableConfigKeys,
+    /// A fieldable Drupal entity, whose `get()`, `set()`, `hasField()`, and
+    /// `getFieldDefinition()` take one of its fields' names (see
+    /// `drupal::fields::field_name_call`).  The entity types the name is
+    /// one of come from the receiver's type.
+    FieldableEntity,
     /// Symfony's serializer, normalizers, and denormalizers, whose
     /// `serialize()`, `deserialize()`, `normalize()`, and `denormalize()`
     /// take a context whose `groups` name serializer groups.
@@ -1781,6 +1794,10 @@ impl ReceiverClass {
                 (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalConfigName),
                 (DRUPAL_FORM_BASE, StringKeyKind::DrupalConfigName),
             ],
+            Self::FieldableEntity => &[(
+                crate::drupal::fields::FIELDABLE_ENTITY,
+                StringKeyKind::DrupalFieldName,
+            )],
             Self::Serializer => &[
                 (SYMFONY_SERIALIZER, StringKeyKind::SerializerGroup),
                 (SYMFONY_NORMALIZER, StringKeyKind::SerializerGroup),
@@ -1888,12 +1905,15 @@ impl TypedReceiverSite {
     /// Whether this site, once confirmed, could name `key` as a `kind`.
     /// The reference index files a site under each kind it could become.
     pub(crate) fn may_name(&self, kind: StringKeyKind, key: &str) -> bool {
-        // A configuration key's site holds the key alone; the object's
-        // name comes with its receiver's type.
+        // A configuration key's or a field name's site holds the key alone;
+        // the object's name or the entity type comes with its receiver's
+        // type.
         let key = if kind == StringKeyKind::DrupalConfigKey {
             crate::drupal::config_keys::split_config_key(key).1
         } else if kind == StringKeyKind::DrupalPlugin && self.receiver.bare_plugin_key() {
             crate::drupal::plugins::split_plugin_key(key).1
+        } else if kind == StringKeyKind::DrupalFieldName {
+            crate::drupal::fields::split_field_key(key).1
         } else {
             key
         };

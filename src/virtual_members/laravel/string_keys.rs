@@ -95,6 +95,7 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::DrupalHook => backend.drupal_hook_documentation(key),
         StringKeyKind::DrupalConfigName => backend.drupal_config_locations(key),
         StringKeyKind::DrupalConfigKey => backend.drupal_config_key_locations(key),
+        StringKeyKind::DrupalFieldName => backend.drupal_field_name_locations(key),
         StringKeyKind::DrupalRenderElement => backend.drupal_render_element_definitions(key),
         StringKeyKind::DrupalPlugin => backend.drupal_plugin_definitions(key),
         StringKeyKind::DrupalThemeHook => backend.drupal_theme_hook_definitions(key),
@@ -391,6 +392,7 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::DrupalConfigName
         | StringKeyKind::DrupalConfigKey
+        | StringKeyKind::DrupalFieldName
         | StringKeyKind::DrupalThemeHook
         | StringKeyKind::DrupalThemeHookVariable => {
             find_string_key_usages(kind, key, backend, snapshot, false)
@@ -511,7 +513,11 @@ fn find_string_key_usages(
                     key: span_key,
                     is_write,
                     ..
-                } if span_kind == kind && span_key == key && (include_writes || !is_write)
+                } if span_kind == kind
+                    && (span_key == key
+                        || *kind == crate::symbol_map::StringKeyKind::DrupalFieldName
+                            && backend.drupal_field_keys_match(span_key, key))
+                    && (include_writes || !is_write)
             )
         };
         let has_match = spans().any(matches);

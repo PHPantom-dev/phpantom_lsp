@@ -1,6 +1,7 @@
 //! The types Drupal's own declarations give: a service `\Drupal::service()`
 //! looks up, the storage `getStorage()` gives for an entity type ID, the
-//! entities that storage loads, and the IDs an entity query finds.
+//! entities that storage loads, the IDs an entity query finds, and the
+//! field a fieldable entity's `get()` reads.
 //!
 //! Shared by the two places the type engine resolves a call: an assignment
 //! (`$x = …`) and a chain (`…->load(1)->`).  The storage is tagged with the
@@ -320,6 +321,40 @@ const CONFIG_SHORTCUTS: [&str; 2] = [
     "Drupal\\Core\\Controller\\ControllerBase",
     "Drupal\\Core\\Form\\FormBase",
 ];
+
+/// What `get('name')` on a fieldable entity `owner` returns when `name` is
+/// one of its fields: the field, typed as reading `->name` types it.  An
+/// unknown name keeps the declared `FieldItemListInterface`.
+pub(crate) fn field_list_type(
+    backend: &Backend,
+    owner: &ClassInfo,
+    method_name: &str,
+    name: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+    cache: Option<&crate::virtual_members::ResolvedClassCache>,
+) -> Option<PhpType> {
+    // A field's name never has a dot, which a configuration name and most
+    // service IDs a `get()` takes have, so those skip the subtype walk.
+    if !method_name.eq_ignore_ascii_case("get")
+        || name.is_empty()
+        || name.contains('.')
+        || !backend.is_drupal_project()
+        || !super::fields::is_fieldable(owner, class_loader)
+    {
+        return None;
+    }
+    let merged =
+        crate::virtual_members::resolve_class_fully_maybe_cached(owner, class_loader, cache);
+    merged
+        .properties
+        .iter()
+        .find(|property| {
+            property.name == name
+                && property.source == Some(crate::types::PropertySource::DrupalField)
+        })?
+        .type_hint
+        .clone()
+}
 
 /// What a call that reads a configuration object by its name returns:
 /// whatever the method declares, with the name added as a type argument

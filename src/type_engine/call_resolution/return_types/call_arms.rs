@@ -170,6 +170,35 @@ impl Backend {
             }
             return classes;
         }
+        // A fieldable entity's `get('title')` reads the field `->title` does.
+        if let Some(backend) = in_drupal
+            && method_name.eq_ignore_ascii_case("get")
+            && let Some(name) = first_literal_text_arg(text_args, "field_name")
+            && let Some(ty) = lhs_resolved
+                .iter()
+                .filter_map(|resolved| resolved.class_info.as_deref())
+                .find_map(|owner| {
+                    crate::drupal::types::field_list_type(
+                        backend,
+                        owner,
+                        method_name,
+                        name,
+                        ctx.file.class_loader,
+                        ctx.resolved_class_cache,
+                    )
+                })
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
         if method_name.eq_ignore_ascii_case("getStorage")
             && let Some(backend) = in_drupal
             && let Some(id) = first_literal_text_arg(text_args, "entity_type_id")

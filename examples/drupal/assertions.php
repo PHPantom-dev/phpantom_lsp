@@ -34,6 +34,7 @@ use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Block\Attribute\Block;
 use Drupal\Core\Block\BlockBase;
 use Drupal\Core\Block\BlockManager;
+use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Field\Attribute\FieldType;
 use Drupal\Core\Field\Attribute\FieldWidget;
 use Drupal\Core\Field\EntityReferenceFieldItemList;
@@ -299,6 +300,18 @@ check("StringItem takes its value property from the item class it extends", $str
 check('NoteSummary reads the entity of field_tags and uid, and the value of the title field', str_contains($summarySource, '$note->field_tags->entity;') && str_contains($summarySource, '$note->uid->entity;') && str_contains($summarySource, '$titleText = $title->value;'));
 check('NoteSummary allows for an empty reference field, whose entity is null', str_contains($summarySource, '$firstTag?->label()') && str_contains($summarySource, '$authorAccount?->label()'));
 check('NoteSummary returns a string', (new ReflectionMethod(NoteSummary::class, 'summarize'))->getReturnType()?->getName() === 'string');
+
+// Field names in code: a fieldable entity's get(), set(), hasField(), and
+// getFieldDefinition() take a field's name first, and get() gives the
+// field's item list (core's FieldableEntityInterface).
+foreach (['get', 'set', 'hasField', 'getFieldDefinition'] as $method) {
+    $parameter = (new ReflectionMethod(FieldableEntityInterface::class, $method))->getParameters()[0]->getName();
+    check("FieldableEntityInterface::$method() takes a field's name first", in_array($parameter, ['field_name', 'name'], true));
+}
+check('FieldableEntityInterface::get() returns the field item list', preg_match('/@return \\\\Drupal\\\\Core\\\\Field\\\\FieldItemListInterface$/m', (string) (new ReflectionMethod(FieldableEntityInterface::class, 'get'))->getDocComment()) === 1);
+check('NoteInterface is fieldable', is_subclass_of(NoteInterface::class, FieldableEntityInterface::class));
+check('NoteSummary::isTagged() asks for and reads field_tags by name', str_contains($summarySource, "\$note->hasField('field_tags')") && str_contains($summarySource, "\$tags = \$note->get('field_tags');"));
+check('NoteSummary::isTagged() returns a bool', (new ReflectionMethod(NoteSummary::class, 'isTagged'))->getReturnType()?->getName() === 'bool');
 
 // Drupal upcasts a controller's parameter named after an entity type and
 // hinted with a class or interface the entity class is (core's
