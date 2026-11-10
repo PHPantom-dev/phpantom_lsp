@@ -17,6 +17,7 @@ use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Controller\NoteController;
 use Drupal\acme\Element\GreetingCard;
 use Drupal\acme\Entity\Note;
+use Drupal\acme\Form\GreetingForm;
 use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
 use Drupal\acme\Hook\AcmeHooks;
@@ -53,6 +54,8 @@ use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\ConfigTarget;
+use Drupal\Core\Form\FormInterface;
+use Drupal\Core\Form\FormState;
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Language\LanguageManager;
 use Drupal\Core\Session\AccountInterface;
@@ -432,6 +435,28 @@ foreach ($attached as $where => $names) {
 }
 check("core's Twig extension declares attach_library()", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Template/TwigExtension.php"), "new TwigFunction('attach_library'"));
 check("core's ThemeManager collects the #attached a preprocess function sets", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeManager.php"), "foreach (['#attached', '#cache'] as \$key)"));
+
+// ─── Callbacks ──────────────────────────────────────────────────────────────
+
+// Drupal rewrites a '::method' callback as a call on the form object, and
+// calls every other one as written. Each one GreetingForm declares names a
+// public method or function, so each one is callable.
+$greetingForm = new GreetingForm();
+$greetingFormState = (new FormState())->setFormObject($greetingForm);
+$greetingBuild = $greetingForm->buildForm([], $greetingFormState);
+$greetingCallbacks = [
+    ...$greetingBuild['#validate'],
+    $greetingBuild['name']['#value_callback'],
+    $greetingBuild['name']['#ajax']['callback'],
+    ...$greetingBuild['#after_build'],
+    ...$greetingBuild['actions']['submit']['#submit'],
+];
+check('GreetingForm declares a callback of each shape', $greetingCallbacks === ['::validateName', GreetingForm::class . '::trimName', '::refreshGreeting', 'Drupal\acme\Form\GreetingForm::addHint', '::submitForm', 'acme_greeting_form_submit']);
+foreach ($greetingCallbacks as $callback) {
+    check("Drupal can call GreetingForm's $callback", is_callable($greetingFormState->prepareCallback($callback)));
+}
+check("FormState rewrites '::validateName' as a call on the form object", $greetingFormState->prepareCallback('::validateName') === [$greetingForm, 'validateName']);
+check('GreetingForm is a form', $greetingForm instanceof FormInterface);
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

@@ -124,6 +124,7 @@ impl Backend {
                     name,
                     is_definition: false,
                     is_docblock_reference,
+                    is_callback: false,
                 } => (name, *is_docblock_reference),
                 _ => continue,
             };

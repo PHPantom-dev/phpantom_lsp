@@ -249,6 +249,9 @@ fn resolve_member_owner(
     if docblock_ref == (DocblockMemberRef::YiiProperty { form_model: true }) {
         names = crate::yii::forms::form_model_class_names(names, &class_loader);
     }
+    if docblock_ref == DocblockMemberRef::FormCallback {
+        names = crate::drupal::forms::form_callback_class_names(names, &class_loader);
+    }
     (names.len() == 1).then(|| names.swap_remove(0))
 }
 

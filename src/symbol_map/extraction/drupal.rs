@@ -1,6 +1,7 @@
 //! The entity types a Drupal entity class declares, by attribute or by the
 //! annotation older code uses, the route names Drupal's static and
-//! constructor calls read, and the libraries a render array attaches (see
+//! constructor calls read, the libraries a render array attaches, and the
+//! methods and functions a form or render array's callbacks name (see
 //! [`crate::drupal`]).
 
 use super::*;
@@ -2767,6 +2768,266 @@ fn push_library(expression: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
     }
 }
 
+// ─── Callbacks ──────────────────────────────────────────────────────────────
+
+/// The keys of a form or render array that hold a list of callbacks.
+const CALLBACK_LIST_KEYS: [&str; 8] = [
+    "#after_build",
+    "#element_validate",
+    "#entity_builders",
+    "#post_render",
+    "#pre_render",
+    "#process",
+    "#submit",
+    "#validate",
+];
+
+/// The keys that hold one callback.
+const CALLBACK_KEYS: [&str; 2] = ["#access_callback", "#value_callback"];
+
+/// The key whose list holds its callback first, then the arguments.
+const LAZY_BUILDER: &str = "#lazy_builder";
+
+/// The key whose array holds its callback under [`AJAX_CALLBACK`].
+const AJAX: &str = "#ajax";
+const AJAX_CALLBACK: &str = "callback";
+
+/// Whether `content` quotes a key Drupal reads a callback under, found in
+/// one pass over its `#`s.
+pub(in crate::symbol_map::extraction) fn has_callback_key(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    memchr::memchr_iter(b'#', bytes).any(|at| {
+        at > 0 && matches!(bytes[at - 1], b'\'' | b'"') && {
+            let rest = &bytes[at..];
+            CALLBACK_LIST_KEYS
+                .iter()
+                .chain(&CALLBACK_KEYS)
+                .chain([&LAZY_BUILDER, &AJAX])
+                .any(|key| {
+                    rest.starts_with(key.as_bytes())
+                        && matches!(rest.get(key.len()), Some(b'\'' | b'"'))
+                })
+        }
+    })
+}
+
+/// Record the callbacks an array literal's entries name under the keys
+/// Drupal reads callbacks from.
+pub(in crate::symbol_map::extraction) fn emit_drupal_callback_spans(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_callback_keys {
+        return;
+    }
+    for element in elements.iter() {
+        if let ArrayElement::KeyValue(entry) = element
+            && let Some((key, _, _)) = resolved_string_literal(entry.key, ctx.content)
+        {
+            push_keyed_callbacks(key, entry.value, ctx);
+        }
+    }
+}
+
+/// Record the callbacks an assignment into a form or render array names:
+/// `$form['#submit'][] = …`, a whole list or callback under its key, and
+/// `$form['x']['#ajax']['callback'] = …`.
+pub(in crate::symbol_map::extraction) fn emit_drupal_callback_assignment(
+    assign: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_callback_keys || !assign.operator.is_assign() {
+        return;
+    }
+    match assign.lhs {
+        Expression::ArrayAppend(append) => {
+            if let Expression::ArrayAccess(access) = append.array
+                && let Some((key, _, _)) = resolved_string_literal(access.index, ctx.content)
+                && CALLBACK_LIST_KEYS.contains(&key)
+            {
+                push_callback(assign.rhs, ctx);
+            }
+        }
+        Expression::ArrayAccess(access) => {
+            let Some((key, _, _)) = resolved_string_literal(access.index, ctx.content) else {
+                return;
+            };
+            if key == AJAX_CALLBACK {
+                if accesses_keys(access.array, &[AJAX], ctx.content) {
+                    push_callback(assign.rhs, ctx);
+                }
+            } else {
+                push_keyed_callbacks(key, assign.rhs, ctx);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Record the callbacks `value`, written under `key`, names.
+fn push_keyed_callbacks(key: &str, value: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    if CALLBACK_KEYS.contains(&key) {
+        push_callback(value, ctx);
+        return;
+    }
+    let lazy_builder = key == LAZY_BUILDER;
+    if !lazy_builder && key != AJAX && !CALLBACK_LIST_KEYS.contains(&key) {
+        return;
+    }
+    let Some(entries) = crate::parser::array_literal_elements(value) else {
+        return;
+    };
+    for entry in entries.iter() {
+        match entry {
+            ArrayElement::Value(item) if key != AJAX => push_callback(item.value, ctx),
+            ArrayElement::KeyValue(entry)
+                if key == AJAX && is_literal_key(entry.key, AJAX_CALLBACK, ctx.content) =>
+            {
+                push_callback(entry.value, ctx);
+            }
+            _ => {}
+        }
+        if lazy_builder {
+            return;
+        }
+    }
+}
+
+/// Record what one callback names: a method of the form for `'::method'`,
+/// a method of the class for `'Class::method'` or a class name joined to
+/// `'::method'`, and a function for a name without a colon.  An array
+/// callable is read wherever it is written, and `'service:method'` names a
+/// service rather than a class.
+fn push_callback(callback: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    if let Expression::Binary(binary) = callback
+        && binary.operator.is_concatenation()
+    {
+        push_joined_callback(binary.lhs, binary.rhs, ctx);
+        return;
+    }
+    let Some((value, start, end)) = resolved_string_literal(callback, ctx.content) else {
+        return;
+    };
+    if let Some((class, method)) = value.rsplit_once("::") {
+        if !is_identifier(method) || !ctx.content[..end].ends_with(method) {
+            return;
+        }
+        let method_start = (end - method.len()) as u32;
+        if class.is_empty() {
+            push_callback_method(
+                SubjectText::owned("$this".to_string()),
+                false,
+                DocblockMemberRef::FormCallback,
+                method,
+                method_start,
+                ctx,
+            );
+            return;
+        }
+        // A class name in a string is a runtime name, which is fully
+        // qualified whether or not it says so.
+        let class = class.strip_prefix('\\').unwrap_or(class);
+        if is_qualified_name(class) {
+            push_callback_method(
+                SubjectText::owned(format!("\\{class}")),
+                true,
+                DocblockMemberRef::No,
+                method,
+                method_start,
+                ctx,
+            );
+        }
+    } else if !value.contains(':') {
+        let name = value.strip_prefix('\\').unwrap_or(value);
+        if is_qualified_name(name) {
+            ctx.spans.push(SymbolSpan {
+                start: start as u32,
+                end: end as u32,
+                kind: SymbolKind::FunctionCall {
+                    name: crate::atom::atom(&format!("\\{name}")),
+                    is_definition: false,
+                    is_docblock_reference: false,
+                    is_callback: true,
+                },
+            });
+        }
+    }
+}
+
+/// Record the method `X::class . '::method'`, `static::class . '::method'`,
+/// `self::class . '::method'` or `__CLASS__ . '::method'` names.  The
+/// `'::method'` half is never read on its own.
+fn push_joined_callback(
+    class: &Expression<'_>,
+    method: &Expression<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some((value, _, end)) = resolved_string_literal(method, ctx.content) else {
+        return;
+    };
+    let Some(name) = value
+        .strip_prefix("::")
+        .filter(|name| is_identifier(name) && ctx.content[..end].ends_with(name))
+    else {
+        return;
+    };
+    let subject = match class {
+        Expression::Access(Access::ClassConstant(fetch))
+            if crate::parser::is_class_fetch(fetch) =>
+        {
+            let span = fetch.class.span();
+            SubjectText::new(
+                expr_to_subject_text(fetch.class),
+                span.start.offset,
+                span.end.offset,
+                ctx.content,
+            )
+        }
+        Expression::MagicConstant(MagicConstant::Class(_)) => {
+            SubjectText::owned("self".to_string())
+        }
+        _ => return,
+    };
+    push_callback_method(
+        subject,
+        true,
+        DocblockMemberRef::No,
+        name,
+        (end - name.len()) as u32,
+        ctx,
+    );
+}
+
+/// Record the method `name`, at `start`, of `subject` that a callback
+/// names, read like the method of an array callable.
+fn push_callback_method(
+    subject: SubjectText,
+    is_static: bool,
+    docblock_ref: DocblockMemberRef,
+    name: &str,
+    start: u32,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    ctx.spans.push(SymbolSpan {
+        start,
+        end: start + name.len() as u32,
+        kind: SymbolKind::MemberAccess {
+            subject_text: subject,
+            member_name: crate::atom::atom(name),
+            is_static,
+            is_method_call: true,
+            docblock_ref,
+            is_array_callable: true,
+            is_nullsafe: false,
+        },
+    });
+}
+
+/// Whether `name` is a class or function name, its namespace included.
+fn is_qualified_name(name: &str) -> bool {
+    name.split('\\').all(is_identifier)
+}
+
 /// The code `program` runs only when a module is installed (see
 /// [`ModuleGuard`]): the branch an `if` takes when a `moduleExists('m')`
 /// it requires holds, and the rest of a block after an `if` that leaves
@@ -4078,5 +4339,84 @@ $build['more']['#theme'] = 'item_list';
             )]
         );
         assert!(map_of(php, false).twig_contexts.is_empty());
+    }
+
+    #[test]
+    fn a_callback_key_is_one_a_quote_opens_and_closes() {
+        for (php, expected) in [
+            ("$form['#submit'][] = 'x';", true),
+            ("['#ajax' => []]", true),
+            ("[\"#lazy_builder\" => []]", true),
+            ("$form['#value_callback'] = 'x';", true),
+            ("$form['#submitted'] = 1;", false),
+            ("# submit, '#type' => 'x'", false),
+            ("#[Hook('form_alter')]", false),
+        ] {
+            assert_eq!(has_callback_key(php), expected, "{php}");
+        }
+    }
+
+    /// The text each callback span of `php` covers, with what it names:
+    /// `subject::method` for a method and `function name` for a function.
+    fn callbacks(php: &str, drupal: bool) -> Vec<(String, String)> {
+        let map = map_of(php, drupal);
+        let source = map.source(php).expect("the map's own source");
+        map.spans
+            .iter()
+            .filter_map(|span| {
+                let named = match &span.kind {
+                    SymbolKind::MemberAccess {
+                        subject_text,
+                        member_name,
+                        is_array_callable: true,
+                        ..
+                    } => format!("{}::{member_name}", subject_text.as_str(source)),
+                    SymbolKind::FunctionCall {
+                        name,
+                        is_callback: true,
+                        ..
+                    } => format!("function {name}"),
+                    _ => return None,
+                };
+                Some((
+                    php[span.start as usize..span.end as usize].to_string(),
+                    named,
+                ))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn each_callback_shape_names_its_method_or_function() {
+        let php = r#"<?php
+namespace Acme;
+$form['#submit'][] = '::save';
+$form['#validate'] = ['\Acme\Helper::check', Helper::class . '::check', 'acme_check', 'acme.checker:check'];
+$form['x']['#ajax']['callback'] = static::class . '::refresh';
+$form['y'] = ['#ajax' => ['callback' => __CLASS__ . '::refresh'], 'callback' => '::nothing'];
+$form['#lazy_builder'] = ['Acme\Builder::build', ['::argument']];
+$form['#value_callback'] = self::class . '::value';
+$form['#markup'] = '::nothing';
+$joined = static::class . '::nothing';
+"#;
+        let expected = [
+            ("save", "$this::save"),
+            ("check", "\\Acme\\Helper::check"),
+            ("check", "Helper::check"),
+            ("acme_check", "function \\acme_check"),
+            ("refresh", "static::refresh"),
+            ("refresh", "self::refresh"),
+            ("build", "\\Acme\\Builder::build"),
+            ("value", "self::value"),
+        ];
+        let found = callbacks(php, true);
+        assert_eq!(
+            found
+                .iter()
+                .map(|(text, named)| (text.as_str(), named.as_str()))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(callbacks(php, false), Vec::new());
     }
 }

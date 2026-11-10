@@ -249,6 +249,17 @@ impl Backend {
                     {
                         continue;
                     }
+                    // A form callback's `'::method'` names a method only of a
+                    // form.
+                    if *docblock_ref == crate::symbol_map::DocblockMemberRef::FormCallback
+                        && crate::drupal::forms::form_callback_classes(
+                            vec![Arc::clone(&base_class)],
+                            resolved_class_loader,
+                        )
+                        .is_empty()
+                    {
+                        continue;
+                    }
 
                     // An attribute's named-argument label uses a property
                     // only when the constructor promotes the parameter.

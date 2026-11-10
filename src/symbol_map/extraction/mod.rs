@@ -123,6 +123,9 @@ struct ExtractionCtx<'a> {
     /// Likewise for `#theme`, the key a render array names its theme hook
     /// under, which `#theme_wrappers` starts with.
     drupal_theme_keys: bool,
+    /// Likewise for the keys a form or render array holds its callbacks
+    /// under, such as `#submit` and `#pre_render`.
+    drupal_callback_keys: bool,
     drupal_route_patterns: Vec<String>,
     drupal_route_aliases: Vec<String>,
     /// The Drupal routes the file's `#[Route]` attributes declare.
@@ -632,6 +635,7 @@ fn extract_symbol_map_inner(
         drupal_plugins: Vec::new(),
         drupal_type_keys: drupal && memchr::memmem::find(content.as_bytes(), b"#type").is_some(),
         drupal_theme_keys: drupal && memchr::memmem::find(content.as_bytes(), b"#theme").is_some(),
+        drupal_callback_keys: drupal && drupal::has_callback_key(content),
         drupal_route_patterns: Vec::new(),
         drupal_route_aliases: Vec::new(),
         drupal_routes: Vec::new(),

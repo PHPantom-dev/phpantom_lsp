@@ -90,8 +90,12 @@ impl Backend {
                 name,
                 MemberRefKind::of_declaration(*is_static, *is_method),
             ),
-            SymbolKind::FunctionCall { name, .. } => {
-                self.highlight_function(symbol_map, content, name)
+            SymbolKind::FunctionCall {
+                name,
+                is_definition,
+                ..
+            } => {
+                self.highlight_function(uri, symbol_map, content, name, *is_definition, span.start)
             }
             SymbolKind::ConstantReference { name, .. } => {
                 self.highlight_constant(symbol_map, content, name)
@@ -245,16 +249,67 @@ impl Backend {
     }
 
     /// Highlight all occurrences of a standalone function name.
+    ///
+    /// A Drupal callback string names its function fully qualified
+    /// (`\foo`), where a call or a declaration spells its short name, so a
+    /// callback and another occurrence name the same function when the FQNs
+    /// they resolve to match.
     fn highlight_function(
         &self,
+        uri: &str,
         symbol_map: &SymbolMap,
         content: &str,
         target_name: &str,
+        target_is_definition: bool,
+        target_offset: u32,
     ) -> Vec<DocumentHighlight> {
+        let ctx = std::cell::OnceCell::new();
+        let ctx = || ctx.get_or_init(|| self.file_context(uri));
+        let target_fqn = std::cell::OnceCell::new();
         collect_highlights(symbol_map, content, |span| {
-            matches!(&span.kind, SymbolKind::FunctionCall { name, .. } if name == target_name)
-                .then_some(DocumentHighlightKind::Read)
+            let SymbolKind::FunctionCall {
+                name,
+                is_definition,
+                ..
+            } = &span.kind
+            else {
+                return None;
+            };
+            let same = if name.starts_with('\\') || target_name.starts_with('\\') {
+                let target_fqn = target_fqn.get_or_init(|| {
+                    self.function_span_fqn(ctx(), target_name, target_is_definition, target_offset)
+                });
+                self.function_span_fqn(ctx(), name, *is_definition, span.start)
+                    .eq_ignore_ascii_case(target_fqn)
+            } else {
+                name == target_name
+            };
+            same.then_some(DocumentHighlightKind::Read)
         })
+    }
+
+    /// The FQN of the function a function span named `name` at `offset`
+    /// names: a declaration's in its namespace, a call's by PHP's rule,
+    /// falling back to the global function when the namespace declares
+    /// none, and a name with a leading `\` as it is.
+    fn function_span_fqn(
+        &self,
+        ctx: &FileContext,
+        name: &str,
+        is_definition: bool,
+        offset: u32,
+    ) -> String {
+        if let Some(fqn) = name.strip_prefix('\\') {
+            return fqn.to_string();
+        }
+        if is_definition {
+            return build_fqn(name, ctx.namespace_at(offset).as_deref());
+        }
+        let fqn = ctx.resolve_name_at(name, offset);
+        if !name.contains('\\') && fqn != name && !self.has_indexed_function(&fqn) {
+            return name.to_string();
+        }
+        fqn
     }
 
     /// Highlight all occurrences of a constant name.

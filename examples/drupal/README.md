@@ -154,6 +154,14 @@ Run `composer install` here first. Composer puts core and contrib into
   `Details` class. Complete a name inside `'#type' => ''` or
   `$build['more']['#type'] = ''`; core's elements are offered too. A name
   no element class declares is reported.
+- Form and render callbacks navigate to the method or function they name.
+  In `web/modules/custom/acme/src/Form/GreetingForm.php`, go to the
+  definition of `validateName` in `'::validateName'`, which lands on the
+  form's own method, hover `trimName` in `static::class . '::trimName'`, or
+  go to the definition of `addHint` in
+  `'Drupal\acme\Form\GreetingForm::addHint'` and of
+  `'acme_greeting_form_submit'`, a function of `acme.module`. Find the
+  references of a callback method, or rename it, and the strings follow.
 - Plugin IDs navigate to the plugin class that declares them, for every
   plugin type a plugin manager declares, core's and contributed modules'
   included. In `block()` in
