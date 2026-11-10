@@ -1137,7 +1137,7 @@ fn apply_providers_same_specificity_preserves_high_priority() {
 
 #[test]
 fn default_providers_has_laravel_and_phpdoc() {
-    let providers = default_providers(true);
+    let providers = default_providers(true, false);
     assert_eq!(
         providers.len(),
         4,
@@ -1148,11 +1148,20 @@ fn default_providers_has_laravel_and_phpdoc() {
 
 #[test]
 fn default_providers_omits_laravel_when_not_laravel() {
-    let providers = default_providers(false);
+    let providers = default_providers(false, false);
     assert_eq!(
         providers.len(),
         1,
         "non-Laravel projects should only register the PHPDoc provider"
+    );
+}
+
+#[test]
+fn default_providers_adds_drupal_only_in_drupal() {
+    assert_eq!(
+        default_providers(false, true).len(),
+        2,
+        "a Drupal project should register the PHPDoc and fieldable entity providers"
     );
 }
 

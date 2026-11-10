@@ -83,6 +83,11 @@ impl BackendState {
                 Arc::clone(&is_doctrine),
                 Arc::clone(&doctrine_mapping_files),
             ));
+        resolved_class_cache
+            .write()
+            .set_drupal(crate::drupal::fields::DrupalCacheState::new(Arc::clone(
+                &workspace.is_drupal,
+            )));
         Self {
             name: "PHPantom".to_string(),
             version: env!("PHPANTOM_GIT_VERSION").to_string(),
