@@ -12,8 +12,8 @@ the plugins of each, the permissions the `*.permissions.yml`
 files declare, the configuration objects and keys the default
 configuration and the configuration schema declare, the theme hooks
 `hook_theme()` implementations declare, the render elements element
-classes declare, and the libraries the `*.libraries.yml` files declare
-are read. Nothing reads fields yet.
+classes declare, the libraries the `*.libraries.yml` files declare, and
+the fields entity classes and field storage files declare are read.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -32,9 +32,9 @@ installs core into `web/core` through Composer (`memory_drupal_module`),
 next to the other framework scenarios. `benches/drupal_completion.rs`
 measures completion of service IDs, route names, entity type IDs,
 permission names, configuration names, render element names, plugin IDs,
-hook names, theme hook names, library names, and hook implementations over a
-generated site with many custom modules. Every item that adds a name
-Drupal declares adds its case to it.
+hook names, theme hook names, library names, field names, and hook
+implementations over a generated site with many custom modules. Every
+item that adds a name Drupal declares adds its case to it.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
@@ -43,30 +43,6 @@ within the same impact tier.
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
-
----
-
-## DR4. Entity field access
-
-**Impact: Medium-High · Complexity: High**
-
-```php
-$tags = $node->field_tags;          // FieldItemListInterface
-$title = $node->get('title')->value;
-```
-
-Fields are reached through magic properties and `get()`. A field name
-comes from the entity class's `baseFieldDefinitions()` or from
-configuration (`field.storage.<entity>.<field>.yml` in the exported
-config or a module's `config/install`). Type a field access as the field
-item list its field type gives (an entity reference field gives
-`EntityReferenceFieldItemListInterface`), and complete and navigate
-field names.
-
-PHPStan's Drupal extension types any magic property on a fieldable
-entity as `FieldItemListInterface` without checking the name. That is
-the floor; reading the configuration is what lets an editor complete
-names and report a misspelt one.
 
 ---
 
@@ -137,7 +113,7 @@ discouraged calls. Port them into `tests/phpstan_drupal/` the same way:
 the `assertType()` fixtures run by `tests/assert_type_runner.rs`, the
 rule tests as `.fixture` files, a slice of `drupal/core` copied by
 `scripts/extract-framework-stubs.php`, and upstream's test modules and
-their `*.services.yml` as the project. Until DR2 to DR4 ship most
+their `*.services.yml` as the project. Until the items that cover them ship most
 assertions are a `// SKIP` pointing at the item that covers them; file
 any that no item does. Rules about Drupal's own deprecations are listed
 in the README as not ported.
@@ -268,8 +244,7 @@ Drupal builds them: each callback returns an array keyed by names such as
 `"create $type_id content"`, and the bundles and formats the names are
 built from are configuration entities (`node.type.*`,
 `filter.format.*`). Their names come from the default configuration,
-and on most sites from the exported configuration, which
-[DR4](#dr4-entity-field-access) reads. A name built from something the
+and on most sites from the exported configuration. A name built from something the
 site's files do not hold could be kept as a pattern, as route builders'
 names are.
 
@@ -365,3 +340,61 @@ argument, which each service in `views.services.yml` and
 sources and processes) neither complete nor navigate. Read the argument
 each such service passes, and type the service by the plugin type it
 builds.
+
+---
+
+## DR29. Fields added by hooks
+
+**Impact: Medium · Complexity: Medium-High**
+
+```php
+$state = $node->moderation_state->value;
+$alias = $node->path->alias;
+```
+
+A field name comes from an entity class's `baseFieldDefinitions()` or
+from a field storage file. Modules also add fields in code:
+`hook_entity_base_field_info()` and `hook_entity_bundle_field_info()`
+return field definitions, and `hook_entity_field_storage_info()` returns
+storage definitions, as `content_moderation` does for `moderation_state`
+and `path` does for `path`. Those names are not read, so they stay
+`mixed` and do not complete. Read the definitions an implementation
+builds, as the base field reader does for a class, including those it
+adds from a helper, and keep the ones that depend on a condition (a
+bundle, a module's setting) as fields of every bundle.
+
+---
+
+## DR30. Warn on unknown field names
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$node->hasField('field_tgas');
+$node->get('field_tgas');
+```
+
+A field name no entity type declares is a typo or a field the site
+lacks, and `get()` throws for it at run time. Report one where
+`get()`, `set()`, `hasField()`, and `getFieldDefinition()` take it. This
+depends on [DR29](#dr29-fields-added-by-hooks): without the fields hooks
+add, `moderation_state` would be reported on every moderated site.
+A lookup the code checks with `hasField()` first is left alone.
+
+---
+
+## DR31. Field names in entity queries and `loadByProperties()`
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$ids = $storage->getQuery()->condition('field_tags.target_id', $tid)->execute();
+$nodes = $storage->loadByProperties(['field_tags' => $tid]);
+```
+
+A field name completes and navigates in `get()` and the other calls
+that take one on an entity, but not where it is a condition of an entity
+query or a key of `loadByProperties()`. Read the entity type from the
+storage or query, offer its field names there, and for a condition read
+the field property after the dot (`field_tags.target_id`) from the
+field's item class.

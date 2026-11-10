@@ -134,7 +134,6 @@ ships, remove every row that names it.
 | DR12 | [Translation placeholders](todo/drupal.md#dr12-translation-placeholders) | Low-Medium | Low-Medium |
 | DR13 | [Module names and `*.info.yml`](todo/drupal.md#dr13-module-names-and-infoyml) | Low-Medium | Low-Medium |
 | DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |
-| DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) | Medium-High | High        |
 | DR16 | [Event subscribers](todo/drupal.md#dr16-event-subscribers) | Medium | Low-Medium |
 | DR18 | [Warn on unknown entity type IDs](todo/drupal.md#dr18-warn-on-unknown-entity-type-ids) | Medium | Low-Medium |
 | DR19 | [Warn on unknown hook names](todo/drupal.md#dr19-warn-on-unknown-hook-names) | Low-Medium | Medium |
@@ -145,6 +144,9 @@ ships, remove every row that names it.
 | DR24 | [Warn on unknown theme hook names](todo/drupal.md#dr24-warn-on-unknown-theme-hook-names) | Low-Medium | Medium-High |
 | DR28 | [Plugin types a manager builds at run time](todo/drupal.md#dr28-plugin-types-a-manager-builds-at-run-time) | Medium | Medium |
 | DR27 | [Plugin IDs in YAML](todo/drupal.md#dr27-plugin-ids-in-yaml) | Low-Medium | Medium |
+| DR29 | [Fields added by hooks](todo/drupal.md#dr29-fields-added-by-hooks) | Medium | Medium-High |
+| DR30 | [Warn on unknown field names](todo/drupal.md#dr30-warn-on-unknown-field-names) (depends on DR29) | Medium | Low-Medium |
+| DR31 | [Field names in entity queries and `loadByProperties()`](todo/drupal.md#dr31-field-names-in-entity-queries-and-loadbyproperties) | Low-Medium | Medium |
 
 ## Yii
 
