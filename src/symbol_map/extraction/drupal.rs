@@ -5,6 +5,7 @@
 //! [`crate::drupal`]).
 
 use super::*;
+use crate::drupal::forms::{AJAX, AJAX_CALLBACK, CALLBACK_KEYS, CALLBACK_LIST_KEYS, LAZY_BUILDER};
 use crate::symbol_map::extraction::symfony::{
     RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
@@ -2769,28 +2770,6 @@ fn push_library(expression: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
 }
 
 // ─── Callbacks ──────────────────────────────────────────────────────────────
-
-/// The keys of a form or render array that hold a list of callbacks.
-const CALLBACK_LIST_KEYS: [&str; 8] = [
-    "#after_build",
-    "#element_validate",
-    "#entity_builders",
-    "#post_render",
-    "#pre_render",
-    "#process",
-    "#submit",
-    "#validate",
-];
-
-/// The keys that hold one callback.
-const CALLBACK_KEYS: [&str; 2] = ["#access_callback", "#value_callback"];
-
-/// The key whose list holds its callback first, then the arguments.
-const LAZY_BUILDER: &str = "#lazy_builder";
-
-/// The key whose array holds its callback under [`AJAX_CALLBACK`].
-const AJAX: &str = "#ajax";
-const AJAX_CALLBACK: &str = "callback";
 
 /// Whether `content` quotes a key Drupal reads a callback under, found in
 /// one pass over its `#`s.

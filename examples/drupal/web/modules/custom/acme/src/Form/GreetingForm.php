@@ -26,7 +26,9 @@ final class GreetingForm extends FormBase
         // Try: go to the definition of validateName after the `::`, which
         // lands on the method of this form: Drupal calls a '::method'
         // callback on the form object. Find the references of
-        // validateName(), or rename it, and the string follows.
+        // validateName(), or rename it, and the string follows. Delete
+        // validateName and complete after the `::`: the form's public
+        // methods are offered.
         $form['#validate'][] = '::validateName';
         $form['name'] = [
             '#type' => 'textfield',

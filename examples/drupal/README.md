@@ -162,6 +162,9 @@ Run `composer install` here first. Composer puts core and contrib into
   `'Drupal\acme\Form\GreetingForm::addHint'` and of
   `'acme_greeting_form_submit'`, a function of `acme.module`. Find the
   references of a callback method, or rename it, and the strings follow.
+  Complete inside a callback string: after `'::` the form's public methods
+  are offered, after `'Class::` the class's, after `'service:` the service
+  class's, and before any colon the functions.
   A `'service:method'` callback leads to the method of the service's
   class: in `card()` in
   `web/modules/custom/acme/src/Controller/GreetingController.php`, go to

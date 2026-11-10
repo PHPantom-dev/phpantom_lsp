@@ -196,6 +196,18 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Drupal callbacks ────────────────────────────────────
+        // `'#submit' => ['::|']`, `$form['#validate'][] = 'Class::|'`, and
+        // the other keys Drupal reads a callback from.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_drupal_callback_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
         // ── Symfony form options ────────────────────────────────
         // `$builder->add('email', EmailType::class, ['|' => …])`, wherever
         // the form component is used.

@@ -1244,3 +1244,410 @@ async fn a_service_callback_checks_its_service_like_any_service_id() {
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(messages[0].contains("acme.missing_builder"), "{messages:?}");
 }
+
+// ─── Completion ─────────────────────────────────────────────────────────────
+
+/// Where a completion test puts the cursor in a buffer.
+const CURSOR: &str = "<|>";
+
+/// What accepting each item offered at [`CURSOR`] in `buffer`, opened as
+/// the file `path`, writes, and where the text it replaces starts, as the
+/// byte offset into `buffer` without the marker.
+async fn completed(
+    backend: &phpantom_lsp::Backend,
+    dir: &tempfile::TempDir,
+    path: &str,
+    buffer: &str,
+) -> Vec<(String, usize)> {
+    let at = buffer
+        .find(CURSOR)
+        .expect("the buffer should mark the cursor");
+    let content = buffer.replacen(CURSOR, "", 1);
+    let uri = uri_for(dir, path);
+    crate::common::open_document(backend, &uri, "php", &content).await;
+    let position = crate::common::offset_position(&content, at);
+    let items = crate::common::response_items(
+        crate::common::completion_response(backend, &uri, position.line, position.character, None)
+            .await,
+    )
+    .unwrap_or_default();
+    let mut written: Vec<(String, usize)> = items
+        .into_iter()
+        .map(|item| match item.text_edit {
+            Some(CompletionItemTextEdit::TextEdit(edit)) => {
+                assert_eq!(edit.range.end, position, "{}", item.label);
+                let line_start: usize = content
+                    .split_inclusive('\n')
+                    .take(edit.range.start.line as usize)
+                    .map(str::len)
+                    .sum();
+                (
+                    edit.new_text,
+                    line_start + edit.range.start.character as usize,
+                )
+            }
+            _ => (item.insert_text.unwrap_or(item.label), usize::MAX),
+        })
+        .collect();
+    written.sort();
+    written
+}
+
+/// The names [`completed`] writes, each replacing the text from the
+/// cursor's `typed` bytes back.
+async fn completed_names(
+    backend: &phpantom_lsp::Backend,
+    dir: &tempfile::TempDir,
+    path: &str,
+    buffer: &str,
+    typed: usize,
+) -> Vec<String> {
+    let start = buffer.find(CURSOR).unwrap() - typed;
+    completed(backend, dir, path, buffer)
+        .await
+        .into_iter()
+        .map(|(name, at)| {
+            assert_eq!(at, start, "{name} should replace only what was typed");
+            name
+        })
+        .collect()
+}
+
+const EDITED_FORM_PATH: &str = "web/modules/custom/acme/src/Form/EditedForm.php";
+
+/// A form being edited, its methods declared above the method that builds
+/// it so that an unclosed string leaves them in place.
+fn edited_form(line: &str) -> String {
+    format!(
+        r#"<?php
+namespace Drupal\acme\Form;
+
+use Drupal\Core\Form\FormBase;
+use Drupal\acme\Helper;
+
+final class EditedForm extends FormBase {{
+    public function saveTitle(): void {{}}
+    public static function processTitle(array $element): array {{ return $element; }}
+    protected function helper(): void {{}}
+    private function secret(): void {{}}
+
+    public function buildForm(array $form, $form_state): array {{
+        {line}
+"#
+    )
+}
+
+#[tokio::test]
+async fn a_form_callback_completes_the_public_methods_of_the_form() {
+    let (backend, dir) = site().await;
+    for line in [
+        "$form['#submit'][] = '::<|>",
+        "$form['#submit'][] = '::<|>'",
+        "$form['actions']['submit'] = ['#submit' => ['::saveTitle', '::<|>",
+        "$form['#validate'] = ['::<|>'];",
+        "$form['x']['#ajax']['callback'] = '::<|>';",
+        "$form['x'] = ['#ajax' => ['callback' => '::<|>']];",
+        "$form['x'] = ['#process' => [\n            '::<|>',\n        ]];",
+        "$form['#submit'] = ['acme_save' => '::<|>'];",
+        "$form['#entity_builders']['acme_entity'] = '::<|>';",
+    ] {
+        let names = completed_names(&backend, &dir, EDITED_FORM_PATH, &edited_form(line), 0).await;
+        assert_eq!(names, ["buildForm", "processTitle", "saveTitle"], "{line}");
+    }
+    let names = completed_names(
+        &backend,
+        &dir,
+        EDITED_FORM_PATH,
+        &edited_form("$form['#submit'][] = '::sa<|>"),
+        2,
+    )
+    .await;
+    assert_eq!(names, ["saveTitle"]);
+}
+
+#[tokio::test]
+async fn a_form_callback_reads_the_methods_declared_after_the_cursor() {
+    let (backend, dir) = site().await;
+    let buffer = FORM.replacen("'::checkTitle';", "'::<|>'", 1);
+    let names = completed_names(&backend, &dir, FORM_PATH, &buffer, 0).await;
+    assert_eq!(
+        names,
+        [
+            "buildForm",
+            "checkTitle",
+            "processTitle",
+            "refresh",
+            "saveTitle"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_form_callback_completes_a_traits_methods_and_nothing_outside_a_form() {
+    let (backend, dir) = site().await;
+    let buffer = TRAIT.replacen("'::pressButton';", "'::<|>", 1);
+    let names = completed_names(&backend, &dir, TRAIT_PATH, &buffer, 0).await;
+    assert_eq!(names, ["addButtons", "pressButton"]);
+
+    let buffer = HOOKS.replacen("'::validate';", "'::<|>", 1);
+    assert_eq!(completed(&backend, &dir, HOOKS_PATH, &buffer).await, []);
+}
+
+#[tokio::test]
+async fn a_form_callback_completes_nothing_where_drupal_does_not_rewrite_it() {
+    let (backend, dir) = site().await;
+    for line in [
+        "$form['#pre_render'][] = '::<|>",
+        "$form['x'] = ['#post_render' => ['::<|>",
+        "$form['x'] = ['#lazy_builder' => ['::<|>",
+        "$form['#access_callback'] = '::<|>",
+        "$form['#value_callback'] = '::<|>",
+        "$form['#markup'] = '::<|>",
+        "$form['x'] = ['callback' => '::<|>",
+        "$label = '::<|>",
+        "$form['#submit'][] .= '::<|>",
+        "$form['#ajax']['wrapper'] = '::<|>",
+        "$form['x']['acme_entity'] = '::<|>",
+        "$form['x'] = ['#lazy_builder' => ['acme_builder' => '::<|>",
+        "$form['x'] = ['#ajax' => ['wrapper' => '::<|>",
+    ] {
+        let found = completed(&backend, &dir, EDITED_FORM_PATH, &edited_form(line)).await;
+        assert_eq!(found, [], "{line}");
+    }
+}
+
+/// A caller in another namespace than [`HELPER`], which imports no
+/// `Helper`.
+const RENDER_EDIT_PATH: &str = "web/modules/custom/acme/src/Render/Edited.php";
+
+fn edited_render(line: &str) -> String {
+    format!("<?php\nnamespace Drupal\\acme\\Render;\n\nfunction build(): array {{\n    {line}\n")
+}
+
+#[tokio::test]
+async fn a_class_callback_completes_the_public_methods_of_the_class_it_spells_out() {
+    let (backend, dir) = site().await;
+    for (path, buffer, expected) in [
+        // The file's import of `Drupal\acme\Helper` does not apply.
+        (
+            EDITED_FORM_PATH,
+            edited_form("$form['#submit'][] = 'Helper::<|>"),
+            &["shout"][..],
+        ),
+        (
+            EDITED_FORM_PATH,
+            edited_form("$form['#submit'][] = 'Drupal\\acme\\Helper::<|>"),
+            &["shout", "whisper"],
+        ),
+        (
+            EDITED_FORM_PATH,
+            edited_form("$form['#submit'] = ['\\Drupal\\acme\\Helper::<|>"),
+            &["shout", "whisper"],
+        ),
+        (
+            EDITED_FORM_PATH,
+            edited_form("$form['#submit'][] = \"Drupal\\\\acme\\\\Helper::<|>"),
+            &["shout", "whisper"],
+        ),
+        (
+            RENDER_EDIT_PATH,
+            edited_render("return ['#pre_render' => ['Helper::<|>"),
+            &["shout"],
+        ),
+        (
+            RENDER_EDIT_PATH,
+            edited_render("return ['#lazy_builder' => ['Drupal\\acme\\Helper::<|>"),
+            &["shout", "whisper"],
+        ),
+        // A value callback must be a native callable: a static method.
+        (
+            RENDER_EDIT_PATH,
+            edited_render("return ['#value_callback' => 'Drupal\\acme\\Helper::<|>"),
+            &[],
+        ),
+        (
+            RENDER_EDIT_PATH,
+            edited_render("return ['#value_callback' => 'Helper::<|>"),
+            &["shout"],
+        ),
+        (
+            RENDER_EDIT_PATH,
+            edited_render("return ['#pre_render' => ['Drupal\\acme\\Missing::<|>"),
+            &[],
+        ),
+    ] {
+        let names = completed_names(&backend, &dir, path, &buffer, 0).await;
+        assert_eq!(names, expected, "{buffer}");
+    }
+    let names = completed_names(
+        &backend,
+        &dir,
+        RENDER_EDIT_PATH,
+        &edited_render("return ['#pre_render' => ['Drupal\\acme\\Helper::WH<|>"),
+        2,
+    )
+    .await;
+    assert_eq!(names, ["whisper"]);
+}
+
+#[tokio::test]
+async fn a_class_joined_to_a_callback_string_completes_its_methods() {
+    let (backend, dir) = site().await;
+    for (path, buffer, expected) in [
+        // A class name in code follows the file's imports.
+        (
+            EDITED_FORM_PATH,
+            edited_form("$form['#submit'][] = Helper::class . '::<|>"),
+            &["shout", "whisper"][..],
+        ),
+        (
+            EDITED_FORM_PATH,
+            edited_form("$form['#submit'] = [static::class . '::<|>"),
+            &["buildForm", "processTitle", "saveTitle"],
+        ),
+        (
+            EDITED_FORM_PATH,
+            edited_form("$form['x']['#ajax']['callback'] = __CLASS__ . '::<|>"),
+            &["buildForm", "processTitle", "saveTitle"],
+        ),
+        (
+            EDITED_FORM_PATH,
+            edited_form("$form['#value_callback'] = self::class . '::<|>"),
+            &["processTitle"],
+        ),
+        (
+            EDITED_FORM_PATH,
+            edited_form("$form['#markup'] = static::class . '::<|>"),
+            &[],
+        ),
+        (
+            EDITED_FORM_PATH,
+            edited_form("$form['#submit'][] = $form_state::class . '::<|>"),
+            &[],
+        ),
+        // Joined to its class, a method of a class that is no form is named
+        // directly.
+        (
+            HOOKS_PATH,
+            HOOKS.replacen("'::validate';", "static::class . '::<|>';", 1),
+            &["formAlter", "validate"],
+        ),
+    ] {
+        let names = completed_names(&backend, &dir, path, &buffer, 0).await;
+        assert_eq!(names, expected, "{buffer}");
+    }
+}
+
+#[tokio::test]
+async fn a_function_callback_completes_function_names_as_written_in_a_string() {
+    let (backend, dir) = site().await;
+    for (line, typed) in [
+        ("$form['#submit'][] = 'acme_log<|>", 8),
+        ("$form['#submit'] = ['::saveTitle', 'acme_log<|>", 8),
+        ("$form['#submit'][] = '\\acme_log<|>", 8),
+        ("$form['x'] = ['#lazy_builder' => ['acme_log<|>", 8),
+        ("$form['#value_callback'] = 'acme_log<|>", 8),
+    ] {
+        let names =
+            completed_names(&backend, &dir, EDITED_FORM_PATH, &edited_form(line), typed).await;
+        assert_eq!(
+            names,
+            ["Drupal\\acme\\Form\\acme_log_submit", "acme_log_submit"],
+            "{line}"
+        );
+    }
+
+    // A double-quoted string spells a backslash escaped, both in what it
+    // inserts and in what was typed.
+    for (line, typed, expected) in [
+        (
+            "$form['#submit'][] = \"acme_log<|>",
+            8,
+            &[
+                "Drupal\\\\acme\\\\Form\\\\acme_log_submit",
+                "acme_log_submit",
+            ][..],
+        ),
+        (
+            "$form['#submit'][] = \"Drupal\\\\acme\\\\Form\\\\acme_log<|>",
+            28,
+            &["Drupal\\\\acme\\\\Form\\\\acme_log_submit"],
+        ),
+    ] {
+        let names =
+            completed_names(&backend, &dir, EDITED_FORM_PATH, &edited_form(line), typed).await;
+        assert_eq!(names, expected, "{line}");
+    }
+
+    // A namespaced function is listed by its full name.
+    let content = edited_form("$form['#submit'][] = 'acme_log");
+    let uri = uri_for(&dir, EDITED_FORM_PATH);
+    crate::common::open_document(&backend, &uri, "php", &content).await;
+    let position = crate::common::offset_position(&content, content.len() - 1);
+    let labels = crate::common::response_labels(
+        crate::common::completion_response(&backend, &uri, position.line, position.character, None)
+            .await,
+    );
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "Drupal\\acme\\Form\\acme_log_submit"),
+        "{labels:?}"
+    );
+}
+
+#[tokio::test]
+async fn only_the_callback_itself_completes() {
+    let (backend, dir) = site().await;
+    for line in [
+        "$form['x'] = ['#lazy_builder' => ['acme_log_submit', ['acme_log<|>",
+        "$form['x'] = ['#lazy_builder' => ['acme_log_submit', 'acme_log<|>",
+        "$form['x'] = ['#markup' => 'acme_log<|>",
+        "$form['x'] = ['callback' => 'acme_log<|>",
+        "$form['#submit'] = 'acme_log<|>",
+    ] {
+        let found = completed(&backend, &dir, EDITED_FORM_PATH, &edited_form(line)).await;
+        assert_eq!(found, [], "{line}");
+    }
+
+    // The method string of an array callable is left to the array callable.
+    let found = completed(
+        &backend,
+        &dir,
+        EDITED_FORM_PATH,
+        &edited_form("$form['#submit'] = [[$this, '<|>"),
+    )
+    .await;
+    let names: Vec<&str> = found.iter().map(|(name, _)| name.as_str()).collect();
+    assert!(names.contains(&"saveTitle"), "{names:?}");
+    assert!(!names.contains(&"acme_log_submit"), "{names:?}");
+}
+
+const SERVICE_EDIT_PATH: &str = "web/modules/custom/acme/src/Render/EditedCard.php";
+
+#[tokio::test]
+async fn a_service_callback_completes_the_public_methods_of_the_service_class() {
+    let (backend, dir) = service_site(false).await;
+    let card = |line: &str| {
+        format!("<?php\nnamespace Drupal\\acme\\Render;\n\nfunction card(): array {{\n    {line}\n")
+    };
+    for (line, expected) in [
+        (
+            "return ['#lazy_builder' => ['acme.greeting_builder:<|>",
+            &["build", "preRender"][..],
+        ),
+        (
+            "return ['#pre_render' => ['acme.greeting_alias:pre<|>",
+            &["preRender"],
+        ),
+        (
+            "return ['#value_callback' => 'acme.greeting_builder:<|>",
+            &[],
+        ),
+        ("return ['#pre_render' => ['acme.missing:<|>", &[]),
+    ] {
+        let typed = line.len() - line.find(':').unwrap() - 1 - CURSOR.len();
+        let names = completed_names(&backend, &dir, SERVICE_EDIT_PATH, &card(line), typed).await;
+        assert_eq!(names, expected, "{line}");
+    }
+}
