@@ -41,6 +41,7 @@ use Drupal\Core\Validation\Attribute\Constraint;
 use Drupal\Core\Validation\Plugin\Validation\Constraint\UniqueFieldConstraint;
 use Drupal\Core\Config\ConfigBase;
 use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\DependencyInjection\ClassResolver;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\DependencyInjection\YamlFileLoader;
@@ -58,6 +59,7 @@ use Drupal\Core\Form\FormInterface;
 use Drupal\Core\Form\FormState;
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Language\LanguageManager;
+use Drupal\Core\Security\TrustedCallbackInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Link;
@@ -67,6 +69,7 @@ use Drupal\Core\Render\Attribute\RenderElement;
 use Drupal\Core\Render\Element\Details;
 use Drupal\Core\Render\Element\RenderElementBase;
 use Drupal\Core\Url;
+use Drupal\Core\Utility\CallableResolver;
 use Drupal\language\ConfigurableLanguageManager;
 use Drupal\language\LanguageServiceProvider;
 
@@ -457,6 +460,17 @@ foreach ($greetingCallbacks as $callback) {
 }
 check("FormState rewrites '::validateName' as a call on the form object", $greetingFormState->prepareCallback('::validateName') === [$greetingForm, 'validateName']);
 check('GreetingForm is a form', $greetingForm instanceof FormInterface);
+
+// The card's lazy builder names a method of the acme.greeter service, which
+// Drupal's CallableResolver finds through the container. A lazy builder
+// must be a trusted callback.
+check("GreetingController::card() has the lazy builder 'acme.greeter:buildGreeting'", str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#lazy_builder' => ['acme.greeter:buildGreeting', [\$name]]"));
+$lazyContainer = new ContainerBuilder();
+$lazyContainer->set('acme.greeter', (new ReflectionClass(Greeter::class))->newInstanceWithoutConstructor());
+$lazyCallable = (new CallableResolver(new ClassResolver($lazyContainer)))->getCallableFromDefinition('acme.greeter:buildGreeting');
+check("CallableResolver calls 'acme.greeter:buildGreeting' on the service", is_array($lazyCallable) && $lazyCallable[0] instanceof Greeter && $lazyCallable[1] === 'buildGreeting');
+check('acme.services.yml builds acme.greeter from Greeter, which declares buildGreeting()', $container->getDefinition('acme.greeter')->getClass() === Greeter::class && (new ReflectionMethod(Greeter::class, 'buildGreeting'))->isPublic());
+check('Greeter trusts buildGreeting() as a render callback', is_subclass_of(Greeter::class, TrustedCallbackInterface::class) && in_array('buildGreeting', Greeter::trustedCallbacks(), true));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

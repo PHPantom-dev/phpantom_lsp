@@ -2895,9 +2895,9 @@ fn push_keyed_callbacks(key: &str, value: &Expression<'_>, ctx: &mut ExtractionC
 
 /// Record what one callback names: a method of the form for `'::method'`,
 /// a method of the class for `'Class::method'` or a class name joined to
-/// `'::method'`, and a function for a name without a colon.  An array
-/// callable is read wherever it is written, and `'service:method'` names a
-/// service rather than a class.
+/// `'::method'`, a service and a method of its class for
+/// `'service:method'`, and a function for a name without a colon.  An array
+/// callable is read wherever it is written.
 fn push_callback(callback: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
     if let Expression::Binary(binary) = callback
         && binary.operator.is_concatenation()
@@ -2937,7 +2937,9 @@ fn push_callback(callback: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
                 ctx,
             );
         }
-    } else if !value.contains(':') {
+    } else if let Some((service, method)) = value.split_once(':') {
+        push_service_callback(service, method, start, end, ctx);
+    } else {
         let name = value.strip_prefix('\\').unwrap_or(value);
         if is_qualified_name(name) {
             ctx.spans.push(SymbolSpan {
@@ -2952,6 +2954,44 @@ fn push_callback(callback: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
             });
         }
     }
+}
+
+/// Record the service a `'service:method'` callback, its content running
+/// from `start` to `end`, names, and the method of the service's class,
+/// which the type engine finds through the container as it does for
+/// `\Drupal::service('service')`.
+fn push_service_callback(
+    service: &str,
+    method: &str,
+    start: usize,
+    end: usize,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !crate::drupal::routing::is_plain_name(service)
+        || !is_identifier(method)
+        || !ctx.content[start..end].starts_with(service)
+        || !ctx.content[..end].ends_with(method)
+    {
+        return;
+    }
+    ctx.spans.push(SymbolSpan {
+        start: start as u32,
+        end: (start + service.len()) as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::ServiceId,
+            key: service.to_string(),
+            is_write: false,
+            is_optional: false,
+        },
+    });
+    push_callback_method(
+        SubjectText::owned(crate::drupal::routing::service_subject(service)),
+        false,
+        DocblockMemberRef::No,
+        method,
+        (end - method.len()) as u32,
+        ctx,
+    );
 }
 
 /// Record the method `X::class . '::method'`, `static::class . '::method'`,
@@ -4404,6 +4444,7 @@ $joined = static::class . '::nothing';
             ("check", "\\Acme\\Helper::check"),
             ("check", "Helper::check"),
             ("acme_check", "function \\acme_check"),
+            ("check", "\\Drupal::service('acme.checker')::check"),
             ("refresh", "static::refresh"),
             ("refresh", "self::refresh"),
             ("build", "\\Acme\\Builder::build"),

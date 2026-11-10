@@ -162,6 +162,12 @@ Run `composer install` here first. Composer puts core and contrib into
   `'Drupal\acme\Form\GreetingForm::addHint'` and of
   `'acme_greeting_form_submit'`, a function of `acme.module`. Find the
   references of a callback method, or rename it, and the strings follow.
+  A `'service:method'` callback leads to the method of the service's
+  class: in `card()` in
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, go to
+  the definition of `buildGreeting` in `'acme.greeter:buildGreeting'`,
+  which lands on Greeter's method, or of `acme.greeter`, which lands on
+  its key in `acme.services.yml`.
 - Plugin IDs navigate to the plugin class that declares them, for every
   plugin type a plugin manager declares, core's and contributed modules'
   included. In `block()` in

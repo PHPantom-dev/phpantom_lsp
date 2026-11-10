@@ -1,6 +1,7 @@
 //! Drupal's form and render callbacks: the methods and functions a callback
 //! key of a form or render array names, as `'::method'`, `'Class::method'`,
-//! a class name joined to `'::method'`, or a function name.
+//! a class name joined to `'::method'`, `'service:method'`, or a function
+//! name.
 
 use crate::common::{apply_edits, edits_for_uri, hover_text_at, prepare_rename, rename};
 use crate::drupal_services::{
@@ -989,4 +990,257 @@ async fn references_and_rename_start_from_the_callback_string_too() {
         GLOBAL_HELPER.replace("shout", "yell")
     );
     assert!(edits_for_uri(&edit, &uri_for(&dir, HELPER_PATH)).is_empty());
+}
+
+const BUILDERS_PATH: &str = "web/modules/custom/acme/src/GreetingBuilders.php";
+
+/// Two service classes that both declare `build()` and `preRender()`.
+const BUILDERS: &str = r#"<?php
+namespace Drupal\acme;
+
+final class GreetingBuilder {
+    public function build(): array { return []; }
+    public function preRender(array $element): array { return $element; }
+}
+
+final class FarewellBuilder {
+    public function build(): array { return []; }
+    public function preRender(array $element): array { return $element; }
+}
+"#;
+
+const BUILDER_SERVICES_PATH: &str = "web/modules/custom/acme/acme.services.yml";
+
+const BUILDER_SERVICES: &str = "services:\n  acme.greeting_builder:\n    class: Drupal\\acme\\GreetingBuilder\n  acme.greeting_alias:\n    alias: acme.greeting_builder\n  acme.greeting_shorthand: '@acme.greeting_builder'\n  acme.farewell_builder:\n    class: Drupal\\acme\\FarewellBuilder\n";
+
+const CARD_PATH: &str = "web/modules/custom/acme/src/Render/Card.php";
+
+const CARD: &str = r#"<?php
+namespace Drupal\acme\Render;
+
+final class Card {
+    public function view(): array {
+        $element = [
+            '#lazy_builder' => ['acme.greeting_builder:build', []],
+            '#pre_render' => ['acme.greeting_alias:preRender', 'acme.greeting_shorthand:preRender'],
+        ];
+        $element['#pre_render'][] = 'acme.greeting_builder:preRender';
+        $element['#markup'] = 'acme.farewell_builder:preRender';
+        return $element;
+    }
+}
+"#;
+
+/// A site whose services file declares a service, an alias of it in each
+/// spelling, and a second service, with [`CARD`] closed when `card_open`
+/// is false.
+async fn service_site(card_open: bool) -> (phpantom_lsp::Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut files = vec![
+        (BUILDERS_PATH, BUILDERS),
+        (BUILDER_SERVICES_PATH, BUILDER_SERVICES),
+    ];
+    if card_open {
+        files.push((CARD_PATH, CARD));
+    } else {
+        let full = dir.path().join(CARD_PATH);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, CARD).unwrap();
+    }
+    let (backend, dir) = workspace_in(dir, &files).await;
+    backend.ensure_workspace_indexed();
+    (backend, dir)
+}
+
+#[tokio::test]
+async fn a_service_callback_goes_to_the_method_of_the_service_class() {
+    let (backend, dir) = service_site(true).await;
+    let card = (CARD_PATH, CARD);
+    let builders_uri = uri_for(&dir, BUILDERS_PATH);
+    let build = (builders_uri.clone(), line_of(BUILDERS, "build()"));
+    let pre_render = (builders_uri.clone(), line_of(BUILDERS, "preRender"));
+    for (needle, inside, expected) in [
+        ("'acme.greeting_builder:build'", 23, &build),
+        // An alias, written either way, leads to its target's class.
+        ("'acme.greeting_alias:preRender'", 22, &pre_render),
+        ("'acme.greeting_shorthand:preRender'", 26, &pre_render),
+        ("'acme.greeting_builder:preRender'", 24, &pre_render),
+    ] {
+        let found = definition_lines(&backend, &dir, card, needle, inside).await;
+        assert_eq!(found, vec![expected.clone()], "{needle}");
+    }
+
+    let services_uri = uri_for(&dir, BUILDER_SERVICES_PATH);
+    for (needle, declared) in [
+        ("'acme.greeting_builder:build'", "  acme.greeting_builder:"),
+        ("'acme.greeting_alias:preRender'", "  acme.greeting_alias:"),
+    ] {
+        let found = definition_lines(&backend, &dir, card, needle, 3).await;
+        assert_eq!(
+            found,
+            vec![(services_uri.clone(), line_of(BUILDER_SERVICES, declared))],
+            "{needle}"
+        );
+    }
+
+    // A string outside a callback key names nothing.
+    let found = definition_lines(&backend, &dir, card, "'acme.farewell_builder:", 24).await;
+    assert_eq!(found, Vec::new());
+}
+
+#[tokio::test]
+async fn a_hover_on_a_service_callback_shows_the_method_and_the_service() {
+    let (backend, dir) = service_site(true).await;
+    let card_uri = uri_for(&dir, CARD_PATH);
+    for (needle, inside, expected) in [
+        ("'acme.greeting_alias:preRender'", 22, "GreetingBuilder"),
+        (
+            "'acme.greeting_builder:build'",
+            3,
+            "**Service** `acme.greeting_builder`",
+        ),
+    ] {
+        let position = position_in(CARD, needle, inside);
+        let hover = hover_text_at(&backend, &card_uri, position.line, position.character)
+            .await
+            .unwrap_or_else(|| panic!("no hover on {needle}"));
+        assert!(hover.contains(expected), "{needle}: {hover}");
+    }
+}
+
+#[tokio::test]
+async fn the_references_of_a_service_method_list_its_callbacks() {
+    for card_open in [true, false] {
+        let (backend, dir) = service_site(card_open).await;
+        let expected = lines(
+            &dir,
+            &[
+                (BUILDERS_PATH, BUILDERS, "public function preRender"),
+                (CARD_PATH, CARD, "'acme.greeting_alias:preRender'"),
+                (CARD_PATH, CARD, "'acme.greeting_shorthand:preRender'"),
+                (CARD_PATH, CARD, "$element['#pre_render'][]"),
+            ],
+        );
+        let found =
+            reference_lines(&backend, &dir, (BUILDERS_PATH, BUILDERS), "preRender", 2).await;
+        assert_eq!(found, expected, "card open: {card_open}");
+        if card_open {
+            let found = reference_lines(
+                &backend,
+                &dir,
+                (CARD_PATH, CARD),
+                "'acme.greeting_builder:preRender'",
+                24,
+            )
+            .await;
+            assert_eq!(found, expected);
+        }
+
+        // The other service's `preRender()` has no callback naming it.
+        let farewell = BUILDERS.find("FarewellBuilder").unwrap();
+        let farewell = farewell + BUILDERS[farewell..].find("preRender").unwrap();
+        let found = references_at(
+            &backend,
+            &uri_for(&dir, BUILDERS_PATH),
+            crate::common::offset_position(BUILDERS, farewell + 2),
+        )
+        .await;
+        assert_eq!(
+            found,
+            vec![(
+                uri_for(&dir, BUILDERS_PATH),
+                BUILDERS[..farewell].matches('\n').count() as u32
+            )],
+            "card open: {card_open}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn renaming_a_service_method_rewrites_its_callbacks() {
+    let (backend, dir) = service_site(false).await;
+    let position = position_in(BUILDERS, "preRender", 2);
+    let edit = rename(
+        &backend,
+        &uri_for(&dir, BUILDERS_PATH),
+        position.line,
+        position.character,
+        "decorate",
+    )
+    .await
+    .expect("an edit");
+    assert_eq!(
+        renamed(&edit, &dir, (CARD_PATH, CARD)),
+        CARD.replace("greeting_alias:preRender", "greeting_alias:decorate")
+            .replace(
+                "greeting_shorthand:preRender",
+                "greeting_shorthand:decorate"
+            )
+            .replace("greeting_builder:preRender", "greeting_builder:decorate")
+    );
+    assert_eq!(
+        renamed(&edit, &dir, (BUILDERS_PATH, BUILDERS)),
+        BUILDERS.replacen("preRender", "decorate", 1)
+    );
+}
+
+#[tokio::test]
+async fn the_references_of_a_service_list_its_callbacks() {
+    let (backend, dir) = service_site(true).await;
+    let found = references_at(
+        &backend,
+        &uri_for(&dir, BUILDER_SERVICES_PATH),
+        position_in(BUILDER_SERVICES, "acme.greeting_builder:", 3),
+    )
+    .await;
+    let card_uri = uri_for(&dir, CARD_PATH);
+    for needle in ["'acme.greeting_builder:build'", "$element['#pre_render'][]"] {
+        assert!(
+            found.contains(&(card_uri.clone(), line_of(CARD, needle))),
+            "{needle}: {found:?}"
+        );
+    }
+    assert!(
+        !found.contains(&(card_uri.clone(), line_of(CARD, "'#markup'"))),
+        "{found:?}"
+    );
+}
+
+const UNKNOWN_CARD_PATH: &str = "web/modules/custom/acme/src/Render/UnknownCard.php";
+
+const UNKNOWN_CARD: &str = r#"<?php
+namespace Drupal\acme\Render;
+
+final class UnknownCard {
+    public function view(): array {
+        return [
+            '#pre_render' => ['acme.missing_builder:build', 'acme.greeting_builder:nope'],
+        ];
+    }
+}
+"#;
+
+#[tokio::test]
+async fn a_service_callback_checks_its_service_like_any_service_id() {
+    let (backend, dir) = workspace_in(
+        tempfile::tempdir().unwrap(),
+        &[
+            (BUILDERS_PATH, BUILDERS),
+            (BUILDER_SERVICES_PATH, BUILDER_SERVICES),
+            (UNKNOWN_CARD_PATH, UNKNOWN_CARD),
+        ],
+    )
+    .await;
+    backend.ensure_workspace_indexed();
+    let uri = uri_for(&dir, UNKNOWN_CARD_PATH);
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), UNKNOWN_CARD, &mut diagnostics);
+    backend.collect_fast_diagnostics(uri.as_str(), UNKNOWN_CARD, &mut diagnostics);
+    let messages: Vec<&str> = diagnostics
+        .iter()
+        .map(|diagnostic| crate::common::message_text(&diagnostic.message))
+        .collect();
+    // The method a declared service's class lacks is not reported here.
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("acme.missing_builder"), "{messages:?}");
 }
