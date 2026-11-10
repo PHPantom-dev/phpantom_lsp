@@ -480,6 +480,11 @@ fn property_source(src: &PropertySource) -> Sz {
             z += vs(pivot_columns);
         }
         PropertySource::RelationshipCount { relationship } => z.add(relationship.capacity()),
+        PropertySource::DrupalField { declarations } => {
+            for declaration in declarations.iter() {
+                z.add(size_of::<crate::types::FieldDeclaration>() + declaration.uri.capacity());
+            }
+        }
         PropertySource::Pivot | PropertySource::DocblockTag | PropertySource::PromotedParameter => {
         }
     }

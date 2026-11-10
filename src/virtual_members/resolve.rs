@@ -330,14 +330,24 @@ pub fn resolve_class_fully_maybe_cached(
 /// them the same way).
 ///
 /// `@property` tags count as declared: they name a type for the path,
-/// which the write is expected to respect.
+/// which the write is expected to respect.  A property a framework stores
+/// through `__set` does not: the setter keeps its type whatever is written
+/// (see [`writes_through_magic_set`]).
+///
+/// [`writes_through_magic_set`]: crate::types::PropertyInfo::writes_through_magic_set
 pub fn property_write_is_magic(
     class: &ClassInfo,
     prop_name: &str,
     class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> bool {
-    if class.has_property(prop_name) {
+    let stores_value = |class: &ClassInfo| {
+        class
+            .properties
+            .iter()
+            .any(|property| property.name == prop_name && !property.writes_through_magic_set())
+    };
+    if stores_value(class) {
         return false;
     }
     // The property and `__set` may each come from a parent, a trait, a
@@ -350,7 +360,7 @@ pub fn property_write_is_magic(
         None => active_resolved_class_cache(),
     };
     let merged = resolve_class_fully_maybe_cached(class, class_loader, cache.or(ambient));
-    merged.has_method("__set") && !merged.has_property(prop_name)
+    merged.has_method("__set") && !stores_value(&merged)
 }
 
 /// The cache key for `fqn` instantiated with `args`.
