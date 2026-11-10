@@ -433,12 +433,16 @@ impl LanguageServer for Backend {
                         DefinitionResponse::Definition(Definition::Location(location))
                     }));
                 }
+                let blade = backend.is_blade_file(uri);
                 backend.handle_with_position("goto_definition", uri, position, |content, pos| {
-                    let locs = backend
+                    let mut locs: Vec<Location> = backend
                         .resolve_definition(uri, content, pos)
                         .into_iter()
                         .map(|l| backend.translate_location(l))
                         .collect();
+                    if locs.is_empty() && !blade {
+                        locs.extend(backend.document_link_definition(uri, content, pos));
+                    }
                     wrap_locations(locs).map(DefinitionResponse::Definition)
                 })
             },

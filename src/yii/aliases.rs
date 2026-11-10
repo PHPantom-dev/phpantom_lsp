@@ -35,11 +35,13 @@ pub(crate) struct Aliases {
 }
 
 /// Where an alias is declared: the file, and the range of its name's string
-/// there, inside the quotes.
+/// there, inside the quotes, with the path as it is written before Yii drops
+/// the separator it ends in.
 #[derive(Debug, Clone)]
 pub(crate) struct AliasDeclaration {
     pub(crate) file: PathBuf,
     pub(crate) range: Range,
+    pub(crate) written: String,
 }
 
 impl Aliases {
@@ -207,15 +209,16 @@ impl Aliases {
             } else {
                 format!("@{name}")
             };
+            self.entries
+                .insert(name.clone(), path.trim_end_matches(['/', '\\']).to_string());
             self.declarations.insert(
-                name.clone(),
+                name,
                 AliasDeclaration {
                     file: file.to_path_buf(),
                     range,
+                    written: path,
                 },
             );
-            self.entries
-                .insert(name, path.trim_end_matches(['/', '\\']).to_string());
         }
     }
 }
@@ -241,8 +244,14 @@ impl Backend {
     pub(crate) fn yii_alias_detail(&self, name: &str) -> Option<String> {
         let aliases = self.yii_aliases();
         let declared = aliases.declared_path(name)?;
+        // `'@baseUrl' => '/'` is the empty path once its separator is
+        // dropped, which tells the reader nothing, so the path is shown as
+        // written.
+        let written = aliases
+            .declaration(name)
+            .map_or(declared, |declaration| declaration.written.as_str());
         let root = self.workspace.workspace_root.read().clone();
-        let mut detail = format!("`{}`", shown_path(declared, root.as_deref()));
+        let mut detail = format!("`{}`", shown_path(written, root.as_deref()));
         if declared.starts_with('@')
             && let Some(resolved) = aliases.resolve(declared)
         {

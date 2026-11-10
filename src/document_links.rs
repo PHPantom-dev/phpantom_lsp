@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use mago_allocator::LocalArena;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp_server::gen_lsp_types::{DocumentLink, Range};
+use tower_lsp_server::gen_lsp_types::{DocumentLink, Location, Position, Range};
 
 use crate::Backend;
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
@@ -43,9 +43,11 @@ impl Backend {
 
         if let Some(dir) = file_dir {
             let mut include_links = Vec::new();
-            for stmt in program.statements.iter() {
-                collect_include_links_from_statement(stmt, dir, &mut include_links);
-            }
+            mago_syntax::walker::Walker::walk_program(
+                &IncludeFinder { file_dir: dir },
+                program,
+                &mut include_links,
+            );
             for il in include_links {
                 if let Some(target_url) = crate::util::path_to_url(&il.resolved_path) {
                     let start = offset_to_position(content, il.start_offset);
@@ -92,166 +94,56 @@ impl Backend {
 
         if links.is_empty() { None } else { Some(links) }
     }
+
+    /// Go-to-definition on a path a document link covers: the file it
+    /// names.  Not every client follows document links, and the ones that
+    /// do not leave the path a dead end otherwise.  A link to a directory
+    /// has no location a client can open, so it gives none.
+    pub(crate) fn document_link_definition(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Option<Location> {
+        let in_range = |range: &Range| {
+            (range.start.line, range.start.character) <= (position.line, position.character)
+                && (position.line, position.character) <= (range.end.line, range.end.character)
+        };
+        let target = self
+            .handle_document_link(uri, content)?
+            .into_iter()
+            .find(|link| in_range(&link.range))?
+            .target?;
+        crate::util::uri_to_path(target.as_str())
+            .is_some_and(|path| path.is_file())
+            .then(|| Location {
+                uri: target,
+                range: Range::default(),
+            })
+    }
 }
 
 // ─── AST walking for include/require ────────────────────────────────────────
 
-/// Walk a statement looking for include/require constructs.
-fn collect_include_links_from_statement(
-    stmt: &Statement<'_>,
-    file_dir: &Path,
-    links: &mut Vec<IncludeLink>,
-) {
-    match stmt {
-        Statement::Expression(expr_stmt) => {
-            collect_include_links_from_expression(expr_stmt.expression, file_dir, links);
-        }
-        Statement::Namespace(ns) => {
-            for s in ns.statements().iter() {
-                collect_include_links_from_statement(s, file_dir, links);
-            }
-        }
-        Statement::Block(block) => {
-            for s in block.statements.iter() {
-                collect_include_links_from_statement(s, file_dir, links);
-            }
-        }
-        Statement::If(if_stmt) => {
-            // Main body statements.
-            for s in if_stmt.body.statements() {
-                collect_include_links_from_statement(s, file_dir, links);
-            }
-            // Else-if clauses.
-            for stmts in if_stmt.body.else_if_statements() {
-                for s in stmts {
-                    collect_include_links_from_statement(s, file_dir, links);
-                }
-            }
-            // Else clause.
-            if let Some(else_stmts) = if_stmt.body.else_statements() {
-                for s in else_stmts {
-                    collect_include_links_from_statement(s, file_dir, links);
-                }
-            }
-        }
-        Statement::Try(try_stmt) => {
-            for s in try_stmt.block.statements.iter() {
-                collect_include_links_from_statement(s, file_dir, links);
-            }
-            for catch in try_stmt.catch_clauses.iter() {
-                for s in catch.block.statements.iter() {
-                    collect_include_links_from_statement(s, file_dir, links);
-                }
-            }
-            if let Some(ref finally) = try_stmt.finally_clause {
-                for s in finally.block.statements.iter() {
-                    collect_include_links_from_statement(s, file_dir, links);
-                }
-            }
-        }
-        Statement::Foreach(foreach) => {
-            for s in foreach.body.statements() {
-                collect_include_links_from_statement(s, file_dir, links);
-            }
-        }
-        Statement::For(for_stmt) => {
-            for s in for_stmt.body.statements() {
-                collect_include_links_from_statement(s, file_dir, links);
-            }
-        }
-        Statement::While(while_stmt) => {
-            for s in while_stmt.body.statements() {
-                collect_include_links_from_statement(s, file_dir, links);
-            }
-        }
-        Statement::DoWhile(do_while) => {
-            collect_include_links_from_statement(do_while.statement, file_dir, links);
-        }
-        Statement::Function(func) => {
-            for s in func.body.statements.iter() {
-                collect_include_links_from_statement(s, file_dir, links);
-            }
-        }
-        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
-            for member in body.members {
-                collect_include_links_from_class_member(member, file_dir, links);
-            }
-        }
-        Statement::Switch(switch) => {
-            let cases = match &switch.body {
-                SwitchBody::BraceDelimited(b) => &b.cases,
-                SwitchBody::ColonDelimited(b) => &b.cases,
-            };
-            for case in cases.iter() {
-                let stmts = match case {
-                    SwitchCase::Expression(c) => &c.statements,
-                    SwitchCase::Default(c) => &c.statements,
-                };
-                for s in stmts.iter() {
-                    collect_include_links_from_statement(s, file_dir, links);
-                }
-            }
-        }
-        Statement::Return(ret) => {
-            if let Some(val) = &ret.value {
-                collect_include_links_from_expression(val, file_dir, links);
-            }
-        }
-        Statement::Echo(echo) => {
-            for val in echo.values.iter() {
-                collect_include_links_from_expression(val, file_dir, links);
-            }
-        }
-        Statement::EchoTag(echo) => {
-            for val in echo.values.iter() {
-                collect_include_links_from_expression(val, file_dir, links);
-            }
-        }
-        _ => {}
-    }
+/// Finds every include/require construct, wherever it is written: a
+/// statement, a returned array (`'db' => require __DIR__ . '/db.php'`), or
+/// a call's argument (`array_merge(require …, require …)`).
+struct IncludeFinder<'a> {
+    file_dir: &'a Path,
 }
 
-/// Walk a class-like member for include/require constructs.
-fn collect_include_links_from_class_member(
-    member: &ClassLikeMember<'_>,
-    file_dir: &Path,
-    links: &mut Vec<IncludeLink>,
-) {
-    if let ClassLikeMember::Method(method) = member
-        && let MethodBody::Concrete(body) = &method.body
-    {
-        for s in body.statements.iter() {
-            collect_include_links_from_statement(s, file_dir, links);
-        }
-    }
-}
-
-/// Walk an expression looking for include/require constructs.
-fn collect_include_links_from_expression(
-    expr: &Expression<'_>,
-    file_dir: &Path,
-    links: &mut Vec<IncludeLink>,
-) {
-    match expr {
-        Expression::Construct(construct) => {
-            let include_value = match construct {
-                construct::Construct::Include(c) => Some(c.value),
-                construct::Construct::IncludeOnce(c) => Some(c.value),
-                construct::Construct::Require(c) => Some(c.value),
-                construct::Construct::RequireOnce(c) => Some(c.value),
-                _ => None,
-            };
-            if let Some(value_expr) = include_value {
-                try_resolve_include(value_expr, file_dir, links);
-            }
-        }
-        Expression::Parenthesized(p) => {
-            collect_include_links_from_expression(p.expression, file_dir, links);
-        }
-        Expression::Assignment(a) => {
-            collect_include_links_from_expression(a.rhs, file_dir, links);
-        }
-        _ => {}
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<IncludeLink>>
+    for IncludeFinder<'_>
+{
+    fn walk_in_construct(&self, construct: &'ast Construct<'arena>, links: &mut Vec<IncludeLink>) {
+        let value = match construct {
+            Construct::Include(c) => c.value,
+            Construct::IncludeOnce(c) => c.value,
+            Construct::Require(c) => c.value,
+            Construct::RequireOnce(c) => c.value,
+            _ => return,
+        };
+        try_resolve_include(value, self.file_dir, links);
     }
 }
 

@@ -593,10 +593,12 @@ fn array_elements<'a>(
 }
 
 /// Whether `value` merges with the array a key already holds rather than
-/// replacing it: an array with keys, or a file required for one.
+/// replacing it: an array with keys, a file required for one, or an
+/// `array_merge()` of those.
 fn merges(value: &Expression<'_>) -> bool {
     match value {
         Expression::Construct(construct) => required_expr(construct).is_some(),
+        value if array_merge_args(value).is_some() => true,
         value => array_elements(value).is_some_and(|elements| {
             elements
                 .iter()
@@ -634,6 +636,21 @@ fn merge_value(
             node.open = true;
         }
         reading.pop();
+        return;
+    }
+    if let Some(args) = array_merge_args(value) {
+        // Each argument merges into the key in turn, the way the merge plan
+        // merges one params file into the next.  One that is not an array
+        // with keys or a file required for one adds keys that cannot be
+        // read.
+        for arg in args.iter() {
+            let arg = arg.value();
+            if matches!(arg, Expression::Construct(_)) || merges(arg) {
+                merge_value(node, arg, source, rank, reading);
+            } else {
+                node.open = true;
+            }
+        }
         return;
     }
     if !merges(value) {
@@ -721,6 +738,22 @@ fn value_type(value: &Expression<'_>, source: &ParamsSource<'_>) -> PhpType {
         &source.use_map,
     )
     .to_php_type()
+}
+
+/// The arguments of `value` when it is a call to `array_merge()`.
+fn array_merge_args<'a>(
+    value: &'a Expression<'a>,
+) -> Option<&'a TokenSeparatedSequence<'a, Argument<'a>>> {
+    match value {
+        Expression::Parenthesized(p) => array_merge_args(p.expression),
+        Expression::Call(Call::Function(call))
+            if matches!(call.function, Expression::Identifier(name)
+                if name.value().eq_ignore_ascii_case(b"array_merge")) =>
+        {
+            Some(&call.argument_list.arguments)
+        }
+        _ => None,
+    }
 }
 
 /// The path a `require` or `include` evaluates.

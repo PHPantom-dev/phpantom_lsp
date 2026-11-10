@@ -369,7 +369,16 @@ impl Backend {
                     .as_ref()
                     .map(|ty| format!("{ty} "))
                     .unwrap_or_default();
-                format!("Parameter `{ty}${name}` of `{callable}`")
+                let mut detail = format!("Parameter `{ty}${name}` of `{callable}`");
+                if let Some(description) = parameter
+                    .description
+                    .as_deref()
+                    .filter(|description| !description.is_empty())
+                {
+                    detail.push_str("\n\n");
+                    detail.push_str(description);
+                }
+                detail
             }
             None => format!("`{callable}` has no parameter `${name}`"),
         }

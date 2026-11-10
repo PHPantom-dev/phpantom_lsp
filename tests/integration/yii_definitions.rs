@@ -56,6 +56,7 @@ final class InMemoryPostRepository implements PostRepositoryInterface
     public readonly string $name;
     private ?Logger $logger = null;
 
+    /** @param array $posts The posts the repository starts with. */
     public function __construct(private array $posts, int $limit = 0) {}
 
     public function setLogger(Logger $logger): void
@@ -359,7 +360,7 @@ async fn definition_keys_go_to_the_members_and_parameters_they_name() {
     );
     assert_eq!(
         definitions(&backend, &di, position_in(DI_PHP, "'posts'", 2)).await,
-        vec![(repository, position_in(REPOSITORY_PHP, "$posts", 0))]
+        vec![(repository, position_in(REPOSITORY_PHP, "$posts, int", 0))]
     );
 
     let hover = markup_hover_at(
@@ -370,6 +371,10 @@ async fn definition_keys_go_to_the_members_and_parameters_they_name() {
     )
     .await;
     assert!(hover.contains("Parameter `array $posts`"), "{hover}");
+    assert!(
+        hover.contains("The posts the repository starts with."),
+        "{hover}"
+    );
 }
 
 #[tokio::test]

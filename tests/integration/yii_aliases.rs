@@ -176,7 +176,8 @@ async fn an_alias_in_any_string_goes_to_its_declaration() {
         );
     }
 
-    // The path after the alias is not the alias.
+    // The path after the alias is not the alias: it goes to the file it
+    // names, and a directory is no location a client can open.
     let found = definitions(
         &backend,
         &uri_for(&dir, "src/Web/Asset.php"),
@@ -184,6 +185,21 @@ async fn an_alias_in_any_string_goes_to_its_declaration() {
     )
     .await;
     assert!(found.is_empty(), "{found:?}");
+    let found = definitions(
+        &backend,
+        &uri_for(&dir, "src/Web/Asset.php"),
+        position_in(ASSET_PHP, "'@views/blog/_card.php'", 15),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0]
+            .uri
+            .to_file_path()
+            .unwrap()
+            .ends_with("resources/views/blog/_card.php"),
+        "{found:?}"
+    );
 }
 
 #[tokio::test]
@@ -247,6 +263,15 @@ async fn hovering_an_alias_shows_its_path() {
         markup.contains("`@root/resources/views`, which is `resources/views`"),
         "{markup}"
     );
+
+    // Yii drops the separator a path ends in, which leaves nothing of a
+    // URL alias declared as `/`, so the path is shown as written.
+    let position = position_in(ASSET_PHP, "'@baseUrl/favicon.svg'", 2);
+    let hover = hover_response(&backend, &uri, position.line, position.character)
+        .await
+        .expect("a hover");
+    let markup = hover_text(&hover);
+    assert!(markup.contains("**Alias** `@baseUrl`\n\n`/`"), "{markup}");
 }
 
 #[tokio::test]

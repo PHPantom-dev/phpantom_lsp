@@ -48,6 +48,17 @@ return [
         'pageSize' => 5,
     ],
     'empty' => [],
+    'storage' => array_merge(
+        require __DIR__ . '/storage.php',
+        ['bucket' => 'files'],
+    ),
+    'loose' => array_merge(['known' => 1], getenv()),
+];
+"#;
+
+const STORAGE_PHP: &str = r#"<?php
+return [
+    'driver' => 's3',
 ];
 "#;
 
@@ -78,6 +89,8 @@ const DI_PHP: &str = r#"<?php
 $size = $params['blog']['pageSize'];
 $posts = $params['blog']['posts'];
 $name = $params['application']['name'];
+$driver = $params['storage']['driver'];
+$bucket = $params['storage']['bucket'];
 
 return [
     'name' => $params['application']['name'],
@@ -89,6 +102,8 @@ return [
     'guarded' => $params['other'] ?? null,
     'checked' => isset($params['gone']) ? 1 : 0,
     'link' => static fn () => $params['traceLink'],
+    'merged' => $params['storage']['region'],
+    'unread' => $params['loose']['anything'],
 ];
 "#;
 
@@ -105,6 +120,7 @@ fn files() -> Vec<(&'static str, &'static str)> {
         ("config/configuration.php", CONFIGURATION_PHP),
         ("config/common/params.php", PARAMS_PHP),
         ("config/common/application.php", APPLICATION_PHP),
+        ("config/common/storage.php", STORAGE_PHP),
         ("config/web/params.php", WEB_PARAMS_PHP),
         ("config/environments/dev/params.php", DEV_PARAMS_PHP),
         ("config/common/di/app.php", DI_PHP),
@@ -255,6 +271,9 @@ async fn a_key_no_params_file_declares_is_reported() {
             "Unknown params key ['nothing']".to_string(),
             // The key under it is not judged.
             "Unknown params key ['nothing']".to_string(),
+            // The keys of an `array_merge()` of a required file and an
+            // array are known.
+            "Unknown params key ['storage']['region']".to_string(),
         ]
     );
     // A `$params` no configuration file is handed is any other variable.
@@ -271,7 +290,14 @@ async fn params_keys_complete_a_level_at_a_time() {
     for (needle, expected) in [
         (
             "$params['",
-            vec!["application", "blog", "empty", "traceLink"],
+            vec![
+                "application",
+                "blog",
+                "empty",
+                "loose",
+                "storage",
+                "traceLink",
+            ],
         ),
         ("['application']['", vec!["charset", "name"]),
     ] {
@@ -309,6 +335,8 @@ async fn a_params_read_is_typed_as_the_declared_value() {
         ("$size", "int"),
         ("$name", "string"),
         ("$posts", "array{hello: string}"),
+        ("$driver", "string"),
+        ("$bucket", "string"),
     ] {
         let position = position_in(DI_PHP, variable, 1);
         let markup = markup_hover_at(&backend, &uri, position.line, position.character).await;

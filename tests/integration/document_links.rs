@@ -558,3 +558,52 @@ fn double_quoted_include_path() {
         link_targets(&links)
     );
 }
+
+#[test]
+fn include_inside_returned_array_and_call_arguments() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["db.php", "queue.php", "storage.php"] {
+        fs::write(dir.path().join(name), "<?php return [];").unwrap();
+    }
+
+    let main_content = "<?php\nreturn [\n    'db' => require __DIR__ . '/db.php',\n    'demo' => array_merge(\n        require __DIR__ . '/queue.php',\n        require __DIR__ . '/storage.php',\n    ),\n];\n";
+    let main_uri = crate::common::file_uri(&dir.path().join("params.php"));
+
+    let backend = create_test_backend();
+    let links = get_document_links(&backend, &main_uri, main_content);
+
+    let targets = link_targets(&links);
+    assert_eq!(targets.len(), 3, "Expected three links, got: {targets:?}");
+    for (target, name) in targets.iter().zip(["db.php", "queue.php", "storage.php"]) {
+        assert!(target.ends_with(name), "expected {name}, got {target}");
+    }
+}
+
+#[tokio::test]
+async fn an_included_path_goes_to_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("storage.php"), "<?php return [];").unwrap();
+    fs::create_dir(dir.path().join("views")).unwrap();
+
+    let content = "<?php\nreturn array_merge(\n    require __DIR__ . '/storage.php',\n    require __DIR__ . '/views',\n);\n";
+    let uri: Uri = crate::common::file_uri(&dir.path().join("params.php"))
+        .parse()
+        .unwrap();
+    let backend = create_test_backend();
+    crate::common::open_document(&backend, &uri, "php", content).await;
+
+    let locations = crate::common::definitions_at(&backend, &uri, content, "'/storage.php'").await;
+    assert_eq!(locations.len(), 1, "{locations:?}");
+    assert!(
+        locations[0]
+            .uri
+            .to_file_path()
+            .unwrap()
+            .ends_with("storage.php"),
+        "{locations:?}"
+    );
+
+    // A directory is no location a client can open.
+    let locations = crate::common::definitions_at(&backend, &uri, content, "'/views'").await;
+    assert!(locations.is_empty(), "{locations:?}");
+}
