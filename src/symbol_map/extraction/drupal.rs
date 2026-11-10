@@ -9,9 +9,9 @@ use crate::symbol_map::extraction::symfony::{
 };
 use crate::symbol_map::{
     BaseFieldInclude, BaseFieldMethodSite, BaseFieldName, BaseFieldSite, DeclaredParameter,
-    DrupalRouteSite, EntityTypeSite, MethodScope, ModuleGuard, PluginClassSite,
-    PluginDeclarationSite, PluginManagerSite, ReceiverClass, StaticPluginSite, StringKeyKind,
-    TypedReceiverSite,
+    DrupalRouteSite, EntityTypeSite, ItemPropertyMethodSite, ItemPropertySite, MethodScope,
+    ModuleGuard, PluginClassSite, PluginDeclarationSite, PluginManagerSite, ReceiverClass,
+    StaticPluginSite, StringKeyKind, TypedReceiverSite,
 };
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
@@ -1314,7 +1314,7 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_base_field_methods(
         let fields: Vec<BaseFieldSite> = found
             .keyed
             .into_iter()
-            .filter_map(|(name, value)| base_field(name, value, ctx))
+            .filter_map(|keyed| base_field(keyed.key, keyed.value, ctx))
             .collect();
         let includes: Vec<BaseFieldInclude> = found
             .calls
@@ -1454,13 +1454,125 @@ fn base_field_creation(
     }
 }
 
-/// The keyed values and the static calls of a base field method.
+/// Record the properties the `propertyDefinitions()` of a class declares
+/// for its field type's items (see [`crate::drupal::field_items`]).
+/// `name_offset` is that of the class's name.
+pub(in crate::symbol_map::extraction) fn emit_drupal_item_property_methods(
+    members: &Sequence<'_, ClassLikeMember<'_>>,
+    name_offset: u32,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || !ctx.content.contains("propertyDefinitions") {
+        return;
+    }
+    let Some(method) = members.iter().find_map(|member| match member {
+        ClassLikeMember::Method(method)
+            if method
+                .name
+                .value
+                .eq_ignore_ascii_case(b"propertyDefinitions") =>
+        {
+            Some(method)
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+    let Some(owner) = ctx
+        .resolved_name_at(name_offset)
+        .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
+    else {
+        return;
+    };
+    let mut found = BaseFieldSites::default();
+    mago_syntax::walker::Walker::walk_method(&BaseFieldWalker, method, &mut found);
+    // The keys of the array the method returns.
+    let returned: Vec<&[u8]> = found
+        .returned
+        .iter()
+        .filter_map(|value| match value {
+            Expression::Variable(Variable::Direct(variable)) => Some(variable.name),
+            _ => None,
+        })
+        .collect();
+    let is_returned = |array: &Expression<'_>| matches!(array, Expression::Variable(Variable::Direct(variable)) if returned.contains(&variable.name));
+    let literal_key = |key: &Expression<'_>| {
+        resolved_string_literal(key, ctx.content).map(|(key, _, _)| key.to_string())
+    };
+    let properties = found
+        .keyed
+        .iter()
+        .filter(|keyed| keyed.assigned.is_some_and(is_returned))
+        .filter_map(|keyed| {
+            Some(ItemPropertySite {
+                name: literal_key(keyed.key)?,
+                data_type: created_data_type(keyed.value, ctx),
+            })
+        })
+        .collect();
+    let removed = found
+        .unset
+        .iter()
+        .filter(|access| is_returned(access.array))
+        .filter_map(|access| literal_key(access.index))
+        .collect();
+    let takes_parent = found.calls.iter().any(|call| {
+        matches!(call.class, Expression::Parent(_))
+            && matches!(&call.method, ClassLikeMemberSelector::Identifier(name)
+                if name.value.eq_ignore_ascii_case(b"propertyDefinitions"))
+    });
+    ctx.drupal_item_property_methods
+        .push(ItemPropertyMethodSite {
+            owner,
+            properties,
+            removed,
+            takes_parent,
+        });
+}
+
+/// The data type a data definition chain such as
+/// `DataReferenceDefinition::create('entity')->setLabel(…)` creates.
+fn created_data_type(value: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<String> {
+    let mut current = value;
+    loop {
+        match current {
+            Expression::Parenthesized(inner) => current = inner.expression,
+            Expression::Call(Call::Method(call)) => current = call.object,
+            Expression::Call(Call::StaticMethod(call)) => {
+                let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+                    return None;
+                };
+                if !method.value.eq_ignore_ascii_case(b"create") {
+                    return None;
+                }
+                let argument = call.argument_list.arguments.first()?;
+                return resolved_string_literal(argument.value(), ctx.content)
+                    .map(|(data_type, _, _)| data_type.to_string());
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// The keyed values, the static calls, and the unset keys of a base field
+/// or property definition method.
 #[derive(Default)]
 struct BaseFieldSites<'ast, 'arena> {
-    /// The key and the value of each `$fields[KEY] = VALUE` and each
-    /// `KEY => VALUE` array entry.
-    keyed: Vec<(&'ast Expression<'arena>, &'ast Expression<'arena>)>,
+    /// Each `$fields[KEY] = VALUE` and each `KEY => VALUE` array entry.
+    keyed: Vec<Keyed<'ast, 'arena>>,
     calls: Vec<&'ast StaticMethodCall<'arena>>,
+    /// The array access of each `unset($fields[KEY])`.
+    unset: Vec<&'ast ArrayAccess<'arena>>,
+    /// The value of each `return`.
+    returned: Vec<&'ast Expression<'arena>>,
+}
+
+struct Keyed<'ast, 'arena> {
+    key: &'ast Expression<'arena>,
+    value: &'ast Expression<'arena>,
+    /// The variable a `$fields[KEY] = VALUE` assigns to; `None` for an
+    /// array entry.
+    assigned: Option<&'ast Expression<'arena>>,
 }
 
 struct BaseFieldWalker;
@@ -1476,7 +1588,27 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BaseFieldSites<'ast
         if let (AssignmentOperator::Assign(_), Expression::ArrayAccess(access)) =
             (&assignment.operator, assignment.lhs)
         {
-            found.keyed.push((access.index, assignment.rhs));
+            found.keyed.push(Keyed {
+                key: access.index,
+                value: assignment.rhs,
+                assigned: Some(access.array),
+            });
+        }
+    }
+
+    fn walk_in_return(
+        &self,
+        r#return: &'ast Return<'arena>,
+        found: &mut BaseFieldSites<'ast, 'arena>,
+    ) {
+        found.returned.extend(r#return.value);
+    }
+
+    fn walk_in_unset(&self, unset: &'ast Unset<'arena>, found: &mut BaseFieldSites<'ast, 'arena>) {
+        for value in unset.values.iter() {
+            if let Expression::ArrayAccess(access) = value {
+                found.unset.push(access);
+            }
         }
     }
 
@@ -1509,7 +1641,11 @@ fn push_base_field_entries<'ast, 'arena>(
 {
     for element in elements {
         if let ArrayElement::KeyValue(entry) = element {
-            found.keyed.push((entry.key, entry.value));
+            found.keyed.push(Keyed {
+                key: entry.key,
+                value: entry.value,
+                assigned: None,
+            });
         }
     }
 }
@@ -4148,6 +4284,65 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn property_definitions_keep_their_properties_and_parent() {
+        let php = r#"<?php
+namespace Drupal\acme\Plugin\Field\FieldType;
+use Drupal\Core\Field\FieldStorageDefinitionInterface;
+use Drupal\Core\TypedData\DataDefinition;
+use Drupal\Core\TypedData\DataReferenceDefinition;
+class PictureItem extends AttachmentItem {
+    public static function propertyDefinitions(FieldStorageDefinitionInterface $definition) {
+        $properties = parent::propertyDefinitions($definition);
+        unset($properties['display'], $properties['description'], $settings['other']);
+        $target = DataDefinition::create('integer')->setLabel(new Label('@label', ['@label' => 'ID']));
+        $properties['target_id'] = $target;
+        $properties['entity'] = DataReferenceDefinition::create('entity')
+            ->setLabel('Picture')
+            ->setComputed(TRUE);
+        $properties['alt'] = (DataDefinition::create('string'));
+        $settings['ignored'] = 'x';
+        $properties['nested']['ignored'] = DataDefinition::create('string');
+        return $properties;
+    }
+    public function label() {
+        $properties['ignored'] = DataDefinition::create('string');
+        return $properties;
+    }
+}
+class PlainItem {
+    public static function propertyDefinitions(FieldStorageDefinitionInterface $definition) {
+        return [];
+    }
+}
+"#;
+        let property = |name: &str, data_type: Option<&str>| ItemPropertySite {
+            name: name.to_string(),
+            data_type: data_type.map(str::to_string),
+        };
+        assert_eq!(
+            drupal_index_map(php).drupal_item_property_methods,
+            [
+                ItemPropertyMethodSite {
+                    owner: crate::atom::atom("Drupal\\acme\\Plugin\\Field\\FieldType\\PictureItem"),
+                    properties: vec![
+                        property("target_id", None),
+                        property("entity", Some("entity")),
+                        property("alt", Some("string")),
+                    ],
+                    removed: vec!["display".to_string(), "description".to_string()],
+                    takes_parent: true,
+                },
+                ItemPropertyMethodSite {
+                    owner: crate::atom::atom("Drupal\\acme\\Plugin\\Field\\FieldType\\PlainItem"),
+                    properties: Vec::new(),
+                    removed: Vec::new(),
+                    takes_parent: false,
+                },
+            ]
+        );
     }
 
     #[test]

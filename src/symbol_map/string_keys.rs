@@ -959,6 +959,30 @@ pub(crate) enum MethodScope {
     Self_,
 }
 
+/// A Drupal field item class's `propertyDefinitions()`, which declares the
+/// properties of its field type's items.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ItemPropertyMethodSite {
+    /// The class that declares the method.
+    pub owner: crate::atom::Atom,
+    /// Each `$properties['name'] = …`, in source order.
+    pub properties: Vec<ItemPropertySite>,
+    /// Each `unset($properties['name'])`.
+    pub removed: Vec<String>,
+    /// Whether it takes the properties `parent::propertyDefinitions()`
+    /// gives.
+    pub takes_parent: bool,
+}
+
+/// A property an [`ItemPropertyMethodSite`] declares.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ItemPropertySite {
+    pub name: String,
+    /// The data type the definition's `create('type')` names, such as
+    /// `entity` for an entity reference.
+    pub data_type: Option<String>,
+}
+
 /// The class a Drupal plugin declaration is written on, such as a render
 /// element's.
 #[derive(Debug, Clone, PartialEq)]

@@ -1443,6 +1443,23 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                     );
                 }
             }
+            sym.add(
+                sm.drupal_item_property_methods.capacity()
+                    * size_of::<crate::symbol_map::ItemPropertyMethodSite>(),
+            );
+            for site in &sm.drupal_item_property_methods {
+                sym.add(
+                    site.properties.capacity() * size_of::<crate::symbol_map::ItemPropertySite>()
+                        + site.removed.capacity() * size_of::<String>()
+                        + site.removed.iter().map(String::capacity).sum::<usize>(),
+                );
+                for property in &site.properties {
+                    sym.add(
+                        property.name.capacity()
+                            + property.data_type.as_ref().map_or(0, String::capacity),
+                    );
+                }
+            }
             if let Some(storage) = &sm.drupal_field_storage {
                 sym.add(
                     size_of::<crate::symbol_map::FieldStorageSite>()

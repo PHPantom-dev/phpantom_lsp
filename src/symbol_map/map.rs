@@ -320,6 +320,10 @@ pub(crate) struct SymbolMap {
     /// The methods of the file's classes and traits that declare Drupal
     /// base fields.  Empty for every file that declares none.
     pub drupal_base_field_methods: Vec<BaseFieldMethodSite>,
+    /// The `propertyDefinitions()` methods of the file's Drupal field item
+    /// classes.  Empty for every file that declares none.
+    #[cfg_attr(not(any(test, feature = "mem-audit")), expect(dead_code))]
+    pub drupal_item_property_methods: Vec<ItemPropertyMethodSite>,
     /// The configurable field the file declares, when it is a Drupal field
     /// storage file.  Boxed, since nearly every file declares none.
     pub drupal_field_storage: Option<Box<FieldStorageSite>>,

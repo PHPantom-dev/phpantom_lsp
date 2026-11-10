@@ -113,6 +113,7 @@ struct ExtractionCtx<'a> {
     /// The entity types the file's entity classes declare.
     entity_types: Vec<crate::symbol_map::EntityTypeSite>,
     drupal_base_field_methods: Vec<crate::symbol_map::BaseFieldMethodSite>,
+    drupal_item_property_methods: Vec<crate::symbol_map::ItemPropertyMethodSite>,
     /// The classes the file's Drupal plugin declarations are written on.
     drupal_plugin_classes: Vec<crate::symbol_map::PluginClassSite>,
     drupal_plugin_managers: Vec<crate::symbol_map::PluginManagerSite>,
@@ -629,6 +630,7 @@ fn extract_symbol_map_inner(
         service_decorations: Vec::new(),
         entity_types: Vec::new(),
         drupal_base_field_methods: Vec::new(),
+        drupal_item_property_methods: Vec::new(),
         drupal_plugin_classes: Vec::new(),
         drupal_plugin_managers: Vec::new(),
         drupal_plugins: Vec::new(),
@@ -873,6 +875,7 @@ fn extract_symbol_map_inner(
         service_decorations: ctx.service_decorations,
         entity_types: ctx.entity_types,
         drupal_base_field_methods: ctx.drupal_base_field_methods,
+        drupal_item_property_methods: ctx.drupal_item_property_methods,
         drupal_field_storage: None,
         drupal_plugin_classes: ctx.drupal_plugin_classes,
         drupal_plugin_managers: ctx.drupal_plugin_managers,
