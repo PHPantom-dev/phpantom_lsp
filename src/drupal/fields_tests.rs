@@ -248,3 +248,55 @@ fn a_global_interface_named_like_cores_is_not_fieldable() {
         .is_empty()
     );
 }
+
+/// A field `name` of the field type `field_type`, typed as its item list.
+fn field(name: &str, field_type: &str, item: &str) -> super::Field {
+    super::Field {
+        name: name.to_string(),
+        ty: crate::php_type::PhpType::generic_atom(
+            atom("Drupal\\Core\\Field\\FieldItemList"),
+            vec![crate::php_type::PhpType::named(atom(item))],
+        ),
+        field_types: vec![atom(field_type)],
+        declarations: Vec::new(),
+    }
+}
+
+/// A field every entity type of a receiver has, created with different
+/// field types, keeps each of them, and its type is the union.
+#[test]
+fn a_shared_field_keeps_the_field_types_of_each_entity_type() {
+    let classes = classes(&[]);
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        let name = name.strip_prefix('\\').unwrap_or(name);
+        classes.iter().find(|class| class.fqn() == name).cloned()
+    };
+    let index = super::FieldIndex {
+        entity_types: vec![
+            super::EntityTypeFields {
+                id: "node".to_string(),
+                class: atom("Drupal\\node\\Entity\\Node"),
+                fields: vec![field("label", "string", "StringItem")],
+            },
+            super::EntityTypeFields {
+                id: "user".to_string(),
+                class: atom("Drupal\\user\\Entity\\User"),
+                fields: vec![field("label", "string_long", "StringLongItem")],
+            },
+        ],
+        ..Default::default()
+    };
+    let receiver = loader(Fqn::new("Drupal\\Core\\Entity\\ContentEntityInterface")).unwrap();
+    let fields = index.fields_of(&receiver, &loader);
+    assert_eq!(fields.len(), 1);
+    assert_eq!(
+        fields[0].field_types,
+        vec![atom("string"), atom("string_long")]
+    );
+    let ty = fields[0].ty.to_string();
+    assert!(
+        ty.contains("StringItem") && ty.contains("StringLongItem"),
+        "{ty}"
+    );
+}

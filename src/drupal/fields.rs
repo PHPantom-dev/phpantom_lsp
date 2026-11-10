@@ -234,6 +234,9 @@ pub(crate) struct Field {
     /// The item list the field holds, with its item class as type argument
     /// and, for a reference field, its target entity class after it.
     pub ty: PhpType,
+    /// The IDs of the field types it is created with, `string` or
+    /// `entity_reference`: one, unless its declarations disagree.
+    pub field_types: Vec<Atom>,
     /// Where the field is declared.  None for the fields Drupal's entity
     /// field manager adds itself.
     pub declarations: Vec<FieldDeclaration>,
@@ -329,6 +332,11 @@ impl FieldIndex {
 fn merge_field(field: &mut Field, other: &Field) {
     if field.ty != other.ty {
         field.ty = PhpType::union(vec![field.ty.clone(), other.ty.clone()]);
+    }
+    for field_type in &other.field_types {
+        if !field.field_types.contains(field_type) {
+            field.field_types.push(*field_type);
+        }
     }
     for declaration in &other.declarations {
         if !field.declarations.contains(declaration) {

@@ -628,6 +628,13 @@ impl Backend {
                             })
                             .collect(),
                     );
+                    let mut field_types = Vec::new();
+                    for creation in &creations {
+                        let field_type = crate::atom::atom(creation.field_type);
+                        if !field_types.contains(&field_type) {
+                            field_types.push(field_type);
+                        }
+                    }
                     let mut declarations = Vec::new();
                     for creation in creations {
                         if let Some(declaration) = creation.declaration
@@ -639,6 +646,7 @@ impl Backend {
                     Field {
                         name,
                         ty,
+                        field_types,
                         declarations,
                     }
                 })
