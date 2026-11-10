@@ -853,6 +853,15 @@ pub(crate) struct EntityTypeSite {
     /// of its kind of entity type; `None` when it names none and has no
     /// default.
     pub storage: Option<crate::atom::Atom>,
+    /// The `entity_keys` the declaration writes, as written: an empty field
+    /// name is a key the entity type does not have.
+    pub keys: Vec<(String, String)>,
+    /// The `revision_metadata_keys` the declaration writes, as written.
+    pub revision_metadata_keys: Vec<(String, String)>,
+    /// The declaration's `translatable` is true.
+    pub translatable: bool,
+    /// The declaration is a content entity type's.
+    pub content: bool,
 }
 
 /// The class a Drupal plugin declaration is written on, such as a render

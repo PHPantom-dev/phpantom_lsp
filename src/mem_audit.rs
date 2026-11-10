@@ -1419,7 +1419,16 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 sm.service_decorations.capacity()
                     * size_of::<crate::symbol_map::ServiceDecoration>(),
             );
-            sym.add(sm.entity_types.capacity() * size_of::<crate::symbol_map::EntityTypeSite>());
+            sym.add(
+                sm.entity_types.capacity() * size_of::<crate::symbol_map::EntityTypeSite>()
+                    + sm.entity_types
+                        .iter()
+                        .flat_map(|site| site.keys.iter().chain(&site.revision_metadata_keys))
+                        .map(|(key, value)| {
+                            size_of::<(String, String)>() + key.capacity() + value.capacity()
+                        })
+                        .sum::<usize>(),
+            );
             sym.add(
                 sm.drupal_plugin_classes.capacity()
                     * size_of::<crate::symbol_map::PluginClassSite>(),

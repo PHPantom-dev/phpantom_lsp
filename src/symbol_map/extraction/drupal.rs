@@ -70,15 +70,20 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
     for kind in &ENTITY_TYPE_KINDS {
         for attribute in attributes_named(&class.attribute_lists, kind.attribute, ctx) {
             let mut id = None;
-            let mut storage = kind.default_storage.map(str::to_string);
+            let mut declared = DeclaredEntityType::of_kind(kind);
             for (parameter, value) in attribute_arguments(attribute, &["id"]) {
                 match parameter {
                     "id" => id = resolved_string_literal(value, ctx.content),
                     "handlers" => {
                         if let Some(named) = handler_class(value, "storage", ctx) {
-                            storage = Some(named);
+                            declared.storage = Some(named);
                         }
                     }
+                    "entity_keys" => declared.keys = string_pairs(value, ctx.content),
+                    "revision_metadata_keys" => {
+                        declared.revision_metadata_keys = string_pairs(value, ctx.content);
+                    }
+                    "translatable" => declared.translatable = is_true(value),
                     "admin_permission" => {
                         push_laravel_string_span(
                             StringKeyKind::DrupalPermission,
@@ -93,7 +98,10 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
                 }
             }
             if let Some((key, start, end)) = id.filter(|(key, _, _)| !key.is_empty()) {
-                found.push((key.to_string(), start as u32, end as u32, storage));
+                declared.id = key.to_string();
+                declared.start = start as u32;
+                declared.end = end as u32;
+                found.push(declared);
             }
         }
     }
@@ -116,22 +124,84 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
     else {
         return;
     };
-    for (key, start, end, storage) in found {
+    for declared in found {
         ctx.spans.push(SymbolSpan {
-            start,
-            end,
+            start: declared.start,
+            end: declared.end,
             kind: SymbolKind::StringKey {
                 kind: StringKeyKind::DrupalEntityType,
-                key,
+                key: declared.id,
                 is_write: true,
                 is_optional: false,
             },
         });
         ctx.entity_types.push(EntityTypeSite {
-            start,
+            start: declared.start,
             class: fqn,
-            storage: storage.map(|storage| crate::atom::atom(&storage)),
+            storage: declared.storage.map(|storage| crate::atom::atom(&storage)),
+            keys: declared.keys,
+            revision_metadata_keys: declared.revision_metadata_keys,
+            translatable: declared.translatable,
+            content: declared.content,
         });
+    }
+}
+
+/// What an entity type attribute or annotation declares, before the class
+/// it is written on is known.
+struct DeclaredEntityType {
+    id: String,
+    /// The range of the ID in the file.
+    start: u32,
+    end: u32,
+    storage: Option<String>,
+    keys: Vec<(String, String)>,
+    revision_metadata_keys: Vec<(String, String)>,
+    translatable: bool,
+    content: bool,
+}
+
+impl DeclaredEntityType {
+    /// A declaration of `kind` that writes nothing yet.
+    fn of_kind(kind: &EntityTypeKind) -> Self {
+        Self {
+            id: String::new(),
+            start: 0,
+            end: 0,
+            storage: kind.default_storage.map(str::to_string),
+            keys: Vec::new(),
+            revision_metadata_keys: Vec::new(),
+            translatable: false,
+            content: kind.default_storage == Some(CONTENT_STORAGE),
+        }
+    }
+}
+
+/// The `'key' => 'value'` pairs of an array literal whose keys and values
+/// are both strings, in order.
+fn string_pairs(array: &Expression<'_>, content: &str) -> Vec<(String, String)> {
+    let Some(entries) = crate::parser::array_literal_elements(array) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let ArrayElement::KeyValue(entry) = entry else {
+                return None;
+            };
+            let (key, _, _) = resolved_string_literal(entry.key, content)?;
+            let (value, _, _) = crate::virtual_members::laravel::helpers::resolved_string_literal_including_empty(entry.value, content)?;
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+/// Whether `value` is the literal `true`, in any case.
+fn is_true(value: &Expression<'_>) -> bool {
+    match value {
+        Expression::Literal(Literal::True(_)) => true,
+        Expression::ConstantAccess(access) => access.name.value().eq_ignore_ascii_case(b"true"),
+        _ => false,
     }
 }
 
@@ -243,7 +313,7 @@ fn annotation_plugin_id(doc: &str, from: usize) -> Option<(usize, usize)> {
     }
     annotation_entries(doc, from)
         .into_iter()
-        .find(|entry| entry.path.is_empty() && entry.key == "id")
+        .find(|entry| entry.path.is_empty() && entry.key == "id" && entry.quoted)
         .map(|entry| (entry.value_start, entry.value_end))
 }
 
@@ -2492,38 +2562,35 @@ fn handler_class(handlers: &Expression<'_>, name: &str, ctx: &ExtractionCtx<'_>)
 }
 
 /// The entity type an `@ContentEntityType(…)`-family annotation in the
-/// docblock `doc`, which starts at `offset` in the file, declares: its ID
-/// with the ID's range in the file, and its storage.
-fn annotation_entity_type(doc: &str, offset: u32) -> Option<(String, u32, u32, Option<String>)> {
-    let (body, default_storage) = ENTITY_TYPE_KINDS.iter().find_map(|kind| {
+/// docblock `doc`, which starts at `offset` in the file, declares, with the
+/// ID's range in the file.
+fn annotation_entity_type(doc: &str, offset: u32) -> Option<DeclaredEntityType> {
+    let (body, kind) = ENTITY_TYPE_KINDS.iter().find_map(|kind| {
         let at = doc.find(kind.annotation)?;
-        Some((at + kind.annotation.len(), kind.default_storage))
+        Some((at + kind.annotation.len(), kind))
     })?;
     let mut id = None;
-    let mut storage = default_storage.map(str::to_string);
+    let mut declared = DeclaredEntityType::of_kind(kind);
     for entry in annotation_entries(doc, body) {
-        match (entry.path.as_slice(), entry.key) {
-            ([], "id") => id = Some((entry.value_start, entry.value_end)),
-            (["handlers"], "storage") => {
-                storage = Some(
-                    doc[entry.value_start..entry.value_end]
-                        .trim_start_matches('\\')
-                        .to_string(),
-                );
+        let value = &doc[entry.value_start..entry.value_end];
+        match (entry.path.as_slice(), entry.key, entry.quoted) {
+            ([], "id", true) => id = Some((entry.value_start, entry.value_end)),
+            ([], "translatable", false) => declared.translatable = value.eq_ignore_ascii_case("true"),
+            (["handlers"], "storage", true) => {
+                declared.storage = Some(value.trim_start_matches('\\').to_string());
             }
+            (["entity_keys"], key, true) => declared.keys.push((key.to_string(), value.to_string())),
+            (["revision_metadata_keys"], key, true) => declared
+                .revision_metadata_keys
+                .push((key.to_string(), value.to_string())),
             _ => {}
         }
     }
     let (start, end) = id?;
-    let key = &doc[start..end];
-    (!key.is_empty()).then(|| {
-        (
-            key.to_string(),
-            offset + start as u32,
-            offset + end as u32,
-            storage,
-        )
-    })
+    declared.id = doc[start..end].to_string();
+    declared.start = offset + start as u32;
+    declared.end = offset + end as u32;
+    (!declared.id.is_empty()).then_some(declared)
 }
 
 /// The span of the permission the `admin_permission` of an entity type
@@ -2535,7 +2602,7 @@ fn annotation_admin_permission(doc: &str, offset: u32) -> Option<SymbolSpan> {
         .find_map(|kind| Some(doc.find(kind.annotation)? + kind.annotation.len()))?;
     let entry = annotation_entries(doc, body)
         .into_iter()
-        .find(|entry| entry.path.is_empty() && entry.key == "admin_permission")?;
+        .find(|entry| entry.path.is_empty() && entry.key == "admin_permission" && entry.quoted)?;
     let key = &doc[entry.value_start..entry.value_end];
     (!key.is_empty()).then(|| SymbolSpan {
         start: offset + entry.value_start as u32,
@@ -2556,6 +2623,8 @@ struct AnnotationEntry<'d> {
     key: &'d str,
     value_start: usize,
     value_end: usize,
+    /// The value is a string; else it is a bare word, such as `TRUE`.
+    quoted: bool,
 }
 
 /// Every `key = "value"` pair of the annotation whose arguments start at
@@ -2584,6 +2653,7 @@ fn annotation_entries(doc: &str, from: usize) -> Vec<AnnotationEntry<'_>> {
                             key: name,
                             value_start: start,
                             value_end: end,
+                            quoted: true,
                         });
                     }
                     assigned = false;
@@ -2636,8 +2706,17 @@ fn annotation_entries(doc: &str, from: usize) -> Vec<AnnotationEntry<'_>> {
                 if !assigned {
                     key = Some(&doc[start..i]);
                 } else {
-                    // A bare value (`TRUE`, a constant): nothing to read.
-                    key = None;
+                    // A bare value: `TRUE`, a constant, or the name of a
+                    // nested annotation.
+                    if let Some(name) = key.take() {
+                        entries.push(AnnotationEntry {
+                            path: path.clone(),
+                            key: name,
+                            value_start: start,
+                            value_end: i,
+                            quoted: false,
+                        });
+                    }
                     assigned = false;
                 }
                 continue;
@@ -3741,6 +3820,123 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
         )));
     }
 
+    /// The entity type declarations `php` makes.
+    fn entity_type_sites(php: &str) -> Vec<EntityTypeSite> {
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: true,
+                twig: false,
+                doctrine: false,
+                yii_params: false,
+                tempest: false,
+            },
+            None,
+        )
+        .entity_types
+    }
+
+    fn pairs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn an_attribute_keeps_the_keys_and_translatability() {
+        let php = r#"<?php
+namespace Drupal\acme\Entity;
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+#[ContentEntityType(
+  id: 'acme_note',
+  entity_keys: ['id' => 'nid', 'owner' => 'uid', 'bundle' => ''],
+  revision_metadata_keys: ['revision_user' => 'revision_uid'],
+  translatable: TRUE,
+)]
+class Note {}
+"#;
+        let sites = entity_type_sites(php);
+        assert_eq!(sites.len(), 1);
+        let site = &sites[0];
+        assert_eq!(
+            site.keys,
+            pairs(&[("id", "nid"), ("owner", "uid"), ("bundle", "")])
+        );
+        assert_eq!(
+            site.revision_metadata_keys,
+            pairs(&[("revision_user", "revision_uid")])
+        );
+        assert!(site.translatable);
+        assert!(site.content);
+    }
+
+    #[test]
+    fn an_annotation_keeps_the_keys_and_translatability() {
+        let php = r#"<?php
+namespace Drupal\acme\Entity;
+/**
+ * @ContentEntityType(
+ *   id = "acme_page",
+ *   label = @Translation("Page"),
+ *   entity_keys = {
+ *     "id" = "pid",
+ *     "revision" = "vid",
+ *   },
+ *   revision_metadata_keys = {
+ *     "revision_log_message" = "revision_log"
+ *   },
+ *   translatable = TRUE,
+ * )
+ */
+class Page {}
+"#;
+        let sites = entity_type_sites(php);
+        assert_eq!(sites.len(), 1);
+        let site = &sites[0];
+        assert_eq!(site.keys, pairs(&[("id", "pid"), ("revision", "vid")]));
+        assert_eq!(
+            site.revision_metadata_keys,
+            pairs(&[("revision_log_message", "revision_log")])
+        );
+        assert!(site.translatable);
+        assert!(site.content);
+    }
+
+    #[test]
+    fn an_entity_type_is_untranslatable_unless_it_says_so() {
+        let php = r#"<?php
+namespace Drupal\acme\Entity;
+use Drupal\Core\Entity\Attribute\ConfigEntityType;
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+#[ConfigEntityType(id: 'acme_type', entity_keys: ['id' => 'id'])]
+class Type {}
+#[ContentEntityType(id: 'acme_log', translatable: FALSE)]
+class Log {}
+/**
+ * @ContentEntityType(id = "acme_entry", translatable = FALSE)
+ */
+class Entry {}
+"#;
+        let sites = entity_type_sites(php);
+        assert_eq!(sites.len(), 3);
+        assert!(sites.iter().all(|site| !site.translatable));
+        assert_eq!(
+            sites.iter().map(|site| site.content).collect::<Vec<_>>(),
+            [false, true, true]
+        );
+        assert_eq!(sites[0].keys, pairs(&[("id", "id")]));
+    }
+
     #[test]
     fn an_attribute_declares_the_id_class_and_storage() {
         let php = "<?php\nnamespace Drupal\\node\\Entity;\nuse Drupal\\Core\\Entity\\Attribute\\ContentEntityType;\nuse Drupal\\node\\NodeStorage;\n#[ContentEntityType(\n  id: 'node',\n  handlers: ['storage' => NodeStorage::class, 'form' => ['default' => 'X']],\n)]\nclass Node {}\n";
@@ -3783,7 +3979,13 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
     #[test]
     fn annotations_give_the_id_and_the_storage_handler() {
         let doc = "/**\n * @ContentEntityType(\n *   id = \"redirect\",\n *   label = @Translation(\"Redirect\"),\n *   handlers = {\n *     \"list_builder\" = \"Drupal\\redirect\\RedirectListBuilder\",\n *     \"storage\" = \"\\Drupal\\redirect\\RedirectStorage\",\n *     \"form\" = {\n *       \"id\" = \"nested\"\n *     }\n *   },\n *   entity_keys = {\n *     \"id\" = \"rid\"\n *   }\n * )\n */";
-        let (id, start, end, storage) = annotation_entity_type(doc, 100).unwrap();
+        let DeclaredEntityType {
+            id,
+            start,
+            end,
+            storage,
+            ..
+        } = annotation_entity_type(doc, 100).unwrap();
         assert_eq!(id, "redirect");
         assert_eq!(
             &doc[(start - 100) as usize..(end - 100) as usize],
@@ -3798,7 +4000,7 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
     #[test]
     fn an_annotation_without_handlers_gets_its_kinds_storage() {
         let doc = "/**\n * @ConfigEntityType(id = \"flag\", label = @Translation(\"Flag\"))\n */";
-        let (id, _, _, storage) = annotation_entity_type(doc, 0).unwrap();
+        let DeclaredEntityType { id, storage, .. } = annotation_entity_type(doc, 0).unwrap();
         assert_eq!(id, "flag");
         assert_eq!(storage.as_deref(), Some(CONFIG_STORAGE));
     }
@@ -3806,7 +4008,7 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
     #[test]
     fn a_nested_annotations_pairs_are_its_own() {
         let doc = "/**\n * @ContentEntityType(\n *   label = @Translation(\"Note\", id = \"other\"),\n *   id = \"note\",\n *   extra = @Bar(handlers = {\"storage\" = \"Wrong\"}),\n * )\n */";
-        let (id, _, _, storage) = annotation_entity_type(doc, 0).unwrap();
+        let DeclaredEntityType { id, storage, .. } = annotation_entity_type(doc, 0).unwrap();
         assert_eq!(id, "note");
         assert_eq!(storage.as_deref(), Some(CONTENT_STORAGE));
     }
