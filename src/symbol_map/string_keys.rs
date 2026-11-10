@@ -939,6 +939,8 @@ pub(crate) struct PluginDeclarationSite {
     /// attribute.
     pub doc_start: u32,
     pub doc_end: u32,
+    /// The `list_class` the marker names, a field type's item list class.
+    pub list_class: Option<crate::atom::Atom>,
 }
 
 /// The value a container declaration gives, read by the kind of name it

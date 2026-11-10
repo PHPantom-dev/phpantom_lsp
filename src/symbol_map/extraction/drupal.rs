@@ -344,13 +344,20 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
         // Plugin attributes take the ID first, by name or by place.  One
         // that is no string, such as a class constant, is recorded empty:
         // its plugin type then has a plugin whose ID is not known.
-        let Some(value) = attribute_arguments(attribute, &["id"])
-            .into_iter()
+        let arguments = attribute_arguments(attribute, &["id"]);
+        let Some(value) = arguments
+            .iter()
             .find(|(parameter, _)| *parameter == "id")
-            .map(|(_, value)| value)
+            .map(|(_, value)| *value)
         else {
             continue;
         };
+        // A field type's item list class.
+        let list_class = arguments
+            .iter()
+            .find(|(parameter, _)| *parameter == "list_class")
+            .and_then(|(_, value)| message_class(value, ctx))
+            .map(|class| crate::atom::atom(&class));
         let (id, start, end) = match resolved_string_literal(value, ctx.content) {
             Some((id, start, end)) if !id.is_empty() => (id, start, end),
             Some(_) => continue,
@@ -373,15 +380,23 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
             is_annotation: false,
             doc_start: start as u32,
             doc_end: end as u32,
+            list_class,
         });
     }
     let Some((doc, offset)) = get_docblock_text_with_offset(ctx.trivias, ctx.content, class) else {
         return;
     };
-    if let Some((name, (start, end))) = doc_annotations(doc)
-        .find_map(|(name, from)| Some((name, annotation_plugin_id(doc, from)?)))
-        .filter(|(_, (start, end))| start < end)
+    if let Some((name, from, (start, end))) = doc_annotations(doc)
+        .find_map(|(name, from)| Some((name, from, annotation_plugin_id(doc, from)?)))
+        .filter(|(_, _, (start, end))| start < end)
     {
+        let list_class = annotation_entries(doc, from)
+            .into_iter()
+            .find(|entry| entry.path.is_empty() && entry.key == "list_class" && entry.quoted)
+            .map(|entry| {
+                crate::atom::atom(doc[entry.value_start..entry.value_end].trim_start_matches('\\'))
+            })
+            .filter(|class| !class.is_empty());
         ctx.drupal_plugins.push(PluginDeclarationSite {
             start: offset + start as u32,
             end: offset + end as u32,
@@ -391,6 +406,7 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
             is_annotation: true,
             doc_start: offset,
             doc_end: offset + doc.len() as u32,
+            list_class,
         });
     }
 }
@@ -3822,6 +3838,12 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
 
     /// The entity type declarations `php` makes.
     fn entity_type_sites(php: &str) -> Vec<EntityTypeSite> {
+        drupal_index_map(php).entity_types
+    }
+
+    /// The symbol map the workspace index makes of `php` in a Drupal
+    /// project.
+    fn drupal_index_map(php: &str) -> crate::symbol_map::SymbolMap {
         let arena = mago_allocator::LocalArena::new();
         let file_id = mago_database::file::FileId::new(b"test.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
@@ -3842,7 +3864,46 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
             },
             None,
         )
-        .entity_types
+    }
+
+    #[test]
+    fn a_field_type_keeps_its_list_class() {
+        let php = r#"<?php
+namespace Drupal\acme\Plugin\Field\FieldType;
+use Drupal\acme\ExampleList;
+use Drupal\Core\Field\Attribute\FieldType;
+#[FieldType(id: 'acme_listed', list_class: ExampleList::class)]
+class ListedItem {}
+#[FieldType(id: 'acme_plain')]
+class PlainItem {}
+/**
+ * @FieldType(
+ *   id = "acme_legacy",
+ *   label = @Translation("Legacy"),
+ *   list_class = "\Drupal\acme\LegacyList",
+ * )
+ */
+class LegacyItem {}
+"#;
+        let found: Vec<(String, Option<String>)> = drupal_index_map(php)
+            .drupal_plugins
+            .iter()
+            .map(|site| (site.id.clone(), site.list_class.map(|class| class.to_string())))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    "acme_listed".to_string(),
+                    Some("Drupal\\acme\\ExampleList".to_string())
+                ),
+                ("acme_plain".to_string(), None),
+                (
+                    "acme_legacy".to_string(),
+                    Some("Drupal\\acme\\LegacyList".to_string())
+                ),
+            ]
+        );
     }
 
     fn pairs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {

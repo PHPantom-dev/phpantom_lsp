@@ -119,6 +119,8 @@ pub(crate) struct PluginType {
 pub(crate) struct Plugin {
     pub id: String,
     pub class: Atom,
+    /// The item list class a field type's declaration names.
+    pub list_class: Option<Atom>,
 }
 
 /// The plugin types and the plugins of each, read from every declaring
@@ -252,6 +254,7 @@ impl PluginIndex {
                 self.by_manager.entry(manager).or_default().push(Plugin {
                     id: site.id.clone(),
                     class,
+                    list_class: site.list_class,
                 });
             }
         }
@@ -546,6 +549,7 @@ impl Backend {
                 plugins.extend(site.static_plugins.iter().map(|plugin| Plugin {
                     id: plugin.id.clone(),
                     class: plugin.class,
+                    list_class: None,
                 }));
             }
             index.types.push(PluginType {
@@ -645,6 +649,24 @@ impl Backend {
             found = Some(manager);
         }
         found
+    }
+
+    /// The item class and the item list class of each declaration of the
+    /// field type `id`; a list class of `None` for a declaration that names
+    /// none, whose items Drupal keeps in a `FieldItemList`.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the field readers are its callers")
+    )]
+    pub(crate) fn drupal_field_type_classes(&self, id: &str) -> Vec<(Atom, Option<Atom>)> {
+        let mut classes: Vec<(Atom, Option<Atom>)> = self
+            .drupal_plugin_index()
+            .named(FIELD_TYPES, id)
+            .iter()
+            .map(|plugin| (plugin.class, plugin.list_class))
+            .collect();
+        classes.dedup();
+        classes
     }
 
     /// The plugin classes the plugin ID `key` (see [`plugin_key`]) names.

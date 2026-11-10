@@ -439,3 +439,44 @@ fn a_path_hash_key_is_a_route_parameter_not_a_variable() {
         [(StringKeyKind::TwigVariable, "node".to_string())]
     );
 }
+
+/// A field type gives its item class and the item list class it names.
+#[test]
+fn a_field_type_gives_its_item_and_list_classes() {
+    let (backend, dir) = drupal_backend(&[]);
+    for (path, content) in [
+        (
+            "web/core/lib/Drupal/Core/Plugin/DefaultPluginManager.php",
+            "<?php\nnamespace Drupal\\Core\\Plugin;\nclass DefaultPluginManager {}\n",
+        ),
+        (
+            "web/core/lib/Drupal/Core/Field/FieldTypePluginManager.php",
+            "<?php\nnamespace Drupal\\Core\\Field;\nuse Drupal\\Core\\Field\\Attribute\\FieldType;\nuse Drupal\\Core\\Plugin\\DefaultPluginManager;\nclass FieldTypePluginManager extends DefaultPluginManager {\n    public function __construct(\\Traversable $namespaces, $module_handler) {\n        parent::__construct('Plugin/Field/FieldType', $namespaces, $module_handler, FieldItemInterface::class, FieldType::class, 'Drupal\\Core\\Field\\Annotation\\FieldType');\n    }\n}\n",
+        ),
+        (
+            "web/modules/custom/acme/src/Plugin/Field/FieldType/ListedItem.php",
+            "<?php\nnamespace Drupal\\acme\\Plugin\\Field\\FieldType;\nuse Drupal\\acme\\ExampleList;\nuse Drupal\\Core\\Field\\Attribute\\FieldType;\n#[FieldType(id: 'acme_listed', list_class: ExampleList::class)]\nclass ListedItem {}\n",
+        ),
+        (
+            "web/modules/custom/acme/src/Plugin/Field/FieldType/PlainItem.php",
+            "<?php\nnamespace Drupal\\acme\\Plugin\\Field\\FieldType;\nuse Drupal\\Core\\Field\\Attribute\\FieldType;\n#[FieldType(id: 'acme_plain')]\nclass PlainItem {}\n",
+        ),
+    ] {
+        backend.update_ast(&uri(dir.path(), path), content);
+    }
+    assert_eq!(
+        backend.drupal_field_type_classes("acme_listed"),
+        [(
+            crate::atom::atom("Drupal\\acme\\Plugin\\Field\\FieldType\\ListedItem"),
+            Some(crate::atom::atom("Drupal\\acme\\ExampleList"))
+        )]
+    );
+    assert_eq!(
+        backend.drupal_field_type_classes("acme_plain"),
+        [(
+            crate::atom::atom("Drupal\\acme\\Plugin\\Field\\FieldType\\PlainItem"),
+            None
+        )]
+    );
+    assert!(backend.drupal_field_type_classes("acme_missing").is_empty());
+}
