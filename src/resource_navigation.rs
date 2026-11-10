@@ -456,9 +456,18 @@ impl Backend {
             }
         }
 
+        // A field storage file declares a configurable field wherever it
+        // is; which ones count is decided as the field index takes them.
+        let drupal_field_storage = (self.is_drupal_project()
+            && crate::drupal::field_storage::is_field_storage_uri(uri))
+        .then(|| crate::drupal::field_storage::read_field_storage(content))
+        .flatten()
+        .map(Box::new);
+
         SymbolMap {
             spans,
             member_access_indices,
+            drupal_field_storage,
             container_values,
             service_decorations,
             route_imports,

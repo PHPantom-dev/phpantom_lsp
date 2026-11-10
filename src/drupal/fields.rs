@@ -12,7 +12,8 @@
 //! that: a field is its field type's item list, `FieldItemList<StringItem>`.
 //! [`receiver_entity_types`] maps a receiver to the entity types it may
 //! hold, and the receiver has the fields all of them have.  The fields are
-//! read into a [`FieldIndex`] on first use (see [`super::base_fields`]),
+//! read into a [`FieldIndex`] on first use (see [`super::base_fields`] and,
+//! for configurable fields, [`super::field_storage`]),
 //! which the provider reads from the resolved-class cache: providers never
 //! see the `Backend`.
 
@@ -194,16 +195,20 @@ pub(crate) struct Field {
     pub declarations: Vec<FieldDeclaration>,
 }
 
-/// A statement that declares a field: the one at `statement` among those
-/// the base field method `method` of `owner` in the file at `uri` creates
-/// fields with.  Where it is written is looked up when asked, since an
-/// edit above it moves it without changing the fields.
+/// Where a field is declared.  Where it is written is looked up when
+/// asked, since an edit above it moves it without changing the fields.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct FieldDeclaration {
-    pub uri: Arc<str>,
-    pub owner: Atom,
-    pub method: Atom,
-    pub statement: usize,
+pub(crate) enum FieldDeclaration {
+    /// The statement at `statement` among those the base field method
+    /// `method` of `owner` in the file at `uri` creates fields with.
+    BaseField {
+        uri: Arc<str>,
+        owner: Atom,
+        method: Atom,
+        statement: usize,
+    },
+    /// The field storage file at `uri`.
+    Storage { uri: Arc<str> },
 }
 
 /// The fields of one entity type declaration.

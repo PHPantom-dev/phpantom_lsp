@@ -715,6 +715,11 @@ pub fn scan_drupal_directories(
                     declaration_files.declarations.push(path.to_path_buf());
                 }
             } else if crate::drupal::config::is_default_config_file(path, web_root) {
+                // A field storage file is read for the field it declares,
+                // where the workspace walk does not reach core and contrib.
+                if crate::drupal::field_storage::is_field_storage_file(path) {
+                    declaration_files.declarations.push(path.to_path_buf());
+                }
                 declaration_files.default_config.push(path.to_path_buf());
             } else if crate::drupal::config::is_schema_file(path, web_root) {
                 declaration_files.config_schemas.push(path.to_path_buf());
@@ -748,7 +753,8 @@ pub fn scan_drupal_directories(
 #[derive(Default)]
 pub struct DrupalDeclarationFiles {
     /// The YAML files Drupal reads declarations from (see
-    /// `drupal::is_declaration_file`) and the PHP files that document or
+    /// `drupal::is_declaration_file`), the field storage files among the
+    /// default configuration files, and the PHP files that document or
     /// implement hooks (see `drupal::is_hook_php_file`).
     pub declarations: Vec<PathBuf>,
     /// The service providers whose `alter()` may give a service another
