@@ -341,8 +341,8 @@ pub fn apply_virtual_members(
 /// 2. Laravel factory provider (convention-based create/make methods)
 /// 3. PHPDoc provider (`@method` / `@property` / `@mixin` tags)
 /// 4. Laravel facade provider (concrete class forwarded as static)
-/// 5. Drupal fieldable entity provider (the magic `__get()` of content
-///    entity interfaces)
+/// 5. Drupal fieldable entity provider (the fields of content entities, and
+///    the magic `__get()` and `__set()` of their interfaces)
 ///
 /// The facade provider deliberately comes last: a facade that carries
 /// generated `@method static` tags should keep them, and only a facade

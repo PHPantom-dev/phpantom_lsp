@@ -83,11 +83,13 @@ impl BackendState {
                 Arc::clone(&is_doctrine),
                 Arc::clone(&doctrine_mapping_files),
             ));
+        let drupal = crate::drupal::DrupalState::default();
         resolved_class_cache
             .write()
-            .set_drupal(crate::drupal::fields::DrupalCacheState::new(Arc::clone(
-                &workspace.is_drupal,
-            )));
+            .set_drupal(crate::drupal::fields::DrupalCacheState::new(
+                Arc::clone(&workspace.is_drupal),
+                drupal.field_slot(),
+            ));
         Self {
             name: "PHPantom".to_string(),
             version: env!("PHPANTOM_GIT_VERSION").to_string(),
@@ -132,7 +134,7 @@ impl BackendState {
             yii: crate::yii::YiiState::default(),
             stylesheets: crate::stylesheets::StylesheetState::default(),
             wordpress_hooks: crate::wordpress::hooks::HookFiles::default(),
-            drupal: crate::drupal::DrupalState::default(),
+            drupal,
             pest_configs: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             diag: crate::diagnostics::state::DiagnosticState::new(),

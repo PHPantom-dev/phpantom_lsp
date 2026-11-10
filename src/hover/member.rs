@@ -166,7 +166,7 @@ pub(super) fn format_property_source(source: &PropertySource) -> Vec<String> {
         }
         // The `👻 virtual` marker already says the member comes from a
         // docblock tag; a "source:" line would be noise.
-        PropertySource::DocblockTag | PropertySource::DrupalField { .. } => Vec::new(),
+        PropertySource::DocblockTag | PropertySource::DrupalField => Vec::new(),
     }
 }
 

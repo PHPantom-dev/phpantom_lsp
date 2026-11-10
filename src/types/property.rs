@@ -168,19 +168,10 @@ pub enum PropertySource {
     /// A field of a Drupal content entity.  The entity reads and writes it
     /// through its magic `__get()` and `__set()`: a write stores the value
     /// into the field's item list, so the property keeps its type whatever
-    /// is written.
-    DrupalField {
-        /// Where the field is declared, in no particular order.
-        declarations: std::sync::Arc<[FieldDeclaration]>,
-    },
-}
-
-/// A place a framework declares a field a [`PropertySource`] names.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FieldDeclaration {
-    pub uri: String,
-    /// Byte offset of the field's name in the file.
-    pub offset: u32,
+    /// is written.  Where it is declared moves with every edit above the
+    /// declaration, so it is looked up when asked (see
+    /// [`crate::drupal::fields`]).
+    DrupalField,
 }
 
 /// What a property's docblock says about writing to it.
@@ -221,7 +212,7 @@ impl PropertyInfo {
     /// Whether a write to this property goes through the magic `__set()`
     /// of a class that has one, rather than replacing the property's value.
     pub fn writes_through_magic_set(&self) -> bool {
-        matches!(self.source, Some(PropertySource::DrupalField { .. }))
+        matches!(self.source, Some(PropertySource::DrupalField))
     }
 
     /// Return the type hint as a string, if present.
