@@ -97,6 +97,17 @@ impl Backend {
             );
             let mut locations =
                 self.dispatch_symbol_references(sym, uri, content, include_declaration, mode);
+            // An event string and the constant that holds it are one event.
+            if mode == ReferenceSearchMode::References {
+                self.link_event_references(
+                    sym,
+                    uri,
+                    content,
+                    position,
+                    include_declaration,
+                    &mut locations,
+                );
+            }
             // A YAML/XML occurrence of a class or namespace is a reference
             // the user can be shown, but not one a PHP-shaped edit can be
             // written over: its text may be the escaped `App\\Handler` form
@@ -126,6 +137,18 @@ impl Backend {
             if !locations.is_empty() {
                 return Some(locations);
             }
+        }
+
+        if mode == ReferenceSearchMode::References
+            && let Some(mut locations) = self.event_constant_initializer_references(
+                uri,
+                content,
+                position,
+                include_declaration,
+            )
+        {
+            sort_locations_for_references(&mut locations);
+            return Some(locations);
         }
 
         if self.resolved_class_cache.read().laravel().is_enabled()
@@ -175,7 +198,7 @@ impl Backend {
     }
 
     /// Dispatch a symbol-map hit to the appropriate reference finder.
-    fn dispatch_symbol_references(
+    pub(super) fn dispatch_symbol_references(
         &self,
         span: &SymbolSpan,
         uri: &str,

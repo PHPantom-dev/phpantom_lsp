@@ -100,9 +100,11 @@ function acme_greeting_form_submit(array &$form, FormStateInterface $form_state)
  */
 function acme_announce_greeting(): void
 {
-    // Try: go to the definition of 'acme.greeted', which lands on the
-    // GreetingEvents::GREETED key of GreetingSubscriber, or hover it to see
-    // how many listeners subscribe. Complete an event name inside the
-    // quotes: the names the subscribers' constant keys hold are offered.
+    // Try: go to the definition of 'acme.greeted', which offers the
+    // constant GreetingEvents::GREETED first, then the key of
+    // GreetingSubscriber that subscribes by it. Hover it to see how many
+    // listeners subscribe, or find its references, the constant's included.
+    // Complete an event name inside the quotes: the names the subscribers'
+    // constant keys hold are offered.
     \Drupal::service('event_dispatcher')->dispatch(new Event(), 'acme.greeted');
 }

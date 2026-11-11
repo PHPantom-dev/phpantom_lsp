@@ -34,7 +34,8 @@ final class GreetingSubscriber implements EventSubscriberInterface
         $events[KernelEvents::RESPONSE][] = ['onResponse', 10];
         $events[ConfigEvents::SAVE][] = ['onConfigSave'];
         // GreetingEvents::GREETED declares the event 'acme.greeted', which
-        // acme_announce_greeting() in acme.module dispatches.
+        // acme_announce_greeting() in acme.module dispatches. Try: find the
+        // references of GREETED: that dispatch is among them.
         $events[GreetingEvents::GREETED][] = ['onGreeted'];
         return $events;
     }

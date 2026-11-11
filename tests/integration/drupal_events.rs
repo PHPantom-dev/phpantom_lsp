@@ -363,21 +363,28 @@ async fn a_dispatched_event_goes_to_every_subscription_on_each_dispatcher_typing
     let order = uri_for(&dir, ORDER_PATH);
     let shop = uri_for(&dir, SHOP_SUBSCRIBER_PATH);
 
-    for (needle, uri, line) in [
+    // A constant the subscription is keyed by comes first: the event's
+    // definition.
+    let opened = uri_for(&dir, "web/core/modules/shop/src/ShopEvents.php");
+    let closed = uri_for(&dir, "web/core/modules/shop/src/ShopEventsInterface.php");
+    for (needle, expected) in [
         (
             "'acme.order_placed'",
-            &order,
-            line_of(ORDER_SUBSCRIBER, "'acme.order_placed'"),
+            vec![(&order, line_of(ORDER_SUBSCRIBER, "'acme.order_placed'"))],
         ),
         (
             "'shop.opened'",
-            &shop,
-            line_of(SHOP_SUBSCRIBER, "ShopEvents::OPENED"),
+            vec![
+                (&opened, 3),
+                (&shop, line_of(SHOP_SUBSCRIBER, "ShopEvents::OPENED")),
+            ],
         ),
         (
             "'shop.closed'",
-            &shop,
-            line_of(SHOP_SUBSCRIBER, "ShopEvents::CLOSED"),
+            vec![
+                (&closed, 3),
+                (&shop, line_of(SHOP_SUBSCRIBER, "ShopEvents::CLOSED")),
+            ],
         ),
     ] {
         let found = definitions_at(&backend, &checkout, position_in(CHECKOUT, needle, 2)).await;
@@ -385,7 +392,7 @@ async fn a_dispatched_event_goes_to_every_subscription_on_each_dispatcher_typing
             .iter()
             .map(|location| (&location.uri, location.range.start.line))
             .collect();
-        assert_eq!(found, vec![(uri, line)], "{needle}");
+        assert_eq!(found, expected, "{needle}");
 
         let position = position_in(CHECKOUT, needle, 2);
         let hover = hover_text_at(&backend, &checkout, position.line, position.character)
@@ -418,6 +425,7 @@ async fn references_of_an_event_name_include_the_subscriptions_keyed_by_a_consta
     let mut expected = vec![
         (checkout.clone(), line_of(CHECKOUT, "'shop.opened'")),
         (shop, line_of(SHOP_SUBSCRIBER, "ShopEvents::OPENED")),
+        (uri_for(&dir, "web/core/modules/shop/src/ShopEvents.php"), 3),
     ];
     expected.sort();
     assert_eq!(found, expected);
@@ -473,4 +481,287 @@ async fn event_names_complete_in_each_dispatcher_call() {
         );
         assert_eq!(labels, expected, "{needle}");
     }
+}
+
+/// A module's events class, a subscriber keyed by it, and a dispatch of
+/// the name its constant holds.
+const ACME_EVENTS: &str = r#"<?php
+namespace Drupal\acme\Event;
+
+final class ShippingEvents {
+    const SHIPPED = /* sent */ 'acme.order_shipped';
+    const DRAFTED = 'acme.order_drafted';
+}
+"#;
+
+const SHIPPING_SUBSCRIBER: &str = r#"<?php
+namespace Drupal\acme\EventSubscriber;
+
+use Drupal\acme\Event\ShippingEvents;
+
+final class ShippingSubscriber {
+    public static function getSubscribedEvents(): array {
+        $events[ShippingEvents::SHIPPED][] = ['onShipped'];
+        return $events;
+    }
+
+    public function onShipped(object $event): void {}
+}
+"#;
+
+const SHIPPING: &str = r#"<?php
+namespace Drupal\acme;
+
+final class Shipping {
+    public function ship(object $order): void {
+        \Drupal::service('event_dispatcher')->dispatch($order, 'acme.order_shipped');
+        \Drupal::service('event_dispatcher')->dispatch($order, 'acme.order_drafted');
+    }
+}
+"#;
+
+const ACME_EVENTS_PATH: &str = "web/modules/custom/acme/src/Event/ShippingEvents.php";
+const SHIPPING_SUBSCRIBER_PATH: &str =
+    "web/modules/custom/acme/src/EventSubscriber/ShippingSubscriber.php";
+const SHIPPING_PATH: &str = "web/modules/custom/acme/src/Shipping.php";
+
+#[tokio::test]
+async fn an_event_constant_is_the_definition_of_its_event_name() {
+    let (backend, dir) = site(&[
+        (CHECKOUT_PATH, CHECKOUT),
+        (ACME_EVENTS_PATH, ACME_EVENTS),
+        (SHIPPING_SUBSCRIBER_PATH, SHIPPING_SUBSCRIBER),
+        (SHIPPING_PATH, SHIPPING),
+    ])
+    .await;
+    let checkout = uri_for(&dir, CHECKOUT_PATH);
+    let events = uri_for(&dir, ACME_EVENTS_PATH);
+    let subscriber = uri_for(&dir, SHIPPING_SUBSCRIBER_PATH);
+    let shipping = uri_for(&dir, SHIPPING_PATH);
+    let at = |locations: Vec<Location>| -> Vec<(Uri, u32)> {
+        locations
+            .into_iter()
+            .map(|location| (location.uri, location.range.start.line))
+            .collect()
+    };
+
+    // The constant first, where core's interface declares it, then the
+    // subscription keyed by it.
+    let found = definitions_at(
+        &backend,
+        &checkout,
+        position_in(CHECKOUT, "'shop.closed'", 2),
+    )
+    .await;
+    assert_eq!(
+        at(found),
+        vec![
+            (
+                uri_for(&dir, "web/core/modules/shop/src/ShopEventsInterface.php"),
+                3
+            ),
+            (
+                uri_for(&dir, SHOP_SUBSCRIBER_PATH),
+                line_of(SHOP_SUBSCRIBER, "ShopEvents::CLOSED")
+            ),
+        ]
+    );
+
+    // One event, from the string, the constant, its use, and the string
+    // it is initialized with.
+    let mut everything = vec![
+        (events.clone(), line_of(ACME_EVENTS, "SHIPPED =")),
+        (
+            subscriber.clone(),
+            line_of(SHIPPING_SUBSCRIBER, "ShippingEvents::SHIPPED"),
+        ),
+        (shipping.clone(), line_of(SHIPPING, "'acme.order_shipped'")),
+    ];
+    everything.sort();
+    for (uri, content, needle, inside) in [
+        (&shipping, SHIPPING, "'acme.order_shipped'", 2),
+        (&events, ACME_EVENTS, "SHIPPED =", 2),
+        (
+            &subscriber,
+            SHIPPING_SUBSCRIBER,
+            "ShippingEvents::SHIPPED",
+            17,
+        ),
+        (&events, ACME_EVENTS, "'acme.order_shipped'", 2),
+    ] {
+        let found = references_at(&backend, uri, position_in(content, needle, inside)).await;
+        assert_eq!(found, everything, "from {needle}");
+    }
+
+    // Just past the initializer's string is no longer on it.
+    let found = references_at(
+        &backend,
+        &events,
+        position_in(ACME_EVENTS, "'acme.order_shipped';", 20),
+    )
+    .await;
+    assert!(found.is_empty(), "{found:?}");
+
+    // A constant no subscriber keys by is a plain constant.
+    let found = references_at(&backend, &events, position_in(ACME_EVENTS, "DRAFTED =", 2)).await;
+    assert_eq!(
+        found,
+        vec![(events.clone(), line_of(ACME_EVENTS, "DRAFTED ="))]
+    );
+    let found = definitions_at(
+        &backend,
+        &shipping,
+        position_in(SHIPPING, "'acme.order_drafted'", 2),
+    )
+    .await;
+    assert!(found.is_empty(), "{found:?}");
+
+    // Renaming the constant leaves the event strings alone.
+    let position = position_in(ACME_EVENTS, "SHIPPED =", 2);
+    let edit = rename(&backend, &events, position.line, position.character, "SENT")
+        .await
+        .expect("the rename should produce edits");
+    let changes = edit.changes.expect("a change map");
+    assert!(!changes.contains_key(&shipping), "{changes:?}");
+}
+
+/// An events class a Composer package installs, a module's subscriber
+/// keyed by it, and a dispatch of the name its constant holds.
+const VENDOR_FILES: &[(&str, &str)] = &[
+    (
+        "vendor/composer/installed.json",
+        r#"{ "packages": [ { "name": "acme/order-events", "install-path": "../acme/order-events", "autoload": { "psr-4": { "Acme\\OrderEvents\\": "src/" } } } ] }"#,
+    ),
+    (
+        "vendor/acme/order-events/src/OrderEvents.php",
+        "<?php\nnamespace Acme\\OrderEvents;\n\nfinal class OrderEvents {\n    const PAID = 'acme.order_settled';\n    const NOTED = /* kept */ 'acme.order_noted';\n}\n",
+    ),
+    (
+        "web/modules/custom/acme/src/EventSubscriber/PaymentSubscriber.php",
+        "<?php\nnamespace Drupal\\acme\\EventSubscriber;\n\nuse Acme\\OrderEvents\\OrderEvents;\n\nfinal class PaymentSubscriber {\n    public static function getSubscribedEvents(): array {\n        $events[OrderEvents::PAID][] = ['onPaid'];\n        return $events;\n    }\n\n    public function onPaid(object $event): void {}\n}\n",
+    ),
+];
+
+const PAYMENT: &str = r#"<?php
+namespace Drupal\acme;
+
+final class Payment {
+    public function settle(object $order): void {
+        \Drupal::service('event_dispatcher')->dispatch($order, 'acme.order_settled');
+    }
+}
+"#;
+
+const PAYMENT_PATH: &str = "web/modules/custom/acme/src/Payment.php";
+
+/// A fresh site holding [`VENDOR_FILES`], none of them open, and the
+/// dispatch open.
+async fn vendor_site() -> (phpantom_lsp::Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in STUBS.iter().chain(VENDOR_FILES) {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let (backend, dir) = workspace_in(dir, &[(PAYMENT_PATH, PAYMENT)]).await;
+    backend.ensure_workspace_indexed();
+    (backend, dir)
+}
+
+#[tokio::test]
+async fn the_first_definition_of_an_event_name_finds_a_constant_composer_installs() {
+    let (backend, dir) = vendor_site().await;
+    let payment = uri_for(&dir, PAYMENT_PATH);
+    let found = definitions_at(
+        &backend,
+        &payment,
+        position_in(PAYMENT, "'acme.order_settled'", 2),
+    )
+    .await;
+    let found: Vec<(Uri, u32)> = found
+        .into_iter()
+        .map(|location| (location.uri, location.range.start.line))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                Uri::from_file_path(
+                    dunce::canonicalize(
+                        dir.path()
+                            .join("vendor/acme/order-events/src/OrderEvents.php")
+                    )
+                    .unwrap()
+                )
+                .unwrap(),
+                4
+            ),
+            (
+                uri_for(
+                    &dir,
+                    "web/modules/custom/acme/src/EventSubscriber/PaymentSubscriber.php"
+                ),
+                7
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn references_of_an_event_name_reach_a_constant_composer_installs() {
+    let (backend, dir) = vendor_site().await;
+    let payment = uri_for(&dir, PAYMENT_PATH);
+    let events = Uri::from_file_path(
+        dunce::canonicalize(
+            dir.path()
+                .join("vendor/acme/order-events/src/OrderEvents.php"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let subscriber = uri_for(
+        &dir,
+        "web/modules/custom/acme/src/EventSubscriber/PaymentSubscriber.php",
+    );
+    let dispatched = (payment.clone(), line_of(PAYMENT, "'acme.order_settled'"));
+    let position = position_in(PAYMENT, "'acme.order_settled'", 2);
+
+    let found = references_at(&backend, &payment, position).await;
+    let mut expected = vec![(events, 4), (subscriber, 7), dispatched.clone()];
+    expected.sort();
+    assert_eq!(found, expected);
+
+    // A subscription is a declaration of the event whatever its spelling,
+    // so without declarations only the dispatch is left.
+    let found = references_without_declaration(&backend, &payment, position).await;
+    assert_eq!(found, vec![dispatched]);
+}
+
+/// [`references_at`] with the declaration left out.
+async fn references_without_declaration(
+    backend: &phpantom_lsp::Backend,
+    uri: &Uri,
+    position: Position,
+) -> Vec<(Uri, u32)> {
+    use tower_lsp_server::LanguageServer;
+    let mut found: Vec<(Uri, u32)> = backend
+        .references(ReferenceParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|location| (location.uri, location.range.start.line))
+        .collect();
+    found.sort();
+    found
 }

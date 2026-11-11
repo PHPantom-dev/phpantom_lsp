@@ -83,7 +83,6 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::TranslationDomain
         | StringKeyKind::TwigTemplate
         | StringKeyKind::SymfonyConfigKey
-        | StringKeyKind::SymfonyEvent
         | StringKeyKind::MessengerBus
         | StringKeyKind::SerializerGroup
         | StringKeyKind::YiiRoute
@@ -92,6 +91,18 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::DrupalRouteParameter
         | StringKeyKind::DrupalPermission
         | StringKeyKind::DrupalLibrary => backend.symfony_declaration_locations(*kind, key),
+        // A constant a subscriber keys its map by defines the event name it
+        // holds, ahead of the subscriptions.
+        StringKeyKind::SymfonyEvent => {
+            let mut locations: Vec<Location> = backend
+                .symfony_event_constants_named(key)
+                .constants
+                .into_iter()
+                .map(|constant| constant.declaration)
+                .collect();
+            locations.extend(backend.symfony_declaration_locations(*kind, key));
+            locations
+        }
         StringKeyKind::DrupalHook => backend.drupal_hook_documentation(key),
         StringKeyKind::DrupalConfigName => backend.drupal_config_locations(key),
         StringKeyKind::DrupalConfigKey => backend.drupal_config_key_locations(key),

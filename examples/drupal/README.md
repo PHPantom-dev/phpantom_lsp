@@ -203,13 +203,16 @@ Run `composer install` here first. Composer puts core and contrib into
   in the map and it is reported. In `RequestSubscriber.php`, which returns
   its map, find the references of `onRequest()`: the string is one of them.
 - Event names navigate from the dispatcher calls that name them to the
-  subscriptions that listen to them, a subscription keyed by a class
-  constant included. In `acme_announce_greeting()` in
-  `web/modules/custom/acme/acme.module`, go to the definition of
-  `'acme.greeted'`, which lands on the `GreetingEvents::GREETED` key of
+  subscriptions that listen to them, and a class constant a subscriber
+  keys its map by is the event's definition. In `acme_announce_greeting()`
+  in `web/modules/custom/acme/acme.module`, go to the definition of
+  `'acme.greeted'`, which offers `GreetingEvents::GREETED` in
+  `src/Event/GreetingEvents.php` first, then the key of
   `GreetingSubscriber`, or hover it to see how many listeners subscribe.
-  Complete an event name inside the quotes of `dispatch()` or of the
-  dispatcher's other listener methods.
+  Find the references of `GREETED`, or of `'acme.greeted'`: the constant,
+  the subscription, and the dispatch are one list. Complete an event name
+  inside the quotes of `dispatch()` or of the dispatcher's other methods
+  that take one.
 
 ## What the Symfony support already reads
 

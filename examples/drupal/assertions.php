@@ -240,6 +240,8 @@ check('A misspelt listener such as onRespons is no method of GreetingSubscriber'
 // A key written as a class constant subscribes to the event the constant
 // holds, which is the name a dispatcher call writes.
 check('GreetingEvents::GREETED holds acme.greeted', GreetingEvents::GREETED === 'acme.greeted');
+check('GreetingSubscriber keys its map by GreetingEvents::GREETED, which makes it the definition of acme.greeted', str_contains((string) file_get_contents("$module/src/EventSubscriber/GreetingSubscriber.php"), '$events[GreetingEvents::GREETED][] = '));
+check('GreetingEvents declares GREETED itself, as a plain string', (new ReflectionClassConstant(GreetingEvents::class, 'GREETED'))->getDeclaringClass()->getName() === GreetingEvents::class && is_string(GreetingEvents::GREETED));
 $greetedListeners = 0;
 foreach ($subscribers as [$class]) {
     $greetedListeners += count(listenerMethods($class::getSubscribedEvents())['acme.greeted'] ?? []);

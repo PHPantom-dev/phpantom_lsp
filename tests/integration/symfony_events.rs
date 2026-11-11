@@ -182,6 +182,16 @@ async fn definitions(backend: &Backend, uri: &Uri, position: Position) -> Vec<(U
 }
 
 async fn references(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Uri, u32)> {
+    references_with(backend, uri, position, true).await
+}
+
+/// [`references`], with the declaration included or not.
+async fn references_with(
+    backend: &Backend,
+    uri: &Uri,
+    position: Position,
+    include_declaration: bool,
+) -> Vec<(Uri, u32)> {
     let mut found: Vec<(Uri, u32)> = backend
         .references(ReferenceParams {
             text_document_position_params: TextDocumentPositionParams {
@@ -191,7 +201,7 @@ async fn references(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Ur
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
-                include_declaration: true,
+                include_declaration,
             },
         })
         .await
@@ -202,6 +212,35 @@ async fn references(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Ur
         .collect();
     found.sort();
     found
+}
+
+/// The definitions of the name at `position`, in the order given.
+async fn definitions_in_order(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Uri, u32)> {
+    let response = backend
+        .goto_definition(DefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+    match response {
+        None => Vec::new(),
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => vec![location],
+        Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => locations,
+        Some(DefinitionResponse::DefinitionLinkList(_)) => panic!("unexpected location links"),
+    }
+    .into_iter()
+    .map(|location| (location.uri, location.range.start.line))
+    .collect()
+}
+
+/// The line `needle` first appears on.
+fn line_of(content: &str, needle: &str) -> u32 {
+    position_in(content, needle, 0).line
 }
 
 fn sorted(mut locations: Vec<(Uri, u32)>) -> Vec<(Uri, u32)> {
@@ -426,6 +465,7 @@ final class OrderEvents extends BaseEvents implements StoreEvents
     public const JOINED = 'app.order.' . 'joined';
     public const ALIAS = self::PLACED;
     public const PRICED = "app.order.\$priced";
+    public const DRAFTED = 'app.order.drafted';
 }
 "#;
 
@@ -535,7 +575,11 @@ async fn a_subscription_keyed_by_a_constant_declares_its_value() {
         position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
     )
     .await;
-    assert_eq!(found, vec![(subscriber.clone(), 10)]);
+    let events = uri_for(&dir, "src/Event/OrderEvents.php");
+    assert_eq!(
+        found,
+        sorted(vec![(events.clone(), 5), (subscriber.clone(), 10)])
+    );
 
     let position = position_in(DISPATCHER_PHP, "'app.order.placed'", 3);
     let hover =
@@ -545,7 +589,7 @@ async fn a_subscription_keyed_by_a_constant_declares_its_value() {
     assert!(hover.contains("1 listener in the project"), "{hover}");
 
     // The subscription the constant declares is among the references, as
-    // it is among the definitions.
+    // it is among the definitions, with the constant and its other use.
     let found = references(
         &backend,
         &checkout,
@@ -554,7 +598,12 @@ async fn a_subscription_keyed_by_a_constant_declares_its_value() {
     .await;
     assert_eq!(
         found,
-        sorted(vec![(checkout.clone(), 11), (subscriber.clone(), 10)])
+        sorted(vec![
+            (checkout.clone(), 11),
+            (events.clone(), 5),
+            (events.clone(), 7),
+            (subscriber.clone(), 10)
+        ])
     );
 
     // The value is read when the names are asked for.
@@ -582,6 +631,234 @@ async fn a_subscription_keyed_by_a_constant_declares_its_value() {
             "app.order.closed",
             "app.order.submitted",
             "app.store.opened"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_event_constant_is_the_definition_of_its_event_name() {
+    // A constant no subscriber keys by, and a dispatch of the name it holds.
+    let drafts = r#"<?php
+namespace App\Service;
+
+use App\Event\OrderEvents;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
+
+function draft(EventDispatcherInterface $events, object $order): void
+{
+    $events->dispatch($order, 'app.order.drafted');
+    $events->dispatch($order, OrderEvents::DRAFTED);
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("src/Event/OrderEvents.php", ORDER_EVENTS_PHP),
+        ("src/Event/BaseEvents.php", BASE_EVENTS_PHP),
+        ("src/Event/StoreEvents.php", STORE_EVENTS_PHP),
+        ("src/Event/PlaceOrder.php", PLACE_ORDER_PHP),
+        (
+            "src/EventSubscriber/StoreSubscriber.php",
+            CONSTANT_SUBSCRIBER_PHP,
+        ),
+        ("src/Service/Checkout.php", DISPATCHER_PHP),
+        ("src/Service/draft.php", drafts),
+    ])
+    .await;
+    let events = uri_for(&dir, "src/Event/OrderEvents.php");
+    let base = uri_for(&dir, "src/Event/BaseEvents.php");
+    let subscriber = uri_for(&dir, "src/EventSubscriber/StoreSubscriber.php");
+    let checkout = uri_for(&dir, "src/Service/Checkout.php");
+    let draft = uri_for(&dir, "src/Service/draft.php");
+    let declared = (events.clone(), line_of(ORDER_EVENTS_PHP, "PLACED ="));
+    let key = (
+        subscriber.clone(),
+        line_of(CONSTANT_SUBSCRIBER_PHP, "OrderEvents::PLACED"),
+    );
+    let dispatched = (
+        checkout.clone(),
+        line_of(DISPATCHER_PHP, "'app.order.placed'"),
+    );
+    let aliased = (events.clone(), line_of(ORDER_EVENTS_PHP, "self::PLACED"));
+
+    // The constant first, then every subscription; a constant inherited
+    // from a parent is declared there.
+    let found = definitions_in_order(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+    )
+    .await;
+    assert_eq!(found, vec![declared.clone(), key.clone()]);
+    let closed = (
+        subscriber.clone(),
+        line_of(CONSTANT_SUBSCRIBER_PHP, "OrderEvents::CLOSED"),
+    );
+    let announce = DISPATCH_ANY_PHP.replace("''", "'app.order.closed'");
+    let announce_uri = uri_for(&dir, "src/Service/announce.php");
+    open_document(&backend, &announce_uri, "php", &announce).await;
+    let found = definitions_in_order(
+        &backend,
+        &announce_uri,
+        position_in(&announce, "'app.order.closed'", 3),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![(base.clone(), line_of(BASE_EVENTS_PHP, "CLOSED =")), closed]
+    );
+
+    // The same event from the string, the constant's declaration, its
+    // use as a key, and the string it is initialized with.
+    let everything = sorted(vec![
+        declared.clone(),
+        aliased.clone(),
+        key.clone(),
+        dispatched.clone(),
+    ]);
+    for (uri, content, needle, inside) in [
+        (&checkout, DISPATCHER_PHP, "'app.order.placed'", 3),
+        (&events, ORDER_EVENTS_PHP, "PLACED =", 2),
+        (
+            &subscriber,
+            CONSTANT_SUBSCRIBER_PHP,
+            "OrderEvents::PLACED",
+            15,
+        ),
+        (&events, ORDER_EVENTS_PHP, "'app.order.placed'", 3),
+    ] {
+        let found = references(&backend, uri, position_in(content, needle, inside)).await;
+        assert_eq!(found, everything, "from {needle} in {}", uri.as_str());
+    }
+    // Without declarations, the constant's own and the subscription,
+    // which declares the event whatever its spelling, are left out; the
+    // constant's other uses stay.
+    let found = references_with(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+        false,
+    )
+    .await;
+    assert_eq!(found, sorted(vec![aliased, dispatched]));
+
+    // Definition on the constant's name stays PHP's own.
+    let found = definitions_in_order(
+        &backend,
+        &subscriber,
+        position_in(CONSTANT_SUBSCRIBER_PHP, "OrderEvents::PLACED", 15),
+    )
+    .await;
+    assert_eq!(found, vec![declared]);
+
+    // Renaming the constant leaves the event strings alone.
+    let position = position_in(ORDER_EVENTS_PHP, "PLACED =", 2);
+    let edit = crate::common::rename(
+        &backend,
+        &events,
+        position.line,
+        position.character,
+        "SUBMITTED",
+    )
+    .await
+    .expect("the rename should produce edits");
+    let changes = edit.changes.expect("a change map");
+    assert!(!changes.contains_key(&checkout), "{changes:?}");
+    assert!(
+        changes
+            .values()
+            .flatten()
+            .all(|edit| edit.new_text == "SUBMITTED"),
+        "{changes:?}"
+    );
+
+    // A constant no subscriber keys by is a plain constant.
+    let drafted = (events.clone(), line_of(ORDER_EVENTS_PHP, "DRAFTED ="));
+    let found = references(
+        &backend,
+        &events,
+        position_in(ORDER_EVENTS_PHP, "DRAFTED =", 2),
+    )
+    .await;
+    assert_eq!(
+        found,
+        sorted(vec![
+            drafted,
+            (draft.clone(), line_of(drafts, "OrderEvents::DRAFTED"))
+        ])
+    );
+    let found = definitions_in_order(
+        &backend,
+        &draft,
+        position_in(drafts, "'app.order.drafted'", 3),
+    )
+    .await;
+    assert!(found.is_empty(), "{found:?}");
+}
+
+/// Where `rel` is on disk, spelled the way the index stores it.
+fn canonical_uri(dir: &tempfile::TempDir, rel: &str) -> Uri {
+    Uri::from_file_path(dunce::canonicalize(dir.path().join(rel)).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn the_first_definition_of_an_event_name_loads_a_constant_composer_installs() {
+    let vendored = r#"<?php
+namespace Acme\OrderEvents;
+
+final class OrderEvents
+{
+    public const PLACED = 'app.order.placed';
+}
+"#;
+    let subscriber = r#"<?php
+namespace App\EventSubscriber;
+
+use Acme\OrderEvents\OrderEvents;
+
+final class VendorSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        return [OrderEvents::PLACED => 'onPlaced'];
+    }
+
+    public function onPlaced(object $event): void {}
+}
+"#;
+    let installed = r#"{ "packages": [ { "name": "acme/order-events", "install-path": "../acme/order-events", "autoload": { "psr-4": { "Acme\\OrderEvents\\": "src/" } } } ] }"#;
+    let all: Vec<(&str, &str)> = STUBS
+        .iter()
+        .copied()
+        .chain([
+            ("vendor/composer/installed.json", installed),
+            ("vendor/acme/order-events/src/OrderEvents.php", vendored),
+            ("src/EventSubscriber/VendorSubscriber.php", subscriber),
+            ("src/Service/Checkout.php", DISPATCHER_PHP),
+        ])
+        .collect();
+    let (backend, dir) = create_psr4_workspace(COMPOSER, &all);
+    // `initialized` reads the packages Composer installed.
+    backend.initialized(InitializedParams {}).await;
+    for (path, content) in [
+        ("src/EventSubscriber/VendorSubscriber.php", subscriber),
+        ("src/Service/Checkout.php", DISPATCHER_PHP),
+    ] {
+        open_document(&backend, &uri_for(&dir, path), "php", content).await;
+    }
+    let checkout = uri_for(&dir, "src/Service/Checkout.php");
+    let found = definitions_in_order(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![
+            (
+                canonical_uri(&dir, "vendor/acme/order-events/src/OrderEvents.php"),
+                5
+            ),
+            (uri_for(&dir, "src/EventSubscriber/VendorSubscriber.php"), 9),
         ]
     );
 }
