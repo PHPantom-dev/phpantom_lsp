@@ -329,12 +329,13 @@ impl StringKeyKind {
             | Self::MixAsset
             | Self::ViteAsset
             | Self::InertiaPage => KeyFramework::Laravel,
-            Self::ServiceId | Self::ContainerParameter => KeyFramework::ServiceContainer,
+            Self::ServiceId | Self::ContainerParameter | Self::SymfonyEvent => {
+                KeyFramework::ServiceContainer
+            }
             Self::SymfonyRoute
             | Self::SymfonyTranslation
             | Self::TranslationDomain
             | Self::SymfonyConfigKey
-            | Self::SymfonyEvent
             | Self::MessengerBus
             | Self::SerializerGroup => KeyFramework::Symfony,
             Self::TwigTemplate
@@ -467,11 +468,11 @@ pub(crate) enum KeyFramework {
     Laravel,
     /// Tempest's explicitly qualified view helper, including standalone use.
     Tempest,
-    /// Symfony's service IDs and container parameters, which any project
-    /// that builds a Symfony service container declares.
+    /// Symfony's service IDs, container parameters, and event names, which
+    /// any project that builds a Symfony service container declares.
     ServiceContainer,
     /// The rest of Symfony: routes, translations, bundle configuration,
-    /// events, and Messenger.
+    /// and Messenger.
     Symfony,
     /// Twig's template, block, filter, function, and variable names,
     /// read in any project that uses Twig.

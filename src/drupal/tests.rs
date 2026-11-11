@@ -229,12 +229,16 @@ fn other_yaml_is_not_read_as_services() {
 #[test]
 fn drupal_reads_the_service_container_and_nothing_else_from_symfony() {
     let (backend, _dir) = drupal_backend(&[]);
-    assert!(backend.string_key_kind_enabled(StringKeyKind::ServiceId));
-    assert!(backend.string_key_kind_enabled(StringKeyKind::ContainerParameter));
+    for kind in [
+        StringKeyKind::ServiceId,
+        StringKeyKind::ContainerParameter,
+        StringKeyKind::SymfonyEvent,
+    ] {
+        assert!(backend.string_key_kind_enabled(kind), "{kind:?}");
+    }
     for kind in [
         StringKeyKind::SymfonyRoute,
         StringKeyKind::SymfonyTranslation,
-        StringKeyKind::SymfonyEvent,
         StringKeyKind::MessengerBus,
         StringKeyKind::SymfonyConfigKey,
     ] {

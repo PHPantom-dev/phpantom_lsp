@@ -3,7 +3,8 @@
 A standalone editor playground for PHPantom on Drupal 11. It is a
 `drupal/recommended-project` site with one custom module, `acme`, and one
 theme, `acme_theme`, declaring a service, a route, a content entity type,
-a render element, a block plugin, hooks, a theme hook, permissions, and configuration the
+a render element, a block plugin, hooks, a theme hook, permissions, event
+subscribers, and configuration the
 way a real Drupal module declares them.
 
 Run `composer install` here first. Composer puts core and contrib into
@@ -193,6 +194,14 @@ Run `composer install` here first. Composer puts core and contrib into
   `web/modules/custom/acme/src/Plugin/Block/FarewellBlock.php`, go to the
   definition of `@Block`, which lands on core's block annotation class, or
   of `@Translation`, which lands on core's `Translation` annotation.
+- An event subscriber's `getSubscribedEvents()` names the methods that
+  listen to each event, whether it returns the map or builds it by
+  assignment. In
+  `web/modules/custom/acme/src/EventSubscriber/GreetingSubscriber.php`, go
+  to the definition of `'onResponse'`, which lands on the method, or hover
+  it; rename `onResponse()` and the string follows. Misspell a method name
+  in the map and it is reported. In `RequestSubscriber.php`, which returns
+  its map, find the references of `onRequest()`: the string is one of them.
 
 ## What the Symfony support already reads
 
@@ -212,10 +221,10 @@ project. What works today:
 
 What does not work yet:
 
-- **Event subscribers.** The `getSubscribedEvents()` map of an event
-  subscriber is read only in a Symfony project, so in a Drupal site its
-  event names and listener methods neither complete nor navigate. See
-  `docs/todo/drupal.md`.
+- **Event names keyed by a class constant.** A subscriber keyed by a
+  constant such as `KernelEvents::REQUEST` does not declare the event name
+  the constant holds, so the dispatcher calls that name it neither complete
+  nor navigate to the subscriber. See `docs/todo/drupal.md`.
 
 ## Runtime assertions
 

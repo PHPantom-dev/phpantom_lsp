@@ -234,8 +234,8 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         };
         // Outside Symfony, only the calls of the framework the project uses
         // are left: Twig's own `render()`, Yii's URL generator, or a Drupal
-        // container lookup.  Only Symfony declares services and parameters
-        // in PHP; in Drupal a `setParameter()` is far more often a
+        // container lookup.  Only Symfony declares services, parameters and
+        // events in PHP; in Drupal a `setParameter()` is far more often a
         // validator's or a query's than the container's.
         let frameworks = ReceiverFrameworks {
             laravel: false,
@@ -2259,29 +2259,39 @@ fn push_own_method_span(
 /// they name: an `#[AsEventListener]` on the class or one of its methods,
 /// and the event-to-method map a subscriber's `getSubscribedEvents()`
 /// returns.  Each subscription declares the event name.
+///
+/// Drupal reads subscribers too, but never honours the attribute.
 pub(in crate::symbol_map::extraction) fn emit_symfony_listener_spans(
     class: &Class<'_>,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    if !ctx.symfony {
+    if !ctx.service_container {
         return;
     }
     // Rooted, so the class is not read again against the file's namespace
-    // and imports.
-    let subject = ctx
-        .resolved_name_at(class.name.span.start.offset)
-        .map(|fqn| format!("\\{}", fqn.trim_start_matches('\\')));
+    // and imports.  Built once, and only for a class that names a listener.
+    let subject_name = std::cell::OnceCell::new();
+    let subject = || {
+        subject_name
+            .get_or_init(|| {
+                ctx.resolved_name_at(class.name.span.start.offset)
+                    .map(|fqn| format!("\\{}", fqn.trim_start_matches('\\')))
+            })
+            .clone()
+    };
     let mut spans = Vec::new();
-    for attribute in attributes_named(&class.attribute_lists, AS_EVENT_LISTENER, ctx) {
-        for (parameter, value) in attribute_arguments(attribute, EVENT_LISTENER_PARAMETERS) {
-            match parameter {
-                "event" => push_event_span(value, ctx.content, &mut spans),
-                "method" => {
-                    if let Some(subject) = &subject {
-                        push_own_method_span(subject, value, ctx.content, &mut spans);
+    if ctx.symfony {
+        for attribute in attributes_named(&class.attribute_lists, AS_EVENT_LISTENER, ctx) {
+            for (parameter, value) in attribute_arguments(attribute, EVENT_LISTENER_PARAMETERS) {
+                match parameter {
+                    "event" => push_event_span(value, ctx.content, &mut spans),
+                    "method" => {
+                        if let Some(subject) = subject() {
+                            push_own_method_span(&subject, value, ctx.content, &mut spans);
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
     }
@@ -2290,10 +2300,13 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_listener_spans(
             continue;
         };
         // On a method, the method is the listener.
-        for attribute in attributes_named(&method.attribute_lists, AS_EVENT_LISTENER, ctx) {
-            for (parameter, value) in attribute_arguments(attribute, EVENT_LISTENER_PARAMETERS) {
-                if parameter == "event" {
-                    push_event_span(value, ctx.content, &mut spans);
+        if ctx.symfony {
+            for attribute in attributes_named(&method.attribute_lists, AS_EVENT_LISTENER, ctx) {
+                for (parameter, value) in attribute_arguments(attribute, EVENT_LISTENER_PARAMETERS)
+                {
+                    if parameter == "event" {
+                        push_event_span(value, ctx.content, &mut spans);
+                    }
                 }
             }
         }
@@ -2304,7 +2317,7 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_listener_spans(
                 .eq_ignore_ascii_case(b"getSubscribedEvents")
             && let MethodBody::Concrete(body) = &method.body
         {
-            push_subscriber_map_spans(body, subject.as_deref(), ctx.content, &mut spans);
+            push_subscriber_map_spans(body, subject().as_deref(), ctx.content, &mut spans);
         }
     }
     ctx.spans.extend(spans);
