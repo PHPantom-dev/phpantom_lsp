@@ -1,23 +1,78 @@
-//! Drupal's event subscribers: the listener methods a subscriber's
-//! `getSubscribedEvents()` names, whether it returns the map or builds it
-//! by assignment.
+//! Drupal's event subscribers and event names: the listener methods a
+//! subscriber's `getSubscribedEvents()` names, whether it returns the map
+//! or builds it by assignment, and the event names its keys declare for
+//! the dispatcher calls that name them.
 
-use crate::common::{hover_text_at, message_text, rename};
+use crate::common::{completion_response, hover_text_at, message_text, rename, response_labels};
 use crate::drupal_services::{definitions_at, position_in, references_at, uri_for, workspace_in};
 use tower_lsp_server::gen_lsp_types::*;
 
-/// Just enough of Symfony's event dispatcher, where Composer would put it
-/// in a Drupal site.
+/// Just enough of Symfony's event dispatcher, where the Drupal walk reads
+/// core, core's `event_dispatcher` service, and a core module that
+/// subscribes by constant: files nobody has open.
 const STUBS: &[(&str, &str)] = &[
     (
-        "vendor/symfony/event-dispatcher/EventSubscriberInterface.php",
+        "web/core/lib/Symfony/EventDispatcher/EventSubscriberInterface.php",
         "<?php\nnamespace Symfony\\Component\\EventDispatcher;\ninterface EventSubscriberInterface {\n    public static function getSubscribedEvents();\n}\n",
     ),
     (
-        "vendor/symfony/event-dispatcher/Attribute/AsEventListener.php",
+        "web/core/lib/Symfony/EventDispatcher/Attribute/AsEventListener.php",
         "<?php\nnamespace Symfony\\Component\\EventDispatcher\\Attribute;\n#[\\Attribute(\\Attribute::TARGET_CLASS | \\Attribute::TARGET_METHOD | \\Attribute::IS_REPEATABLE)]\nclass AsEventListener {\n    public function __construct(?string $event = null, ?string $method = null, int $priority = 0) {}\n}\n",
     ),
+    (
+        "web/core/lib/Symfony/EventDispatcherContracts/EventDispatcherInterface.php",
+        "<?php\nnamespace Symfony\\Contracts\\EventDispatcher;\ninterface EventDispatcherInterface {\n    public function dispatch(object $event, ?string $eventName = null): object;\n}\n",
+    ),
+    (
+        "web/core/lib/Symfony/EventDispatcher/EventDispatcherInterface.php",
+        "<?php\nnamespace Symfony\\Component\\EventDispatcher;\ninterface EventDispatcherInterface extends \\Symfony\\Contracts\\EventDispatcher\\EventDispatcherInterface {\n    public function addListener(string $eventName, callable|array $listener, int $priority = 0): void;\n    public function removeListener(string $eventName, callable|array $listener): void;\n    public function hasListeners(?string $eventName = null): bool;\n    public function getListeners(?string $eventName = null): array;\n    public function getListenerPriority(string $eventName, callable|array $listener): ?int;\n}\n",
+    ),
+    (
+        "web/core/lib/Symfony/EventDispatcher/EventDispatcher.php",
+        "<?php\nnamespace Symfony\\Component\\EventDispatcher;\nclass EventDispatcher implements EventDispatcherInterface {\n    public function dispatch(object $event, ?string $eventName = null): object { return $event; }\n    public function addListener(string $eventName, callable|array $listener, int $priority = 0): void {}\n    public function removeListener(string $eventName, callable|array $listener): void {}\n    public function hasListeners(?string $eventName = null): bool { return false; }\n    public function getListeners(?string $eventName = null): array { return []; }\n    public function getListenerPriority(string $eventName, callable|array $listener): ?int { return null; }\n}\n",
+    ),
+    (
+        "web/core/core.services.yml",
+        "services:\n  event_dispatcher:\n    class: Symfony\\Component\\EventDispatcher\\EventDispatcher\n",
+    ),
+    (
+        "web/core/modules/shop/src/ShopEventsInterface.php",
+        "<?php\nnamespace Drupal\\shop;\ninterface ShopEventsInterface {\n    const CLOSED = 'shop.closed';\n}\n",
+    ),
+    (
+        "web/core/modules/shop/src/ShopEvents.php",
+        "<?php\nnamespace Drupal\\shop;\nfinal class ShopEvents implements ShopEventsInterface {\n    const OPENED = 'shop.opened';\n    const TESTED = 'shop.tested';\n}\n",
+    ),
+    (SHOP_SUBSCRIBER_PATH, SHOP_SUBSCRIBER),
+    // A test module's subscriber, which declares nothing while it is closed.
+    (
+        "web/core/modules/shop/tests/modules/shop_test/src/EventSubscriber/TestSubscriber.php",
+        "<?php\nnamespace Drupal\\shop_test\\EventSubscriber;\nuse Drupal\\shop\\ShopEvents;\nfinal class TestSubscriber {\n    public static function getSubscribedEvents(): array {\n        return [ShopEvents::TESTED => 'onTested'];\n    }\n    public function onTested(object $event): void {}\n}\n",
+    ),
 ];
+
+/// A core subscriber keyed only by constants, one of them inherited from
+/// an interface.
+const SHOP_SUBSCRIBER: &str = "<?php
+namespace Drupal\\shop\\EventSubscriber;
+
+use Drupal\\shop\\ShopEvents;
+use Symfony\\Component\\EventDispatcher\\EventSubscriberInterface;
+
+final class ShopSubscriber implements EventSubscriberInterface {
+    public static function getSubscribedEvents(): array {
+        $events[ShopEvents::OPENED][] = ['onOpened', 100];
+        $events[ShopEvents::CLOSED][] = ['onClosed'];
+        return $events;
+    }
+
+    public function onOpened(object $event): void {}
+
+    public function onClosed(object $event): void {}
+}
+";
+
+const SHOP_SUBSCRIBER_PATH: &str = "web/core/modules/shop/src/EventSubscriber/ShopSubscriber.php";
 
 /// A subscriber that builds its map by assignment.
 const ORDER_SUBSCRIBER: &str = r#"<?php
@@ -56,7 +111,8 @@ final class AuditSubscriber implements EventSubscriberInterface {
 const ORDER_PATH: &str = "web/modules/custom/acme/src/EventSubscriber/OrderSubscriber.php";
 const AUDIT_PATH: &str = "web/modules/custom/acme/src/EventSubscriber/AuditSubscriber.php";
 
-/// A Drupal site holding the dispatcher stubs and `files`, all open.
+/// A Drupal site holding the dispatcher stubs and `files`, `files` open
+/// and the rest read by the workspace index.
 async fn site(files: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     for (path, content) in STUBS {
@@ -64,7 +120,10 @@ async fn site(files: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfile::TempD
         std::fs::create_dir_all(full.parent().unwrap()).unwrap();
         std::fs::write(full, content).unwrap();
     }
-    workspace_in(dir, files).await
+    let (backend, dir) = workspace_in(dir, files).await;
+    // A test backend has no client, so `initialized` leaves the index out.
+    backend.ensure_workspace_indexed();
+    (backend, dir)
 }
 
 /// The line `needle` first appears on.
@@ -269,4 +328,149 @@ async fn nothing_is_read_outside_a_project_with_a_service_container() {
     crate::common::open_document(&backend, &uri, "php", &content).await;
     let reported = unknown_members(&backend, &uri, &content);
     assert!(reported.is_empty(), "{reported:?}");
+}
+
+/// A module's calls on each of the dispatcher's typings, and on something
+/// that is not a dispatcher.
+const CHECKOUT: &str = r#"<?php
+namespace Drupal\acme;
+
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface as ContractsDispatcher;
+
+final class Checkout {
+    public function __construct(
+        private EventDispatcherInterface $events,
+        private ContractsDispatcher $contracts,
+    ) {}
+
+    public function place(object $order, \ArrayObject $other): void {
+        $this->contracts->dispatch($order, 'acme.order_placed');
+        $this->events->hasListeners('shop.opened');
+        \Drupal::service('event_dispatcher')->dispatch($order, 'shop.closed');
+        $this->events->addListener('acme.order_paid', [$this, 'place']);
+        $other->offsetSet($order, 'acme.order_placed');
+    }
+}
+"#;
+
+const CHECKOUT_PATH: &str = "web/modules/custom/acme/src/Checkout.php";
+
+#[tokio::test]
+async fn a_dispatched_event_goes_to_every_subscription_on_each_dispatcher_typing() {
+    let (backend, dir) = site(&[(ORDER_PATH, ORDER_SUBSCRIBER), (CHECKOUT_PATH, CHECKOUT)]).await;
+    let checkout = uri_for(&dir, CHECKOUT_PATH);
+    let order = uri_for(&dir, ORDER_PATH);
+    let shop = uri_for(&dir, SHOP_SUBSCRIBER_PATH);
+
+    for (needle, uri, line) in [
+        (
+            "'acme.order_placed'",
+            &order,
+            line_of(ORDER_SUBSCRIBER, "'acme.order_placed'"),
+        ),
+        (
+            "'shop.opened'",
+            &shop,
+            line_of(SHOP_SUBSCRIBER, "ShopEvents::OPENED"),
+        ),
+        (
+            "'shop.closed'",
+            &shop,
+            line_of(SHOP_SUBSCRIBER, "ShopEvents::CLOSED"),
+        ),
+    ] {
+        let found = definitions_at(&backend, &checkout, position_in(CHECKOUT, needle, 2)).await;
+        let found: Vec<(&Uri, u32)> = found
+            .iter()
+            .map(|location| (&location.uri, location.range.start.line))
+            .collect();
+        assert_eq!(found, vec![(uri, line)], "{needle}");
+
+        let position = position_in(CHECKOUT, needle, 2);
+        let hover = hover_text_at(&backend, &checkout, position.line, position.character)
+            .await
+            .unwrap_or_default();
+        assert!(
+            hover.contains("1 listener in the project"),
+            "{needle}: {hover}"
+        );
+    }
+
+    // `offsetSet()` on something that is not a dispatcher names nothing.
+    let position = position_in(CHECKOUT, "$order, 'acme.order_placed');\n    }", 10);
+    let found = definitions_at(&backend, &checkout, position).await;
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[tokio::test]
+async fn references_of_an_event_name_include_the_subscriptions_keyed_by_a_constant() {
+    let (backend, dir) = site(&[(ORDER_PATH, ORDER_SUBSCRIBER), (CHECKOUT_PATH, CHECKOUT)]).await;
+    let checkout = uri_for(&dir, CHECKOUT_PATH);
+    let shop = uri_for(&dir, SHOP_SUBSCRIBER_PATH);
+
+    let found = references_at(
+        &backend,
+        &checkout,
+        position_in(CHECKOUT, "'shop.opened'", 2),
+    )
+    .await;
+    let mut expected = vec![
+        (checkout.clone(), line_of(CHECKOUT, "'shop.opened'")),
+        (shop, line_of(SHOP_SUBSCRIBER, "ShopEvents::OPENED")),
+    ];
+    expected.sort();
+    assert_eq!(found, expected);
+}
+
+#[tokio::test]
+async fn a_listener_added_in_code_completes_but_declares_nothing() {
+    let (backend, dir) = site(&[(ORDER_PATH, ORDER_SUBSCRIBER), (CHECKOUT_PATH, CHECKOUT)]).await;
+    let checkout = uri_for(&dir, CHECKOUT_PATH);
+
+    // Drupal records no event a call declares, so the name the call adds
+    // a listener for neither navigates nor hovers.
+    let position = position_in(CHECKOUT, "'acme.order_paid'", 2);
+    let found = definitions_at(&backend, &checkout, position).await;
+    assert!(found.is_empty(), "{found:?}");
+    let hover = hover_text_at(&backend, &checkout, position.line, position.character).await;
+    assert!(hover.is_none(), "{hover:?}");
+}
+
+#[tokio::test]
+async fn event_names_complete_in_each_dispatcher_call() {
+    let typing = CHECKOUT
+        .replace(
+            "'acme.order_placed');\n        $this->events",
+            "'');\n        $this->events",
+        )
+        .replace("'shop.opened'", "''")
+        .replace("'shop.closed'", "''")
+        .replace("'acme.order_paid'", "''");
+    let (backend, dir) = site(&[
+        (ORDER_PATH, ORDER_SUBSCRIBER),
+        (CHECKOUT_PATH, typing.as_str()),
+    ])
+    .await;
+    let checkout = uri_for(&dir, CHECKOUT_PATH);
+    let expected = vec![
+        "acme.order_paid".to_string(),
+        "acme.order_placed".to_string(),
+        "shop.closed".to_string(),
+        "shop.opened".to_string(),
+    ];
+    for needle in [
+        "dispatch($order, '",
+        "hasListeners('",
+        "->dispatch($order, '');\n        $this->events->addListener",
+        "addListener('",
+    ] {
+        let at = typing.find(needle).expect("needle should exist");
+        let cursor = at + needle.find('\'').unwrap() + 1;
+        let position = crate::common::offset_position(&typing, cursor);
+        let labels = response_labels(
+            completion_response(&backend, &checkout, position.line, position.character, None).await,
+        );
+        assert_eq!(labels, expected, "{needle}");
+    }
 }

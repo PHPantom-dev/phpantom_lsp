@@ -202,6 +202,14 @@ Run `composer install` here first. Composer puts core and contrib into
   it; rename `onResponse()` and the string follows. Misspell a method name
   in the map and it is reported. In `RequestSubscriber.php`, which returns
   its map, find the references of `onRequest()`: the string is one of them.
+- Event names navigate from the dispatcher calls that name them to the
+  subscriptions that listen to them, a subscription keyed by a class
+  constant included. In `acme_announce_greeting()` in
+  `web/modules/custom/acme/acme.module`, go to the definition of
+  `'acme.greeted'`, which lands on the `GreetingEvents::GREETED` key of
+  `GreetingSubscriber`, or hover it to see how many listeners subscribe.
+  Complete an event name inside the quotes of `dispatch()` or of the
+  dispatcher's other listener methods.
 
 ## What the Symfony support already reads
 
@@ -218,13 +226,6 @@ project. What works today:
   to the method `Greeter` takes from core's `StringTranslationTrait`, and a
   method name there completes from the public methods of the service's
   class.
-
-What does not work yet:
-
-- **Event names keyed by a class constant.** A subscriber keyed by a
-  constant such as `KernelEvents::REQUEST` does not declare the event name
-  the constant holds, so the dispatcher calls that name it neither complete
-  nor navigate to the subscriber. See `docs/todo/drupal.md`.
 
 ## Runtime assertions
 

@@ -17,6 +17,7 @@ use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Controller\NoteController;
 use Drupal\acme\Element\GreetingCard;
 use Drupal\acme\Entity\Note;
+use Drupal\acme\Event\GreetingEvents;
 use Drupal\acme\EventSubscriber\GreetingSubscriber;
 use Drupal\acme\EventSubscriber\RequestSubscriber;
 use Drupal\acme\Form\GreetingForm;
@@ -75,6 +76,7 @@ use Drupal\Core\Url;
 use Drupal\Core\Utility\CallableResolver;
 use Drupal\language\ConfigurableLanguageManager;
 use Drupal\language\LanguageServiceProvider;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpKernel\KernelEvents;
 
@@ -214,6 +216,7 @@ $subscribers = [
     'acme.greeting_subscriber' => [GreetingSubscriber::class, [
         KernelEvents::RESPONSE => ['onResponse'],
         ConfigEvents::SAVE => ['onConfigSave'],
+        GreetingEvents::GREETED => ['onGreeted'],
     ]],
     'acme.request_subscriber' => [RequestSubscriber::class, [
         KernelEvents::REQUEST => ['onRequest'],
@@ -233,6 +236,18 @@ foreach ($subscribers as $id => [$class, $expected]) {
 check('GreetingSubscriber builds its map by assignment', str_contains((string) file_get_contents("$module/src/EventSubscriber/GreetingSubscriber.php"), '$events[KernelEvents::RESPONSE][] = '));
 check('RequestSubscriber returns its map as a literal', str_contains((string) file_get_contents("$module/src/EventSubscriber/RequestSubscriber.php"), 'return [KernelEvents::REQUEST => '));
 check('A misspelt listener such as onRespons is no method of GreetingSubscriber', !method_exists(GreetingSubscriber::class, 'onRespons'));
+
+// A key written as a class constant subscribes to the event the constant
+// holds, which is the name a dispatcher call writes.
+check('GreetingEvents::GREETED holds acme.greeted', GreetingEvents::GREETED === 'acme.greeted');
+$greetedListeners = 0;
+foreach ($subscribers as [$class]) {
+    $greetedListeners += count(listenerMethods($class::getSubscribedEvents())['acme.greeted'] ?? []);
+}
+check('One listener in the module subscribes to acme.greeted', $greetedListeners === 1);
+check("acme_announce_greeting() dispatches acme.greeted on core's event_dispatcher", str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('event_dispatcher')->dispatch(new Event(), 'acme.greeted')"));
+check('core.services.yml builds event_dispatcher from Symfony\'s EventDispatcher', ltrim((string) $core->getDefinition('event_dispatcher')->getClass(), '\\') === EventDispatcher::class);
+check("EventDispatcher takes the event name second in dispatch()", (new ReflectionMethod(EventDispatcher::class, 'dispatch'))->getParameters()[1]->getName() === 'eventName');
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Drupal\acme\EventSubscriber;
 
+use Drupal\acme\Event\GreetingEvents;
+use Drupal\Component\EventDispatcher\Event;
 use Drupal\Core\Config\ConfigCrudEvent;
 use Drupal\Core\Config\ConfigEvents;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -20,6 +22,9 @@ final class GreetingSubscriber implements EventSubscriberInterface
     /** Whether acme.settings was saved during this request. */
     public bool $greetingChanged = false;
 
+    /** How many visitors were greeted during this request. */
+    public int $greeted = 0;
+
     public static function getSubscribedEvents(): array
     {
         // Try: go to the definition of 'onResponse' or 'onConfigSave', or
@@ -28,12 +33,20 @@ final class GreetingSubscriber implements EventSubscriberInterface
         // method.
         $events[KernelEvents::RESPONSE][] = ['onResponse', 10];
         $events[ConfigEvents::SAVE][] = ['onConfigSave'];
+        // GreetingEvents::GREETED declares the event 'acme.greeted', which
+        // acme_announce_greeting() in acme.module dispatches.
+        $events[GreetingEvents::GREETED][] = ['onGreeted'];
         return $events;
     }
 
     public function onResponse(ResponseEvent $event): void
     {
         $event->getResponse()->headers->set('X-Acme-Greeting', 'hello');
+    }
+
+    public function onGreeted(Event $event): void
+    {
+        $this->greeted++;
     }
 
     public function onConfigSave(ConfigCrudEvent $event): void
