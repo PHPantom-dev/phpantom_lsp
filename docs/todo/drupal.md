@@ -12,8 +12,9 @@ the plugins of each, the permissions the `*.permissions.yml`
 files declare, the configuration objects and keys the default
 configuration and the configuration schema declare, the theme hooks
 `hook_theme()` implementations declare, the render elements element
-classes declare, the libraries the `*.libraries.yml` files declare, and
-the callbacks form and render arrays name are read. Nothing reads fields yet.
+classes declare, the libraries the `*.libraries.yml` files declare, the
+callbacks form and render arrays name, and the event names and listener
+methods event subscribers declare are read. Nothing reads fields yet.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -125,29 +126,6 @@ their `*.services.yml` as the project. Until DR2 to DR4 ship most
 assertions are a `// SKIP` pointing at the item that covers them; file
 any that no item does. Rules about Drupal's own deprecations are listed
 in the README as not ported.
-
----
-
-## DR16. Event subscribers
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-final class AcmeSubscriber implements EventSubscriberInterface {
-    public static function getSubscribedEvents(): array {
-        return [KernelEvents::REQUEST => 'onRequest'];
-    }
-}
-```
-
-Drupal's event subscribers are Symfony's: a service tagged
-`event_subscriber` maps event names to its own methods in
-`getSubscribedEvents()`. The Symfony support reads that map, jumps from
-a listener name to its method, and reports one that does not exist,
-but only in a Symfony project, and a Drupal site's `composer.json`
-requires none of the packages that make it one. Read the map in a
-Drupal site too, so the listener methods navigate and are checked, and
-the event names complete where Drupal's event dispatcher takes one.
 
 ---
 
@@ -428,3 +406,27 @@ An array callable whose class is a string rather than `OrderForm::class`
 names no method, so it neither navigates nor renames, and a method the
 class lacks is not reported. Read the string as the fully qualified class
 name PHP reads it as, wherever an array callable is read.
+
+---
+
+## DR37. Listener methods in subscriber maps
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+public static function getSubscribedEvents(): array {
+    $events[KernelEvents::REQUEST][] = ['onRequest', 100];
+    return $events;
+}
+
+private function onRequest(RequestEvent $event): void {}
+```
+
+A subscriber's `getSubscribedEvents()` names its listener methods as
+strings, which jump to the method, follow a rename, and are reported
+when the class has no such method. Complete the subscriber's public
+methods inside a map value, the way a services file's `calls:` completes
+the service's methods. Report a listener method that is private or
+protected too: the event dispatcher calls it from outside the class, so
+it fails at run time. Symfony projects read the same maps, so this
+applies to them as well.

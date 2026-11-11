@@ -801,31 +801,33 @@ PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
 
 ```php
 $dispatcher->dispatch(new OrderPlaced($order));   // which listeners?
+$dispatcher->dispatch($event, KernelEvents::REQUEST);
 
 #[AsEventListener]
 public function onOrderPlaced(OrderPlaced $event): void {}
 
 public static function getSubscribedEvents(): array
 {
-    return [KernelEvents::REQUEST => 'onRequest'];
+    return [OrderPlaced::class => 'onOrderPlaced'];
 }
 ```
 
 An event name written as a string navigates between its dispatchers and
-its listeners. Most events are not: an event dispatched without a name is
-named by its class, an `#[AsEventListener]` without an `event:` subscribes
-to the class its method's first parameter is typed with, and a
-subscriber's map is usually keyed by `OrderPlaced::class` or a constant
-such as `KernelEvents::REQUEST`. None of these link a dispatch to its
-listeners. Symfony's own language server shows a CodeLens over an event
-class listing its listeners, and one over a listener listing its events,
-the way the Messenger lenses link a message and its handlers.
+its listeners, and so does a subscription keyed by a constant that holds
+one (`KernelEvents::REQUEST`). Many events are named another way: an
+event dispatched without a name is named by its class, an
+`#[AsEventListener]` without an `event:` subscribes to the class its
+method's first parameter is typed with, and a subscriber's map may be
+keyed by `OrderPlaced::class`. None of these, nor a `dispatch()` that
+names its event by a constant, link a dispatch to its listeners.
+Symfony's own language server shows a CodeLens over an event class
+listing its listeners, and one over a listener listing its events, the
+way the Messenger lenses link a message and its handlers.
 
-A constant key resolves to the string it holds, which also gives
-completion the framework's own events (`kernel.request`,
-`console.command`, `security.interactive_login`): only the names a
-project's listeners subscribe to are offered today, since nothing the
-installed bundles declare is read.
+Only the event names a project's own subscribers and listeners declare
+complete: the framework's events (`kernel.request`, `console.command`,
+`security.interactive_login`) are declared by the installed bundles'
+subscribers, which are not read.
 
 **Where to look:** `src/symbol_map/extraction/symfony.rs`
 (`emit_symfony_listener_spans`), `src/symfony/messenger.rs` (the handler
