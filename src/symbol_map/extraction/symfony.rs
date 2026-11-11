@@ -2280,6 +2280,8 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_listener_spans(
             .clone()
     };
     let mut spans = Vec::new();
+    let mut constant_keys = Vec::new();
+    let mut listener_lists = Vec::new();
     if ctx.symfony {
         for attribute in attributes_named(&class.attribute_lists, AS_EVENT_LISTENER, ctx) {
             for (parameter, value) in attribute_arguments(attribute, EVENT_LISTENER_PARAMETERS) {
@@ -2317,59 +2319,193 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_listener_spans(
                 .eq_ignore_ascii_case(b"getSubscribedEvents")
             && let MethodBody::Concrete(body) = &method.body
         {
-            push_subscriber_map_spans(body, subject().as_deref(), ctx.content, &mut spans);
+            let mut map = SubscriberMap {
+                ctx: &*ctx,
+                subject: subject(),
+                spans: &mut spans,
+                constant_keys: &mut constant_keys,
+                listener_lists: &mut listener_lists,
+            };
+            map.read_body(body);
         }
     }
     ctx.spans.extend(spans);
+    ctx.event_constant_keys.extend(constant_keys);
+    ctx.event_listener_lists.extend(listener_lists);
 }
 
-/// Push the spans of the map a `getSubscribedEvents()` body builds: the
-/// literal it returns, and the literals and entries it assigns to the
-/// variable it returns (`$events[KEY][] = ['onEvent', 10];`), anywhere in
-/// the body.
-fn push_subscriber_map_spans(
-    body: &Block<'_>,
-    subject: Option<&str>,
-    content: &str,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    let mut returned = Vec::new();
-    let mut assignments = Vec::new();
-    collect_subscriber_map_writes(Node::Block(body), &mut returned, &mut assignments);
-    for value in &returned {
-        push_subscribed_event_spans(value, subject, content, spans);
-    }
-    let returns = |variable: &Expression<'_>| {
-        let Expression::Variable(Variable::Direct(variable)) = variable else {
-            return false;
+/// Push the event name a listener subscribes to, when it is a string.
+fn push_event_span(event: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
+    push_laravel_string_span(
+        StringKeyKind::SymfonyEvent,
+        true,
+        false,
+        event,
+        content,
+        spans,
+    );
+}
+
+/// The reader of a subscriber's `getSubscribedEvents()`: each key an event
+/// name, each value the method that listens to it, alone, with a priority
+/// (`['onEvent', 10]`), or as a list of either.
+struct SubscriberMap<'r, 'c> {
+    ctx: &'r ExtractionCtx<'c>,
+    /// The subscriber, rooted, so the class is not read again against the
+    /// file's namespace and imports.
+    subject: Option<String>,
+    spans: &'r mut Vec<SymbolSpan>,
+    constant_keys: &'r mut Vec<crate::symbol_map::EventConstantKey>,
+    /// Where each subscription that lists other than one listener starts,
+    /// with how many it lists.
+    listener_lists: &'r mut Vec<(u32, u32)>,
+}
+
+impl SubscriberMap<'_, '_> {
+    /// Read the map the body builds: the literal it returns, and the
+    /// literals and entries it assigns to the variable it returns
+    /// (`$events[KEY][] = ['onEvent', 10];`), anywhere in the body.
+    fn read_body(&mut self, body: &Block<'_>) {
+        let mut returned = Vec::new();
+        let mut assignments = Vec::new();
+        collect_subscriber_map_writes(Node::Block(body), &mut returned, &mut assignments);
+        for value in &returned {
+            self.read_literal(value);
+        }
+        let returns = |variable: &Expression<'_>| {
+            let Expression::Variable(Variable::Direct(variable)) = variable else {
+                return false;
+            };
+            returned.iter().any(|value| {
+                matches!(value, Expression::Variable(Variable::Direct(other)) if other.name == variable.name)
+            })
         };
-        returned.iter().any(|value| {
-            matches!(value, Expression::Variable(Variable::Direct(other)) if other.name == variable.name)
-        })
-    };
-    for assignment in assignments {
-        match assignment.lhs {
-            // `$events = [...]`
-            lhs if returns(lhs) => {
-                push_subscribed_event_spans(assignment.rhs, subject, content, spans);
-            }
-            // `$events[KEY] = ...`
-            Expression::ArrayAccess(access) if returns(access.array) => {
-                push_subscription_spans(access.index, assignment.rhs, subject, content, spans);
-            }
-            // `$events[KEY][] = ...`: one listener.
-            Expression::ArrayAppend(append) => {
-                if let Expression::ArrayAccess(access) = append.array
-                    && returns(access.array)
-                {
-                    push_event_span(access.index, content, spans);
-                    if let Some(subject) = subject {
-                        push_listener_span(subject, assignment.rhs, content, spans);
+        for assignment in assignments {
+            match assignment.lhs {
+                // `$events = [...]`
+                lhs if returns(lhs) => self.read_literal(assignment.rhs),
+                // `$events[KEY] = ...`
+                Expression::ArrayAccess(access) if returns(access.array) => {
+                    self.read_subscription(access.index, assignment.rhs);
+                }
+                // `$events[KEY][] = ...`: one listener.
+                Expression::ArrayAppend(append) => {
+                    if let Expression::ArrayAccess(access) = append.array
+                        && returns(access.array)
+                    {
+                        self.read_event(access.index);
+                        self.read_listener(assignment.rhs);
                     }
                 }
+                _ => {}
             }
-            _ => {}
         }
+    }
+
+    /// Read a map written as a literal.
+    fn read_literal(&mut self, events: &Expression<'_>) {
+        let Some(entries) = crate::parser::array_literal_elements(events) else {
+            return;
+        };
+        for entry in entries.iter() {
+            if let ArrayElement::KeyValue(entry) = entry {
+                self.read_subscription(entry.key, entry.value);
+            }
+        }
+    }
+
+    /// Read one subscription: the event its key names, and the methods
+    /// that listen to it.
+    fn read_subscription(&mut self, event: &Expression<'_>, listeners: &Expression<'_>) {
+        let start = self.read_event(event);
+        let Some(elements) = crate::parser::array_literal_elements(listeners) else {
+            self.read_listener(listeners);
+            return;
+        };
+        let mut values = elements.iter().filter_map(|element| match element {
+            ArrayElement::Value(value) => Some(value.value),
+            _ => None,
+        });
+        let listed = match values.next() {
+            // `['onEvent', 10]`: the method, then its priority.
+            Some(first @ Expression::Literal(Literal::String(_))) => {
+                self.read_listener(first);
+                return;
+            }
+            // `[['onEvent', 10], ['onOther']]`: one listener per entry.
+            Some(first) => {
+                let mut listed = 0;
+                for listener in std::iter::once(first).chain(values) {
+                    self.read_listener(listener);
+                    listed += 1;
+                }
+                listed
+            }
+            None => 0,
+        };
+        if listed != 1
+            && let Some(start) = start
+        {
+            self.listener_lists.push((start, listed));
+        }
+    }
+
+    /// Read the event a key names: a string declares it outright, and a
+    /// class constant (`KernelEvents::REQUEST`, `self::X`) declares the
+    /// value the constant holds, once its class is loaded.  `X::class`
+    /// names the event by its class, which no caller writes as a string.
+    /// Gives where the declaration starts.
+    fn read_event(&mut self, event: &Expression<'_>) -> Option<u32> {
+        let written = self.spans.len();
+        push_event_span(event, self.ctx.content, self.spans);
+        if self.spans.len() > written {
+            return self.spans.last().map(|span| span.start);
+        }
+        let Expression::Access(Access::ClassConstant(access)) = event else {
+            return None;
+        };
+        let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
+            return None;
+        };
+        if constant.value.eq_ignore_ascii_case(b"class") {
+            return None;
+        }
+        let class = match access.class {
+            Expression::Self_(_) | Expression::Static(_) => self
+                .subject
+                .as_deref()
+                .map(|subject| subject.trim_start_matches('\\')),
+            Expression::Identifier(identifier) => self
+                .ctx
+                .resolved_name_at(identifier.span().start.offset)
+                .map(|fqn| fqn.trim_start_matches('\\')),
+            _ => None,
+        };
+        let class = class?;
+        let span = access.span();
+        self.constant_keys
+            .push(crate::symbol_map::EventConstantKey {
+                start: span.start.offset,
+                end: span.end.offset,
+                class: crate::atom::atom(class),
+                constant: crate::atom::atom_bytes(constant.value),
+            });
+        Some(span.start.offset)
+    }
+
+    /// Read the method of one listener, `'onEvent'` or `['onEvent', 10]`.
+    fn read_listener(&mut self, listener: &Expression<'_>) {
+        let Some(subject) = &self.subject else {
+            return;
+        };
+        let method = match crate::parser::array_literal_elements(listener) {
+            Some(elements) => match elements.iter().next() {
+                Some(ArrayElement::Value(value)) => value.value,
+                _ => return,
+            },
+            None => listener,
+        };
+        push_own_method_span(subject, method, self.ctx.content, self.spans);
     }
 }
 
@@ -2398,91 +2534,6 @@ fn collect_subscriber_map_writes<'a>(
         }
         other => collect_subscriber_map_writes(other, returned, assignments),
     });
-}
-
-/// Push the event name a listener subscribes to, when it is a string.
-fn push_event_span(event: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
-    push_laravel_string_span(
-        StringKeyKind::SymfonyEvent,
-        true,
-        false,
-        event,
-        content,
-        spans,
-    );
-}
-
-/// Push the spans of the map a `getSubscribedEvents()` returns: each key
-/// an event name, each value the method that listens to it, alone, with a
-/// priority (`['onEvent', 10]`), or as a list of either.
-fn push_subscribed_event_spans(
-    events: &Expression<'_>,
-    subject: Option<&str>,
-    content: &str,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    let Some(entries) = crate::parser::array_literal_elements(events) else {
-        return;
-    };
-    for entry in entries.iter() {
-        if let ArrayElement::KeyValue(entry) = entry {
-            push_subscription_spans(entry.key, entry.value, subject, content, spans);
-        }
-    }
-}
-
-/// Push the spans of one subscription: the event name its key gives, and
-/// the method that listens to it, alone, with a priority, or as a list of
-/// either.
-fn push_subscription_spans(
-    event: &Expression<'_>,
-    listeners: &Expression<'_>,
-    subject: Option<&str>,
-    content: &str,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    push_event_span(event, content, spans);
-    let Some(subject) = subject else {
-        return;
-    };
-    let Some(elements) = crate::parser::array_literal_elements(listeners) else {
-        push_own_method_span(subject, listeners, content, spans);
-        return;
-    };
-    let mut values = elements.iter().filter_map(|element| match element {
-        ArrayElement::Value(value) => Some(value.value),
-        _ => None,
-    });
-    match values.next() {
-        // `['onEvent', 10]`: the method, then its priority.
-        Some(first @ Expression::Literal(Literal::String(_))) => {
-            push_own_method_span(subject, first, content, spans);
-        }
-        // `[['onEvent', 10], ['onOther']]`: one listener per entry.
-        Some(first) => {
-            for listener in std::iter::once(first).chain(values) {
-                push_listener_span(subject, listener, content, spans);
-            }
-        }
-        None => {}
-    }
-}
-
-/// Push the method of one listener, `'onEvent'` or `['onEvent', 10]`.
-fn push_listener_span(
-    subject: &str,
-    listener: &Expression<'_>,
-    content: &str,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    let method = match crate::parser::array_literal_elements(listener) {
-        Some(elements) => match elements.iter().next() {
-            Some(ArrayElement::Value(value)) => value.value,
-            _ => return,
-        },
-        None => listener,
-    };
-    push_own_method_span(subject, method, content, spans);
 }
 
 /// Record the Messenger handlers a class's `#[AsMessageHandler]`
@@ -3454,6 +3505,51 @@ mod tests {
                 "onRestocked",
                 "onOther",
             ]
+        );
+        assert_eq!(constant_keys(&map), vec![("App\\Listener\\Other", "NAME")]);
+    }
+
+    /// The class and constant of each subscription keyed by a constant.
+    fn constant_keys(map: &SymbolMap) -> Vec<(&str, &str)> {
+        map.event_constant_keys
+            .iter()
+            .map(|key| (key.class.as_str(), key.constant.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn a_subscription_keyed_by_a_constant_records_its_class_and_constant() {
+        let php = r#"<?php
+namespace Acme\EventSubscriber;
+use Acme\Event\OrderEvents;
+use Acme\Event\PlaceOrder;
+class OrderSubscriber extends BaseSubscriber {
+    const CLOSED = 'acme.order.closed';
+    public static function getSubscribedEvents(): array {
+        $events[OrderEvents::PLACED][] = ['onPlaced'];
+        $events[\Acme\Event\OrderEvents::PAID] = 'onPaid';
+        $events[self::CLOSED][] = 'onClosed';
+        $events[static::CLOSED][] = 'onClosedLate';
+        $events[PlaceOrder::class][] = 'onPlaceOrder';
+        $events[parent::OPENED][] = 'onOpened';
+        return $events;
+    }
+}
+"#;
+        let map = map_of(php);
+        assert_eq!(
+            constant_keys(&map),
+            vec![
+                ("Acme\\Event\\OrderEvents", "PLACED"),
+                ("Acme\\Event\\OrderEvents", "PAID"),
+                ("Acme\\EventSubscriber\\OrderSubscriber", "CLOSED"),
+                ("Acme\\EventSubscriber\\OrderSubscriber", "CLOSED"),
+            ]
+        );
+        let key = &map.event_constant_keys[0];
+        assert_eq!(
+            &php[key.start as usize..key.end as usize],
+            "OrderEvents::PLACED"
         );
     }
 

@@ -357,7 +357,6 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::TwigFilter
         | StringKeyKind::TwigFunction
         | StringKeyKind::SymfonyConfigKey
-        | StringKeyKind::SymfonyEvent
         | StringKeyKind::MessengerBus
         | StringKeyKind::SerializerGroup
         | StringKeyKind::YiiRoute
@@ -369,6 +368,21 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::DrupalPlugin
         | StringKeyKind::DrupalLibrary => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
+        }
+        // A subscription keyed by a class constant declares the name the
+        // constant holds, which no span spells, so its declarations are
+        // added to the ones the usages hold.
+        StringKeyKind::SymfonyEvent => {
+            let mut locations =
+                find_string_key_usages(kind, key, backend, snapshot, include_declaration);
+            if include_declaration {
+                for location in backend.symfony_declaration_locations(*kind, key) {
+                    if !locations.contains(&location) {
+                        locations.push(location);
+                    }
+                }
+            }
+            return locations;
         }
         // A documented pattern stands for every hook that fills it in.
         StringKeyKind::DrupalHook => {

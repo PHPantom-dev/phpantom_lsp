@@ -166,6 +166,7 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
         || (!map.service_decorations.is_empty() && enabled(StringKeyKind::ServiceId))
         || (map.declares_twig_loader && enabled(StringKeyKind::TwigTemplate))
+        || (!map.event_constant_keys.is_empty() && enabled(StringKeyKind::SymfonyEvent))
         || (map.sets_unread_yii_view_parameters && enabled(StringKeyKind::YiiViewParameter))
         || ((!map.drupal_route_patterns.is_empty() || !map.drupal_route_aliases.is_empty())
             && enabled(StringKeyKind::DrupalRoute))
@@ -184,6 +185,10 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
             .iter()
             .any(|site| site.is_write && site.receiver.names_any(counts))
 }
+
+/// The classes the constant keys of one lookup of event names have loaded,
+/// by name, each fully resolved, or `None` when it does not load.
+type EventConstantClasses = crate::atom::AtomMap<Option<std::sync::Arc<crate::types::ClassInfo>>>;
 
 impl Backend {
     /// Whether the project builds a Symfony service container; see
@@ -338,6 +343,9 @@ impl Backend {
             | KeyFramework::WordPress
             | KeyFramework::Tempest => true,
         };
+        let mut event_constants =
+            (kind == StringKeyKind::SymfonyEvent).then(EventConstantClasses::default);
+        let loader = self.resolved_class_loader_with(&[]);
         for uri in uris {
             let Some(map) = self.symbol_map_for(&uri) else {
                 continue;
@@ -359,7 +367,61 @@ impl Backend {
                     visit(&uri, &map, span.start, span.end, key);
                 }
             }
+            if let Some(classes) = &mut event_constants {
+                for key in &map.event_constant_keys {
+                    if let Some(value) = self.event_constant_value(key, &loader, classes) {
+                        visit(&uri, &map, key.start, key.end, &value);
+                    }
+                }
+            }
         }
+    }
+
+    /// How many listeners subscribe to the event `name`: every declaration
+    /// of it is a subscription, and a subscription may list several.
+    pub(crate) fn symfony_event_listener_count(&self, name: &str) -> usize {
+        let mut listeners = 0;
+        self.visit_symfony_declarations(
+            StringKeyKind::SymfonyEvent,
+            |_, map, start, _, declared| {
+                if declared == name {
+                    listeners += map.event_listeners_at(start);
+                }
+            },
+        );
+        listeners
+    }
+
+    /// The event name a subscription keyed by a class constant declares:
+    /// the constant's value, when it is a plain string literal.  The class
+    /// is read with what it inherits, so a constant from a parent or an
+    /// interface counts.
+    fn event_constant_value(
+        &self,
+        key: &crate::symbol_map::EventConstantKey,
+        loader: &crate::class_lookup::ResolvedClassLoader<'_>,
+        classes: &mut EventConstantClasses,
+    ) -> Option<String> {
+        let class = classes
+            .entry(key.class)
+            .or_insert_with(|| {
+                let class = loader(crate::class_lookup::Fqn::new(key.class.as_str()))?;
+                Some(crate::virtual_members::resolve_class_fully_cached(
+                    &class,
+                    loader,
+                    &self.resolved_class_cache,
+                ))
+            })
+            .as_ref()?;
+        let constant = class.get_constant(key.constant.as_str())?;
+        if constant.is_enum_case {
+            return None;
+        }
+        let value = constant.value.as_deref()?.trim();
+        // A constant's initializer cannot interpolate, so a double-quoted
+        // string is a plain one too, with its escapes decoded.
+        crate::text_scan::unquote_php_string(value)?;
+        crate::text_scan::decode_php_string_literal(value).map(std::borrow::Cow::into_owned)
     }
 
     /// Every service ID, container parameter, route name, translation key

@@ -101,6 +101,10 @@ struct ExtractionCtx<'a> {
     /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
     /// register.
     messenger_handlers: Vec<crate::symbol_map::MessengerHandlerSite>,
+    /// The event subscriptions keyed by a class constant.
+    event_constant_keys: Vec<crate::symbol_map::EventConstantKey>,
+    /// The event subscriptions that list other than one listener.
+    event_listener_lists: Vec<(u32, u32)>,
     /// The Twig filters and functions the file declares.
     twig_callables: Vec<crate::symbol_map::TwigCallableSite>,
     /// The variables the file's renders hand Twig templates.
@@ -626,6 +630,8 @@ fn extract_symbol_map_inner(
         morph_column_sites: Vec::new(),
         gate_subjects: Vec::new(),
         messenger_handlers: Vec::new(),
+        event_constant_keys: Vec::new(),
+        event_listener_lists: Vec::new(),
         twig_callables: Vec::new(),
         twig_contexts: Vec::new(),
         container_values: Vec::new(),
@@ -874,6 +880,8 @@ fn extract_symbol_map_inner(
         morph_column_sites: ctx.morph_column_sites,
         gate_subjects: ctx.gate_subjects,
         messenger_handlers: ctx.messenger_handlers,
+        event_constant_keys: ctx.event_constant_keys,
+        event_listener_lists: ctx.event_listener_lists,
         twig_callables: ctx.twig_callables,
         twig_contexts: ctx.twig_contexts,
         container_values: ctx.container_values,

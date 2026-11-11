@@ -360,10 +360,8 @@ impl Backend {
                 }
                 (label, detail)
             }
-            // Every listener declares the event it subscribes to, so the
-            // declarations are its listeners.
             StringKeyKind::SymfonyEvent => {
-                let listeners = self.symfony_declaration_locations(*kind, key).len();
+                let listeners = self.symfony_event_listener_count(key);
                 let detail = match listeners {
                     0 => "No listener in the project subscribes to it".to_string(),
                     1 => "1 listener in the project".to_string(),

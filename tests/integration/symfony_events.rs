@@ -417,6 +417,346 @@ function run(EventDispatcherInterface $events, object $event): void
     }
 }
 
+const ORDER_EVENTS_PHP: &str = r#"<?php
+namespace App\Event;
+
+final class OrderEvents extends BaseEvents implements StoreEvents
+{
+    public const PLACED = 'app.order.placed';
+    public const JOINED = 'app.order.' . 'joined';
+    public const ALIAS = self::PLACED;
+    public const PRICED = "app.order.\$priced";
+}
+"#;
+
+const BASE_EVENTS_PHP: &str = r#"<?php
+namespace App\Event;
+
+abstract class BaseEvents
+{
+    public const CLOSED = 'app.order.closed';
+}
+"#;
+
+const STORE_EVENTS_PHP: &str = r#"<?php
+namespace App\Event;
+
+interface StoreEvents
+{
+    public const OPENED = "app.store.opened";
+}
+"#;
+
+const PLACE_ORDER_PHP: &str = r#"<?php
+namespace App\Event;
+
+final class PlaceOrder {}
+"#;
+
+/// A subscriber keyed only by constants, so it writes no event string.
+const CONSTANT_SUBSCRIBER_PHP: &str = r#"<?php
+namespace App\EventSubscriber;
+
+use App\Event\OrderEvents;
+use App\Event\PlaceOrder;
+
+final class StoreSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        $events[OrderEvents::PLACED][] = ['onPlaced', 10];
+        $events[OrderEvents::CLOSED][] = 'onClosed';
+        $events[OrderEvents::OPENED][] = 'onOpened';
+        $events[OrderEvents::JOINED][] = 'onJoined';
+        $events[OrderEvents::ALIAS][] = 'onAlias';
+        $events[OrderEvents::PRICED][] = 'onPriced';
+        $events[PlaceOrder::class][] = 'onPlaceOrder';
+        return $events;
+    }
+
+    public function onPlaced(object $event): void {}
+    public function onClosed(object $event): void {}
+    public function onOpened(object $event): void {}
+    public function onJoined(object $event): void {}
+    public function onAlias(object $event): void {}
+    public function onPriced(object $event): void {}
+    public function onPlaceOrder(object $event): void {}
+}
+"#;
+
+const DISPATCH_ANY_PHP: &str = r#"<?php
+namespace App\Service;
+
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
+
+function announce(EventDispatcherInterface $events, object $event): void
+{
+    $events->dispatch($event, '');
+}
+"#;
+
+#[tokio::test]
+async fn a_subscription_keyed_by_a_constant_declares_its_value() {
+    let (backend, dir) = workspace(&[
+        ("src/Event/OrderEvents.php", ORDER_EVENTS_PHP),
+        ("src/Event/BaseEvents.php", BASE_EVENTS_PHP),
+        ("src/Event/StoreEvents.php", STORE_EVENTS_PHP),
+        ("src/Event/PlaceOrder.php", PLACE_ORDER_PHP),
+        (
+            "src/EventSubscriber/StoreSubscriber.php",
+            CONSTANT_SUBSCRIBER_PHP,
+        ),
+        ("src/Service/announce.php", DISPATCH_ANY_PHP),
+        ("src/Service/Checkout.php", DISPATCHER_PHP),
+    ])
+    .await;
+    let subscriber = uri_for(&dir, "src/EventSubscriber/StoreSubscriber.php");
+    let announce = uri_for(&dir, "src/Service/announce.php");
+    let checkout = uri_for(&dir, "src/Service/Checkout.php");
+    let anywhere = position_in(DISPATCH_ANY_PHP, "$event, ''", 9);
+
+    // An inherited constant counts, from a parent or an interface, and so
+    // does a double-quoted string, which a constant cannot interpolate; a
+    // class name, a concatenation, and another constant declare nothing.
+    let labels = completion_labels(&backend, &announce, anywhere).await;
+    assert_eq!(
+        labels,
+        vec![
+            "app.order.$priced",
+            "app.order.closed",
+            "app.order.placed",
+            "app.store.opened"
+        ]
+    );
+
+    let found = definitions(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+    )
+    .await;
+    assert_eq!(found, vec![(subscriber.clone(), 10)]);
+
+    let position = position_in(DISPATCHER_PHP, "'app.order.placed'", 3);
+    let hover =
+        crate::common::hover_text_at(&backend, &checkout, position.line, position.character)
+            .await
+            .unwrap_or_default();
+    assert!(hover.contains("1 listener in the project"), "{hover}");
+
+    // The subscription the constant declares is among the references, as
+    // it is among the definitions.
+    let found = references(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+    )
+    .await;
+    assert_eq!(
+        found,
+        sorted(vec![(checkout.clone(), 11), (subscriber.clone(), 10)])
+    );
+
+    // The value is read when the names are asked for.
+    let changed = ORDER_EVENTS_PHP.replace("'app.order.placed'", "'app.order.submitted'");
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                text_document_identifier: TextDocumentIdentifier {
+                    uri: uri_for(&dir, "src/Event/OrderEvents.php"),
+                },
+                version: 2,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                    TextDocumentContentChangeWholeDocument { text: changed },
+                ),
+            ],
+        })
+        .await;
+    let labels = completion_labels(&backend, &announce, anywhere).await;
+    assert_eq!(
+        labels,
+        vec![
+            "app.order.$priced",
+            "app.order.closed",
+            "app.order.submitted",
+            "app.store.opened"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn hover_counts_each_listener_whatever_the_map_shape() {
+    let listed = r#"<?php
+namespace App\EventSubscriber;
+
+final class ListedSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        return ['app.order.placed' => [['onPlaced', 10], ['onLogged']]];
+    }
+
+    public function onPlaced(object $event): void {}
+    public function onLogged(object $event): void {}
+}
+"#;
+    let appended = r#"<?php
+namespace App\EventSubscriber;
+
+final class AppendedSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        $events['app.order.shipped'][] = ['onShipped', 10];
+        $events['app.order.shipped'][] = 'onLogged';
+        return $events;
+    }
+
+    public function onShipped(object $event): void {}
+    public function onLogged(object $event): void {}
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("src/EventSubscriber/ListedSubscriber.php", listed),
+        ("src/EventSubscriber/AppendedSubscriber.php", appended),
+        ("src/Service/Checkout.php", DISPATCHER_PHP),
+    ])
+    .await;
+    let checkout = uri_for(&dir, "src/Service/Checkout.php");
+    for needle in ["'app.order.placed'", "'app.order.shipped'"] {
+        let position = position_in(DISPATCHER_PHP, needle, 3);
+        let hover =
+            crate::common::hover_text_at(&backend, &checkout, position.line, position.character)
+                .await
+                .unwrap_or_default();
+        assert!(
+            hover.contains("2 listeners in the project"),
+            "{needle}: {hover}"
+        );
+    }
+}
+
+/// Like [`COMPOSER`], with global classes under `lib/`.
+const CLASSMAP_COMPOSER: &str = r#"{
+    "require": { "symfony/framework-bundle": "^7.3" },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "Symfony\\Component\\EventDispatcher\\": "stubs/event-dispatcher/",
+            "Symfony\\Contracts\\EventDispatcher\\": "stubs/event-dispatcher-contracts/",
+            "Symfony\\Component\\Messenger\\": "stubs/messenger/"
+        },
+        "classmap": ["lib/"]
+    }
+}"#;
+
+#[tokio::test]
+async fn a_constant_key_names_its_class_the_way_php_does() {
+    let namespaced = r#"<?php
+namespace App\Event;
+
+final class OrderEvents
+{
+    public const PLACED = 'app.order.placed';
+    public const PAID = 'app.order.paid';
+    public const SHIPPED = 'app.order.shipped';
+}
+"#;
+    let global = r#"<?php
+
+final class OrderEvents
+{
+    public const PLACED = 'global.order.placed';
+    public const PAID = 'global.order.paid';
+}
+"#;
+    let imported = r#"<?php
+namespace App\EventSubscriber;
+
+use App\Event\OrderEvents;
+
+final class ImportedSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        return [OrderEvents::PLACED => 'onPlaced'];
+    }
+
+    public function onPlaced(object $event): void {}
+}
+"#;
+    // No import: `OrderEvents` is a class of this namespace, which does
+    // not exist, never the global one.
+    let unimported = r#"<?php
+namespace App\EventSubscriber;
+
+final class UnimportedSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        $events[OrderEvents::PAID][] = 'onPaid';
+        $events[\App\Event\OrderEvents::SHIPPED][] = 'onShipped';
+        return $events;
+    }
+
+    public function onPaid(object $event): void {}
+    public function onShipped(object $event): void {}
+}
+"#;
+    let global_subscriber = r#"<?php
+
+final class GlobalSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        return [OrderEvents::PAID => 'onPaid'];
+    }
+
+    public function onPaid(object $event): void {}
+}
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("composer.json"), CLASSMAP_COMPOSER).unwrap();
+    let files: Vec<(&str, &str)> = STUBS
+        .iter()
+        .copied()
+        .chain([
+            ("src/Event/OrderEvents.php", namespaced),
+            ("lib/OrderEvents.php", global),
+            ("src/EventSubscriber/ImportedSubscriber.php", imported),
+            ("src/EventSubscriber/UnimportedSubscriber.php", unimported),
+            ("lib/GlobalSubscriber.php", global_subscriber),
+            ("src/Service/announce.php", DISPATCH_ANY_PHP),
+        ])
+        .collect();
+    for (path, content) in &files {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let backend = Backend::new_test();
+    crate::common::initialize_with_options(&backend, dir.path(), None).await;
+    // Only the dispatcher is open: the subscribers are read by the
+    // workspace index, as a subscriber nobody has open is.  A test backend
+    // has no client, so `initialized` leaves the index out.
+    backend.ensure_workspace_indexed();
+    let announce = uri_for(&dir, "src/Service/announce.php");
+    open_document(&backend, &announce, "php", DISPATCH_ANY_PHP).await;
+
+    let labels = completion_labels(
+        &backend,
+        &announce,
+        position_in(DISPATCH_ANY_PHP, "$event, ''", 9),
+    )
+    .await;
+    assert_eq!(
+        labels,
+        vec!["app.order.placed", "app.order.shipped", "global.order.paid"]
+    );
+}
+
 #[tokio::test]
 async fn buses_navigate_complete_and_report_unknown_names() {
     let consumer = r#"<?php

@@ -710,6 +710,23 @@ pub(crate) struct MessengerHandlerSite {
     pub message: Atom,
 }
 
+/// An event subscription keyed by a class constant
+/// (`KernelEvents::REQUEST => 'onRequest'`), which declares the event name
+/// the constant holds.
+///
+/// Kept in a side table rather than as a span, since the name is only
+/// known once the constant's class is loaded, which is left to the lookups
+/// that ask for event names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EventConstantKey {
+    /// The byte range of the whole key, `KernelEvents::REQUEST`.
+    pub start: u32,
+    pub end: u32,
+    /// The class the key names, fully qualified without a leading `\`.
+    pub class: Atom,
+    pub constant: Atom,
+}
+
 /// A Twig filter or function an extension declares, and the PHP callable
 /// behind it.
 ///
