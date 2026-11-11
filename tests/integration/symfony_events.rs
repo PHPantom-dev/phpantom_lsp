@@ -317,6 +317,55 @@ async fn a_listener_method_goes_to_the_method_and_an_unknown_one_is_reported() {
 }
 
 #[tokio::test]
+async fn a_map_built_by_assignment_subscribes_and_names_its_methods() {
+    let subscriber = r#"<?php
+namespace App\EventSubscriber;
+
+final class ShippingSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        $events['app.order.placed'][] = ['onPlaced', 10];
+        $events['app.order.shipped'] = 'onShipped';
+        return $events;
+    }
+
+    public function onPlaced(object $event): void {}
+
+    public function onShipped(object $event): void {}
+}
+"#;
+    let path = "src/EventSubscriber/ShippingSubscriber.php";
+    let (backend, dir) = workspace(&[
+        (path, subscriber),
+        ("src/Service/Checkout.php", DISPATCHER_PHP),
+    ])
+    .await;
+    let uri = uri_for(&dir, path);
+    let checkout = uri_for(&dir, "src/Service/Checkout.php");
+
+    let found = definitions(&backend, &uri, position_in(subscriber, "'onPlaced'", 3)).await;
+    assert_eq!(found, vec![(uri.clone(), 12)]);
+    let found = definitions(&backend, &uri, position_in(subscriber, "'onShipped'", 3)).await;
+    assert_eq!(found, vec![(uri.clone(), 14)]);
+
+    let found = definitions(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+    )
+    .await;
+    assert_eq!(found, vec![(uri.clone(), 7)]);
+    let found = definitions(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.shipped'", 3),
+    )
+    .await;
+    assert_eq!(found, vec![(uri, 8)]);
+}
+
+#[tokio::test]
 async fn event_names_complete_where_listeners_and_dispatchers_take_them() {
     let subscription = r#"<?php
 namespace App\Service;
