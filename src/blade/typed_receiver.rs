@@ -514,8 +514,17 @@ thread_local! {
     static PARTIAL_ANSWERS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-fn note_partial_answer() {
+pub(crate) fn note_partial_answer() {
     PARTIAL_ANSWERS.with(|count| count.set(count.get() + 1));
+}
+
+/// The files whose sites are being confirmed on this thread, sorted: the
+/// ones [`Backend::typed_receiver_spans_for`] answers for with no spans.
+pub(crate) fn confirming_files() -> Vec<String> {
+    let mut files: Vec<String> =
+        CONFIRMING.with(|confirming| confirming.borrow().iter().cloned().collect());
+    files.sort_unstable();
+    files
 }
 
 /// A count that moves whenever [`Backend::typed_receiver_spans_for`]
@@ -547,6 +556,7 @@ impl ConfirmingGuard {
 impl Drop for ConfirmingGuard {
     fn drop(&mut self) {
         CONFIRMING.with(|confirming| confirming.borrow_mut().remove(&self.uri));
+        crate::symfony::container::forget_builds_confirming(&self.uri);
     }
 }
 

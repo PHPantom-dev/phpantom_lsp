@@ -344,11 +344,38 @@ impl Backend {
         {
             return Arc::clone(index);
         }
+        // A lookup made while confirming a file's sites asks for the index
+        // again, for every lookup the file makes, and so does each file the
+        // build confirms in turn.  The files being confirmed read as
+        // declaring nothing, and every other file's spans, once confirmed,
+        // are cached and stay so while those files are being confirmed:
+        // build it once for each set of files, and keep it until one of
+        // them is confirmed (see `forget_builds_confirming`).
+        let confirming = crate::blade::typed_receiver::confirming_files();
+        if !confirming.is_empty()
+            && let Some((index, partial)) = THREAD_BUILDS.with(|builds| {
+                builds
+                    .borrow()
+                    .iter()
+                    .find(|build| {
+                        build.index.generation == generation
+                            && build.index.is_symfony == is_symfony
+                            && build.confirming == confirming
+                    })
+                    .map(|build| (Arc::clone(&build.index), build.partial))
+            })
+        {
+            if partial {
+                crate::blade::typed_receiver::note_partial_answer();
+            }
+            return index;
+        }
         let partial_before = crate::blade::typed_receiver::partial_answers();
         let index = Arc::new(self.build_container_index(generation, is_symfony));
         // A configurator file being confirmed further up this thread reads
         // as declaring nothing, so an index built meanwhile is incomplete.
-        if crate::blade::typed_receiver::partial_answers() == partial_before {
+        let partial = crate::blade::typed_receiver::partial_answers() != partial_before;
+        if !partial {
             let mut built = state.built.write();
             if built
                 .as_ref()
@@ -357,10 +384,21 @@ impl Backend {
                 *built = Some(Arc::clone(&index));
             }
         }
+        if !confirming.is_empty() {
+            THREAD_BUILDS.with(|builds| {
+                builds.borrow_mut().push(ThreadBuild {
+                    confirming,
+                    index: Arc::clone(&index),
+                    partial,
+                });
+            });
+        }
         index
     }
 
     fn build_container_index(&self, generation: u64, is_symfony: bool) -> ContainerIndex {
+        #[cfg(test)]
+        BUILDS.set(BUILDS.get() + 1);
         let mut index = ContainerIndex {
             generation,
             is_symfony,
@@ -595,6 +633,39 @@ fn push_unique(out: &mut Vec<Atom>, class: Atom) {
     }
 }
 
+/// A container index this thread built while it was confirming
+/// `confirming`.
+struct ThreadBuild {
+    confirming: Vec<String>,
+    index: Arc<ContainerIndex>,
+    /// Whether the files being confirmed left the index incomplete.
+    partial: bool,
+}
+
+thread_local! {
+    /// The container indexes this thread built for the sets of files it is
+    /// still confirming (see `Backend::container_index`).
+    static THREAD_BUILDS: std::cell::RefCell<Vec<ThreadBuild>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Forget the container indexes this thread built while confirming `uri`,
+/// once it is confirmed: that set of files does not come back.
+pub(crate) fn forget_builds_confirming(uri: &str) {
+    THREAD_BUILDS.with(|builds| {
+        let mut builds = builds.borrow_mut();
+        if !builds.is_empty() {
+            builds.retain(|build| !build.confirming.iter().any(|file| file == uri));
+        }
+    });
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread has built the container index.
+    static BUILDS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -658,5 +729,74 @@ mod tests {
             type_of(xml_parameter_value("X::Y", Some("constant"))),
             "none"
         );
+    }
+
+    const PSR: &str = "<?php\nnamespace Psr\\Container;\ninterface ContainerInterface {\n    public function get(string $id): mixed;\n}\n";
+    const BUILDER: &str = "<?php\nnamespace Symfony\\Component\\DependencyInjection;\nclass ContainerBuilder implements \\Psr\\Container\\ContainerInterface {\n    public function get(string $id): mixed {}\n    public function register(string $id, ?string $class = null): Definition {}\n}\nclass Definition {}\n";
+
+    fn open(backend: &Backend, uri: &str, source: &str) {
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), Arc::new(source.to_string()));
+        backend.update_ast(uri, source);
+    }
+
+    /// A Symfony backend that knows the container's classes.
+    fn symfony_backend() -> Backend {
+        let backend = Backend::new_headless();
+        backend.set_is_symfony(true);
+        open(&backend, "file:///stubs/ContainerInterface.php", PSR);
+        open(&backend, "file:///stubs/ContainerBuilder.php", BUILDER);
+        backend
+    }
+
+    /// Configurator files that each register a service on the one the
+    /// previous file registers, named so that each sorts before the file
+    /// it depends on.
+    fn chained_configurators(backend: &Backend, n: usize) {
+        for k in 0..n {
+            let receiver = if k == 0 {
+                "$container".to_string()
+            } else {
+                format!("$container->get('app.s{}')", k - 1)
+            };
+            let source = format!(
+                "<?php\nnamespace App;\nuse Symfony\\Component\\DependencyInjection\\ContainerBuilder;\nfunction configure{k}(ContainerBuilder $container): void {{\n    {receiver}->register('app.s{k}', ContainerBuilder::class);\n}}\n"
+            );
+            open(
+                backend,
+                &format!("file:///config/c{:02}.php", n - 1 - k),
+                &source,
+            );
+        }
+    }
+
+    #[test]
+    fn building_the_index_builds_it_once_for_each_configurator_being_confirmed() {
+        let backend = symfony_backend();
+        chained_configurators(&backend, 8);
+        BUILDS.set(0);
+        let index = backend.container_index();
+        assert_eq!(index.services.len(), 8);
+        assert!(BUILDS.get() <= 8, "{} builds", BUILDS.get());
+    }
+
+    #[test]
+    fn confirming_a_configurator_builds_the_index_once_for_all_its_lookups() {
+        let backend = symfony_backend();
+        chained_configurators(&backend, 1);
+        let uri = "file:///config/lookups.php";
+        let source = "<?php\nnamespace App;\nuse Symfony\\Component\\DependencyInjection\\ContainerBuilder;\nfunction lookups(ContainerBuilder $container): void {\n    $container->get('app.s0')->register('app.a', ContainerBuilder::class);\n    $container->get('app.s0')->register('app.b', ContainerBuilder::class);\n    $container->get('app.s0')->register('app.c', ContainerBuilder::class);\n}\n";
+        open(&backend, uri, source);
+        let map = backend.symbol_map_for(uri).unwrap();
+        BUILDS.set(0);
+        let spans = backend.typed_receiver_spans_for(uri, &map);
+        let declared = spans
+            .iter()
+            .filter(|span| matches!(span.kind, SymbolKind::StringKey { is_write: true, .. }))
+            .count();
+        assert_eq!(declared, 3);
+        assert_eq!(BUILDS.get(), 1);
     }
 }
