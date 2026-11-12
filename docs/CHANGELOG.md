@@ -249,6 +249,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Type inference
 
+- **`self` parameters in traits.** A parameter typed `self` inside a trait now sees the class its `@phpstan-require-extends` or `-implements` names, as `$this` already did, so a model trait's `static::saving(static function (self $model) { $model->getTable(); })` no longer reports `getTable()` as unknown.
 - **Constants passed to calls.** Namespaced and imported constants keep their values and types when used as arguments. Contributed by @shuvroroy.
 - **Constants defined from namespaced or imported constants.** A class constant or namespaced constant such as `const MAX = LIMIT;` now holds the value of the constant its own file means, whether imported with `use const`, declared in its namespace, or global, when it is read from another file. A parameter default that names a constant is read the same way when the argument is left out.
 - **Constants holding a class name or an enum case.** A global or namespaced constant such as `const DEFAULT = Widget::class;` or `const SUIT = Suit::Hearts;` now has that type, including when it is passed to a templated function or used as a parameter default.

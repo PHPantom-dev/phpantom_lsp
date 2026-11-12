@@ -10,7 +10,7 @@ use mago_span::HasSpan;
 use crate::atom::bytes_to_str;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
-use crate::types::{MethodInfo, ResolvedType};
+use crate::types::{ClassInfo, MethodInfo, ResolvedType};
 
 /// What seeding a function-like body needs to know about its declaration.
 #[derive(Clone, Copy)]
@@ -794,10 +794,31 @@ pub(crate) fn declared_param_type(
         }
     }
 
+    // A `self` parameter in a trait holds a class using the trait, so it gets `$this`'s bounds.
+    if is_the_current_trait(&param_results, ctx.current_class) {
+        crate::type_engine::trait_context::extend_this_with_trait_bounds(
+            &mut param_results,
+            ctx.current_class,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+            ctx.file.backend,
+        );
+    }
+
     DeclaredParam {
         effective: effective_type,
         results: param_results,
     }
+}
+
+/// Whether a parameter's resolved type is exactly the trait being analysed,
+/// which is what a `self` hint inside a trait resolves to.
+fn is_the_current_trait(param_results: &[ResolvedType], current_class: &ClassInfo) -> bool {
+    current_class.kind == crate::types::ClassLikeKind::Trait
+        && matches!(
+            param_results,
+            [only] if only.class_info.as_ref().is_some_and(|ci| ci.fqn() == current_class.fqn())
+        )
 }
 
 /// Turn a variadic parameter's element types into the array it receives.
