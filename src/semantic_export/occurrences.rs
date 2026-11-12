@@ -121,6 +121,7 @@ pub(super) fn export_span(
             name,
             is_definition,
             is_docblock_reference,
+            is_callback,
         } => {
             let loader = backend.function_loader_with(
                 context.resolved_names.as_deref(),
@@ -137,7 +138,7 @@ pub(super) fn export_span(
                 resolved_symbol: symbol,
                 is_definition: *is_definition,
             });
-            if !is_definition && function.is_none() && !is_docblock_reference {
+            if !is_definition && function.is_none() && !is_docblock_reference && !is_callback {
                 output.diagnostics.push(ExportDiagnostic {
                     kind: ExportDiagnosticKind::UnresolvedFunction,
                     range,
@@ -197,7 +198,8 @@ pub(super) fn export_span(
             // and so is a key of an array passed to something other than a
             // repository, or a name passed to the `get()` of something
             // other than a record, or a field helper's string given
-            // something other than a form model.
+            // something other than a form model, or a form callback's
+            // `'::method'` outside a form.
             if target.is_none()
                 && matches!(
                     docblock_ref,
@@ -205,6 +207,7 @@ pub(super) fn export_span(
                         | DocblockMemberRef::EntityField
                         | DocblockMemberRef::YiiAttribute
                         | DocblockMemberRef::YiiProperty { form_model: true }
+                        | DocblockMemberRef::FormCallback
                 )
             {
                 return;

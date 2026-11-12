@@ -876,20 +876,44 @@ impl Backend {
         position: Position,
     ) -> Option<CompletionResponse> {
         let loader = self.resolved_class_loader_with(&[]);
-        let prefix = content.get(start..cursor)?.as_bytes();
+        let classes: Vec<_> = classes
+            .iter()
+            .filter_map(|class| loader(crate::class_lookup::Fqn::new(class)))
+            .collect();
+        let names = self.public_method_names(
+            &classes,
+            &loader,
+            content.get(start..cursor)?,
+            OfferedMethods::Instance,
+        );
+        string_key_response(names, CompletionItemKind::Method, content, start, position)
+    }
+
+    /// The names of the public methods of `classes` that start with
+    /// `prefix`, ignoring case, leaving out magic methods.
+    pub(crate) fn public_method_names(
+        &self,
+        classes: &[std::sync::Arc<crate::types::ClassInfo>],
+        loader: &crate::class_lookup::ResolvedClassLoader<'_>,
+        prefix: &str,
+        offered: OfferedMethods,
+    ) -> Vec<String> {
+        let prefix = prefix.as_bytes();
         let mut names: Vec<String> = Vec::new();
         for class in classes {
-            let Some(class) = loader(crate::class_lookup::Fqn::new(class)) else {
-                continue;
-            };
             let class = crate::virtual_members::resolve_class_fully_cached(
-                &class,
-                &loader,
+                class,
+                loader,
                 &self.resolved_class_cache,
             );
             for method in &class.methods {
-                if method.visibility == Visibility::Public
-                    && !method.is_static
+                let kept = match offered {
+                    OfferedMethods::Instance => !method.is_static,
+                    OfferedMethods::Any => true,
+                    OfferedMethods::Static => method.is_static,
+                };
+                if kept
+                    && method.visibility == Visibility::Public
                     && !method.name.starts_with("__")
                     && method
                         .name
@@ -902,8 +926,17 @@ impl Backend {
                 }
             }
         }
-        string_key_response(names, CompletionItemKind::Method, content, start, position)
+        names
     }
+}
+
+/// Which of a class's public methods [`Backend::public_method_names`]
+/// offers.
+#[derive(Clone, Copy)]
+pub(crate) enum OfferedMethods {
+    Instance,
+    Static,
+    Any,
 }
 
 /// What an `#[Autowire]`, `#[Template]`, `#[AsEventListener]`, or

@@ -154,6 +154,26 @@ Run `composer install` here first. Composer puts core and contrib into
   `Details` class. Complete a name inside `'#type' => ''` or
   `$build['more']['#type'] = ''`; core's elements are offered too. A name
   no element class declares is reported.
+- Form and render callbacks navigate to the method or function they name.
+  In `web/modules/custom/acme/src/Form/GreetingForm.php`, go to the
+  definition of `validateName` in `'::validateName'`, which lands on the
+  form's own method, hover `trimName` in `static::class . '::trimName'`, or
+  go to the definition of `addHint` in
+  `'Drupal\acme\Form\GreetingForm::addHint'` and of
+  `'acme_greeting_form_submit'`, a function of `acme.module`. Find the
+  references of a callback method, or rename it, and the strings follow.
+  Complete inside a callback string: after `'::` the form's public methods
+  are offered, after `'Class::` the class's, after `'service:` the service
+  class's, and before any colon the functions. A callback Drupal cannot
+  call is reported: misspell `'::validateName'`, make `validateName`
+  private, or make `trimName` non-static, which Drupal ignores as a value
+  callback.
+  A `'service:method'` callback leads to the method of the service's
+  class: in `card()` in
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, go to
+  the definition of `buildGreeting` in `'acme.greeter:buildGreeting'`,
+  which lands on Greeter's method, or of `acme.greeter`, which lands on
+  its key in `acme.services.yml`.
 - Plugin IDs navigate to the plugin class that declares them, for every
   plugin type a plugin manager declares, core's and contributed modules'
   included. In `block()` in

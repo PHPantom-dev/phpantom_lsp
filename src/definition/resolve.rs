@@ -438,6 +438,7 @@ impl Backend {
                 name,
                 is_definition,
                 is_docblock_reference,
+                ..
             } => {
                 // The cursor is on the function's own name at its
                 // declaration, so there is nothing to jump to: resolving

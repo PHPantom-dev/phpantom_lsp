@@ -129,7 +129,6 @@ ships, remove every row that names it.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | F59 | [Send Twig, YAML, and XML documents to the server from Zed](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed) (Zed PR) | Medium | Low |
-| DR11 | [Form and render callbacks](todo/drupal.md#dr11-form-and-render-callbacks) | Low-Medium | Low-Medium |
 | DR12 | [Translation placeholders](todo/drupal.md#dr12-translation-placeholders) | Low-Medium | Low-Medium |
 | DR13 | [Module names and `*.info.yml`](todo/drupal.md#dr13-module-names-and-infoyml) | Low-Medium | Low-Medium |
 | DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |
@@ -144,6 +143,11 @@ ships, remove every row that names it.
 | DR24 | [Warn on unknown theme hook names](todo/drupal.md#dr24-warn-on-unknown-theme-hook-names) | Low-Medium | Medium-High |
 | DR28 | [Plugin types a manager builds at run time](todo/drupal.md#dr28-plugin-types-a-manager-builds-at-run-time) | Medium | Medium |
 | DR27 | [Plugin IDs in YAML](todo/drupal.md#dr27-plugin-ids-in-yaml) | Low-Medium | Medium |
+| DR32 | [`'::method'` callbacks in a form alter hook](todo/drupal.md#dr32-method-callbacks-in-a-form-alter-hook) | Low-Medium | Low-Medium |
+| DR33 | [Render callbacks that are not trusted](todo/drupal.md#dr33-render-callbacks-that-are-not-trusted) | Low-Medium | Low |
+| DR34 | [Callback parameter checks](todo/drupal.md#dr34-callback-parameter-checks) | Low | Low-Medium |
+| DR35 | [Invokable classes and services as callbacks](todo/drupal.md#dr35-invokable-classes-and-services-as-callbacks) | Low | Low-Medium |
+| DR36 | [Array callables that name their class in a string](todo/drupal.md#dr36-array-callables-that-name-their-class-in-a-string) | Low | Low |
 
 ## Yii
 

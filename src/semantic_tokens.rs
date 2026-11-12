@@ -336,7 +336,8 @@ impl Backend {
                     // a repository call's field name is an array key first,
                     // as a record's attribute name is a string first.  A
                     // property a Yii form field or map names is a string or
-                    // a key first, too.
+                    // a key first, too, and so is a form callback's
+                    // `'::method'`, which names a method only of a form.
                     if matches!(
                         docblock_ref,
                         crate::symbol_map::DocblockMemberRef::MockedMethod
@@ -344,6 +345,7 @@ impl Backend {
                             | crate::symbol_map::DocblockMemberRef::EntityField
                             | crate::symbol_map::DocblockMemberRef::YiiAttribute
                             | crate::symbol_map::DocblockMemberRef::YiiProperty { .. }
+                            | crate::symbol_map::DocblockMemberRef::FormCallback
                     ) {
                         continue;
                     }
@@ -412,8 +414,15 @@ impl Backend {
                     (tt, mods)
                 }
 
-                SymbolKind::FunctionCall { is_definition, .. } => {
-                    if mode == SemanticTokensMode::Contextual {
+                SymbolKind::FunctionCall {
+                    name,
+                    is_definition,
+                    is_callback,
+                    ..
+                } => {
+                    if mode == SemanticTokensMode::Contextual
+                        || (*is_callback && !self.callback_names_function(name))
+                    {
                         continue;
                     }
                     let mods = if *is_definition { TM_DECLARATION } else { 0 };

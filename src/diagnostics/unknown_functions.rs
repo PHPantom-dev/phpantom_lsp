@@ -20,6 +20,7 @@ use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
+use crate::util::strip_fqn_prefix;
 
 use super::existence_guards::compute_existence_guards;
 use super::helpers::{FileDiagnosticContext, is_offset_in_ranges, make_diagnostic};
@@ -93,8 +94,8 @@ impl Backend {
         // ── Collect local function definition names ─────────────────────
         // Functions defined in the same file are always resolvable even
         // before they appear in global_functions (hoisting).  Collect
-        // both short names and FQN forms.
-        let local_function_names: Vec<String> = symbol_map
+        // both short names and FQN forms, the FQN last.
+        let local_function_names: Vec<Vec<String>> = symbol_map
             .spans
             .iter()
             .filter_map(|span| match &span.kind {
@@ -111,20 +112,24 @@ impl Backend {
                 }
                 _ => None,
             })
-            .flatten()
             .collect();
+
+        // The Drupal site's service IDs, read when a callback first needs
+        // them.
+        let drupal_services = std::cell::OnceCell::new();
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
             if !super::incremental::reports_site(span.start) {
                 continue;
             }
-            let (name, is_docblock_reference) = match &span.kind {
+            let (name, is_docblock_reference, is_callback) = match &span.kind {
                 SymbolKind::FunctionCall {
                     name,
                     is_definition: false,
                     is_docblock_reference,
-                } => (name, *is_docblock_reference),
+                    is_callback,
+                } => (name, *is_docblock_reference, *is_callback),
                 _ => continue,
             };
 
@@ -149,8 +154,17 @@ impl Backend {
                 continue;
             }
 
-            // Skip names that match a local function definition.
-            if local_function_names.iter().any(|n| n == name) {
+            // Skip names that match a local function definition.  A
+            // callback's name is fully qualified, so only an FQN matches it.
+            if local_function_names.iter().any(|names| {
+                if is_callback {
+                    names
+                        .last()
+                        .is_some_and(|fqn| fqn == name.trim_start_matches('\\'))
+                } else {
+                    names.iter().any(|n| n == name)
+                }
+            }) {
                 continue;
             }
 
@@ -173,7 +187,15 @@ impl Backend {
             }
 
             // ── Skip functions guarded by function_exists() ──────────────
-            if existence_guards.is_function_guarded(name, span.start) {
+            // A callback's name keeps the leading `\` that makes it global,
+            // which the guarded name does not spell.
+            if existence_guards.is_function_guarded(strip_fqn_prefix(name), span.start) {
+                continue;
+            }
+
+            // A Drupal callback that names a class or a service rather than
+            // a function names an invokable.
+            if is_callback && self.drupal_callback_names_invokable(name, &drupal_services) {
                 continue;
             }
 

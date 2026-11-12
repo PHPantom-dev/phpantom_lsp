@@ -100,6 +100,7 @@ fn symbol_name_and_kind(span: &SymbolSpan) -> Option<(&str, ImportKind)> {
             name,
             is_definition: false,
             is_docblock_reference: false,
+            is_callback: false,
         } => Some((name, ImportKind::Function)),
         SymbolKind::ConstantReference {
             name,

@@ -232,6 +232,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         "invalid_drupal_route_parameter",
         Backend::collect_drupal_route_parameter_diagnostics,
     ),
+    always(
+        "invalid_drupal_callback",
+        Backend::collect_drupal_callback_diagnostics,
+    ),
     SlowCollector {
         name: "framework string keys",
         collect: Backend::collect_invalid_laravel_string_key_diagnostics,

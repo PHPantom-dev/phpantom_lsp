@@ -217,6 +217,7 @@ mod document_highlight;
 mod document_links;
 mod document_symbols;
 mod document_symbols_blade;
+mod drupal_callbacks;
 mod drupal_config;
 mod drupal_config_keys;
 mod drupal_directories;

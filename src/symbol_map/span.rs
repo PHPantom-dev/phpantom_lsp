@@ -229,6 +229,16 @@ pub(crate) enum DocblockMemberRef {
     /// its classes (see [`crate::yii::forms::form_model_classes`]), and
     /// drops the span otherwise.
     YiiProperty { form_model: bool },
+
+    /// The method a Drupal form callback's `'::method'` names, with `$this`
+    /// as the subject.
+    ///
+    /// Drupal calls it on the form being built, which is the class the
+    /// string is written in only when that class is a form or a trait, so a
+    /// consumer that resolves the subject keeps only those (see
+    /// [`crate::drupal::forms::form_callback_classes`]), and drops the span
+    /// otherwise.
+    FormCallback,
 }
 
 impl DocblockMemberRef {
@@ -506,6 +516,10 @@ pub(crate) enum SymbolKind {
         /// reading applies to it, so `retag_as_covers_target` clears this;
         /// see [`DocblockMemberRef`] for the member equivalent.
         is_docblock_reference: bool,
+        /// `true` when this span is a function name a Drupal form or render
+        /// callback key holds as a string, which PHP reads as a global name
+        /// (the span's `name` carries a leading `\`) rather than a call.
+        is_callback: bool,
     },
 
     /// `self`, `static`, `parent`, or `$this` in a navigable context.

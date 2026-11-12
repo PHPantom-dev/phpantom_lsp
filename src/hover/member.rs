@@ -402,6 +402,10 @@ impl Backend {
                 candidates =
                     crate::yii::forms::form_model_classes(candidates, &resolved_class_loader);
             }
+            DocblockMemberRef::FormCallback => {
+                candidates =
+                    crate::drupal::forms::form_callback_classes(candidates, &resolved_class_loader);
+            }
             _ => {}
         }
 

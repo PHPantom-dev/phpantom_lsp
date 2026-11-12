@@ -98,6 +98,7 @@ impl Backend {
                     name,
                     is_definition: false,
                     is_docblock_reference: false,
+                    is_callback: false,
                 } => (SiblingKind::Function, name.as_str()),
                 SymbolKind::ConstantReference {
                     name,

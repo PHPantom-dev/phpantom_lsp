@@ -229,13 +229,19 @@ impl UnknownMemberPass<'_> {
         if access.is_docblock_ref {
             return false;
         }
+        // Drupal calls a callback from outside every class.
+        let (current_class, binds_scope) = if access.drupal_callback {
+            (None, false)
+        } else {
+            (access.current_class, access.subject_binds_scope())
+        };
         let Some(message) = inaccessible_member_message(
             classes,
             access.member_name,
             access.is_static,
             access.is_method_call,
-            access.current_class,
-            access.subject_binds_scope(),
+            current_class,
+            binds_scope,
             self.class_loader(),
         ) else {
             return false;

@@ -777,6 +777,7 @@ fn emit_covers_reference(
             // for a *global* function, not shorthand for a member of the test
             // class, so the enclosing class must not be consulted for it.
             is_docblock_reference: false,
+            is_callback: false,
         },
     };
 
@@ -1508,6 +1509,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                     name: crate::atom::atom(clean),
                     is_definition: false,
                     is_docblock_reference: true,
+                    is_callback: false,
                 },
             });
         }

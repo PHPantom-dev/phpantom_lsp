@@ -17,6 +17,7 @@ use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Controller\NoteController;
 use Drupal\acme\Element\GreetingCard;
 use Drupal\acme\Entity\Note;
+use Drupal\acme\Form\GreetingForm;
 use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
 use Drupal\acme\Hook\AcmeHooks;
@@ -40,6 +41,7 @@ use Drupal\Core\Validation\Attribute\Constraint;
 use Drupal\Core\Validation\Plugin\Validation\Constraint\UniqueFieldConstraint;
 use Drupal\Core\Config\ConfigBase;
 use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\DependencyInjection\ClassResolver;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\DependencyInjection\YamlFileLoader;
@@ -53,8 +55,11 @@ use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\ConfigTarget;
+use Drupal\Core\Form\FormInterface;
+use Drupal\Core\Form\FormState;
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Language\LanguageManager;
+use Drupal\Core\Security\TrustedCallbackInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Link;
@@ -64,6 +69,7 @@ use Drupal\Core\Render\Attribute\RenderElement;
 use Drupal\Core\Render\Element\Details;
 use Drupal\Core\Render\Element\RenderElementBase;
 use Drupal\Core\Url;
+use Drupal\Core\Utility\CallableResolver;
 use Drupal\language\ConfigurableLanguageManager;
 use Drupal\language\LanguageServiceProvider;
 
@@ -432,6 +438,49 @@ foreach ($attached as $where => $names) {
 }
 check("core's Twig extension declares attach_library()", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Template/TwigExtension.php"), "new TwigFunction('attach_library'"));
 check("core's ThemeManager collects the #attached a preprocess function sets", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeManager.php"), "foreach (['#attached', '#cache'] as \$key)"));
+
+// ─── Callbacks ──────────────────────────────────────────────────────────────
+
+// Drupal rewrites a '::method' callback as a call on the form object, and
+// calls every other one as written. Each one GreetingForm declares names a
+// public method or function, so each one is callable.
+$greetingForm = new GreetingForm();
+$greetingFormState = (new FormState())->setFormObject($greetingForm);
+$greetingBuild = $greetingForm->buildForm([], $greetingFormState);
+$greetingCallbacks = [
+    ...$greetingBuild['#validate'],
+    $greetingBuild['name']['#value_callback'],
+    $greetingBuild['name']['#ajax']['callback'],
+    ...$greetingBuild['#after_build'],
+    ...$greetingBuild['actions']['submit']['#submit'],
+];
+check('GreetingForm declares a callback of each shape', $greetingCallbacks === ['::validateName', GreetingForm::class . '::trimName', '::refreshGreeting', 'Drupal\acme\Form\GreetingForm::addHint', '::submitForm', 'acme_greeting_form_submit']);
+foreach ($greetingCallbacks as $callback) {
+    check("Drupal can call GreetingForm's $callback", is_callable($greetingFormState->prepareCallback($callback)));
+}
+check("FormState rewrites '::validateName' as a call on the form object", $greetingFormState->prepareCallback('::validateName') === [$greetingForm, 'validateName']);
+// A value callback must be a native callable: a static method named by its
+// class is one, and an instance method named by its class or '::method' is
+// not.
+check('the value callback trimName is a native callable', is_callable(GreetingForm::class . '::trimName'));
+check('an instance method named by its class is no native callable', !is_callable(GreetingForm::class . '::validateName'));
+check("'::trimName' is no native callable", !is_callable('::trimName'));
+// Drupal calls a callback from outside the form, where only a public
+// method is callable.
+check('validateName is public', (new ReflectionMethod(GreetingForm::class, 'validateName'))->isPublic());
+check('a private method is not callable from outside its class', !is_callable([new class { public function run(): void { $this->hidden(); } private function hidden(): void {} }, 'hidden']));
+check('GreetingForm is a form', $greetingForm instanceof FormInterface);
+
+// The card's lazy builder names a method of the acme.greeter service, which
+// Drupal's CallableResolver finds through the container. A lazy builder
+// must be a trusted callback.
+check("GreetingController::card() has the lazy builder 'acme.greeter:buildGreeting'", str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#lazy_builder' => ['acme.greeter:buildGreeting', [\$name]]"));
+$lazyContainer = new ContainerBuilder();
+$lazyContainer->set('acme.greeter', (new ReflectionClass(Greeter::class))->newInstanceWithoutConstructor());
+$lazyCallable = (new CallableResolver(new ClassResolver($lazyContainer)))->getCallableFromDefinition('acme.greeter:buildGreeting');
+check("CallableResolver calls 'acme.greeter:buildGreeting' on the service", is_array($lazyCallable) && $lazyCallable[0] instanceof Greeter && $lazyCallable[1] === 'buildGreeting');
+check('acme.services.yml builds acme.greeter from Greeter, which declares buildGreeting()', $container->getDefinition('acme.greeter')->getClass() === Greeter::class && (new ReflectionMethod(Greeter::class, 'buildGreeting'))->isPublic());
+check('Greeter trusts buildGreeting() as a render callback', is_subclass_of(Greeter::class, TrustedCallbackInterface::class) && in_array('buildGreeting', Greeter::trustedCallbacks(), true));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

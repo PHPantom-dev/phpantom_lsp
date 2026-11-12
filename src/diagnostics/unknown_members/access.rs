@@ -23,6 +23,8 @@ pub(super) struct AccessFilters<'a> {
     /// Where the method names of the array callables known to be called
     /// start, in order: the listeners of a Yii events file.
     pub(super) called_array_callables: Vec<u32>,
+    /// The callbacks the file's Drupal form and render arrays name.
+    pub(super) drupal_callbacks: &'a [crate::symbol_map::DrupalCallbackSite],
 }
 
 /// One member access the check judges.
@@ -63,6 +65,13 @@ pub(super) struct MemberAccessSite<'a> {
     /// only when it resolves to something other than the trait: a member
     /// the chain lands back on the trait for is one the host provides.
     pub(super) trait_self_chain: bool,
+    /// Whether the member is the method a Drupal callback names, which
+    /// Drupal calls from outside every class.
+    pub(super) drupal_callback: bool,
+    /// Whether the member is the method a Drupal form callback's
+    /// `'::method'` names, which is checked only when the class it is
+    /// written in is a form (see [`crate::drupal::forms`]).
+    pub(super) form_callback: bool,
 }
 
 impl<'a> MemberAccessSite<'a> {
@@ -87,10 +96,15 @@ impl<'a> MemberAccessSite<'a> {
         // Without type-flow analysis we cannot tell such an array apart
         // from a plain data pair like `return [[Foo::class, 'name'], ...]`,
         // so we do not validate its second element as a method, unless the
-        // file is known to call it.  The span still drives navigation,
+        // file is known to call it, as Drupal calls the callbacks its form
+        // and render arrays name.  The span still drives navigation,
         // hover, and semantic tokens, which only surface information when
         // the member actually resolves.
+        let drupal_callback = *is_array_callable
+            && crate::drupal::forms::callback_at(filters.drupal_callbacks, span.start)
+                .is_some_and(crate::drupal::forms::looks_up_method);
         if *is_array_callable
+            && !drupal_callback
             && filters
                 .called_array_callables
                 .binary_search(&span.start)
@@ -159,6 +173,10 @@ impl<'a> MemberAccessSite<'a> {
             return None;
         }
         let trait_self_chain = in_trait && subject_text_is_rooted_in_self(subject_text);
+        // A form callback's `'::method'` is a call Drupal makes on the form,
+        // not a name a docblock gives.
+        let form_callback = *docblock_ref == DocblockMemberRef::FormCallback;
+        let is_docblock_ref = docblock_ref.is_reference() && !form_callback;
 
         Some(Self {
             start: span.start,
@@ -178,11 +196,11 @@ impl<'a> MemberAccessSite<'a> {
                     .as_bytes()
                     .get(span.start.saturating_sub(1) as usize..=span.start as usize)
                     .is_some_and(|bytes| bytes.contains(&b'$')),
-            is_docblock_ref: docblock_ref.is_reference(),
+            is_docblock_ref,
             // A Yii form field or hydration map reads or writes a property
             // by reflection, which a method or a constant cannot stand in
             // for, though its visibility does not matter.
-            relaxed_lookup: docblock_ref.is_reference()
+            relaxed_lookup: is_docblock_ref
                 && !matches!(docblock_ref, DocblockMemberRef::YiiProperty { .. }),
             is_nullsafe: *is_nullsafe,
             mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
@@ -192,6 +210,8 @@ impl<'a> MemberAccessSite<'a> {
                 == DocblockMemberRef::YiiProperty { form_model: true },
             current_class,
             trait_self_chain,
+            drupal_callback,
+            form_callback,
         })
     }
 
