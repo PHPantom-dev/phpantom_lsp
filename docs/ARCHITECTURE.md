@@ -1552,6 +1552,12 @@ two templates and incoming scope are unchanged, so typing in one view
 re-evaluates only the calls that edit reaches. A stale indexing batch cannot
 overwrite a lowering built with newer inferred data.
 
+Named data arguments to `view()` reverse that same path lookup. Completion
+reads the target template's source-backed variable uses, excluding local
+bindings and data the call already supplies. Definition and hover use each
+input's first source read, with the template's normal PHP type resolution.
+This lookup reads only the selected template and retains no separate cache.
+
 Component arguments are evaluated in the caller, while slot contents are
 lowered into isolated closures. `tempest/component_context.rs` resolves slot
 locals at the receiving component's outlet for that invocation. Component

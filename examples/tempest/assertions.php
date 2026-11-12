@@ -73,7 +73,7 @@ if (new App\RouteLinks()->links() !== [
 }
 
 $html = $renderer->render(new BookController()->index());
-foreach (['<h2>The PHP Book</h2>', '<p>Read The PHP Book</p>'] as $expected) {
+foreach (['<h1>Books</h1>', '<h2>The PHP Book</h2>', '<p>Read The PHP Book</p>'] as $expected) {
     if (!str_contains($html, $expected)) {
         throw new RuntimeException("Missing rendered content: {$expected}");
     }
@@ -81,9 +81,12 @@ foreach (['<h2>The PHP Book</h2>', '<p>Read The PHP Book</p>'] as $expected) {
 if (str_contains($html, 'No books yet.')) {
     throw new RuntimeException('The nonempty loop rendered its forelse branch.');
 }
-$empty = $renderer->render(view(__DIR__ . '/app/books.view.php', books: []));
+$empty = $renderer->render(view(__DIR__ . '/app/books.view.php', books: [], title: 'Empty books'));
 if (!str_contains($empty, 'No books yet.')) {
     throw new RuntimeException('The empty loop did not render its forelse branch.');
+}
+if (!str_contains($empty, '<h1>Empty books</h1>')) {
+    throw new RuntimeException('The named title did not reach the empty view.');
 }
 
 foreach ([true, false] as $showTitle) {

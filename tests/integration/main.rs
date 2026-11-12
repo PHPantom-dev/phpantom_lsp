@@ -357,6 +357,7 @@ mod tempest_dynamic_components;
 mod tempest_model_properties;
 mod tempest_paths;
 mod tempest_routes;
+mod tempest_view_parameters;
 mod trait_self_generics;
 mod twig_blocks;
 mod twig_callables;

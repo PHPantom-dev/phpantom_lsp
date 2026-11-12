@@ -12,6 +12,7 @@ pub(crate) mod preprocessor;
 pub(crate) mod routes;
 mod syntax;
 mod view_data;
+mod view_parameters;
 mod wrappers;
 
 pub(crate) use discovery::TempestState;
