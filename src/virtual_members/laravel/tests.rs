@@ -606,7 +606,7 @@ fn synthesizes_has_one_property() {
         .iter()
         .find(|p| p.name == "profile")
         .unwrap();
-    assert_eq!(rel_prop.type_hint_str().as_deref(), Some("Profile"));
+    assert_eq!(rel_prop.type_hint_str().as_deref(), Some("?Profile"));
 }
 
 #[test]
@@ -625,7 +625,7 @@ fn synthesizes_belongs_to_property() {
         .iter()
         .find(|p| p.name == "author")
         .unwrap();
-    assert_eq!(rel_prop.type_hint_str().as_deref(), Some("User"));
+    assert_eq!(rel_prop.type_hint_str().as_deref(), Some("?User"));
 }
 
 #[test]
@@ -965,7 +965,7 @@ fn provides_fqn_related_type_singular() {
         .unwrap();
     assert_eq!(
         rel_prop.type_hint_str().as_deref(),
-        Some("\\App\\Models\\Profile")
+        Some("?\\App\\Models\\Profile")
     );
 }
 

@@ -309,7 +309,7 @@ pub(super) fn build_property_type(
     custom_collection: Option<&str>,
 ) -> Option<PhpType> {
     match kind {
-        RelationshipKind::Singular => related_type.cloned(),
+        RelationshipKind::Singular => related_type.cloned().map(PhpType::nullable),
         RelationshipKind::Collection => {
             let inner = related_type.cloned().unwrap_or_else(eloquent_model_type);
             let collection_class = custom_collection.unwrap_or(ELOQUENT_COLLECTION_FQN);
