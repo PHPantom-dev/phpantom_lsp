@@ -1470,8 +1470,8 @@ fn split_at(start: usize, end: usize, operators: &[usize]) -> Vec<(usize, usize)
 /// The index of the `)` that closes the `(` at `open`.
 fn matching(reader: &Reader<'_>, open: usize) -> Option<usize> {
     let mut depth = 0usize;
-    for i in open..reader.tokens.len() {
-        match reader.tokens[i].kind {
+    for (i, token) in reader.tokens.iter().enumerate().skip(open) {
+        match token.kind {
             Tok::LParen => depth += 1,
             Tok::RParen => {
                 depth = depth.checked_sub(1)?;
@@ -1669,8 +1669,9 @@ fn top_level_items(reader: &Reader<'_>, start: usize, end: usize) -> Option<Vec<
     let mut items = Vec::new();
     let mut depth = 0usize;
     let mut item_start = start;
-    for i in start..end {
-        match reader.tokens[i].kind {
+    for (i, token) in reader.tokens[start..end].iter().enumerate() {
+        let i = start + i;
+        match token.kind {
             Tok::LParen | Tok::LBrace => depth += 1,
             Tok::RParen | Tok::RBrace => depth = depth.checked_sub(1)?,
             Tok::Comma if depth == 0 => {

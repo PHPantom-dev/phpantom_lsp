@@ -228,15 +228,10 @@ pub(super) fn is_type_contradiction(doc_type: &PhpType, native_type: &PhpType) -
     let doc_bases = doc_type.union_members();
     let native_bases = native_type.union_members();
 
-    if doc_bases.len() == 1
+    doc_bases.len() == 1
         && native_bases.len() == 1
         && !doc_bases[0].equivalent(native_bases[0])
         && !is_compatible_refinement_typed(doc_bases[0], native_bases[0])
-    {
-        return true;
-    }
-
-    false
 }
 
 /// Check if the `@return` tag should be removed.

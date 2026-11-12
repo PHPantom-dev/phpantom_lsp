@@ -34,10 +34,7 @@ pub(super) fn likely_interface_name(name: &str) -> bool {
             return true;
         }
     }
-    if name.ends_with("Interface") {
-        return true;
-    }
-    false
+    name.ends_with("Interface")
 }
 
 /// Heuristic: names that positively look like non-interface types.
@@ -82,8 +79,5 @@ pub(super) fn likely_non_instantiable(name: &str) -> bool {
             return true;
         }
     }
-    if name.ends_with("Abstract") || name.ends_with("Trait") {
-        return true;
-    }
-    false
+    name.ends_with("Abstract") || name.ends_with("Trait")
 }

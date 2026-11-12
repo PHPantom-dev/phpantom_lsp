@@ -240,11 +240,7 @@ pub fn is_function_definition_paren(chars: &[char], paren_pos: usize) -> bool {
         j -= 1;
     }
 
-    if ends_with_keyword(chars, j, "function") || ends_with_keyword(chars, j, "fn") {
-        return true;
-    }
-
-    false
+    ends_with_keyword(chars, j, "function") || ends_with_keyword(chars, j, "fn")
 }
 
 /// Check whether the text ending at `pos` (exclusive) ends with `keyword`

@@ -132,10 +132,7 @@ impl Backend {
                 return false;
             }
         }
-        if file_namespace.is_none() && self.find_or_load_class(ref_name).is_some() {
-            return false;
-        }
-        true
+        !(file_namespace.is_none() && self.find_or_load_class(ref_name).is_some())
     }
 
     /// Collect "Import class" code actions for the cursor position.
