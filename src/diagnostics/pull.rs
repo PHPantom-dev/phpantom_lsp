@@ -121,19 +121,26 @@ impl Backend {
     /// client echoes the last `resultId`, and the fresh set only reaches a
     /// client that pulls the document again on `workspace/diagnostic/refresh`.
     /// Neovim answers the refresh with a `workspace/diagnostic` pull only,
-    /// so it kept showing the stale set until the buffer was reloaded.  The
-    /// same went for a pull that landed while the project was still being
-    /// indexed at startup, which was answered with an empty set.
+    /// and Emacs did not pull the document again either, so both kept
+    /// showing the set from the edit before.  The same went for a pull that
+    /// landed while the project was still being indexed at startup, which
+    /// was answered with an empty set.
     ///
     /// So the pull waits for startup to finish, queues a pass when nothing
     /// is cached for the document, and waits while the worker still owes
-    /// the document a pass.  Nothing is computed on the request path: a
-    /// synchronous compute would hold a tower-lsp concurrency slot for
-    /// seconds and wedge the transport under a typing burst (see
-    /// `trigger_diagnostics_for_pull`).  A newer pull for the same document
-    /// releases the held one, so a typing burst holds at most one request
-    /// per document.  A cancelled request drops this future, which is
-    /// equally safe.
+    /// the document a pass.  In a client known to pull the document again
+    /// on a refresh (see `fast_phase_answers_pulls`), it answers once that
+    /// pass has delivered its fast phase (syntax errors, unused imports),
+    /// with the slow phase's previous results, and the slow phase reaches
+    /// the editor through the refresh that follows.  Every other client
+    /// waits for the slow phase as well.
+    ///
+    /// Nothing is computed on the request path: a synchronous compute would
+    /// hold a tower-lsp concurrency slot for seconds and wedge the transport
+    /// under a typing burst (see `trigger_diagnostics_for_pull`).  A newer
+    /// pull for the same document releases the held one, so a typing burst
+    /// holds at most one request per document.  A cancelled request drops
+    /// this future, which is equally safe.
     async fn await_fresh_diagnostics(&self, uri: &str) {
         let ticket = PullTicket::take(&self.diag, uri);
         let mut queued = false;
@@ -152,7 +159,7 @@ impl Backend {
                     self.trigger_diagnostics_for_pull(uri);
                 }
                 queued = true;
-                if !self.diagnostic_pass_outstanding(uri) {
+                if !self.diagnostic_pass_outstanding(uri, self.fast_phase_answers_pulls()) {
                     return;
                 }
             }
@@ -162,11 +169,13 @@ impl Backend {
 
     /// Whether the running diagnostic worker still owes `uri` a pass: its
     /// latest edit is still being parsed, or it is queued for the worker,
-    /// or being diagnosed by it.  Each stage hands the URI on before it
-    /// lets go of it, so they are read in that order: the parse queues the
-    /// URI before it drops its `edits_awaiting_parse` entry, and the worker
-    /// moves it into `in_flight_uris` before it releases `pending_uris`.
-    fn diagnostic_pass_outstanding(&self, uri: &str) -> bool {
+    /// or being diagnosed by it (and, when `fast_phase_answers`, has not
+    /// delivered its fast phase yet).  Each stage hands the URI on before
+    /// it lets go of it, so they are read in that order: the parse queues
+    /// the URI before it drops its `edits_awaiting_parse` entry, and the
+    /// worker moves it into `in_flight_uris` before it releases
+    /// `pending_uris`.
+    fn diagnostic_pass_outstanding(&self, uri: &str, fast_phase_answers: bool) -> bool {
         if !self.diag.worker_alive.load(Ordering::Acquire) {
             return false;
         }
@@ -174,7 +183,31 @@ impl Backend {
             return true;
         }
         let pending = self.diag.pending_uris.lock();
-        pending.contains(uri) || self.diag.in_flight_uris.lock().contains(uri)
+        if pending.contains(uri) {
+            return true;
+        }
+        let in_flight = self.diag.in_flight_uris.lock();
+        in_flight.contains(uri)
+            && !(fast_phase_answers && self.diag.fast_delivered.lock().contains(uri))
+    }
+
+    /// Whether a held document pull answers as soon as the fast phase is
+    /// in, leaving the slow phase to the refresh that follows.  That is
+    /// only safe in a client that pulls its open documents again on
+    /// `workspace/diagnostic/refresh`, which the protocol cannot tell us:
+    /// Neovim advertises refresh support but answers a refresh with a
+    /// `workspace/diagnostic` pull only, and ignores its items for a buffer
+    /// it pulls one document at a time.  So this lists the clients seen to
+    /// re-pull (VS Code and Zed, including their insider and preview
+    /// builds), and every other client waits for the slow phase.  A client
+    /// missing from the list sees syntax errors later on a large file; one
+    /// wrongly on it would keep the slow phase's stale set.
+    pub(crate) fn fast_phase_answers_pulls(&self) -> bool {
+        let name = self.client_name.lock();
+        ["Visual Studio Code", "Zed"].iter().any(|prefix| {
+            name.get(..prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        })
     }
 
     /// Body of `workspace/diagnostic`. Reports open files from the live

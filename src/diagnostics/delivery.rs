@@ -41,7 +41,8 @@ impl Backend {
     /// **Phase 1 (instant):** Run fast collectors (syntax errors, unused
     /// imports/variables, namespace/class-name mismatches) and assemble
     /// them with *cached* slow and PHPStan results.  In push mode the
-    /// merged set is published; in pull mode it is cached and a
+    /// merged set is published; in pull mode it is cached and either a
+    /// pull held for the file answers with it or a
     /// `workspace/diagnostic/refresh` is sent so the editor re-pulls.
     /// Either way the editor shows dimming within milliseconds.
     ///
@@ -168,7 +169,21 @@ impl Backend {
 
         // Update the assembled cache immediately so pull-capable editors
         // can see fast diagnostics before the slower native passes finish.
-        self.assemble_and_refresh(uri_str).await;
+        // A pull held for this file answers with this set, so it needs no
+        // refresh, and VS Code would cancel and re-send that pull on one,
+        // which would hide the fast set until the slow phase is done.
+        let held_pull_answers = self.diag.pull_generations.lock().contains_key(uri_str)
+            && self.fast_phase_answers_pulls();
+        if self.assemble_and_push(uri_str).await && !held_pull_answers {
+            self.request_diagnostic_refresh().await;
+        }
+        {
+            let in_flight = self.diag.in_flight_uris.lock();
+            if in_flight.contains(uri_str) {
+                self.diag.fast_delivered.lock().insert(uri_str.to_string());
+            }
+        }
+        self.diag.pass_done.notify_waiters();
 
         // ── Phase 2: cache slow diagnostics ─────────────────────────
         let slow_pass = slow_task.await.ok().flatten().flatten();
@@ -815,7 +830,11 @@ impl Backend {
                 if let Some(content) = content {
                     self.publish_diagnostics_for_file(uri, &content).await;
                 }
-                self.diag.in_flight_uris.lock().remove(uri);
+                {
+                    let mut in_flight = self.diag.in_flight_uris.lock();
+                    in_flight.remove(uri);
+                    self.diag.fast_delivered.lock().remove(uri);
+                }
                 self.diag.pass_done.notify_waiters();
             }
         }

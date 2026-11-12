@@ -34,6 +34,12 @@ pub(crate) struct DiagnosticState {
     /// diagnosing.  A URI moves here under the `pending_uris` guard, so
     /// it is never missing from both while its pass is outstanding.
     pub(crate) in_flight_uris: Arc<Mutex<HashSet<String>>>,
+    /// The URIs in `in_flight_uris` whose pass has delivered its fast
+    /// phase.  A held pull can answer from then on in a client that pulls
+    /// the document again on a refresh (see
+    /// `Backend::await_fresh_diagnostics`).  Always a subset of
+    /// `in_flight_uris`, locked after it.
+    pub(crate) fast_delivered: Arc<Mutex<HashSet<String>>>,
     /// Wakes held document pulls (with `notify_waiters`) whenever startup
     /// completes, the worker finishes a URI's pass, a newer document pull
     /// supersedes a held one, the worker stops, or the server shuts down.
@@ -131,6 +137,7 @@ impl DiagnosticState {
             pending_uris: Arc::new(Mutex::new(HashSet::new())),
             edits_awaiting_parse: Arc::new(Mutex::new(HashMap::new())),
             in_flight_uris: Arc::new(Mutex::new(HashSet::new())),
+            fast_delivered: Arc::new(Mutex::new(HashSet::new())),
             pass_done: Arc::new(Notify::new()),
             worker_alive: Arc::new(AtomicBool::new(false)),
             pull_generations: Arc::new(Mutex::new(HashMap::new())),

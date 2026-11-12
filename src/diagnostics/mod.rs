@@ -242,8 +242,9 @@
 //! inline (a synchronous compute on the request path can wedge the
 //! transport under a typing burst, see [`trigger_diagnostics_for_pull`]);
 //! instead it queues a background pass when nothing is cached and holds
-//! the request until the worker has delivered the pass the document is
-//! owed (see `Backend::await_fresh_diagnostics` in `pull.rs`).  The
+//! the request until the worker has delivered the fast phase of the pass
+//! the document is owed, or the whole pass in Neovim (see
+//! `Backend::await_fresh_diagnostics` in `pull.rs`).  The
 //! worker's completion still requests a `workspace/diagnostic/refresh`
 //! for the editor's other views of the result.  A pull-capable client already has a
 //! canonical native diagnostic stream, so pushing the same native
@@ -974,6 +975,86 @@ pub(crate) mod tests {
             "the unclosed class must report a syntax error"
         );
         worker.abort();
+    }
+
+    /// Simulates the worker diagnosing `uri`: in flight, with a set cached.
+    fn pass_in_flight(backend: &Backend, uri: &str) {
+        backend
+            .diag
+            .last_full
+            .lock()
+            .insert(uri.to_string(), Vec::new());
+        backend.diag.in_flight_uris.lock().insert(uri.to_string());
+    }
+
+    /// In a client that pulls the document again on a refresh, a held pull
+    /// answers once the pass has delivered its fast phase, so syntax
+    /// errors show without waiting for the slow phase, which reaches the
+    /// editor through the refresh after it.
+    #[tokio::test]
+    async fn fast_phase_releases_a_held_pull() {
+        let backend = Backend::new_test();
+        *backend.client_name.lock() = "Zed".to_string();
+        backend.init_complete.store(true, Ordering::Release);
+        backend.client_caps.write().pull_diagnostics = true;
+        let worker = backend.spawn_diagnostic_worker();
+
+        let uri = "file:///fast_phase_pull.php";
+        pass_in_flight(&backend, uri);
+        let held = spawn_pull(&backend, uri);
+        tokio::task::yield_now().await;
+        assert!(!held.is_finished(), "a pull must wait for the fast phase");
+
+        backend.diag.fast_delivered.lock().insert(uri.to_string());
+        backend.diag.pass_done.notify_waiters();
+        held.await.unwrap();
+        worker.abort();
+    }
+
+    /// Clients not known to pull a document again on a refresh (Neovim,
+    /// Emacs) would never see the slow phase if the fast phase answered
+    /// their pull, so their held pull waits for the slow phase too.
+    #[tokio::test]
+    async fn unlisted_client_pull_waits_for_the_slow_phase() {
+        let backend = Backend::new_test();
+        *backend.client_name.lock() = "Neovim".to_string();
+        backend.init_complete.store(true, Ordering::Release);
+        backend.client_caps.write().pull_diagnostics = true;
+        let worker = backend.spawn_diagnostic_worker();
+
+        let uri = "file:///neovim_pull.php";
+        pass_in_flight(&backend, uri);
+        backend.diag.fast_delivered.lock().insert(uri.to_string());
+        let held = spawn_pull(&backend, uri);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !held.is_finished(),
+            "an unlisted client's pull must wait for the slow phase"
+        );
+
+        backend.diag.in_flight_uris.lock().remove(uri);
+        backend.diag.fast_delivered.lock().remove(uri);
+        backend.diag.pass_done.notify_waiters();
+        held.await.unwrap();
+        worker.abort();
+    }
+
+    #[test]
+    fn only_clients_seen_to_re_pull_get_the_fast_phase_answer() {
+        let backend = Backend::new_test();
+        for (name, expected) in [
+            ("Visual Studio Code", true),
+            ("Visual Studio Code - Insiders", true),
+            ("Zed", true),
+            ("Zed Preview", true),
+            ("Neovim", false),
+            ("GNU Emacs", false),
+            ("Emacs", false),
+            ("", false),
+        ] {
+            *backend.client_name.lock() = name.to_string();
+            assert_eq!(backend.fast_phase_answers_pulls(), expected, "{name:?}");
+        }
     }
 
     /// A pull held for startup is released when the server shuts down.

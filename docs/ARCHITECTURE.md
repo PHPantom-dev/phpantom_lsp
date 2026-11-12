@@ -1425,10 +1425,17 @@ published instead of an empty set.
 
 A `textDocument/diagnostic` pull is held until the diagnostics reflect the
 document's current text, since editors pull right after every `didChange`
-and some (Neovim) do not pull the document again when the server sends
-`workspace/diagnostic/refresh`. The pull waits for startup to finish, for
-the edit's background parse, for the pass that parse queues, and for the
-pass in flight, without computing anything on the request path. Each stage
+and some (Neovim, Emacs) do not pull the document again when the server
+sends `workspace/diagnostic/refresh`. The pull waits for startup to finish,
+for the edit's background parse, for the pass that parse queues, and for
+the pass in flight, without computing anything on the request path. In
+clients known to pull the document again on a refresh (VS Code and Zed,
+`fast_phase_answers_pulls`), it answers once that pass has delivered its
+fast phase, and the fast phase sends no refresh for it (VS Code would
+cancel and re-send the held pull on one); the slow phase follows through
+the usual refresh. Every other client's pull waits for the slow phase as
+well, since the protocol gives no way to tell whether the client would
+pull the document on that refresh. Each stage
 hands the URI on before letting go of it (`edits_awaiting_parse`, then
 `pending_uris`, then `in_flight_uris` on `DiagnosticState`), so the wait
 never sees a gap. A newer pull for the same document releases the held
