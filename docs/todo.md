@@ -156,12 +156,6 @@ ships, remove every row that names it.
 | Y9  | [Views a template renders by name](todo/yii.md#y9-views-a-template-renders-by-name) | Medium      | Medium      |
 | Y10 | [The renderer's configured view path](todo/yii.md#y10-the-renderers-configured-view-path) | Medium      | Medium      |
 
-## Tempest
-
-| #   | Item                                                                                                                                                            | Impact      | Complexity  |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| TM7 | [A project's own route decorators change the route's URI](todo/tempest.md#tm7-a-projects-own-route-decorators-change-the-routes-uri) | Low | Medium |
-
 ## PHPUnit & Pest
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |

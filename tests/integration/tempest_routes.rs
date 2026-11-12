@@ -774,3 +774,256 @@ async fn tempest_routes_return_each_action_for_a_uri_shared_by_http_methods() {
     assert_eq!(locations[0].range.start, position_of(alternate, "$book"));
     assert_eq!(locations[1].uri, controller);
 }
+
+async fn install_decorators(backend: &Backend, source: &str) -> Uri {
+    open_php(
+        backend,
+        &workspace_uri(backend, "framework/router.php"),
+        &format!("{FRAMEWORK}\ninterface RouteDecorator {{ public function decorate(Route $route): Route; }}"),
+    )
+    .await;
+    let uri = workspace_uri(backend, "routes/Decorators.php");
+    open_php(backend, &uri, source).await;
+    uri
+}
+
+#[tokio::test]
+async fn tempest_routes_custom_decorators_preserve_order_navigation_and_parameter_renames() {
+    let source = r"<?php namespace Consumer;
+use function Tempest\Router\uri;
+uri('');
+uri('/admin/{tenant}/v1/books/{book}', );
+uri('/admin/{tenant}/v1/books/{book}', book: 'php', tenant: 'acme');
+";
+    let (backend, _dir, controller, uri) = project(source).await;
+    install_decorators(
+        &backend,
+        r"<?php namespace Routes;
+use Tempest\Router\Prefix as RoutePrefix;
+use Tempest\Router\Route;
+use Tempest\Router\RouteDecorator;
+class Admin implements RouteDecorator {
+    public function decorate(Route $route): Route {
+        return (new RoutePrefix(prefix: '/admin/'))->DeCoRaTe(route: $route);
+    }
+}
+class Tenant implements RouteDecorator {
+    public function decorate(Route $candidate): Route {
+        $candidate->uri = '/{tenant}' . ($candidate->uri);
+        return ($candidate);
+    }
+}
+",
+    )
+    .await;
+    let edited = CONTROLLER
+        .replace("class Books {", "#[Admin]\nclass Books {")
+        .replace(
+            "#[Read('/books/{book}')]",
+            "#[Read('/books/{book}')]\n    #[\\Tempest\\Router\\Prefix('/v1')]\n    #[Tenant]",
+        )
+        .replace("string $unused", "string $tenant");
+    open_php(&backend, &controller, &edited).await;
+    let offered = items(&backend, &uri, source, "uri('").await;
+    assert!(
+        offered
+            .iter()
+            .any(|item| item.label == "/admin/{tenant}/v1/books/{book}"),
+        "{offered:?}"
+    );
+    assert!(!offered.iter().any(|item| item.label == "/books/{book}"));
+    let parameters = items(&backend, &uri, source, "{book}', ").await;
+    for name in ["book:", "tenant:"] {
+        assert!(
+            parameters.iter().any(|item| item.label == name),
+            "{parameters:?}"
+        );
+    }
+    for (needle, target) in [
+        ("/admin/{tenant}/v1/books/{book}', book:", "show(string"),
+        ("book: 'php'", "$book, string"),
+        ("tenant: 'acme'", "$tenant ="),
+    ] {
+        let locations = definitions(&backend, &uri, source, needle).await;
+        assert_eq!(locations.len(), 1, "{needle}: {locations:?}");
+        assert_eq!(locations[0].uri, controller);
+        assert_eq!(locations[0].range.start, position_of(&edited, target));
+    }
+    let at = position_of(&edited, "$book, string");
+    let changes = rename(&backend, &controller, at.line, at.character + 1, "volume")
+        .await
+        .unwrap()
+        .changes
+        .unwrap();
+    let edits = &changes[&uri];
+    assert_eq!(edits.len(), 3, "{changes:?}");
+    assert!(edits.iter().all(|edit| edit.new_text == "volume"));
+}
+
+#[tokio::test]
+async fn tempest_routes_custom_decorators_follow_unsaved_body_and_interface_edits() {
+    let source = r"<?php \Tempest\Router\uri('');";
+    let (backend, _dir, controller, uri) = project(source).await;
+    let decorator = r"<?php namespace Routes;
+class Admin implements \Tempest\Router\RouteDecorator {
+    public function decorate(\Tempest\Router\Route $route): \Tempest\Router\Route {
+        return new \Tempest\Router\Prefix('/admin')->decorate($route);
+    }
+}";
+    let decorator_uri = install_decorators(&backend, decorator).await;
+    open_php(
+        &backend,
+        &controller,
+        &CONTROLLER.replace("class Books {", "#[Admin]\nclass Books {"),
+    )
+    .await;
+    for (edited, expected) in [
+        (decorator.to_owned(), "/admin/books/{book}"),
+        (
+            decorator.replace("'/admin'", "'/staff'"),
+            "/staff/books/{book}",
+        ),
+        (
+            decorator.replace("implements \\Tempest\\Router\\RouteDecorator", ""),
+            "/books/{book}",
+        ),
+        (decorator.replace("'/admin'", "$unknown"), "/books/{book}"),
+    ] {
+        open_php(&backend, &decorator_uri, &edited).await;
+        let offered = items(&backend, &uri, source, "uri('").await;
+        assert!(
+            offered.iter().any(|item| item.label == expected),
+            "{edited}: {offered:?}"
+        );
+        if expected != "/admin/books/{book}" {
+            assert!(
+                !offered
+                    .iter()
+                    .any(|item| item.label == "/admin/books/{book}")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn tempest_routes_custom_decorators_use_declaring_namespace_and_member_precedence() {
+    let source = r"<?php namespace Consumer; \Tempest\Router\uri('');";
+    let (backend, _dir, controller, uri) = project(source).await;
+    install_decorators(
+        &backend,
+        r"<?php
+namespace {
+    class Prefix {}
+    class Admin implements \Tempest\Router\RouteDecorator {
+        public function decorate(\Tempest\Router\Route $route): \Tempest\Router\Route {
+            $route->uri = '/global' . $route->uri;
+            return $route;
+        }
+    }
+}
+namespace Routes {
+    use Tempest\Router\Prefix as BuiltinPrefix;
+    use Tempest\Router\Route;
+    use Tempest\Router\RouteDecorator;
+    trait Decoration {
+        public function decorate(Route $route): Route {
+            return new BuiltinPrefix('/trait')->decorate($route);
+        }
+    }
+    class Base implements RouteDecorator {
+        public function decorate(Route $route): Route {
+            return new BuiltinPrefix('/parent')->decorate($route);
+        }
+    }
+    class Admin extends Base {}
+    class FromTrait extends Base { use Decoration; }
+    class Own extends Base {
+        use Decoration;
+        public function decorate(Route $route): Route {
+            $route->uri = '/own' . $route->uri;
+            return $route;
+        }
+    }
+    class Prefix {}
+    class Local implements RouteDecorator {
+        public function decorate(Route $route): Route {
+            return new Prefix('/wrong')->decorate($route);
+        }
+    }
+}
+",
+    )
+    .await;
+    for (attribute, expected) in [
+        ("Admin", "/parent/books/{book}"),
+        ("FromTrait", "/trait/books/{book}"),
+        ("Own", "/own/books/{book}"),
+        ("Local", "/books/{book}"),
+        ("\\Admin", "/global/books/{book}"),
+    ] {
+        open_php(
+            &backend,
+            &controller,
+            &CONTROLLER.replace("class Books {", &format!("#[{attribute}]\nclass Books {{")),
+        )
+        .await;
+        let offered = items(&backend, &uri, source, "uri('").await;
+        assert!(
+            offered.iter().any(|item| item.label == expected),
+            "{attribute}: {offered:?}"
+        );
+        assert!(!offered.iter().any(|item| item.label.starts_with("/wrong")));
+    }
+}
+
+#[tokio::test]
+async fn tempest_routes_custom_decorators_preserve_literal_slashes_and_relative_uris() {
+    let source = r"<?php \Tempest\Router\uri('');";
+    let (backend, _dir, controller, uri) = project(source).await;
+    let template = r"<?php namespace Routes;
+class Admin implements \Tempest\Router\RouteDecorator {
+    public function decorate(\Tempest\Router\Route $route): \Tempest\Router\Route {
+        BODY
+    }
+}";
+    let decorator_uri =
+        install_decorators(&backend, &template.replace("BODY", "return $route;")).await;
+    for (body, path, expected) in [
+        (
+            r"return new \Tempest\Router\Prefix('/admin/')->decorate($route);",
+            "/books/{book}",
+            "/admin/books/{book}",
+        ),
+        (
+            r"$route->uri = '/admin/' . $route->uri; return $route;",
+            "/books/{book}",
+            "/admin//books/{book}",
+        ),
+        (
+            r"$route->uri = '/admin' . $route->uri; return $route;",
+            "books/{book}",
+            "/adminbooks/{book}",
+        ),
+        (
+            r"$route->uri = '' . $route->uri; return $route;",
+            "books/{book}",
+            "/books/{book}",
+        ),
+        (
+            r"return new \Tempest\Router\Prefix('')->decorate($route);",
+            "",
+            "/",
+        ),
+    ] {
+        open_php(&backend, &decorator_uri, &template.replace("BODY", body)).await;
+        let edited = CONTROLLER
+            .replace("class Books {", "#[Admin]\nclass Books {")
+            .replace("/books/{book}", path);
+        open_php(&backend, &controller, &edited).await;
+        let offered = items(&backend, &uri, source, "uri('").await;
+        assert!(
+            offered.iter().any(|item| item.label == expected),
+            "{body}, {path}: {offered:?}"
+        );
+    }
+}

@@ -1488,6 +1488,8 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             sym.add(std::mem::size_of_val(sm.tempest_uri_calls.as_ref()));
             for route in &sm.tempest_routes {
                 sym.add(route.path.capacity());
+                sym.add(route.original_path.as_deref().map_or(0, str::len));
+                sym.add(std::mem::size_of_val(route.decorators.as_ref()));
                 sym.add(route.placeholders.capacity() * size_of::<(u32, u32)>());
                 sym.add(std::mem::size_of_val(route.parameters.as_ref()));
             }

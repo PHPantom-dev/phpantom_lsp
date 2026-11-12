@@ -9,6 +9,7 @@ pub(crate) mod inference;
 mod model_properties;
 mod paths;
 pub(crate) mod preprocessor;
+mod route_decorators;
 pub(crate) mod routes;
 mod syntax;
 mod view_data;

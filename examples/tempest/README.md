@@ -15,7 +15,8 @@ The `.view.php` files use the editor's PHP language-server connection.
   In `BookController.php`, follow route placeholders to parameters and rename them
   together with their URI arguments. Routes without a leading slash complete
   as absolute paths. Custom route attributes and controller
-  prefixes work too.
+  prefixes work too. The custom `Admin` and `Versioned` decorators produce
+  `/admin/v1/books/{book}`; method decorators run before controller decorators.
 - In `app/books.view.php`, complete directives and component tags, follow
   `<x-card>` to its file, and complete or navigate `$book`'s members.
   Follow `:title` and `:show-title` to their first variable reads in the

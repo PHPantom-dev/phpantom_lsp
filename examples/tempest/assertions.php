@@ -64,8 +64,8 @@ $generator = new Tempest\Router\UriGenerator(
 );
 $container->singleton(Tempest\Router\UriGenerator::class, $generator);
 if (new App\RouteLinks()->links() !== [
-    'https://books.example/books/php',
-    'https://books.example/books/php',
+    'https://books.example/admin/v1/books/php',
+    'https://books.example/admin/v1/books/php',
     'https://books.example/api/home/en',
     'https://books.example/api/home/en',
 ]) {

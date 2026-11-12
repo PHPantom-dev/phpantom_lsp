@@ -14,8 +14,8 @@ final class RouteLinks
         return [
             // Try: complete book:, follow it to $book, or rename the parameter.
             uri([BookController::class, 'show'], book: 'php'),
-            // Try: complete the URI string or follow it to show().
-            uri('/books/{book}', book: 'php'),
+            // Try: complete the decorated URI or follow it to show().
+            uri('/admin/v1/books/{book}', book: 'php'),
             // Try: complete locale: or follow it to the invokable action's parameter.
             uri(HomeController::class, locale: 'en'),
             // Try: complete a controller name or follow it to __invoke().

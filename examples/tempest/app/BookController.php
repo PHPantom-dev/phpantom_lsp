@@ -9,6 +9,7 @@ use Tempest\Router\Get;
 
 use function Tempest\View\view;
 
+#[Admin]
 final class BookController
 {
     #[Get('/books')]
@@ -20,6 +21,8 @@ final class BookController
     }
 
     // Try: complete inside {book}, or follow it to the parameter below.
+    // The method decorator runs first: /admin/v1/books/{book}.
+    #[Versioned]
     #[ReadBook('books/{book}')]
     public function show(string $book): string
     {
