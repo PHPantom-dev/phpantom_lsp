@@ -2498,29 +2498,31 @@ PHPStan's Symfony extension (<code>Rules/Symfony/Undefined*Rule</code>,
 <h2 id="f45-symfony-events-named-by-their-class-or-a-constant">F45. Symfony events named by their class or a constant<a class="headerlink" href="#f45-symfony-events-named-by-their-class-or-a-constant" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$dispatcher-&gt;dispatch(new OrderPlaced($order));   // which listeners?</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">#[AsEventListener]</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">public function onOrderPlaced(OrderPlaced $event): void {}</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">public static function getSubscribedEvents(): array</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">{</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">    return [KernelEvents::REQUEST =&gt; 'onRequest'];</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x">}</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$dispatcher-&gt;dispatch($event, KernelEvents::REQUEST);</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">#[AsEventListener]</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">public function onOrderPlaced(OrderPlaced $event): void {}</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">public static function getSubscribedEvents(): array</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">{</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x">    return [OrderPlaced::class =&gt; 'onOrderPlaced'];</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="x">}</span>
 </code></pre></div>
 <p>An event name written as a string navigates between its dispatchers and
-its listeners. Most events are not: an event dispatched without a name is
-named by its class, an <code>#[AsEventListener]</code> without an <code>event:</code> subscribes
-to the class its method's first parameter is typed with, and a
-subscriber's map is usually keyed by <code>OrderPlaced::class</code> or a constant
-such as <code>KernelEvents::REQUEST</code>. None of these link a dispatch to its
-listeners. Symfony's own language server shows a CodeLens over an event
-class listing its listeners, and one over a listener listing its events,
-the way the Messenger lenses link a message and its handlers.</p>
-<p>A constant key resolves to the string it holds, which also gives
-completion the framework's own events (<code>kernel.request</code>,
-<code>console.command</code>, <code>security.interactive_login</code>): only the names a
-project's listeners subscribe to are offered today, since nothing the
-installed bundles declare is read.</p>
+its listeners, and so does a subscription keyed by a constant that holds
+one (<code>KernelEvents::REQUEST</code>). Many events are named another way: an
+event dispatched without a name is named by its class, an
+<code>#[AsEventListener]</code> without an <code>event:</code> subscribes to the class its
+method's first parameter is typed with, and a subscriber's map may be
+keyed by <code>OrderPlaced::class</code>. None of these, nor a <code>dispatch()</code> that
+names its event by a constant, link a dispatch to its listeners.
+Symfony's own language server shows a CodeLens over an event class
+listing its listeners, and one over a listener listing its events, the
+way the Messenger lenses link a message and its handlers.</p>
+<p>Only the event names a project's own subscribers and listeners declare
+complete: the framework's events (<code>kernel.request</code>, <code>console.command</code>,
+<code>security.interactive_login</code>) are declared by the installed bundles'
+subscribers, which are not read.</p>
 <p><strong>Where to look:</strong> <code>src/symbol_map/extraction/symfony.rs</code>
 (<code>emit_symfony_listener_spans</code>), <code>src/symfony/messenger.rs</code> (the handler
 side table to mirror), and <code>references/symfony-language-tools</code>
