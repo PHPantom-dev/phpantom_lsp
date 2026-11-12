@@ -395,7 +395,7 @@ pub(crate) struct DrupalServiceIds {
 impl DrupalServiceIds {
     /// Whether the site may declare the service `id`, or `None` when its
     /// services files were not read.
-    fn may_declare(&self, id: &str) -> Option<bool> {
+    pub(crate) fn may_declare(&self, id: &str) -> Option<bool> {
         if self.declared.is_empty() {
             return None;
         }

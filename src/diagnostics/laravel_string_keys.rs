@@ -203,9 +203,9 @@ struct DeclaredKeys<'a> {
     middleware_known: bool,
     /// The service IDs the project's configuration declares, sorted.
     services: Vec<String>,
-    /// The service IDs a Drupal site's services files declare, sorted, and
-    /// those its PHP code may define.
-    drupal_services: Option<(Vec<String>, Arc<crate::drupal::services::PhpServiceIds>)>,
+    /// The service IDs a Drupal site's services files declare, and those
+    /// its PHP code may define.
+    drupal_services: Option<crate::drupal::services::DrupalServiceIds>,
     /// The plugin types and their plugins, and the plugin IDs PHP code may
     /// add definitions for.
     drupal_plugins: Option<(
@@ -414,16 +414,7 @@ impl<'a> DeclaredKeys<'a> {
         } else {
             Vec::new()
         };
-        // Core's and contributed modules' services files are only read once
-        // the workspace index has walked the folders `.gitignore` leaves
-        // out.
-        let drupal_services = (has_service && in_drupal_site).then(|| {
-            backend.ensure_workspace_index_ready_for_request();
-            (
-                backend.symfony_declared_names(crate::symbol_map::StringKeyKind::ServiceId),
-                backend.drupal_php_service_ids(),
-            )
-        });
+        let drupal_services = (has_service && in_drupal_site).then(|| backend.drupal_service_ids());
         // Core's and contributed modules' plugins are only read once the
         // workspace index has walked them.
         let drupal_plugins = names(|kind| kind == CheckedStringKind::DrupalPlugin).then(|| {
@@ -758,14 +749,7 @@ impl<'a> DeclaredKeys<'a> {
     /// service ID, so only a class that does not exist is told missing.  A
     /// site whose services files were not read declares none at all.
     fn judge_drupal_service(&self, key: &str) -> Verdict {
-        let (declared, php) = self.drupal_services.as_ref()?;
-        if declared.is_empty() {
-            return None;
-        }
-        let valid = declared
-            .binary_search_by(|name| name.as_str().cmp(key))
-            .is_ok()
-            || php.declares(key)
+        let valid = self.drupal_services.as_ref()?.may_declare(key)?
             || (key.contains('\\')
                 && self
                     .backend
