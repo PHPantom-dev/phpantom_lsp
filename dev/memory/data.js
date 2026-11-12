@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794506805096,
+  "lastUpdate": 1794513318393,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13643,6 +13643,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 99.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "abs@stubbe.dev",
+            "name": "Alexander Bugge Stage",
+            "username": "stubbedev"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "552e7bcb869335a756f46387f2a37888c8c33fe0",
+          "message": "Return memory right after large parses instead of holding it\n\nThe memory benchmark for a WordPress plugin swung between about 75,\n90 and 160 MiB from one run to the next, failing unrelated PRs. Two\nthings kept the memory of a large transient parse resident after the\nwork that needed it was done, and the benchmark sampled at a moment\nthat landed before or after they let go.\n\nmimalloc keeps the pages a thread frees in that thread's own heap and\nreturns them only when the same thread next calls into the allocator.\nThe first hover in the scenario parses the 6 MB wordpress-stubs.php on\na blocking-pool thread, which then parks; its freed pages stayed\nresident until Tokio reaped the idle thread ten seconds later. Every\nblocking task now ends with mi_collect(false) on its own thread, which\ncosts around 10 µs per request.\n\nThe thread-local parse arena keeps its last chunk on reset, and blink\nsizes each chunk to everything the arena held before it, so that one\nparse left its thread holding a 24 MiB chunk until the thread exited.\nSources over 512 KiB now parse in a throwaway arena; the syscalls the\nreuse saves are noise next to parsing a file that size.\n\nWith both, the scenario settles at 79-88 MiB at the benchmark's sample\npoint and stays there, where before it read 116-123 MiB locally and\ndropped to 65-81 MiB only after the idle threads exited.",
+          "timestamp": "2026-11-12T20:24:15+01:00",
+          "tree_id": "c28dcb5f0a1dead7a294754d581b74a521c6d741",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/552e7bcb869335a756f46387f2a37888c8c33fe0"
+        },
+        "date": 1794513302999,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 264.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 44.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 80.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 74.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 79.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 100.8,
             "unit": "MiB"
           }
         ]
