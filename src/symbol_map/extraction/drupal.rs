@@ -1305,7 +1305,10 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_base_field_methods(
     name_offset: u32,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    if !ctx.drupal || !ctx.content.contains("BaseFieldDefinition") {
+    // The name every base field method ends with, which a method that only
+    // takes or unsets its parent's fields has without naming
+    // `BaseFieldDefinition`.
+    if !ctx.drupal || !ctx.content.contains("aseFieldDefinitions") {
         return;
     }
     let mut owner = None;

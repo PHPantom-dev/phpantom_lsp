@@ -714,6 +714,35 @@ async fn a_trait_s_base_field_method_follows_the_class_that_uses_it() {
     }
 }
 
+/// A base field method that only unsets a field it takes from its parent
+/// drops it, though its file names no `BaseFieldDefinition`.
+#[tokio::test]
+async fn a_base_field_method_that_only_unsets_drops_the_field() {
+    let files: &[(&str, &str)] = &[(
+        "web/modules/custom/acme/src/Entity/Card.php",
+        r#"<?php
+namespace Drupal\acme\Entity;
+
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+use Drupal\Core\Entity\ContentEntityBase;
+use Drupal\Core\Entity\EntityTypeInterface;
+
+#[ContentEntityType(id: 'acme_card', entity_keys: ['id' => 'id', 'uuid' => 'uuid'])]
+class Card extends ContentEntityBase {
+    public static function baseFieldDefinitions(EntityTypeInterface $entity_type) {
+        $fields = parent::baseFieldDefinitions($entity_type);
+        unset($fields['uuid']);
+        return $fields;
+    }
+}
+"#,
+    )];
+    let (backend, dir) = site_with(files, &[]).await;
+    let labels = members_of(&backend, &dir, "Drupal\\acme\\Entity\\Card").await;
+    assert!(offers(&labels, "id"), "{labels:?}");
+    assert!(!offers(&labels, "uuid"), "{labels:?}");
+}
+
 /// A field a base field method unsets is gone, though the method it takes
 /// it from creates it.
 #[tokio::test]
