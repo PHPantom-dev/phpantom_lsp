@@ -119,6 +119,8 @@ pub(crate) struct PluginType {
 pub(crate) struct Plugin {
     pub id: String,
     pub class: Atom,
+    /// The item list class a field type's declaration names.
+    pub list_class: Option<Atom>,
 }
 
 /// The plugin types and the plugins of each, read from every declaring
@@ -252,6 +254,7 @@ impl PluginIndex {
                 self.by_manager.entry(manager).or_default().push(Plugin {
                     id: site.id.clone(),
                     class,
+                    list_class: site.list_class,
                 });
             }
         }
@@ -288,6 +291,27 @@ pub(crate) struct PluginSources {
     /// IDs that exist (see [`PluginIndex::declares`]) and whose managers
     /// declare no plugin type.
     pub(super) from_test: bool,
+}
+
+impl PluginSources {
+    /// The field types the file declares, wherever they are written: the
+    /// ID, the item class, and the item list class of each.
+    fn field_types(&self) -> Vec<(&str, Atom, Option<Atom>)> {
+        self.plugins
+            .iter()
+            .filter(|site| short_name(&site.marker).eq_ignore_ascii_case("FieldType"))
+            .map(|site| (site.id.as_str(), site.class, site.list_class))
+            .collect()
+    }
+
+    /// The field type manager's declarations the file holds, which decide
+    /// which plugins are field types.
+    fn field_type_managers(&self) -> Vec<&PluginManagerSite> {
+        self.managers
+            .iter()
+            .filter(|site| site.class.eq_ignore_ascii_case(FIELD_TYPES))
+            .collect()
+    }
 }
 
 /// Whether the symbol map holds anything the plugin index reads.
@@ -458,7 +482,27 @@ impl Backend {
                 from_test,
             })
         });
-        let unchanged = self.drupal.plugin_sources.read().get(uri) == sources.as_ref();
+        let (unchanged, field_types_changed) = {
+            let stored = self.drupal.plugin_sources.read();
+            let old = stored.get(uri);
+            let unchanged = old == sources.as_ref();
+            (
+                unchanged,
+                !unchanged
+                    && (old.map(PluginSources::field_types).unwrap_or_default()
+                        != sources
+                            .as_ref()
+                            .map(PluginSources::field_types)
+                            .unwrap_or_default()
+                        || old
+                            .map(PluginSources::field_type_managers)
+                            .unwrap_or_default()
+                            != sources
+                                .as_ref()
+                                .map(PluginSources::field_type_managers)
+                                .unwrap_or_default()),
+            )
+        };
         if !unchanged {
             let mut stored = self.drupal.plugin_sources.write();
             match sources {
@@ -483,6 +527,12 @@ impl Backend {
             if slot.is_some() {
                 *slot = None;
             }
+        }
+        // The fields are typed by the field types, read from the plugin
+        // index, so they go once it has, or the manager that says which
+        // plugins are field types has.
+        if field_types_changed {
+            self.invalidate_drupal_fields();
         }
     }
 
@@ -546,6 +596,7 @@ impl Backend {
                 plugins.extend(site.static_plugins.iter().map(|plugin| Plugin {
                     id: plugin.id.clone(),
                     class: plugin.class,
+                    list_class: None,
                 }));
             }
             index.types.push(PluginType {
@@ -645,6 +696,20 @@ impl Backend {
             found = Some(manager);
         }
         found
+    }
+
+    /// The item class and the item list class of each declaration of the
+    /// field type `id`; a list class of `None` for a declaration that names
+    /// none, whose items Drupal keeps in a `FieldItemList`.
+    pub(crate) fn drupal_field_type_classes(&self, id: &str) -> Vec<(Atom, Option<Atom>)> {
+        let mut classes: Vec<(Atom, Option<Atom>)> = self
+            .drupal_plugin_index()
+            .named(FIELD_TYPES, id)
+            .iter()
+            .map(|plugin| (plugin.class, plugin.list_class))
+            .collect();
+        classes.dedup();
+        classes
     }
 
     /// The plugin classes the plugin ID `key` (see [`plugin_key`]) names.

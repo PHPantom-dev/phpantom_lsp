@@ -148,6 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Unknown Drupal services.** In a Drupal project, a service ID that `\Drupal::service()` or a container's `get()` looks up is reported when no services file declares it and no service provider, compiler pass, or other PHP code could define it. A lookup the code checks with `has()` first, one that runs only when `moduleExists()` finds a module the site lacks, or one in a file that may catch the exception a missing service throws, is left alone, and so is test code.
 - **Drupal annotations without imports.** In a Drupal project, an annotation on a plugin class that no `use` imports, such as `@Block` or `@Translation`, jumps to its class, shows it on hover, and is found by Find References, wherever Drupal's plugin discovery would find it.
 - **Controller methods of a Drupal service.** In a routing file, the method of a `_controller` or `_title_callback` written as `service:method` jumps to the method of the service's class, completes from its public methods, and is listed among the method's references.
+- **Drupal entity fields.** In a Drupal project, a content entity's fields are typed properties of the entity and of its interfaces, down to the entity a reference field points to. Field names written in code complete, show their type on hover, and jump to where the field is declared. Contributed by @giuseppe-esposito-87.
 
 #### WordPress
 

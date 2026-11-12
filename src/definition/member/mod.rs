@@ -214,7 +214,7 @@ impl Backend {
         content: &str,
         position: Position,
         mctx: &MemberDefinitionCtx<'_>,
-    ) -> Option<Location> {
+    ) -> Option<Vec<Location>> {
         let cursor_offset = position_to_offset(content, position);
         let ctx = self.file_context_at(uri, cursor_offset);
         let loaders = self.file_loaders(&ctx);
@@ -251,7 +251,7 @@ impl Backend {
                 if let Some(location) = candidates.iter().find_map(|record| {
                     self.yii_column_location(record, mctx.member_name, class_loader)
                 }) {
-                    return Some(location);
+                    return Some(vec![location]);
                 }
             }
             crate::symbol_map::DocblockMemberRef::YiiProperty { form_model: true } => {
@@ -282,10 +282,19 @@ impl Backend {
             // the real inheritance/mixin chain.
             let raw_class = Self::reload_raw_class(target_class, &ctx.classes, class_loader);
             let lookup_class = raw_class.as_ref().unwrap_or(target_class);
+            // A Drupal entity field goes to every place its entity types
+            // declare it.
+            if lookup.access_hint == MemberAccessHint::PropertyAccess {
+                let fields =
+                    self.drupal_field_locations(lookup_class, lookup.member_name, class_loader);
+                if !fields.is_empty() {
+                    return Some(fields);
+                }
+            }
             if let Some(location) =
                 self.member_definition_on_candidate(&lookup, target_class, lookup_class)
             {
-                return Some(location);
+                return Some(vec![location]);
             }
         }
 
@@ -293,6 +302,7 @@ impl Backend {
         // so we at least get partial results when possible.
         let raw_fallback = Self::reload_raw_class(first, &ctx.classes, class_loader);
         self.member_definition_fallback(&lookup, first, raw_fallback.as_ref().unwrap_or(first))
+            .map(|location| vec![location])
     }
 
     /// Look the member up on one candidate class of the subject.

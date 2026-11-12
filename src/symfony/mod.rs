@@ -241,6 +241,7 @@ impl Backend {
         self.note_drupal_library_builder_sources(uri, Some(map));
         self.note_drupal_plugin_sources(uri, Some(map));
         self.note_drupal_entity_type_test_sources(uri, Some(map));
+        self.note_drupal_field_sources(uri, Some(map));
         self.note_drupal_theme_suggestions(map);
         self.note_container_declarations(uri, declares.then_some(map));
         let was_declaring = self.symfony.declaring_uris.read().contains(uri);
@@ -258,12 +259,14 @@ impl Backend {
 
     /// Forget a file that no longer exists.
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
+        let _fields = self.drupal_field_flush();
         self.note_drupal_routes(uri, None);
         self.note_drupal_hook_declarations(uri, None);
         self.note_drupal_theme_hook_sources(uri, None);
         self.note_drupal_library_builder_sources(uri, None);
         self.note_drupal_plugin_sources(uri, None);
         self.note_drupal_entity_type_test_sources(uri, None);
+        self.note_drupal_field_sources(uri, None);
         self.note_container_declarations(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);

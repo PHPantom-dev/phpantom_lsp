@@ -516,6 +516,7 @@ fn extract_method_call<'a>(
         emit_drupal_requirement_permission_spans(&member_name, argument_list, ctx);
         record_drupal_config_list_sites(&member_name, argument_list, ctx);
         record_drupal_config_key_sites(&member_name, argument_list, ctx);
+        record_drupal_field_name_sites(&member_name, argument_list, ctx);
         record_drupal_plugin_sites(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
         record_yii_css_class_sites(&member_name, argument_list, ctx);

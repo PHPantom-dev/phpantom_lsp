@@ -386,7 +386,6 @@ impl Backend {
                 };
 
                 self.resolve_member_definition_with(uri, content, position, &mctx)
-                    .map(|loc| vec![loc])
             }
 
             SymbolKind::SelfStaticParent(ssp_kind) => {
@@ -471,10 +470,10 @@ impl Backend {
                         },
                         docblock_ref: DocblockMemberRef::No,
                     };
-                    if let Some(loc) =
+                    if let Some(locations) =
                         self.resolve_member_definition_with(uri, content, position, &mctx)
                     {
-                        return Some(vec![loc]);
+                        return Some(locations);
                     }
                 }
 

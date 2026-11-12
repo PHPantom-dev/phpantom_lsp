@@ -17,12 +17,14 @@ use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Controller\NoteController;
 use Drupal\acme\Element\GreetingCard;
 use Drupal\acme\Entity\Note;
+use Drupal\acme\Entity\NoteInterface;
 use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
 use Drupal\acme\Hook\AcmeHooks;
 use Drupal\acme\Plugin\Block\FarewellBlock;
 use Drupal\acme\Plugin\Block\GreetingBlock;
 use Drupal\acme\NoteCounter;
+use Drupal\acme\NoteSummary;
 use Drupal\acme\RequestClock;
 use Drupal\Component\Datetime\Time;
 use Drupal\Component\Datetime\TimeInterface;
@@ -32,13 +34,18 @@ use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Block\Attribute\Block;
 use Drupal\Core\Block\BlockBase;
 use Drupal\Core\Block\BlockManager;
+use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Field\Attribute\FieldType;
 use Drupal\Core\Field\Attribute\FieldWidget;
+use Drupal\Core\Field\EntityReferenceFieldItemList;
+use Drupal\Core\Field\FieldItemList;
+use Drupal\Core\Field\Plugin\Field\FieldType\EntityReferenceItem;
 use Drupal\Core\Field\Plugin\Field\FieldType\StringItem;
 use Drupal\Core\Field\Plugin\Field\FieldWidget\StringTextfieldWidget;
 use Drupal\Core\Validation\Attribute\Constraint;
 use Drupal\Core\Validation\Plugin\Validation\Constraint\UniqueFieldConstraint;
 use Drupal\Core\Config\ConfigBase;
+use Drupal\Core\Config\FileStorage;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
@@ -66,6 +73,10 @@ use Drupal\Core\Render\Element\RenderElementBase;
 use Drupal\Core\Url;
 use Drupal\language\ConfigurableLanguageManager;
 use Drupal\language\LanguageServiceProvider;
+use Drupal\taxonomy\Entity\Term;
+use Drupal\user\Entity\User;
+use Drupal\user\EntityOwnerInterface;
+use Drupal\user\EntityOwnerTrait;
 
 $passed = 0;
 $failed = 0;
@@ -98,10 +109,10 @@ $web = __DIR__ . '/web';
 $module = "$web/modules/custom/acme";
 $theme = "$web/themes/custom/acme_theme";
 
-// The demo's classes live in the module, and the language module's in
-// core, which only a booted site adds to the autoloader.
+// The demo's classes live in the module, and the language, taxonomy, and
+// user modules' in core, which only a booted site adds to the autoloader.
 spl_autoload_register(static function (string $class) use ($module, $web): void {
-    foreach (['acme' => $module, 'language' => "$web/core/modules/language"] as $name => $dir) {
+    foreach (['acme' => $module, 'language' => "$web/core/modules/language", 'taxonomy' => "$web/core/modules/taxonomy", 'user' => "$web/core/modules/user"] as $name => $dir) {
         $prefix = "Drupal\\$name\\";
         if (str_starts_with($class, $prefix)) {
             $file = "$dir/src/" . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
@@ -239,6 +250,68 @@ check("NoteCounter::ids() starts an entity query on acme_note", str_contains((st
 check('acme_note is a content entity type, whose entity query gives IDs under integer keys', $noteDefinition instanceof ContentEntityTypeInterface && $noteDefinition->entityClassImplements(ContentEntityInterface::class));
 check('NoteCounter::count() counts the entity query it starts from the storage', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "->getQuery()") && str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "->count()"));
 check('NoteCounter::first() asks for acme_note', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "getStorage('acme_note');"));
+
+// Base fields: the ones Note declares, the ones its parent and the owner
+// trait declare under the names the entity keys give, and their field
+// types' item and item list classes (core's EntityFieldManager and
+// FieldTypePluginManager).
+$noteSource = (string) file_get_contents("$module/src/Entity/Note.php");
+$contentEntitySource = (string) file_get_contents("$web/core/lib/Drupal/Core/Entity/ContentEntityBase.php");
+$ownerTrait = new ReflectionClass(EntityOwnerTrait::class);
+$ownerSource = (string) file_get_contents((string) $ownerTrait->getFileName());
+$summarySource = (string) file_get_contents("$module/src/NoteSummary.php");
+check('Note creates its title field from the string field type', str_contains($noteSource, "\$fields['title'] = BaseFieldDefinition::create('string')"));
+check("Note takes ContentEntityBase's fields and the owner trait's", str_contains($noteSource, '$fields = parent::baseFieldDefinitions($entity_type);') && str_contains($noteSource, '$fields += static::ownerBaseFieldDefinitions($entity_type);'));
+check('Note uses the owner trait and implements its interface, which ownerBaseFieldDefinitions() requires', in_array(EntityOwnerTrait::class, $note->getTraitNames(), true) && $note->implementsInterface(EntityOwnerInterface::class));
+check("ContentEntityBase names the id and uuid fields after the entity keys", str_contains($contentEntitySource, "\$fields[\$entity_type->getKey('id')] = BaseFieldDefinition::create('integer')") && str_contains($contentEntitySource, "\$fields[\$entity_type->getKey('uuid')] = BaseFieldDefinition::create('uuid')"));
+check("acme_note's id and uuid keys name the id and uuid fields", ($noteType['entity_keys']['id'] ?? null) === 'id' && ($noteType['entity_keys']['uuid'] ?? null) === 'uuid');
+check("acme_note's owner key names the uid field the owner trait creates", ($noteType['entity_keys']['owner'] ?? null) === 'uid' && str_contains($ownerSource, "\$entity_type->getKey('owner') => BaseFieldDefinition::create('entity_reference')"));
+check("the owner trait's field points to user entities", str_contains($ownerSource, "->setSetting('target_type', 'user')") && ((new ReflectionClass(User::class))->getAttributes(ContentEntityType::class)[0]->getArguments()['id'] ?? null) === 'user');
+check('acme_note is neither translatable nor revisionable, so the entity field manager adds no field of its own', !isset($noteType['translatable']) && !isset($noteType['entity_keys']['revision']));
+$stringType = attributeArguments(new ReflectionClass(StringItem::class), FieldType::class);
+$referenceType = attributeArguments(new ReflectionClass(EntityReferenceItem::class), FieldType::class);
+check('StringItem is the string field type, kept in the default FieldItemList', ($stringType['id'] ?? null) === 'string' && !isset($stringType['list_class']) && class_exists(FieldItemList::class));
+check('EntityReferenceItem is the entity_reference field type, kept in an EntityReferenceFieldItemList', ($referenceType['id'] ?? null) === 'entity_reference' && ($referenceType['list_class'] ?? null) === EntityReferenceFieldItemList::class);
+check('NoteSummary reads the title and uid fields of a NoteInterface, which Note implements', str_contains($summarySource, '$note->title;') && str_contains($summarySource, '$note->uid;') && $note->implementsInterface(NoteInterface::class));
+check('NoteInterface is a content entity interface, which has fields', is_subclass_of(NoteInterface::class, ContentEntityInterface::class));
+
+// Configurable fields: the site's exported field storage, read with core's
+// configuration file storage, declares field_tags on acme_note, an entity
+// reference to taxonomy terms (core's FieldStorageConfig).
+$sync = new FileStorage(__DIR__ . '/config/sync');
+$tagsStorage = $sync->read('field.storage.acme_note.field_tags');
+check('the exported configuration declares the field_tags storage', is_array($tagsStorage) && in_array('field.storage.acme_note.field_tags', $sync->listAll('field.storage.'), true));
+check('field_tags is a field of acme_note', ($tagsStorage['entity_type'] ?? null) === ($noteType['id'] ?? null) && ($tagsStorage['field_name'] ?? null) === 'field_tags' && ($tagsStorage['id'] ?? null) === 'acme_note.field_tags');
+check('field_tags is an entity_reference field, kept in an EntityReferenceFieldItemList', ($tagsStorage['type'] ?? null) === ($referenceType['id'] ?? null));
+check('field_tags points to taxonomy terms, whose class is Term', ($tagsStorage['settings']['target_type'] ?? null) === 'taxonomy_term' && (attributeArguments(new ReflectionClass(Term::class), ContentEntityType::class)['id'] ?? null) === 'taxonomy_term');
+check('the exported field attaches field_tags to the acme_note bundle', ($sync->read('field.field.acme_note.acme_note.field_tags')['field_name'] ?? null) === 'field_tags');
+check('NoteSummary reads the field_tags field of a NoteInterface', str_contains($summarySource, '$note->field_tags;'));
+
+// Field properties: an item list reads a property on its first item, and
+// the item's propertyDefinitions() declares the property, taking its
+// parent's (core's FieldItemList and the field type item classes).
+$fieldItemListSource = (string) file_get_contents((string) (new ReflectionClass(FieldItemList::class))->getFileName());
+$referenceItemSource = (string) file_get_contents((string) (new ReflectionClass(EntityReferenceItem::class))->getFileName());
+$stringDefinitions = new ReflectionMethod(StringItem::class, 'propertyDefinitions');
+$stringDefinitionsSource = (string) file_get_contents((string) $stringDefinitions->getDeclaringClass()->getFileName());
+check('FieldItemList reads a property on its first item', str_contains($fieldItemListSource, 'if ($item = $this->first()) {') && str_contains($fieldItemListSource, 'return $item->__get($property_name);'));
+check("EntityReferenceItem declares the target_id and entity properties, entity as a reference to an entity", str_contains($referenceItemSource, "\$properties['target_id'] = \$target_id_definition;") && str_contains($referenceItemSource, "\$properties['entity'] = DataReferenceDefinition::create('entity')"));
+check("StringItem takes its value property from the item class it extends", $stringDefinitions->getDeclaringClass()->getName() !== StringItem::class && is_subclass_of(StringItem::class, $stringDefinitions->getDeclaringClass()->getName()) && str_contains($stringDefinitionsSource, "\$properties['value'] = DataDefinition::create('string')"));
+check('NoteSummary reads the entity of field_tags and uid, and the value of the title field', str_contains($summarySource, '$note->field_tags->entity;') && str_contains($summarySource, '$note->uid->entity;') && str_contains($summarySource, '$titleText = $title->value;'));
+check('NoteSummary allows for an empty reference field, whose entity is null', str_contains($summarySource, '$firstTag?->label()') && str_contains($summarySource, '$authorAccount?->label()'));
+check('NoteSummary returns a string', (new ReflectionMethod(NoteSummary::class, 'summarize'))->getReturnType()?->getName() === 'string');
+
+// Field names in code: a fieldable entity's get(), set(), hasField(), and
+// getFieldDefinition() take a field's name first, and get() gives the
+// field's item list (core's FieldableEntityInterface).
+foreach (['get', 'set', 'hasField', 'getFieldDefinition'] as $method) {
+    $parameter = (new ReflectionMethod(FieldableEntityInterface::class, $method))->getParameters()[0]->getName();
+    check("FieldableEntityInterface::$method() takes a field's name first", in_array($parameter, ['field_name', 'name'], true));
+}
+check('FieldableEntityInterface::get() returns the field item list', preg_match('/@return \\\\Drupal\\\\Core\\\\Field\\\\FieldItemListInterface$/m', (string) (new ReflectionMethod(FieldableEntityInterface::class, 'get'))->getDocComment()) === 1);
+check('NoteInterface is fieldable', is_subclass_of(NoteInterface::class, FieldableEntityInterface::class));
+check('NoteSummary::isTagged() asks for and reads field_tags by name', str_contains($summarySource, "\$note->hasField('field_tags')") && str_contains($summarySource, "\$tags = \$note->get('field_tags');"));
+check('NoteSummary::isTagged() returns a bool', (new ReflectionMethod(NoteSummary::class, 'isTagged'))->getReturnType()?->getName() === 'bool');
 
 // Drupal upcasts a controller's parameter named after an entity type and
 // hinted with a class or interface the entity class is (core's

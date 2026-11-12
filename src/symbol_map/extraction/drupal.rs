@@ -8,9 +8,10 @@ use crate::symbol_map::extraction::symfony::{
     RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
 use crate::symbol_map::{
-    DeclaredParameter, DrupalRouteSite, EntityTypeSite, ModuleGuard, PluginClassSite,
-    PluginDeclarationSite, PluginManagerSite, ReceiverClass, StaticPluginSite, StringKeyKind,
-    TypedReceiverSite,
+    BaseFieldInclude, BaseFieldMethodSite, BaseFieldName, BaseFieldSite, DeclaredParameter,
+    DefaultTarget, DrupalRouteSite, EntityTypeSite, FieldItemSite, FieldTarget, ItemPropertySite,
+    MethodScope, ModuleGuard, PluginClassSite, PluginDeclarationSite, PluginManagerSite,
+    PropertyDefinitionsSite, ReceiverClass, StaticPluginSite, StringKeyKind, TypedReceiverSite,
 };
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
@@ -70,14 +71,23 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
     for kind in &ENTITY_TYPE_KINDS {
         for attribute in attributes_named(&class.attribute_lists, kind.attribute, ctx) {
             let mut id = None;
-            let mut storage = kind.default_storage.map(str::to_string);
+            let mut declared = DeclaredEntityType::of_kind(kind);
             for (parameter, value) in attribute_arguments(attribute, &["id"]) {
                 match parameter {
                     "id" => id = resolved_string_literal(value, ctx.content),
                     "handlers" => {
                         if let Some(named) = handler_class(value, "storage", ctx) {
-                            storage = Some(named);
+                            declared.storage = Some(named);
                         }
+                    }
+                    "entity_keys" => declared.keys = string_pairs(value, ctx.content),
+                    "revision_metadata_keys" => {
+                        declared.revision_metadata_keys = string_pairs(value, ctx.content);
+                    }
+                    "translatable" => declared.translatable = is_true(value),
+                    "bundle_entity_type" => {
+                        declared.bundle_entity_type = resolved_string_literal(value, ctx.content)
+                            .map(|(bundle, _, _)| bundle.to_string());
                     }
                     "admin_permission" => {
                         push_laravel_string_span(
@@ -93,7 +103,10 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
                 }
             }
             if let Some((key, start, end)) = id.filter(|(key, _, _)| !key.is_empty()) {
-                found.push((key.to_string(), start as u32, end as u32, storage));
+                declared.id = key.to_string();
+                declared.start = start as u32;
+                declared.end = end as u32;
+                found.push(declared);
             }
         }
     }
@@ -116,22 +129,91 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
     else {
         return;
     };
-    for (key, start, end, storage) in found {
+    for declared in found {
         ctx.spans.push(SymbolSpan {
-            start,
-            end,
+            start: declared.start,
+            end: declared.end,
             kind: SymbolKind::StringKey {
                 kind: StringKeyKind::DrupalEntityType,
-                key,
+                key: declared.id,
                 is_write: true,
                 is_optional: false,
             },
         });
         ctx.entity_types.push(EntityTypeSite {
-            start,
+            start: declared.start,
             class: fqn,
-            storage: storage.map(|storage| crate::atom::atom(&storage)),
+            storage: declared.storage.map(|storage| crate::atom::atom(&storage)),
+            keys: declared.keys,
+            revision_metadata_keys: declared.revision_metadata_keys,
+            translatable: declared.translatable,
+            content: declared.content,
+            bundle_entity_type: declared.bundle_entity_type,
         });
+    }
+}
+
+/// What an entity type attribute or annotation declares, before the class
+/// it is written on is known.
+struct DeclaredEntityType {
+    id: String,
+    /// The range of the ID in the file.
+    start: u32,
+    end: u32,
+    storage: Option<String>,
+    keys: Vec<(String, String)>,
+    revision_metadata_keys: Vec<(String, String)>,
+    translatable: bool,
+    content: bool,
+    bundle_entity_type: Option<String>,
+}
+
+impl DeclaredEntityType {
+    /// A declaration of `kind` that writes nothing yet.
+    fn of_kind(kind: &EntityTypeKind) -> Self {
+        Self {
+            id: String::new(),
+            start: 0,
+            end: 0,
+            storage: kind.default_storage.map(str::to_string),
+            keys: Vec::new(),
+            revision_metadata_keys: Vec::new(),
+            translatable: false,
+            content: kind.default_storage == Some(CONTENT_STORAGE),
+            bundle_entity_type: None,
+        }
+    }
+}
+
+/// The `'key' => 'value'` pairs of an array literal whose keys and values
+/// are both strings, in order.
+fn string_pairs(array: &Expression<'_>, content: &str) -> Vec<(String, String)> {
+    let Some(entries) = crate::parser::array_literal_elements(array) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let ArrayElement::KeyValue(entry) = entry else {
+                return None;
+            };
+            let (key, _, _) = resolved_string_literal(entry.key, content)?;
+            let (value, _, _) =
+                crate::virtual_members::laravel::helpers::resolved_string_literal_including_empty(
+                    entry.value,
+                    content,
+                )?;
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+/// Whether `value` is the literal `true`, in any case.
+fn is_true(value: &Expression<'_>) -> bool {
+    match value {
+        Expression::Literal(Literal::True(_)) => true,
+        Expression::ConstantAccess(access) => access.name.value().eq_ignore_ascii_case(b"true"),
+        _ => false,
     }
 }
 
@@ -243,7 +325,7 @@ fn annotation_plugin_id(doc: &str, from: usize) -> Option<(usize, usize)> {
     }
     annotation_entries(doc, from)
         .into_iter()
-        .find(|entry| entry.path.is_empty() && entry.key == "id")
+        .find(|entry| entry.path.is_empty() && entry.key == "id" && entry.quoted)
         .map(|entry| (entry.value_start, entry.value_end))
 }
 
@@ -274,13 +356,20 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
         // Plugin attributes take the ID first, by name or by place.  One
         // that is no string, such as a class constant, is recorded empty:
         // its plugin type then has a plugin whose ID is not known.
-        let Some(value) = attribute_arguments(attribute, &["id"])
-            .into_iter()
+        let arguments = attribute_arguments(attribute, &["id"]);
+        let Some(value) = arguments
+            .iter()
             .find(|(parameter, _)| *parameter == "id")
-            .map(|(_, value)| value)
+            .map(|(_, value)| *value)
         else {
             continue;
         };
+        // A field type's item list class.
+        let list_class = arguments
+            .iter()
+            .find(|(parameter, _)| *parameter == "list_class")
+            .and_then(|(_, value)| message_class(value, ctx))
+            .map(|class| crate::atom::atom(&class));
         let (id, start, end) = match resolved_string_literal(value, ctx.content) {
             Some((id, start, end)) if !id.is_empty() => (id, start, end),
             Some(_) => continue,
@@ -303,15 +392,23 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
             is_annotation: false,
             doc_start: start as u32,
             doc_end: end as u32,
+            list_class,
         });
     }
     let Some((doc, offset)) = get_docblock_text_with_offset(ctx.trivias, ctx.content, class) else {
         return;
     };
-    if let Some((name, (start, end))) = doc_annotations(doc)
-        .find_map(|(name, from)| Some((name, annotation_plugin_id(doc, from)?)))
-        .filter(|(_, (start, end))| start < end)
+    if let Some((name, from, (start, end))) = doc_annotations(doc)
+        .find_map(|(name, from)| Some((name, from, annotation_plugin_id(doc, from)?)))
+        .filter(|(_, _, (start, end))| start < end)
     {
+        let list_class = annotation_entries(doc, from)
+            .into_iter()
+            .find(|entry| entry.path.is_empty() && entry.key == "list_class" && entry.quoted)
+            .map(|entry| {
+                crate::atom::atom(doc[entry.value_start..entry.value_end].trim_start_matches('\\'))
+            })
+            .filter(|class| !class.is_empty());
         ctx.drupal_plugins.push(PluginDeclarationSite {
             start: offset + start as u32,
             end: offset + end as u32,
@@ -321,6 +418,7 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
             is_annotation: true,
             doc_start: offset,
             doc_end: offset + doc.len() as u32,
+            list_class,
         });
     }
 }
@@ -1177,6 +1275,558 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_builder_spans(
                     ctx.drupal_route_patterns.push(pattern);
                 }
             }
+        }
+    }
+}
+
+// ─── Base fields ────────────────────────────────────────────────────────────
+
+const BASE_FIELD_DEFINITION: &str = "Drupal\\Core\\Field\\BaseFieldDefinition";
+
+/// Whether a method named `name` declares base fields: an entity class's
+/// `baseFieldDefinitions()`, or a helper such as
+/// `ownerBaseFieldDefinitions()`.
+fn is_base_field_method(name: &[u8]) -> bool {
+    name.eq_ignore_ascii_case(b"baseFieldDefinitions") || name.ends_with(b"BaseFieldDefinitions")
+}
+
+/// Record the base fields each base field method of a class or trait
+/// creates, and the base field methods it calls (see
+/// [`crate::drupal::fields`]).  `name_offset` is that of the class's or
+/// trait's name.
+pub(in crate::symbol_map::extraction) fn emit_drupal_base_field_methods(
+    members: &Sequence<'_, ClassLikeMember<'_>>,
+    name_offset: u32,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || !ctx.content.contains("BaseFieldDefinition") {
+        return;
+    }
+    let mut owner = None;
+    for member in members.iter() {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        if !is_base_field_method(method.name.value) {
+            continue;
+        }
+        let Some(owner) = *owner.get_or_insert_with(|| {
+            ctx.resolved_name_at(name_offset)
+                .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
+        }) else {
+            return;
+        };
+        let mut found = BaseFieldSites::default();
+        mago_syntax::walker::Walker::walk_method(&BaseFieldWalker, method, &mut found);
+        let fields: Vec<BaseFieldSite> = found
+            .keyed
+            .iter()
+            .filter_map(|keyed| base_field(keyed.key, keyed.value, &found, ctx))
+            .collect();
+        // The fields it unsets from the array it returns.
+        let returned: Vec<&[u8]> = found
+            .returned
+            .iter()
+            .filter_map(|value| match value {
+                Expression::Variable(Variable::Direct(variable)) => Some(variable.name),
+                _ => None,
+            })
+            .collect();
+        let removed: Vec<BaseFieldName> = found
+            .unset
+            .iter()
+            .filter(|access| {
+                matches!(access.array, Expression::Variable(Variable::Direct(variable))
+                    if returned.contains(&variable.name))
+            })
+            .filter_map(|access| base_field_name(access.index, ctx).map(|(name, _, _)| name))
+            .collect();
+        let includes: Vec<BaseFieldInclude> = found
+            .calls
+            .into_iter()
+            .filter_map(|call| {
+                let scope = match call.class {
+                    Expression::Parent(_) => MethodScope::Parent,
+                    Expression::Static(_) => MethodScope::Static,
+                    Expression::Self_(_) => MethodScope::Self_,
+                    _ => return None,
+                };
+                let ClassLikeMemberSelector::Identifier(name) = &call.method else {
+                    return None;
+                };
+                is_base_field_method(name.value).then(|| BaseFieldInclude {
+                    scope,
+                    method: crate::atom::atom_bytes(name.value),
+                })
+            })
+            .collect();
+        ctx.drupal_base_field_methods.push(BaseFieldMethodSite {
+            owner,
+            method: crate::atom::atom_bytes(method.name.value),
+            fields,
+            includes,
+            removed,
+        });
+    }
+}
+
+/// The base field `NAME` keys to `VALUE`, when `VALUE` is a
+/// `BaseFieldDefinition::create('type')` chain and `NAME` a string or an
+/// entity type's key lookup.
+fn base_field(
+    name: &Expression<'_>,
+    value: &Expression<'_>,
+    found: &BaseFieldSites<'_, '_>,
+    ctx: &ExtractionCtx<'_>,
+) -> Option<BaseFieldSite> {
+    let (field_type, target) = base_field_creation(value, found, ctx)?;
+    let at = name.span().start.offset;
+    let bundle_condition = found.bundle_branches.iter().find_map(|(then, otherwise)| {
+        if then.has_offset(at) {
+            Some(true)
+        } else {
+            otherwise
+                .filter(|otherwise| otherwise.has_offset(at))
+                .map(|_| false)
+        }
+    });
+    let (name, start, end) = base_field_name(name, ctx)?;
+    Some(BaseFieldSite {
+        name,
+        field_type,
+        target,
+        bundle_condition,
+        start,
+        end,
+    })
+}
+
+/// The base field `NAME` names, a string or an entity type's key lookup,
+/// with its byte range.
+fn base_field_name(
+    name: &Expression<'_>,
+    ctx: &ExtractionCtx<'_>,
+) -> Option<(BaseFieldName, u32, u32)> {
+    match name {
+        Expression::Call(Call::Method(call)) => {
+            let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+                return None;
+            };
+            let Some(Argument::Positional(argument)) = call.argument_list.arguments.first() else {
+                return None;
+            };
+            let (key, _, _) = resolved_string_literal(argument.value, ctx.content)?;
+            let name = if method.value.eq_ignore_ascii_case(b"getKey") {
+                BaseFieldName::Key(key.to_string())
+            } else if method.value.eq_ignore_ascii_case(b"getRevisionMetadataKey") {
+                BaseFieldName::RevisionMetadataKey(key.to_string())
+            } else {
+                return None;
+            };
+            let span = name_span(call);
+            Some((name, span.0, span.1))
+        }
+        _ => {
+            let (literal, start, end) = resolved_string_literal(name, ctx.content)?;
+            Some((
+                BaseFieldName::Literal(literal.to_string()),
+                start as u32,
+                end as u32,
+            ))
+        }
+    }
+}
+
+/// The byte range of a key lookup call.
+fn name_span(call: &MethodCall<'_>) -> (u32, u32) {
+    let span = call.span();
+    (span.start.offset, span.end.offset)
+}
+
+/// The field type a `BaseFieldDefinition::create('type')` chain creates a
+/// field of, and the entity type the last `setSetting('target_type', …)`
+/// of the chain names.
+fn base_field_creation(
+    value: &Expression<'_>,
+    found: &BaseFieldSites<'_, '_>,
+    ctx: &ExtractionCtx<'_>,
+) -> Option<(String, Option<FieldTarget>)> {
+    let mut target_type = None;
+    let mut current = value;
+    loop {
+        match current {
+            Expression::Parenthesized(inner) => current = inner.expression,
+            Expression::Call(Call::Method(call)) => {
+                // The outermost call runs last, so its setting wins.
+                if target_type.is_none()
+                    && let ClassLikeMemberSelector::Identifier(method) = &call.method
+                    && method.value.eq_ignore_ascii_case(b"setSetting")
+                    && let [
+                        Argument::Positional(setting),
+                        Argument::Positional(target),
+                        ..,
+                    ] = call.argument_list.arguments.as_slice()
+                    && resolved_string_literal(setting.value, ctx.content)
+                        .is_some_and(|(setting, _, _)| setting == "target_type")
+                {
+                    target_type = field_target(target.value, found, ctx);
+                }
+                current = call.object;
+            }
+            Expression::Call(Call::StaticMethod(call)) => {
+                let Expression::Identifier(class) = call.class else {
+                    return None;
+                };
+                let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+                    return None;
+                };
+                let class = ctx
+                    .resolved_name_at(class.span().start.offset)
+                    .unwrap_or_else(|| bytes_to_str(class.value()));
+                if !method.value.eq_ignore_ascii_case(b"create")
+                    || !class
+                        .trim_start_matches('\\')
+                        .eq_ignore_ascii_case(BASE_FIELD_DEFINITION)
+                {
+                    return None;
+                }
+                let (field_type, _, _) =
+                    crate::call_args::first_param_arg(&call.argument_list, "type").and_then(
+                        |argument| resolved_string_literal(argument.value(), ctx.content),
+                    )?;
+                return Some((field_type.to_string(), target_type));
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// Record what a field item class declares about its field type's items:
+/// the properties of its `propertyDefinitions()`, and the target its
+/// `defaultStorageSettings()` gives (see [`crate::drupal::field_items`]).
+/// `name_offset` is that of the class's name.
+pub(in crate::symbol_map::extraction) fn emit_drupal_field_item_sites(
+    members: &Sequence<'_, ClassLikeMember<'_>>,
+    name_offset: u32,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal
+        || !(ctx.content.contains("propertyDefinitions")
+            || ctx.content.contains("defaultStorageSettings"))
+    {
+        return;
+    }
+    let method = |name: &[u8]| {
+        members.iter().find_map(|member| match member {
+            ClassLikeMember::Method(method) if method.name.value.eq_ignore_ascii_case(name) => {
+                Some(method)
+            }
+            _ => None,
+        })
+    };
+    let property_definitions =
+        method(b"propertyDefinitions").map(|method| property_definitions(method, ctx));
+    let default_target =
+        method(b"defaultStorageSettings").and_then(|method| default_target(method, ctx));
+    if property_definitions.is_none() && default_target.is_none() {
+        return;
+    }
+    let Some(owner) = ctx
+        .resolved_name_at(name_offset)
+        .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
+    else {
+        return;
+    };
+    ctx.drupal_field_items.push(FieldItemSite {
+        owner,
+        property_definitions,
+        default_target,
+    });
+}
+
+/// The properties a `propertyDefinitions()` method declares.
+fn property_definitions(method: &Method<'_>, ctx: &ExtractionCtx<'_>) -> PropertyDefinitionsSite {
+    let mut found = BaseFieldSites::default();
+    mago_syntax::walker::Walker::walk_method(&BaseFieldWalker, method, &mut found);
+    // The keys of the array the method returns.
+    let returned: Vec<&[u8]> = found
+        .returned
+        .iter()
+        .filter_map(|value| match value {
+            Expression::Variable(Variable::Direct(variable)) => Some(variable.name),
+            _ => None,
+        })
+        .collect();
+    let is_returned = |array: &Expression<'_>| {
+        matches!(array, Expression::Variable(Variable::Direct(variable))
+            if returned.contains(&variable.name))
+    };
+    let literal_key = |key: &Expression<'_>| {
+        resolved_string_literal(key, ctx.content).map(|(key, _, _)| key.to_string())
+    };
+    let properties = found
+        .keyed
+        .iter()
+        .filter(|keyed| keyed.assigned.is_some_and(is_returned))
+        .filter_map(|keyed| {
+            Some(ItemPropertySite {
+                name: literal_key(keyed.key)?,
+                data_type: created_data_type(keyed.value, ctx),
+            })
+        })
+        .collect();
+    let removed = found
+        .unset
+        .iter()
+        .filter(|access| is_returned(access.array))
+        .filter_map(|access| literal_key(access.index))
+        .collect();
+    let takes_parent = found.calls.iter().any(|call| {
+        matches!(call.class, Expression::Parent(_))
+            && matches!(&call.method, ClassLikeMemberSelector::Identifier(name)
+                if name.value.eq_ignore_ascii_case(b"propertyDefinitions"))
+    });
+    PropertyDefinitionsSite {
+        properties,
+        removed,
+        takes_parent,
+    }
+}
+
+/// What a `defaultStorageSettings()` that returns an array literal, or
+/// literals joined to `parent::defaultStorageSettings()` with `+`, says the
+/// `target_type` setting is.  `None` when it says nothing.
+fn default_target(method: &Method<'_>, ctx: &ExtractionCtx<'_>) -> Option<DefaultTarget> {
+    let MethodBody::Concrete(body) = &method.body else {
+        return None;
+    };
+    let returned = body
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::Return(r#return) => r#return.value,
+            _ => None,
+        })?;
+    // `+` keeps the keys of its left operand, so the first one that writes
+    // the setting wins, the parent's included.
+    let mut operands = vec![returned];
+    let mut from_parent = false;
+    while let Some(operand) = operands.pop() {
+        match operand {
+            Expression::Parenthesized(inner) => operands.push(inner.expression),
+            Expression::Binary(binary)
+                if matches!(binary.operator, BinaryOperator::Addition(_)) =>
+            {
+                operands.push(binary.rhs);
+                operands.push(binary.lhs);
+            }
+            Expression::Call(Call::StaticMethod(call))
+                if matches!(call.class, Expression::Parent(_))
+                    && matches!(&call.method, ClassLikeMemberSelector::Identifier(name)
+                        if name.value.eq_ignore_ascii_case(b"defaultStorageSettings")) =>
+            {
+                from_parent = true;
+            }
+            _ => {
+                // An operand that is no array literal, such as a constant,
+                // says nothing that can be read.
+                let Some(entries) = crate::parser::array_literal_elements(operand) else {
+                    continue;
+                };
+                for entry in entries.iter() {
+                    if let ArrayElement::KeyValue(entry) = entry
+                        && resolved_string_literal(entry.key, ctx.content)
+                            .is_some_and(|(key, _, _)| key == "target_type")
+                    {
+                        let target = resolved_string_literal(entry.value, ctx.content)
+                            .map(|(target, _, _)| target.to_string());
+                        return Some(if from_parent {
+                            DefaultTarget::FromParent {
+                                otherwise: Some(target),
+                            }
+                        } else {
+                            DefaultTarget::Declared(target)
+                        });
+                    }
+                }
+            }
+        }
+    }
+    from_parent.then_some(DefaultTarget::FromParent { otherwise: None })
+}
+
+/// The data type a data definition chain such as
+/// `DataReferenceDefinition::create('entity')->setLabel(…)` creates.
+fn created_data_type(value: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<String> {
+    let mut current = value;
+    loop {
+        match current {
+            Expression::Parenthesized(inner) => current = inner.expression,
+            Expression::Call(Call::Method(call)) => current = call.object,
+            Expression::Call(Call::StaticMethod(call)) => {
+                let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+                    return None;
+                };
+                if !method.value.eq_ignore_ascii_case(b"create") {
+                    return None;
+                }
+                let argument = call.argument_list.arguments.first()?;
+                return resolved_string_literal(argument.value(), ctx.content)
+                    .map(|(data_type, _, _)| data_type.to_string());
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// The entity type the value of a `target_type` setting names: a string, or
+/// the entity type's bundle entity type.
+fn field_target(
+    value: &Expression<'_>,
+    found: &BaseFieldSites<'_, '_>,
+    ctx: &ExtractionCtx<'_>,
+) -> Option<FieldTarget> {
+    let bundle_variable = matches!(value, Expression::Variable(Variable::Direct(variable))
+        if found.bundle_variables.contains(&variable.name));
+    if bundle_variable || reads_bundle_entity_type(value) {
+        return Some(FieldTarget::BundleEntityType);
+    }
+    resolved_string_literal(value, ctx.content)
+        .map(|(target, _, _)| FieldTarget::EntityType(target.to_string()))
+}
+
+/// Whether `value` is a `->getBundleEntityType()` call.
+fn reads_bundle_entity_type(value: &Expression<'_>) -> bool {
+    matches!(value, Expression::Call(Call::Method(call))
+        if matches!(&call.method, ClassLikeMemberSelector::Identifier(method)
+            if method.value.eq_ignore_ascii_case(b"getBundleEntityType")))
+}
+
+/// The keyed values, the static calls, and the unset keys of a base field
+/// or property definition method.
+#[derive(Default)]
+struct BaseFieldSites<'ast, 'arena> {
+    /// Each `$fields[KEY] = VALUE` and each `KEY => VALUE` array entry.
+    keyed: Vec<Keyed<'ast, 'arena>>,
+    calls: Vec<&'ast StaticMethodCall<'arena>>,
+    /// The array access of each `unset($fields[KEY])`.
+    unset: Vec<&'ast ArrayAccess<'arena>>,
+    /// The value of each `return`.
+    returned: Vec<&'ast Expression<'arena>>,
+    /// The variables assigned `$entity_type->getBundleEntityType()`.
+    bundle_variables: Vec<&'arena [u8]>,
+    /// The branches of each `if` that tests the entity type's bundle entity
+    /// type: the one taken when it has one, and the `else` taken when not.
+    bundle_branches: Vec<(mago_span::Span, Option<mago_span::Span>)>,
+}
+
+struct Keyed<'ast, 'arena> {
+    key: &'ast Expression<'arena>,
+    value: &'ast Expression<'arena>,
+    /// The variable a `$fields[KEY] = VALUE` assigns to; `None` for an
+    /// array entry.
+    assigned: Option<&'ast Expression<'arena>>,
+}
+
+struct BaseFieldWalker;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BaseFieldSites<'ast, 'arena>>
+    for BaseFieldWalker
+{
+    fn walk_in_assignment(
+        &self,
+        assignment: &'ast Assignment<'arena>,
+        found: &mut BaseFieldSites<'ast, 'arena>,
+    ) {
+        if let (AssignmentOperator::Assign(_), Expression::Variable(Variable::Direct(variable))) =
+            (&assignment.operator, assignment.lhs)
+            && reads_bundle_entity_type(assignment.rhs)
+        {
+            found.bundle_variables.push(variable.name);
+        }
+        if let (AssignmentOperator::Assign(_), Expression::ArrayAccess(access)) =
+            (&assignment.operator, assignment.lhs)
+        {
+            found.keyed.push(Keyed {
+                key: access.index,
+                value: assignment.rhs,
+                assigned: Some(access.array),
+            });
+        }
+    }
+
+    fn walk_in_if(&self, r#if: &'ast If<'arena>, found: &mut BaseFieldSites<'ast, 'arena>) {
+        let mut condition = r#if.condition;
+        while let Expression::Parenthesized(inner) = condition {
+            condition = inner.expression;
+        }
+        let tests_bundle = match condition {
+            Expression::Assignment(assignment) => reads_bundle_entity_type(assignment.rhs),
+            other => reads_bundle_entity_type(other),
+        };
+        if tests_bundle
+            && let IfBody::Statement(body) = &r#if.body
+            && body.else_if_clauses.is_empty()
+        {
+            found.bundle_branches.push((
+                body.statement.span(),
+                body.else_clause
+                    .as_ref()
+                    .map(|clause| clause.statement.span()),
+            ));
+        }
+    }
+
+    fn walk_in_return(
+        &self,
+        r#return: &'ast Return<'arena>,
+        found: &mut BaseFieldSites<'ast, 'arena>,
+    ) {
+        found.returned.extend(r#return.value);
+    }
+
+    fn walk_in_unset(&self, unset: &'ast Unset<'arena>, found: &mut BaseFieldSites<'ast, 'arena>) {
+        for value in unset.values.iter() {
+            if let Expression::ArrayAccess(access) = value {
+                found.unset.push(access);
+            }
+        }
+    }
+
+    fn walk_in_array(&self, array: &'ast Array<'arena>, found: &mut BaseFieldSites<'ast, 'arena>) {
+        push_base_field_entries(array.elements.iter(), found);
+    }
+
+    fn walk_in_legacy_array(
+        &self,
+        array: &'ast LegacyArray<'arena>,
+        found: &mut BaseFieldSites<'ast, 'arena>,
+    ) {
+        push_base_field_entries(array.elements.iter(), found);
+    }
+
+    fn walk_in_static_method_call(
+        &self,
+        call: &'ast StaticMethodCall<'arena>,
+        found: &mut BaseFieldSites<'ast, 'arena>,
+    ) {
+        found.calls.push(call);
+    }
+}
+
+fn push_base_field_entries<'ast, 'arena>(
+    elements: impl Iterator<Item = &'ast ArrayElement<'arena>>,
+    found: &mut BaseFieldSites<'ast, 'arena>,
+) where
+    'arena: 'ast,
+{
+    for element in elements {
+        if let ArrayElement::KeyValue(entry) = element {
+            found.keyed.push(Keyed {
+                key: entry.key,
+                value: entry.value,
+                assigned: None,
+            });
         }
     }
 }
@@ -2188,6 +2838,44 @@ fn push_config_key_span(
     });
 }
 
+/// Record the field name a call of a fieldable entity's method that takes
+/// one names (see [`crate::drupal::fields::field_name_call`]), for the type
+/// engine to confirm against its receiver.  A `get()` and a `set()` are a
+/// container lookup's and a configurator's too, which their own sites
+/// read.
+pub(in crate::symbol_map::extraction) fn record_drupal_field_name_sites(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some(parameter) = crate::drupal::fields::field_name_call(member_name) else {
+        return;
+    };
+    let Some(name) = argument_at(argument_list, 0, parameter.as_bytes()) else {
+        return;
+    };
+    // A field's name never has a dot, which the service IDs and
+    // configuration names other receivers' `get()` takes mostly have.
+    let Some((name, start, end)) = resolved_string_literal(name, ctx.content)
+        .filter(|(name, _, _)| !name.is_empty() && !name.contains('.'))
+    else {
+        return;
+    };
+    ctx.typed_receiver_sites.push(TypedReceiverSite {
+        start: start as u32,
+        end: end as u32,
+        key: name.to_string(),
+        is_write: false,
+        // `hasField()` asks whether the entity has it.
+        is_optional: member_name.eq_ignore_ascii_case("hasField"),
+        guards: 0,
+        receiver: ReceiverClass::FieldableEntity,
+    });
+}
+
 /// Record the key an editable config object's `set()` or `clear()` reads,
 /// for the type engine to confirm against its receiver, whose type carries
 /// the object's name.  Its `get()` is recorded as a container lookup's,
@@ -2492,38 +3180,42 @@ fn handler_class(handlers: &Expression<'_>, name: &str, ctx: &ExtractionCtx<'_>)
 }
 
 /// The entity type an `@ContentEntityType(…)`-family annotation in the
-/// docblock `doc`, which starts at `offset` in the file, declares: its ID
-/// with the ID's range in the file, and its storage.
-fn annotation_entity_type(doc: &str, offset: u32) -> Option<(String, u32, u32, Option<String>)> {
-    let (body, default_storage) = ENTITY_TYPE_KINDS.iter().find_map(|kind| {
+/// docblock `doc`, which starts at `offset` in the file, declares, with the
+/// ID's range in the file.
+fn annotation_entity_type(doc: &str, offset: u32) -> Option<DeclaredEntityType> {
+    let (body, kind) = ENTITY_TYPE_KINDS.iter().find_map(|kind| {
         let at = doc.find(kind.annotation)?;
-        Some((at + kind.annotation.len(), kind.default_storage))
+        Some((at + kind.annotation.len(), kind))
     })?;
     let mut id = None;
-    let mut storage = default_storage.map(str::to_string);
+    let mut declared = DeclaredEntityType::of_kind(kind);
     for entry in annotation_entries(doc, body) {
-        match (entry.path.as_slice(), entry.key) {
-            ([], "id") => id = Some((entry.value_start, entry.value_end)),
-            (["handlers"], "storage") => {
-                storage = Some(
-                    doc[entry.value_start..entry.value_end]
-                        .trim_start_matches('\\')
-                        .to_string(),
-                );
+        let value = &doc[entry.value_start..entry.value_end];
+        match (entry.path.as_slice(), entry.key, entry.quoted) {
+            ([], "id", true) => id = Some((entry.value_start, entry.value_end)),
+            ([], "translatable", false) => {
+                declared.translatable = value.eq_ignore_ascii_case("true")
             }
+            ([], "bundle_entity_type", true) => {
+                declared.bundle_entity_type = Some(value.to_string());
+            }
+            (["handlers"], "storage", true) => {
+                declared.storage = Some(value.trim_start_matches('\\').to_string());
+            }
+            (["entity_keys"], key, true) => {
+                declared.keys.push((key.to_string(), value.to_string()))
+            }
+            (["revision_metadata_keys"], key, true) => declared
+                .revision_metadata_keys
+                .push((key.to_string(), value.to_string())),
             _ => {}
         }
     }
     let (start, end) = id?;
-    let key = &doc[start..end];
-    (!key.is_empty()).then(|| {
-        (
-            key.to_string(),
-            offset + start as u32,
-            offset + end as u32,
-            storage,
-        )
-    })
+    declared.id = doc[start..end].to_string();
+    declared.start = offset + start as u32;
+    declared.end = offset + end as u32;
+    (!declared.id.is_empty()).then_some(declared)
 }
 
 /// The span of the permission the `admin_permission` of an entity type
@@ -2535,7 +3227,7 @@ fn annotation_admin_permission(doc: &str, offset: u32) -> Option<SymbolSpan> {
         .find_map(|kind| Some(doc.find(kind.annotation)? + kind.annotation.len()))?;
     let entry = annotation_entries(doc, body)
         .into_iter()
-        .find(|entry| entry.path.is_empty() && entry.key == "admin_permission")?;
+        .find(|entry| entry.path.is_empty() && entry.key == "admin_permission" && entry.quoted)?;
     let key = &doc[entry.value_start..entry.value_end];
     (!key.is_empty()).then(|| SymbolSpan {
         start: offset + entry.value_start as u32,
@@ -2556,6 +3248,8 @@ struct AnnotationEntry<'d> {
     key: &'d str,
     value_start: usize,
     value_end: usize,
+    /// The value is a string; else it is a bare word, such as `TRUE`.
+    quoted: bool,
 }
 
 /// Every `key = "value"` pair of the annotation whose arguments start at
@@ -2584,6 +3278,7 @@ fn annotation_entries(doc: &str, from: usize) -> Vec<AnnotationEntry<'_>> {
                             key: name,
                             value_start: start,
                             value_end: end,
+                            quoted: true,
                         });
                     }
                     assigned = false;
@@ -2636,8 +3331,17 @@ fn annotation_entries(doc: &str, from: usize) -> Vec<AnnotationEntry<'_>> {
                 if !assigned {
                     key = Some(&doc[start..i]);
                 } else {
-                    // A bare value (`TRUE`, a constant): nothing to read.
-                    key = None;
+                    // A bare value: `TRUE`, a constant, or the name of a
+                    // nested annotation.
+                    if let Some(name) = key.take() {
+                        entries.push(AnnotationEntry {
+                            path: path.clone(),
+                            key: name,
+                            value_start: start,
+                            value_end: i,
+                            quoted: false,
+                        });
+                    }
                     assigned = false;
                 }
                 continue;
@@ -3149,6 +3853,115 @@ class SettingsForm {
                 ("six", ReceiverClass::EditableConfigKeys),
             ]
         );
+    }
+
+    /// The field names a fieldable entity's methods take, recorded for the
+    /// type engine with the name alone, written positionally or by name;
+    /// a name built at runtime is none, and so is a dotted service ID or
+    /// configuration name, which no field is named.
+    #[test]
+    fn field_names_are_left_for_the_type_engine() {
+        let php = r#"<?php
+namespace Drupal\acme;
+class Reader {
+    public function run($node, string $name): void {
+        $node->get('title');
+        $node->set('body', 'Example');
+        $node->hasField('field_tags');
+        $node->getFieldDefinition(name: 'uid');
+        $node->get($name);
+        $node->get('');
+        $node->get('acme.settings');
+        $node->set('acme.mode', 'Example');
+        $node->other('nid');
+    }
+}
+"#;
+        let sites_in = |drupal: bool| -> Vec<(String, bool)> {
+            let arena = mago_allocator::LocalArena::new();
+            let file_id = mago_database::file::FileId::new(b"test.php");
+            let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+            let resolver = mago_names::resolver::NameResolver::new(&arena);
+            let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+            let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+                program,
+                php,
+                &names,
+                crate::symbol_map::extraction::Frameworks {
+                    symfony: false,
+                    service_container: drupal,
+                    drupal,
+                    twig: false,
+                    doctrine: false,
+                    yii_params: false,
+                    tempest: false,
+                },
+                None,
+            );
+            map.typed_receiver_sites
+                .iter()
+                .filter(|site| site.receiver == ReceiverClass::FieldableEntity)
+                .map(|site| {
+                    assert_eq!(&php[site.start as usize..site.end as usize], site.key);
+                    assert!(!site.is_write, "{}", site.key);
+                    (site.key.clone(), site.is_optional)
+                })
+                .collect()
+        };
+        assert_eq!(
+            sites_in(true),
+            [
+                ("title".to_string(), false),
+                ("body".to_string(), false),
+                ("field_tags".to_string(), true),
+                ("uid".to_string(), false),
+            ]
+        );
+        assert!(sites_in(false).is_empty());
+    }
+
+    /// Each method that takes a field name reaches fieldable entities, and
+    /// the field name site stands beside what the other tables read the
+    /// call as, so neither shadows the other.
+    #[test]
+    fn every_field_name_method_reaches_fieldable_entities() {
+        for (method, other) in [
+            ("get", Some(ReceiverClass::ContainerLookup)),
+            ("set", Some(ReceiverClass::ConfiguratorSet)),
+            ("hasField", None),
+            ("getFieldDefinition", None),
+        ] {
+            assert!(
+                crate::drupal::fields::field_name_call(method).is_some(),
+                "{method}"
+            );
+            assert!(
+                ReceiverClass::FieldableEntity.targets().contains(&(
+                    crate::drupal::fields::FIELDABLE_ENTITY,
+                    StringKeyKind::DrupalFieldName
+                )),
+                "{method}"
+            );
+            assert_eq!(
+                crate::symbol_map::extraction::symfony_receiver_method(method, 0)
+                    .map(|(receiver, _)| receiver),
+                other,
+                "{method}"
+            );
+            for (receiver, _) in other.iter().flat_map(|receiver| receiver.targets()) {
+                assert_ne!(
+                    *receiver,
+                    crate::drupal::fields::FIELDABLE_ENTITY,
+                    "{method}"
+                );
+            }
+            assert!(hook_invocation(method, 0).is_none(), "{method}");
+            assert!(
+                crate::drupal::route_parameter_call(method).is_none(),
+                "{method}"
+            );
+        }
+        assert!(crate::drupal::fields::field_name_call("getFields").is_none());
     }
 
     /// Each permission a requirement, a list, or an entity type names is a
@@ -3741,6 +4554,535 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
         )));
     }
 
+    /// The entity type declarations `php` makes.
+    fn entity_type_sites(php: &str) -> Vec<EntityTypeSite> {
+        drupal_index_map(php).entity_types
+    }
+
+    /// The symbol map the workspace index makes of `php` in a Drupal
+    /// project.
+    fn drupal_index_map(php: &str) -> crate::symbol_map::SymbolMap {
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: true,
+                twig: false,
+                doctrine: false,
+                yii_params: false,
+                tempest: false,
+            },
+            None,
+        )
+    }
+
+    /// A base field's name as written, the text the name spans, its field
+    /// type, and its target.
+    type ReadField = (BaseFieldName, String, String, Option<FieldTarget>);
+
+    /// Each base field method of `php`: its class or trait, its name, the
+    /// fields it creates, and the methods it calls.
+    fn base_fields(php: &str) -> Vec<(String, String, Vec<ReadField>, Vec<BaseFieldInclude>)> {
+        drupal_index_map(php)
+            .drupal_fields
+            .map(|fields| fields.base_field_methods)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|site| {
+                let fields = site
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        (
+                            field.name.clone(),
+                            php[field.start as usize..field.end as usize].to_string(),
+                            field.field_type.clone(),
+                            field.target.clone(),
+                        )
+                    })
+                    .collect();
+                (
+                    site.owner.to_string(),
+                    site.method.to_string(),
+                    fields,
+                    site.includes,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn property_definitions_keep_their_properties_and_parent() {
+        let php = r#"<?php
+namespace Drupal\acme\Plugin\Field\FieldType;
+use Drupal\Core\Field\FieldStorageDefinitionInterface;
+use Drupal\Core\TypedData\DataDefinition;
+use Drupal\Core\TypedData\DataReferenceDefinition;
+class PictureItem extends AttachmentItem {
+    public static function propertyDefinitions(FieldStorageDefinitionInterface $definition) {
+        $properties = parent::propertyDefinitions($definition);
+        unset($properties['display'], $properties['description'], $settings['other']);
+        $target = DataDefinition::create('integer')->setLabel(new Label('@label', ['@label' => 'ID']));
+        $properties['target_id'] = $target;
+        $properties['entity'] = DataReferenceDefinition::create('entity')
+            ->setLabel('Picture')
+            ->setComputed(TRUE);
+        $properties['alt'] = (DataDefinition::create('string'));
+        $settings['ignored'] = 'x';
+        $properties['nested']['ignored'] = DataDefinition::create('string');
+        return $properties;
+    }
+    public function label() {
+        $properties['ignored'] = DataDefinition::create('string');
+        return $properties;
+    }
+}
+class PlainItem {
+    public static function propertyDefinitions(FieldStorageDefinitionInterface $definition) {
+        return [];
+    }
+}
+"#;
+        let property = |name: &str, data_type: Option<&str>| ItemPropertySite {
+            name: name.to_string(),
+            data_type: data_type.map(str::to_string),
+        };
+        assert_eq!(
+            drupal_index_map(php)
+                .drupal_fields
+                .map(|fields| fields.field_items)
+                .unwrap_or_default(),
+            [
+                FieldItemSite {
+                    owner: crate::atom::atom("Drupal\\acme\\Plugin\\Field\\FieldType\\PictureItem"),
+                    property_definitions: Some(PropertyDefinitionsSite {
+                        properties: vec![
+                            property("target_id", None),
+                            property("entity", Some("entity")),
+                            property("alt", Some("string")),
+                        ],
+                        removed: vec!["display".to_string(), "description".to_string()],
+                        takes_parent: true,
+                    }),
+                    default_target: None,
+                },
+                FieldItemSite {
+                    owner: crate::atom::atom("Drupal\\acme\\Plugin\\Field\\FieldType\\PlainItem"),
+                    property_definitions: Some(PropertyDefinitionsSite {
+                        properties: Vec::new(),
+                        removed: Vec::new(),
+                        takes_parent: false,
+                    }),
+                    default_target: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn default_storage_settings_keep_their_target() {
+        let php = r#"<?php
+namespace Drupal\acme\Plugin\Field\FieldType;
+class AttachmentItem extends ReferenceItem {
+    public static function defaultStorageSettings() {
+        return [
+            'target_type' => 'file',
+            'display_field' => FALSE,
+        ] + parent::defaultStorageSettings();
+    }
+}
+class PictureItem extends AttachmentItem {
+    public static function defaultStorageSettings() {
+        return ['default_image' => ['alt' => '']] + parent::defaultStorageSettings();
+    }
+}
+class ReferenceItem {
+    public static function defaultStorageSettings() {
+        return [
+            'target_type' => \Drupal::moduleHandler()->moduleExists('node') ? 'node' : 'user',
+        ] + parent::defaultStorageSettings();
+    }
+}
+class PlainItem {
+    public static function defaultStorageSettings() {
+        return ['max_length' => 255];
+    }
+}
+class MediaItem extends PlainItem {
+    public static function defaultStorageSettings() {
+        return parent::defaultStorageSettings() + ['target_type' => 'media'];
+    }
+}
+class NodeItem {
+    const SETTINGS = ['max_length' => 255];
+    public static function defaultStorageSettings() {
+        return static::SETTINGS + ['target_type' => 'node'];
+    }
+}
+"#;
+        let targets: Vec<(String, Option<DefaultTarget>)> = drupal_index_map(php)
+            .drupal_fields
+            .map(|fields| fields.field_items)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|site| (site.owner.to_string(), site.default_target))
+            .collect();
+        let class = |name: &str| format!("Drupal\\acme\\Plugin\\Field\\FieldType\\{name}");
+        assert_eq!(
+            targets,
+            [
+                (
+                    class("AttachmentItem"),
+                    Some(DefaultTarget::Declared(Some("file".to_string())))
+                ),
+                (
+                    class("PictureItem"),
+                    Some(DefaultTarget::FromParent { otherwise: None })
+                ),
+                (class("ReferenceItem"), Some(DefaultTarget::Declared(None))),
+                (
+                    class("MediaItem"),
+                    Some(DefaultTarget::FromParent {
+                        otherwise: Some(Some("media".to_string()))
+                    })
+                ),
+                (
+                    class("NodeItem"),
+                    Some(DefaultTarget::Declared(Some("node".to_string())))
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn base_fields_follow_the_bundle_entity_type() {
+        let php = r#"<?php
+namespace Drupal\acme\Entity;
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+abstract class Base {
+    public static function baseFieldDefinitions(EntityTypeInterface $entity_type) {
+        $fields = [];
+        if ($entity_type->hasKey('bundle')) {
+            if ($bundle_entity_type_id = $entity_type->getBundleEntityType()) {
+                $fields[$entity_type->getKey('bundle')] = BaseFieldDefinition::create('entity_reference')
+                    ->setSetting('target_type', $bundle_entity_type_id);
+            }
+            else {
+                $fields[$entity_type->getKey('bundle')] = BaseFieldDefinition::create('string');
+            }
+        }
+        $fields['kind'] = BaseFieldDefinition::create('entity_reference')
+            ->setSetting('target_type', $entity_type->getBundleEntityType());
+        return $fields;
+    }
+}
+"#;
+        let fields: Vec<(String, Option<FieldTarget>, Option<bool>)> = drupal_index_map(php)
+            .drupal_fields
+            .map(|fields| fields.base_field_methods)
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|site| site.fields)
+            .map(|field| (field.field_type, field.target, field.bundle_condition))
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                (
+                    "entity_reference".to_string(),
+                    Some(FieldTarget::BundleEntityType),
+                    Some(true)
+                ),
+                ("string".to_string(), None, Some(false)),
+                (
+                    "entity_reference".to_string(),
+                    Some(FieldTarget::BundleEntityType),
+                    None
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn entity_types_keep_their_bundle_entity_type() {
+        let attribute = r#"<?php
+namespace Drupal\acme\Entity;
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+#[ContentEntityType(id: 'acme_note', bundle_entity_type: 'acme_note_type')]
+class Note {}
+"#;
+        let annotation = r#"<?php
+namespace Drupal\acme\Entity;
+/**
+ * @ContentEntityType(
+ *   id = "acme_memo",
+ *   bundle_entity_type = "acme_memo_type",
+ * )
+ */
+class Memo {}
+"#;
+        for (php, bundle) in [
+            (attribute, "acme_note_type"),
+            (annotation, "acme_memo_type"),
+        ] {
+            let sites = entity_type_sites(php);
+            assert_eq!(
+                sites
+                    .first()
+                    .and_then(|site| site.bundle_entity_type.as_deref()),
+                Some(bundle)
+            );
+        }
+    }
+
+    #[test]
+    fn base_field_methods_keep_their_fields_and_includes() {
+        let php = r#"<?php
+namespace Drupal\acme\Entity;
+use Drupal\Core\Entity\ContentEntityBase;
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+class Note extends ContentEntityBase {
+    public static function baseFieldDefinitions(EntityTypeInterface $entity_type) {
+        $fields = parent::baseFieldDefinitions($entity_type);
+        $fields += static::ownerBaseFieldDefinitions($entity_type);
+        $fields['title'] = BaseFieldDefinition::create('string')
+            ->setLabel('Title')
+            ->setRequired(TRUE);
+        $fields[$entity_type->getKey('bundle')] = BaseFieldDefinition::create('entity_reference')
+            ->setSetting('target_type', 'acme_note_type');
+        $fields[$entity_type->getRevisionMetadataKey('revision_user')] = BaseFieldDefinition::create('entity_reference');
+        $fields['title']->setDisplayOptions('form', ['weight' => 1]);
+        $fields[$name] = BaseFieldDefinition::create('string');
+        $fields['other'] = \Other\BaseFieldDefinition::create('string');
+        $fields['no_type'] = BaseFieldDefinition::create($type);
+        return $fields;
+    }
+    public function label() {
+        $fields['ignored'] = BaseFieldDefinition::create('string');
+    }
+}
+trait OwnerTrait {
+    public static function ownerBaseFieldDefinitions(EntityTypeInterface $entity_type) {
+        return [
+            $entity_type->getKey('owner') => BaseFieldDefinition::create('entity_reference')
+                ->setSetting('target_type', 'user')
+                ->setLabel('Owner'),
+        ];
+    }
+}
+class Page extends Note {
+    public static function baseFieldDefinitions(EntityTypeInterface $entity_type) {
+        return parent::baseFieldDefinitions($entity_type) + self::publishedBaseFieldDefinitions($entity_type);
+    }
+}
+"#;
+        let key = |name: &str| BaseFieldName::Key(name.to_string());
+        let include = |scope, method: &str| BaseFieldInclude {
+            scope,
+            method: crate::atom::atom(method),
+        };
+        assert_eq!(
+            base_fields(php),
+            [
+                (
+                    "Drupal\\acme\\Entity\\Note".to_string(),
+                    "baseFieldDefinitions".to_string(),
+                    vec![
+                        (
+                            BaseFieldName::Literal("title".to_string()),
+                            "title".to_string(),
+                            "string".to_string(),
+                            None
+                        ),
+                        (
+                            key("bundle"),
+                            "$entity_type->getKey('bundle')".to_string(),
+                            "entity_reference".to_string(),
+                            Some(FieldTarget::EntityType("acme_note_type".to_string()))
+                        ),
+                        (
+                            BaseFieldName::RevisionMetadataKey("revision_user".to_string()),
+                            "$entity_type->getRevisionMetadataKey('revision_user')".to_string(),
+                            "entity_reference".to_string(),
+                            None
+                        ),
+                    ],
+                    vec![
+                        include(MethodScope::Parent, "baseFieldDefinitions"),
+                        include(MethodScope::Static, "ownerBaseFieldDefinitions"),
+                    ],
+                ),
+                (
+                    "Drupal\\acme\\Entity\\OwnerTrait".to_string(),
+                    "ownerBaseFieldDefinitions".to_string(),
+                    vec![(
+                        key("owner"),
+                        "$entity_type->getKey('owner')".to_string(),
+                        "entity_reference".to_string(),
+                        Some(FieldTarget::EntityType("user".to_string()))
+                    )],
+                    vec![],
+                ),
+                (
+                    "Drupal\\acme\\Entity\\Page".to_string(),
+                    "baseFieldDefinitions".to_string(),
+                    vec![],
+                    vec![
+                        include(MethodScope::Parent, "baseFieldDefinitions"),
+                        include(MethodScope::Self_, "publishedBaseFieldDefinitions"),
+                    ],
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_field_type_keeps_its_list_class() {
+        let php = r#"<?php
+namespace Drupal\acme\Plugin\Field\FieldType;
+use Drupal\acme\ExampleList;
+use Drupal\Core\Field\Attribute\FieldType;
+#[FieldType(id: 'acme_listed', list_class: ExampleList::class)]
+class ListedItem {}
+#[FieldType(id: 'acme_plain')]
+class PlainItem {}
+/**
+ * @FieldType(
+ *   id = "acme_legacy",
+ *   label = @Translation("Legacy"),
+ *   list_class = "\Drupal\acme\LegacyList",
+ * )
+ */
+class LegacyItem {}
+"#;
+        let found: Vec<(String, Option<String>)> = drupal_index_map(php)
+            .drupal_plugins
+            .iter()
+            .map(|site| {
+                (
+                    site.id.clone(),
+                    site.list_class.map(|class| class.to_string()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    "acme_listed".to_string(),
+                    Some("Drupal\\acme\\ExampleList".to_string())
+                ),
+                ("acme_plain".to_string(), None),
+                (
+                    "acme_legacy".to_string(),
+                    Some("Drupal\\acme\\LegacyList".to_string())
+                ),
+            ]
+        );
+    }
+
+    fn pairs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn an_attribute_keeps_the_keys_and_translatability() {
+        let php = r#"<?php
+namespace Drupal\acme\Entity;
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+#[ContentEntityType(
+  id: 'acme_note',
+  entity_keys: ['id' => 'nid', 'owner' => 'uid', 'bundle' => ''],
+  revision_metadata_keys: ['revision_user' => 'revision_uid'],
+  translatable: TRUE,
+)]
+class Note {}
+"#;
+        let sites = entity_type_sites(php);
+        assert_eq!(sites.len(), 1);
+        let site = &sites[0];
+        assert_eq!(
+            site.keys,
+            pairs(&[("id", "nid"), ("owner", "uid"), ("bundle", "")])
+        );
+        assert_eq!(
+            site.revision_metadata_keys,
+            pairs(&[("revision_user", "revision_uid")])
+        );
+        assert!(site.translatable);
+        assert!(site.content);
+    }
+
+    #[test]
+    fn an_annotation_keeps_the_keys_and_translatability() {
+        let php = r#"<?php
+namespace Drupal\acme\Entity;
+/**
+ * @ContentEntityType(
+ *   id = "acme_page",
+ *   label = @Translation("Page"),
+ *   entity_keys = {
+ *     "id" = "pid",
+ *     "revision" = "vid",
+ *   },
+ *   revision_metadata_keys = {
+ *     "revision_log_message" = "revision_log"
+ *   },
+ *   translatable = TRUE,
+ * )
+ */
+class Page {}
+"#;
+        let sites = entity_type_sites(php);
+        assert_eq!(sites.len(), 1);
+        let site = &sites[0];
+        assert_eq!(site.keys, pairs(&[("id", "pid"), ("revision", "vid")]));
+        assert_eq!(
+            site.revision_metadata_keys,
+            pairs(&[("revision_log_message", "revision_log")])
+        );
+        assert!(site.translatable);
+        assert!(site.content);
+    }
+
+    #[test]
+    fn an_entity_type_is_untranslatable_unless_it_says_so() {
+        let php = r#"<?php
+namespace Drupal\acme\Entity;
+use Drupal\Core\Entity\Attribute\ConfigEntityType;
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+#[ConfigEntityType(id: 'acme_type', entity_keys: ['id' => 'id'])]
+class Type {}
+#[ContentEntityType(id: 'acme_log', translatable: FALSE)]
+class Log {}
+/**
+ * @ContentEntityType(id = "acme_entry", translatable = FALSE)
+ */
+class Entry {}
+"#;
+        let sites = entity_type_sites(php);
+        assert_eq!(sites.len(), 3);
+        assert!(sites.iter().all(|site| !site.translatable));
+        assert_eq!(
+            sites.iter().map(|site| site.content).collect::<Vec<_>>(),
+            [false, true, true]
+        );
+        assert_eq!(sites[0].keys, pairs(&[("id", "id")]));
+    }
+
     #[test]
     fn an_attribute_declares_the_id_class_and_storage() {
         let php = "<?php\nnamespace Drupal\\node\\Entity;\nuse Drupal\\Core\\Entity\\Attribute\\ContentEntityType;\nuse Drupal\\node\\NodeStorage;\n#[ContentEntityType(\n  id: 'node',\n  handlers: ['storage' => NodeStorage::class, 'form' => ['default' => 'X']],\n)]\nclass Node {}\n";
@@ -3783,7 +5125,13 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
     #[test]
     fn annotations_give_the_id_and_the_storage_handler() {
         let doc = "/**\n * @ContentEntityType(\n *   id = \"redirect\",\n *   label = @Translation(\"Redirect\"),\n *   handlers = {\n *     \"list_builder\" = \"Drupal\\redirect\\RedirectListBuilder\",\n *     \"storage\" = \"\\Drupal\\redirect\\RedirectStorage\",\n *     \"form\" = {\n *       \"id\" = \"nested\"\n *     }\n *   },\n *   entity_keys = {\n *     \"id\" = \"rid\"\n *   }\n * )\n */";
-        let (id, start, end, storage) = annotation_entity_type(doc, 100).unwrap();
+        let DeclaredEntityType {
+            id,
+            start,
+            end,
+            storage,
+            ..
+        } = annotation_entity_type(doc, 100).unwrap();
         assert_eq!(id, "redirect");
         assert_eq!(
             &doc[(start - 100) as usize..(end - 100) as usize],
@@ -3798,7 +5146,7 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
     #[test]
     fn an_annotation_without_handlers_gets_its_kinds_storage() {
         let doc = "/**\n * @ConfigEntityType(id = \"flag\", label = @Translation(\"Flag\"))\n */";
-        let (id, _, _, storage) = annotation_entity_type(doc, 0).unwrap();
+        let DeclaredEntityType { id, storage, .. } = annotation_entity_type(doc, 0).unwrap();
         assert_eq!(id, "flag");
         assert_eq!(storage.as_deref(), Some(CONFIG_STORAGE));
     }
@@ -3806,7 +5154,7 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
     #[test]
     fn a_nested_annotations_pairs_are_its_own() {
         let doc = "/**\n * @ContentEntityType(\n *   label = @Translation(\"Note\", id = \"other\"),\n *   id = \"note\",\n *   extra = @Bar(handlers = {\"storage\" = \"Wrong\"}),\n * )\n */";
-        let (id, _, _, storage) = annotation_entity_type(doc, 0).unwrap();
+        let DeclaredEntityType { id, storage, .. } = annotation_entity_type(doc, 0).unwrap();
         assert_eq!(id, "note");
         assert_eq!(storage.as_deref(), Some(CONTENT_STORAGE));
     }

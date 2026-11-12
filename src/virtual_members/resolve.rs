@@ -330,14 +330,24 @@ pub fn resolve_class_fully_maybe_cached(
 /// them the same way).
 ///
 /// `@property` tags count as declared: they name a type for the path,
-/// which the write is expected to respect.
+/// which the write is expected to respect.  A property a framework stores
+/// through `__set` does not: the setter keeps its type whatever is written
+/// (see [`writes_through_magic_set`]).
+///
+/// [`writes_through_magic_set`]: crate::types::PropertyInfo::writes_through_magic_set
 pub fn property_write_is_magic(
     class: &ClassInfo,
     prop_name: &str,
     class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> bool {
-    if class.has_property(prop_name) {
+    let stores_value = |class: &ClassInfo| {
+        class
+            .properties
+            .iter()
+            .any(|property| property.name == prop_name && !property.writes_through_magic_set())
+    };
+    if stores_value(class) {
         return false;
     }
     // The property and `__set` may each come from a parent, a trait, a
@@ -350,7 +360,7 @@ pub fn property_write_is_magic(
         None => active_resolved_class_cache(),
     };
     let merged = resolve_class_fully_maybe_cached(class, class_loader, cache.or(ambient));
-    merged.has_method("__set") && !merged.has_property(prop_name)
+    merged.has_method("__set") && !stores_value(&merged)
 }
 
 /// The cache key for `fqn` instantiated with `args`.
@@ -593,6 +603,25 @@ pub fn resolve_class_for_type_hint(
     generic_arg_strings: &[String],
     generic_args: &[PhpType],
 ) -> Arc<ClassInfo> {
+    resolve_class_for_field_type_hint(
+        class,
+        class_loader,
+        generic_arg_strings,
+        generic_args,
+        || crate::drupal::field_items::field_type_hint(class, generic_args, class_loader),
+    )
+}
+
+/// [`resolve_class_for_type_hint`] for a caller that has already asked
+/// what the hint says about a Drupal field (`drupal`), so it is asked only
+/// once, and only when the result is not cached.
+pub(crate) fn resolve_class_for_field_type_hint(
+    class: &ClassInfo,
+    class_loader: &ResolvedClassLoader<'_>,
+    generic_arg_strings: &[String],
+    generic_args: &[PhpType],
+    drupal: impl FnOnce() -> Option<crate::drupal::field_items::FieldTypeHint>,
+) -> Arc<ClassInfo> {
     let cache = super::cache::active_resolved_class_cache();
     let fqn = class.fqn();
     let key = resolved_key(
@@ -607,18 +636,29 @@ pub fn resolve_class_for_type_hint(
         return cached;
     }
 
+    // A Drupal field item list's template is its item, which carries the
+    // reference field's target the list names after it.
+    let drupal = drupal();
+    let drupal_args = drupal.as_ref().map(|hint| hint.specialisation());
+    let drupal_arg_strings: Option<Vec<String>> = drupal_args
+        .as_ref()
+        .map(|args| args.iter().map(ToString::to_string).collect());
+    let (specialised_arg_strings, specialised_args) = match (&drupal_arg_strings, &drupal_args) {
+        (Some(strings), Some(args)) => (strings.as_slice(), args.as_slice()),
+        _ => (generic_arg_strings, generic_args),
+    };
     let specialised = resolve_class_fully_with_generics(
         class,
         class_loader,
         cache,
-        generic_arg_strings,
-        generic_args,
+        specialised_arg_strings,
+        specialised_args,
     );
     // A specialisation that was left uncached is a partial result handed
     // to a re-entrant caller, and so is anything built on it.
     let cacheable = cache.is_some_and(|c| {
         c.read()
-            .contains_key(&resolved_key(fqn, generic_arg_strings.to_vec()))
+            .contains_key(&resolved_key(fqn, specialised_arg_strings.to_vec()))
     });
 
     let mut result = Arc::unwrap_or_clone(specialised);
@@ -661,6 +701,9 @@ pub fn resolve_class_for_type_hint(
             class_loader,
             &doctrine,
         );
+    }
+    if let Some(hint) = &drupal {
+        crate::drupal::field_items::apply_to_field_type(&mut result, hint, class_loader);
     }
 
     let result = Arc::new(result);
@@ -838,10 +881,13 @@ fn apply_post_merge_stages(
 ) {
     let fqn = effective_class.fqn();
 
-    // Whether Laravel-specific resolution should run.  A throwaway
-    // cache defaults to `true`, so behaviour is unchanged for
-    // cache-less code paths and tests.
-    let is_laravel = cache.read().laravel().is_enabled();
+    // Whether Laravel- and Drupal-specific resolution should run.  A
+    // throwaway cache has Laravel on, so behaviour is unchanged for
+    // cache-less code paths and tests, and Drupal off.
+    let (is_laravel, is_drupal) = {
+        let cache = cache.read();
+        (cache.laravel().is_enabled(), cache.drupal().is_enabled())
+    };
 
     // ── Pre-provider patches ────────────────────────────────────────
     // Inject missing `@mixin` annotations before virtual member
@@ -874,7 +920,7 @@ fn apply_post_merge_stages(
         }
     }
 
-    let providers = default_providers(is_laravel);
+    let providers = default_providers(is_laravel, is_drupal);
     if !providers.is_empty() {
         apply_virtual_members(merged, class_loader, &providers, Some(cache));
     }

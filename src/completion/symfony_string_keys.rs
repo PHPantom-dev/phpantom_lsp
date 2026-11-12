@@ -105,6 +105,22 @@ impl Backend {
             );
             return self.drupal_config_key_response(&names, content, prefix_start, position);
         }
+        // A field name: one of the fields of the entity types the
+        // receiver's type may hold.
+        if kind == StringKeyKind::DrupalFieldName {
+            let names = self.drupal_receiver_field_names(
+                receiver_type.as_ref()?,
+                self.file_loaders(ctx).resolved_class_loader(),
+            );
+            return self.symfony_names_response(
+                kind,
+                names,
+                content,
+                prefix_start,
+                cursor,
+                position,
+            );
+        }
         // A plugin ID: the manager's, which the receiver's type is, or the
         // one the call always looks it up in.
         if kind == StringKeyKind::DrupalPlugin {
@@ -487,12 +503,23 @@ impl Backend {
                 ctx,
             );
         }
+        // A fieldable entity's `get()` and `set()` are a container lookup's
+        // and a configurator's too, and its `hasField()` is no one else's.
+        let field_names = call.arg_index == 0
+            && self.is_drupal_project()
+            && crate::drupal::fields::field_name_call(&call.method_name).is_some();
+        let receivers: Vec<crate::symbol_map::ReceiverClass> =
+            symfony_receiver_method(&call.method_name, call.arg_index)
+                .map(|(receiver, _)| receiver)
+                .into_iter()
+                .chain(field_names.then_some(crate::symbol_map::ReceiverClass::FieldableEntity))
+                .collect();
         // The receiver's type is kept for what it carries besides its
-        // class: a config object's name.
-        let (receiver, _) = symfony_receiver_method(&call.method_name, call.arg_index)?;
-        let (kind, ty) = self.receiver_key_and_type(
+        // class: a config object's name, or the entity types a fieldable
+        // entity may be.
+        let (kind, ty) = self.receivers_key_and_type(
             subject,
-            (receiver, &call.method_name, call.arg_index),
+            (&receivers, &call.method_name, call.arg_index),
             content,
             cursor,
             ctx,
@@ -539,9 +566,28 @@ impl Backend {
         cursor: usize,
         ctx: &FileContext,
     ) -> Option<(StringKeyKind, crate::php_type::PhpType)> {
+        self.receivers_key_and_type(subject, (&[receiver], method, index), content, cursor, ctx)
+    }
+
+    /// [`Self::receiver_key_and_type`] for a call several receivers may
+    /// take, the first that the subject is confirmed to be, resolving the
+    /// subject once for all of them.
+    fn receivers_key_and_type(
+        &self,
+        subject: &str,
+        (receivers, method, index): (&[crate::symbol_map::ReceiverClass], &str, usize),
+        content: &str,
+        cursor: usize,
+        ctx: &FileContext,
+    ) -> Option<(StringKeyKind, crate::php_type::PhpType)> {
         // Resolving the receiver is the costly part, and is wasted on a
         // call whose every kind of key the project does not read.
-        if !receiver.names_any(|kind| self.string_key_kind_enabled(kind)) {
+        let receivers: Vec<_> = receivers
+            .iter()
+            .copied()
+            .filter(|receiver| receiver.names_any(|kind| self.string_key_kind_enabled(kind)))
+            .collect();
+        if receivers.is_empty() {
             return None;
         }
         let loaders = self.file_loaders(ctx);
@@ -551,14 +597,13 @@ impl Backend {
             .into_iter()
             .find_map(|resolved| {
                 let class = resolved.class_info?;
-                self.typed_receiver_key_kind(
-                    &crate::php_type::PhpType::named(class.fqn()),
-                    method,
-                    index,
-                    receiver,
-                    class_loader,
-                )
-                .map(|kind| (kind, resolved.type_string))
+                let ty = crate::php_type::PhpType::named(class.fqn());
+                receivers
+                    .iter()
+                    .find_map(|receiver| {
+                        self.typed_receiver_key_kind(&ty, method, index, *receiver, class_loader)
+                    })
+                    .map(|kind| (kind, resolved.type_string))
             })
     }
 

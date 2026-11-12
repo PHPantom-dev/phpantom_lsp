@@ -292,6 +292,13 @@ pub(crate) enum StringKeyKind {
     /// `BaseFieldDefinition::create()`, the `type` of a field's display
     /// options, and `addConstraint()`.
     DrupalPlugin,
+    /// A field of a Drupal content entity, keyed by the entity type as well
+    /// as the name (see `drupal::fields::field_key`): `title` is node's in
+    /// one place and another entity type's elsewhere.  Declared by an
+    /// entity class's base field definitions and by field storage files,
+    /// and read by a fieldable entity's `get()`, `set()`, `hasField()`, and
+    /// `getFieldDefinition()`.
+    DrupalFieldName,
 }
 
 impl StringKeyKind {
@@ -366,7 +373,8 @@ impl StringKeyKind {
             | Self::DrupalThemeHook
             | Self::DrupalThemeHookVariable
             | Self::DrupalLibrary
-            | Self::DrupalPlugin => KeyFramework::Drupal,
+            | Self::DrupalPlugin
+            | Self::DrupalFieldName => KeyFramework::Drupal,
         }
     }
 
@@ -853,6 +861,180 @@ pub(crate) struct EntityTypeSite {
     /// of its kind of entity type; `None` when it names none and has no
     /// default.
     pub storage: Option<crate::atom::Atom>,
+    /// The `entity_keys` the declaration writes, as written: an empty field
+    /// name is a key the entity type does not have.
+    pub keys: Vec<(String, String)>,
+    /// The `revision_metadata_keys` the declaration writes, as written.
+    pub revision_metadata_keys: Vec<(String, String)>,
+    /// The declaration's `translatable` is true.
+    pub translatable: bool,
+    /// The declaration is a content entity type's.
+    pub content: bool,
+    /// The entity type its `bundle_entity_type` names, whose entities are
+    /// its bundles.
+    pub bundle_entity_type: Option<String>,
+}
+
+/// A method that declares the base fields of Drupal content entities: an
+/// entity class's `baseFieldDefinitions()`, or a helper such as a trait's
+/// `ownerBaseFieldDefinitions()`, whose result joins them.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BaseFieldMethodSite {
+    /// The class or trait that declares the method.
+    pub owner: crate::atom::Atom,
+    /// The method's name, as declared.
+    pub method: crate::atom::Atom,
+    /// Each `$fields[NAME] = BaseFieldDefinition::create('type')` and each
+    /// `NAME => BaseFieldDefinition::create('type')` array entry, in source
+    /// order.
+    pub fields: Vec<BaseFieldSite>,
+    /// The other base field methods it calls on `parent::`, `static::`, or
+    /// `self::`, in source order.
+    pub includes: Vec<BaseFieldInclude>,
+    /// The fields it unsets from what it takes from those.
+    pub removed: Vec<BaseFieldName>,
+}
+
+impl BaseFieldMethodSite {
+    /// Whether the two declare the same fields, wherever they are written.
+    pub(crate) fn declares_as(&self, other: &Self) -> bool {
+        self.owner == other.owner
+            && self.method == other.method
+            && self.includes == other.includes
+            && self.removed == other.removed
+            && self.fields.len() == other.fields.len()
+            && self.fields.iter().zip(&other.fields).all(|(a, b)| {
+                a.name == b.name
+                    && a.field_type == b.field_type
+                    && a.target == b.target
+                    && a.bundle_condition == b.bundle_condition
+            })
+    }
+}
+
+/// A base field a [`BaseFieldMethodSite`] creates.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BaseFieldSite {
+    pub name: BaseFieldName,
+    /// The field type `create()` names.
+    pub field_type: String,
+    /// The entity type a `setSetting('target_type', …)` on it names.
+    pub target: Option<FieldTarget>,
+    /// Whether it is created only when the entity type has a bundle entity
+    /// type (`true`) or only when it has none (`false`), as the branches
+    /// of an `if ($entity_type->getBundleEntityType())` decide.
+    pub bundle_condition: Option<bool>,
+    /// Byte range of the name: a string's contents, or the key lookup.
+    pub start: u32,
+    pub end: u32,
+}
+
+/// The entity type a base field points to.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum FieldTarget {
+    EntityType(String),
+    /// `$entity_type->getBundleEntityType()`: the entity type's own
+    /// `bundle_entity_type`.
+    BundleEntityType,
+}
+
+/// What a Drupal field storage file, `field.storage.<entity type>.<field>.yml`,
+/// declares: a configurable field of an entity type.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FieldStorageSite {
+    pub entity_type: String,
+    pub field_name: String,
+    /// The field type, its `type`.
+    pub field_type: String,
+    /// The entity type its `settings.target_type` names.
+    pub target_type: Option<String>,
+    /// Byte range of the `field_name` value.
+    pub start: u32,
+    pub end: u32,
+}
+
+impl FieldStorageSite {
+    /// Whether the two declare the same field, wherever it is written.
+    pub(crate) fn declares_as(&self, other: &Self) -> bool {
+        self.entity_type == other.entity_type
+            && self.field_name == other.field_name
+            && self.field_type == other.field_type
+            && self.target_type == other.target_type
+    }
+}
+
+/// The name of a base field, as written.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum BaseFieldName {
+    Literal(String),
+    /// `$entity_type->getKey('key')`: the field the entity type names for
+    /// the entity key.
+    Key(String),
+    /// `$entity_type->getRevisionMetadataKey('key')`.
+    RevisionMetadataKey(String),
+}
+
+/// A base field method another one calls, whose fields join its own.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BaseFieldInclude {
+    pub scope: MethodScope,
+    pub method: crate::atom::Atom,
+}
+
+/// The class a `parent::`, `static::`, or `self::` call is made on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MethodScope {
+    Parent,
+    Static,
+    Self_,
+}
+
+/// What a Drupal field item class declares about its field type's items
+/// in `propertyDefinitions()` and `defaultStorageSettings()`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FieldItemSite {
+    /// The class that declares the methods.
+    pub owner: crate::atom::Atom,
+    /// What its `propertyDefinitions()` declares, when it declares one.
+    pub property_definitions: Option<PropertyDefinitionsSite>,
+    /// What its `defaultStorageSettings()` says the `target_type` setting
+    /// is, when it declares one that says.
+    pub default_target: Option<DefaultTarget>,
+}
+
+/// The properties a field item class's `propertyDefinitions()` declares.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PropertyDefinitionsSite {
+    /// Each `$properties['name'] = …`, in source order.
+    pub properties: Vec<ItemPropertySite>,
+    /// Each `unset($properties['name'])`.
+    pub removed: Vec<String>,
+    /// Whether it takes the properties `parent::propertyDefinitions()`
+    /// gives.
+    pub takes_parent: bool,
+}
+
+/// What a field item class's `defaultStorageSettings()` says the
+/// `target_type` setting is: the entity type a reference field of its
+/// field type points to when the field sets none.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum DefaultTarget {
+    /// The setting it writes: the entity type, or `None` for a value that
+    /// is not a string literal.
+    Declared(Option<String>),
+    /// It adds `parent::defaultStorageSettings()` before it writes any, so
+    /// the parent's setting wins, as `+` keeps its left operand's keys:
+    /// `otherwise` is the one it writes after, if it writes one.
+    FromParent { otherwise: Option<Option<String>> },
+}
+
+/// A property a [`PropertyDefinitionsSite`] declares.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ItemPropertySite {
+    pub name: String,
+    /// The data type the definition's `create('type')` names, such as
+    /// `entity` for an entity reference.
+    pub data_type: Option<String>,
 }
 
 /// The class a Drupal plugin declaration is written on, such as a render
@@ -930,6 +1112,8 @@ pub(crate) struct PluginDeclarationSite {
     /// attribute.
     pub doc_start: u32,
     pub doc_end: u32,
+    /// The `list_class` the marker names, a field type's item list class.
+    pub list_class: Option<crate::atom::Atom>,
 }
 
 /// The value a container declaration gives, read by the kind of name it
@@ -1437,6 +1621,11 @@ pub(crate) enum ReceiverClass {
     /// one of its keys; an `ImmutableConfig` throws on both.  Its `get()`
     /// is a [`Self::ContainerLookup`], as every config object's is.
     EditableConfigKeys,
+    /// A fieldable Drupal entity, whose `get()`, `set()`, `hasField()`, and
+    /// `getFieldDefinition()` take one of its fields' names (see
+    /// `drupal::fields::field_name_call`).  The entity types the name is
+    /// one of come from the receiver's type.
+    FieldableEntity,
     /// Symfony's serializer, normalizers, and denormalizers, whose
     /// `serialize()`, `deserialize()`, `normalize()`, and `denormalize()`
     /// take a context whose `groups` name serializer groups.
@@ -1605,6 +1794,10 @@ impl ReceiverClass {
                 (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalConfigName),
                 (DRUPAL_FORM_BASE, StringKeyKind::DrupalConfigName),
             ],
+            Self::FieldableEntity => &[(
+                crate::drupal::fields::FIELDABLE_ENTITY,
+                StringKeyKind::DrupalFieldName,
+            )],
             Self::Serializer => &[
                 (SYMFONY_SERIALIZER, StringKeyKind::SerializerGroup),
                 (SYMFONY_NORMALIZER, StringKeyKind::SerializerGroup),
@@ -1712,12 +1905,15 @@ impl TypedReceiverSite {
     /// Whether this site, once confirmed, could name `key` as a `kind`.
     /// The reference index files a site under each kind it could become.
     pub(crate) fn may_name(&self, kind: StringKeyKind, key: &str) -> bool {
-        // A configuration key's site holds the key alone; the object's
-        // name comes with its receiver's type.
+        // A configuration key's or a field name's site holds the key alone;
+        // the object's name or the entity type comes with its receiver's
+        // type.
         let key = if kind == StringKeyKind::DrupalConfigKey {
             crate::drupal::config_keys::split_config_key(key).1
         } else if kind == StringKeyKind::DrupalPlugin && self.receiver.bare_plugin_key() {
             crate::drupal::plugins::split_plugin_key(key).1
+        } else if kind == StringKeyKind::DrupalFieldName {
+            crate::drupal::fields::split_field_key(key).1
         } else {
             key
         };

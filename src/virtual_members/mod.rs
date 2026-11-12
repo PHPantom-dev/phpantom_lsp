@@ -61,12 +61,12 @@ pub use cache::{
 pub(crate) use cache::{
     TransformFingerprint, intern_transformed_method, intern_transformed_property,
 };
-pub(crate) use resolve::resolve_class_base_cached;
 pub use resolve::{
     populate_from_sorted, property_write_is_magic, resolve_class_for_type_hint,
     resolve_class_fully, resolve_class_fully_cached, resolve_class_fully_maybe_cached,
     resolve_class_fully_with_generics, resolve_class_fully_with_type_args,
 };
+pub(crate) use resolve::{resolve_class_base_cached, resolve_class_for_field_type_hint};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -341,6 +341,8 @@ pub fn apply_virtual_members(
 /// 2. Laravel factory provider (convention-based create/make methods)
 /// 3. PHPDoc provider (`@method` / `@property` / `@mixin` tags)
 /// 4. Laravel facade provider (concrete class forwarded as static)
+/// 5. Drupal fieldable entity provider (the fields of content entities, and
+///    the magic `__get()` and `__set()` of their interfaces)
 ///
 /// The facade provider deliberately comes last: a facade that carries
 /// generated `@method static` tags should keep them, and only a facade
@@ -348,8 +350,10 @@ pub fn apply_virtual_members(
 ///
 /// When `is_laravel` is `false`, the Laravel providers are omitted so
 /// that a non-Laravel project does not pay for their parent-chain walks.
-/// The framework-agnostic PHPDoc provider is always included.
-pub fn default_providers(is_laravel: bool) -> Vec<Box<dyn VirtualMemberProvider>> {
+/// The framework-agnostic PHPDoc provider is always included.  The Drupal
+/// provider runs only in a Drupal project, after the PHPDoc provider, so an
+/// interface's own `@method __get` tag would win.
+pub fn default_providers(is_laravel: bool, is_drupal: bool) -> Vec<Box<dyn VirtualMemberProvider>> {
     let mut providers: Vec<Box<dyn VirtualMemberProvider>> = Vec::new();
     if is_laravel {
         providers.push(Box::new(laravel::LaravelModelProvider));
@@ -358,6 +362,10 @@ pub fn default_providers(is_laravel: bool) -> Vec<Box<dyn VirtualMemberProvider>
     providers.push(Box::new(phpdoc::PHPDocProvider));
     if is_laravel {
         providers.push(Box::new(laravel::LaravelFacadeProvider));
+    }
+    if is_drupal {
+        providers.push(Box::new(crate::drupal::fields::FieldableEntityProvider));
+        providers.push(Box::new(crate::drupal::field_items::FieldItemProvider));
     }
     providers
 }

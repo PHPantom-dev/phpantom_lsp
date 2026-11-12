@@ -467,16 +467,44 @@ impl Backend {
                 // Config resources and their generic config spelling share a
                 // canonical index identity. Declaration lookup is independent
                 // of this usage snapshot, so every request stays narrow.
+                // A name some of the entity types a receiver may hold lack
+                // is no field there.
+                if *kind == crate::symbol_map::StringKeyKind::DrupalFieldName
+                    && crate::drupal::fields::field_key_entity_types(key)
+                        .nth(1)
+                        .is_some()
+                    && self.drupal_field_named(key).is_none()
+                {
+                    return Vec::new();
+                }
                 let reference_key = crate::reference_index::string_key_reference_key(*kind, key);
                 let snapshot = self.user_file_symbol_maps_for_reference_keys(&[reference_key]);
-                laravel::find_laravel_string_key_references(
+                let mut locations = laravel::find_laravel_string_key_references(
                     self,
                     kind,
                     key,
                     uri,
                     &snapshot,
                     include_declaration,
-                )
+                );
+                // A Drupal field is read as a property of its entity too.
+                if *kind == crate::symbol_map::StringKeyKind::DrupalFieldName
+                    && let Some(scope) = self.drupal_field_scope(key)
+                {
+                    for location in self.find_member_references(
+                        crate::drupal::fields::split_field_key(key).1,
+                        false,
+                        MemberRefKind::Property,
+                        false,
+                        Some(&scope),
+                        None,
+                    ) {
+                        if !locations.contains(&location) {
+                            locations.push(location);
+                        }
+                    }
+                }
+                locations
             }
 
             SymbolKind::LaravelMacroString { name } => {

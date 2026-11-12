@@ -62,6 +62,8 @@ pub struct ResolvedCacheInner {
     laravel: crate::virtual_members::laravel::LaravelCacheState,
     /// The project facts the Doctrine repository members read.
     doctrine: crate::doctrine::DoctrineCacheState,
+    /// The project facts the Drupal providers read.
+    drupal: crate::drupal::fields::DrupalCacheState,
     /// Classes currently being resolved by `resolve_class_fully_inner`,
     /// keyed per thread so one thread's in-progress resolution never
     /// degrades another thread's independent resolution of the same
@@ -332,6 +334,14 @@ impl ResolvedCacheInner {
         self.map.contains_key(key)
     }
 
+    /// Whether [`evict_fqn`] would find anything to evict for `fqn`: a
+    /// resolution of it, or one that depends on it.
+    pub(crate) fn holds_or_depends_on(&self, fqn: &str) -> bool {
+        self.fqn_keys.contains_key(fqn)
+            || self.reverse_deps.contains_key(fqn)
+            || self.reverse_deps.contains_key(crate::util::short_name(fqn))
+    }
+
     /// The project facts the Laravel providers read.
     pub(crate) fn laravel(&self) -> &crate::virtual_members::laravel::LaravelCacheState {
         &self.laravel
@@ -343,6 +353,15 @@ impl ResolvedCacheInner {
 
     pub(crate) fn set_doctrine(&mut self, doctrine: crate::doctrine::DoctrineCacheState) {
         self.doctrine = doctrine;
+    }
+
+    /// The project facts the Drupal providers read.
+    pub(crate) fn drupal(&self) -> &crate::drupal::fields::DrupalCacheState {
+        &self.drupal
+    }
+
+    pub(crate) fn set_drupal(&mut self, drupal: crate::drupal::fields::DrupalCacheState) {
+        self.drupal = drupal;
     }
 
     pub(crate) fn laravel_mut(

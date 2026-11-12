@@ -1,0 +1,20 @@
+uuid: 6f1c2a3e-9b4d-4c8e-a1f2-3d4e5f6a7b8c
+langcode: en
+status: true
+dependencies:
+  module:
+    - acme
+    - taxonomy
+id: acme_note.field_tags
+field_name: field_tags
+entity_type: acme_note
+type: entity_reference
+settings:
+  target_type: taxonomy_term
+module: core
+locked: false
+cardinality: -1
+translatable: true
+indexes: {  }
+persist_with_no_fields: false
+custom_storage: false
