@@ -203,7 +203,7 @@ fn singular_with_related() {
             Some(&PhpType::named(atom("App\\Models\\Post"))),
             None
         ),
-        Some(PhpType::named(atom("App\\Models\\Post")))
+        Some(PhpType::nullable(PhpType::named(atom("App\\Models\\Post"))))
     );
 }
 
@@ -295,7 +295,7 @@ fn singular_ignores_custom_collection() {
             Some(&PhpType::named(atom("App\\Models\\Post"))),
             Some("App\\Collections\\PostCollection")
         ),
-        Some(PhpType::named(atom("App\\Models\\Post")))
+        Some(PhpType::nullable(PhpType::named(atom("App\\Models\\Post"))))
     );
 }
 
