@@ -458,7 +458,17 @@ impl Backend {
                 from_test,
             })
         });
-        let unchanged = self.drupal.plugin_sources.read().get(uri) == sources.as_ref();
+        let (unchanged, managers_changed) = {
+            let stored = self.drupal.plugin_sources.read();
+            let old = stored.get(uri);
+            fn managers(sources: Option<&PluginSources>) -> &[PluginManagerSite] {
+                sources.map_or(&[], |sources| sources.managers.as_slice())
+            }
+            (
+                old == sources.as_ref(),
+                managers(old) != managers(sources.as_ref()),
+            )
+        };
         if !unchanged {
             let mut stored = self.drupal.plugin_sources.write();
             match sources {
@@ -485,8 +495,10 @@ impl Backend {
             }
         }
         // A receiver is confirmed as a plugin manager by the managers this
-        // index holds.
-        if !unchanged {
+        // index holds.  The plugins themselves do not type a receiver, and
+        // their offsets move with every edit above them, so a plugin class
+        // being indexed or edited leaves every file's confirmed spans be.
+        if managers_changed {
             self.retire_typed_receiver_spans();
         }
     }
