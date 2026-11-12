@@ -252,21 +252,22 @@ impl Backend {
         self.note_drupal_plugin_sources(uri, Some(map));
         self.note_drupal_entity_type_test_sources(uri, Some(map));
         self.note_drupal_theme_suggestions(map);
-        self.note_container_declarations(uri, declares.then_some(map));
         let was_declaring = self.symfony.declaring_uris.read().contains(uri);
         if was_declaring || !map.event_constant_keys.is_empty() {
             self.forget_event_constant_names();
         }
         // Only take the write lock when the answer changes.
-        if was_declaring == declares {
-            return;
+        if was_declaring != declares {
+            let mut uris = self.symfony.declaring_uris.write();
+            if declares {
+                uris.insert(uri.to_string());
+            } else {
+                uris.remove(uri);
+            }
         }
-        let mut uris = self.symfony.declaring_uris.write();
-        if declares {
-            uris.insert(uri.to_string());
-        } else {
-            uris.remove(uri);
-        }
+        // After the declaring files: a lookup that reads the container's
+        // new generation builds its index from them.
+        self.note_container_declarations(uri, declares.then_some(map));
     }
 
     /// Forget a file that no longer exists.
@@ -277,11 +278,11 @@ impl Backend {
         self.note_drupal_library_builder_sources(uri, None);
         self.note_drupal_plugin_sources(uri, None);
         self.note_drupal_entity_type_test_sources(uri, None);
-        self.note_container_declarations(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
             self.forget_event_constant_names();
         }
+        self.note_container_declarations(uri, None);
     }
 
     /// The names of the class constants the project's subscribers key their

@@ -75,6 +75,51 @@ async fn an_entity_type_id_goes_to_its_declaration_and_lists_its_readers() {
     );
 }
 
+#[tokio::test]
+async fn a_lookup_in_a_file_opened_before_the_index_is_read_again_once_it_is_built() {
+    let manager_class = "<?php\nnamespace Drupal\\Core\\Entity;\nclass EntityTypeManager implements EntityTypeManagerInterface {\n    public function getStorage(string $entity_type_id): EntityStorageInterface {}\n    public function getDefinition(string $entity_type_id, bool $exception_on_invalid = true): ?object { return null; }\n}\n";
+    let core_services =
+        "services:\n  entity_type.manager:\n    class: Drupal\\Core\\Entity\\EntityTypeManager\n";
+    let consumer = r#"<?php
+namespace Drupal\acme;
+
+final class StaticNotes {
+    public function run(): void {
+        \Drupal::service('entity_type.manager')->getStorage('acme_note');
+    }
+}
+"#;
+    let consumer_path = "web/modules/custom/acme/src/StaticNotes.php";
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in [
+        (MANAGER_PATH, MANAGER),
+        (
+            "web/core/lib/Drupal/Core/Entity/EntityTypeManager.php",
+            manager_class,
+        ),
+        ("web/core/core.services.yml", core_services),
+        (NOTE_PATH, NOTE),
+    ] {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    // The editor restores the tab before the workspace index runs, and a
+    // request reads the file against a container nothing has filled yet.
+    let (backend, dir) = workspace_in(dir, &[(consumer_path, consumer)]).await;
+    let php = uri_for(&dir, consumer_path);
+    let position = position_in(consumer, "getStorage('acme_note')", 13);
+    let _ = definitions_at(&backend, &php, position).await;
+    backend.ensure_workspace_indexed();
+
+    let found = definitions_at(&backend, &php, position).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        (&found[0].uri, found[0].range.start.line),
+        (&uri_for(&dir, NOTE_PATH), 6)
+    );
+}
+
 /// Core's entity classes sit in a folder the project's `.gitignore` leaves
 /// out, and its test modules declare entity types no real site has.
 #[tokio::test]

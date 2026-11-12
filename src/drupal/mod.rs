@@ -431,6 +431,9 @@ impl Backend {
         self.drupal.service_definition_files.write().clear();
         *self.drupal.php_service_ids.write() = None;
         self.drupal.config.clear();
+        // The service providers' replacements and the plugin managers type
+        // receivers, so lookups confirmed against them go with them.
+        self.retire_typed_receiver_spans();
     }
 
     /// Remember the declaration files the Drupal walk found: the YAML for

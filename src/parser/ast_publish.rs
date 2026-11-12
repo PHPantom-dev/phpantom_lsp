@@ -974,7 +974,10 @@ impl Backend {
         // A receiver's type is settled against the classes of the whole
         // workspace, so a signature change anywhere can turn a call that
         // was not a render into one, or the other way round.
-        self.blade.typed_receiver_spans_cache.write().clear();
+        // Retired here because `invalidate_container_index` only retires
+        // them when a configurator's typed calls make the index depend on
+        // signatures.
+        self.retire_typed_receiver_spans();
         self.invalidate_container_index(true);
         self.laravel.morph_column_spans_cache.write().clear();
     }
