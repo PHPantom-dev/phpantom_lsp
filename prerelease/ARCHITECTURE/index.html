@@ -5032,6 +5032,12 @@ loads selected targets as their names become known and removes contributions
 when a selector changes. The dynamic wrapper's scalar attributes become
 strings, while objects and arrays enter the inner view's data. Literal <code>:is</code>
 names navigate to components; variables and constants keep PHP navigation.</p>
+<p>Tempest route attributes keep their built-in prefixes precomputed. Custom
+route decorators are resolved once per attribute class within a request, in
+method-then-class order. Their <code>decorate()</code> bodies are read in the declaring
+file's namespace, including inherited and trait methods; recognized literal
+prefix transformations supply the same URI to completion, navigation, and
+parameter references without copying the route's declaration data.</p>
 <h2 id="tempest-model-property-names">Tempest model property names<a class="headerlink" href="#tempest-model-property-names" title="Permanent link">&para;</a></h2>
 <p>Tempest database property arguments use the shared resolver to read the model
 from a query builder's generic type. Model helpers are recognized by their
