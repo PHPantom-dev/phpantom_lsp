@@ -3,7 +3,8 @@
 A standalone editor playground for PHPantom on Drupal 11. It is a
 `drupal/recommended-project` site with one custom module, `acme`, and one
 theme, `acme_theme`, declaring a service, a route, a content entity type,
-a render element, a block plugin, hooks, a theme hook, permissions, and configuration the
+a render element, a block plugin, hooks, a theme hook, permissions, event
+subscribers, and configuration the
 way a real Drupal module declares them.
 
 Run `composer install` here first. Composer puts core and contrib into
@@ -193,6 +194,25 @@ Run `composer install` here first. Composer puts core and contrib into
   `web/modules/custom/acme/src/Plugin/Block/FarewellBlock.php`, go to the
   definition of `@Block`, which lands on core's block annotation class, or
   of `@Translation`, which lands on core's `Translation` annotation.
+- An event subscriber's `getSubscribedEvents()` names the methods that
+  listen to each event, whether it returns the map or builds it by
+  assignment. In
+  `web/modules/custom/acme/src/EventSubscriber/GreetingSubscriber.php`, go
+  to the definition of `'onResponse'`, which lands on the method, or hover
+  it; rename `onResponse()` and the string follows. Misspell a method name
+  in the map and it is reported. In `RequestSubscriber.php`, which returns
+  its map, find the references of `onRequest()`: the string is one of them.
+- Event names navigate from the dispatcher calls that name them to the
+  subscriptions that listen to them, and a class constant a subscriber
+  keys its map by is the event's definition. In `acme_announce_greeting()`
+  in `web/modules/custom/acme/acme.module`, go to the definition of
+  `'acme.greeted'`, which offers `GreetingEvents::GREETED` in
+  `src/Event/GreetingEvents.php` first, then the key of
+  `GreetingSubscriber`, or hover it to see how many listeners subscribe.
+  Find the references of `GREETED`, or of `'acme.greeted'`: the constant,
+  the subscription, and the dispatch are one list. Complete an event name
+  inside the quotes of `dispatch()` or of the dispatcher's other methods
+  that take one.
 
 ## What the Symfony support already reads
 
@@ -209,13 +229,6 @@ project. What works today:
   to the method `Greeter` takes from core's `StringTranslationTrait`, and a
   method name there completes from the public methods of the service's
   class.
-
-What does not work yet:
-
-- **Event subscribers.** The `getSubscribedEvents()` map of an event
-  subscriber is read only in a Symfony project, so in a Drupal site its
-  event names and listener methods neither complete nor navigate. See
-  `docs/todo/drupal.md`.
 
 ## Runtime assertions
 

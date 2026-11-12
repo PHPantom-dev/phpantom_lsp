@@ -329,12 +329,13 @@ impl StringKeyKind {
             | Self::MixAsset
             | Self::ViteAsset
             | Self::InertiaPage => KeyFramework::Laravel,
-            Self::ServiceId | Self::ContainerParameter => KeyFramework::ServiceContainer,
+            Self::ServiceId | Self::ContainerParameter | Self::SymfonyEvent => {
+                KeyFramework::ServiceContainer
+            }
             Self::SymfonyRoute
             | Self::SymfonyTranslation
             | Self::TranslationDomain
             | Self::SymfonyConfigKey
-            | Self::SymfonyEvent
             | Self::MessengerBus
             | Self::SerializerGroup => KeyFramework::Symfony,
             Self::TwigTemplate
@@ -467,11 +468,11 @@ pub(crate) enum KeyFramework {
     Laravel,
     /// Tempest's explicitly qualified view helper, including standalone use.
     Tempest,
-    /// Symfony's service IDs and container parameters, which any project
-    /// that builds a Symfony service container declares.
+    /// Symfony's service IDs, container parameters, and event names, which
+    /// any project that builds a Symfony service container declares.
     ServiceContainer,
     /// The rest of Symfony: routes, translations, bundle configuration,
-    /// events, and Messenger.
+    /// and Messenger.
     Symfony,
     /// Twig's template, block, filter, function, and variable names,
     /// read in any project that uses Twig.
@@ -707,6 +708,23 @@ pub(crate) struct MessengerHandlerSite {
     pub method: Atom,
     /// The message class, fully qualified.
     pub message: Atom,
+}
+
+/// An event subscription keyed by a class constant
+/// (`KernelEvents::REQUEST => 'onRequest'`), which declares the event name
+/// the constant holds.
+///
+/// Kept in a side table rather than as a span, since the name is only
+/// known once the constant's class is loaded, which is left to the lookups
+/// that ask for event names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EventConstantKey {
+    /// The byte range of the whole key, `KernelEvents::REQUEST`.
+    pub start: u32,
+    pub end: u32,
+    /// The class the key names, fully qualified without a leading `\`.
+    pub class: Atom,
+    pub constant: Atom,
 }
 
 /// A Twig filter or function an extension declares, and the PHP callable

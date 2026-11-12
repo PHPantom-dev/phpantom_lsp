@@ -133,7 +133,6 @@ ships, remove every row that names it.
 | DR13 | [Module names and `*.info.yml`](todo/drupal.md#dr13-module-names-and-infoyml) | Low-Medium | Low-Medium |
 | DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |
 | DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) | Medium-High | High        |
-| DR16 | [Event subscribers](todo/drupal.md#dr16-event-subscribers) | Medium | Low-Medium |
 | DR18 | [Warn on unknown entity type IDs](todo/drupal.md#dr18-warn-on-unknown-entity-type-ids) | Medium | Low-Medium |
 | DR19 | [Warn on unknown hook names](todo/drupal.md#dr19-warn-on-unknown-hook-names) | Low-Medium | Medium |
 | DR20 | [Complete route names built in code](todo/drupal.md#dr20-complete-route-names-built-in-code) | Low-Medium | Medium |
@@ -148,6 +147,7 @@ ships, remove every row that names it.
 | DR34 | [Callback parameter checks](todo/drupal.md#dr34-callback-parameter-checks) | Low | Low-Medium |
 | DR35 | [Invokable classes and services as callbacks](todo/drupal.md#dr35-invokable-classes-and-services-as-callbacks) | Low | Low-Medium |
 | DR36 | [Array callables that name their class in a string](todo/drupal.md#dr36-array-callables-that-name-their-class-in-a-string) | Low | Low |
+| DR37 | [Listener methods in subscriber maps](todo/drupal.md#dr37-listener-methods-in-subscriber-maps) | Low-Medium | Low-Medium |
 
 ## Yii
 

@@ -93,7 +93,16 @@ impl Backend {
         let (kind, prefix_start) = self
             .symfony_call_key(content, cursor, code, ctx, &mut receiver_type)
             .map(|kind| (kind, literal_start))
-            .or_else(|| attribute_key(content, code, literal, literal_start, ctx))
+            .or_else(|| {
+                attribute_key(
+                    content,
+                    code,
+                    literal,
+                    literal_start,
+                    ctx,
+                    self.is_symfony_project(),
+                )
+            })
             .filter(|(kind, _)| self.string_key_kind_enabled(*kind))?;
         // A config object's `get()`: its keys come from the name its type,
         // resolved once above, carries.
@@ -943,7 +952,8 @@ pub(crate) enum OfferedMethods {
 /// `#[AsMessageHandler]` string names, and where the name in it starts:
 /// `service:` a service, `param:` a parameter, and its value an `@id`
 /// service reference or a `%name%` placeholder; a `#[Template]`'s
-/// `template:` a template; an `#[AsEventListener]`'s `event:` an event; an
+/// `template:` a template; an `#[AsEventListener]`'s `event:` an event,
+/// in Symfony only, since Drupal never honours the attribute; an
 /// `#[AsMessageHandler]`'s `bus:` a bus.
 fn attribute_key(
     content: &str,
@@ -951,6 +961,7 @@ fn attribute_key(
     literal: &str,
     literal_start: usize,
     ctx: &FileContext,
+    is_symfony: bool,
 ) -> Option<(StringKeyKind, usize)> {
     let (callable, slot) = scalar_argument_at(content, code)?;
     let name_start = callable.len() - trailing_name(callable).len();
@@ -965,10 +976,11 @@ fn attribute_key(
         .then_some((StringKeyKind::TwigTemplate, literal_start));
     }
     if is_event_listener_attribute(&attribute) {
-        return matches!(
-            slot,
-            ArgumentSlot::Named("event") | ArgumentSlot::Positional(0)
-        )
+        return (is_symfony
+            && matches!(
+                slot,
+                ArgumentSlot::Named("event") | ArgumentSlot::Positional(0)
+            ))
         .then_some((StringKeyKind::SymfonyEvent, literal_start));
     }
     if crate::yii::routes::is_route_argument_attribute(&attribute) {

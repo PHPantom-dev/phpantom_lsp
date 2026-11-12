@@ -182,6 +182,16 @@ async fn definitions(backend: &Backend, uri: &Uri, position: Position) -> Vec<(U
 }
 
 async fn references(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Uri, u32)> {
+    references_with(backend, uri, position, true).await
+}
+
+/// [`references`], with the declaration included or not.
+async fn references_with(
+    backend: &Backend,
+    uri: &Uri,
+    position: Position,
+    include_declaration: bool,
+) -> Vec<(Uri, u32)> {
     let mut found: Vec<(Uri, u32)> = backend
         .references(ReferenceParams {
             text_document_position_params: TextDocumentPositionParams {
@@ -191,7 +201,7 @@ async fn references(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Ur
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
-                include_declaration: true,
+                include_declaration,
             },
         })
         .await
@@ -202,6 +212,35 @@ async fn references(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Ur
         .collect();
     found.sort();
     found
+}
+
+/// The definitions of the name at `position`, in the order given.
+async fn definitions_in_order(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Uri, u32)> {
+    let response = backend
+        .goto_definition(DefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+    match response {
+        None => Vec::new(),
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => vec![location],
+        Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => locations,
+        Some(DefinitionResponse::DefinitionLinkList(_)) => panic!("unexpected location links"),
+    }
+    .into_iter()
+    .map(|location| (location.uri, location.range.start.line))
+    .collect()
+}
+
+/// The line `needle` first appears on.
+fn line_of(content: &str, needle: &str) -> u32 {
+    position_in(content, needle, 0).line
 }
 
 fn sorted(mut locations: Vec<(Uri, u32)>) -> Vec<(Uri, u32)> {
@@ -317,6 +356,55 @@ async fn a_listener_method_goes_to_the_method_and_an_unknown_one_is_reported() {
 }
 
 #[tokio::test]
+async fn a_map_built_by_assignment_subscribes_and_names_its_methods() {
+    let subscriber = r#"<?php
+namespace App\EventSubscriber;
+
+final class ShippingSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        $events['app.order.placed'][] = ['onPlaced', 10];
+        $events['app.order.shipped'] = 'onShipped';
+        return $events;
+    }
+
+    public function onPlaced(object $event): void {}
+
+    public function onShipped(object $event): void {}
+}
+"#;
+    let path = "src/EventSubscriber/ShippingSubscriber.php";
+    let (backend, dir) = workspace(&[
+        (path, subscriber),
+        ("src/Service/Checkout.php", DISPATCHER_PHP),
+    ])
+    .await;
+    let uri = uri_for(&dir, path);
+    let checkout = uri_for(&dir, "src/Service/Checkout.php");
+
+    let found = definitions(&backend, &uri, position_in(subscriber, "'onPlaced'", 3)).await;
+    assert_eq!(found, vec![(uri.clone(), 12)]);
+    let found = definitions(&backend, &uri, position_in(subscriber, "'onShipped'", 3)).await;
+    assert_eq!(found, vec![(uri.clone(), 14)]);
+
+    let found = definitions(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+    )
+    .await;
+    assert_eq!(found, vec![(uri.clone(), 7)]);
+    let found = definitions(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.shipped'", 3),
+    )
+    .await;
+    assert_eq!(found, vec![(uri, 8)]);
+}
+
+#[tokio::test]
 async fn event_names_complete_where_listeners_and_dispatchers_take_them() {
     let subscription = r#"<?php
 namespace App\Service;
@@ -366,6 +454,584 @@ function run(EventDispatcherInterface $events, object $event): void
         .await;
         assert_eq!(labels, expected, "in {path}");
     }
+}
+
+const ORDER_EVENTS_PHP: &str = r#"<?php
+namespace App\Event;
+
+final class OrderEvents extends BaseEvents implements StoreEvents
+{
+    public const PLACED = 'app.order.placed';
+    public const JOINED = 'app.order.' . 'joined';
+    public const ALIAS = self::PLACED;
+    public const PRICED = "app.order.\$priced";
+    public const DRAFTED = 'app.order.drafted';
+}
+"#;
+
+const BASE_EVENTS_PHP: &str = r#"<?php
+namespace App\Event;
+
+abstract class BaseEvents
+{
+    public const CLOSED = 'app.order.closed';
+}
+"#;
+
+const STORE_EVENTS_PHP: &str = r#"<?php
+namespace App\Event;
+
+interface StoreEvents
+{
+    public const OPENED = "app.store.opened";
+}
+"#;
+
+const PLACE_ORDER_PHP: &str = r#"<?php
+namespace App\Event;
+
+final class PlaceOrder {}
+"#;
+
+/// A subscriber keyed only by constants, so it writes no event string.
+const CONSTANT_SUBSCRIBER_PHP: &str = r#"<?php
+namespace App\EventSubscriber;
+
+use App\Event\OrderEvents;
+use App\Event\PlaceOrder;
+
+final class StoreSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        $events[OrderEvents::PLACED][] = ['onPlaced', 10];
+        $events[OrderEvents::CLOSED][] = 'onClosed';
+        $events[OrderEvents::OPENED][] = 'onOpened';
+        $events[OrderEvents::JOINED][] = 'onJoined';
+        $events[OrderEvents::ALIAS][] = 'onAlias';
+        $events[OrderEvents::PRICED][] = 'onPriced';
+        $events[PlaceOrder::class][] = 'onPlaceOrder';
+        return $events;
+    }
+
+    public function onPlaced(object $event): void {}
+    public function onClosed(object $event): void {}
+    public function onOpened(object $event): void {}
+    public function onJoined(object $event): void {}
+    public function onAlias(object $event): void {}
+    public function onPriced(object $event): void {}
+    public function onPlaceOrder(object $event): void {}
+}
+"#;
+
+const DISPATCH_ANY_PHP: &str = r#"<?php
+namespace App\Service;
+
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
+
+function announce(EventDispatcherInterface $events, object $event): void
+{
+    $events->dispatch($event, '');
+}
+"#;
+
+#[tokio::test]
+async fn a_subscription_keyed_by_a_constant_declares_its_value() {
+    let (backend, dir) = workspace(&[
+        ("src/Event/OrderEvents.php", ORDER_EVENTS_PHP),
+        ("src/Event/BaseEvents.php", BASE_EVENTS_PHP),
+        ("src/Event/StoreEvents.php", STORE_EVENTS_PHP),
+        ("src/Event/PlaceOrder.php", PLACE_ORDER_PHP),
+        (
+            "src/EventSubscriber/StoreSubscriber.php",
+            CONSTANT_SUBSCRIBER_PHP,
+        ),
+        ("src/Service/announce.php", DISPATCH_ANY_PHP),
+        ("src/Service/Checkout.php", DISPATCHER_PHP),
+    ])
+    .await;
+    let subscriber = uri_for(&dir, "src/EventSubscriber/StoreSubscriber.php");
+    let announce = uri_for(&dir, "src/Service/announce.php");
+    let checkout = uri_for(&dir, "src/Service/Checkout.php");
+    let anywhere = position_in(DISPATCH_ANY_PHP, "$event, ''", 9);
+
+    // An inherited constant counts, from a parent or an interface, and so
+    // does a double-quoted string, which a constant cannot interpolate; a
+    // class name, a concatenation, and another constant declare nothing.
+    let labels = completion_labels(&backend, &announce, anywhere).await;
+    assert_eq!(
+        labels,
+        vec![
+            "app.order.$priced",
+            "app.order.closed",
+            "app.order.placed",
+            "app.store.opened"
+        ]
+    );
+
+    let found = definitions(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+    )
+    .await;
+    let events = uri_for(&dir, "src/Event/OrderEvents.php");
+    assert_eq!(
+        found,
+        sorted(vec![(events.clone(), 5), (subscriber.clone(), 10)])
+    );
+
+    let position = position_in(DISPATCHER_PHP, "'app.order.placed'", 3);
+    let hover =
+        crate::common::hover_text_at(&backend, &checkout, position.line, position.character)
+            .await
+            .unwrap_or_default();
+    assert!(hover.contains("1 listener in the project"), "{hover}");
+
+    // The subscription the constant declares is among the references, as
+    // it is among the definitions, with the constant and its other use.
+    let found = references(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+    )
+    .await;
+    assert_eq!(
+        found,
+        sorted(vec![
+            (checkout.clone(), 11),
+            (events.clone(), 5),
+            (events.clone(), 7),
+            (subscriber.clone(), 10)
+        ])
+    );
+
+    // The value is read when the names are asked for.
+    let changed = ORDER_EVENTS_PHP.replace("'app.order.placed'", "'app.order.submitted'");
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                text_document_identifier: TextDocumentIdentifier {
+                    uri: uri_for(&dir, "src/Event/OrderEvents.php"),
+                },
+                version: 2,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                    TextDocumentContentChangeWholeDocument { text: changed },
+                ),
+            ],
+        })
+        .await;
+    let labels = completion_labels(&backend, &announce, anywhere).await;
+    assert_eq!(
+        labels,
+        vec![
+            "app.order.$priced",
+            "app.order.closed",
+            "app.order.submitted",
+            "app.store.opened"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_event_constant_is_the_definition_of_its_event_name() {
+    // A constant no subscriber keys by, and a dispatch of the name it holds.
+    let drafts = r#"<?php
+namespace App\Service;
+
+use App\Event\OrderEvents;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
+
+function draft(EventDispatcherInterface $events, object $order): void
+{
+    $events->dispatch($order, 'app.order.drafted');
+    $events->dispatch($order, OrderEvents::DRAFTED);
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("src/Event/OrderEvents.php", ORDER_EVENTS_PHP),
+        ("src/Event/BaseEvents.php", BASE_EVENTS_PHP),
+        ("src/Event/StoreEvents.php", STORE_EVENTS_PHP),
+        ("src/Event/PlaceOrder.php", PLACE_ORDER_PHP),
+        (
+            "src/EventSubscriber/StoreSubscriber.php",
+            CONSTANT_SUBSCRIBER_PHP,
+        ),
+        ("src/Service/Checkout.php", DISPATCHER_PHP),
+        ("src/Service/draft.php", drafts),
+    ])
+    .await;
+    let events = uri_for(&dir, "src/Event/OrderEvents.php");
+    let base = uri_for(&dir, "src/Event/BaseEvents.php");
+    let subscriber = uri_for(&dir, "src/EventSubscriber/StoreSubscriber.php");
+    let checkout = uri_for(&dir, "src/Service/Checkout.php");
+    let draft = uri_for(&dir, "src/Service/draft.php");
+    let declared = (events.clone(), line_of(ORDER_EVENTS_PHP, "PLACED ="));
+    let key = (
+        subscriber.clone(),
+        line_of(CONSTANT_SUBSCRIBER_PHP, "OrderEvents::PLACED"),
+    );
+    let dispatched = (
+        checkout.clone(),
+        line_of(DISPATCHER_PHP, "'app.order.placed'"),
+    );
+    let aliased = (events.clone(), line_of(ORDER_EVENTS_PHP, "self::PLACED"));
+
+    // The constant first, then every subscription; a constant inherited
+    // from a parent is declared there.
+    let found = definitions_in_order(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+    )
+    .await;
+    assert_eq!(found, vec![declared.clone(), key.clone()]);
+    let closed = (
+        subscriber.clone(),
+        line_of(CONSTANT_SUBSCRIBER_PHP, "OrderEvents::CLOSED"),
+    );
+    let announce = DISPATCH_ANY_PHP.replace("''", "'app.order.closed'");
+    let announce_uri = uri_for(&dir, "src/Service/announce.php");
+    open_document(&backend, &announce_uri, "php", &announce).await;
+    let found = definitions_in_order(
+        &backend,
+        &announce_uri,
+        position_in(&announce, "'app.order.closed'", 3),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![(base.clone(), line_of(BASE_EVENTS_PHP, "CLOSED =")), closed]
+    );
+
+    // The same event from the string, the constant's declaration, its
+    // use as a key, and the string it is initialized with.
+    let everything = sorted(vec![
+        declared.clone(),
+        aliased.clone(),
+        key.clone(),
+        dispatched.clone(),
+    ]);
+    for (uri, content, needle, inside) in [
+        (&checkout, DISPATCHER_PHP, "'app.order.placed'", 3),
+        (&events, ORDER_EVENTS_PHP, "PLACED =", 2),
+        (
+            &subscriber,
+            CONSTANT_SUBSCRIBER_PHP,
+            "OrderEvents::PLACED",
+            15,
+        ),
+        (&events, ORDER_EVENTS_PHP, "'app.order.placed'", 3),
+    ] {
+        let found = references(&backend, uri, position_in(content, needle, inside)).await;
+        assert_eq!(found, everything, "from {needle} in {}", uri.as_str());
+    }
+    // Without declarations, the constant's own and the subscription,
+    // which declares the event whatever its spelling, are left out; the
+    // constant's other uses stay.
+    let found = references_with(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+        false,
+    )
+    .await;
+    assert_eq!(found, sorted(vec![aliased, dispatched]));
+
+    // Definition on the constant's name stays PHP's own.
+    let found = definitions_in_order(
+        &backend,
+        &subscriber,
+        position_in(CONSTANT_SUBSCRIBER_PHP, "OrderEvents::PLACED", 15),
+    )
+    .await;
+    assert_eq!(found, vec![declared]);
+
+    // Renaming the constant leaves the event strings alone.
+    let position = position_in(ORDER_EVENTS_PHP, "PLACED =", 2);
+    let edit = crate::common::rename(
+        &backend,
+        &events,
+        position.line,
+        position.character,
+        "SUBMITTED",
+    )
+    .await
+    .expect("the rename should produce edits");
+    let changes = edit.changes.expect("a change map");
+    assert!(!changes.contains_key(&checkout), "{changes:?}");
+    assert!(
+        changes
+            .values()
+            .flatten()
+            .all(|edit| edit.new_text == "SUBMITTED"),
+        "{changes:?}"
+    );
+
+    // A constant no subscriber keys by is a plain constant.
+    let drafted = (events.clone(), line_of(ORDER_EVENTS_PHP, "DRAFTED ="));
+    let found = references(
+        &backend,
+        &events,
+        position_in(ORDER_EVENTS_PHP, "DRAFTED =", 2),
+    )
+    .await;
+    assert_eq!(
+        found,
+        sorted(vec![
+            drafted,
+            (draft.clone(), line_of(drafts, "OrderEvents::DRAFTED"))
+        ])
+    );
+    let found = definitions_in_order(
+        &backend,
+        &draft,
+        position_in(drafts, "'app.order.drafted'", 3),
+    )
+    .await;
+    assert!(found.is_empty(), "{found:?}");
+}
+
+/// Where `rel` is on disk, spelled the way the index stores it.
+fn canonical_uri(dir: &tempfile::TempDir, rel: &str) -> Uri {
+    Uri::from_file_path(dunce::canonicalize(dir.path().join(rel)).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn the_first_definition_of_an_event_name_loads_a_constant_composer_installs() {
+    let vendored = r#"<?php
+namespace Acme\OrderEvents;
+
+final class OrderEvents
+{
+    public const PLACED = 'app.order.placed';
+}
+"#;
+    let subscriber = r#"<?php
+namespace App\EventSubscriber;
+
+use Acme\OrderEvents\OrderEvents;
+
+final class VendorSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        return [OrderEvents::PLACED => 'onPlaced'];
+    }
+
+    public function onPlaced(object $event): void {}
+}
+"#;
+    let installed = r#"{ "packages": [ { "name": "acme/order-events", "install-path": "../acme/order-events", "autoload": { "psr-4": { "Acme\\OrderEvents\\": "src/" } } } ] }"#;
+    let all: Vec<(&str, &str)> = STUBS
+        .iter()
+        .copied()
+        .chain([
+            ("vendor/composer/installed.json", installed),
+            ("vendor/acme/order-events/src/OrderEvents.php", vendored),
+            ("src/EventSubscriber/VendorSubscriber.php", subscriber),
+            ("src/Service/Checkout.php", DISPATCHER_PHP),
+        ])
+        .collect();
+    let (backend, dir) = create_psr4_workspace(COMPOSER, &all);
+    // `initialized` reads the packages Composer installed.
+    backend.initialized(InitializedParams {}).await;
+    for (path, content) in [
+        ("src/EventSubscriber/VendorSubscriber.php", subscriber),
+        ("src/Service/Checkout.php", DISPATCHER_PHP),
+    ] {
+        open_document(&backend, &uri_for(&dir, path), "php", content).await;
+    }
+    let checkout = uri_for(&dir, "src/Service/Checkout.php");
+    let found = definitions_in_order(
+        &backend,
+        &checkout,
+        position_in(DISPATCHER_PHP, "'app.order.placed'", 3),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![
+            (
+                canonical_uri(&dir, "vendor/acme/order-events/src/OrderEvents.php"),
+                5
+            ),
+            (uri_for(&dir, "src/EventSubscriber/VendorSubscriber.php"), 9),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn hover_counts_each_listener_whatever_the_map_shape() {
+    let listed = r#"<?php
+namespace App\EventSubscriber;
+
+final class ListedSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        return ['app.order.placed' => [['onPlaced', 10], ['onLogged']]];
+    }
+
+    public function onPlaced(object $event): void {}
+    public function onLogged(object $event): void {}
+}
+"#;
+    let appended = r#"<?php
+namespace App\EventSubscriber;
+
+final class AppendedSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        $events['app.order.shipped'][] = ['onShipped', 10];
+        $events['app.order.shipped'][] = 'onLogged';
+        return $events;
+    }
+
+    public function onShipped(object $event): void {}
+    public function onLogged(object $event): void {}
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("src/EventSubscriber/ListedSubscriber.php", listed),
+        ("src/EventSubscriber/AppendedSubscriber.php", appended),
+        ("src/Service/Checkout.php", DISPATCHER_PHP),
+    ])
+    .await;
+    let checkout = uri_for(&dir, "src/Service/Checkout.php");
+    for needle in ["'app.order.placed'", "'app.order.shipped'"] {
+        let position = position_in(DISPATCHER_PHP, needle, 3);
+        let hover =
+            crate::common::hover_text_at(&backend, &checkout, position.line, position.character)
+                .await
+                .unwrap_or_default();
+        assert!(
+            hover.contains("2 listeners in the project"),
+            "{needle}: {hover}"
+        );
+    }
+}
+
+/// Like [`COMPOSER`], with global classes under `lib/`.
+const CLASSMAP_COMPOSER: &str = r#"{
+    "require": { "symfony/framework-bundle": "^7.3" },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "Symfony\\Component\\EventDispatcher\\": "stubs/event-dispatcher/",
+            "Symfony\\Contracts\\EventDispatcher\\": "stubs/event-dispatcher-contracts/",
+            "Symfony\\Component\\Messenger\\": "stubs/messenger/"
+        },
+        "classmap": ["lib/"]
+    }
+}"#;
+
+#[tokio::test]
+async fn a_constant_key_names_its_class_the_way_php_does() {
+    let namespaced = r#"<?php
+namespace App\Event;
+
+final class OrderEvents
+{
+    public const PLACED = 'app.order.placed';
+    public const PAID = 'app.order.paid';
+    public const SHIPPED = 'app.order.shipped';
+}
+"#;
+    let global = r#"<?php
+
+final class OrderEvents
+{
+    public const PLACED = 'global.order.placed';
+    public const PAID = 'global.order.paid';
+}
+"#;
+    let imported = r#"<?php
+namespace App\EventSubscriber;
+
+use App\Event\OrderEvents;
+
+final class ImportedSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        return [OrderEvents::PLACED => 'onPlaced'];
+    }
+
+    public function onPlaced(object $event): void {}
+}
+"#;
+    // No import: `OrderEvents` is a class of this namespace, which does
+    // not exist, never the global one.
+    let unimported = r#"<?php
+namespace App\EventSubscriber;
+
+final class UnimportedSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        $events[OrderEvents::PAID][] = 'onPaid';
+        $events[\App\Event\OrderEvents::SHIPPED][] = 'onShipped';
+        return $events;
+    }
+
+    public function onPaid(object $event): void {}
+    public function onShipped(object $event): void {}
+}
+"#;
+    let global_subscriber = r#"<?php
+
+final class GlobalSubscriber
+{
+    public static function getSubscribedEvents(): array
+    {
+        return [OrderEvents::PAID => 'onPaid'];
+    }
+
+    public function onPaid(object $event): void {}
+}
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("composer.json"), CLASSMAP_COMPOSER).unwrap();
+    let files: Vec<(&str, &str)> = STUBS
+        .iter()
+        .copied()
+        .chain([
+            ("src/Event/OrderEvents.php", namespaced),
+            ("lib/OrderEvents.php", global),
+            ("src/EventSubscriber/ImportedSubscriber.php", imported),
+            ("src/EventSubscriber/UnimportedSubscriber.php", unimported),
+            ("lib/GlobalSubscriber.php", global_subscriber),
+            ("src/Service/announce.php", DISPATCH_ANY_PHP),
+        ])
+        .collect();
+    for (path, content) in &files {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let backend = Backend::new_test();
+    crate::common::initialize_with_options(&backend, dir.path(), None).await;
+    // Only the dispatcher is open: the subscribers are read by the
+    // workspace index, as a subscriber nobody has open is.  A test backend
+    // has no client, so `initialized` leaves the index out.
+    backend.ensure_workspace_indexed();
+    let announce = uri_for(&dir, "src/Service/announce.php");
+    open_document(&backend, &announce, "php", DISPATCH_ANY_PHP).await;
+
+    let labels = completion_labels(
+        &backend,
+        &announce,
+        position_in(DISPATCH_ANY_PHP, "$event, ''", 9),
+    )
+    .await;
+    assert_eq!(
+        labels,
+        vec!["app.order.placed", "app.order.shipped", "global.order.paid"]
+    );
 }
 
 #[tokio::test]

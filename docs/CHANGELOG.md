@@ -108,6 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Symfony services and parameters are typed.** In a Symfony project, `$container->get('app.mailer')` is the class the service is declared with, through any aliases, and `getParameter('app.sender')` has the type of the value the parameter is declared with. A query bus's `HandleTrait::handle()` returns what the message's handler returns.
 - **Decorated services.** A service that decorates another, in a Symfony services file, a Drupal `*.services.yml`, or a PHP configurator, takes over its ID, so a lookup of that ID is typed as the decorator's class as well as its own. The ID a YAML `decorates:` names jumps to its declaration and counts among its references.
 - **Methods a service definition calls.** A method named under a service's `calls:` in a Symfony services file or a Drupal `*.services.yml`, or in XML's `<call method="…">`, jumps to its declaration, completes from the public methods of the service's class, and counts among the method's references.
+- **Event subscriber maps built in code or keyed by constants.** A subscriber's `getSubscribedEvents()` is read when it builds its map by assignment (`$events[KernelEvents::REQUEST][] = ['onRequest', 10];`) as well as when it returns one, and a key written as a class constant declares the event name the constant holds, which makes the constant that event's definition for navigation and Find References. Contributed by @giuseppe-esposito-87.
 
 #### Doctrine
 
@@ -149,6 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Drupal annotations without imports.** In a Drupal project, an annotation on a plugin class that no `use` imports, such as `@Block` or `@Translation`, jumps to its class, shows it on hover, and is found by Find References, wherever Drupal's plugin discovery would find it.
 - **Controller methods of a Drupal service.** In a routing file, the method of a `_controller` or `_title_callback` written as `service:method` jumps to the method of the service's class, completes from its public methods, and is listed among the method's references.
 - **Drupal form and render callbacks.** In a Drupal project, a callback named in a form or render array, such as a `#submit`, `#validate`, `#pre_render`, or `#ajax` callback, jumps to its method or function, completes, shows it on hover, is renamed with it, and lists its references. A callback that names nothing, or that cannot be called, is reported. Contributed by @giuseppe-esposito-87.
+- **Drupal event subscribers.** In a Drupal project, event subscribers are read as they are in Symfony: the methods a subscriber's map names navigate and are checked, and an event name passed to the event dispatcher completes and leads to the constant that names it, if any, and to every subscription that listens to it. Contributed by @giuseppe-esposito-87.
 
 #### WordPress
 

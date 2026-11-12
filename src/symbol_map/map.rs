@@ -301,6 +301,14 @@ pub(crate) struct SymbolMap {
     /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
     /// register.  Empty for every file that declares none.
     pub messenger_handlers: Vec<MessengerHandlerSite>,
+    /// The event subscriptions the file's subscribers key by a class
+    /// constant, in the order each subscriber's map is read.  Empty for
+    /// every file that has none.
+    pub event_constant_keys: Vec<EventConstantKey>,
+    /// The event subscriptions whose value lists other than one listener
+    /// (`[['onEvent', 10], ['onOther']]`), by where their key starts, with
+    /// how many it lists.  Every other subscription names one.
+    pub event_listener_lists: Vec<(u32, u32)>,
     /// The Twig filters and functions the file declares, in source order.
     /// Empty for every file that declares none.
     pub twig_callables: Vec<TwigCallableSite>,
@@ -428,6 +436,15 @@ pub(crate) struct SymbolMap {
 }
 
 impl SymbolMap {
+    /// How many listeners the event subscription whose key starts at
+    /// `start` names.
+    pub(crate) fn event_listeners_at(&self, start: u32) -> usize {
+        self.event_listener_lists
+            .iter()
+            .find(|(key, _)| *key == start)
+            .map_or(1, |(_, listeners)| *listeners as usize)
+    }
+
     /// Whether this map's offsets are valid indices into `content`.
     ///
     /// A length match means no text was inserted or removed since the map

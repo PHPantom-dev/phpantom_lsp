@@ -222,6 +222,7 @@ mod drupal_config;
 mod drupal_config_keys;
 mod drupal_directories;
 mod drupal_entities;
+mod drupal_events;
 mod drupal_hooks;
 mod drupal_libraries;
 mod drupal_mixed_workspace;

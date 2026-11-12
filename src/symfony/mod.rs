@@ -36,6 +36,7 @@
 pub(crate) mod bundles;
 pub(crate) mod config_tree;
 pub(crate) mod container;
+pub(crate) mod event_constants;
 pub(crate) mod form_options;
 pub(crate) mod forms;
 pub(crate) mod kernel;
@@ -135,6 +136,10 @@ pub(crate) struct SymfonyState {
     vendor_form_classes: form_options::VendorFormClasses,
     /// Where the project's kernels keep their configuration.
     kernel_config: RwLock<kernel::KernelConfig>,
+    /// The names of the class constants subscribers key their maps by,
+    /// built when first asked for and dropped when a file that keys by one
+    /// changes.
+    event_constant_names: RwLock<Option<std::sync::Arc<crate::atom::AtomSet>>>,
 }
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
@@ -166,6 +171,7 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
         || (!map.service_decorations.is_empty() && enabled(StringKeyKind::ServiceId))
         || (map.declares_twig_loader && enabled(StringKeyKind::TwigTemplate))
+        || (!map.event_constant_keys.is_empty() && enabled(StringKeyKind::SymfonyEvent))
         || (map.sets_unread_yii_view_parameters && enabled(StringKeyKind::YiiViewParameter))
         || ((!map.drupal_route_patterns.is_empty() || !map.drupal_route_aliases.is_empty())
             && enabled(StringKeyKind::DrupalRoute))
@@ -184,6 +190,10 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
             .iter()
             .any(|site| site.is_write && site.receiver.names_any(counts))
 }
+
+/// The classes the constant keys of one lookup of event names have loaded,
+/// by name, each fully resolved, or `None` when it does not load.
+type EventConstantClasses = crate::atom::AtomMap<Option<std::sync::Arc<crate::types::ClassInfo>>>;
 
 impl Backend {
     /// Whether the project builds a Symfony service container; see
@@ -244,6 +254,9 @@ impl Backend {
         self.note_drupal_theme_suggestions(map);
         self.note_container_declarations(uri, declares.then_some(map));
         let was_declaring = self.symfony.declaring_uris.read().contains(uri);
+        if was_declaring || !map.event_constant_keys.is_empty() {
+            self.forget_event_constant_names();
+        }
         // Only take the write lock when the answer changes.
         if was_declaring == declares {
             return;
@@ -267,6 +280,28 @@ impl Backend {
         self.note_container_declarations(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
+            self.forget_event_constant_names();
+        }
+    }
+
+    /// The names of the class constants the project's subscribers key their
+    /// maps by, of any class.
+    pub(crate) fn event_constant_names(&self) -> std::sync::Arc<crate::atom::AtomSet> {
+        if let Some(names) = self.symfony.event_constant_names.read().as_ref() {
+            return std::sync::Arc::clone(names);
+        }
+        let mut names = crate::atom::AtomSet::default();
+        self.visit_declaring_symbol_maps(|_, map| {
+            names.extend(map.event_constant_keys.iter().map(|key| key.constant));
+        });
+        let names = std::sync::Arc::new(names);
+        *self.symfony.event_constant_names.write() = Some(std::sync::Arc::clone(&names));
+        names
+    }
+
+    fn forget_event_constant_names(&self) {
+        if self.symfony.event_constant_names.read().is_some() {
+            *self.symfony.event_constant_names.write() = None;
         }
     }
 
@@ -338,6 +373,9 @@ impl Backend {
             | KeyFramework::WordPress
             | KeyFramework::Tempest => true,
         };
+        let mut event_constants =
+            (kind == StringKeyKind::SymfonyEvent).then(EventConstantClasses::default);
+        let loader = self.resolved_class_loader_with(&[]);
         for uri in uris {
             let Some(map) = self.symbol_map_for(&uri) else {
                 continue;
@@ -359,7 +397,83 @@ impl Backend {
                     visit(&uri, &map, span.start, span.end, key);
                 }
             }
+            if let Some(classes) = &mut event_constants {
+                for key in &map.event_constant_keys {
+                    if let Some(value) = self.event_constant_value(key, &loader, classes) {
+                        visit(&uri, &map, key.start, key.end, &value);
+                    }
+                }
+            }
         }
+    }
+
+    /// How many listeners subscribe to the event `name`: every declaration
+    /// of it is a subscription, and a subscription may list several.
+    pub(crate) fn symfony_event_listener_count(&self, name: &str) -> usize {
+        let mut listeners = 0;
+        self.visit_symfony_declarations(
+            StringKeyKind::SymfonyEvent,
+            |_, map, start, _, declared| {
+                if declared == name {
+                    listeners += map.event_listeners_at(start);
+                }
+            },
+        );
+        listeners
+    }
+
+    /// Visit every event subscription keyed by a class constant that holds
+    /// a plain string, among the ones `wanted` keeps: the file, the key, and
+    /// the event name it declares.  Only the keys kept load their class.
+    pub(crate) fn visit_event_constant_keys(
+        &self,
+        wanted: impl Fn(&crate::symbol_map::EventConstantKey) -> bool,
+        mut visit: impl FnMut(&str, &crate::symbol_map::EventConstantKey, &str),
+    ) {
+        if !self.string_key_kind_enabled(StringKeyKind::SymfonyEvent) {
+            return;
+        }
+        let loader = self.resolved_class_loader_with(&[]);
+        let mut classes = EventConstantClasses::default();
+        self.visit_declaring_symbol_maps(|uri, map| {
+            for key in map.event_constant_keys.iter().filter(|key| wanted(key)) {
+                if let Some(value) = self.event_constant_value(key, &loader, &mut classes) {
+                    visit(uri, key, &value);
+                }
+            }
+        });
+    }
+
+    /// The event name a subscription keyed by a class constant declares:
+    /// the constant's value, when it is a plain string literal.  The class
+    /// is read with what it inherits, so a constant from a parent or an
+    /// interface counts.
+    fn event_constant_value(
+        &self,
+        key: &crate::symbol_map::EventConstantKey,
+        loader: &crate::class_lookup::ResolvedClassLoader<'_>,
+        classes: &mut EventConstantClasses,
+    ) -> Option<String> {
+        let class = classes
+            .entry(key.class)
+            .or_insert_with(|| {
+                let class = loader(crate::class_lookup::Fqn::new(key.class.as_str()))?;
+                Some(crate::virtual_members::resolve_class_fully_cached(
+                    &class,
+                    loader,
+                    &self.resolved_class_cache,
+                ))
+            })
+            .as_ref()?;
+        let constant = class.get_constant(key.constant.as_str())?;
+        if constant.is_enum_case {
+            return None;
+        }
+        let value = constant.value.as_deref()?.trim();
+        // A constant's initializer cannot interpolate, so a double-quoted
+        // string is a plain one too, with its escapes decoded.
+        crate::text_scan::unquote_php_string(value)?;
+        crate::text_scan::decode_php_string_literal(value).map(std::borrow::Cow::into_owned)
     }
 
     /// Every service ID, container parameter, route name, translation key

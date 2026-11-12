@@ -23,3 +23,14 @@ services:
     arguments: ['@.inner']
   # Lets controllers and hook classes autowire the greeter by its class.
   Drupal\acme\Greeter: '@acme.greeter'
+  # Try: open src/EventSubscriber/GreetingSubscriber.php, which builds its
+  # map by assignment, or src/EventSubscriber/RequestSubscriber.php, which
+  # returns it. Each listener method its map names navigates.
+  acme.greeting_subscriber:
+    class: Drupal\acme\EventSubscriber\GreetingSubscriber
+    tags:
+      - { name: event_subscriber }
+  acme.request_subscriber:
+    class: Drupal\acme\EventSubscriber\RequestSubscriber
+    tags:
+      - { name: event_subscriber }

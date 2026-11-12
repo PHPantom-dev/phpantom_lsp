@@ -17,6 +17,9 @@ use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Controller\NoteController;
 use Drupal\acme\Element\GreetingCard;
 use Drupal\acme\Entity\Note;
+use Drupal\acme\Event\GreetingEvents;
+use Drupal\acme\EventSubscriber\GreetingSubscriber;
+use Drupal\acme\EventSubscriber\RequestSubscriber;
 use Drupal\acme\Form\GreetingForm;
 use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
@@ -33,6 +36,7 @@ use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Block\Attribute\Block;
 use Drupal\Core\Block\BlockBase;
 use Drupal\Core\Block\BlockManager;
+use Drupal\Core\Config\ConfigEvents;
 use Drupal\Core\Field\Attribute\FieldType;
 use Drupal\Core\Field\Attribute\FieldWidget;
 use Drupal\Core\Field\Plugin\Field\FieldType\StringItem;
@@ -72,6 +76,9 @@ use Drupal\Core\Url;
 use Drupal\Core\Utility\CallableResolver;
 use Drupal\language\ConfigurableLanguageManager;
 use Drupal\language\LanguageServiceProvider;
+use Symfony\Component\EventDispatcher\EventDispatcher;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Component\HttpKernel\KernelEvents;
 
 $passed = 0;
 $failed = 0;
@@ -182,6 +189,67 @@ check('RequestClock can stand in for Time', is_subclass_of(RequestClock::class, 
 check('Only RequestClock declares secondsSinceRequest()', method_exists(RequestClock::class, 'secondsSinceRequest') && !method_exists(Time::class, 'secondsSinceRequest'));
 check('RequestClock::secondsSinceRequest() returns an int', is_int((new RequestClock(new Time()))->secondsSinceRequest()));
 check('acme_request_age() looks up datetime.time', str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('datetime.time')"));
+
+// ─── Event subscribers ──────────────────────────────────────────────────────
+
+/**
+ * The methods a subscriber's map names for each event: the value is one
+ * method, a method with its priority, or a list of either.
+ *
+ * @return array<string, list<string>>
+ */
+function listenerMethods(array $events): array
+{
+    $methods = [];
+    foreach ($events as $event => $listeners) {
+        if (is_string($listeners)) {
+            $listeners = [[$listeners]];
+        } elseif (is_string($listeners[0] ?? null)) {
+            $listeners = [$listeners];
+        }
+        $methods[$event] = array_map(fn (array $listener) => $listener[0], $listeners);
+    }
+    return $methods;
+}
+
+$subscribers = [
+    'acme.greeting_subscriber' => [GreetingSubscriber::class, [
+        KernelEvents::RESPONSE => ['onResponse'],
+        ConfigEvents::SAVE => ['onConfigSave'],
+        GreetingEvents::GREETED => ['onGreeted'],
+    ]],
+    'acme.request_subscriber' => [RequestSubscriber::class, [
+        KernelEvents::REQUEST => ['onRequest'],
+    ]],
+];
+foreach ($subscribers as $id => [$class, $expected]) {
+    $definition = $container->getDefinition($id);
+    check("$id is built from " . (new ReflectionClass($class))->getShortName(), $definition->getClass() === $class);
+    check("$id is tagged event_subscriber, which Drupal registers listeners from", $definition->hasTag('event_subscriber'));
+    check("$class is an event subscriber", is_subclass_of($class, EventSubscriberInterface::class));
+    $methods = listenerMethods($class::getSubscribedEvents());
+    check("$class subscribes to the events its map names", $methods === $expected);
+    foreach (array_merge(...array_values($methods)) as $method) {
+        check("$class::$method(), which its map names, is a public method", method_exists($class, $method) && (new ReflectionMethod($class, $method))->isPublic());
+    }
+}
+check('GreetingSubscriber builds its map by assignment', str_contains((string) file_get_contents("$module/src/EventSubscriber/GreetingSubscriber.php"), '$events[KernelEvents::RESPONSE][] = '));
+check('RequestSubscriber returns its map as a literal', str_contains((string) file_get_contents("$module/src/EventSubscriber/RequestSubscriber.php"), 'return [KernelEvents::REQUEST => '));
+check('A misspelt listener such as onRespons is no method of GreetingSubscriber', !method_exists(GreetingSubscriber::class, 'onRespons'));
+
+// A key written as a class constant subscribes to the event the constant
+// holds, which is the name a dispatcher call writes.
+check('GreetingEvents::GREETED holds acme.greeted', GreetingEvents::GREETED === 'acme.greeted');
+check('GreetingSubscriber keys its map by GreetingEvents::GREETED, which makes it the definition of acme.greeted', str_contains((string) file_get_contents("$module/src/EventSubscriber/GreetingSubscriber.php"), '$events[GreetingEvents::GREETED][] = '));
+check('GreetingEvents declares GREETED itself, as a plain string', (new ReflectionClassConstant(GreetingEvents::class, 'GREETED'))->getDeclaringClass()->getName() === GreetingEvents::class && is_string(GreetingEvents::GREETED));
+$greetedListeners = 0;
+foreach ($subscribers as [$class]) {
+    $greetedListeners += count(listenerMethods($class::getSubscribedEvents())['acme.greeted'] ?? []);
+}
+check('One listener in the module subscribes to acme.greeted', $greetedListeners === 1);
+check("acme_announce_greeting() dispatches acme.greeted on core's event_dispatcher", str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('event_dispatcher')->dispatch(new Event(), 'acme.greeted')"));
+check('core.services.yml builds event_dispatcher from Symfony\'s EventDispatcher', ltrim((string) $core->getDefinition('event_dispatcher')->getClass(), '\\') === EventDispatcher::class);
+check("EventDispatcher takes the event name second in dispatch()", (new ReflectionMethod(EventDispatcher::class, 'dispatch'))->getParameters()[1]->getName() === 'eventName');
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
