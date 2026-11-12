@@ -29,6 +29,7 @@
 //! [`Backend::typed_receiver_key_kind`]).
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::literal::Literal;
@@ -40,13 +41,17 @@ use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::symbol_map::{ReceiverClass, StringKeyKind, SymbolMap, SymbolSpan, TypedReceiverSite};
 
-/// One file's confirmed extra string-key spans, and the source length they
-/// were derived from.
+/// One file's confirmed extra string-key spans, with the epoch and the
+/// source length they were derived from.
 ///
 /// The length is the same staleness signal [`SymbolMap::matches_source`]
 /// uses: an insertion or removal since the spans were computed moves every
-/// offset in them, so they have to be recomputed rather than reused.
-pub(crate) type TypedReceiverSpans = (u32, Arc<Vec<SymbolSpan>>);
+/// offset in them, so they have to be recomputed rather than reused.  The
+/// epoch is [`BladeState::typed_receiver_epoch`] as it read before the
+/// receivers were resolved.
+///
+/// [`BladeState::typed_receiver_epoch`]: super::state::BladeState::typed_receiver_epoch
+pub(crate) type TypedReceiverSpans = (u64, u32, Arc<Vec<SymbolSpan>>);
 
 impl Backend {
     /// The string-key spans of `uri` whose call is recognised by the
@@ -68,7 +73,13 @@ impl Backend {
         if map.typed_receiver_sites.is_empty() {
             return empty_spans();
         }
-        if let Some((source_len, spans)) = self.blade.typed_receiver_spans_cache.read().get(uri)
+        // Read before resolving: a change that retypes a receiver while
+        // the sites are being confirmed then retires the answer, instead of
+        // the answer being cached as current when it may predate the change.
+        let epoch = self.blade.typed_receiver_epoch.load(Ordering::Acquire);
+        if let Some((cached_epoch, source_len, spans)) =
+            self.blade.typed_receiver_spans_cache.read().get(uri)
+            && *cached_epoch == epoch
             && *source_len == map.source_len
         {
             return Arc::clone(spans);
@@ -96,11 +107,34 @@ impl Backend {
         };
         let spans =
             Arc::new(self.confirm_typed_receiver_sites(uri, &content, &map.typed_receiver_sites));
-        self.blade
-            .typed_receiver_spans_cache
-            .write()
-            .insert(uri.to_string(), (map.source_len, Arc::clone(&spans)));
+        #[cfg(test)]
+        if let Some(hook) = BEFORE_CACHING.take() {
+            hook(self);
+        }
+        let mut cache = self.blade.typed_receiver_spans_cache.write();
+        // An answer a change has already retired would only stand in for,
+        // or replace, a newer one.
+        if self.blade.typed_receiver_epoch.load(Ordering::Acquire) == epoch {
+            cache.insert(uri.to_string(), (epoch, map.source_len, Arc::clone(&spans)));
+        }
         spans
+    }
+
+    /// Retire the confirmed spans of every file, for a change that may
+    /// retype a receiver anywhere: a signature, what the service container
+    /// declares, or the plugin managers.
+    ///
+    /// Call it once a confirmation that reads the new epoch can only read
+    /// the new state: after the change is published, or while holding a
+    /// lock such a confirmation has to wait for, as the `files` lock a
+    /// batch is published under.
+    pub(crate) fn retire_typed_receiver_spans(&self) {
+        self.blade
+            .typed_receiver_epoch
+            .fetch_add(1, Ordering::Release);
+        if !self.blade.typed_receiver_spans_cache.read().is_empty() {
+            self.blade.typed_receiver_spans_cache.write().clear();
+        }
     }
 
     /// Drop the confirmed spans of one file, so the next reader recomputes
@@ -501,6 +535,15 @@ impl Drop for ForwardingGuard {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Run once, on this thread, between confirming a file's sites and
+    /// caching them: a test's stand-in for a change landing on another
+    /// thread meanwhile.
+    static BEFORE_CACHING: std::cell::Cell<Option<fn(&Backend)>> =
+        const { std::cell::Cell::new(None) };
+}
+
 thread_local! {
     /// The files whose sites are being confirmed on this thread.
     static CONFIRMING: std::cell::RefCell<std::collections::HashSet<String>> =
@@ -668,3 +711,7 @@ impl<'ast, 'arena, 'w, 'sites>
         }
     }
 }
+
+#[cfg(test)]
+#[path = "typed_receiver_tests.rs"]
+mod tests;

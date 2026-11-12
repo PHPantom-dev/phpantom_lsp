@@ -313,11 +313,13 @@ impl Backend {
         if changed {
             state.generation.fetch_add(1, Ordering::AcqRel);
             drop(contributions);
+            #[cfg(test)]
+            if let Some(hook) = AFTER_GENERATION_MOVES.take() {
+                hook(self);
+            }
             // A receiver typed by a service, as `\Drupal::service('…')->`
             // is, may have been confirmed against declarations not read yet.
-            if !self.blade.typed_receiver_spans_cache.read().is_empty() {
-                self.blade.typed_receiver_spans_cache.write().clear();
-            }
+            self.retire_typed_receiver_spans();
         }
     }
 
@@ -337,6 +339,7 @@ impl Backend {
             return;
         }
         state.generation.fetch_add(1, Ordering::AcqRel);
+        self.retire_typed_receiver_spans();
     }
 
     /// The container index, built if nothing current is kept.
@@ -673,6 +676,15 @@ thread_local! {
 }
 
 #[cfg(test)]
+thread_local! {
+    /// Run once, on this thread, right after a file's declarations move the
+    /// container's generation on: a test's stand-in for a lookup on another
+    /// thread landing then.
+    static AFTER_GENERATION_MOVES: std::cell::Cell<Option<fn(&Backend)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -804,5 +816,42 @@ mod tests {
             .count();
         assert_eq!(declared, 3);
         assert_eq!(BUILDS.get(), 1);
+    }
+
+    #[test]
+    fn a_lookup_as_a_file_starts_declaring_reads_its_declarations() {
+        let backend = Backend::new_headless();
+        let uri = "file:///config/services.yaml";
+        let map = Arc::new(SymbolMap {
+            spans: vec![crate::symbol_map::SymbolSpan {
+                start: 12,
+                end: 22,
+                kind: SymbolKind::StringKey {
+                    kind: StringKeyKind::ServiceId,
+                    key: "app.mailer".to_string(),
+                    is_write: true,
+                    is_optional: false,
+                },
+            }],
+            ..Default::default()
+        });
+        backend.files.write().insert(
+            uri.to_string(),
+            Arc::new(crate::file_state::FileState {
+                symbol_map: Some(Arc::clone(&map)),
+                ..Default::default()
+            }),
+        );
+        AFTER_GENERATION_MOVES.set(Some(|backend| {
+            backend.container_index();
+        }));
+        backend.note_symfony_declarations(uri, &map);
+        assert!(AFTER_GENERATION_MOVES.take().is_none());
+        assert!(
+            backend
+                .container_index()
+                .services
+                .contains_key(&crate::atom::atom("app.mailer"))
+        );
     }
 }

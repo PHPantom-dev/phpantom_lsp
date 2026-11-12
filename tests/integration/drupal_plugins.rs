@@ -528,3 +528,68 @@ async fn test_code_is_not_checked_for_plugins() {
     let (backend, dir) = site_with(UNKNOWN_PLUGIN_SITE, &[(path, LOOKUPS)]).await;
     assert!(unknown_plugins(&backend, &dir, path, LOOKUPS).is_empty());
 }
+
+/// The editor restores the tab before the workspace index runs, when no
+/// plugin manager has been read yet.
+#[tokio::test]
+async fn a_plugin_id_in_a_file_opened_before_the_index_goes_to_its_class_once_it_is_built() {
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in CORE.iter().chain(&[
+        (".git/HEAD", "ref: refs/heads/main\n"),
+        (".gitignore", "/web/core/\n"),
+        (HELLO_PATH, HELLO),
+    ]) {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let (backend, dir) = workspace_in(dir, &[(CONSUMER_PATH, CONSUMER)]).await;
+    let php = uri_for(&dir, CONSUMER_PATH);
+    let position = position_in(CONSUMER, "'acme_hello')", 2);
+    let _ = definitions_at(&backend, &php, position).await;
+    backend.ensure_workspace_indexed();
+
+    let found = definitions_at(&backend, &php, position).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        (&found[0].uri, found[0].range.start.line),
+        (&uri_for(&dir, HELLO_PATH), 6)
+    );
+}
+
+/// A plugin ID goes to its class only while every class the service may
+/// be is the manager, and so follows a service provider as it is edited.
+#[tokio::test]
+async fn a_plugin_id_follows_a_service_provider_as_it_is_edited() {
+    let consumer_path = "web/modules/custom/acme/src/Things.php";
+    let consumer = "<?php\nnamespace Drupal\\acme;\n\nfinal class Things {\n    public function run(): void {\n        \\Drupal::service('acme.blocks')->createInstance('acme_hello');\n    }\n}\n";
+    let (backend, dir) = site_with(
+        &[
+            (
+                "web/modules/custom/acme/acme.services.yml",
+                "services:\n  acme.blocks:\n    class: Drupal\\Core\\Block\\BlockManager\n",
+            ),
+            (
+                "web/modules/custom/acme/src/Blocks.php",
+                "<?php\nnamespace Drupal\\acme;\nclass Blocks {\n    public function createInstance($plugin_id) {}\n}\n",
+            ),
+        ],
+        &[(consumer_path, consumer)],
+    )
+    .await;
+    let php = uri_for(&dir, consumer_path);
+    let position = position_in(consumer, "'acme_hello')", 2);
+    let provider_uri = uri_for(&dir, "web/modules/custom/acme/src/AcmeServiceProvider.php");
+    let provider = "<?php\nnamespace Drupal\\acme;\nclass AcmeServiceProvider {\n    public function alter($container) {\n        $container->getDefinition('acme.blocks')->setClass(Blocks::class);\n    }\n}\n";
+    crate::common::open_document(&backend, &provider_uri, "php", provider).await;
+    assert!(definitions_at(&backend, &php, position).await.is_empty());
+
+    let edited = provider.replace("setClass(Blocks::class)", "setPublic(true)");
+    backend.update_ast(provider_uri.as_str(), &edited);
+    let found = definitions_at(&backend, &php, position).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        (&found[0].uri, found[0].range.start.line),
+        (&uri_for(&dir, HELLO_PATH), 6)
+    );
+}

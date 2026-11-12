@@ -484,6 +484,11 @@ impl Backend {
                 *slot = None;
             }
         }
+        // A receiver is confirmed as a plugin manager by the managers this
+        // index holds.
+        if !unchanged {
+            self.retire_typed_receiver_spans();
+        }
     }
 
     /// Read the plugin types from the project's plugin managers, then the

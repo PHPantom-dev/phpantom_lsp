@@ -2,6 +2,7 @@
 //! (see [`FileState`](crate::file_state::FileState)).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicU64;
 
 use parking_lot::RwLock;
 
@@ -24,9 +25,13 @@ pub(crate) struct BladeState {
     /// whose scope is unchanged.
     pub(crate) injected_vars: RwLock<HashMap<String, super::call_site_inference::BladeScope>>,
     /// Per-file string-key spans whose call only the receiver's *type*
-    /// settles, computed on first use and dropped when the file is
-    /// re-parsed (see [`crate::blade::typed_receiver`]).  Only files whose
-    /// symbol map recorded a candidate site ever get an entry.
+    /// settles, computed on first use and stale once the file is
+    /// re-parsed or [`Self::typed_receiver_epoch`] moves on.  Only files
+    /// whose symbol map recorded a candidate site ever get an entry.
     pub(crate) typed_receiver_spans_cache:
         RwLock<HashMap<String, super::typed_receiver::TypedReceiverSpans>>,
+    /// Moves on whenever a change elsewhere in the project may retype a
+    /// receiver, retiring every entry of `typed_receiver_spans_cache`
+    /// stamped before it (see `Backend::retire_typed_receiver_spans`).
+    pub(crate) typed_receiver_epoch: AtomicU64,
 }
