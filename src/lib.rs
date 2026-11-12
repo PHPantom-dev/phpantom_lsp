@@ -255,6 +255,27 @@ pub fn configure_allocator() {
     }
 }
 
+/// Returns the current thread's free pages to the OS when dropped.
+///
+/// mimalloc keeps the pages a thread frees in that thread's own heap and
+/// only gives them back when the same thread next calls into the
+/// allocator. A blocking-pool thread that finishes a burst of work (a
+/// first parse of a multi-megabyte stub file, a diagnostic pass) and then
+/// parks makes no such call, so everything the burst freed stays resident
+/// until Tokio reaps the idle thread ten seconds later. Dropping this at
+/// the end of each blocking task hands those pages back while the thread
+/// is still running. No-op when mimalloc is not the active allocator.
+pub(crate) struct PurgeThreadHeapOnDrop;
+
+impl Drop for PurgeThreadHeapOnDrop {
+    fn drop(&mut self) {
+        #[cfg(all(feature = "mimalloc", target_os = "linux"))]
+        unsafe {
+            libmimalloc_sys::mi_collect(false);
+        }
+    }
+}
+
 pub mod analyse;
 pub mod atom;
 mod backend;

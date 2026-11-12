@@ -66,7 +66,11 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    match tokio::spawn(async move { tokio::task::spawn_blocking(f).await }).await {
+    let blocking = move || {
+        let _purge = crate::PurgeThreadHeapOnDrop;
+        f()
+    };
+    match tokio::spawn(async move { tokio::task::spawn_blocking(blocking).await }).await {
         Ok(Ok(value)) => Some(value),
         // The inner blocking task panicked, or the outer task carrying it did.
         // Either way the request answers with its fallback; without this log

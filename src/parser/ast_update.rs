@@ -27,6 +27,10 @@ use crate::Backend;
 
 use super::DocblockCtx;
 
+/// The longest source whose parse reuses the thread-local arena; see
+/// [`with_reusable_arena`].
+const REUSABLE_ARENA_MAX_SOURCE_BYTES: usize = 512 * 1024;
+
 /// Run `f` with a parsing arena, reusing a thread-local `LocalArena` across
 /// calls instead of allocating a fresh one each time.
 ///
@@ -42,11 +46,21 @@ use super::DocblockCtx;
 /// still using the arena). Such re-entrant calls fall back to a throwaway
 /// `LocalArena` so the shared arena is never aliased — the borrow held for the
 /// duration of `f` makes `try_borrow_mut` fail for the nested call.
-fn with_reusable_arena<R>(f: impl FnOnce(&LocalArena) -> R) -> R {
+///
+/// A reset keeps the arena's last chunk, which grows to the size of
+/// everything the arena held before it, so one parse of a multi-megabyte
+/// file (a stub package that declares a whole framework in one file)
+/// would leave its thread holding tens of megabytes for good. Sources
+/// longer than [`REUSABLE_ARENA_MAX_SOURCE_BYTES`] therefore parse in a
+/// throwaway arena, which costs nothing next to parsing them.
+fn with_reusable_arena<R>(source_len: usize, f: impl FnOnce(&LocalArena) -> R) -> R {
     thread_local! {
         static ARENA: RefCell<LocalArena> = const { RefCell::new(LocalArena::new()) };
     }
 
+    if source_len > REUSABLE_ARENA_MAX_SOURCE_BYTES {
+        return f(&LocalArena::new());
+    }
     ARENA.with(|cell| match cell.try_borrow_mut() {
         Ok(mut arena) => {
             arena.reset();
@@ -219,7 +233,7 @@ impl Backend {
                 parse_errors = errors;
                 program
             });
-            let update = with_reusable_arena(|arena| {
+            let update = with_reusable_arena(parsed.content().len(), |arena| {
                 self.ast_index_update_from(
                     arena,
                     uri,
@@ -447,7 +461,7 @@ impl Backend {
     }
 
     fn build_ast_index_update(&self, uri: &str, content: &str) -> AstIndexUpdate {
-        with_reusable_arena(|arena| {
+        with_reusable_arena(content.len(), |arena| {
             let (parse_errors, program) = parse_with_errors(arena, content);
             self.ast_index_update_from(arena, uri, content, parse_errors, program)
         })
