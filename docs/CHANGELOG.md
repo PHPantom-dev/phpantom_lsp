@@ -587,6 +587,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Find References in Drupal hook files.** Calls in a Drupal site's `.module`, `.install`, `.theme`, `.profile`, `.inc` and `.engine` files are now found by Find References and rename, and `analyze` checks those files, without listing the extensions under `[indexing] extensions`.
 - **WordPress's `__()` returns a string.** Outside a Laravel project, `__()` and `trans()` keep the return type their own declaration gives, instead of Laravel's `string|array`, so passing a translated string to WordPress functions is no longer reported.
 - **WordPress output constants.** In a project with the WordPress stubs installed, `OBJECT`, `OBJECT_K`, `ARRAY_A` and `ARRAY_N` are known constants, so `get_post($id)` is a `WP_Post|null` and `get_post($id, ARRAY_A)` an array, instead of every possible result at once.
+- **Service lookups in files open at startup.** A lookup through a service, such as `\Drupal::service('entity_type.manager')->getStorage('node')`, in a file the editor had open before the project finished indexing is now found once indexing ends. Contributed by @giuseppe-esposito-87.
 
 #### Completion, hover, and editor features
 

@@ -312,6 +312,12 @@ impl Backend {
         };
         if changed {
             state.generation.fetch_add(1, Ordering::AcqRel);
+            drop(contributions);
+            // A receiver typed by a service, as `\Drupal::service('…')->`
+            // is, may have been confirmed against declarations not read yet.
+            if !self.blade.typed_receiver_spans_cache.read().is_empty() {
+                self.blade.typed_receiver_spans_cache.write().clear();
+            }
         }
     }
 
