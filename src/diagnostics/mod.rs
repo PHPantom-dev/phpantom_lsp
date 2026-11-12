@@ -237,15 +237,15 @@
 //! cache and the `resultId` alone and sends no refresh: LSP has no
 //! per-document refresh, so each one costs a workspace-wide re-pull and
 //! is worth sending only for a real change.
-//! The pull handler (`textDocument/diagnostic`) returns this cached set.
-//! If the cache is missing (e.g. the file was just opened), the pull
-//! handler schedules a background computation and returns whatever is
-//! cached right now — usually empty — instead of computing inline: a
-//! synchronous compute on the request path can wedge the transport
-//! under a typing burst (see [`trigger_diagnostics_for_pull`]). The
-//! worker's completion then bumps the `resultId` and requests a
-//! `workspace/diagnostic/refresh`, so the editor re-pulls with the real
-//! results a moment later.  A pull-capable client already has a
+//! The pull handler (`textDocument/diagnostic`) returns this cached set
+//! once it reflects the document's current text.  It never computes
+//! inline (a synchronous compute on the request path can wedge the
+//! transport under a typing burst, see [`trigger_diagnostics_for_pull`]);
+//! instead it queues a background pass when nothing is cached and holds
+//! the request until the worker has delivered the pass the document is
+//! owed (see `Backend::await_fresh_diagnostics` in `pull.rs`).  The
+//! worker's completion still requests a `workspace/diagnostic/refresh`
+//! for the editor's other views of the result.  A pull-capable client already has a
 //! canonical native diagnostic stream, so pushing the same native
 //! diagnostics as well would create two competing streams that clients
 //! may merge differently.
@@ -710,9 +710,8 @@ pub(crate) mod tests {
         // Push mode never asks the client to re-pull.
         assert!(!backend.assemble_and_push(uri).await);
 
-        let full = full_report(pull_document(&backend, uri, None).await)
+        let report = full_report(pull_document(&backend, uri, None).await)
             .expect("first pull must return the full set");
-        let report = full;
         assert_eq!(report.items.len(), 1);
         assert_eq!(report.items[0].message, "boom".to_string().into());
 
