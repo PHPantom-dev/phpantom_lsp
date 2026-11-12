@@ -3,7 +3,9 @@
 Run `composer install`, then open this directory in an editor using PHPantom.
 The `.view.php` files use the editor's PHP language-server connection.
 
-- In `app/BookController.php`, complete or follow the view path.
+- In `app/BookController.php`, complete or follow the view path and the
+  data names. Hover a data name to inspect its type in the template, or
+  follow it to the variable's first read.
 - In `app/DatabaseQueries.php`, complete and follow model property names in
   query builders and model helpers. Passing a model class name to `query()`
   keeps the results typed as model objects.

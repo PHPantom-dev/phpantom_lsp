@@ -22,25 +22,3 @@ within the same impact tier.
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
-
----
-
-## TM8. The data `view()` passes completes and navigates
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-return view('./books.view.php', books: $books, title: 'Books');
-```
-
-The named arguments `view()` passes become the template's variables,
-and the template already types `$books` from them, but the call site
-gets nothing back: completion inside the call offers only `params:`,
-and go-to-definition and hover on `books:` find nothing. Laravel's
-`view('books', ['books' => …])` and Yii's `render('index', ['form' => …])`
-already do this (a **View parameter** hover and a jump to the
-variable's first read in the template). Complete the variables the
-template reads that the call does not pass yet, and navigate and hover
-from a name to the variable, reusing the reverse of the lookup that
-types the template (`src/tempest/view_data.rs`). A custom View object's
-constructor arguments are ordinary parameters and keep their handling.

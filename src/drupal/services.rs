@@ -385,6 +385,29 @@ impl PhpServiceIds {
     }
 }
 
+/// The service IDs a Drupal site's services files declare, sorted, and what
+/// its PHP code may declare (see [`Backend::drupal_service_ids`]).
+pub(crate) struct DrupalServiceIds {
+    declared: Vec<String>,
+    php: Arc<PhpServiceIds>,
+}
+
+impl DrupalServiceIds {
+    /// Whether the site may declare the service `id`, or `None` when its
+    /// services files were not read.
+    pub(crate) fn may_declare(&self, id: &str) -> Option<bool> {
+        if self.declared.is_empty() {
+            return None;
+        }
+        Some(
+            self.declared
+                .binary_search_by(|name| name.as_str().cmp(id))
+                .is_ok()
+                || self.php.declares(id),
+        )
+    }
+}
+
 /// What a file the web-root walk found may define: a test module's
 /// services file declares the IDs it lists, a PHP file what
 /// [`defined_service_ids`] reads.
@@ -418,6 +441,35 @@ impl Backend {
     pub(crate) fn note_drupal_service_definition_files(&self, files: Vec<std::path::PathBuf>) {
         let mut known = self.drupal.service_definition_files.write();
         known.extend(files.iter().map(|path| crate::util::path_to_uri(path)));
+    }
+
+    /// The service IDs the Drupal site declares.  Core's and contributed
+    /// modules' services files are only read once the workspace index has
+    /// walked the folders `.gitignore` leaves out.
+    pub(crate) fn drupal_service_ids(&self) -> DrupalServiceIds {
+        self.ensure_workspace_index_ready_for_request();
+        DrupalServiceIds {
+            declared: self.symfony_declared_names(crate::symbol_map::StringKeyKind::ServiceId),
+            php: self.drupal_php_service_ids(),
+        }
+    }
+
+    /// Whether the name `name` a callback gives, which names no function,
+    /// names a class or a service, which Drupal calls as an invokable, or
+    /// may name one the site's unread services files declare.  `services`
+    /// holds the site's service IDs once a name needs them, so a diagnostic
+    /// pass reads them at most once.
+    pub(crate) fn drupal_callback_names_invokable(
+        &self,
+        name: &str,
+        services: &std::cell::OnceCell<DrupalServiceIds>,
+    ) -> bool {
+        let name = name.trim_start_matches('\\');
+        self.find_or_load_class(name).is_some()
+            || services
+                .get_or_init(|| self.drupal_service_ids())
+                .may_declare(name)
+                != Some(false)
     }
 
     /// What the files that may define services define, read on first use.

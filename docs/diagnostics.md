@@ -188,6 +188,7 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 | `invalid_drupal_service` | Warning | A service ID no services file declares and no PHP code may define. |
 | `invalid_drupal_plugin` | Warning | A plugin ID no plugin of its type declares and no PHP code may add. |
 | `invalid_drupal_render_element` | Warning | A render element `#type` no element class declares. |
+| `invalid_drupal_callback` | Warning | A form or render callback Drupal cannot call: `'::method'` in a render callback, an array callable that names a non-static method by its class, or a value callback that is not a native callable. |
 
 ## External tools
 

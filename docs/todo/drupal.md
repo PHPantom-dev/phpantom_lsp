@@ -12,8 +12,8 @@ the plugins of each, the permissions the `*.permissions.yml`
 files declare, the configuration objects and keys the default
 configuration and the configuration schema declare, the theme hooks
 `hook_theme()` implementations declare, the render elements element
-classes declare, and the libraries the `*.libraries.yml` files declare
-are read. Nothing reads fields yet.
+classes declare, the libraries the `*.libraries.yml` files declare, and
+the callbacks form and render arrays name are read. Nothing reads fields yet.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -67,22 +67,6 @@ PHPStan's Drupal extension types any magic property on a fieldable
 entity as `FieldItemListInterface` without checking the name. That is
 the floor; reading the configuration is what lets an editor complete
 names and report a misspelt one.
-
----
-
-## DR11. Form and render callbacks
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-$form['actions']['submit']['#submit'][] = '::submitOrder';
-$form['country']['#ajax'] = ['callback' => '::updateRegions'];
-```
-
-`#submit`, `#validate`, `#element_validate`, `#pre_render`,
-`#after_build`, and an `#ajax` `callback` name methods of the form class
-as `'::method'`, or a function or `Class::method`. Navigate, rename, and
-complete them, and report one that names nothing.
 
 ---
 
@@ -365,3 +349,82 @@ argument, which each service in `views.services.yml` and
 sources and processes) neither complete nor navigate. Read the argument
 each such service passes, and type the service by the plugin type it
 builds.
+
+---
+
+## DR32. `'::method'` callbacks in a form alter hook
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+function acme_form_node_article_form_alter(array &$form, FormStateInterface $form_state) {
+  $form['actions']['submit']['#submit'][] = '::saveDraft';
+}
+```
+
+In `hook_form_FORM_ID_alter()`, or `#[Hook('form_FORM_ID_alter')]`, a
+`'::method'` names a method of the form class that `FORM_ID` belongs to,
+not of the module's own class. Resolve the form ID to its form class, so
+the callback navigates, completes, renames, and is reported when the
+class has no such method.
+
+---
+
+## DR33. Render callbacks that are not trusted
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+$build['#pre_render'][] = [Formatter::class, 'prepare'];
+```
+
+Drupal refuses to run a `#pre_render`, `#post_render`, `#lazy_builder`, or
+`#access_callback` callback that is not trusted. Report a callback whose
+class implements neither `TrustedCallbackInterface` nor
+`RenderCallbackInterface`, and one whose method `trustedCallbacks()` does
+not list.
+
+---
+
+## DR34. Callback parameter checks
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+public function submitOrder(array $form) {}
+```
+
+A submit or validate handler takes `array &$form, FormStateInterface
+$form_state`, and an `#ajax` callback takes the same two parameters.
+Report a callback that takes a different list, such as one that lacks the
+form state or types it as something else.
+
+---
+
+## DR35. Invokable classes and services as callbacks
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$form['#validate'][] = [OrderValidator::class, '__invoke'];
+$form['#submit'][] = 'order_handler:submit';
+```
+
+A class with `__invoke()` named as a callback, and a class name written
+as the service part of `'Class:method'`, are not read as callbacks.
+Navigate, rename, and report them like any other callback.
+
+---
+
+## DR36. Array callables that name their class in a string
+
+**Impact: Low · Complexity: Low**
+
+```php
+$form['#submit'][] = ['Drupal\acme\Form\OrderForm', 'submitOrder'];
+```
+
+An array callable whose class is a string rather than `OrderForm::class`
+names no method, so it neither navigates nor renames, and a method the
+class lacks is not reported. Read the string as the fully qualified class
+name PHP reads it as, wherever an array callable is read.

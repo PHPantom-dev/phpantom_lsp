@@ -212,6 +212,7 @@ impl Backend {
             existence_guards: compute_existence_guards(content),
             isset_empty_ranges: compute_isset_empty_argument_ranges(content),
             called_array_callables: self.yii_listener_method_offsets(uri, content),
+            drupal_callbacks: &ctx.symbol_map.drupal_callbacks,
         };
 
         // ── Parse cache for this diagnostic pass ────────────────────────
@@ -237,6 +238,17 @@ impl Backend {
             let Some(access) = MemberAccessSite::of_span(span, &filters) else {
                 continue;
             };
+            // `'::method'` names a method of the form object, even in a static
+            // method, and outside a form a method of a form the code does
+            // not know.
+            if access.form_callback {
+                if access.current_class.is_some_and(|class| {
+                    crate::drupal::forms::names_own_method(class, pass.class_loader())
+                }) {
+                    pass.report(&access, &pass.resolve_subject(&access), out);
+                }
+                continue;
+            }
 
             // ── Look up or populate the subject cache ───────────────────
             let cache_key = SubjectCacheKey::build(
@@ -284,7 +296,8 @@ impl UnknownMemberPass<'_> {
     /// Resolve the access's subject at the access's own position.
     fn resolve_subject(&self, access: &MemberAccessSite) -> SubjectOutcome {
         let rctx = ResolutionCtx {
-            is_in_static_method: self.ctx.symbol_map.is_in_static_method(access.start),
+            is_in_static_method: !access.form_callback
+                && self.ctx.symbol_map.is_in_static_method(access.start),
             ..self.loaders.resolution_ctx_at(self.content, access.start)
         };
         resolve_subject_outcome(access.subject_text, access.access_kind(), &rctx)

@@ -522,7 +522,7 @@ fn is_method_name(name: &str) -> bool {
 }
 
 /// Whether `name` can be an entity type ID or a service ID.
-fn is_plain_name(name: &str) -> bool {
+pub(crate) fn is_plain_name(name: &str) -> bool {
     !name.is_empty()
         && name
             .bytes()

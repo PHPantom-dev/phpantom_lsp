@@ -1437,6 +1437,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for site in &sm.drupal_computed_hooks {
                 sym.add(site.shape.capacity());
             }
+            sym.add(
+                sm.drupal_callbacks.capacity() * size_of::<crate::symbol_map::DrupalCallbackSite>(),
+            );
             for name in sm
                 .drupal_route_patterns
                 .iter()

@@ -257,6 +257,7 @@ pub(super) fn extract_from_expression<'a>(
             emit_drupal_render_element_reads(&array.elements, ctx);
             emit_drupal_render_array_spans(&array.elements, ctx);
             emit_drupal_attached_array_spans(&array.elements, ctx);
+            emit_drupal_callback_spans(&array.elements, ctx);
             emit_yii_definition_spans(&array.elements, array.span().start.offset, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
@@ -266,6 +267,7 @@ pub(super) fn extract_from_expression<'a>(
             emit_drupal_render_element_reads(&array.elements, ctx);
             emit_drupal_render_array_spans(&array.elements, ctx);
             emit_drupal_attached_array_spans(&array.elements, ctx);
+            emit_drupal_callback_spans(&array.elements, ctx);
             emit_yii_definition_spans(&array.elements, array.span().start.offset, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }

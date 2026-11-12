@@ -123,7 +123,11 @@ pub(crate) fn compute_existence_guards(content: &str) -> ExistenceGuards {
                 return;
             };
             let (map, key) = match kind {
-                ExistenceKind::Function => (&mut guards.function_guards, name.to_lowercase()),
+                // `function_exists()` ignores a leading `\`.
+                ExistenceKind::Function => (
+                    &mut guards.function_guards,
+                    name.strip_prefix('\\').unwrap_or(&name).to_lowercase(),
+                ),
                 ExistenceKind::Class => (&mut guards.class_guards, name),
                 ExistenceKind::Method => (&mut guards.method_guards, name.to_lowercase()),
             };

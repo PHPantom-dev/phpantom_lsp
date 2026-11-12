@@ -184,6 +184,9 @@ impl Backend {
             DocblockMemberRef::YiiProperty { form_model: true } => {
                 crate::yii::forms::form_model_class_names(fqns, &class_loader)
             }
+            DocblockMemberRef::FormCallback => {
+                crate::drupal::forms::form_callback_class_names(fqns, &class_loader)
+            }
             _ => fqns,
         }
     }

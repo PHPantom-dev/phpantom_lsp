@@ -100,6 +100,15 @@ final class GreetingController extends ControllerBase
         ];
         $build['more']['#type'] = 'details';
         $build['more']['#title'] = $this->t('More');
+        // Try: go to the definition of buildGreeting, which lands on the
+        // method of Greeter, the class of the acme.greeter service, or of
+        // acme.greeter, which lands on its key in acme.services.yml. Find
+        // the references of Greeter::buildGreeting(), or rename it, and the
+        // string follows.
+        $build['later'] = [
+            '#lazy_builder' => ['acme.greeter:buildGreeting', [$name]],
+            '#create_placeholder' => true,
+        ];
 
         return $build;
     }

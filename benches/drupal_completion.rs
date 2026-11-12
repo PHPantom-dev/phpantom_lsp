@@ -126,8 +126,12 @@ final class Consumer
         $this->blocks->createInstance('mod1_');
         $themed = ['#theme' => 'mod1_'];
         $build = ['#attached' => ['library' => ['mod1/']]];
+        $build = ['#submit' => ['mod1_']];
+        $build = ['#pre_render' => ['Drupal\acme\Consumer::r']];
     }
 }
+
+function mod1_submit(): void {}
 "#;
 
 const MODULE_PATH: &str = "web/modules/custom/acme/acme.module";
@@ -444,6 +448,20 @@ fn bench_drupal_name_completion(c: &mut Criterion) {
             CONSUMER_PHP,
             "['library' => ['mod1/'",
             "mod1/library7",
+        ),
+        (
+            "callback_function",
+            &consumer,
+            CONSUMER_PHP,
+            "['#submit' => ['mod1_'",
+            "Drupal\\acme\\mod1_submit",
+        ),
+        (
+            "callback_method",
+            &consumer,
+            CONSUMER_PHP,
+            "['#pre_render' => ['Drupal\\acme\\Consumer::r'",
+            "run",
         ),
         (
             "hook_implementation",

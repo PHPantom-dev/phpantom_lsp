@@ -257,6 +257,9 @@ impl Backend {
             crate::symbol_map::DocblockMemberRef::YiiProperty { form_model: true } => {
                 candidates = crate::yii::forms::form_model_classes(candidates, class_loader);
             }
+            crate::symbol_map::DocblockMemberRef::FormCallback => {
+                candidates = crate::drupal::forms::form_callback_classes(candidates, class_loader);
+            }
             _ => {}
         }
         let first = candidates.first()?;

@@ -8,6 +8,7 @@
 declare(strict_types=1);
 
 use Drupal\acme\Greeter;
+use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 
 /**
@@ -79,4 +80,16 @@ function acme_request_age(): int
     $clock = \Drupal::service('datetime.time');
 
     return $clock->secondsSinceRequest();
+}
+
+/**
+ * Submit handler of GreetingForm, which names it in its `#submit` list.
+ *
+ * @param array<string, mixed> $form
+ */
+function acme_greeting_form_submit(array &$form, FormStateInterface $form_state): void
+{
+    // Try: find the references of acme_greeting_form_submit(), which list
+    // the string in GreetingForm::buildForm().
+    \Drupal::logger('acme')->info('Greeted @name.', ['@name' => $form_state->getValue('name')]);
 }

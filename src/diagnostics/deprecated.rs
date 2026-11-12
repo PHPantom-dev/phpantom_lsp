@@ -249,6 +249,20 @@ impl Backend {
                     {
                         continue;
                     }
+                    // A form callback's `'::method'` names a method only of a
+                    // form, and only under a key Drupal looks it up for.
+                    if *docblock_ref == crate::symbol_map::DocblockMemberRef::FormCallback
+                        && (!crate::drupal::forms::names_own_method(
+                            &base_class,
+                            resolved_class_loader,
+                        ) || crate::drupal::forms::callback_at(
+                            &symbol_map.drupal_callbacks,
+                            span.start,
+                        )
+                        .is_some_and(|site| !crate::drupal::forms::looks_up_method(site)))
+                    {
+                        continue;
+                    }
 
                     // An attribute's named-argument label uses a property
                     // only when the constructor promotes the parameter.

@@ -20,7 +20,7 @@ use tower_lsp_server::gen_lsp_types::{
 };
 
 use crate::Backend;
-use crate::symbol_map::{ClassRefContext, SymbolKind, SymbolMap, SymbolSpan};
+use crate::symbol_map::{ClassRefContext, DocblockMemberRef, SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::{byte_range_to_lsp_range, offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, FunctionInfo, MethodInfo};
 
@@ -371,6 +371,8 @@ impl Backend {
 /// Reading a same-named property (`$this->leaf`), naming the method in a
 /// `@see` tag, and calling it (`$this->leaf()`) all reference the same member,
 /// so both directions filter down to the occurrences that actually invoke it.
+/// A Drupal form callback's `'::method'` is a call Drupal makes on the form,
+/// which the resolution of its subject keeps to forms and traits.
 fn is_call_site(span: &SymbolSpan) -> bool {
     match &span.kind {
         SymbolKind::FunctionCall {
@@ -382,7 +384,11 @@ fn is_call_site(span: &SymbolSpan) -> bool {
             is_method_call,
             docblock_ref,
             ..
-        } => *is_method_call && !docblock_ref.is_reference(),
+        } => {
+            *is_method_call
+                && (!docblock_ref.is_reference()
+                    || *docblock_ref == DocblockMemberRef::FormCallback)
+        }
         SymbolKind::ClassReference { context, .. } => matches!(context, ClassRefContext::New),
         _ => false,
     }

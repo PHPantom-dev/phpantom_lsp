@@ -43,6 +43,9 @@ enum Expected<'a> {
     /// text at a reference site is not predictable from the symbol name.
     /// All we can require is that the range still covers one whole name.
     Name,
+    /// [`Expected::Name`] for a function, which a Drupal callback string in
+    /// PHP may also spell with escaped backslashes (`'Drupal\\\\acme\\\\fn'`).
+    FunctionName,
     /// The full key, or one of its segments.  A Laravel string key is
     /// written out in full at its use sites (`config('app.name')`) and as
     /// a single segment at its declaration (`'name' => ...`).
@@ -92,7 +95,13 @@ impl Backend {
             if !self.rename_map_matches(uri, content) {
                 return false;
             }
-            if !range_matches(content, location.range, &expected)
+            // A YAML or XML document spells escaped backslashes for its own
+            // quoting, which no edit here is planned for.
+            let expected = match expected {
+                Expected::FunctionName if self.is_resource_uri(uri) => &Expected::Name,
+                _ => &expected,
+            };
+            if !range_matches(content, location.range, expected)
                 && !magic_expected
                     .as_ref()
                     .is_some_and(|magic| range_matches(content, location.range, magic))
@@ -129,6 +138,19 @@ pub(super) fn span_spells_its_name(content: &str, span: &SymbolSpan) -> bool {
     let text = text.strip_prefix('\\').unwrap_or(text);
     let name = name.strip_prefix('\\').unwrap_or(name);
     text.eq_ignore_ascii_case(name)
+        || matches!(
+            span.kind,
+            SymbolKind::FunctionCall {
+                is_callback: true,
+                ..
+            }
+        ) && unescaped_name(text).is_some_and(|text| text.eq_ignore_ascii_case(name))
+}
+
+/// The name a string literal spells as `text` with escaped backslashes
+/// (`'Drupal\\acme\\fn'`), as a callback names a namespaced function.
+fn unescaped_name(text: &str) -> Option<String> {
+    text.contains("\\\\").then(|| text.replace("\\\\", "\\"))
 }
 
 /// The name a span's own source text should spell.
@@ -171,6 +193,7 @@ fn expected_text(kind: &SymbolKind) -> Expected<'_> {
         }
         SymbolKind::LaravelMacroString { name } => Expected::Exact(name),
         SymbolKind::StringKey { key, .. } => Expected::Key(key),
+        SymbolKind::FunctionCall { .. } => Expected::FunctionName,
         _ => Expected::Name,
     }
 }
@@ -207,6 +230,9 @@ fn range_matches(content: &str, range: Range, expected: &Expected) -> bool {
             token.eq_ignore_ascii_case(name)
         }
         Expected::Name => is_name_token(text),
+        Expected::FunctionName => {
+            is_name_token(text) || unescaped_name(text).is_some_and(|text| is_name_token(&text))
+        }
         Expected::Key(key) => {
             // A view name is stored in its canonical dotted spelling, so
             // the source may still read `partials/card` for `partials.card`.

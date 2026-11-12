@@ -276,7 +276,8 @@ impl Backend {
                 // attribute's named-argument label whose parameter the
                 // constructor does not promote names no property, and a
                 // field helper's string given something other than a form
-                // model names none either.
+                // model names none either, nor does a form callback's
+                // `'::method'` outside a form.
                 if hierarchy.is_none()
                     && matches!(
                         docblock_ref,
@@ -285,6 +286,7 @@ impl Backend {
                             | DocblockMemberRef::EntityField
                             | DocblockMemberRef::YiiAttribute
                             | DocblockMemberRef::YiiProperty { form_model: true }
+                            | DocblockMemberRef::FormCallback
                     )
                 {
                     return Vec::new();

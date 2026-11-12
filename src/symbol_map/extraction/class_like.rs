@@ -1000,6 +1000,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
             name,
             is_definition: true,
             is_docblock_reference: false,
+            is_callback: false,
         },
     });
     emit_drupal_hook_doc_span(func, ctx);
@@ -1120,6 +1121,7 @@ pub(super) fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<Sym
                 name,
                 is_definition: false,
                 is_docblock_reference: false,
+                is_callback: false,
             },
             UseItemKind::Constant => SymbolKind::ConstantReference {
                 name,

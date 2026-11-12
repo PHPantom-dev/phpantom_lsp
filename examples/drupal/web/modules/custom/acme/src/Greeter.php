@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Drupal\acme;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Security\TrustedCallbackInterface;
 use Drupal\Core\StringTranslation\StringTranslationTrait;
 
 /**
  * Builds the greeting the demo route shows.
  */
-final class Greeter
+final class Greeter implements TrustedCallbackInterface
 {
     use StringTranslationTrait;
 
@@ -38,5 +39,20 @@ final class Greeter
         \Drupal::moduleHandler()->alter('acme_greeting', $greeting, $name);
 
         return $greeting;
+    }
+
+    /**
+     * The greeting as a render array, for the card's lazy builder.
+     *
+     * @return array<string, mixed>
+     */
+    public function buildGreeting(string $name): array
+    {
+        return ['#markup' => $this->greet($name)];
+    }
+
+    public static function trustedCallbacks(): array
+    {
+        return ['buildGreeting'];
     }
 }

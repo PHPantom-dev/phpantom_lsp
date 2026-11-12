@@ -364,6 +364,7 @@ fn extract_function_call<'a>(
                     name: crate::atom::atom(name_clean),
                     is_definition: false,
                     is_docblock_reference: false,
+                    is_callback: false,
                 },
             });
             // `@yield`/`@section`/`@stack`/`@push` and their
@@ -729,6 +730,7 @@ pub(super) fn extract_partial_application_expr<'a>(
                         name: crate::atom::atom(name_clean),
                         is_definition: false,
                         is_docblock_reference: false,
+                        is_callback: false,
                     },
                 });
             }
