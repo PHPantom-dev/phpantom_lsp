@@ -8313,6 +8313,52 @@ trait MyTrait {
     );
 }
 
+/// A parameter typed `self` inside a trait is an instance of a class using
+/// the trait, so it sees the `@phpstan-require-extends` class's members the
+/// way `$this` does, in a method and in a closure (Laravel model events).
+#[test]
+fn self_typed_parameter_inside_trait_sees_required_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+abstract class Model {
+    public function getTable(): string { return ''; }
+    public static function saving(\Closure $callback): void {}
+}
+
+/** @phpstan-require-extends Model */
+trait Stamps {
+    public static function bootStamps(): void {
+        static::saving(static function (self $model): void {
+            $model->getTable();
+            $model->notOnModel();
+        });
+    }
+
+    public static function viaParameter(self $model): string {
+        return $model->getTable();
+    }
+}
+
+class Post extends Model {
+    use Stamps;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<String> = diags
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
+    assert!(
+        !messages.iter().any(|m| m.contains("getTable")),
+        "getTable() comes from the required class, got: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("notOnModel")),
+        "a member neither the trait nor the required class has must still be flagged, got: {messages:?}"
+    );
+}
+
 /// `$this->` and `static::` inside a closure nested within a trait
 /// method should be suppressed just like direct trait method bodies.
 #[test]
