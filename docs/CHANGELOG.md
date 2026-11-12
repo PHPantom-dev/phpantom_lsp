@@ -238,6 +238,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Less memory for indexed classes.** The methods, properties and constants of every indexed class now take only the memory they need. On a large Laravel project this cuts memory after startup by about 5%. Contributed by @vishnub1626.
 - **Faster startup on Symfony and Drupal projects.** Working out which class a service ID or the value of a container parameter refers to no longer reads through every service definition in the project each time. Starting up on a Drupal site takes about 12% less CPU time.
 - **Faster go-to-implementation on library classes.** Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.
+- **Faster service lookups after an edit.** In a workspace with Symfony PHP configuration, the first service or parameter lookup after an edit that changes a method signature is faster. In a workspace holding a Symfony app and a Drupal site, going to the definition of a plugin ID after such an edit takes about a second instead of three. Contributed by @giuseppe-esposito-87.
 
 ### Fixed
 
