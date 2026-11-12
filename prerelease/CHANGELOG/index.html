@@ -6237,6 +6237,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Less memory for indexed classes.</strong> The methods, properties and constants of every indexed class now take only the memory they need. On a large Laravel project this cuts memory after startup by about 5%. Contributed by @vishnub1626.</li>
 <li><strong>Faster startup on Symfony and Drupal projects.</strong> Working out which class a service ID or the value of a container parameter refers to no longer reads through every service definition in the project each time. Starting up on a Drupal site takes about 12% less CPU time.</li>
 <li><strong>Faster go-to-implementation on library classes.</strong> Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.</li>
+<li><strong>Faster service lookups after an edit.</strong> In a workspace with Symfony PHP configuration, the first service or parameter lookup after an edit that changes a method signature is faster. In a workspace holding a Symfony app and a Drupal site, going to the definition of a plugin ID after such an edit takes about a second instead of three. Contributed by @giuseppe-esposito-87.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <h4 id="type-inference_1">Type inference<a class="headerlink" href="#type-inference_1" title="Permanent link">&para;</a></h4>
