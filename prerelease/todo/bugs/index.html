@@ -977,6 +977,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Framework names in strings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b743-a-configurator-confirmed-while-another-is-being-confirmed-keeps-an-incomplete-answer" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B743. A configurator confirmed while another is being confirmed keeps an incomplete answer
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1600,6 +1617,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Framework names in strings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b743-a-configurator-confirmed-while-another-is-being-confirmed-keeps-an-incomplete-answer" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B743. A configurator confirmed while another is being confirmed keeps an incomplete answer
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1698,7 +1732,44 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b743-a-configurator-confirmed-while-another-is-being-confirmed-keeps-an-incomplete-answer">B743. A configurator confirmed while another is being confirmed keeps an incomplete answer<a class="headerlink" href="#b743-a-configurator-confirmed-while-another-is-being-confirmed-keeps-an-incomplete-answer" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Reproduced on <code>75f27a0ba</code> and on <code>d0b36afac</code> (before #568), so the
+per-thread index reuse did not introduce it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// config/c00.php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function configure0(ContainerBuilder $container): void {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    $container-&gt;register('app.s0', ContainerBuilder::class);</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">// config/c01.php</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">function configure1(ContainerBuilder $container): void {</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    $container-&gt;get('app.s0')-&gt;register('app.s1', ContainerBuilder::class);</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">// config/c02.php</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">function configure2(ContainerBuilder $container): void {</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    $container-&gt;get('app.s1')-&gt;register('app.s2', ContainerBuilder::class);</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">}</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">// config/c03.php</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">function configure3(ContainerBuilder $container): void {</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">    $container-&gt;get('app.s2')-&gt;register('app.s3', ContainerBuilder::class);</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">}</span>
+</code></pre></div>
+<p>The container index ends up with <code>app.s0</code> and <code>app.s1</code> only, so
+<code>$container-&gt;get('app.s2')</code> and <code>'app.s3'</code> resolve to nothing everywhere.
+Building the index confirms <code>c01</code>, which builds the index again, which
+confirms <code>c02</code> while <code>c01</code> reads as declaring nothing. <code>app.s1</code> is then
+missing, so <code>c02</code> declares nothing, and <code>typed_receiver_spans_for</code> caches
+that answer even though <code>partial_answers()</code> moved while it was computed.
+The outer build is correctly not kept, but the next one reads <code>c02</code>'s
+cached answer and is. The answer only goes once the confirmed spans are
+retired. When each file depends on one that sorts after it, as in
+<code>chained_configurators</code> in <code>src/symfony/container.rs</code>, every nested answer
+happens to be complete, which is why the existing test passes.</p>
+<p>Not caching an answer computed while the partial count moved fixes it, but
+every nested confirmation is partial in that sense, so the chain is then
+recomputed at every level. The fix that keeps the cost down is a fixed
+point: build the index from the untyped declarations, then confirm the
+typed calls (<code>Contribution::typed</code>) against it, re-confirming until no
+call is added.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
