@@ -376,6 +376,20 @@ check(
     'BakerBuilder holds the Baker model it queries',
     $result->getModel() instanceof \App\Models\Baker
 );
+check(
+    'Convention and attribute scopes preserve BakerBuilder and its model',
+    $result->employed()->available()->active() === $result
+    && $result->getModel() instanceof \App\Models\Baker
+);
+check(
+    'Static scope forwarding preserves BakerBuilder',
+    \App\Models\Baker::employed()->available()->active() instanceof \App\Models\BakerBuilder
+);
+check(
+    'The scoped builder demo returns BakerBuilder<Baker>',
+    ($scopedBakers = (new \App\Demo())->scopedBakers()) instanceof \App\Models\BakerBuilder
+    && $scopedBakers->getModel() instanceof \App\Models\Baker
+);
 
 check(
     'Inherited where/orderBy calls preserve the LoafBuilder instance',
