@@ -21,6 +21,7 @@ use crate::completion::source::code_context::CodeContext;
 use crate::symbol_map::{LaravelConfigResource, StringKeyKind};
 use crate::types::FileContext;
 
+mod connections;
 mod context;
 mod enumerate;
 #[cfg(test)]
@@ -317,6 +318,7 @@ impl Backend {
             Some(&indexed_function_exists),
             Some(&indexed_class_exists),
         )
+        .or_else(|| self.try_laravel_connection_completion(content, position, code, file_ctx))
     }
 
     fn try_laravel_string_key_completion_inner(
@@ -337,6 +339,15 @@ impl Backend {
             indexed_class_exists,
         )?;
 
+        self.laravel_string_key_response(content, position, ctx)
+    }
+
+    fn laravel_string_key_response(
+        &self,
+        content: &str,
+        position: Position,
+        ctx: LaravelStringKeyContext<'_>,
+    ) -> Option<CompletionResponse> {
         // `public/` and the project root hold far too much to list whole, so
         // a path is offered one directory at a time, like a path helper's.
         if let Some(base) = self.asset_completion_base(ctx.kind) {

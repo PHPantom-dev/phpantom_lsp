@@ -76,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Laravel
 
+- **Laravel connection names follow the receiver's type.** Connection names in instance calls and model or job properties now complete, navigate, show hover details and references, and report unknown names against the appropriate config file. Contributed by @shuvroroy.
 - **Container call parameters.** The parameter keys passed to `app()->call()` complete from the callable's parameters and go to them. Contributed by @shuvroroy.
 - **Laravel asset paths and Inertia pages.** The paths `asset()`, `mix()`, `@vite` and `Vite::asset()` name, and the pages `Inertia::render()`, `inertia()` and `Route::inertia()` render, complete from the files on disk, jump to the file, and are reported when nothing is there. An unknown Inertia page gets a quick fix that creates it. Page directories and extensions are read from `config/inertia.php`.
 - **Laravel related classes.** Code lenses on an Eloquent model go to its factory, policy, observers, migrations, API resources, and custom collection, and a factory, policy, or observer gets one back to its model. An event lists the listeners that handle it, whether registered or discovered from their `handle()` type hint, and a listener links to the events it handles.

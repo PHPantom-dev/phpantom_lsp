@@ -10,6 +10,7 @@ features against a real Laravel installation.
 - **Computed attributes.** Column suggestions distinguish stored values from accessors, while assignment suggestions include attributes with setters. See `Demo::computedAttributes()`.
 - **Model factories.** Convention-based factories (no `@extends Factory<Model>` needed) get `create()`/`make()` returning the model, plus the dynamic `has{Relationship}()` / `for{Relationship}()` methods synthesized from the model's relationships, and `trashed()` when the model uses `SoftDeletes` — all chaining fluently (e.g. `BlogAuthor::factory()->hasPosts(3)->create()`). See `Demo::factories()`.
 - **Config and env navigation.** Go-to-definition and find-references for `config('app.name')` keys (resolves to `config/app.php`) and `env('APP_KEY')` vars (resolves to `.env`).
+- **Typed connection names.** Completion, hover, navigation, references, and diagnostics follow the database, queue, or broadcasting receiver and model or job properties. See `Demo::typedConnections()`.
 - **View navigation.** Go-to-definition for `view('welcome')` and `View::make('admin.users.index')` (resolves to Blade templates in `resources/views/`).
 - **Asset paths.** `asset('css/app.css')` and `Vite::asset()`/`@vite` paths complete from the files on disk, jump to the file, and are reported when nothing is there. Inertia page names (`Inertia::render('Users/Index')`) work the same way in a project that installs Inertia.
 - **Route navigation.** Go-to-definition for `route('home')` (resolves to `->name('home')` in route files).

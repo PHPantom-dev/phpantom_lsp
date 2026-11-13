@@ -824,6 +824,8 @@ pub(super) fn extract_from_property<'a>(property: &'a Property<'a>, ctx: &mut Ex
         extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
     }
 
+    record_connection_property(property, ctx);
+
     // Property variable names and default value expressions.
     match property {
         Property::Plain(plain) => {
