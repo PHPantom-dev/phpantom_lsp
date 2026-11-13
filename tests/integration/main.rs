@@ -329,8 +329,6 @@ mod rename_variable;
 mod reparse_symbol_eviction;
 mod return_type_resolution;
 mod self_out;
-#[cfg(feature = "semantic-export")]
-mod semantic_export;
 mod semantic_tokens;
 mod server_lifecycle;
 mod signature_change_detection;

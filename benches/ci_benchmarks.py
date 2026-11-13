@@ -2,9 +2,10 @@
 """Prepare, run, and combine balanced Criterion shards for PR comparisons.
 
 Build with ``cargo bench --no-run --message-format=json`` and pipe its output
-to ``prepare``. A prepared baseline can be included so each shard measures
-both revisions on the same runner. Each revision uses its own fixtures;
-only complete results reach the comparison.
+to ``prepare``. A prepared baseline can be included, or independently built
+manifests joined with ``pair``, so each shard measures both revisions on the
+same runner. Each revision uses its own fixtures; only complete results reach
+the comparison.
 """
 
 from __future__ import annotations
@@ -26,6 +27,47 @@ from typing import TextIO
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def _pair_manifest(manifest: dict, baseline: dict) -> None:
+    baseline_cases = {}
+    for case in baseline["cases"]:
+        name = case["name"]
+        if not name or name in baseline_cases:
+            raise ValueError(f"empty or duplicate baseline benchmark name: {name!r}")
+        if case["target"] not in baseline["executables"]:
+            raise ValueError(f"missing baseline executable for {name!r}")
+        baseline_cases[name] = case["target"]
+
+    manifest["baseline_executables"] = {
+        target: f"baseline-bin/{target}" for target in baseline["executables"]
+    }
+    for case in manifest["cases"]:
+        case.pop("baseline_target", None)
+        if case["name"] in baseline_cases:
+            case["baseline_target"] = baseline_cases[case["name"]]
+    manifest["removed"] = sorted(set(baseline_cases) - {case["name"] for case in manifest["cases"]})
+
+
+def pair(build_dir: Path, baseline_dir: Path) -> None:
+    """Pair independently built manifests; extract baseline binaries into baseline-bin."""
+    if baseline_dir.resolve() == build_dir.resolve():
+        raise ValueError("baseline and head build directories must be distinct")
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    baseline = json.loads((baseline_dir / "manifest.json").read_text(encoding="utf-8"))
+    _pair_manifest(manifest, baseline)
+    _write_json(build_dir / "manifest.json", manifest)
+
+
+def partition(build_dir: Path, shards: int) -> None:
+    """Assign cached executables to the requested number of measurement runners."""
+    manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    if not 1 <= shards <= len(manifest["cases"]):
+        raise ValueError("shard count must be positive and cannot exceed benchmark cases")
+    manifest["shards"] = shards
+    for index, case in enumerate(manifest["cases"]):
+        case["shard"] = index % shards + 1
+    _write_json(build_dir / "manifest.json", manifest)
 
 
 def prepare(
@@ -93,25 +135,11 @@ def prepare(
 
     if baseline_dir is not None:
         baseline = json.loads((baseline_dir / "manifest.json").read_text(encoding="utf-8"))
-        baseline_cases = {}
-        for case in baseline["cases"]:
-            name = case["name"]
-            if not name or name in baseline_cases:
-                raise ValueError(f"empty or duplicate baseline benchmark name: {name!r}")
-            if case["target"] not in baseline["executables"]:
-                raise ValueError(f"missing baseline executable for {name!r}")
-            baseline_cases[name] = case["target"]
-
+        _pair_manifest(manifest, baseline)
         (build_dir / "baseline-bin").mkdir(parents=True, exist_ok=True)
-        manifest["baseline_executables"] = {}
         for target, source in baseline["executables"].items():
-            relative = f"baseline-bin/{target}"
+            relative = manifest["baseline_executables"][target]
             shutil.copy2(baseline_dir / source, build_dir / relative)
-            manifest["baseline_executables"][target] = relative
-        for case in manifest["cases"]:
-            if case["name"] in baseline_cases:
-                case["baseline_target"] = baseline_cases[case["name"]]
-        manifest["removed"] = sorted(set(baseline_cases) - seen)
 
     _write_json(build_dir / "manifest.json", manifest)
     with tarfile.open(build_dir / "binaries.tar", "w") as archive:
@@ -359,6 +387,12 @@ def main() -> None:
     prepare_parser.add_argument("--build-dir", type=Path, required=True)
     prepare_parser.add_argument("--shards", type=int, required=True)
     prepare_parser.add_argument("--baseline-dir", type=Path)
+    pair_parser = commands.add_parser("pair")
+    pair_parser.add_argument("--build-dir", type=Path, required=True)
+    pair_parser.add_argument("--baseline-dir", type=Path, required=True)
+    partition_parser = commands.add_parser("partition")
+    partition_parser.add_argument("--build-dir", type=Path, required=True)
+    partition_parser.add_argument("--shards", type=int, required=True)
     run_parser = commands.add_parser("run")
     run_parser.add_argument("--build-dir", type=Path, required=True)
     run_parser.add_argument("--shard", type=int, required=True)
@@ -379,6 +413,10 @@ def main() -> None:
     try:
         if args.command == "prepare":
             prepare(args.build_dir, args.shards, sys.stdin, args.baseline_dir)
+        elif args.command == "pair":
+            pair(args.build_dir, args.baseline_dir)
+        elif args.command == "partition":
+            partition(args.build_dir, args.shards)
         elif args.command == "run":
             run_shard(args.build_dir, args.shard, args.output, args.baseline_source)
         elif args.command == "merge":

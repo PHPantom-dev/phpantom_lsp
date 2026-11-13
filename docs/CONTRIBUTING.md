@@ -48,24 +48,70 @@ Note that clippy runs twice, once for library code and once including test code.
 
 ## Testing
 
-CI runs the test suite with coverage across six parallel Nextest shards.
+CI builds the instrumented test suite once and runs its Nextest archive across
+six parallel shards, without compiling again on those runners.
 The `Test` check passes only after every shard succeeds and their coverage
 reports are uploaded together to Codecov. To reproduce one shard locally
 (replace `1` with the shard number):
 
 ```bash
-cargo llvm-cov nextest --partition hash:1/6 --lcov --output-path lcov.info
+cargo llvm-cov nextest-archive --locked --archive-file coverage-tests.tar.zst
+cargo llvm-cov nextest --archive-file coverage-tests.tar.zst \
+  --partition hash:1/6 --lcov --output-path lcov.info
 ```
 
-PR latency benchmarks build the base and PR revisions with the same toolchain
-and settings, then distribute the cases across four runners. Each runner
-runs both revisions sequentially with Criterion's usual sampling settings
+Windows also builds once, then runs the full suite across four Nextest archive
+partitions. The `Test (Windows)` check accounts for every partition's successful
+result for the tested revision and retains its existing non-blocking policy.
+An exact-commit archive cache also avoids compilation on reruns, keyed by the
+compiler, runner image, target, and test profile. Every partition still runs.
+
+The optional semantic-export feature has a separate integration test target,
+so its checks do not compile the full default integration suite again:
+
+```bash
+cargo test --features semantic-export --lib --test semantic_export semantic_export
+```
+
+PR latency benchmarks build the base and PR revisions in parallel with the same
+toolchain and settings, then distribute the cases across twelve runners. Each
+runner runs both revisions sequentially with Criterion's usual sampling settings
 and each revision's own fixtures. One shared assignment
 keeps matching cases on the same runner even when a PR adds benchmarks.
 The `Benchmark (PR comparison)` check compares the paired results only after
 every shard passes and every case is accounted for. New cases are reported
 without a baseline; removed cases are listed explicitly. Main-branch
-measurements continue to populate the historical dashboard.
+measurements use the same sharding to populate the historical dashboard.
+The head build also produces the release server used by the scaling and memory
+checks, so those jobs do not rebuild it.
+
+CI keeps every check on each PR, including Windows, coverage, WebAssembly,
+and performance comparisons. Superseded PR runs are cancelled. Rust dependency
+caches are separated by build type and can be saved in each PR's own cache
+scope as well as on `main`; memory checks also cache Composer downloads.
+Tests omit debug information to reduce disk usage and linking time, while
+release optimization and Criterion sampling stay
+unchanged.
+
+Rust and runner families are pinned so updates do not silently replace the
+build environment. Benchmark binaries are cached for an exact source revision,
+compiler, target, native toolchain, build recipe, and release settings. A matching
+base built on `main` is reused by later PRs; a missing match is compiled. Scaling
+and memory checks depend only on the head build. Each benchmark runner pairs
+the manifests locally, avoiding a separate preparation job.
+
+The manual CI trigger accepts 8, 12, or 16 benchmark workers for controlled
+comparisons. The comparison summary lists job queue and execution times and
+release artifact cache hits; Cargo timing reports are retained with the build
+artifacts. Measure cold runs, warm reruns, source changes, and concurrent PRs
+separately. A 5–6 minute result remains a target until measured on GitHub with
+the full set of checks.
+
+Memory sampling waits for the opened file's native diagnostic passes before
+the settling period, so a slow background pass does not leave a temporary
+parse in the memory measurement. Manual profiling runs without a Codecov
+token retain the coverage reports without uploading them; PR and push uploads
+keep their existing behavior.
 
 To reproduce a paired shard locally from the repository root, replace
 `BASE_COMMIT` with the PR's base revision:
@@ -73,16 +119,16 @@ To reproduce a paired shard locally from the repository root, replace
 ```bash
 benchmark_root="$PWD"
 git worktree add --detach /tmp/phpantom-bench-base BASE_COMMIT
-cargo bench --locked --manifest-path /tmp/phpantom-bench-base/Cargo.toml \
-  --bench '*' --no-run --message-format=json > /tmp/baseline-build.jsonl
+cargo build --locked --release --manifest-path /tmp/phpantom-bench-base/Cargo.toml \
+  --bench '*' --message-format=json > /tmp/baseline-build.jsonl
 (
   cd /tmp/phpantom-bench-base
   python3 "$benchmark_root/benches/ci_benchmarks.py" prepare \
     --build-dir /tmp/phpantom-baseline --shards 1 < /tmp/baseline-build.jsonl
 )
-cargo bench --locked --bench '*' --no-run --message-format=json > /tmp/benchmark-build.jsonl
+cargo build --locked --release --bench '*' --message-format=json > /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py prepare --build-dir /tmp/phpantom-benchmarks \
-  --shards 4 --baseline-dir /tmp/phpantom-baseline < /tmp/benchmark-build.jsonl
+  --shards 12 --baseline-dir /tmp/phpantom-baseline < /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py run --build-dir /tmp/phpantom-benchmarks \
   --baseline-source /tmp/phpantom-bench-base --shard 1 --output /tmp/shard-1.json
 ```
