@@ -521,6 +521,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Laravel
 
+- **Scopes keep custom Eloquent builders.** Chaining a local scope preserves the custom builder and its model type, including with ide-helper docblocks, so its methods remain available and valid returns are no longer reported as type mismatches. Contributed by @shuvroroy.
 - **Route groups in `bootstrap/app.php`.** Routes registered from the `then:` or `using:` callback of `withRouting()`, including route files grouped there under a name prefix, are now known by their full names and are no longer reported as unknown routes.
 - **Imported `#[Table]` and `#[Connection]` attributes.** A model's table and connection attributes are now read when the attribute is imported with `use`, not only when written fully qualified, in files open in the editor and in `analyze`. Contributed by @shuvroroy.
 - **Nullable columns stay nullable through a cast.** A model attribute cast to `boolean`, `integer`, a date, an enum or another cast that hands `null` back untouched is now nullable when its column is, and so is a nullable `updated_at` or other timestamp column. A null check on a nullable date column, the soft-delete column included, leaves the date class with all its members.

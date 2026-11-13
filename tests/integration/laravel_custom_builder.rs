@@ -3,6 +3,190 @@ use crate::common::{completion_response, goto_definition_at, open_php};
 use tower_lsp_server::gen_lsp_types::*;
 
 #[tokio::test]
+async fn test_custom_builder_scopes_preserve_query_type() {
+    use crate::common::{
+        assigned_type, complete_labels_at, hover_on, messages_with_code, position_after,
+    };
+
+    for (model_tag, builder_mixin, extends_tag) in [
+        (true, true, "@template-extends"),
+        (false, true, "@template-extends"),
+        (true, false, "@template-extends"),
+        (true, true, "@extends"),
+        (false, false, ""),
+    ] {
+        let builder = format!(
+            r#"<?php
+namespace App\Builders;
+use App\Models\Post;
+use Illuminate\Database\Eloquent\Builder;
+/**
+ * {}
+ * {}
+ * {}
+ */
+class PostBuilder extends Builder {{
+    /** @return $this */
+    public function popular(): static {{ return $this; }}
+    public function overridden(): string {{ return ''; }}
+}}
+"#,
+            if extends_tag.is_empty() {
+                ""
+            } else {
+                "@template TModel of Post"
+            },
+            if extends_tag.is_empty() {
+                String::new()
+            } else {
+                format!("{extends_tag} Builder<TModel>")
+            },
+            if builder_mixin { "@mixin Post" } else { "" },
+        );
+        let model = format!(
+            r#"<?php
+namespace App\Models;
+use App\Builders\PostBuilder;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+class BasePost extends Model {{
+    protected function scopeInherited(Builder $query): Builder {{ return $query; }}
+}}
+/** {} */
+#[UseEloquentBuilder(PostBuilder::class)]
+class Post extends BasePost {{
+    protected function scopePublished(Builder $query): Builder {{ return $query; }}
+    protected function scopeRecent(Builder $query): void {{}}
+    #[Scope]
+    protected function featured(Builder $query): void {{}}
+    /** @return Builder<static> */
+    protected function scopeGeneric(Builder $query): Builder {{ return $query; }}
+    protected function scopeCounted(Builder $query): int {{ return 1; }}
+    protected function scopeOverridden(Builder $query): Builder {{ return $query; }}
+}}
+class ChildPost extends Post {{}}
+"#,
+            if model_tag {
+                "@method static PostBuilder<static>|Post published()"
+            } else {
+                ""
+            },
+        );
+        let (backend, dir) = create_psr4_workspace(
+            r#"{"autoload":{"psr-4":{"App\\":"app/","Illuminate\\":"vendor/illuminate/"}}}"#,
+            &[
+                (
+                    "vendor/illuminate/Database/Eloquent/Model.php",
+                    "<?php namespace Illuminate\\Database\\Eloquent; abstract class Model {}",
+                ),
+                (
+                    "vendor/illuminate/Database/Eloquent/Builder.php",
+                    r#"<?php
+namespace Illuminate\Database\Eloquent;
+/** @template TModel of Model */
+class Builder {
+    /** @return TModel */
+    public function firstOrFail() {}
+}
+"#,
+                ),
+                ("app/Builders/PostBuilder.php", &builder),
+                ("app/Models/Post.php", &model),
+            ],
+        );
+        let uri = Uri::from_file_path(dir.path().join("demo.php")).unwrap();
+        let content = r#"<?php
+namespace Consumer;
+use App\Builders\PostBuilder;
+use App\Models\ChildPost;
+use App\Models\Post;
+class Demo {
+    /** @return PostBuilder<Post> */
+    public function scoped(): PostBuilder {
+        $plain = Post::query();
+        $published = Post::query()->published();
+        $recent = Post::query()->recent();
+        $featured = Post::query()->featured();
+        $generic = Post::query()->generic();
+        $inherited = Post::query()->inherited();
+        $child = ChildPost::query()->published();
+        $static = Post::published();
+        $instance = (new Post())->published();
+        $chained = Post::query()->published()->recent()->featured()->popular();
+        $model = Post::query()->published()->firstOrFail();
+        $plainModel = Post::query()->firstOrFail();
+        $count = Post::query()->counted();
+        $override = Post::query()->overridden();
+        return Post::query()->published();
+    }
+    public function wrong(): string {
+        return Post::query()->published();
+    }
+}
+"#;
+        open_php(&backend, &uri, content).await;
+        for variable in [
+            "$plain",
+            "$published",
+            "$recent",
+            "$featured",
+            "$generic",
+            "$static",
+            "$instance",
+            "$chained",
+            "$inherited",
+        ] {
+            assert_eq!(
+                assigned_type(&backend, uri.as_str(), content, variable),
+                "PostBuilder<Post>",
+                "{variable}, model tag: {model_tag}, mixin: {builder_mixin}, {extends_tag}",
+            );
+        }
+        assert_eq!(
+            assigned_type(&backend, uri.as_str(), content, "$child"),
+            "PostBuilder<ChildPost>",
+        );
+        for (variable, expected) in [
+            ("$plainModel", "Post"),
+            ("$model", "Post"),
+            ("$count", "int"),
+            ("$override", "string"),
+        ] {
+            assert_eq!(
+                assigned_type(&backend, uri.as_str(), content, variable),
+                expected
+            );
+        }
+        let hover = hover_on(&backend, &uri, content, "$published =").await;
+        assert!(!hover.contains("PostBuilder<PostBuilder"), "{hover}");
+        let mut diagnostics = Vec::new();
+        backend.collect_return_type_diagnostics(uri.as_str(), content, &mut diagnostics);
+        let messages = messages_with_code(&diagnostics, "type_mismatch_return");
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(
+            messages[0].contains("Return expects string"),
+            "{messages:?}"
+        );
+        let completion = "<?php\nuse App\\Models\\Post;\nPost::query()->published()->pop";
+        let position = position_after(completion, "->pop");
+        let labels = complete_labels_at(
+            &backend,
+            &uri,
+            completion,
+            position.line,
+            position.character,
+        )
+        .await;
+        assert!(
+            labels.iter().any(|label| label.starts_with("popular")),
+            "{labels:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_custom_eloquent_builder_attribute() {
     let (backend, dir) = create_psr4_workspace(
         r#"{ "autoload": { "psr-4": { "App\\": "src/", "Illuminate\\": "vendor/illuminate/" } } }"#,
