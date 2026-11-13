@@ -796,6 +796,7 @@ pub(crate) fn declared_param_type(
 
     // A `self` parameter in a trait holds a class using the trait, so it gets `$this`'s bounds.
     if is_the_current_trait(&param_results, ctx.current_class) {
+        let nullable = param_results[0].type_string.has_null_member();
         crate::type_engine::trait_context::extend_this_with_trait_bounds(
             &mut param_results,
             ctx.current_class,
@@ -803,6 +804,13 @@ pub(crate) fn declared_param_type(
             ctx.file.class_loader,
             ctx.file.backend,
         );
+        // The bounds are joined as an intersection that replaces the hint,
+        // so put back the `null` a `?self` or `self $x = null` admits.
+        if nullable && param_results.len() > 1 {
+            for rt in &mut param_results {
+                rt.type_string = PhpType::union(vec![rt.type_string.clone(), PhpType::null()]);
+            }
+        }
     }
 
     DeclaredParam {
@@ -811,14 +819,30 @@ pub(crate) fn declared_param_type(
     }
 }
 
-/// Whether a parameter's resolved type is exactly the trait being analysed,
-/// which is what a `self` hint inside a trait resolves to.
+/// Whether a parameter holds an instance of the trait being analysed, which
+/// is what a `self` or `?self` hint inside a trait resolves to. A wrapper
+/// such as `class-string<self>` resolves to the trait too but holds a name,
+/// not an instance, so the declared type itself must name the trait.
 fn is_the_current_trait(param_results: &[ResolvedType], current_class: &ClassInfo) -> bool {
-    current_class.kind == crate::types::ClassLikeKind::Trait
-        && matches!(
-            param_results,
-            [only] if only.class_info.as_ref().is_some_and(|ci| ci.fqn() == current_class.fqn())
-        )
+    if current_class.kind != crate::types::ClassLikeKind::Trait {
+        return false;
+    }
+    let [only] = param_results else {
+        return false;
+    };
+    if !only
+        .class_info
+        .as_ref()
+        .is_some_and(|ci| ci.fqn() == current_class.fqn())
+    {
+        return false;
+    }
+    let non_null = only.type_string.non_null_type();
+    non_null
+        .as_ref()
+        .unwrap_or(&only.type_string)
+        .base_name()
+        .is_some_and(|name| name == current_class.fqn() || name.eq_ignore_ascii_case("self"))
 }
 
 /// Turn a variadic parameter's element types into the array it receives.
