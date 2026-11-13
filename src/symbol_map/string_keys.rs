@@ -65,6 +65,9 @@ pub(crate) enum StringKeyKind {
     /// aliases and groups the framework, the HTTP kernel, `bootstrap/app.php`,
     /// and the service providers register.
     Middleware,
+    /// A rate limiter registered by `RateLimiter::for()` and named by
+    /// `throttle:name` middleware or a queue's `new RateLimited('name')`.
+    RateLimiter,
     /// An environment variable name: the string `env('APP_NAME')` or
     /// `Env::get('APP_NAME')` reads, resolving to the line that declares it
     /// in the project's `.env`.
@@ -324,6 +327,7 @@ impl StringKeyKind {
             | Self::GateAbility
             | Self::ContainerBinding
             | Self::Middleware
+            | Self::RateLimiter
             | Self::Env
             | Self::Asset
             | Self::MixAsset

@@ -43,6 +43,22 @@ pub(super) fn extract_instantiation_expr<'a>(
             );
         }
         emit_symfony_instantiation_spans(inst.class, args, ctx);
+        if let Expression::Identifier(ident) = inst.class
+            && crate::virtual_members::laravel::rate_limiters::is_rate_limited_class(
+                ctx.resolved_name_at(ident.span().start.offset)
+                    .unwrap_or(&class_text),
+            )
+            && let Some(name) = argument_expr_for_parameter(args, "limiterName")
+        {
+            push_laravel_string_span(
+                crate::symbol_map::StringKeyKind::RateLimiter,
+                false,
+                false,
+                name,
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
         emit_twig_callable_instantiation(inst.class, args, ctx);
         emit_drupal_url_spans(inst.class, args, ctx);
         emit_drupal_route_permission_spans(inst.class, args, ctx);

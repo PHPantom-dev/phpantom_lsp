@@ -5,7 +5,6 @@ use tower_lsp_server::gen_lsp_types::*;
 use crate::Backend;
 use crate::completion::source::code_context::CodeContext;
 use crate::text_position::{offset_to_position, position_to_offset};
-use crate::text_scan::escape_literal_value;
 use crate::types::FileContext;
 use crate::virtual_members::laravel::validation_strings as validation;
 
@@ -64,15 +63,15 @@ impl Backend {
                             if !site.array_rule && candidate.name.contains('|') {
                                 return None;
                             }
-                            escape_literal_value(
+                            crate::text_scan::escape_php_string_content(
                                 &validation::csv_parameter(&candidate.name)?,
                                 quote,
                             )
                         } else {
-                            escape_literal_value(&candidate.name, quote)
+                            crate::text_scan::escape_php_string_content(&candidate.name, quote)
                         }
                     } else {
-                        escape_literal_value(&candidate.name, quote)
+                        crate::text_scan::escape_php_string_content(&candidate.name, quote)
                     };
                     // Editors filter against the source the user typed, which may
                     // contain PHP escapes or a CSV enclosure absent from the value.

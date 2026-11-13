@@ -291,6 +291,24 @@ fn push_middleware_parameter_spans(
             parameter_start,
             spans,
         );
+    } else if parts.alias && alias == "throttle" {
+        if let Some((decoded, _, end)) =
+            crate::virtual_members::laravel::helpers::resolved_string_literal(expr, content)
+            && let Some(name) = decoded.strip_prefix("throttle:")
+            && !name.is_empty()
+            && crate::virtual_members::laravel::rate_limiters::is_named_throttle_parameter(name)
+        {
+            spans.push(SymbolSpan {
+                start: parameter_start,
+                end: end as u32,
+                kind: SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::RateLimiter,
+                    key: name.to_string(),
+                    is_write: false,
+                    is_optional: false,
+                },
+            });
+        }
     } else if parts.auth_guards
         && crate::symbol_map::laravel_resources::middleware_resource(&text[..alias.len() + 1])
             == Some(crate::symbol_map::LaravelConfigResource::AuthGuard)

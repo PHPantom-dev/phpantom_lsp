@@ -39,6 +39,7 @@ const LOOSE_PHP: &str =
 /// A constraint whose constructor collects any named argument.
 const OPEN_PHP: &str = "<?php\nnamespace App\\Validator;\nuse Symfony\\Component\\Validator\\Constraint;\nclass Open extends Constraint {\n    public function __construct(mixed ...$options) {}\n}\n";
 
+// Escape the indented blank line's final space so whitespace cleanup preserves it.
 const VALIDATION_YAML: &str = "App\\Entity\\User:
     constraints:
         - App\\Validator\\Loose: { anything: 1 }
@@ -54,7 +55,7 @@ const VALIDATION_YAML: &str = "App\\Entity\\User:
         displayName:
             - Length:
                 max: 50
-                
+               \x20
             - Length: { min: 1,  }
 ";
 
@@ -178,7 +179,8 @@ async fn options_complete_in_a_block_mapping() {
     let (backend, dir) = workspace().await;
     let uri = uri_for(&dir, "config/validator/User.yaml");
     // The blank line indented under `max: 50`.
-    let offset = VALIDATION_YAML.find("max: 50\n").unwrap() + "max: 50\n                ".len();
+    let prefix = "max: 50\n                ";
+    let offset = VALIDATION_YAML.find(prefix).unwrap() + prefix.len();
     assert_eq!(
         labels_at(&backend, &uri, VALIDATION_YAML, offset).await,
         vec!["exactly", "min", "groups", "payload", "minMessage"],
