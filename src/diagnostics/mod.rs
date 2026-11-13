@@ -426,8 +426,9 @@ pub(crate) fn checked_byte_range_to_lsp_range(
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
 
     use super::*;
 
@@ -488,8 +489,6 @@ mod tests {
     /// fill every slot and wedge the transport (the regression this guards).
     #[test]
     fn pull_diagnostics_defer_to_worker_and_never_compute_inline() {
-        use std::sync::atomic::Ordering;
-
         let backend = crate::Backend::new_test();
         backend.init_complete.store(true, Ordering::Release);
         backend.client_caps.write().pull_diagnostics = true;
@@ -696,6 +695,7 @@ mod tests {
     #[tokio::test]
     async fn push_client_pull_returns_last_published_set() {
         let backend = Backend::new_test();
+        backend.init_complete.store(true, Ordering::Release);
         assert!(!backend.caps().pull_diagnostics);
         let uri = "file:///push.php";
         backend.diag.last_fast.lock().insert(
@@ -711,33 +711,293 @@ mod tests {
         // Push mode never asks the client to re-pull.
         assert!(!backend.assemble_and_push(uri).await);
 
-        let pull = |previous_result_id: Option<String>| {
-            backend
-                .document_pull_diagnostic(DocumentDiagnosticParams {
-                    text_document: TextDocumentIdentifier {
-                        uri: uri.parse().unwrap(),
-                    },
-                    identifier: None,
-                    previous_result_id,
-                    work_done_progress_params: Default::default(),
-                    partial_result_params: Default::default(),
-                })
-                .unwrap()
-        };
-
-        let DocumentDiagnosticReport::RelatedFullDocumentDiagnosticReport(full) = pull(None) else {
-            panic!("first pull must return the full set");
-        };
-        let report = full.full_document_diagnostic_report;
+        let full = full_report(pull_document(&backend, uri, None).await)
+            .expect("first pull must return the full set");
+        let report = full;
         assert_eq!(report.items.len(), 1);
         assert_eq!(report.items[0].message, "boom".to_string().into());
 
         // Re-publishing the same set leaves the client's result valid.
         backend.assemble_and_push(uri).await;
-        assert!(matches!(
-            pull(report.result_id),
-            DocumentDiagnosticReport::RelatedUnchangedDocumentDiagnosticReport(_)
-        ));
+        assert!(full_report(pull_document(&backend, uri, report.result_id).await).is_none());
+    }
+
+    /// The full set a pull answered with, or `None` for `Unchanged`.
+    pub(crate) fn full_report(
+        report: DocumentDiagnosticReport,
+    ) -> Option<FullDocumentDiagnosticReport> {
+        match report {
+            DocumentDiagnosticReport::RelatedFullDocumentDiagnosticReport(full) => {
+                Some(full.full_document_diagnostic_report)
+            }
+            DocumentDiagnosticReport::RelatedUnchangedDocumentDiagnosticReport(_) => None,
+        }
+    }
+
+    async fn pull_document(
+        backend: &Backend,
+        uri: &str,
+        previous_result_id: Option<String>,
+    ) -> DocumentDiagnosticReport {
+        backend
+            .document_pull_diagnostic(DocumentDiagnosticParams {
+                text_document: TextDocumentIdentifier {
+                    uri: uri.parse().unwrap(),
+                },
+                identifier: None,
+                previous_result_id,
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await
+            .unwrap()
+    }
+
+    fn edit_open_file(backend: &Backend, uri: &str, text: &str) {
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), Arc::new(text.to_string()));
+        backend.update_ast(uri, text);
+        backend.schedule_diagnostics(uri.to_string());
+    }
+
+    /// A pull sent right after an edit must answer with the diagnostics
+    /// of the edited text.  Editors pull immediately after `didChange`;
+    /// answering from the cache then reported the set from before the
+    /// edit as `Unchanged`, and a client that only re-pulls the workspace
+    /// on refresh (Neovim) never saw the fresh set.
+    #[tokio::test]
+    async fn pull_after_edit_answers_with_the_edited_text() {
+        let mut backend = Backend::new_test();
+        // Parse edits on a background task, as the server does, so the
+        // pull lands before the edit's pass is queued.
+        backend.state_mut().sync_ast_updates = false;
+        backend.init_complete.store(true, Ordering::Release);
+        backend.client_caps.write().pull_diagnostics = true;
+        let worker = backend.spawn_diagnostic_worker();
+
+        let uri = "file:///stale_pull.php";
+        edit_open_file(&backend, uri, "<?php\n\nclass Foo {\n");
+        let broken = full_report(pull_document(&backend, uri, None).await)
+            .expect("the first pull must return the full set");
+        assert!(
+            !broken.items.is_empty(),
+            "the unclosed class must report a syntax error"
+        );
+
+        backend
+            .on_did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    text_document_identifier: TextDocumentIdentifier {
+                        uri: uri.parse().unwrap(),
+                    },
+                    version: 2,
+                },
+                content_changes: vec![
+                    TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                        TextDocumentContentChangeWholeDocument {
+                            text: "<?php\n\nclass Foo {}\n".to_string(),
+                        },
+                    ),
+                ],
+            })
+            .await;
+        let fixed = full_report(pull_document(&backend, uri, broken.result_id.clone()).await)
+            .expect("a pull right after the edit must not answer Unchanged");
+        assert!(
+            fixed.items.is_empty(),
+            "stale diagnostics: {:?}",
+            fixed.items
+        );
+        assert_ne!(fixed.result_id, broken.result_id);
+
+        worker.abort();
+    }
+
+    /// A newer pull for the same document releases a held one, so pulls
+    /// sent on every keystroke while the worker is still debouncing never
+    /// pile up in tower-lsp's concurrency slots.
+    #[tokio::test]
+    async fn newer_pull_releases_a_held_one() {
+        let backend = Backend::new_test();
+        backend.init_complete.store(true, Ordering::Release);
+        backend.client_caps.write().pull_diagnostics = true;
+
+        let worker = backend.spawn_diagnostic_worker();
+
+        let uri = "file:///held_pull.php";
+        edit_open_file(&backend, uri, "<?php\n");
+        let held = spawn_pull(&backend, uri);
+        tokio::task::yield_now().await;
+        assert!(!held.is_finished(), "a pull must wait for the queued pass");
+
+        let newer = spawn_pull(&backend, uri);
+        held.await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(!newer.is_finished(), "the newest pull keeps waiting");
+
+        newer.await.unwrap();
+        assert!(backend.diag.pull_generations.lock().is_empty());
+        worker.abort();
+    }
+
+    /// A pull held for a pass must not wait forever once the worker that
+    /// owes it has stopped, on shutdown or a panic.
+    #[tokio::test]
+    async fn stopped_worker_releases_held_pulls() {
+        let backend = Backend::new_test();
+        backend.init_complete.store(true, Ordering::Release);
+        backend.client_caps.write().pull_diagnostics = true;
+        let worker = backend.spawn_diagnostic_worker();
+
+        let uri = "file:///orphaned_pull.php";
+        edit_open_file(&backend, uri, "<?php\n");
+        let held = spawn_pull(&backend, uri);
+        tokio::task::yield_now().await;
+        assert!(!held.is_finished(), "a pull must wait for the queued pass");
+
+        worker.abort();
+        held.await.unwrap();
+    }
+
+    /// The worker returns on shutdown and no longer counts as running, so
+    /// pulls stop waiting on a queue nothing drains.
+    #[tokio::test]
+    async fn worker_stops_on_shutdown() {
+        let backend = Backend::new_test();
+        let worker = backend.spawn_diagnostic_worker();
+        assert!(backend.diag.worker_alive.load(Ordering::Acquire));
+
+        backend.shutdown_flag.store(true, Ordering::Release);
+        backend.diag.notify.notify_one();
+        worker.await.unwrap();
+        assert!(!backend.diag.worker_alive.load(Ordering::Acquire));
+    }
+
+    /// A pull for a document that is not open queues a pass the worker
+    /// skips, and is answered with an empty set once it has.
+    #[tokio::test]
+    async fn pull_for_an_unopened_document_is_answered_after_the_skipped_pass() {
+        let backend = Backend::new_test();
+        backend.init_complete.store(true, Ordering::Release);
+        backend.client_caps.write().pull_diagnostics = true;
+        let worker = backend.spawn_diagnostic_worker();
+
+        let uri = "file:///never_opened.php";
+        let report = full_report(pull_document(&backend, uri, None).await)
+            .expect("a first pull must return the full set");
+        assert!(report.items.is_empty());
+        assert!(backend.diag.pending_uris.lock().is_empty());
+        assert!(backend.diag.in_flight_uris.lock().is_empty());
+        worker.abort();
+    }
+
+    /// A pull the client cancels while it is held leaves nothing behind.
+    #[tokio::test]
+    async fn cancelled_pull_leaves_no_generation_behind() {
+        let backend = Backend::new_test();
+        backend.init_complete.store(true, Ordering::Release);
+        let worker = backend.spawn_diagnostic_worker();
+
+        let uri = "file:///cancelled_pull.php";
+        edit_open_file(&backend, uri, "<?php\n");
+        let held = spawn_pull(&backend, uri);
+        tokio::task::yield_now().await;
+        assert!(!held.is_finished(), "a pull must wait for the queued pass");
+
+        held.abort();
+        assert!(held.await.unwrap_err().is_cancelled());
+        assert!(backend.diag.pull_generations.lock().is_empty());
+        worker.abort();
+    }
+
+    /// A pull for an open file with nothing cached and nothing queued
+    /// queues the pass itself and answers with its result, not with an
+    /// empty set the client would keep.
+    #[tokio::test]
+    async fn pull_with_nothing_cached_waits_for_the_pass_it_queues() {
+        let backend = Backend::new_test();
+        backend.init_complete.store(true, Ordering::Release);
+        backend.client_caps.write().pull_diagnostics = true;
+        let worker = backend.spawn_diagnostic_worker();
+
+        let uri = "file:///uncached_pull.php";
+        let text = "<?php\n\nclass Foo {\n";
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), Arc::new(text.to_string()));
+        backend.update_ast(uri, text);
+        assert!(backend.diag.pending_uris.lock().is_empty());
+
+        let report = full_report(pull_document(&backend, uri, None).await)
+            .expect("a first pull must return the full set");
+        assert!(
+            !report.items.is_empty(),
+            "the unclosed class must report a syntax error"
+        );
+        worker.abort();
+    }
+
+    /// A pull that lands while the project is still being indexed waits
+    /// for startup and the pass it queues, instead of answering with an
+    /// empty set that a client re-pulling only the workspace on refresh
+    /// (Neovim) would keep until the first edit.
+    #[tokio::test]
+    async fn pull_during_startup_waits_for_the_first_pass() {
+        let backend = Backend::new_test();
+        backend.client_caps.write().pull_diagnostics = true;
+        let worker = backend.spawn_diagnostic_worker();
+
+        let uri = "file:///startup_pull.php";
+        let text = "<?php\n\nclass Foo {\n";
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), Arc::new(text.to_string()));
+        backend.update_ast(uri, text);
+        backend.schedule_diagnostics(uri.to_string());
+        assert!(
+            backend.diag.pending_uris.lock().is_empty(),
+            "nothing is queued before startup completes"
+        );
+
+        let held = spawn_pull(&backend, uri);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!held.is_finished(), "a pull must wait for startup");
+
+        backend.init_complete.store(true, Ordering::Release);
+        backend.diag.pass_done.notify_waiters();
+        let report =
+            full_report(held.await.unwrap()).expect("a first pull must return the full set");
+        assert!(
+            !report.items.is_empty(),
+            "the unclosed class must report a syntax error"
+        );
+        worker.abort();
+    }
+
+    /// A pull held for startup is released when the server shuts down.
+    #[tokio::test]
+    async fn shutdown_releases_a_pull_held_for_startup() {
+        let backend = Backend::new_test();
+        let uri = "file:///shutdown_pull.php";
+        let held = spawn_pull(&backend, uri);
+        tokio::task::yield_now().await;
+        assert!(!held.is_finished(), "a pull must wait for startup");
+
+        backend.shutdown_flag.store(true, Ordering::Release);
+        backend.diag.pass_done.notify_waiters();
+        held.await.unwrap();
+    }
+
+    fn spawn_pull(
+        backend: &Backend,
+        uri: &'static str,
+    ) -> tokio::task::JoinHandle<DocumentDiagnosticReport> {
+        let backend = backend.clone_for_blocking();
+        tokio::spawn(async move { pull_document(&backend, uri, None).await })
     }
 
     /// `publish_diagnostics_for_file` must not resurrect a closed file's
