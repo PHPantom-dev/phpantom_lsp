@@ -880,14 +880,15 @@ fn extract_generic_args_from_methods(class: &ClassInfo, class_fqn: &str) -> Opti
     None
 }
 
-/// Extract the model type from a resolved `Builder<Model>` class by
-/// scanning its method return types for `Builder<X>` and returning `X`.
+/// Recover the model from a resolved builder's fluent return types,
+/// including scopes returning the custom builder itself.
 pub(in crate::type_engine) fn extract_model_from_builder(builder: &ClassInfo) -> Option<PhpType> {
+    let builder_fqn = builder.fqn();
     for method in &builder.methods {
         if let Some(ref ret) = method.return_type
             && let TypeKind::Generic(g) = ret.kind()
             && !g.args.is_empty()
-            && (g.name == ELOQUENT_BUILDER_FQN || g.name == "Builder")
+            && (g.name == ELOQUENT_BUILDER_FQN || g.name == "Builder" || g.name == builder_fqn)
         {
             // Skip unsubstituted template params like "TModel".
             if !g.args[0].is_empty() && !g.args[0].is_named("TModel") {
@@ -896,4 +897,26 @@ pub(in crate::type_engine) fn extract_model_from_builder(builder: &ClassInfo) ->
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_fixtures::{make_class, make_method};
+
+    #[test]
+    fn recover_model_from_custom_builder_uses_its_exact_class() {
+        let mut builder = make_class("App\\Builders\\Query");
+        for (name, ret) in [
+            ("other", "Other\\Builders\\Query<App\\Models\\Other>"),
+            ("unbound", "App\\Builders\\Query<TModel>"),
+            ("scoped", "App\\Builders\\Query<App\\Models\\Post>"),
+        ] {
+            builder.methods.push(Arc::new(make_method(name, Some(ret))));
+        }
+        assert_eq!(
+            extract_model_from_builder(&builder),
+            Some(PhpType::named(atom("App\\Models\\Post"))),
+        );
+    }
 }

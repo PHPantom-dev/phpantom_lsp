@@ -27,7 +27,7 @@ use super::relationships::{
     RelationshipKind, build_property_type, classify_relationship_typed, count_property_name,
     extract_pivot_accessor_typed, extract_related_type_typed,
 };
-use super::scopes::{build_scope_methods, is_scope_method};
+use super::scopes::{build_scope_methods, is_scope_method, rebind_scope_builder_return};
 use super::table_names::model_schema_table;
 use super::where_property::{build_where_property_methods_with_properties, lowercase_method_names};
 use super::{
@@ -463,6 +463,7 @@ impl<'a> ModelMembers<'a> {
     /// relationship method loads.
     fn add_method_members(&mut self) {
         let class = self.class;
+        let mut builder_type = None;
         for method in &class.methods {
             if self.is_base_model_method(method) {
                 continue;
@@ -473,7 +474,11 @@ impl<'a> ModelMembers<'a> {
                 // A method that is both `#[Scope]`-attributed and named
                 // `scopeX` keeps the attribute's name as-is; the prefix is
                 // only stripped for convention-based scope methods.
-                let [instance_method, static_method] = build_scope_methods(method);
+                let builder = builder_type
+                    .get_or_insert_with(|| super::model_builder_type(class, self.class_loader));
+                let [mut instance_method, mut static_method] = build_scope_methods(method);
+                rebind_scope_builder_return(&mut instance_method, builder);
+                rebind_scope_builder_return(&mut static_method, builder);
                 self.methods.push(Arc::new(instance_method));
                 self.methods.push(Arc::new(static_method));
                 continue;
