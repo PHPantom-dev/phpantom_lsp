@@ -31,11 +31,26 @@ pub(super) fn resolve_synthetic_key_type(
     if key.ends_with(']') {
         resolve_array_key_type(key, scope, ctx)
     } else if key.contains("->") {
-        resolve_member_key_type(key, scope, ctx)
+        resolve_member_key_type(key, scope, ctx, false).unwrap_or_default()
     } else if let Some((class_key, prop_name)) = split_static_property_key(key) {
         resolve_static_property_key_type(class_key, prop_name, ctx)
     } else {
         scope.get(key).to_vec()
+    }
+}
+
+/// What a key is seeded with: [`resolve_synthetic_key_type`], except that
+/// an argument-less call key whose method declares a conditional return
+/// type answers `None`, to be seeded from the call expression itself.
+pub(super) fn resolve_seed_key_type(
+    key: &str,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if key.ends_with("()") && key.contains("->") {
+        resolve_member_key_type(key, scope, ctx, true)
+    } else {
+        Some(resolve_synthetic_key_type(key, scope, ctx))
     }
 }
 
@@ -168,17 +183,23 @@ fn resolve_array_key_type(
 
 /// Resolve what a member key's declaration promises, reading the scope
 /// but not writing to it.
+///
+/// With `defer_conditional_calls`, an argument-less call key whose method
+/// declares a conditional return type answers `None`: what the call returns
+/// is the call resolver's to say, and the declared type is only the union
+/// of the branches.
 fn resolve_member_key_type(
     key: &str,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) -> Vec<ResolvedType> {
+    defer_conditional_calls: bool,
+) -> Option<Vec<ResolvedType>> {
     let (head, is_call) = match key.strip_suffix("()") {
         Some(head) => (head, true),
         None => (key, false),
     };
     let Some(arrow_pos) = head.rfind("->") else {
-        return Vec::new();
+        return Some(Vec::new());
     };
     let obj_var = &head[..arrow_pos];
     let member_name = &head[arrow_pos + 2..];
@@ -198,7 +219,7 @@ fn resolve_member_key_type(
         from_scope => from_scope,
     };
     if obj_types.is_empty() {
-        return Vec::new();
+        return Some(Vec::new());
     }
 
     // Look up the member's type on the resolved class(es).
@@ -224,7 +245,24 @@ fn resolve_member_key_type(
     let mut member_results: Vec<ResolvedType> = Vec::new();
     for cls in owners {
         let type_hint = if is_call {
-            crate::inheritance::resolve_method_return_type(cls, member_name, ctx.file.class_loader)
+            match crate::inheritance::resolve_unconditional_method_return_type(
+                cls,
+                member_name,
+                ctx.file.class_loader,
+            ) {
+                Some(crate::inheritance::CallReturn::Conditional) if defer_conditional_calls => {
+                    return None;
+                }
+                Some(crate::inheritance::CallReturn::Conditional) => {
+                    crate::inheritance::resolve_method_return_type(
+                        cls,
+                        member_name,
+                        ctx.file.class_loader,
+                    )
+                }
+                Some(crate::inheritance::CallReturn::Declared(ty)) => Some(ty),
+                None => None,
+            }
         } else {
             crate::inheritance::resolve_property_type_hint(cls, member_name, ctx.file.class_loader)
         };
@@ -263,7 +301,7 @@ fn resolve_member_key_type(
         }
     }
 
-    member_results
+    Some(member_results)
 }
 
 /// Whether a declared type that resolved to no class still means exactly

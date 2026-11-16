@@ -39,7 +39,10 @@ pub(crate) use ancestry::{
 };
 pub(crate) use enrichment::enrich_method_arc_from_ancestor;
 pub(crate) use enrichment::enrich_property_arc_from_ancestor;
-pub(crate) use member_types::{resolve_method_return_type, resolve_property_type_hint};
+pub(crate) use member_types::{
+    CallReturn, resolve_method_return_type, resolve_property_type_hint,
+    resolve_unconditional_method_return_type,
+};
 pub(crate) use merge::{MergeDedup, TraitContext, resolve_class_with_inheritance};
 pub(crate) use rebind::{is_extends_only_generic_rebindable, rebind_extends_only_generics};
 
