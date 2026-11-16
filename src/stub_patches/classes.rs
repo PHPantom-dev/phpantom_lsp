@@ -612,7 +612,7 @@ fn patch_reflection_object(class: &mut ClassInfo) {
 
 /// Give a method a conditional return type, provided the stub declares the
 /// parameter the conditional keys on.
-fn patch_method_conditional_return(
+pub(super) fn patch_method_conditional_return(
     class: &mut ClassInfo,
     method_name: &str,
     param_name: &str,

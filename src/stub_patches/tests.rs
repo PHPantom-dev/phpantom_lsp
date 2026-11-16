@@ -632,3 +632,55 @@ fn drupal_extend_keeps_a_parameter_core_no_longer_types_as_a_class_string() {
     );
     assert!(method.template_params().is_empty());
 }
+
+/// `Drupal\Core\Url` with a `toString()` returning `return_type` and taking
+/// one parameter named `flag`.
+fn drupal_url(return_type: Option<&str>, flag: &str) -> ClassInfo {
+    let mut class = empty_class("Drupal\\Core\\Url");
+    let mut method = crate::types::MethodInfo::virtual_method("toString", return_type);
+    method.parameters = vec![param(flag, "bool")].into();
+    class.methods.make_mut().push(std::sync::Arc::new(method));
+    class
+}
+
+#[test]
+fn drupal_url_methods_return_a_string_unless_asked_for_metadata() {
+    for declared in [
+        Some("string|Drupal\\Core\\GeneratedUrl"),
+        Some("Drupal\\Core\\GeneratedUrl|string"),
+        None,
+    ] {
+        let mut class = drupal_url(declared, "$collect_bubbleable_metadata");
+
+        apply_third_party_class_patches(&mut class);
+
+        assert_eq!(
+            class.methods[0].conditional_return().map(|c| c.to_string()),
+            Some(
+                "$collect_bubbleable_metadata is true ? Drupal\\Core\\GeneratedUrl : string"
+                    .to_string()
+            ),
+            "{declared:?}"
+        );
+    }
+}
+
+#[test]
+fn drupal_url_methods_that_core_already_narrowed_are_left_alone() {
+    for (declared, flag) in [
+        (Some("string"), "$collect_bubbleable_metadata"),
+        (
+            Some("string|Drupal\\Core\\GeneratedUrl"),
+            "$collect_metadata",
+        ),
+    ] {
+        let mut class = drupal_url(declared, flag);
+
+        apply_third_party_class_patches(&mut class);
+
+        assert!(
+            class.methods[0].conditional_return().is_none(),
+            "{declared:?} {flag}"
+        );
+    }
+}
