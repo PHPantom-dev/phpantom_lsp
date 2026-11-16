@@ -633,6 +633,23 @@ check("CallableResolver calls 'acme.greeter:buildGreeting' on the service", is_a
 check('acme.services.yml builds acme.greeter from Greeter, which declares buildGreeting()', $container->getDefinition('acme.greeter')->getClass() === Greeter::class && (new ReflectionMethod(Greeter::class, 'buildGreeting'))->isPublic());
 check('Greeter trusts buildGreeting() as a render callback', is_subclass_of(Greeter::class, TrustedCallbackInterface::class) && in_array('buildGreeting', Greeter::trustedCallbacks(), true));
 
+// The URL methods return a GeneratedUrl only when asked for its bubbleable
+// metadata, through a flag that defaults to FALSE. PHPantom keys their
+// return type on that parameter's name.
+foreach ([
+    [\Drupal\Core\Url::class, 'toString'],
+    [\Drupal\Core\Routing\UrlGeneratorInterface::class, 'generateFromRoute'],
+    [\Drupal\Core\Utility\UnroutedUrlAssemblerInterface::class, 'assemble'],
+] as [$urlClass, $urlMethod]) {
+    $urlFlag = array_values(array_filter(
+        (new ReflectionMethod($urlClass, $urlMethod))->getParameters(),
+        static fn (ReflectionParameter $parameter): bool => $parameter->getName() === 'collect_bubbleable_metadata',
+    ))[0] ?? null;
+    check("$urlClass::$urlMethod() takes \$collect_bubbleable_metadata, FALSE by default", $urlFlag !== null && $urlFlag->isDefaultValueAvailable() && $urlFlag->getDefaultValue() === false);
+}
+check('A GeneratedUrl has getGeneratedUrl()', method_exists(\Drupal\Core\GeneratedUrl::class, 'getGeneratedUrl'));
+check('CoreLinks::firstNodePath() passes a plain toString() to a string parameter and uses toString(TRUE) as a GeneratedUrl', str_contains((string) file_get_contents("$module/src/CoreLinks.php"), '$this->describe($url->toString())') && str_contains((string) file_get_contents("$module/src/CoreLinks.php"), '$url->toString(TRUE)'));
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";
