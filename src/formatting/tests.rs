@@ -270,7 +270,17 @@ fn malformed_mago_toml_returns_error_not_panic() {
 }
 
 #[test]
-fn strategy_both_disabled() {
+fn strategy_disabled() {
+    let config = FormattingConfig {
+        enabled: Some(false),
+        ..FormattingConfig::default()
+    };
+    let strategy = resolve_strategy(None, &config, None, None, None);
+    assert!(matches!(strategy, FormattingStrategy::Disabled));
+}
+
+#[test]
+fn strategy_all_tools_disabled_falls_back_to_builtin() {
     let config = FormattingConfig {
         enabled: Some(true),
         pint: Some(String::new()),
@@ -280,6 +290,17 @@ fn strategy_both_disabled() {
         blade_formatter: None,
         blade_php: None,
         timeout: None,
+    };
+    let strategy = resolve_strategy(None, &config, None, None, None);
+    assert!(matches!(strategy, FormattingStrategy::BuiltIn(None)));
+}
+
+#[test]
+fn strategy_disabled_wins_over_explicit_command() {
+    let config = FormattingConfig {
+        enabled: Some(false),
+        php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
+        ..FormattingConfig::default()
     };
     let strategy = resolve_strategy(None, &config, None, None, None);
     assert!(matches!(strategy, FormattingStrategy::Disabled));

@@ -185,13 +185,13 @@ pub enum FormattingStrategy {
 /// the workspace root.
 ///
 /// Resolution rules:
-/// - If `config.is_disabled()` (every tool set to `""`) → `Disabled`.
+/// - If `config.is_disabled()` (`enabled = false`) → `Disabled`.
 /// - If any tool has an explicit non-empty path in config →
 ///   `External` with those tools.
 /// - Otherwise every tool the project's metadata selects (see
 ///   [`Tool::detected`]) and whose binary the Composer bin-dir holds →
 ///   `External`.
-/// - Otherwise → `BuiltIn`.
+/// - Otherwise (including when every tool is set to `""`) → `BuiltIn`.
 ///
 /// `phpcs_standard` is the `[phpcs]` standard, handed on to phpcbf.
 pub fn resolve_strategy(

@@ -14,11 +14,15 @@ use serde::Deserialize;
 /// Explicit configuration in `.phpantom.toml` always takes priority:
 /// set a tool path to use it, or set it to `""` to disable it.
 /// When no external tool is configured or detected, the built-in
-/// formatter is used.
+/// formatter is used.  `enabled = false` turns formatting off entirely.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct FormattingConfig {
-    /// Explicitly disable all formatting
+    /// Whether formatting is enabled at all.
+    ///
+    /// - `None` (default) or `true` — format with the resolved strategy.
+    /// - `false` — answer no formatting requests, built-in formatter
+    ///   included.
     pub enabled: Option<bool>,
     /// Command (path or name) to run php-cs-fixer.
     ///
@@ -92,7 +96,7 @@ impl FormattingConfig {
         self.timeout.unwrap_or(10_000)
     }
 
-    /// Whether formatting is explicitly disabled
+    /// Whether formatting is turned off with `enabled = false`.
     pub fn is_disabled(&self) -> bool {
         self.enabled == Some(false)
     }

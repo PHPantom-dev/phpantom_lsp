@@ -306,6 +306,7 @@ Your editor can switch these off too, see [Editor-supplied inlay hint toggles](#
 
 | Key            | Type    | Default | Description |
 | -------------- | ------- | ------- | ----------- |
+| `enabled`      | boolean | unset   | Whether formatting is enabled at all. Unset or `true`: format with the strategy below. `false`: turn formatting off, built-in formatter included. |
 | `pint`         | string  | unset   | Command or path for Laravel Pint. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `pint-blade`   | boolean | unset   | Whether `.blade.php` files are formatted by Pint's `Pint/laravel_blade` rule. Unset: follow the workspace `pint.json`. `true`: send them to Pint with `--blade`. `false`: never. |
 | `blade-formatter` | string | unset | Command or path for [blade-formatter](https://github.com/shufo/blade-formatter), used for `.blade.php` files. Unset: use it when the project does (see below). `""`: never. Any other value: always, even over Pint. |
@@ -428,7 +429,9 @@ PHPantom ships a built-in PHP formatter (mago-formatter) that works out of the b
 
 1. **Explicit config wins.** A tool path set under `[formatting]` in `.phpantom.toml` (`pint`, `php-cs-fixer`, or `phpcbf`) is always used. Setting a tool to `""` disables it.
 2. **Composer `require-dev` wins over the built-in formatter.** If `composer.json` lists `laravel/pint`, `friendsofphp/php-cs-fixer`, or `squizlabs/php_codesniffer` in `require-dev`, PHPantom resolves the binary through Composer's bin-dir and runs it as a subprocess. A `phpcs.xml`, `.phpcs.xml`, `phpcs.xml.dist`, or `.phpcs.xml.dist` file at the workspace root certifies phpcbf the same way, so a project that only pulls `squizlabs/php_codesniffer` in transitively (e.g. through `slevomat/coding-standard`) is still detected. These tools discover their own project config (`pint.json`, `.php-cs-fixer.php`, `.phpcs.xml`, etc.) as they normally would.
-3. **Otherwise, the built-in formatter is used.**
+3. **Otherwise, the built-in formatter is used.** This includes projects that set every external tool to `""`.
+
+To turn formatting off entirely, set `enabled = false` under `[formatting]`.
 
 **Formatting a selection** (`textDocument/rangeFormatting`) works with every one of these. None of them can format part of a file, so PHPantom formats the whole file and applies only the changes on the selected lines. A change that runs past the edge of the selection is applied whole, so the file never ends up half-formatted mid-statement, and lines the formatter moved (sorted imports, for example) are moved as a unit rather than dropped or duplicated.
 
