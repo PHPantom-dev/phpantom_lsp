@@ -321,7 +321,12 @@ migration below lets a stub declare only the members it overrides.
    no Rust needed).
 
 The phpstorm-stubs patch system (`src/stub_patches/`) is an equally
-good candidate for the same treatment once the mechanism exists.
+good candidate for the same treatment once the mechanism exists. So
+are its third-party corrections, which a stub can express as plain
+declarations: Drupal's URL methods (`Url::toString()`,
+`generateFromRoute()`, `assemble()`), whose conditional return keys on
+`$collect_bubbleable_metadata`, and the method template on a query's
+`extend()` (`src/stub_patches/drupal.rs`).
 
 ### Scope of the Rust patch system until then
 

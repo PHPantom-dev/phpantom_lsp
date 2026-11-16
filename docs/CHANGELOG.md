@@ -156,6 +156,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Drupal form and render callbacks.** In a Drupal project, a callback named in a form or render array, such as a `#submit`, `#validate`, `#pre_render`, or `#ajax` callback, jumps to its method or function, completes, shows it on hover, is renamed with it, and lists its references. A callback that names nothing, or that cannot be called, is reported. Contributed by @giuseppe-esposito-87.
 - **Drupal event subscribers.** In a Drupal project, event subscribers are read as they are in Symfony: the methods a subscriber's map names navigate and are checked, and an event name passed to the event dispatcher completes and leads to the constant that names it, if any, and to every subscription that listens to it. Contributed by @giuseppe-esposito-87.
 - **Drupal entity fields.** In a Drupal project, a content entity's fields are typed properties of the entity and of its interfaces, down to the entity a reference field points to. Field names written in code complete, show their type on hover, and jump to where the field is declared. Contributed by @giuseppe-esposito-87.
+- **Precise return types for Drupal's URLs and query extenders.** A URL built without asking for its bubbleable metadata is a plain string, and a query extended with an extender is typed as that extender, so its methods resolve. Contributed by @giuseppe-esposito-87.
 
 #### WordPress
 

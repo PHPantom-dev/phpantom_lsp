@@ -147,7 +147,11 @@
 //! leave undeclared, the `$args` docblock of Mockery's mock factories,
 //! whose `array<TMock>` alternative is really constructor arguments, the
 //! record class a `yiisoft/active-record` query is for (see
-//! `active_record.rs`), and the model class accepted by Tempest's `query()`.
+//! `active_record.rs`), the model class accepted by Tempest's `query()`,
+//! and the return types Drupal core declares wider than the call (see
+//! `drupal.rs`): the URL methods that return a plain string unless asked
+//! for bubbleable metadata, and a query's `extend()`, which returns the
+//! extender it is given.
 //!
 //! ### Class patches
 //!
