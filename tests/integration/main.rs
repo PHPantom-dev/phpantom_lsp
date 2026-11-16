@@ -232,6 +232,7 @@ mod drupal_mixed_workspace;
 mod drupal_permissions;
 mod drupal_plugins;
 mod drupal_render_elements;
+mod drupal_return_types;
 mod drupal_routes;
 mod drupal_services;
 mod drupal_theme_hooks;

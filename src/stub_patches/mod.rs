@@ -203,6 +203,7 @@
 
 mod active_record;
 mod classes;
+mod drupal;
 mod functions;
 mod mockery;
 

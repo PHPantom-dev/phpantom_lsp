@@ -128,14 +128,20 @@ const THIRD_PARTY_ASSERT_IF_TRUE: &[(&str, &str, &str)] = &[(
     "$this->getClassReflection()",
 )];
 
-/// Supply the `@phpstan-assert-if-true` tags that [`THIRD_PARTY_ASSERT_IF_TRUE`]
-/// records, for a class parsed from the user's project or its vendor tree.
+/// Apply the corrections for third-party classes to a class parsed from
+/// the user's project or its vendor tree: `yiisoft/active-record`'s query
+/// generics, Mockery's mock arguments, Drupal core's return types, and the
+/// `@phpstan-assert-if-true` tags that [`THIRD_PARTY_ASSERT_IF_TRUE`]
+/// records.
 ///
 /// Separate from [`apply_class_stub_patches`], which is deliberately
 /// confined to the embedded stubs: this one has to reach vendor code, so
-/// it does nothing at all for a class whose FQN is not in the list.
+/// it does nothing at all for a class whose FQN none of them names.
 pub fn apply_third_party_class_patches(class: &mut ClassInfo) {
     if super::active_record::patch(class) {
+        return;
+    }
+    if super::drupal::patch(class) {
         return;
     }
     let fqn = class.fqn();
