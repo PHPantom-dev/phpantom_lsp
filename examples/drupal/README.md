@@ -70,6 +70,10 @@ Run `composer install` here first. Composer puts core and contrib into
   `'field_tags'`, which lands in its field storage file, hover it for its
   field type, or find its references, the `$note->field_tags` reads
   included; `$tags`, from `get('field_tags')`, is typed as the field is.
+- A database query's `extend()` returns the extender it is given. In
+  `firstPageIds()` in `web/modules/custom/acme/src/NoteCounter.php`,
+  complete after `->extend(PagerSelectExtender::class)->`: the pager's
+  `limit()` is offered, and is no unknown method.
 - Route names navigate between the routing file that declares them and the
   code, links files, and templates that name them. In
   `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the

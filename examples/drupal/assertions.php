@@ -51,6 +51,9 @@ use Drupal\Core\Validation\Attribute\Constraint;
 use Drupal\Core\Validation\Plugin\Validation\Constraint\UniqueFieldConstraint;
 use Drupal\Core\Config\ConfigBase;
 use Drupal\Core\Config\FileStorage;
+use Drupal\Core\Database\Query\ExtendableInterface;
+use Drupal\Core\Database\Query\PagerSelectExtender;
+use Drupal\Core\Database\Query\Select;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\DependencyInjection\ClassResolver;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
@@ -386,6 +389,13 @@ check('FieldableEntityInterface::get() returns the field item list', preg_match(
 check('NoteInterface is fieldable', is_subclass_of(NoteInterface::class, FieldableEntityInterface::class));
 check('NoteSummary::isTagged() asks for and reads field_tags by name', str_contains($summarySource, "\$note->hasField('field_tags')") && str_contains($summarySource, "\$tags = \$note->get('field_tags');"));
 check('NoteSummary::isTagged() returns a bool', (new ReflectionMethod(NoteSummary::class, 'isTagged'))->getReturnType()?->getName() === 'bool');
+
+// A query's extend() builds the extender class it is given, which PHPantom
+// reads from the parameter extend() declares.
+check("ExtendableInterface::extend() takes the extender's class as \$extender_name", (new ReflectionMethod(ExtendableInterface::class, 'extend'))->getParameters()[0]->getName() === 'extender_name');
+check('the select query Connection::select() builds is extendable', is_subclass_of(Select::class, ExtendableInterface::class));
+check('PagerSelectExtender is extendable and has limit()', is_subclass_of(PagerSelectExtender::class, ExtendableInterface::class) && (new ReflectionClass(PagerSelectExtender::class))->hasMethod('limit'));
+check('NoteCounter::firstPageIds() extends its query with PagerSelectExtender and limits it', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "->extend(PagerSelectExtender::class)\n            ->limit(10);"));
 
 // Drupal upcasts a controller's parameter named after an entity type and
 // hinted with a class or interface the entity class is (core's
