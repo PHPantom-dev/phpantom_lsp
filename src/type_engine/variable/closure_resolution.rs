@@ -890,8 +890,15 @@ pub(in crate::type_engine) fn extract_model_from_builder(builder: &ClassInfo) ->
             && !g.args.is_empty()
             && (g.name == ELOQUENT_BUILDER_FQN || g.name == "Builder" || g.name == builder_fqn)
         {
-            // Skip unsubstituted template params like "TModel".
-            if !g.args[0].is_empty() && !g.args[0].is_named("TModel") {
+            // Skip unsubstituted template params: Eloquent's own `TModel`
+            // and whatever a custom builder names its model parameter.
+            let unbound = match g.args[0].kind() {
+                TypeKind::Named(name) => {
+                    name == "TModel" || builder.template_params.iter().any(|p| p == name)
+                }
+                _ => false,
+            };
+            if !g.args[0].is_empty() && !unbound {
                 return Some(g.args[0].clone());
             }
         }
@@ -907,9 +914,11 @@ mod tests {
     #[test]
     fn recover_model_from_custom_builder_uses_its_exact_class() {
         let mut builder = make_class("App\\Builders\\Query");
+        builder.template_params.push(atom("TModelClass"));
         for (name, ret) in [
             ("other", "Other\\Builders\\Query<App\\Models\\Other>"),
             ("unbound", "App\\Builders\\Query<TModel>"),
+            ("templated", "App\\Builders\\Query<TModelClass>"),
             ("scoped", "App\\Builders\\Query<App\\Models\\Post>"),
         ] {
             builder.methods.push(Arc::new(make_method(name, Some(ret))));
