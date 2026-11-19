@@ -263,11 +263,13 @@ fn collect_table_metadata(
     })
 }
 
-fn visit_expressions(node: Node<'_, '_>, visitor: &mut impl FnMut(&Expression<'_>)) {
-    if let Node::Expression(expr) = node {
-        visitor(expr);
-    }
-    node.visit_children(|child| visit_expressions(child, visitor));
+fn visit_expressions(root: Node<'_, '_>, visitor: &mut impl FnMut(&Expression<'_>)) {
+    crate::parser::walk_nodes(root, |node| {
+        if let Node::Expression(expr) = node {
+            visitor(expr);
+        }
+        true
+    });
 }
 
 fn empty_spans() -> Arc<Vec<SymbolSpan>> {

@@ -107,26 +107,28 @@ pub(crate) fn scan_morph_map(content: &str) -> MorphMapScan {
 /// Recursively collect every `Relation::morphMap(...)` /
 /// `Relation::enforceMorphMap(...)` / `Relation::requireMorphMap(...)` call.
 fn collect_morph_map_calls(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     resolved: &OwnedResolvedNames,
     content: &str,
     scan: &mut MorphMapScan,
 ) {
-    if let Node::StaticMethodCall(smc) = node
-        && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
-        && let Some(method) = morph_map_method(bytes_to_str(ident.value))
-        && subject_is_relation(smc.class, resolved)
-    {
-        if method.enforces {
-            scan.enforced = true;
-        }
-        if method.takes_map
-            && let Some(arg) = smc.argument_list.arguments.first()
+    crate::parser::walk_nodes(root, |node| {
+        if let Node::StaticMethodCall(smc) = node
+            && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
+            && let Some(method) = morph_map_method(bytes_to_str(ident.value))
+            && subject_is_relation(smc.class, resolved)
         {
-            collect_map_argument(arg.value(), resolved, content, scan);
+            if method.enforces {
+                scan.enforced = true;
+            }
+            if method.takes_map
+                && let Some(arg) = smc.argument_list.arguments.first()
+            {
+                collect_map_argument(arg.value(), resolved, content, scan);
+            }
         }
-    }
-    node.visit_children(|child| collect_morph_map_calls(child, resolved, content, scan));
+        true
+    });
 }
 
 /// Which morph-map API a method name refers to.

@@ -930,3 +930,103 @@ return {};
 
     assert!(folding.is_some(), "Folding ranges should be computed");
 }
+
+/// The framework scanners walk every file a Laravel project hands them, so
+/// a generated chain in a provider, a route file, a config file, or a form
+/// request must not overflow their walks either.
+#[test]
+fn generated_length_operator_chains_do_not_overflow_framework_scanners() {
+    use tower_lsp_server::LanguageServer;
+    const OPERANDS: usize = 20_000;
+
+    let chain = vec!["'a'"; OPERANDS].join(" . ");
+    let provider = format!(
+        "<?php
+namespace App\\Providers;
+
+use Illuminate\\Support\\ServiceProvider;
+
+class AppServiceProvider extends ServiceProvider
+{{
+    public function boot(): void
+    {{
+        $generated = {chain};
+    }}
+}}
+"
+    );
+    let request = format!(
+        "<?php
+namespace App\\Http\\Requests;
+
+use Illuminate\\Foundation\\Http\\FormRequest;
+
+class ChainRequest extends FormRequest
+{{
+    public function rules(): array
+    {{
+        return ['name' => {chain}];
+    }}
+
+    public function store(): void
+    {{
+        $this->validate(['name' => {chain}]);
+        $this->
+    }}
+}}
+"
+    );
+    let files = [
+        ("app/Providers/AppServiceProvider.php", provider),
+        ("app/Http/Requests/ChainRequest.php", request.clone()),
+        ("routes/web.php", format!("<?php\n$generated = {chain};\n")),
+        (
+            "config/app.php",
+            format!("<?php\nreturn ['aliases' => ['Generated' => {chain}]];\n"),
+        ),
+    ];
+    // The line holding `$this->` and the column just past it.
+    let completion_line = 15;
+    let completion_column = 15;
+
+    with_parse_worker_stack(move || {
+        let file_refs: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(path, content)| (*path, content.as_str()))
+            .collect();
+        let (backend, dir) = crate::common::create_psr4_workspace(
+            r#"{"require":{"laravel/framework":"^13.0"},"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+            &file_refs,
+        );
+        crate::common::block_on(async {
+            backend
+                .initialized(tower_lsp_server::gen_lsp_types::InitializedParams {})
+                .await;
+            let uri = crate::common::open_php_at(
+                &backend,
+                &dir,
+                "app/Http/Requests/ChainRequest.php",
+                &request,
+            )
+            .await;
+            let mut diagnostics = Vec::new();
+            backend.collect_fast_diagnostics(uri.as_str(), &request, &mut diagnostics);
+            backend.collect_slow_diagnostics(uri.as_str(), &request, &mut diagnostics);
+            crate::common::complete_at_raw(
+                &backend,
+                &uri,
+                &request,
+                completion_line,
+                completion_column,
+            )
+            .await;
+            crate::common::get_code_actions_at(
+                &backend,
+                uri.as_str(),
+                &request,
+                9,
+                (25 + OPERANDS / 2 * 6) as u32,
+            );
+        });
+    });
+}

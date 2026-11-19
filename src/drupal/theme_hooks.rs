@@ -154,60 +154,60 @@ pub(crate) fn read_declared(content: &str, name: &str) -> ImplementationRead {
 /// in its attributes, or in its name, or for a `#[Hook]` on a class, in the
 /// class's attributes.
 fn find_body<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     at: u32,
     content: &str,
     found: &mut Option<&'ast [Statement<'arena>]>,
 ) {
-    if found.is_some() {
-        return;
-    }
-    match node {
-        Node::Class(class) => {
-            if let Some(attribute) = class
-                .attribute_lists
-                .iter()
-                .flat_map(|list| list.attributes.iter())
-                .find(|attribute| {
-                    let span = attribute.span();
-                    span.start.offset <= at && at <= span.end.offset
-                })
-            {
-                let name = hook_method(attribute, content);
-                *found = class.members.iter().find_map(|member| match member {
-                    ClassLikeMember::Method(method)
-                        if bytes_to_str(method.name.value).eq_ignore_ascii_case(name) =>
-                    {
-                        match &method.body {
-                            MethodBody::Concrete(block) => Some(block.statements.as_slice()),
-                            MethodBody::Abstract(_) => None,
+    crate::parser::walk_nodes(root, |node| {
+        if found.is_some() {
+            return false;
+        }
+        match node {
+            Node::Class(class) => {
+                if let Some(attribute) = class
+                    .attribute_lists
+                    .iter()
+                    .flat_map(|list| list.attributes.iter())
+                    .find(|attribute| {
+                        let span = attribute.span();
+                        span.start.offset <= at && at <= span.end.offset
+                    })
+                {
+                    let name = hook_method(attribute, content);
+                    *found = class.members.iter().find_map(|member| match member {
+                        ClassLikeMember::Method(method)
+                            if bytes_to_str(method.name.value).eq_ignore_ascii_case(name) =>
+                        {
+                            match &method.body {
+                                MethodBody::Concrete(block) => Some(block.statements.as_slice()),
+                                MethodBody::Abstract(_) => None,
+                            }
                         }
-                    }
-                    _ => None,
-                });
-                return;
+                        _ => None,
+                    });
+                    return false;
+                }
             }
-        }
-        Node::Function(function) => {
-            if declares_at(&function.attribute_lists, function.name.span, at) {
-                *found = Some(function.body.statements.as_slice());
+            Node::Function(function) => {
+                if declares_at(&function.attribute_lists, function.name.span, at) {
+                    *found = Some(function.body.statements.as_slice());
+                }
+                return false;
             }
-            return;
-        }
-        Node::Method(method) => {
-            if declares_at(&method.attribute_lists, method.name.span, at)
-                && let MethodBody::Concrete(block) = &method.body
-            {
-                *found = Some(block.statements.as_slice());
+            Node::Method(method) => {
+                if declares_at(&method.attribute_lists, method.name.span, at)
+                    && let MethodBody::Concrete(block) = &method.body
+                {
+                    *found = Some(block.statements.as_slice());
+                }
+                return false;
             }
-            return;
+            _ => {}
         }
-        _ => {}
-    }
-    let span = node.span();
-    if span.start.offset <= at && at <= span.end.offset {
-        node.visit_children(|child| find_body(child, at, content, found));
-    }
+        let span = node.span();
+        span.start.offset <= at && at <= span.end.offset
+    });
 }
 
 /// The method a class's `#[Hook]` runs: the one its `method:` argument
@@ -246,31 +246,33 @@ fn declares_at(
 
 /// The statements of the first function or method named `name`.
 fn find_declared<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     name: &str,
     found: &mut Option<&'ast [Statement<'arena>]>,
 ) {
-    if found.is_some() {
-        return;
-    }
-    match node {
-        Node::Method(method) => {
-            if bytes_to_str(method.name.value).eq_ignore_ascii_case(name)
-                && let MethodBody::Concrete(block) = &method.body
-            {
-                *found = Some(block.statements.as_slice());
-            }
-            return;
+    crate::parser::walk_nodes(root, |node| {
+        if found.is_some() {
+            return false;
         }
-        Node::Function(function) => {
-            if bytes_to_str(function.name.value).eq_ignore_ascii_case(name) {
-                *found = Some(function.body.statements.as_slice());
+        match node {
+            Node::Method(method) => {
+                if bytes_to_str(method.name.value).eq_ignore_ascii_case(name)
+                    && let MethodBody::Concrete(block) = &method.body
+                {
+                    *found = Some(block.statements.as_slice());
+                }
+                return false;
             }
-            return;
+            Node::Function(function) => {
+                if bytes_to_str(function.name.value).eq_ignore_ascii_case(name) {
+                    *found = Some(function.body.statements.as_slice());
+                }
+                return false;
+            }
+            _ => {}
         }
-        _ => {}
-    }
-    node.visit_children(|child| find_declared(child, name, found));
+        true
+    });
 }
 
 /// Whether `function` names the global function `name`.

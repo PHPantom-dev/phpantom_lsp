@@ -32,6 +32,7 @@ use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::names::OwnedResolvedNames;
+use crate::parser::{walk_nodes, walk_nodes_with, walk_nodes_with_start};
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 use crate::util::short_name;
 
@@ -476,7 +477,7 @@ fn inline_validate_rules_in(
     let names = EnumNames::for_program(program);
 
     let mut in_force: Option<RulesArray> = None;
-    walk_candidate_calls(body, cursor, false, &mut |node, conditional| {
+    walk_candidate_calls(body, cursor, |node, conditional| {
         let rules_arg = match node {
             Node::MethodCall(mc) => method_rules_argument(&mc.method, &mc.argument_list),
             Node::NullSafeMethodCall(mc) => method_rules_argument(&mc.method, &mc.argument_list),
@@ -517,17 +518,16 @@ fn inline_validate_rules_in(
 /// Walk order is source order, so a `visit` that overwrites its state ends up
 /// holding the last node.
 fn walk_candidate_calls<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     cursor: u32,
-    conditional: bool,
-    visit: &mut impl FnMut(Node<'ast, 'arena>, bool),
+    mut visit: impl FnMut(Node<'ast, 'arena>, bool),
 ) {
-    visit(node, conditional);
-    let conditional = conditional || introduces_control_flow_choice(node);
-    node.visit_children(|child| {
-        if child.span().start.offset < cursor {
-            walk_candidate_calls(child, cursor, conditional, visit);
+    walk_nodes_with_start(root, false, |node, start, conditional| {
+        if start >= cursor {
+            return None;
         }
+        visit(node, conditional);
+        Some(conditional || introduces_control_flow_choice(node))
     });
 }
 
@@ -674,25 +674,27 @@ pub(crate) fn rules_from_program_range(
 }
 
 fn collect_rules_in_range(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     content: &str,
     start: usize,
     end: usize,
     names: &EnumNames<'_, '_>,
     out: &mut RulesArray,
 ) {
-    let span = node.span();
-    if (span.start.offset as usize) > start || (span.end.offset as usize) < end {
-        return;
-    }
-    if span.start.offset as usize == start
-        && span.end.offset as usize == end
-        && let Node::Expression(expression) = node
-    {
-        collect_rules_from_expr(expression, content, names, out);
-        return;
-    }
-    node.visit_children(|child| collect_rules_in_range(child, content, start, end, names, out));
+    walk_nodes(root, |node| {
+        let span = node.span();
+        if (span.start.offset as usize) > start || (span.end.offset as usize) < end {
+            return false;
+        }
+        if span.start.offset as usize == start
+            && span.end.offset as usize == end
+            && let Node::Expression(expression) = node
+        {
+            collect_rules_from_expr(expression, content, names, out);
+            return false;
+        }
+        true
+    });
 }
 
 /// The rules argument of `->validate([...])`, `->validate($request, [...])`,
@@ -1130,63 +1132,64 @@ pub(crate) fn rules_from_class_source(content: &str, class_name: &str) -> RulesA
 }
 
 fn collect_rules_method(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     class_name: &str,
     content: &str,
     names: &EnumNames<'_, '_>,
     out: &mut RulesArray,
 ) {
-    if let Node::Namespace(namespace) = node {
-        let source_namespace = namespace
-            .name
-            .as_ref()
-            .map_or("", |name| bytes_to_str(name.value()));
-        let (requested_namespace, short_name) =
-            class_name.rsplit_once('\\').unwrap_or(("", class_name));
-        if source_namespace.eq_ignore_ascii_case(requested_namespace) {
-            node.visit_children(|child| {
-                collect_rules_method(child, short_name, content, names, out)
-            });
+    // A namespace narrows the short name the classes inside it declare.
+    walk_nodes_with(root, class_name, |node, class_name| {
+        if let Node::Namespace(namespace) = node {
+            let source_namespace = namespace
+                .name
+                .as_ref()
+                .map_or("", |name| bytes_to_str(name.value()));
+            let (requested_namespace, short_name) =
+                class_name.rsplit_once('\\').unwrap_or(("", class_name));
+            return source_namespace
+                .eq_ignore_ascii_case(requested_namespace)
+                .then_some(short_name);
         }
-        return;
-    }
-    // A trait declares `rules()` the same way a class does, and a
-    // `FormRequest` is free to get its method from one.
-    let declaration = match node {
-        Node::Class(class) => Some((bytes_to_str(class.name.value), &class.members)),
-        Node::Trait(trait_) => Some((bytes_to_str(trait_.name.value), &trait_.members)),
-        _ => None,
-    };
-    if let Some((name, members)) = declaration {
-        if !name.eq_ignore_ascii_case(class_name) {
-            return;
-        }
-        for member in members.iter() {
-            if let ClassLikeMember::Method(method) = member
-                && bytes_to_str(method.name.value).eq_ignore_ascii_case("rules")
-                && let MethodBody::Concrete(block) = &method.body
-            {
-                collect_returned_rules(Node::Block(block), content, names, out);
+        // A trait declares `rules()` the same way a class does, and a
+        // `FormRequest` is free to get its method from one.
+        let declaration = match node {
+            Node::Class(class) => Some((bytes_to_str(class.name.value), &class.members)),
+            Node::Trait(trait_) => Some((bytes_to_str(trait_.name.value), &trait_.members)),
+            _ => None,
+        };
+        let Some((name, members)) = declaration else {
+            return Some(class_name);
+        };
+        if name.eq_ignore_ascii_case(class_name) {
+            for member in members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && bytes_to_str(method.name.value).eq_ignore_ascii_case("rules")
+                    && let MethodBody::Concrete(block) = &method.body
+                {
+                    collect_returned_rules(Node::Block(block), content, names, out);
+                }
             }
         }
-        return;
-    }
-    node.visit_children(|child| collect_rules_method(child, class_name, content, names, out));
+        None
+    });
 }
 
 fn collect_returned_rules(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     content: &str,
     names: &EnumNames<'_, '_>,
     out: &mut RulesArray,
 ) {
-    if let Node::Return(ret) = node {
-        if let Some(value) = ret.value {
-            collect_rules_from_expr(value, content, names, out);
+    walk_nodes(root, |node| {
+        if let Node::Return(ret) = node {
+            if let Some(value) = ret.value {
+                collect_rules_from_expr(value, content, names, out);
+            }
+            return false;
         }
-        return;
-    }
-    node.visit_children(|child| collect_returned_rules(child, content, names, out));
+        true
+    });
 }
 
 // ─── Candidate keys ─────────────────────────────────────────────────────────

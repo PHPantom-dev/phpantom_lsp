@@ -10,6 +10,7 @@ use tower_lsp_server::gen_lsp_types::{Location, Position};
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::names::OwnedResolvedNames;
+use crate::parser::{walk_nodes, walk_nodes_with};
 
 use super::super::database_schema::blueprint_declares_column;
 use super::super::helpers::extract_string_literal;
@@ -114,33 +115,36 @@ struct MigrationSearch<'a> {
 }
 
 impl MigrationSearch<'_> {
-    fn walk(&self, node: Node<'_, '_>, connection: &str, found: &mut Option<usize>) {
-        if matches!(node, Node::Method(method) if method.name.value.eq_ignore_ascii_case(b"down")) {
-            return;
-        }
-        let declared_connection = match node {
-            Node::Class(class) => class_connection(class.members.iter(), self.content),
-            Node::AnonymousClass(class) => class_connection(class.members.iter(), self.content),
-            _ => None,
-        };
-        let connection = declared_connection.unwrap_or(connection);
-        match node {
-            Node::StaticMethodCall(call) if self.is_schema(call.class) => {
-                self.call(&call.method, &call.argument_list, connection, found);
+    fn walk(&self, root: Node<'_, '_>, connection: &str, found: &mut Option<usize>) {
+        walk_nodes_with(root, connection, |node, connection| {
+            if matches!(node, Node::Method(method) if method.name.value.eq_ignore_ascii_case(b"down"))
+            {
+                return None;
             }
-            Node::MethodCall(call) => {
-                if let Expression::Call(Call::StaticMethod(root)) = call.object
-                    && self.is_schema(root.class)
-                    && matches!(&root.method, ClassLikeMemberSelector::Identifier(method) if method.value.eq_ignore_ascii_case(b"connection"))
-                    && let Some((connection, _, _)) = argument(&root.argument_list, 0, "name")
-                        .and_then(|arg| extract_string_literal(arg, self.content))
-                {
+            let declared_connection = match node {
+                Node::Class(class) => class_connection(class.members.iter(), self.content),
+                Node::AnonymousClass(class) => class_connection(class.members.iter(), self.content),
+                _ => None,
+            };
+            let connection = declared_connection.unwrap_or(connection);
+            match node {
+                Node::StaticMethodCall(call) if self.is_schema(call.class) => {
                     self.call(&call.method, &call.argument_list, connection, found);
                 }
+                Node::MethodCall(call) => {
+                    if let Expression::Call(Call::StaticMethod(root)) = call.object
+                        && self.is_schema(root.class)
+                        && matches!(&root.method, ClassLikeMemberSelector::Identifier(method) if method.value.eq_ignore_ascii_case(b"connection"))
+                        && let Some((connection, _, _)) = argument(&root.argument_list, 0, "name")
+                            .and_then(|arg| extract_string_literal(arg, self.content))
+                    {
+                        self.call(&call.method, &call.argument_list, connection, found);
+                    }
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        node.visit_children(|child| self.walk(child, connection, found));
+            Some(connection)
+        });
     }
 
     fn is_schema(&self, expression: &Expression<'_>) -> bool {
@@ -243,40 +247,43 @@ fn closure_column(
 }
 
 fn walk_blueprint(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     variable: &[u8],
     content: &str,
     column: &str,
     found: &mut Option<usize>,
 ) {
-    if matches!(
-        node,
-        Node::Closure(_)
-            | Node::ArrowFunction(_)
-            | Node::Function(_)
-            | Node::Class(_)
-            | Node::AnonymousClass(_)
-    ) {
-        return;
-    }
-    if let Node::MethodCall(call) = node
-        && matches!(call.object, Expression::Variable(Variable::Direct(receiver)) if receiver.name == variable)
-        && let ClassLikeMemberSelector::Identifier(method) = &call.method
-    {
-        let method_name = bytes_to_str(method.value);
-        if method_name.eq_ignore_ascii_case("after") {
-            if let Some(Expression::Closure(closure)) = argument(&call.argument_list, 1, "callback")
-                && let Some(offset) = closure_column(closure, content, column)
-            {
-                *found = Some(offset);
-            }
-        } else if let Some(offset) =
-            column_argument(method_name, &call.argument_list, content, column)
-        {
-            *found = Some(offset.unwrap_or(method.span.start.offset as usize));
+    walk_nodes(root, |node| {
+        if matches!(
+            node,
+            Node::Closure(_)
+                | Node::ArrowFunction(_)
+                | Node::Function(_)
+                | Node::Class(_)
+                | Node::AnonymousClass(_)
+        ) {
+            return false;
         }
-    }
-    node.visit_children(|child| walk_blueprint(child, variable, content, column, found));
+        if let Node::MethodCall(call) = node
+            && matches!(call.object, Expression::Variable(Variable::Direct(receiver)) if receiver.name == variable)
+            && let ClassLikeMemberSelector::Identifier(method) = &call.method
+        {
+            let method_name = bytes_to_str(method.value);
+            if method_name.eq_ignore_ascii_case("after") {
+                if let Some(Expression::Closure(closure)) =
+                    argument(&call.argument_list, 1, "callback")
+                    && let Some(offset) = closure_column(closure, content, column)
+                {
+                    *found = Some(offset);
+                }
+            } else if let Some(offset) =
+                column_argument(method_name, &call.argument_list, content, column)
+            {
+                *found = Some(offset.unwrap_or(method.span.start.offset as usize));
+            }
+        }
+        true
+    });
 }
 
 fn column_argument(

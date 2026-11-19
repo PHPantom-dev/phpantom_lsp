@@ -2513,26 +2513,27 @@ impl SubscriberMap<'_, '_> {
 /// assignments it makes, leaving out the closures and classes it defines,
 /// whose variables are their own.
 fn collect_subscriber_map_writes<'a>(
-    node: Node<'a, 'a>,
+    body: Node<'a, 'a>,
     returned: &mut Vec<&'a Expression<'a>>,
     assignments: &mut Vec<&'a Assignment<'a>>,
 ) {
-    node.visit_children(|child| match child {
+    crate::parser::walk_nodes(body, |node| match node {
         Node::Closure(_)
         | Node::ArrowFunction(_)
         | Node::AnonymousClass(_)
         | Node::Function(_)
-        | Node::Class(_) => {}
+        | Node::Class(_) => false,
         Node::Return(statement) => {
             returned.extend(statement.value);
+            false
         }
         Node::Assignment(assignment) => {
             if assignment.operator.is_assign() {
                 assignments.push(assignment);
             }
-            collect_subscriber_map_writes(child, returned, assignments);
+            true
         }
-        other => collect_subscriber_map_writes(other, returned, assignments),
+        _ => true,
     });
 }
 

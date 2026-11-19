@@ -9,6 +9,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
 use crate::completion::source::code_context::CodeContext;
+use crate::parser::walk_nodes;
 
 use super::super::helpers::{extract_string_literal_including_empty, resolved_string_literal};
 use super::super::validation_rules::{RulesArray, rules_from_program_range};
@@ -196,7 +197,14 @@ fn close_syntax(repaired: &mut String, code: &CodeContext<'_>) {
     }
 }
 
-fn visit(node: Node<'_, '_>, content: &str, sites: &mut Vec<ValidationSite>) {
+fn visit(root: Node<'_, '_>, content: &str, sites: &mut Vec<ValidationSite>) {
+    walk_nodes(root, |node| {
+        visit_node(node, content, sites);
+        true
+    });
+}
+
+fn visit_node(node: Node<'_, '_>, content: &str, sites: &mut Vec<ValidationSite>) {
     match node {
         Node::MethodCall(call) => collect_method_call(
             call.object,
@@ -253,7 +261,6 @@ fn visit(node: Node<'_, '_>, content: &str, sites: &mut Vec<ValidationSite>) {
         }
         _ => {}
     }
-    node.visit_children(|child| visit(child, content, sites));
 }
 
 fn collect_method_call(
@@ -330,18 +337,18 @@ fn argument<'ast, 'arena>(
 }
 
 fn collect_returns(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     kind: SiteKind,
     owner: &Arc<ValidationOwner>,
     content: &str,
     sites: &mut Vec<ValidationSite>,
 ) {
-    match node {
+    walk_nodes(root, |node| match node {
         Node::Closure(_)
         | Node::ArrowFunction(_)
         | Node::Function(_)
         | Node::Class(_)
-        | Node::AnonymousClass(_) => return,
+        | Node::AnonymousClass(_) => false,
         Node::Return(ret) => {
             if let Some(value) = ret.value {
                 if kind == SiteKind::Rule {
@@ -361,11 +368,10 @@ fn collect_returns(
                     });
                 }
             }
-            return;
+            false
         }
-        _ => {}
-    }
-    node.visit_children(|child| collect_returns(child, kind, owner, content, sites));
+        _ => true,
+    });
 }
 
 struct RuleGroup {

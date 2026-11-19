@@ -232,38 +232,22 @@ fn within(inner: &Location, outer: &Location) -> bool {
 /// in: its name and where the name starts and ends.
 fn constant_initialized_at(content: &str, offset: u32) -> Option<(String, u32, u32)> {
     crate::parser::with_parsed_program(content, "event_constant_initializer", |program, _| {
-        let mut found = None;
-        find_constant_initialized_at(Node::Program(program), offset, &mut found);
-        found
+        crate::parser::innermost_node_at(Node::Program(program), offset, |node| {
+            let Node::ClassLikeConstantItem(item) = node else {
+                return None;
+            };
+            let Expression::Literal(Literal::String(literal)) = item.value else {
+                return None;
+            };
+            let span = literal.span();
+            (span.start.offset <= offset && offset < span.end.offset).then(|| {
+                let name = &item.name;
+                (
+                    String::from_utf8_lossy(name.value).into_owned(),
+                    name.span.start.offset,
+                    name.span.end.offset,
+                )
+            })
+        })
     })
-}
-
-fn find_constant_initialized_at(
-    node: Node<'_, '_>,
-    offset: u32,
-    found: &mut Option<(String, u32, u32)>,
-) {
-    node.visit_children(|child| {
-        if found.is_some() {
-            return;
-        }
-        if let Node::ClassLikeConstantItem(item) = child {
-            if let Expression::Literal(Literal::String(literal)) = item.value {
-                let span = literal.span();
-                if span.start.offset <= offset && offset < span.end.offset {
-                    let name = &item.name;
-                    *found = Some((
-                        String::from_utf8_lossy(name.value).into_owned(),
-                        name.span.start.offset,
-                        name.span.end.offset,
-                    ));
-                }
-            }
-            return;
-        }
-        let span = child.span();
-        if span.start.offset <= offset && offset <= span.end.offset {
-            find_constant_initialized_at(child, offset, found);
-        }
-    });
 }

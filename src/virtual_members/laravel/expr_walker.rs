@@ -4,6 +4,7 @@
 
 use std::ops::ControlFlow;
 
+use crate::parser::{innermost_node_at, walk_nodes_with_start};
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
@@ -80,29 +81,26 @@ pub(in crate::virtual_members::laravel) fn covers(span: Span, offset: u32) -> bo
 /// That keeps the search proportional to nesting depth rather than to file
 /// size.
 pub(in crate::virtual_members::laravel) fn enclosing_body<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     offset: u32,
 ) -> Option<Node<'ast, 'arena>> {
-    let body = match node {
-        Node::Method(m) => match &m.body {
-            MethodBody::Concrete(block) => Some(Node::Block(block)),
-            MethodBody::Abstract(_) => None,
-        },
-        Node::Function(f) => Some(Node::Block(&f.body)),
-        Node::Closure(c) => Some(Node::Block(&c.body)),
-        _ => None,
-    };
-    if let Some(body) = body
-        && covers(body.span(), offset)
-    {
-        return Some(body);
-    }
-
+    // Only the first body down the path counts: the outermost one.
     let mut found = None;
-    node.visit_children(|child| {
-        if found.is_none() && covers(child.span(), offset) {
-            found = enclosing_body(child, offset);
+    innermost_node_at(root, offset, |node| {
+        if found.is_some() {
+            return None::<()>;
         }
+        let body = match node {
+            Node::Method(m) => match &m.body {
+                MethodBody::Concrete(block) => Some(Node::Block(block)),
+                MethodBody::Abstract(_) => None,
+            },
+            Node::Function(f) => Some(Node::Block(&f.body)),
+            Node::Closure(c) => Some(Node::Block(&c.body)),
+            _ => None,
+        };
+        found = body.filter(|body| covers(body.span(), offset));
+        None
     });
     found
 }
@@ -114,15 +112,12 @@ pub(in crate::virtual_members::laravel) fn enclosing_body<'ast, 'arena>(
 /// and one cannot end before the cursor without starting before it, so
 /// subtrees that begin at or after the cursor are skipped rather than walked.
 pub(in crate::virtual_members::laravel) fn walk_before_cursor<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     cursor: u32,
     visit: &mut impl FnMut(Node<'ast, 'arena>),
 ) {
-    visit(node);
-    node.visit_children(|child| {
-        if child.span().start.offset < cursor {
-            walk_before_cursor(child, cursor, visit);
-        }
+    walk_nodes_with_start(root, (), |node, start, ()| {
+        (start < cursor).then(|| visit(node))
     });
 }
 
@@ -134,15 +129,12 @@ pub(in crate::virtual_members::laravel) fn walk_before_cursor<'ast, 'arena>(
 /// level of the script, so a `$path = …` written inside a function or closure
 /// further up the file says nothing about the value in force there.
 pub(in crate::virtual_members::laravel) fn walk_file_scope_before_cursor<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     cursor: u32,
     visit: &mut impl FnMut(Node<'ast, 'arena>),
 ) {
-    visit(node);
-    node.visit_children(|child| {
-        if child.span().start.offset < cursor && !opens_variable_scope(child) {
-            walk_file_scope_before_cursor(child, cursor, visit);
-        }
+    walk_nodes_with_start(root, (), |node, start, ()| {
+        (start < cursor && !opens_variable_scope(node)).then(|| visit(node))
     });
 }
 

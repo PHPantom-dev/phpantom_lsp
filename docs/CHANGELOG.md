@@ -712,7 +712,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Classes inside a phar no longer go missing on a busy machine.** Classes shipped in a `.phar`, such as PHPStan's, could sometimes be reported as not found when the machine was under load.
 - **No more busy core after indexing large legacy scripts.** Preparing find-references data in the background could keep one CPU core busy indefinitely on a long file full of methods without return types.
 - **Find References no longer hangs on constructors or Laravel macros.** Finding the references of a `__construct` method could leave the server unresponsive until it was restarted, and so could finding or renaming a macro while a file that registers macros was being edited.
-- **No more crash on generated files with long operator chains.** A file that joins thousands of values with `.`, `+`, `&&` or a similar operator, as generated code often does, no longer crashes the server while indexing, and is analyzed and edited without delay. Expanding the selection from one operand of such a chain now selects the whole chain.
+- **No more crash on generated files with long operator chains.** A file that joins thousands of values with `.`, `+`, `&&` or a similar operator, as generated code often does, no longer crashes the server while indexing, in plain PHP and framework projects alike, and is analyzed and edited without delay. Expanding the selection from one operand of such a chain now selects the whole chain.
 
 ### Internal
 
