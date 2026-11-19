@@ -96,20 +96,32 @@ impl Backend {
             return empty_spans();
         }
 
-        // Confirming a site resolves its receiver, which can read the
-        // declarations a configurator file makes (a `get('app.mailer')` is
-        // typed by them), and so come back here for the file still being
-        // confirmed.  That file's declarations are not known yet: it reads
-        // as declaring nothing, and the partial answer is not cached.
+        // Confirming a site resolves its receiver, which can look a service
+        // up (a `get('app.mailer')` is typed by what the configurator files
+        // declare), and building the container index confirms every
+        // configurator's calls, this file's among them.  Build it before
+        // this file is marked as being confirmed, so that it can.
+        if self.is_symfony_project() {
+            self.prepare_container_index();
+        }
+        // Otherwise a file being confirmed can come back here, as declaring
+        // nothing: the partial answer is not cached.
         let Some(_confirming) = ConfirmingGuard::enter(uri) else {
             note_partial_answer();
             return empty_spans();
         };
+        let partial_before = partial_answers();
         let spans =
             Arc::new(self.confirm_typed_receiver_sites(uri, &content, &map.typed_receiver_sites));
         #[cfg(test)]
         if let Some(hook) = BEFORE_CACHING.take() {
             hook(self);
+        }
+        // An answer worked out from a partial one is partial too (the count
+        // has already moved for whoever reads it further up), and so is one
+        // worked out against a container index still being built.
+        if partial_answers() != partial_before || crate::symfony::container::building_index() {
+            return spans;
         }
         let mut cache = self.blade.typed_receiver_spans_cache.write();
         // An answer a change has already retired would only stand in for,
@@ -153,6 +165,21 @@ impl Backend {
     fn effective_content(&self, uri: &str) -> Option<Arc<String>> {
         self.template_virtual_php_arc(uri)
             .or_else(|| self.get_file_content_arc(uri))
+    }
+
+    /// [`Self::confirm_typed_receiver_sites`] for `sites`, some of the
+    /// candidate sites of the file at `uri` whose symbol map is `map`,
+    /// worked out afresh and not cached.  `None` when the file's text no
+    /// longer matches its map.
+    pub(crate) fn confirm_typed_receiver_sites_of(
+        &self,
+        uri: &str,
+        map: &SymbolMap,
+        sites: &[TypedReceiverSite],
+    ) -> Option<Vec<SymbolSpan>> {
+        let content = self.effective_content(uri)?;
+        map.matches_source(&content)
+            .then(|| self.confirm_typed_receiver_sites(uri, &content, sites))
     }
 
     /// Resolve the receiver of every candidate site and keep the spans of
@@ -561,23 +588,21 @@ pub(crate) fn note_partial_answer() {
     PARTIAL_ANSWERS.with(|count| count.set(count.get() + 1));
 }
 
-/// The files whose sites are being confirmed on this thread, sorted: the
-/// ones [`Backend::typed_receiver_spans_for`] answers for with no spans.
-pub(crate) fn confirming_files() -> Vec<String> {
-    let mut files: Vec<String> =
-        CONFIRMING.with(|confirming| confirming.borrow().iter().cloned().collect());
-    files.sort_unstable();
-    files
-}
-
 /// A count that moves whenever [`Backend::typed_receiver_spans_for`]
 /// answers on this thread with no spans for a file it could not confirm
 /// (one already being confirmed further up, or whose text no longer
-/// matches its map) rather than the file's actual spans.  Whatever is
+/// matches its map) rather than the file's actual spans, and whenever the
+/// container index skips such a file.  Whatever is
 /// derived from the answers between two readings that differ is partial
 /// and must not be cached.
 pub(crate) fn partial_answers() -> u64 {
     PARTIAL_ANSWERS.with(std::cell::Cell::get)
+}
+
+/// Whether the sites of the file at `uri` are being confirmed on this
+/// thread.
+pub(crate) fn is_confirming(uri: &str) -> bool {
+    CONFIRMING.with(|confirming| confirming.borrow().contains(uri))
 }
 
 /// Marks one file as being confirmed for as long as it lives.
@@ -599,7 +624,6 @@ impl ConfirmingGuard {
 impl Drop for ConfirmingGuard {
     fn drop(&mut self) {
         CONFIRMING.with(|confirming| confirming.borrow_mut().remove(&self.uri));
-        crate::symfony::container::forget_builds_confirming(&self.uri);
     }
 }
 

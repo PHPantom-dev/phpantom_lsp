@@ -224,8 +224,8 @@ thread_local! {
 /// The guard [`with_out_type_memo`] hands back.
 pub(crate) type OutTypeMemoGuard = crate::type_engine::MemoGuard<OutTypeMemo>;
 
-pub(super) fn with_out_type_memo() -> OutTypeMemoGuard {
-    crate::type_engine::activate_memo(&OUT_TYPE_MEMO)
+pub(super) fn with_out_type_memo(scope: crate::type_engine::MemoScope) -> OutTypeMemoGuard {
+    crate::type_engine::activate_memo(&OUT_TYPE_MEMO, scope)
 }
 
 /// How deep a chain of out-parameter readings may go.

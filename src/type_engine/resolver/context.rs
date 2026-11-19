@@ -143,7 +143,7 @@ pub(crate) type ChainCacheGuard = crate::type_engine::MemoGuard<ChainCache>;
 ///
 /// Nested activations are no-ops — the outermost guard owns the cache.
 pub(crate) fn with_chain_resolution_cache() -> ChainCacheGuard {
-    crate::type_engine::activate_memo(&CHAIN_CACHE)
+    crate::type_engine::activate_memo(&CHAIN_CACHE, crate::type_engine::MemoScope::Shared)
 }
 
 /// Puts back the chain cache [`with_isolated_chain_cache`] set aside.

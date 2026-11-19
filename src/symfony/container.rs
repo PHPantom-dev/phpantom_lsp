@@ -77,6 +77,14 @@ struct Contribution {
     decorations: Vec<ServiceDecoration>,
 }
 
+/// Whether the container index holds the names of `kind`.
+fn is_indexed(kind: StringKeyKind) -> bool {
+    matches!(
+        kind,
+        StringKeyKind::ServiceId | StringKeyKind::ContainerParameter
+    )
+}
+
 impl Contribution {
     fn of(map: &SymbolMap) -> Self {
         let values_at = |start: u32| -> Vec<ContainerValue> {
@@ -89,12 +97,6 @@ impl Contribution {
                 .map(|site| site.value.clone())
                 .collect()
         };
-        let indexed = |kind: StringKeyKind| {
-            matches!(
-                kind,
-                StringKeyKind::ServiceId | StringKeyKind::ContainerParameter
-            )
-        };
         let declarations = map
             .spans
             .iter()
@@ -104,14 +106,14 @@ impl Contribution {
                     key,
                     is_write: true,
                     ..
-                } if indexed(*kind) => Some((*kind, key.clone(), values_at(span.start))),
+                } if is_indexed(*kind) => Some((*kind, key.clone(), values_at(span.start))),
                 _ => None,
             })
             .collect();
         let typed = map
             .typed_receiver_sites
             .iter()
-            .filter(|site| site.is_write && site.receiver.names_any(indexed))
+            .filter(|site| site.is_write && site.receiver.names_any(is_indexed))
             .map(|site| (site.key.clone(), values_at(site.start)))
             .collect();
         Self {
@@ -342,9 +344,21 @@ impl Backend {
         self.retire_typed_receiver_spans();
     }
 
+    /// Build the container index now if nothing current is kept, for a
+    /// file about to be confirmed: once it is, the index cannot confirm the
+    /// file's own configurator calls.
+    pub(crate) fn prepare_container_index(&self) {
+        self.container_index();
+    }
+
     /// The container index, built if nothing current is kept.
     fn container_index(&self) -> Arc<ContainerIndex> {
         let state = &self.symfony.container_index;
+        // A lookup made while the index is being built, by a configurator
+        // call being confirmed for it, reads what it has so far.
+        if let Some(index) = index_being_built(state) {
+            return index;
+        }
         let generation = state.generation.load(Ordering::Acquire);
         let is_symfony = self.is_symfony_project();
         if let Some(index) = state.built.read().as_ref()
@@ -353,38 +367,12 @@ impl Backend {
         {
             return Arc::clone(index);
         }
-        // A lookup made while confirming a file's sites asks for the index
-        // again, for every lookup the file makes, and so does each file the
-        // build confirms in turn.  The files being confirmed read as
-        // declaring nothing, and every other file's spans, once confirmed,
-        // are cached and stay so while those files are being confirmed:
-        // build it once for each set of files, and keep it until one of
-        // them is confirmed (see `forget_builds_confirming`).
-        let confirming = crate::blade::typed_receiver::confirming_files();
-        if !confirming.is_empty()
-            && let Some((index, partial)) = THREAD_BUILDS.with(|builds| {
-                builds
-                    .borrow()
-                    .iter()
-                    .find(|build| {
-                        build.index.generation == generation
-                            && build.index.is_symfony == is_symfony
-                            && build.confirming == confirming
-                    })
-                    .map(|build| (Arc::clone(&build.index), build.partial))
-            })
-        {
-            if partial {
-                crate::blade::typed_receiver::note_partial_answer();
-            }
-            return index;
-        }
         let partial_before = crate::blade::typed_receiver::partial_answers();
-        let index = Arc::new(self.build_container_index(generation, is_symfony));
-        // A configurator file being confirmed further up this thread reads
-        // as declaring nothing, so an index built meanwhile is incomplete.
-        let partial = crate::blade::typed_receiver::partial_answers() != partial_before;
-        if !partial {
+        let index = self.build_container_index(generation, is_symfony);
+        // A configurator file that could not be confirmed (being confirmed
+        // further up this thread, or whose text no longer matches its map)
+        // reads as declaring nothing, so the index is incomplete.
+        if crate::blade::typed_receiver::partial_answers() == partial_before {
             let mut built = state.built.write();
             if built
                 .as_ref()
@@ -393,34 +381,161 @@ impl Backend {
                 *built = Some(Arc::clone(&index));
             }
         }
-        if !confirming.is_empty() {
-            THREAD_BUILDS.with(|builds| {
-                builds.borrow_mut().push(ThreadBuild {
-                    confirming,
-                    index: Arc::clone(&index),
-                    partial,
-                });
-            });
-        }
         index
     }
 
-    fn build_container_index(&self, generation: u64, is_symfony: bool) -> ContainerIndex {
+    /// Build the index from what every file declares outright, then confirm
+    /// the configurator calls whose receiver the type engine has to settle
+    /// against it, and again against what that adds, until no call is
+    /// added.  A call's receiver can be a service another call registers
+    /// (`$container->get('app.a')->register('app.b')`), in any file.
+    fn build_container_index(&self, generation: u64, is_symfony: bool) -> Arc<ContainerIndex> {
         #[cfg(test)]
         BUILDS.set(BUILDS.get() + 1);
+        let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
+        uris.sort_unstable();
+        let maps: Vec<(String, Arc<SymbolMap>)> = uris
+            .into_iter()
+            .filter_map(|uri| {
+                let map = self.symbol_map_for(&uri)?;
+                Some((uri, map))
+            })
+            .collect();
+
+        let mut decorators: AtomMap<Vec<Atom>> = AtomMap::default();
+        let mut visit = |map: &SymbolMap| {
+            for decoration in &map.service_decorations {
+                push_unique(
+                    decorators.entry(decoration.decorated).or_default(),
+                    decoration.decorator,
+                );
+            }
+        };
+        for (_, map) in &maps {
+            visit(map);
+        }
+        if is_symfony {
+            for (_, map) in &self.symfony_bundle_declarations().files {
+                visit(map);
+            }
+        }
+
+        // The calls to confirm, by the file they are in.  Only Symfony
+        // declares services through them; a Drupal project records calls
+        // on its container too, but those only look services up.
+        let pending: Vec<(usize, Vec<crate::symbol_map::TypedReceiverSite>)> = if is_symfony {
+            maps.iter()
+                .enumerate()
+                .filter_map(|(at, (_, map))| {
+                    let sites: Vec<_> = map
+                        .typed_receiver_sites
+                        .iter()
+                        .filter(|site| site.is_write && site.receiver.names_any(is_indexed))
+                        .cloned()
+                        .collect();
+                    (!sites.is_empty()).then_some((at, sites))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut confirmed: Vec<Vec<crate::symbol_map::SymbolSpan>> = vec![Vec::new(); maps.len()];
+        let mut index = Arc::new(self.assemble_container_index(
+            generation,
+            is_symfony,
+            &maps,
+            &confirmed,
+            decorators.clone(),
+        ));
+        if pending.is_empty() {
+            return index;
+        }
+        // The calls are confirmed in their own files, whose offsets have
+        // nothing to do with the file a diagnostic pass may be checking on
+        // this thread, so its scope cache may not answer for them.
+        let _diagnostic_scope =
+            crate::type_engine::variable::forward_walk::suspend_diagnostic_scope();
+        loop {
+            let mut added = false;
+            {
+                let _building = BuildingGuard::enter(&self.symfony.container_index, &index);
+                // What the type engine memoizes holds for this round's
+                // index only, and not for the one the caller reads.
+                let _caches = (
+                    crate::type_engine::call_resolution::isolated_type_engine_caches(),
+                    crate::type_engine::resolver::with_isolated_chain_cache(),
+                );
+                for (at, sites) in &pending {
+                    let done = &mut confirmed[*at];
+                    if done.len() == sites.len() {
+                        continue;
+                    }
+                    let (uri, map) = &maps[*at];
+                    // A file being confirmed further up this thread is in
+                    // the middle of resolving the same receivers, which the
+                    // type engine cuts short when they come back.
+                    let spans = if crate::blade::typed_receiver::is_confirming(uri) {
+                        None
+                    } else {
+                        self.confirm_typed_receiver_sites_of(uri, map, sites)
+                    };
+                    let Some(spans) = spans else {
+                        crate::blade::typed_receiver::note_partial_answer();
+                        continue;
+                    };
+                    for span in spans {
+                        let declares = matches!(
+                            &span.kind,
+                            SymbolKind::StringKey { kind, is_write: true, .. } if is_indexed(*kind)
+                        );
+                        // A call stays confirmed once it is: what the
+                        // index gains can only settle more receivers.
+                        if declares && !done.iter().any(|known| known.start == span.start) {
+                            done.push(span);
+                            added = true;
+                        }
+                    }
+                }
+            }
+            if !added {
+                return index;
+            }
+            for spans in &mut confirmed {
+                spans.sort_by_key(|span| span.start);
+            }
+            index = Arc::new(self.assemble_container_index(
+                generation,
+                is_symfony,
+                &maps,
+                &confirmed,
+                decorators.clone(),
+            ));
+        }
+    }
+
+    /// The container index of what each of `maps` declares outright, with
+    /// the calls `confirmed` for it, and what the installed bundles declare.
+    fn assemble_container_index(
+        &self,
+        generation: u64,
+        is_symfony: bool,
+        maps: &[(String, Arc<SymbolMap>)],
+        confirmed: &[Vec<crate::symbol_map::SymbolSpan>],
+        decorators: AtomMap<Vec<Atom>>,
+    ) -> ContainerIndex {
         let mut index = ContainerIndex {
             generation,
             is_symfony,
             services: AtomMap::default(),
             parameters: AtomMap::default(),
-            decorators: AtomMap::default(),
+            decorators,
         };
         for kind in [StringKeyKind::ServiceId, StringKeyKind::ContainerParameter] {
             let values = match kind {
                 StringKeyKind::ServiceId => &mut index.services,
                 _ => &mut index.parameters,
             };
-            self.visit_symfony_declarations(kind, |_, map, start, _, declared| {
+            let mut push = |map: &SymbolMap, start: u32, declared: &str| {
                 let values = values.entry(crate::atom::atom(declared)).or_default();
                 let at = map
                     .container_values
@@ -435,22 +550,24 @@ impl Backend {
                 if values.len() == before {
                     values.push(None);
                 }
+            };
+            for ((_, map), confirmed) in maps.iter().zip(confirmed) {
+                for span in map.spans.iter().chain(confirmed) {
+                    if let SymbolKind::StringKey {
+                        kind: span_kind,
+                        key,
+                        is_write: true,
+                        ..
+                    } = &span.kind
+                        && *span_kind == kind
+                    {
+                        push(map, span.start, key);
+                    }
+                }
+            }
+            self.visit_bundle_declarations(kind, |_, map, start, _, declared| {
+                push(map, start, declared);
             });
-        }
-        let decorators = &mut index.decorators;
-        let mut visit = |map: &SymbolMap| {
-            for decoration in &map.service_decorations {
-                push_unique(
-                    decorators.entry(decoration.decorated).or_default(),
-                    decoration.decorator,
-                );
-            }
-        };
-        self.visit_declaring_symbol_maps(|_, map| visit(map));
-        if is_symfony {
-            for (_, map) in &self.symfony_bundle_declarations().files {
-                visit(map);
-            }
         }
         index
     }
@@ -642,31 +759,47 @@ fn push_unique(out: &mut Vec<Atom>, class: Atom) {
     }
 }
 
-/// A container index this thread built while it was confirming
-/// `confirming`.
-struct ThreadBuild {
-    confirming: Vec<String>,
-    index: Arc<ContainerIndex>,
-    /// Whether the files being confirmed left the index incomplete.
-    partial: bool,
-}
-
 thread_local! {
-    /// The container indexes this thread built for the sets of files it is
-    /// still confirming (see `Backend::container_index`).
-    static THREAD_BUILDS: std::cell::RefCell<Vec<ThreadBuild>> =
+    /// The container indexes being built on this thread, by the address of
+    /// the state they are built for, with what each holds so far.
+    static BUILDING: std::cell::RefCell<Vec<(usize, Arc<ContainerIndex>)>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Forget the container indexes this thread built while confirming `uri`,
-/// once it is confirmed: that set of files does not come back.
-pub(crate) fn forget_builds_confirming(uri: &str) {
-    THREAD_BUILDS.with(|builds| {
-        let mut builds = builds.borrow_mut();
-        if !builds.is_empty() {
-            builds.retain(|build| !build.confirming.iter().any(|file| file == uri));
-        }
-    });
+/// Whether a container index is being built on this thread: whatever is
+/// worked out from a lookup meanwhile may be incomplete.
+pub(crate) fn building_index() -> bool {
+    BUILDING.with(|building| !building.borrow().is_empty())
+}
+
+fn index_being_built(state: &ContainerIndexState) -> Option<Arc<ContainerIndex>> {
+    let key = std::ptr::from_ref(state) as usize;
+    BUILDING.with(|building| {
+        building
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(of, _)| *of == key)
+            .map(|(_, index)| Arc::clone(index))
+    })
+}
+
+/// Lets lookups read `index` as the one being built for as long as it
+/// lives.
+struct BuildingGuard;
+
+impl BuildingGuard {
+    fn enter(state: &ContainerIndexState, index: &Arc<ContainerIndex>) -> Self {
+        let key = std::ptr::from_ref(state) as usize;
+        BUILDING.with(|building| building.borrow_mut().push((key, Arc::clone(index))));
+        Self
+    }
+}
+
+impl Drop for BuildingGuard {
+    fn drop(&mut self) {
+        BUILDING.with(|building| building.borrow_mut().pop());
+    }
 }
 
 #[cfg(test)]
@@ -771,8 +904,9 @@ mod tests {
 
     /// Configurator files that each register a service on the one the
     /// previous file registers, named so that each sorts before the file
-    /// it depends on.
-    fn chained_configurators(backend: &Backend, n: usize) {
+    /// it depends on, or (`forward`) after it.
+    fn chained_configurators(backend: &Backend, n: usize, forward: bool) -> Vec<String> {
+        let mut uris = Vec::new();
         for k in 0..n {
             let receiver = if k == 0 {
                 "$container".to_string()
@@ -782,39 +916,85 @@ mod tests {
             let source = format!(
                 "<?php\nnamespace App;\nuse Symfony\\Component\\DependencyInjection\\ContainerBuilder;\nfunction configure{k}(ContainerBuilder $container): void {{\n    {receiver}->register('app.s{k}', ContainerBuilder::class);\n}}\n"
             );
-            open(
-                backend,
-                &format!("file:///config/c{:02}.php", n - 1 - k),
-                &source,
+            let uri = format!(
+                "file:///config/c{:02}.php",
+                if forward { k } else { n - 1 - k }
+            );
+            open(backend, &uri, &source);
+            uris.push(uri);
+        }
+        uris
+    }
+
+    /// The service IDs the file at `uri` declares through calls the type
+    /// engine confirms.
+    fn typed_declarations(backend: &Backend, uri: &str) -> Vec<String> {
+        let map = backend.symbol_map_for(uri).unwrap();
+        backend
+            .typed_receiver_spans_for(uri, &map)
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    key,
+                    is_write: true,
+                    ..
+                } => Some(key.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn building_the_index_builds_it_once() {
+        for forward in [false, true] {
+            let backend = symfony_backend();
+            chained_configurators(&backend, 8, forward);
+            BUILDS.set(0);
+            let index = backend.container_index();
+            assert_eq!(index.services.len(), 8, "forward: {forward}");
+            assert_eq!(BUILDS.get(), 1, "forward: {forward}");
+        }
+    }
+
+    #[test]
+    fn a_configurator_confirmed_while_another_is_keeps_its_whole_answer() {
+        for forward in [false, true] {
+            let backend = symfony_backend();
+            let uris = chained_configurators(&backend, 4, forward);
+            // Confirm the last file of the chain first: its lookup builds
+            // the index, which confirms the others.
+            assert_eq!(
+                typed_declarations(&backend, &uris[3]),
+                ["app.s3"],
+                "forward: {forward}"
+            );
+            for (k, uri) in uris.iter().enumerate() {
+                assert_eq!(
+                    typed_declarations(&backend, uri),
+                    [format!("app.s{k}")],
+                    "{uri}, forward: {forward}"
+                );
+            }
+            assert_eq!(
+                backend.container_index().services.len(),
+                4,
+                "forward: {forward}"
             );
         }
     }
 
     #[test]
-    fn building_the_index_builds_it_once_for_each_configurator_being_confirmed() {
-        let backend = symfony_backend();
-        chained_configurators(&backend, 8);
-        BUILDS.set(0);
-        let index = backend.container_index();
-        assert_eq!(index.services.len(), 8);
-        assert!(BUILDS.get() <= 8, "{} builds", BUILDS.get());
-    }
-
-    #[test]
     fn confirming_a_configurator_builds_the_index_once_for_all_its_lookups() {
         let backend = symfony_backend();
-        chained_configurators(&backend, 1);
+        chained_configurators(&backend, 1, false);
         let uri = "file:///config/lookups.php";
         let source = "<?php\nnamespace App;\nuse Symfony\\Component\\DependencyInjection\\ContainerBuilder;\nfunction lookups(ContainerBuilder $container): void {\n    $container->get('app.s0')->register('app.a', ContainerBuilder::class);\n    $container->get('app.s0')->register('app.b', ContainerBuilder::class);\n    $container->get('app.s0')->register('app.c', ContainerBuilder::class);\n}\n";
         open(&backend, uri, source);
-        let map = backend.symbol_map_for(uri).unwrap();
         BUILDS.set(0);
-        let spans = backend.typed_receiver_spans_for(uri, &map);
-        let declared = spans
-            .iter()
-            .filter(|span| matches!(span.kind, SymbolKind::StringKey { is_write: true, .. }))
-            .count();
-        assert_eq!(declared, 3);
+        assert_eq!(
+            typed_declarations(&backend, uri),
+            ["app.a", "app.b", "app.c"]
+        );
         assert_eq!(BUILDS.get(), 1);
     }
 

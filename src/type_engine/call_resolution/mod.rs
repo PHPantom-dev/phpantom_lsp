@@ -116,7 +116,7 @@ pub(crate) use target_cache::test_body_inferences;
 pub(crate) use target_cache::{
     TypeEngineCaches, activate_body_infer_memo, activate_type_engine_caches,
     body_inference_context, body_inference_in_progress, call_site_param_types,
-    try_infer_body_return_type, try_infer_function_body_return_type,
+    isolated_type_engine_caches, try_infer_body_return_type, try_infer_function_body_return_type,
 };
 pub(crate) use template_binding::{TemplateCallee, bind_template_args, instantiate_class};
 pub(crate) use template_subs::{

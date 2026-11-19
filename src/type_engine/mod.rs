@@ -64,18 +64,31 @@ pub(crate) mod variable;
 ///
 /// A nested activation gets a guard that owns nothing and clears nothing,
 /// so an inner pass cannot discard the entries an outer one is still
-/// relying on.
+/// relying on.  An isolated one puts the outer memo back instead.
 pub(crate) struct MemoGuard<T: 'static> {
     /// The memo to clear on drop, or `None` for a nested activation.
     cell: Option<&'static std::thread::LocalKey<std::cell::RefCell<Option<T>>>>,
+    /// The memo an isolated activation set aside, put back on drop.
+    outer: Option<T>,
 }
 
 impl<T: 'static> Drop for MemoGuard<T> {
     fn drop(&mut self) {
         if let Some(cell) = self.cell {
-            cell.with(|c| *c.borrow_mut() = None);
+            let outer = self.outer.take();
+            cell.with(|c| *c.borrow_mut() = outer);
         }
     }
+}
+
+/// How [`activate_memo`] treats a memo an outer pass already installed.
+#[derive(Clone, Copy)]
+pub(crate) enum MemoScope {
+    /// Share it.
+    Shared,
+    /// Set it aside for a fresh one until the guard drops: for a pass
+    /// whose answers may differ from the outer pass's for the same keys.
+    Isolated,
 }
 
 /// Activate the pass-scoped memo held in `cell` for the current thread.
@@ -85,12 +98,25 @@ impl<T: 'static> Drop for MemoGuard<T> {
 /// no-op.
 pub(crate) fn activate_memo<T: Default + 'static>(
     cell: &'static std::thread::LocalKey<std::cell::RefCell<Option<T>>>,
+    scope: MemoScope,
 ) -> MemoGuard<T> {
-    if cell.with(|c| c.borrow().is_some()) {
-        return MemoGuard { cell: None };
+    let outer = match scope {
+        MemoScope::Shared => {
+            if cell.with(|c| c.borrow().is_some()) {
+                return MemoGuard {
+                    cell: None,
+                    outer: None,
+                };
+            }
+            cell.with(|c| *c.borrow_mut() = Some(T::default()));
+            None
+        }
+        MemoScope::Isolated => cell.with(|c| c.borrow_mut().replace(T::default())),
+    };
+    MemoGuard {
+        cell: Some(cell),
+        outer,
     }
-    cell.with(|c| *c.borrow_mut() = Some(T::default()));
-    MemoGuard { cell: Some(cell) }
 }
 
 // ─── Bounded, re-entrant, memoized inference ────────────────────────────────

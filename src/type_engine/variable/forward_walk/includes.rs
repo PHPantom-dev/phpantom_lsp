@@ -64,10 +64,10 @@ thread_local! {
 pub(crate) type IncludeMemoGuard = (MemoGuard<IncludeMemo>, MemoGuard<ReadsMemo>);
 
 /// Activate the include memos for the current thread.
-pub(crate) fn with_include_memo() -> IncludeMemoGuard {
+pub(crate) fn with_include_memo(scope: crate::type_engine::MemoScope) -> IncludeMemoGuard {
     (
-        crate::type_engine::activate_memo(&INCLUDE_MEMO),
-        crate::type_engine::activate_memo(&READS_MEMO),
+        crate::type_engine::activate_memo(&INCLUDE_MEMO, scope),
+        crate::type_engine::activate_memo(&READS_MEMO, scope),
     )
 }
 

@@ -905,8 +905,8 @@ thread_local! {
 pub(crate) type RulesMemoGuard = crate::type_engine::MemoGuard<RulesMemo>;
 
 /// Activate the `FormRequest` rules memo for the current thread.
-pub(crate) fn with_rules_memo() -> RulesMemoGuard {
-    crate::type_engine::activate_memo(&RULES_MEMO)
+pub(crate) fn with_rules_memo(scope: crate::type_engine::MemoScope) -> RulesMemoGuard {
+    crate::type_engine::activate_memo(&RULES_MEMO, scope)
 }
 
 /// [`form_request_rules`] with an explicit budget of parent-chain steps.
