@@ -189,26 +189,48 @@ fn collect_guard_targets(expr: &Expression<'_>, offsets: &mut HashSet<u32>) {
 /// the surrounding `if`/`while` body — a plain `isset($x)` check does
 /// not otherwise define `$x` (see `flags_undefined_variable_after_isset_guard`).
 pub(super) fn collect_short_circuit_guarded_offsets(body: ScopeBody<'_, '_>) -> HashSet<u32> {
-    let mut offsets = HashSet::new();
-    body.walk_with(&ShortCircuitWalker, &mut offsets);
-    offsets
+    let mut state = ShortCircuitState::default();
+    body.walk_with(&ShortCircuitWalker, &mut state);
+    state.offsets
 }
 
 struct ShortCircuitWalker;
 
-impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<u32>> for ShortCircuitWalker {
-    fn walk_in_binary(&self, node: &'ast Binary<'arena>, context: &mut HashSet<u32>) {
+#[derive(Default)]
+struct ShortCircuitState {
+    offsets: HashSet<u32>,
+    /// The operators further down the left spine of a chain already
+    /// handled from its outermost operator, by address.  Each one's
+    /// operands are a prefix of that chain's, so handling it again finds
+    /// nothing new, and doing so at every operator of a long chain is
+    /// quadratic.  (Not by span: finding an operator's span walks down its
+    /// left edge, which is quadratic over the chain too.)
+    handled: HashSet<usize>,
+}
+
+impl<'ast, 'arena> Walker<'ast, 'arena, ShortCircuitState> for ShortCircuitWalker {
+    fn walk_in_binary(&self, node: &'ast Binary<'arena>, context: &mut ShortCircuitState) {
         let is_or = match node.operator {
             BinaryOperator::And(_) | BinaryOperator::LowAnd(_) => false,
             BinaryOperator::Or(_) | BinaryOperator::LowOr(_) => true,
             _ => return,
         };
+        if context.handled.remove(&binary_key(node)) {
+            return;
+        }
 
         let mut operands = Vec::new();
         collect_chain_operands(node.lhs, is_or, &mut operands);
         collect_chain_operands(node.rhs, is_or, &mut operands);
         if operands.len() < 2 {
             return;
+        }
+        let mut spine = node.lhs;
+        while let Expression::Binary(inner) = spine
+            && joins_chain(&inner.operator, is_or)
+        {
+            context.handled.insert(binary_key(inner));
+            spine = inner.lhs;
         }
 
         // `&&` only guards later operands with a positive `isset()`;
@@ -217,14 +239,20 @@ impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<u32>> for ShortCircuitWalker {
         // therefore the isset() check, was false).
         let mut guarded: HashSet<String> = HashSet::new();
         for operand in &operands {
-            mark_guarded_reads(operand, &guarded, context);
+            mark_guarded_reads(operand, &guarded, &mut context.offsets);
             for name in isset_guard_names(operand, is_or) {
                 guarded.insert(name);
             }
         }
     }
 
-    stop_at_inner_scopes!(HashSet<u32>);
+    stop_at_inner_scopes!(ShortCircuitState);
+}
+
+/// The address of an operator node, as [`ShortCircuitState::handled`]
+/// keys it.
+fn binary_key(node: &Binary<'_>) -> usize {
+    std::ptr::from_ref(node).addr()
 }
 
 /// Flatten a left-associative chain of the same short-circuiting
@@ -236,24 +264,37 @@ fn collect_chain_operands<'e>(
     is_or: bool,
     out: &mut Vec<&'e Expression<'e>>,
 ) {
-    if let Expression::Binary(bin) = expr {
-        let matches_operator = if is_or {
-            matches!(
-                bin.operator,
-                BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
-            )
-        } else {
-            matches!(
-                bin.operator,
-                BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
-            )
-        };
-        if matches_operator {
-            collect_chain_operands(bin.lhs, is_or, out);
-            collect_chain_operands(bin.rhs, is_or, out);
-            return;
-        }
+    // The chain nests on the left and can be thousands of operators long,
+    // so walk its left spine in a loop rather than a frame per operator.
+    let mut right_operands = Vec::new();
+    let mut leftmost = expr;
+    while let Expression::Binary(bin) = leftmost
+        && joins_chain(&bin.operator, is_or)
+    {
+        right_operands.push(bin.rhs);
+        leftmost = bin.lhs;
     }
+    push_chain_operand(leftmost, is_or, out);
+    for rhs in right_operands.into_iter().rev() {
+        collect_chain_operands(rhs, is_or, out);
+    }
+}
+
+/// Whether `operator` is `||`/`or` when `is_or`, or `&&`/`and` otherwise.
+fn joins_chain(operator: &BinaryOperator<'_>, is_or: bool) -> bool {
+    if is_or {
+        matches!(operator, BinaryOperator::Or(_) | BinaryOperator::LowOr(_))
+    } else {
+        matches!(operator, BinaryOperator::And(_) | BinaryOperator::LowAnd(_))
+    }
+}
+
+/// One operand of a chain that is not itself joined by the chain's operator.
+fn push_chain_operand<'e>(
+    expr: &'e Expression<'e>,
+    is_or: bool,
+    out: &mut Vec<&'e Expression<'e>>,
+) {
     if let Expression::Parenthesized(inner) = expr {
         let mut inner_operands = Vec::new();
         collect_chain_operands(inner.expression, is_or, &mut inner_operands);

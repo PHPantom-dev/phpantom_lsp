@@ -53,7 +53,7 @@ impl Backend {
             "convert_to_interpolation",
             |program, content| {
                 let mut best: Option<(u32, u32, String)> = None;
-                find_concat(Node::Program(program), false, cursor, content, &mut best);
+                find_concat(Node::Program(program), cursor, content, &mut best);
                 best
             },
         );
@@ -79,25 +79,66 @@ impl Backend {
 /// Descend into the subtree containing the cursor looking for a convertible
 /// concatenation.
 ///
-/// `in_statement_position` says whether this node sits somewhere the rewrite
-/// is offered (see the module docs).  Pruning to the subtree that contains
+/// Each node on the stack carries whether it sits somewhere the rewrite is
+/// offered (see the module docs).  Pruning to the subtree that contains
 /// `cursor` keeps the walk linear in the depth of the cursor rather than the
 /// size of the file, and the generic [`Node::visit_children`] descent means
-/// no syntax node has to be enumerated to be reached.
+/// no syntax node has to be enumerated to be reached.  The walk keeps its
+/// own stack, since a generated expression can nest thousands of levels
+/// deep.
 fn find_concat(
-    node: Node<'_, '_>,
-    in_statement_position: bool,
+    root: Node<'_, '_>,
     cursor: u32,
     content: &str,
     best: &mut Option<(u32, u32, String)>,
 ) {
-    let span = node.span();
+    let mut stack = vec![(root, false)];
+    while let Some((node, in_statement_position)) = stack.pop() {
+        if let Node::Expression(Expression::Binary(binary)) | Node::Binary(binary) = node {
+            find_concat_in_operator(
+                binary,
+                in_statement_position,
+                cursor,
+                content,
+                best,
+                &mut stack,
+            );
+            continue;
+        }
+
+        let span = node.span();
+        if cursor < span.start.offset || cursor > span.end.offset {
+            continue;
+        }
+        let child_position = if is_transparent(&node) {
+            in_statement_position
+        } else {
+            opens_statement_position(&node)
+        };
+        node.visit_children(|child| stack.push((child, child_position)));
+    }
+}
+
+/// [`find_concat`] at a binary operator: the operator itself, when it is a
+/// convertible concatenation in statement position, or else the operands of
+/// it and of the operators nested down its left spine.  None of those
+/// operands sits in statement position, and taking the spine in one go
+/// spares asking each operator in it for its span, which walks down its
+/// left edge and so is quadratic over a long chain.
+fn find_concat_in_operator<'ast, 'arena>(
+    binary: &'ast Binary<'arena>,
+    in_statement_position: bool,
+    cursor: u32,
+    content: &str,
+    best: &mut Option<(u32, u32, String)>,
+    stack: &mut Vec<(Node<'ast, 'arena>, bool)>,
+) {
+    let span = binary.span();
     if cursor < span.start.offset || cursor > span.end.offset {
         return;
     }
 
     if in_statement_position
-        && let Node::Binary(binary) = node
         && binary.operator.is_concatenation()
         && let Some(replacement) = try_convert_concat(binary, content)
     {
@@ -110,13 +151,13 @@ fn find_concat(
         return;
     }
 
-    let child_position = if is_transparent(&node) {
-        in_statement_position
-    } else {
-        opens_statement_position(&node)
-    };
-
-    node.visit_children(|child| find_concat(child, child_position, cursor, content, best));
+    stack.push((Node::Expression(binary.rhs), false));
+    let mut lhs = binary.lhs;
+    while let Expression::Binary(inner) = lhs {
+        stack.push((Node::Expression(inner.rhs), false));
+        lhs = inner.lhs;
+    }
+    stack.push((Node::Expression(lhs), false));
 }
 
 /// Nodes that merely wrap their child and so pass the current position

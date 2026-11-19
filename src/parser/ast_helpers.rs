@@ -416,15 +416,13 @@ pub(crate) fn innermost_node_at<'ast, 'arena, T>(
     mut pick: impl FnMut(mago_syntax::cst::Node<'ast, 'arena>) -> Option<T>,
 ) -> Option<T> {
     use mago_span::HasSpan;
-    let holds = |node: &mago_syntax::cst::Node<'_, '_>| {
-        let span = node.span();
-        span.start.offset <= offset && offset <= span.end.offset
-    };
-    if !holds(&root) {
+    let root_span = root.span();
+    if offset < root_span.start.offset || root_span.end.offset < offset {
         return None;
     }
     let mut found = None;
     let mut node = root;
+    let mut node_start = root_span.start.offset;
     loop {
         if let Some(picked) = pick(node) {
             found = Some(picked);
@@ -432,15 +430,50 @@ pub(crate) fn innermost_node_at<'ast, 'arena, T>(
         // An offset on the boundary of two siblings belongs to the later.
         let mut next = None;
         node.visit_children(|child| {
-            if holds(&child) {
-                next = Some(child);
+            let (start, end) = child_span(node, node_start, child);
+            if start <= offset && offset <= end {
+                next = Some((child, start));
             }
         });
         match next {
-            Some(child) => node = child,
+            Some((child, start)) => (node, node_start) = (child, start),
             None => return found,
         }
     }
+}
+
+/// The span of `child`, a child of `parent`, which starts at `parent_start`.
+///
+/// `Binary::span` finds an operator's start by walking down its left edge,
+/// so asking every operator of a long left-nested chain for its span is
+/// quadratic.  An operator's left operand, and the operator inside the
+/// expression that wraps it, start where their parent does, so a walk down
+/// the tree that knows the parent's start passes it in.
+fn child_span(
+    parent: mago_syntax::cst::Node<'_, '_>,
+    parent_start: u32,
+    child: mago_syntax::cst::Node<'_, '_>,
+) -> (u32, u32) {
+    use mago_span::HasSpan;
+    use mago_syntax::cst::{Expression, Node};
+    let shares_start = match (parent, child) {
+        (Node::Expression(Expression::Binary(wrapped)), Node::Binary(inner)) => {
+            std::ptr::eq(wrapped, inner)
+        }
+        (Node::Binary(binary), Node::Expression(lhs)) => std::ptr::eq(binary.lhs, lhs),
+        _ => false,
+    };
+    if !shares_start {
+        let span = child.span();
+        return (span.start.offset, span.end.offset);
+    }
+    let end = match child {
+        Node::Expression(Expression::Binary(binary)) | Node::Binary(binary) => {
+            binary.rhs.span().end.offset
+        }
+        _ => child.span().end.offset,
+    };
+    (parent_start, end)
 }
 
 /// Call `visit` with every node under `root`, in source order, together

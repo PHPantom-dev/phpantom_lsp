@@ -224,9 +224,20 @@ pub(crate) fn forget_impure_call_results(
             forget_impure_call_results(inner.expression, scope, ctx)
         }
         Expression::UnaryPrefix(unary) => forget_impure_call_results(unary.operand, scope, ctx),
-        Expression::Binary(bin) => {
-            forget_impure_call_results(bin.lhs, scope, ctx);
-            forget_impure_call_results(bin.rhs, scope, ctx);
+        // A left-associative chain (`$a && $b && $c`) nests on the left and
+        // can be thousands of operators deep, so walk the left spine in a
+        // loop rather than a frame per operator.
+        Expression::Binary(_) => {
+            let mut spine = Vec::new();
+            let mut leftmost = condition;
+            while let Expression::Binary(bin) = leftmost {
+                spine.push(bin.rhs);
+                leftmost = bin.lhs;
+            }
+            forget_impure_call_results(leftmost, scope, ctx);
+            for rhs in spine.into_iter().rev() {
+                forget_impure_call_results(rhs, scope, ctx);
+            }
         }
         Expression::Call(call) => {
             // A type guard narrows its argument: `is_wp_error(impure())`

@@ -285,6 +285,35 @@ pub(crate) fn seed_assert_arg_subject_keys(
     }
 }
 
+/// Whether `operator` is `&&`, `||`, `and` or `or`.
+fn is_logical_connective(operator: &BinaryOperator<'_>) -> bool {
+    matches!(
+        operator,
+        BinaryOperator::And(_)
+            | BinaryOperator::LowAnd(_)
+            | BinaryOperator::Or(_)
+            | BinaryOperator::LowOr(_)
+    )
+}
+
+/// The operands of a chain of logical connectives rooted at `bin`, left to
+/// right, read down the chain's left spine in a loop: `a && b || c` nests
+/// on the left and can be thousands of operators long, too deep to recurse
+/// through one frame per operator.
+fn logical_chain_operands<'b>(bin: &'b Binary<'b>) -> Vec<&'b Expression<'b>> {
+    let mut operands = vec![bin.rhs];
+    let mut leftmost = bin.lhs;
+    while let Expression::Binary(inner) = leftmost
+        && is_logical_connective(&inner.operator)
+    {
+        operands.push(inner.rhs);
+        leftmost = inner.lhs;
+    }
+    operands.push(leftmost);
+    operands.reverse();
+    operands
+}
+
 /// Collect property access keys (e.g. `$a->foo`) from conditions that
 /// contain type guards or instanceof checks on property accesses.
 /// These keys are injected into the scope so that narrowing applies.
@@ -334,17 +363,10 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
             collect_condition_property_keys_inner(p.expression, keys);
         }
         // Logical connectives
-        Expression::Binary(bin)
-            if matches!(
-                bin.operator,
-                BinaryOperator::And(_)
-                    | BinaryOperator::LowAnd(_)
-                    | BinaryOperator::Or(_)
-                    | BinaryOperator::LowOr(_)
-            ) =>
-        {
-            collect_condition_property_keys_inner(bin.lhs, keys);
-            collect_condition_property_keys_inner(bin.rhs, keys);
+        Expression::Binary(bin) if is_logical_connective(&bin.operator) => {
+            for operand in logical_chain_operands(bin) {
+                collect_condition_property_keys_inner(operand, keys);
+            }
         }
         // Checks on their first argument: `is_string($a->foo)`,
         // `is_a($a->foo, Foo::class)`, `in_array($a->foo, $list, true)`.
@@ -438,17 +460,10 @@ pub(crate) fn seed_call_subject_keys(
         Expression::Binary(bin) if bin.operator.is_instanceof() => {
             seed_call_subject(bin.lhs, scope, ctx)
         }
-        Expression::Binary(bin)
-            if matches!(
-                bin.operator,
-                BinaryOperator::And(_)
-                    | BinaryOperator::LowAnd(_)
-                    | BinaryOperator::Or(_)
-                    | BinaryOperator::LowOr(_)
-            ) =>
-        {
-            seed_call_subject_keys(bin.lhs, scope, ctx);
-            seed_call_subject_keys(bin.rhs, scope, ctx);
+        Expression::Binary(bin) if is_logical_connective(&bin.operator) => {
+            for operand in logical_chain_operands(bin) {
+                seed_call_subject_keys(operand, scope, ctx);
+            }
         }
         // A comparison names its subject on whichever side is not the
         // value being compared against, and the narrowing extractors read
@@ -536,17 +551,10 @@ pub(crate) fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &m
         Expression::Parenthesized(p) => {
             collect_condition_var_names_inner(p.expression, names);
         }
-        Expression::Binary(bin)
-            if matches!(
-                bin.operator,
-                BinaryOperator::And(_)
-                    | BinaryOperator::LowAnd(_)
-                    | BinaryOperator::Or(_)
-                    | BinaryOperator::LowOr(_)
-            ) =>
-        {
-            collect_condition_var_names_inner(bin.lhs, names);
-            collect_condition_var_names_inner(bin.rhs, names);
+        Expression::Binary(bin) if is_logical_connective(&bin.operator) => {
+            for operand in logical_chain_operands(bin) {
+                collect_condition_var_names_inner(operand, names);
+            }
         }
         // is_a($var, ...) and get_class($var) === ...
         Expression::Call(Call::Function(func_call)) => {

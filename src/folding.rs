@@ -638,9 +638,20 @@ fn collect_from_expression(
             collect_from_expression(assign.rhs, idx, ranges);
         }
 
-        Expression::Binary(bin) => {
-            collect_from_expression(bin.lhs, idx, ranges);
-            collect_from_expression(bin.rhs, idx, ranges);
+        // A left-associative chain (`"a" . "b" . "c"`) nests on the left and
+        // generated code can make it thousands of operators deep, so walk
+        // the left spine in a loop rather than a frame per operator.
+        Expression::Binary(_) => {
+            let mut right_operands = Vec::new();
+            let mut leftmost = expr;
+            while let Expression::Binary(bin) = leftmost {
+                right_operands.push(bin.rhs);
+                leftmost = bin.lhs;
+            }
+            collect_from_expression(leftmost, idx, ranges);
+            for rhs in right_operands.into_iter().rev() {
+                collect_from_expression(rhs, idx, ranges);
+            }
         }
 
         Expression::UnaryPrefix(u) => {

@@ -21,7 +21,36 @@ surfaced: one entry is one root cause, however many shapes it shows up in.
 
 ## Crashes
 
-No outstanding items.
+### B744. Framework scanners overflow the stack on a generated operator chain
+
+**Impact: Medium · Complexity: Medium**
+
+A generated file holding one long operator chain still aborts the server
+with a stack overflow in a Laravel project:
+
+```php
+<?php return "a" . "a" . "a" /* … 20,000 operands … */;
+```
+
+The core walkers (symbol map, forward walker, RHS resolver, scope
+collector, folding, selection range, code-action cursor walks) now walk a
+chain's left spine in a loop. Several framework scanners still descend
+through `Node::visit_children` by recursing once per node, which costs a
+stack frame per operator: `validation_strings/context.rs` overflows in the
+slow diagnostic pass of a Laravel project, and the same shape is in the
+other files under `virtual_members/laravel/` that recurse from inside a
+`visit_children` closure (`aliases.rs`, `expr_walker.rs`, `macros.rs`,
+`morph_map.rs`, `route_names/traversal.rs`, `storage.rs`,
+`typed_morph_columns.rs`, `validation_rules.rs`, and the rest of
+`validation_strings/`), in `drupal/theme_hooks.rs`, `references/events.rs`,
+and in the `convert_to_closure` and PHPStan `fix_return_type` code actions.
+
+Move them onto an explicit stack, the way `for_each_node_with_ancestors`
+and `innermost_node_at` in `parser/ast_helpers.rs` already walk. A shared
+pre-order helper that lets the visitor skip a node's children would cover
+most of them. Add a Laravel-enabled variant of
+`generated_length_operator_chains_do_not_overflow` in
+`tests/integration/crash_sandbox.rs` once they are moved.
 
 ## Type comparison
 

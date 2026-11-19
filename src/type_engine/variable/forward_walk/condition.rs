@@ -246,6 +246,22 @@ impl<'b> Condition<'b> {
 
     /// The scope where the condition failed.
     pub(crate) fn falsey(&self, ctx: &ForwardWalkCtx<'_>) -> &ScopeState {
+        // An `&&` is falsey when its left operand was, so a long `&&` chain
+        // would recurse once per operator: work the left spine out deepest
+        // first instead, so each level finds its left operand's answer kept.
+        if self.falsey.get().is_none() {
+            let mut spine = Vec::new();
+            let mut node = self;
+            while let Node::And(left, _) = &node.node
+                && left.falsey.get().is_none()
+            {
+                spine.push(&**left);
+                node = left;
+            }
+            for condition in spine.into_iter().rev() {
+                condition.falsey(ctx);
+            }
+        }
         self.falsey.get_or_init(|| match &self.node {
             Node::Leaf { expr, after, .. } => {
                 let mut scope = after.clone();
@@ -266,6 +282,21 @@ impl<'b> Condition<'b> {
     }
 
     fn truthy_outcome(&self, ctx: &ForwardWalkCtx<'_>) -> &Truthy {
+        // Both `&&` and `||` read their left operand's truthy outcome; see
+        // `falsey` for why the left spine is worked out first.
+        if self.truthy.get().is_none() {
+            let mut spine = Vec::new();
+            let mut node = self;
+            while let Node::And(left, _) | Node::Or { left, .. } = &node.node
+                && left.truthy.get().is_none()
+            {
+                spine.push(&**left);
+                node = left;
+            }
+            for condition in spine.into_iter().rev() {
+                condition.truthy_outcome(ctx);
+            }
+        }
         self.truthy.get_or_init(|| match &self.node {
             Node::Leaf {
                 expr,
@@ -299,11 +330,14 @@ impl<'b> Condition<'b> {
     /// The scope a leg's narrowing started from, which is what a leg's
     /// answer is checked against when the legs of a disjunction are joined.
     fn narrowing_base(&self) -> &ScopeState {
-        match &self.node {
-            Node::Leaf { after, .. } => after,
-            Node::Not(inner) => inner.narrowing_base(),
-            Node::And(left, _) => left.narrowing_base(),
-            Node::Or { left, .. } => left.narrowing_base(),
+        let mut node = self;
+        loop {
+            match &node.node {
+                Node::Leaf { after, .. } => return after,
+                Node::Not(inner) => node = inner,
+                Node::And(left, _) => node = left,
+                Node::Or { left, .. } => node = left,
+            }
         }
     }
 }

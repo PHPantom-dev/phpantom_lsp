@@ -273,20 +273,31 @@ pub(crate) fn walk_closures_in_expr<'b>(
                 }
             }
         }
-        Expression::Binary(bin) => {
-            walk_closures_in_expr(bin.lhs, outer_scope, ctx, None);
-            // The right operand of `&&` runs only when the left one was
-            // truthy, and that of `||` only when it was falsy.
-            let polarity = match bin.operator {
-                BinaryOperator::And(_) | BinaryOperator::LowAnd(_) => Some(true),
-                BinaryOperator::Or(_) | BinaryOperator::LowOr(_) => Some(false),
-                _ => None,
-            };
-            match polarity {
-                Some(truthy) => walk_closures_in_branch(bin.rhs, outer_scope, ctx, |scope| {
-                    narrow_by_condition(bin.lhs, truthy, scope, ctx);
-                }),
-                None => walk_closures_in_expr(bin.rhs, outer_scope, ctx, None),
+        // A left-associative chain (`"a" . "b" . "c"`) nests on the left and
+        // generated code can make it thousands of operators deep, so walk
+        // the left spine in a loop rather than a frame per operator.
+        Expression::Binary(_) => {
+            let mut spine: Vec<&'b Binary<'b>> = Vec::new();
+            let mut leftmost = expr;
+            while let Expression::Binary(bin) = leftmost {
+                spine.push(bin);
+                leftmost = bin.lhs;
+            }
+            walk_closures_in_expr(leftmost, outer_scope, ctx, None);
+            for bin in spine.iter().rev() {
+                // The right operand of `&&` runs only when the left one was
+                // truthy, and that of `||` only when it was falsy.
+                let polarity = match bin.operator {
+                    BinaryOperator::And(_) | BinaryOperator::LowAnd(_) => Some(true),
+                    BinaryOperator::Or(_) | BinaryOperator::LowOr(_) => Some(false),
+                    _ => None,
+                };
+                match polarity {
+                    Some(truthy) => walk_closures_in_branch(bin.rhs, outer_scope, ctx, |scope| {
+                        narrow_by_condition(bin.lhs, truthy, scope, ctx);
+                    }),
+                    None => walk_closures_in_expr(bin.rhs, outer_scope, ctx, None),
+                }
             }
         }
         Expression::UnaryPrefix(prefix) => {

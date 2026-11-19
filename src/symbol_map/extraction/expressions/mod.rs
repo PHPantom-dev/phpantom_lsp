@@ -191,21 +191,34 @@ pub(super) fn extract_from_expression<'a>(
         Expression::Assignment(assign) => extract_assignment_expr(assign, ctx, scope_start),
 
         // ── Binary operations ──
-        Expression::Binary(bin) => {
-            record_morph_column_comparison(bin, ctx.content, &mut ctx.morph_column_sites);
-            let lhs_spans = ctx.spans.len();
-            extract_from_expression(bin.lhs, ctx, scope_start);
-            if ctx.yii_params && bin.operator.is_null_coalesce() {
-                mark_yii_param_reads_optional(lhs_spans, ctx);
+        // Left-associative operators nest on the left (`"a" . "b" . "c"` is
+        // `("a" . "b") . "c"`), and generated code can chain thousands of
+        // them, so walk the left spine in a loop rather than a frame per
+        // operator.  Every operator's LHS starts at the leftmost operand, so
+        // they all share one `lhs_spans` mark.
+        Expression::Binary(_) => {
+            let mut spine: Vec<&'a Binary<'a>> = Vec::new();
+            let mut leftmost = expr;
+            while let Expression::Binary(bin) = leftmost {
+                record_morph_column_comparison(bin, ctx.content, &mut ctx.morph_column_sites);
+                spine.push(bin);
+                leftmost = bin.lhs;
             }
-            // Tag the RHS of `instanceof` with the Instanceof context.
-            if bin.operator.is_instanceof()
-                && let Expression::Identifier(ident) = bin.rhs
-            {
-                ctx.spans
-                    .push(identifier_class_ref(ident, ClassRefContext::Instanceof));
-            } else {
-                extract_from_expression(bin.rhs, ctx, scope_start);
+            let lhs_spans = ctx.spans.len();
+            extract_from_expression(leftmost, ctx, scope_start);
+            for bin in spine.iter().rev() {
+                if ctx.yii_params && bin.operator.is_null_coalesce() {
+                    mark_yii_param_reads_optional(lhs_spans, ctx);
+                }
+                // Tag the RHS of `instanceof` with the Instanceof context.
+                if bin.operator.is_instanceof()
+                    && let Expression::Identifier(ident) = bin.rhs
+                {
+                    ctx.spans
+                        .push(identifier_class_ref(ident, ClassRefContext::Instanceof));
+                } else {
+                    extract_from_expression(bin.rhs, ctx, scope_start);
+                }
             }
         }
 
