@@ -5,7 +5,8 @@
 //! the links between a Messenger message and its handlers, the links
 //! between a class and its tests, the routes that dispatch to a Laravel
 //! controller method, the classes and files a Laravel model, event or
-//! listener is paired with, and the renders of a Yii template.
+//! listener is paired with, the renders of a Yii template, and the
+//! listeners the Yii events configuration attaches to an event.
 
 use std::sync::Arc;
 
@@ -159,7 +160,13 @@ impl Backend {
 
             let descendants = self.implementation_lens_descendants(class, &class_loader);
             if let Some(descendants) = &descendants {
-                let count = descendants.iter().filter(|d| !d.is_abstract).count();
+                let plugins =
+                    self.drupal_plugin_lens_classes(&class_fqn, descendants, &class_loader);
+                let count = descendants
+                    .iter()
+                    .chain(&plugins)
+                    .filter(|d| !d.is_abstract)
+                    .count();
                 lenses.extend(Self::build_implementation_lens(
                     uri,
                     &index,
@@ -186,6 +193,7 @@ impl Backend {
 
             if is_yii {
                 lenses.extend(self.build_yii_definition_lens(uri, class, &index));
+                lenses.extend(self.build_yii_listener_lens(uri, class, &index));
             }
 
             let route_actions = routes
@@ -603,6 +611,31 @@ impl Backend {
         Some(self.implementation_descendants(class, &class.fqn(), class_loader, true))
     }
 
+    /// The plugins of the Drupal plugin manager `class_fqn` stands for that
+    /// are not among `descendants`: the implementation lens of the class
+    /// itself lists them, as go to implementation does.  A plugin
+    /// implements none of the manager's methods, so a method's lens counts
+    /// the descendants alone.
+    fn drupal_plugin_lens_classes(
+        &self,
+        class_fqn: &str,
+        descendants: &[Arc<ClassInfo>],
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Vec<Arc<ClassInfo>> {
+        let mut plugins: Vec<Arc<ClassInfo>> = Vec::new();
+        for plugin in self.drupal_plugin_implementations(class_fqn) {
+            if !descendants
+                .iter()
+                .chain(&plugins)
+                .any(|known| known.fqn().eq_ignore_ascii_case(&plugin))
+                && let Some(info) = class_loader(Fqn::new(&plugin))
+            {
+                plugins.push(info);
+            }
+        }
+        plugins
+    }
+
     /// Build the implementation lens for a class, or for one of its
     /// methods when `member` is given.
     ///
@@ -662,9 +695,15 @@ impl Backend {
     ) -> Option<Vec<Location>> {
         let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let class = class_loader(Fqn::new(class_fqn))?;
-        let descendants = self.implementation_descendants(&class, class_fqn, &class_loader, true);
+        let mut descendants =
+            self.implementation_descendants(&class, class_fqn, &class_loader, true);
         Some(match member {
-            None => self.class_implementation_locations(uri, content, &class, &descendants),
+            None => {
+                let plugins =
+                    self.drupal_plugin_lens_classes(class_fqn, &descendants, &class_loader);
+                descendants.extend(plugins);
+                self.class_implementation_locations(uri, content, &class, &descendants)
+            }
             Some(member) => {
                 let providers = member_implementation_providers(
                     class_fqn,
@@ -944,6 +983,40 @@ impl Backend {
         let title = match targets.as_slice() {
             [(label, _)] => format!("DI definition: {label}"),
             _ => format!("{} DI definitions", targets.len()),
+        };
+        let line = index.line_of(class.keyword_offset as usize);
+        let position = Position {
+            line: line as u32,
+            character: line_indent(index, line),
+        };
+        self.targets_lens(uri, position, title, targets)
+    }
+
+    /// The lens on an event class that the Yii events configuration
+    /// attaches listeners to, which goes to them.  `None` when it attaches
+    /// none.
+    fn build_yii_listener_lens(
+        &self,
+        uri: &str,
+        class: &ClassInfo,
+        index: &LineIndex,
+    ) -> Option<CodeLens> {
+        if class.keyword_offset == 0 {
+            return None;
+        }
+        let targets: Vec<(String, Location)> = self
+            .yii_event_listener_locations(class.fqn().as_str())
+            .into_iter()
+            .map(|location| {
+                let label = self
+                    .workspace_relative_path(location.uri.as_str())
+                    .unwrap_or_else(|| location.uri.to_string());
+                (label, location)
+            })
+            .collect();
+        let title = match targets.as_slice() {
+            [(label, _)] => format!("Listener: {label}"),
+            _ => format!("{} listeners", targets.len()),
         };
         let line = index.line_of(class.keyword_offset as usize);
         let position = Position {

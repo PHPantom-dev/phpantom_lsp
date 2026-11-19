@@ -58,6 +58,80 @@ fn fold(func: &str, types: &[Option<PhpType>]) -> Option<String> {
 }
 
 #[test]
+fn dirname_preserves_known_paths_and_valid_levels() {
+    assert!(has_string_func_rule("dirname"));
+    let dir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    let child = root.join("project").join("app");
+    let input = lit(&child.to_string_lossy());
+    assert_eq!(
+        fold("dirname", std::slice::from_ref(&input)),
+        lit(&root.join("project").to_string_lossy()).map(|ty| ty.to_string())
+    );
+    assert_eq!(
+        fold("dirname", &[input.clone(), Some(PhpType::literal_int("2"))]),
+        lit(&root.to_string_lossy()).map(|ty| ty.to_string())
+    );
+    assert_eq!(fold("dirname", &[lit("file.php")]), Some("'.'".into()));
+    assert_eq!(
+        fold("dirname", &[lit("日本/page.php")]),
+        Some("'日本'".into())
+    );
+    assert_eq!(
+        fold("dirname", &[lit("a"), Some(PhpType::literal_int("3"))]),
+        Some("'.'".into())
+    );
+    for levels in ["0", "-1", "65"] {
+        assert_eq!(
+            fold(
+                "dirname",
+                &[input.clone(), Some(PhpType::literal_int(levels))]
+            ),
+            None
+        );
+    }
+    assert_eq!(fold("dirname", &[input, Some(PhpType::int())]), None);
+    assert_eq!(fold("dirname", &[Some(PhpType::string())]), None);
+}
+
+#[test]
+fn dirname_preserves_lexical_segments_and_platform_roots() {
+    use super::dirname;
+    for (input, expected) in [
+        ("", ""),
+        ("a/./b", "a/."),
+        ("a/../b", "a/.."),
+        ("a/./", "a"),
+        ("a//b", "a"),
+        ("a/b/", "a"),
+        ("./foo", "."),
+        ("../foo", ".."),
+        ("file.php", "."),
+        ("日本/page.php", "日本"),
+    ] {
+        for windows in [false, true] {
+            assert_eq!(dirname(input, windows), expected, "{input}");
+        }
+    }
+    for (input, expected) in [("/", "/"), ("//", "/"), ("///foo", "/")] {
+        assert_eq!(dirname(input, false), expected);
+        assert_eq!(dirname(input, true), r"\");
+    }
+    for (input, expected) in [
+        (r"C:", r"C:"),
+        (r"C:foo", r"C:."),
+        (r"C:\", r"C:\"),
+        (r"C:\foo", r"C:\"),
+        (r"C:\app\page.php", r"C:\app"),
+        (r"\\server\share", r"\\server"),
+        (r"\\?\C:\app\page.php", r"C:\app"),
+    ] {
+        assert_eq!(dirname(input, true), expected);
+    }
+    assert_eq!(dirname(r"a\b", false), ".");
+}
+
+#[test]
 fn a_case_transform_folds_every_alternative_of_a_literal_union() {
     let subject = PhpType::union(vec![
         PhpType::literal_string_value("Interface"),

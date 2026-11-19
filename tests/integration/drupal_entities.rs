@@ -75,6 +75,51 @@ async fn an_entity_type_id_goes_to_its_declaration_and_lists_its_readers() {
     );
 }
 
+#[tokio::test]
+async fn a_lookup_in_a_file_opened_before_the_index_is_read_again_once_it_is_built() {
+    let manager_class = "<?php\nnamespace Drupal\\Core\\Entity;\nclass EntityTypeManager implements EntityTypeManagerInterface {\n    public function getStorage(string $entity_type_id): EntityStorageInterface {}\n    public function getDefinition(string $entity_type_id, bool $exception_on_invalid = true): ?object { return null; }\n}\n";
+    let core_services =
+        "services:\n  entity_type.manager:\n    class: Drupal\\Core\\Entity\\EntityTypeManager\n";
+    let consumer = r#"<?php
+namespace Drupal\acme;
+
+final class StaticNotes {
+    public function run(): void {
+        \Drupal::service('entity_type.manager')->getStorage('acme_note');
+    }
+}
+"#;
+    let consumer_path = "web/modules/custom/acme/src/StaticNotes.php";
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in [
+        (MANAGER_PATH, MANAGER),
+        (
+            "web/core/lib/Drupal/Core/Entity/EntityTypeManager.php",
+            manager_class,
+        ),
+        ("web/core/core.services.yml", core_services),
+        (NOTE_PATH, NOTE),
+    ] {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    // The editor restores the tab before the workspace index runs, and a
+    // request reads the file against a container nothing has filled yet.
+    let (backend, dir) = workspace_in(dir, &[(consumer_path, consumer)]).await;
+    let php = uri_for(&dir, consumer_path);
+    let position = position_in(consumer, "getStorage('acme_note')", 13);
+    let _ = definitions_at(&backend, &php, position).await;
+    backend.ensure_workspace_indexed();
+
+    let found = definitions_at(&backend, &php, position).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        (&found[0].uri, found[0].range.start.line),
+        (&uri_for(&dir, NOTE_PATH), 6)
+    );
+}
+
 /// Core's entity classes sit in a folder the project's `.gitignore` leaves
 /// out, and its test modules declare entity types no real site has.
 #[tokio::test]
@@ -254,6 +299,71 @@ final class Chained {
         assert_eq!(found.len(), 1, "{needle}: {found:?}");
         assert_eq!(found[0].uri, uri_for(&dir, target), "{needle}");
     }
+}
+
+/// The tests that enable a test module see the entity types it declares,
+/// and a site's own code, which never runs with it enabled, does not.
+#[tokio::test]
+async fn test_code_sees_its_test_modules_entity_types() {
+    const TEST_ENTITY: &str =
+        "web/core/modules/system/tests/modules/entity_test/src/Entity/EntityTest.php";
+    const KERNEL_TEST: &str = "web/core/modules/system/tests/src/Kernel/EntityTestTest.php";
+    let user = |namespace: &str| {
+        format!(
+            "<?php\nnamespace {namespace};\n\nuse Drupal\\Core\\Entity\\EntityTypeManagerInterface;\n\nfinal class User {{\n    public function run(EntityTypeManagerInterface $manager): void {{\n        $storage = $manager->getStorage('entity_test');\n        $storage;\n        $query = \\Drupal::entityQuery('entity_test');\n        $query;\n    }}\n}}\n"
+        )
+    };
+    let in_test = user("Drupal\\Tests\\system\\Kernel");
+    let in_site = user("Drupal\\acme");
+    let dir = tempfile::tempdir().unwrap();
+    let full = dir.path().join(TEST_ENTITY);
+    std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+    std::fs::write(
+        full,
+        "<?php\nnamespace Drupal\\entity_test\\Entity;\n/**\n * @ContentEntityType(\n *   id = \"entity_test\",\n * )\n */\nclass EntityTest {}\n",
+    )
+    .unwrap();
+    let mut files: Vec<(&str, &str)> = STORAGE_STUBS.to_vec();
+    files.extend(QUERY_STUBS);
+    files.extend([
+        (MANAGER_PATH, MANAGER),
+        (KERNEL_TEST, in_test.as_str()),
+        (LOADER_PATH, in_site.as_str()),
+    ]);
+    let (backend, dir) = workspace_in(dir, &files).await;
+    // Finding references indexes the workspace, the test module included.
+    references_at(
+        &backend,
+        &uri_for(&dir, LOADER_PATH),
+        position_in(&in_site, "getStorage('entity_test')", 13),
+    )
+    .await;
+
+    let hover = |path: &'static str, content: &str, needle: &str| {
+        let position = position_in(content, needle, 2);
+        let backend = &backend;
+        let php = uri_for(&dir, path);
+        async move {
+            crate::common::hover_text_at(backend, &php, position.line, position.character)
+                .await
+                .unwrap_or_default()
+        }
+    };
+    let storage = hover(KERNEL_TEST, &in_test, "$storage;").await;
+    assert!(
+        storage.contains("SqlContentEntityStorage<EntityTest>"),
+        "{storage}"
+    );
+    let query = hover(KERNEL_TEST, &in_test, "$query;").await;
+    assert!(query.contains("QueryInterface<EntityTest>"), "{query}");
+
+    let storage = hover(LOADER_PATH, &in_site, "$storage;").await;
+    assert!(
+        storage.contains("EntityStorageInterface") && !storage.contains("EntityTest"),
+        "{storage}"
+    );
+    let query = hover(LOADER_PATH, &in_site, "$query;").await;
+    assert!(!query.contains("EntityTest"), "{query}");
 }
 
 /// `getStorage(entity_type_id: 'x')` names the same entity type as the

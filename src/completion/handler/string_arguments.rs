@@ -1,10 +1,10 @@
 //! Completion inside a string argument: array shape keys, the Laravel
 //! string keys (routes, config, views, translations, morph aliases, paths,
 //! route and command parameters, request input), Symfony service IDs and
-//! container parameters, Yii views and DI definition keys, WordPress hook
-//! names, Eloquent relation and column names, the strings a parameter's
-//! declared type asks for, and method names in mock expectations,
-//! route-controller groups and array callables.
+//! container parameters, Yii views, asset bundle files, DI definition keys
+//! and CSS classes, WordPress hook names, Eloquent relation and column
+//! names, the strings a parameter's declared type asks for, and method
+//! names in mock expectations, route-controller groups and array callables.
 
 use tower_lsp_server::gen_lsp_types::CompletionResponse;
 
@@ -41,6 +41,28 @@ impl Backend {
             content,
             *cursor_offset as usize,
         );
+        if let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.container_string_completions(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+        if let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.tempest_model_property_string_completion(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+        if let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.tempest_route_string_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
+        if let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.tempest_path_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
         // ── Array shape key completion ───────────────────────────
         // Runs before `InStringLiteral` suppression because in
         // normal code `$arr['` puts the scanner inside a
@@ -143,8 +165,9 @@ impl Backend {
         if matches!(string_ctx, StringContext::InStringLiteral)
             && self.is_drupal_project()
             && let Some(code) = code_ctx.as_ref()
-            && let Some(response) =
-                self.try_drupal_render_element_completion(uri, content, position, code)
+            && let Some(response) = self
+                .try_drupal_render_element_completion(uri, content, position, code)
+                .or_else(|| self.try_drupal_display_type_completion(content, position, code))
         {
             return Some(response);
         }
@@ -173,6 +196,18 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Drupal callbacks ────────────────────────────────────
+        // `'#submit' => ['::|']`, `$form['#validate'][] = 'Class::|'`, and
+        // the other keys Drupal reads a callback from.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_drupal_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_drupal_callback_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
         // ── Symfony form options ────────────────────────────────
         // `$builder->add('email', EmailType::class, ['|' => …])`, wherever
         // the form component is used.
@@ -184,6 +219,16 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Yii asset bundle files ──────────────────────────────
+        // `public array $css = ['|']` in an asset bundle.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_asset_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
         // ── Yii aliases ─────────────────────────────────────────
         // `'@|'` in any string, before the names a call's string could
         // otherwise be read as.
@@ -191,6 +236,16 @@ impl Backend {
             && self.is_yii_project()
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) = self.try_yii_alias_completion(content, position, code)
+        {
+            return Some(response);
+        }
+
+        // ── Yii params keys ─────────────────────────────────────
+        // `$params['application']['|']` in a configuration file.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_param_completion(uri, content, position, code)
         {
             return Some(response);
         }
@@ -230,6 +285,28 @@ impl Backend {
             return Some(response);
         }
 
+        // ── Yii view parameters ─────────────────────────────────
+        // `render('blog/post', ['|' => …])`, from the template's `@var`
+        // block.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_yii_view_parameter_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── CSS classes ─────────────────────────────────────────
+        // `Html::div()->class('card |')`, a name at a time.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_css_class_completion(content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
         // ── Yii DI definitions ──────────────────────────────────
         // The keys of a definition, `MailerInterface::class => ['|' …`,
         // and of the arguments its method keys pass by name.
@@ -237,6 +314,28 @@ impl Backend {
             && matches!(string_ctx, StringContext::InStringLiteral)
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) = self.try_yii_definition_completion(content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── Key paths `ArrayHelper` reads ───────────────────────
+        // `ArrayHelper::getValueByPath($user, 'profile.|')` completes from
+        // the value the keys before the cursor reach.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_array_path_completion(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
+        // ── Yii form fields and hydration maps ──────────────────
+        // `Field::text($form, '|')` and the keys of a hydration map,
+        // `populate($form, $data, ['|' …`, name properties of the object.
+        if self.is_yii_project()
+            && matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_yii_form_property_completion(content, position, ctx, code)
         {
             return Some(response);
         }
@@ -369,6 +468,30 @@ impl Backend {
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_mock_method_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
+        // ── Yii Active Record attributes and relations ──────────
+        // `$post->get('|')` names an attribute of the record, and
+        // `$post->relation('|')` and `Post::query()->with('|')` a
+        // relation.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_yii_active_record_completion(content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
+        // ── Yii query tables and columns ────────────────────────
+        // `$query->from('|')` names a table the migrations create, and
+        // `->where(['|' => …])` a column of the query's tables.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_query_completion(uri, content, position, ctx, code)
         {
             return Some(response);
         }

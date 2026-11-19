@@ -231,7 +231,7 @@ impl Backend {
                     range,
                     DiagnosticSeverity::Hint,
                     "unused_import",
-                    format!("Unused import '{}'", fqn),
+                    format!("Unused import {}", fqn.trim_start_matches('\\')),
                     Some(DiagnosticTag::Unnecessary),
                 ));
             }

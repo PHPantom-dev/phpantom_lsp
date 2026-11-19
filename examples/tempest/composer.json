@@ -1,0 +1,20 @@
+{
+    "name": "phpantom/tempest-demo",
+    "description": "Tempest View playground for PHPantom",
+    "license": "MIT",
+    "type": "project",
+    "require": {
+        "php": "^8.5",
+        "tempest/database": "^3.19",
+        "tempest/router": "^3.19",
+        "tempest/view": "^3.19"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

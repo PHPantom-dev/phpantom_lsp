@@ -41,7 +41,9 @@ class Child extends ParentBox
 "#;
     assert_eq!(
         collect(php),
-        vec!["Child::$other has #[\\Override] attribute, but no matching parent property exists"]
+        vec![
+            "Property Child::$other has #[\\Override] attribute, but no matching parent property exists"
+        ]
     );
 }
 
@@ -61,7 +63,9 @@ class Bar extends Foo
 "#;
     assert_eq!(
         collect(php),
-        vec!["Bar::test2() has #[\\Override] attribute, but no matching parent method exists"]
+        vec![
+            "Method Bar::test2() has #[\\Override] attribute, but no matching parent method exists"
+        ]
     );
 }
 
@@ -117,7 +121,9 @@ class E extends Q { #[\Override] public function __construct() {} }
 "#;
     assert_eq!(
         collect(php),
-        vec!["C::__construct() has #[\\Override] attribute, but no matching parent method exists"]
+        vec![
+            "Method C::__construct() has #[\\Override] attribute, but no matching parent method exists"
+        ]
     );
 }
 
@@ -147,7 +153,7 @@ class C extends P {
 "#;
     assert_eq!(
         collect(php),
-        vec!["C::p() has #[\\Override] attribute, but no matching parent method exists"]
+        vec!["Method C::p() has #[\\Override] attribute, but no matching parent method exists"]
     );
 }
 
@@ -162,7 +168,7 @@ abstract class C extends Base { #[\Override] public function f(): void {} #[\Ove
 "#;
     assert_eq!(
         collect(php),
-        vec!["K::g() has #[\\Override] attribute, but no matching parent method exists"]
+        vec!["Method K::g() has #[\\Override] attribute, but no matching parent method exists"]
     );
 }
 
@@ -178,7 +184,7 @@ enum E: string implements I {
 "#;
     assert_eq!(
         collect_on(&Backend::new_test_with_full_stubs(), php),
-        vec!["E::h() has #[\\Override] attribute, but no matching parent method exists"]
+        vec!["Method E::h() has #[\\Override] attribute, but no matching parent method exists"]
     );
 }
 
@@ -194,8 +200,8 @@ class C extends P {
     assert_eq!(
         collect(php),
         vec![
-            "C::$b has #[\\Override] attribute, but no matching parent property exists",
-            "C::$c has #[\\Override] attribute, but no matching parent property exists",
+            "Property C::$b has #[\\Override] attribute, but no matching parent property exists",
+            "Property C::$c has #[\\Override] attribute, but no matching parent property exists",
         ]
     );
 }
@@ -208,7 +214,7 @@ class C extends P { #[\Override] public $a, $b; }
 "#;
     assert_eq!(
         collect(php),
-        vec!["C::$b has #[\\Override] attribute, but no matching parent property exists"]
+        vec!["Property C::$b has #[\\Override] attribute, but no matching parent property exists"]
     );
 }
 
@@ -281,7 +287,7 @@ class C { #[\Override] public function f(): void {} #[\Override] public $a; }
     backend.set_php_version(PhpVersion::new(8, 4));
     assert_eq!(
         collect_on(&backend, php),
-        vec!["C::f() has #[\\Override] attribute, but no matching parent method exists"]
+        vec!["Method C::f() has #[\\Override] attribute, but no matching parent method exists"]
     );
     backend.set_php_version(PhpVersion::new(8, 2));
     assert!(collect_on(&backend, php).is_empty());

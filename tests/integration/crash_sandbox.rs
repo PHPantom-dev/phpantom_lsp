@@ -840,3 +840,193 @@ probe("\x8b", []);
         );
     }
 }
+
+/// Regression test: generated-length operator chains must be indexed,
+/// diagnosed, and answered on without overflowing the stack.
+///
+/// Binary operators nest on their left (`"a" . "b" . "c"` is
+/// `("a" . "b") . "c"`), so a walker that recurses into each operator's left
+/// operand costs a stack frame per operator, and a generated file can chain
+/// tens of thousands of them.  Like a fluent chain (see
+/// `generated_length_method_chain_does_not_overflow`), the overflow aborts
+/// the process.
+#[test]
+fn generated_length_operator_chains_do_not_overflow() {
+    const OPERANDS: usize = 20_000;
+
+    let chain = |operand: &str, operator: &str| vec![operand; OPERANDS].join(operator);
+    let content = format!(
+        "<?php
+function chains($v): string {{
+    $sum = {};
+    $sum->total();
+    if ({}) {{ }}
+    if ({}) {{ }}
+    return {};
+}}
+return {};
+",
+        chain("1", " + "),
+        chain("$v", " && "),
+        chain("$v", " || "),
+        chain("$v", " . "),
+        chain("'a'", " . "),
+    );
+    // The middle of the chain on the function's `return` line.
+    let return_line = 6;
+    let mid_chain = (4 + "return ".len() + OPERANDS / 2 * 5) as u32;
+
+    let (diagnostics, selection, folding) = with_parse_worker_stack(move || {
+        // A plain PHP project, the reporter's setup: no `composer.json`, so
+        // no framework support is switched on.
+        let backend = create_test_backend();
+        let root = tempfile::tempdir().expect("temp dir");
+        crate::common::block_on(crate::common::initialize_with_options(
+            &backend,
+            root.path(),
+            None,
+        ));
+        let uri = "file:///generated_operator_chains.php";
+        backend.update_ast(uri, &content);
+        let mut diagnostics = Vec::new();
+        backend.collect_fast_diagnostics(uri, &content, &mut diagnostics);
+        backend.collect_slow_diagnostics(uri, &content, &mut diagnostics);
+        // Code actions offer nothing on an all-variable chain; getting an
+        // answer back without aborting is the check.
+        crate::common::get_code_actions_at(&backend, uri, &content, return_line, mid_chain);
+        let position = Position::new(return_line, mid_chain);
+        (
+            diagnostics,
+            backend.handle_selection_range(&content, &[position]),
+            backend.handle_folding_range(uri, &content),
+        )
+    });
+
+    // `$sum` is only known to be an int if the whole chain was folded.
+    let messages: Vec<&str> = diagnostics
+        .iter()
+        .map(|d| message_text(&d.message))
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("total()") && message.contains(&OPERANDS.to_string())),
+        "The {OPERANDS}-operand sum should resolve to {OPERANDS}, got: {messages:#?}"
+    );
+
+    // The chain is one expression: expanding from an operand selects the
+    // whole chain, not each of its thousands of prefixes.
+    let selection = selection.expect("selection ranges").remove(0);
+    let mut levels = 0;
+    let mut range = Some(&selection);
+    while let Some(current) = range {
+        levels += 1;
+        range = current.parent.as_deref();
+    }
+    assert!(
+        levels < 10,
+        "A flat chain should take a handful of selection levels, got {levels}"
+    );
+
+    assert!(folding.is_some(), "Folding ranges should be computed");
+}
+
+/// The framework scanners walk every file a Laravel project hands them, so
+/// a generated chain in a provider, a route file, a config file, or a form
+/// request must not overflow their walks either.
+#[test]
+fn generated_length_operator_chains_do_not_overflow_framework_scanners() {
+    use tower_lsp_server::LanguageServer;
+    const OPERANDS: usize = 20_000;
+
+    let chain = vec!["'a'"; OPERANDS].join(" . ");
+    let provider = format!(
+        "<?php
+namespace App\\Providers;
+
+use Illuminate\\Support\\ServiceProvider;
+
+class AppServiceProvider extends ServiceProvider
+{{
+    public function boot(): void
+    {{
+        $generated = {chain};
+    }}
+}}
+"
+    );
+    let request = format!(
+        "<?php
+namespace App\\Http\\Requests;
+
+use Illuminate\\Foundation\\Http\\FormRequest;
+
+class ChainRequest extends FormRequest
+{{
+    public function rules(): array
+    {{
+        return ['name' => {chain}];
+    }}
+
+    public function store(): void
+    {{
+        $this->validate(['name' => {chain}]);
+        $this->
+    }}
+}}
+"
+    );
+    let files = [
+        ("app/Providers/AppServiceProvider.php", provider),
+        ("app/Http/Requests/ChainRequest.php", request.clone()),
+        ("routes/web.php", format!("<?php\n$generated = {chain};\n")),
+        (
+            "config/app.php",
+            format!("<?php\nreturn ['aliases' => ['Generated' => {chain}]];\n"),
+        ),
+    ];
+    // The line holding `$this->` and the column just past it.
+    let completion_line = 15;
+    let completion_column = 15;
+
+    with_parse_worker_stack(move || {
+        let file_refs: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(path, content)| (*path, content.as_str()))
+            .collect();
+        let (backend, dir) = crate::common::create_psr4_workspace(
+            r#"{"require":{"laravel/framework":"^13.0"},"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+            &file_refs,
+        );
+        crate::common::block_on(async {
+            backend
+                .initialized(tower_lsp_server::gen_lsp_types::InitializedParams {})
+                .await;
+            let uri = crate::common::open_php_at(
+                &backend,
+                &dir,
+                "app/Http/Requests/ChainRequest.php",
+                &request,
+            )
+            .await;
+            let mut diagnostics = Vec::new();
+            backend.collect_fast_diagnostics(uri.as_str(), &request, &mut diagnostics);
+            backend.collect_slow_diagnostics(uri.as_str(), &request, &mut diagnostics);
+            crate::common::complete_at_raw(
+                &backend,
+                &uri,
+                &request,
+                completion_line,
+                completion_column,
+            )
+            .await;
+            crate::common::get_code_actions_at(
+                &backend,
+                uri.as_str(),
+                &request,
+                9,
+                (25 + OPERANDS / 2 * 6) as u32,
+            );
+        });
+    });
+}

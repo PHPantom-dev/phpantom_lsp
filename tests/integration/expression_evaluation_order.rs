@@ -62,7 +62,7 @@ fn the_right_operand_reads_what_the_left_one_assigned() {
         let php = format!("{FOO}function t(): void {{ {statement} }}\n");
         let diagnostics = unknown_members(&php);
         assert!(
-            diagnostics.iter().any(|d| d.contains("'nope'")),
+            diagnostics.iter().any(|d| d.contains("::nope()")),
             "{position}: expected `nope` to be reported on `Foo`, got {diagnostics:?}"
         );
     }
@@ -78,7 +78,7 @@ fn the_right_operand_does_not_read_the_value_the_left_one_replaced() {
         "scalar_member_access",
     );
     assert!(
-        diagnostics.iter().any(|d| d.contains("on type '1'")),
+        diagnostics.iter().any(|d| d.ends_with(" on 1")),
         "`$a` is `1` on the right, not the `Foo` it replaced: {diagnostics:?}"
     );
 }
@@ -89,7 +89,7 @@ fn an_item_reads_what_an_earlier_item_assigned() {
         format!("{FOO}function t(): void {{ $x = [$b = new Foo(), $b->nope()]; echo $x; }}\n");
     let diagnostics = unknown_members(&php);
     assert!(
-        diagnostics.iter().any(|d| d.contains("'nope'")),
+        diagnostics.iter().any(|d| d.contains("::nope()")),
         "{diagnostics:?}"
     );
 }

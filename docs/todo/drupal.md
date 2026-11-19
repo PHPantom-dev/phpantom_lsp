@@ -7,12 +7,14 @@ module, theme, and profile, with the Drupal file extensions (`.module`,
 the services the `*.services.yml` files declare, the entity types
 entity classes declare, the routes the routing files, route attributes,
 and route builders declare, the hooks the `*.api.php` files document
-and the extensions implement, the permissions the `*.permissions.yml`
+and the extensions implement, the plugin types plugin managers declare and
+the plugins of each, the permissions the `*.permissions.yml`
 files declare, the configuration objects and keys the default
 configuration and the configuration schema declare, the theme hooks
 `hook_theme()` implementations declare, the render elements element
-classes declare, and the libraries the `*.libraries.yml` files declare
-are read. Nothing reads fields yet.
+classes declare, the libraries the `*.libraries.yml` files declare, the
+callbacks form and render arrays name, and the event names and listener
+methods event subscribers declare are read. Nothing reads fields yet.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -30,8 +32,8 @@ is what they expect from an editor.
 installs core into `web/core` through Composer (`memory_drupal_module`),
 next to the other framework scenarios. `benches/drupal_completion.rs`
 measures completion of service IDs, route names, entity type IDs,
-permission names, configuration names, render element names, hook names,
-theme hook names, library names, and hook implementations over a
+permission names, configuration names, render element names, plugin IDs,
+hook names, theme hook names, library names, and hook implementations over a
 generated site with many custom modules. Every item that adds a name
 Drupal declares adds its case to it.
 
@@ -66,45 +68,6 @@ PHPStan's Drupal extension types any magic property on a fieldable
 entity as `FieldItemListInterface` without checking the name. That is
 the floor; reading the configuration is what lets an editor complete
 names and report a misspelt one.
-
----
-
-## DR10. Plugin IDs
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-#[Block(id: 'acme_order_summary', admin_label: new TranslatableMarkup('Order summary'))]
-final class OrderSummaryBlock extends BlockBase { … }
-
-$block = $this->blockManager->createInstance('acme_order_summary');
-```
-
-Blocks, field types, formatters, widgets, queue workers, and the other
-plugin types declare an ID in an attribute (or, in older code, a
-docblock annotation). Complete and navigate plugin IDs where a plugin
-manager takes one (`createInstance()`, `getDefinition()`,
-`hasDefinition()`), and in the YAML that names them, and type
-`createInstance()` as the plugin class. Render elements, the plugins a
-render array's `'#type'` names, already complete and navigate, and the
-reader that finds their attributes and annotations takes the attribute
-class as a parameter, so the other plugin types can reuse it.
-
----
-
-## DR11. Form and render callbacks
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-$form['actions']['submit']['#submit'][] = '::submitOrder';
-$form['country']['#ajax'] = ['callback' => '::updateRegions'];
-```
-
-`#submit`, `#validate`, `#element_validate`, `#pre_render`,
-`#after_build`, and an `#ajax` `callback` name methods of the form class
-as `'::method'`, or a function or `Class::method`. Navigate, rename, and
-complete them, and report one that names nothing.
 
 ---
 
@@ -163,45 +126,6 @@ their `*.services.yml` as the project. Until DR2 to DR4 ship most
 assertions are a `// SKIP` pointing at the item that covers them; file
 any that no item does. Rules about Drupal's own deprecations are listed
 in the README as not ported.
-
----
-
-## DR16. Event subscribers
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-final class AcmeSubscriber implements EventSubscriberInterface {
-    public static function getSubscribedEvents(): array {
-        return [KernelEvents::REQUEST => 'onRequest'];
-    }
-}
-```
-
-Drupal's event subscribers are Symfony's: a service tagged
-`event_subscriber` maps event names to its own methods in
-`getSubscribedEvents()`. The Symfony support reads that map, jumps from
-a listener name to its method, and reports one that does not exist,
-but only in a Symfony project, and a Drupal site's `composer.json`
-requires none of the packages that make it one. Read the map in a
-Drupal site too, so the listener methods navigate and are checked, and
-the event names complete where Drupal's event dispatcher takes one.
-
----
-
-## DR17. Warn on unknown service IDs
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-$manager = \Drupal::service('acme.order_manger');
-```
-
-A service ID no `*.services.yml` declares is a typo or a module the site
-lacks, and the container throws for it at run time. Report one where
-`\Drupal::service()` and `$container->get()` take it. A module's
-`ServiceProvider` class can register services in PHP, which no YAML file
-lists, so an ID such a provider may register must not warn.
 
 ---
 
@@ -357,46 +281,152 @@ such an implementation can add. A suggestion such as
 
 ---
 
-## DR25. Warn on unknown plugin IDs
+## DR27. Plugin IDs in YAML
 
-**Impact: Medium · Complexity: Low-Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
-```php
-$fields['total'] = BaseFieldDefinition::create('decimel');
-$block = $this->blockManager->createInstance('acme_order_sumary');
+```yaml
+# config/install/core.entity_form_display.node.article.default.yml
+content:
+  title:
+    type: string_textfield
+# config/install/block.block.acme_theme_greeting.yml
+plugin: acme_greeting_block
 ```
 
-A plugin ID that no plugin of its type declares is a typo or a module the
-site lacks. The plugin manager throws for it, except for widgets and
-formatters, which silently fall back to the field type's default. Report
-one wherever [DR10](#dr10-plugin-ids) reads plugin IDs: field types,
-widgets and formatters, constraints, and a plugin manager's
-`createInstance()`. A derivative ID (`system_menu_block:main`) is known
-only at run time, so an ID whose base plugin has a deriver must not
-warn. This depends on DR10.
+Plugin IDs complete and navigate in PHP: a plugin manager's lookups, the
+field type `BaseFieldDefinition::create()` takes, the widget or formatter
+of a field's display options, and the constraint `addConstraint()` takes.
+The YAML that names them does not yet: a form or view display's `type`
+(a widget or formatter), a field storage's `type` (a field type), a
+block's `plugin`, and a migration's `source`, `process`, and
+`destination` plugins. Default configuration files are not parsed today
+(see `drupal::config`), so this needs a reader for the keys that name a
+plugin and the manager each one belongs to.
 
 ---
 
-## DR26. Annotation class names
+## DR28. Plugin types a manager builds at run time
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+class ViewsPluginManager extends DefaultPluginManager {
+  public function __construct($type, \Traversable $namespaces, …) {
+    parent::__construct("Plugin/views/$type", $namespaces, …);
+  }
+}
+```
+
+A plugin type is read from the literals a manager's constructor passes to
+`DefaultPluginManager`'s. Views and Migrate serve many plugin types from
+one manager class whose subdirectory is built from a constructor
+argument, which each service in `views.services.yml` and
+`migrate.services.yml` passes (`plugin.manager.views.field` passes
+`field`), so their plugins (Views fields, filters, and displays, Migrate
+sources and processes) neither complete nor navigate. Read the argument
+each such service passes, and type the service by the plugin type it
+builds.
+
+---
+
+## DR32. `'::method'` callbacks in a form alter hook
 
 **Impact: Low-Medium · Complexity: Low-Medium**
 
 ```php
-/**
- * @Block(
- *   id = "acme_order_summary",
- *   admin_label = @Translation("Order summary"),
- * )
- */
-final class OrderSummaryBlock extends BlockBase { … }
+function acme_form_node_article_form_alter(array &$form, FormStateInterface $form_state) {
+  $form['actions']['submit']['#submit'][] = '::saveDraft';
+}
 ```
 
-Plugins written before Drupal 10.2 declare themselves in a docblock
-annotation, and many contributed modules still do. `@Block` and
-`@Translation` name annotation classes, but Drupal's annotated plugin
-discovery finds them without a `use` import: it reads a plugin type's
-annotation class and namespaces from its plugin manager, not from the
-file. Annotations are read through the imports already; resolve a name
-the imports don't cover through the namespaces of the plugin type the
-class is discovered for, so that go-to-definition, hover, and references
-reach the class.
+In `hook_form_FORM_ID_alter()`, or `#[Hook('form_FORM_ID_alter')]`, a
+`'::method'` names a method of the form class that `FORM_ID` belongs to,
+not of the module's own class. Resolve the form ID to its form class, so
+the callback navigates, completes, renames, and is reported when the
+class has no such method.
+
+---
+
+## DR33. Render callbacks that are not trusted
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+$build['#pre_render'][] = [Formatter::class, 'prepare'];
+```
+
+Drupal refuses to run a `#pre_render`, `#post_render`, `#lazy_builder`, or
+`#access_callback` callback that is not trusted. Report a callback whose
+class implements neither `TrustedCallbackInterface` nor
+`RenderCallbackInterface`, and one whose method `trustedCallbacks()` does
+not list.
+
+---
+
+## DR34. Callback parameter checks
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+public function submitOrder(array $form) {}
+```
+
+A submit or validate handler takes `array &$form, FormStateInterface
+$form_state`, and an `#ajax` callback takes the same two parameters.
+Report a callback that takes a different list, such as one that lacks the
+form state or types it as something else.
+
+---
+
+## DR35. Invokable classes and services as callbacks
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$form['#validate'][] = [OrderValidator::class, '__invoke'];
+$form['#submit'][] = 'order_handler:submit';
+```
+
+A class with `__invoke()` named as a callback, and a class name written
+as the service part of `'Class:method'`, are not read as callbacks.
+Navigate, rename, and report them like any other callback.
+
+---
+
+## DR36. Array callables that name their class in a string
+
+**Impact: Low · Complexity: Low**
+
+```php
+$form['#submit'][] = ['Drupal\acme\Form\OrderForm', 'submitOrder'];
+```
+
+An array callable whose class is a string rather than `OrderForm::class`
+names no method, so it neither navigates nor renames, and a method the
+class lacks is not reported. Read the string as the fully qualified class
+name PHP reads it as, wherever an array callable is read.
+
+---
+
+## DR37. Listener methods in subscriber maps
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+public static function getSubscribedEvents(): array {
+    $events[KernelEvents::REQUEST][] = ['onRequest', 100];
+    return $events;
+}
+
+private function onRequest(RequestEvent $event): void {}
+```
+
+A subscriber's `getSubscribedEvents()` names its listener methods as
+strings, which jump to the method, follow a rename, and are reported
+when the class has no such method. Complete the subscriber's public
+methods inside a map value, the way a services file's `calls:` completes
+the service's methods. Report a listener method that is private or
+protected too: the event dispatcher calls it from outside the class, so
+it fails at run time. Symfony projects read the same maps, so this
+applies to them as well.

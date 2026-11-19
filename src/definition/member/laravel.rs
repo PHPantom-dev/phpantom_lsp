@@ -147,17 +147,7 @@ impl Backend {
             .unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
 
         let builder = class_loader(Fqn::new(&builder_fqn))?;
-        let (declaring_class, fqn) =
-            Self::find_declaring_class(&builder, member_name, class_loader)?;
-
-        // When the declaring class is the builder itself, find_declaring_class
-        // returns the short name ("Builder"). Replace it with the FQN so
-        // that find_class_file_content can disambiguate.
-        if !fqn.contains('\\') && fqn == builder.name {
-            Some((declaring_class, builder_fqn))
-        } else {
-            Some((declaring_class, fqn))
-        }
+        Self::find_declaring_class(&builder, member_name, class_loader)
     }
 
     /// Find a scope method's declaration on the model when the target

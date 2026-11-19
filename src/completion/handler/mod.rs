@@ -223,8 +223,26 @@ impl Backend {
     ) -> Option<CompletionResponse> {
         let position = params.text_document_position_params.position;
 
+        if let Some(response) = self.tempest_source_completion(uri, position) {
+            return Some(response);
+        }
+
         if self.is_blade_file(uri)
             && let Some(response) = self.blade_source_completion(uri, position)
+        {
+            return Some(response);
+        }
+
+        if self.is_yii_config_plugin_uri(uri) {
+            let content = self.get_file_content_arc(uri)?;
+            return self.try_yii_config_plugin_completion(uri, &content, position);
+        }
+
+        // The PHP file a Yii project declares its config groups in completes
+        // them inside its strings, and like PHP everywhere else.
+        if self.is_yii_config_plugin_file(uri)
+            && let Some(content) = self.get_file_content_arc(uri)
+            && let Some(response) = self.try_yii_config_plugin_completion(uri, &content, position)
         {
             return Some(response);
         }
@@ -270,7 +288,7 @@ impl Backend {
         // the injected prologue rather than clamping them to the
         // template's start.
         match response {
-            Some(response) if self.is_blade_file(uri) => {
+            Some(response) if self.is_php_template(uri) => {
                 Some(self.translate_completion_response(uri, response))
             }
             other => other,

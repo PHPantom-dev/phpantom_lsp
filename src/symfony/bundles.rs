@@ -35,7 +35,7 @@ use crate::symbol_map::{ContainerValue, ReceiverClass, StringKeyKind, SymbolKind
 /// What the installed bundles declare, file by file.
 #[derive(Default)]
 pub(crate) struct BundleDeclarations {
-    files: Vec<(String, Arc<SymbolMap>)>,
+    pub(super) files: Vec<(String, Arc<SymbolMap>)>,
 }
 
 /// Text one of a PHP file's declaring calls has to contain, so the files
@@ -190,6 +190,8 @@ fn read_php_file(uri: &str, content: &str) -> SymbolMap {
             drupal: false,
             twig: false,
             doctrine: false,
+            yii_params: false,
+            tempest: false,
         },
         None,
         crate::drupal::hooks::DrupalFile::Other,
@@ -214,6 +216,7 @@ fn read_php_file(uri: &str, content: &str) -> SymbolMap {
     SymbolMap {
         spans,
         container_values: map.container_values,
+        service_decorations: map.service_decorations,
         ..SymbolMap::default()
     }
 }
@@ -230,10 +233,11 @@ fn read_bundle_file(path: &Path) -> Option<(String, SymbolMap)> {
         }
         read_php_file(&uri, &content)
     } else {
-        let (spans, container_values) = super::resources::container_declarations(&uri, &content);
+        let declared = super::resources::container_declarations(&uri, &content);
         SymbolMap {
-            spans,
-            container_values,
+            spans: declared.spans,
+            container_values: declared.values,
+            service_decorations: declared.decorations,
             ..SymbolMap::default()
         }
     };
@@ -319,6 +323,7 @@ impl Backend {
     /// Forget what the installed bundles declare, once they changed.
     pub(crate) fn forget_symfony_bundle_declarations(&self) {
         *self.symfony.bundle_declarations.lock() = None;
+        self.invalidate_container_index(false);
     }
 
     /// Visit every declaration of a `kind` name an installed bundle makes:

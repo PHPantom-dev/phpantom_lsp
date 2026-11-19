@@ -469,9 +469,20 @@ pub(super) fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'
                 walk_expression(unary.operand, collector);
             }
         }
-        Expression::Binary(binary) => {
-            walk_expression(binary.lhs, collector);
-            walk_expression(binary.rhs, collector);
+        // A left-associative chain (`"a" . "b" . "c"`) nests on the left and
+        // generated code can make it thousands of operators deep, so walk
+        // the left spine in a loop rather than a frame per operator.
+        Expression::Binary(_) => {
+            let mut spine = Vec::new();
+            let mut leftmost = expr;
+            while let Expression::Binary(binary) = leftmost {
+                spine.push(binary.rhs);
+                leftmost = binary.lhs;
+            }
+            walk_expression(leftmost, collector);
+            for rhs in spine.into_iter().rev() {
+                walk_expression(rhs, collector);
+            }
         }
         // ── Ternary / short ternary / null coalescing ──
         Expression::Conditional(cond) => {

@@ -34,6 +34,10 @@ pub(crate) fn resolve_laravel_string_key(
 ) -> Vec<Location> {
     use crate::symbol_map::StringKeyKind;
     match kind {
+        StringKeyKind::TempestView { relative } => backend
+            .tempest_view_definition(uri, key, *relative)
+            .into_iter()
+            .collect(),
         StringKeyKind::Section => {
             backend.blade_block_definitions(uri, crate::blade::blocks::BlockKind::Section, key)
         }
@@ -79,7 +83,6 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::TranslationDomain
         | StringKeyKind::TwigTemplate
         | StringKeyKind::SymfonyConfigKey
-        | StringKeyKind::SymfonyEvent
         | StringKeyKind::MessengerBus
         | StringKeyKind::SerializerGroup
         | StringKeyKind::YiiRoute
@@ -88,20 +91,41 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::DrupalRouteParameter
         | StringKeyKind::DrupalPermission
         | StringKeyKind::DrupalLibrary => backend.symfony_declaration_locations(*kind, key),
+        // A constant a subscriber keys its map by defines the event name it
+        // holds, ahead of the subscriptions.
+        StringKeyKind::SymfonyEvent => {
+            let mut locations: Vec<Location> = backend
+                .symfony_event_constants_named(key)
+                .constants
+                .into_iter()
+                .map(|constant| constant.declaration)
+                .collect();
+            locations.extend(backend.symfony_declaration_locations(*kind, key));
+            locations
+        }
         StringKeyKind::DrupalHook => backend.drupal_hook_documentation(key),
         StringKeyKind::DrupalConfigName => backend.drupal_config_locations(key),
         StringKeyKind::DrupalConfigKey => backend.drupal_config_key_locations(key),
         StringKeyKind::DrupalRenderElement => backend.drupal_render_element_definitions(key),
+        StringKeyKind::DrupalPlugin => backend.drupal_plugin_definitions(key),
         StringKeyKind::DrupalThemeHook => backend.drupal_theme_hook_definitions(key),
         StringKeyKind::DrupalThemeHookVariable => backend.drupal_theme_variable_definitions(key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
+        // A directory is no place an editor can open.
+        StringKeyKind::YiiViewPath => Vec::new(),
+        StringKeyKind::YiiAssetFile => backend.resolve_yii_asset_definitions(key),
         StringKeyKind::YiiAlias => backend.yii_alias_definitions(key),
+        StringKeyKind::CssClass => backend.css_class_definitions(key),
+        StringKeyKind::YiiParam => backend.yii_param_definitions(key),
+        StringKeyKind::YiiTranslation => backend.yii_message_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
         StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
             backend.twig_callable_definitions(*kind, key)
         }
         StringKeyKind::YiiRouteArgument => backend.yii_route_argument_locations(key),
+        StringKeyKind::YiiUrlArgument => backend.yii_url_argument_locations(key),
+        StringKeyKind::YiiViewParameter => backend.yii_view_parameter_locations(key),
         StringKeyKind::YiiDefinitionArgument => backend.yii_definition_argument_locations(key),
         StringKeyKind::WordPressHook => backend.wordpress_hook_definitions(key),
     }
@@ -310,6 +334,15 @@ pub(crate) fn find_laravel_string_key_references(
                 key,
             );
         }
+        StringKeyKind::TempestView { relative } => {
+            return backend.tempest_view_references(
+                uri,
+                key,
+                *relative,
+                snapshot,
+                include_declaration,
+            );
+        }
         StringKeyKind::View
         | StringKeyKind::Route
         | StringKeyKind::Trans
@@ -322,7 +355,10 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::Asset
         | StringKeyKind::MixAsset
         | StringKeyKind::ViteAsset
-        | StringKeyKind::InertiaPage => find_string_key_usages(kind, key, backend, snapshot, true),
+        | StringKeyKind::InertiaPage
+        | StringKeyKind::YiiViewPath
+        | StringKeyKind::YiiAssetFile
+        | StringKeyKind::CssClass => find_string_key_usages(kind, key, backend, snapshot, true),
         // A Symfony declaration is a span in a configuration file's (or a
         // template's) map like any use, so the usages already hold it.
         StringKeyKind::ServiceId
@@ -332,7 +368,6 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::TwigFilter
         | StringKeyKind::TwigFunction
         | StringKeyKind::SymfonyConfigKey
-        | StringKeyKind::SymfonyEvent
         | StringKeyKind::MessengerBus
         | StringKeyKind::SerializerGroup
         | StringKeyKind::YiiRoute
@@ -341,22 +376,43 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::DrupalRouteParameter
         | StringKeyKind::DrupalPermission
         | StringKeyKind::DrupalRenderElement
+        | StringKeyKind::DrupalPlugin
         | StringKeyKind::DrupalLibrary => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
+        }
+        // A subscription keyed by a class constant declares the name the
+        // constant holds, which no span spells, so its declarations are
+        // added to the ones the usages hold.
+        StringKeyKind::SymfonyEvent => {
+            let mut locations =
+                find_string_key_usages(kind, key, backend, snapshot, include_declaration);
+            if include_declaration {
+                for location in backend.symfony_declaration_locations(*kind, key) {
+                    if !locations.contains(&location) {
+                        locations.push(location);
+                    }
+                }
+            }
+            return locations;
         }
         // A documented pattern stands for every hook that fills it in.
         StringKeyKind::DrupalHook => {
             return backend.drupal_hook_references(key, include_declaration);
         }
-        // The catalogues named after a domain declare it, and the paths of
-        // its handler's routes a route argument, and are added below.  A
+        // The catalogues named after a domain declare it, the paths of its
+        // handler's routes a route argument, the paths of the routes it
+        // names a URL argument, and a template's `@var` block
+        // the parameters a render passes it, and are added below.  A
         // route's name may be put together by the imports that load it, or
         // declared by a bundle's routing file outside the workspace, so its
         // declarations are too, as are a theme hook's and its variables',
         // which `hook_theme()` arrays declare.
         StringKeyKind::TranslationDomain
         | StringKeyKind::YiiRouteArgument
+        | StringKeyKind::YiiUrlArgument
+        | StringKeyKind::YiiViewParameter
         | StringKeyKind::YiiDefinitionArgument
+        | StringKeyKind::YiiParam
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::DrupalConfigName
         | StringKeyKind::DrupalConfigKey
@@ -364,6 +420,13 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::DrupalThemeHookVariable => {
             find_string_key_usages(kind, key, backend, snapshot, false)
         }
+        // A call that leaves its category to the translator and one that
+        // names the default category name the same message.
+        StringKeyKind::YiiTranslation => backend
+            .yii_message_key_spellings(key)
+            .iter()
+            .flat_map(|key| find_string_key_usages(kind, key, backend, snapshot, false))
+            .collect(),
         // The string that declares an alias is a span like any use, but
         // only the configuration says it declares one.
         StringKeyKind::YiiAlias => {
@@ -408,7 +471,7 @@ pub(crate) fn find_laravel_string_key_references(
             // translates the whole list back as though it all did.
             let decl_uri = decl.uri.as_str();
             let range = if backend.is_blade_file(decl_uri) {
-                backend.translate_blade_range_to_php(decl_uri, decl.range)
+                backend.translate_template_range_to_php(decl_uri, decl.range)
             } else {
                 decl.range
             };

@@ -29,7 +29,7 @@ use super::relationships::{
 };
 use super::scopes::{build_scope_methods, is_scope_method};
 use super::table_names::model_schema_table;
-use super::where_property::{build_where_property_methods_for_class, lowercase_method_names};
+use super::where_property::{build_where_property_methods_with_properties, lowercase_method_names};
 use super::{
     CONFIGURED_DATE_CLASS_FQN, ELOQUENT_MODEL_FQN, camel_to_snake, extends_eloquent_model,
     unique_ids,
@@ -148,7 +148,15 @@ fn accessor_property(
     mutator_methods: &HashMap<String, String>,
 ) -> PropertyInfo {
     let method_name = method.name.to_string();
-    let mutator = mutator_methods.get(prop_name).cloned();
+    let mutator = if method
+        .extras
+        .as_ref()
+        .is_some_and(|extras| extras.has_attribute_setter)
+    {
+        Some(method_name.clone())
+    } else {
+        mutator_methods.get(prop_name).cloned()
+    };
     let column = schema_column_source(schema_table, prop_name);
     let source = if column.is_some() {
         PropertySource::Accessor {
@@ -179,7 +187,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
     /// Scan the class's methods for Eloquent relationship return types,
     /// scope methods, Builder-as-static forwarded methods, `$casts`
     /// definitions, `$attributes` defaults, and `$fillable`/`$guarded`/
-    /// `$hidden`/`$appends` column names.
+    /// `$hidden`/`$visible` column names.
     fn provide(
         &self,
         class: &ClassInfo,
@@ -372,7 +380,7 @@ impl<'a> ModelMembers<'a> {
 
     /// The columns every model has whether or not anything describes them:
     /// the primary key, the timestamps and the soft-delete column, and then
-    /// the untyped names `$fillable`, `$guarded`, `$hidden` and `$appends`
+    /// the untyped names `$fillable`, `$guarded`, `$hidden` and `$visible`
     /// list.
     fn add_implicit_column_properties(
         &mut self,
@@ -434,9 +442,12 @@ impl<'a> ModelMembers<'a> {
         }
 
         // ── Column name properties (last-resort fallback) ───────
-        // $fillable, $guarded, $hidden, and $appends provide column names
+        // $fillable, $guarded, $hidden, and $visible provide column names
         // without type info.  Only add those not already covered.
-        for (column, _) in laravel.column_lists() {
+        for (column, sources) in laravel.column_lists() {
+            if sources & !crate::types::model_declaration::APPENDS == 0 {
+                continue;
+            }
             if !self.seen_props.insert(column.clone()) {
                 continue;
             }
@@ -611,7 +622,8 @@ impl<'a> ModelMembers<'a> {
         // handles where{Column}() calls.  Synthesize these as static
         // methods on the model so that User::whereName('Alice') resolves.
         let existing = lowercase_method_names(&self.methods);
-        let where_static = build_where_property_methods_for_class(self.class, &existing);
+        let where_static =
+            build_where_property_methods_with_properties(self.class, &self.properties, &existing);
         for mut m in where_static {
             m.is_static = true;
             self.methods.push(Arc::new(m));

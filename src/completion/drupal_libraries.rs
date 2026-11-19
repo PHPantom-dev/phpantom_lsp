@@ -12,7 +12,7 @@ use tower_lsp_server::gen_lsp_types::{CompletionResponse, Position};
 
 use crate::Backend;
 use crate::completion::source::code_context::CodeContext;
-use crate::drupal::elements::{arrow_key, assignment_target};
+use crate::drupal::elements::{arrow_key, assignment_target, ends_with_keys};
 use crate::symbol_map::StringKeyKind;
 use crate::text_position::position_to_offset;
 
@@ -79,31 +79,6 @@ fn attached_library_start(content: &str, code: &CodeContext<'_>) -> Option<usize
         _ => false,
     };
     reads_library.then_some(quote + 1)
-}
-
-/// Whether `target` ends with the offsets `['keys…']`, in order.
-fn ends_with_keys(mut target: &str, keys: &[&str]) -> bool {
-    for key in keys.iter().rev() {
-        let Some(rest) = target
-            .trim_end()
-            .strip_suffix(']')
-            .and_then(|rest| strip_quoted(rest.trim_end(), key))
-            .and_then(|rest| rest.trim_end().strip_suffix('['))
-        else {
-            return false;
-        };
-        target = rest;
-    }
-    true
-}
-
-/// `text` without the string literal `key` it ends with.
-fn strip_quoted<'a>(text: &'a str, key: &str) -> Option<&'a str> {
-    ['\'', '"'].into_iter().find_map(|quote| {
-        text.strip_suffix(quote)?
-            .strip_suffix(key)?
-            .strip_suffix(quote)
-    })
 }
 
 #[cfg(test)]

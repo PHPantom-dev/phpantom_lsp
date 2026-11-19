@@ -39,6 +39,7 @@ use mago_syntax::parser::parse_file_content;
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
 use crate::names::OwnedResolvedNames;
+use crate::parser::{find_node, walk_nodes};
 use crate::types::{ClassInfo, FacadeAccessor};
 
 /// FQN of the framework class that declares the core container aliases.
@@ -548,37 +549,37 @@ pub(crate) fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
 /// Find the first return-statement value inside a `getFacadeAccessor()` method
 /// reachable from `node`.
 fn find_facade_accessor_return<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
 ) -> Option<&'ast Expression<'arena>> {
     use mago_syntax::cst::class_like::method::MethodBody;
 
-    if let Node::Method(method) = node
-        && bytes_to_str(method.name.value).eq_ignore_ascii_case("getFacadeAccessor")
-        && let MethodBody::Concrete(block) = &method.body
-    {
-        return block.statements.iter().find_map(|stmt| match stmt {
-            Statement::Return(ret) => ret.value,
-            _ => None,
-        });
-    }
-    let mut found = None;
-    node.visit_children(|child| {
-        if found.is_none() {
-            found = find_facade_accessor_return(child);
+    find_node(root, |node| match node {
+        Node::Method(method)
+            if bytes_to_str(method.name.value).eq_ignore_ascii_case("getFacadeAccessor") =>
+        {
+            let MethodBody::Concrete(block) = &method.body else {
+                return None;
+            };
+            Some(block.statements.iter().find_map(|stmt| match stmt {
+                Statement::Return(ret) => ret.value,
+                _ => None,
+            }))
         }
-    });
-    found
+        _ => None,
+    })
+    .flatten()
 }
 
 // ─── AST helpers ────────────────────────────────────────────────────────────
 
-/// Recursively collect every array literal (`[…]` and `array(…)`) reachable
-/// from `node`.
-fn collect_arrays<'ast, 'arena>(node: Node<'ast, 'arena>, out: &mut Vec<&'ast Array<'arena>>) {
-    if let Node::Array(arr) = node {
-        out.push(arr);
-    }
-    node.visit_children(|child| collect_arrays(child, out));
+/// Collect every array literal (`[…]` and `array(…)`) reachable from `node`.
+fn collect_arrays<'ast, 'arena>(root: Node<'ast, 'arena>, out: &mut Vec<&'ast Array<'arena>>) {
+    walk_nodes(root, |node| {
+        if let Node::Array(arr) = node {
+            out.push(arr);
+        }
+        true
+    });
 }
 
 /// Iterate the key/value pairs of an array literal, skipping non-keyed and

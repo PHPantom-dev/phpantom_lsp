@@ -24,7 +24,7 @@ impl Backend {
     /// up call sites discovered since they were preprocessed.  Cheap
     /// for templates whose inference is unchanged (no re-parse).
     pub(crate) fn refresh_blade_injected_vars(&self) {
-        let blade_uris = self.lowered_template_uris();
+        let blade_uris = self.lowered_blade_uris();
         if blade_uris.is_empty() {
             return;
         }
@@ -280,7 +280,7 @@ impl Backend {
                 caller_uri,
             ) {
                 let template_uri = location.uri.to_string();
-                if self.blade_virtual_php_arc(&template_uri).is_none() {
+                if self.template_virtual_php_arc(&template_uri).is_none() {
                     continue;
                 }
                 let Some(content) = self.get_file_content(&template_uri) else {
@@ -326,7 +326,7 @@ impl Backend {
                     if !visited.insert(template_uri.clone()) {
                         continue;
                     }
-                    if self.blade_virtual_php_arc(&template_uri).is_none() {
+                    if self.template_virtual_php_arc(&template_uri).is_none() {
                         continue;
                     }
                     let Some(template_content) = self.get_file_content(&template_uri) else {

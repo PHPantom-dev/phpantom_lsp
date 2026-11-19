@@ -8,7 +8,7 @@ cargo build --release   # build the binary
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs/) (stable toolchain)
+- [Rust](https://rustup.rs/) 1.99 or newer (the `rust-version` in `Cargo.toml`, set by the newest Rust the Mago crates require)
 
 ## Build
 
@@ -55,6 +55,10 @@ over LSP. The caller supplies PHP documents as strings, and gets back
 declarations, occurrences, calls, byte ranges, and diagnostics as owned
 values that outlive the backend they came from. Nothing is read from
 disk and no server is started.
+
+Like the rest of the crate's Rust API, it is internal: it is not
+covered by PHPantom's version number and can change in any release.
+Pin an exact version if you depend on it.
 
 ```bash
 cargo build --features semantic-export,offline-stubs
@@ -145,8 +149,8 @@ demonstrates `invalid_laravel_command`,
 `->withoutMiddleware('bakery.closed')` demonstrates
 `invalid_laravel_middleware`, and one `view('welcome', …)`
 call both leaves out a variable the template declares and passes a
-misspelled key, demonstrating `missing_view_variable` and
-`unused_view_variable`. So it must report exactly
+misspelled key, demonstrating `missing_blade_variable` and
+`unused_blade_variable`. So it must report exactly
 `[ERROR] Found 4 errors`, on those three lines. Any other count, or an
 error on a different line, is a regression.
 

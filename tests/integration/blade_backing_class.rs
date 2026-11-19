@@ -425,11 +425,11 @@ mod tests {
         let messages: Vec<String> = diags
             .into_iter()
             .map(|d| message_text(&d.message).to_string())
-            .filter(|m| !m.contains("Function 'e' not found"))
+            .filter(|m| !m.contains("Function e() not found"))
             .collect();
         assert_eq!(
             messages,
-            vec!["Method 'missing' not found on class 'App\\Models\\Order'"],
+            vec!["Method App\\Models\\Order::missing() not found"],
             "the template's own import must still resolve"
         );
     }

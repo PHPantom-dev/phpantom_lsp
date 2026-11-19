@@ -216,7 +216,7 @@ fn check_declaration(
                     tag,
                     docblock_start,
                     format!(
-                        "Documented type '{}' for {} leaves out the null its native type hint '{}' allows",
+                        "Documented type {} for {} leaves out the null its native type {} allows",
                         written, name, hint_type
                     ),
                 ));
@@ -234,7 +234,7 @@ fn check_declaration(
             end: param.variable.span.end.offset as usize,
             kind: FindingKind::Mismatch,
             message: format!(
-                "Documented type '{}' for {} accepts null, but the native type hint '{}' does not",
+                "Documented type {} for {} accepts null, but its native type {} does not",
                 documented, name, native
             ),
         });
@@ -300,7 +300,7 @@ fn check_return(
             tag,
             docblock_start,
             format!(
-                "Documented return type '{}' leaves out the null its native type hint '{}' allows",
+                "Documented return type {} leaves out the null its native type {} allows",
                 written, native
             ),
         ));
@@ -317,7 +317,7 @@ fn check_return(
         end: span.end.offset as usize,
         kind: FindingKind::Mismatch,
         message: format!(
-            "Documented return type '{}' accepts null, but the native type hint '{}' does not",
+            "Documented return type {} accepts null, but its native type {} does not",
             documented, native
         ),
     });

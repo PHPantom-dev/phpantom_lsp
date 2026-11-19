@@ -201,17 +201,10 @@ impl UnknownMemberPass<'_> {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        let kind_label = if access.is_method_call {
-            "Method"
-        } else if access.is_static {
-            "Member"
-        } else {
-            "Property"
-        };
         Some(format!(
-            "{} '{}' exists on {} but not on {}",
-            kind_label,
-            access.member_name,
+            "{} {} exists on {} but not on {}",
+            access.kind_title(),
+            access.spelled(None),
             names(&declaring),
             names(&lacking),
         ))
@@ -236,13 +229,19 @@ impl UnknownMemberPass<'_> {
         if access.is_docblock_ref {
             return false;
         }
+        // Drupal calls a callback from outside every class.
+        let (current_class, binds_scope) = if access.drupal_callback {
+            (None, false)
+        } else {
+            (access.current_class, access.subject_binds_scope())
+        };
         let Some(message) = inaccessible_member_message(
             classes,
             access.member_name,
             access.is_static,
             access.is_method_call,
-            access.current_class,
-            access.subject_binds_scope(),
+            current_class,
+            binds_scope,
             self.class_loader(),
         ) else {
             return false;
@@ -324,7 +323,7 @@ impl UnknownMemberPass<'_> {
         // through to the merged classes below.
         if base_classes.iter().any(|c| {
             member_is_public(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name))
+                || (access.relaxed_lookup && member_exists_relaxed(c, member_name))
         }) {
             return (MemberCheckResult::Ok, diagnostics);
         }
@@ -365,7 +364,7 @@ impl UnknownMemberPass<'_> {
         // ── Check whether the member exists on ANY branch ───────────
         if resolved_classes.iter().any(|c| {
             member_exists(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name))
+                || (access.relaxed_lookup && member_exists_relaxed(c, member_name))
         }) {
             self.push_inaccessible_member(access, &resolved_classes, &mut diagnostics);
             return (MemberCheckResult::Ok, diagnostics);
@@ -422,37 +421,27 @@ impl UnknownMemberPass<'_> {
             return (MemberCheckResult::Ok, diagnostics);
         };
 
-        let kind_label = if is_method_call {
-            "Method"
-        } else if is_static {
-            // Static non-method could be a property ($prop) or constant
-            "Member"
-        } else {
-            "Property"
-        };
-
-        // Show the first resolved class name for context.  For union
-        // types we could list all of them, but keeping it short is
-        // more useful in the editor gutter.
-        let class_display = display_class_name(&resolved_classes[0]);
-
-        let message = if resolved_classes.len() > 1 {
-            format!(
-                "{} '{}' not found on any of the {} possible types ({})",
-                kind_label,
-                member_name,
-                resolved_classes.len(),
-                resolved_classes
+        let message = match &resolved_classes[..] {
+            [class] if class.name.starts_with("__anonymous@") => format!(
+                "{} {} not found on anonymous class",
+                access.kind_title(),
+                access.spelled(None),
+            ),
+            [class] => format!(
+                "{} {} not found",
+                access.kind_title(),
+                access.spelled(Some(&class.fqn())),
+            ),
+            classes => format!(
+                "{} {} not found on any of {}",
+                access.kind_title(),
+                access.spelled(None),
+                classes
                     .iter()
                     .map(|c| display_class_name(c))
                     .collect::<Vec<_>>()
                     .join(", "),
-            )
-        } else {
-            format!(
-                "{} '{}' not found on class '{}'",
-                kind_label, member_name, class_display,
-            )
+            ),
         };
 
         diagnostics.push(make_diagnostic(

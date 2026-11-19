@@ -136,16 +136,18 @@ impl Backend {
                     MemberKind::Method => (
                         offset as usize + name.len(),
                         format!(
-                            "{}::{}() has #[\\Override] attribute, but no matching parent method exists",
-                            class.name, name
+                            "Method {}::{}() has #[\\Override] attribute, but no matching parent method exists",
+                            class.fqn(),
+                            name
                         ),
                     ),
                     MemberKind::Property => (
                         // The span covers the `$`.
                         offset as usize + name.len() + 1,
                         format!(
-                            "{}::${} has #[\\Override] attribute, but no matching parent property exists",
-                            class.name, name
+                            "Property {}::${} has #[\\Override] attribute, but no matching parent property exists",
+                            class.fqn(),
+                            name
                         ),
                     ),
                 };

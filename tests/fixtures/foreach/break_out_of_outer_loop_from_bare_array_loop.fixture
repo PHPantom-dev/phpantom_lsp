@@ -1,0 +1,18 @@
+// test: a break out of the outer loop from a loop over a bare array keeps what it carried
+// feature: hover
+// expect: $found = bool
+---
+<?php
+
+function search(array $rows): void {
+    $found = false;
+    foreach ([1, 2] as $pass) {
+        foreach ($rows as $row) {
+            if ($row) {
+                $found = true;
+                break 2;
+            }
+        }
+    }
+    $<>found;
+}

@@ -100,6 +100,7 @@ fn symbol_name_and_kind(span: &SymbolSpan) -> Option<(&str, ImportKind)> {
             name,
             is_definition: false,
             is_docblock_reference: false,
+            is_callback: false,
         } => Some((name, ImportKind::Function)),
         SymbolKind::ConstantReference {
             name,
@@ -204,7 +205,7 @@ impl Backend {
         };
 
         let template = self.template_text(uri);
-        if template.is_none() && self.is_blade_file(uri) {
+        if template.is_none() && self.is_php_template(uri) {
             return;
         }
         let symbols = self.qualified_symbols(

@@ -75,7 +75,7 @@ async fn trans_diagnostics(provider: &str) -> Vec<String> {
 
     diags
         .iter()
-        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_trans"))
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_translation"))
         .map(|d| message_text(&d.message).to_string())
         .collect()
 }

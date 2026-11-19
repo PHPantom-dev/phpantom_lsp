@@ -9,6 +9,7 @@ use tower_lsp_server::gen_lsp_types::{CompletionItemKind, Location};
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::class_lookup::{Fqn, find_class_at_offset};
+use crate::parser::{innermost_node_at, walk_nodes_with_start};
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, PropertySource};
 
 use super::super::validation_rules::{RulesSource, form_request_rules, rules_from_source_range};
@@ -503,7 +504,7 @@ fn validator_rules_range(
         let expression = if let Expression::Variable(Variable::Direct(variable)) = expression {
             let scope = innermost_scope(root, start as u32)?;
             let mut latest = None;
-            last_assignment(scope, start as u32, variable.name, false, &mut latest);
+            last_assignment(scope, start as u32, variable.name, &mut latest);
             latest?.1?
         } else {
             expression
@@ -513,36 +514,31 @@ fn validator_rules_range(
 }
 
 fn expression_at<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     start: u32,
     end: u32,
 ) -> Option<&'ast Expression<'arena>> {
-    if let Node::Expression(expression) = node
-        && expression.span().start.offset == start
-        && expression.span().end.offset == end
-    {
-        return Some(expression);
-    }
+    // The outermost expression spanning the range, so only the first match
+    // down the path counts.
     let mut found = None;
-    node.visit_children(|child| {
-        if found.is_none() && child.span().start.offset <= start && child.span().end.offset >= end {
-            found = expression_at(child, start, end);
+    innermost_node_at(root, start, |node| {
+        if found.is_none()
+            && let Node::Expression(expression) = node
+            && expression.span().start.offset == start
+            && expression.span().end.offset == end
+        {
+            found = Some(expression);
         }
+        None::<()>
     });
     found
 }
 
 fn innermost_scope<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     cursor: u32,
 ) -> Option<Node<'ast, 'arena>> {
-    let mut found = None;
-    node.visit_children(|child| {
-        if child.span().start.offset <= cursor && child.span().end.offset >= cursor {
-            found = innermost_scope(child, cursor).or(found);
-        }
-    });
-    found.or(match node {
+    innermost_node_at(root, cursor, |node| match node {
         Node::Program(_) => Some(node),
         Node::Method(Method {
             body: MethodBody::Concrete(block),
@@ -556,41 +552,15 @@ fn innermost_scope<'ast, 'arena>(
 }
 
 fn last_assignment<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     cursor: u32,
     variable: &[u8],
-    conditional: bool,
     latest: &mut Option<(u32, Option<&'ast Expression<'arena>>)>,
 ) {
-    let conditional = conditional
-        || matches!(
-            node,
-            Node::If(_)
-                | Node::Switch(_)
-                | Node::Match(_)
-                | Node::Conditional(_)
-                | Node::While(_)
-                | Node::DoWhile(_)
-                | Node::For(_)
-                | Node::Foreach(_)
-                | Node::Try(_)
-        );
-    if let Node::Assignment(assignment) = node
-        && matches!(assignment.lhs, Expression::Variable(Variable::Direct(target)) if target.name == variable)
-        && node.span().end.offset <= cursor
-        && latest
-            .as_ref()
-            .is_none_or(|(end, _)| node.span().end.offset >= *end)
-    {
-        *latest = Some((
-            node.span().end.offset,
-            (!conditional).then_some(assignment.rhs),
-        ));
-    }
-    node.visit_children(|child| {
-        if child.span().start.offset < cursor
-            && !matches!(
-                child,
+    walk_nodes_with_start(root, false, |node, start, conditional| {
+        if start >= cursor
+            || matches!(
+                node,
                 Node::Closure(_)
                     | Node::ArrowFunction(_)
                     | Node::Function(_)
@@ -598,8 +568,34 @@ fn last_assignment<'ast, 'arena>(
                     | Node::PropertyHook(_)
             )
         {
-            last_assignment(child, cursor, variable, conditional, latest);
+            return None;
         }
+        let conditional = conditional
+            || matches!(
+                node,
+                Node::If(_)
+                    | Node::Switch(_)
+                    | Node::Match(_)
+                    | Node::Conditional(_)
+                    | Node::While(_)
+                    | Node::DoWhile(_)
+                    | Node::For(_)
+                    | Node::Foreach(_)
+                    | Node::Try(_)
+            );
+        if let Node::Assignment(assignment) = node
+            && matches!(assignment.lhs, Expression::Variable(Variable::Direct(target)) if target.name == variable)
+            && node.span().end.offset <= cursor
+            && latest
+                .as_ref()
+                .is_none_or(|(end, _)| node.span().end.offset >= *end)
+        {
+            *latest = Some((
+                node.span().end.offset,
+                (!conditional).then_some(assignment.rhs),
+            ));
+        }
+        Some(conditional)
     });
 }
 

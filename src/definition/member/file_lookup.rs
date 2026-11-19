@@ -12,7 +12,6 @@ use tower_lsp_server::gen_lsp_types::Position;
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::types::ClassInfo;
-use crate::util::short_name;
 
 use super::MemberKind;
 
@@ -42,12 +41,8 @@ impl Backend {
 
     /// Find the file URI and content for the file that contains a given class.
     ///
-    /// `class_name` can be a short name (e.g. `"Kernel"`) or a
-    /// fully-qualified name (e.g. `"Illuminate\\Foundation\\Console\\Kernel"`).
-    /// When a namespace prefix is present the file's namespace (from
-    /// `namespace_map`) must match for the class to be returned.  This
-    /// prevents short-name collisions when a child class and its parent
-    /// share the same simple name but live in different namespaces.
+    /// `class_name` is an already resolved FQN, including when a global
+    /// class's name has no namespace separator.
     ///
     /// Searches the `uri_classes_index` (which includes files loaded via PSR-4 by
     /// `find_or_load_class`) and returns `(uri, content)`.
@@ -79,62 +74,29 @@ impl Backend {
         class_name: &str,
         current_uri: &str,
     ) -> Option<String> {
-        let last_segment = short_name(class_name);
-        let expected_ns: Option<&str> = if class_name.contains('\\') {
-            Some(&class_name[..class_name.len() - last_segment.len() - 1])
-        } else {
-            None
-        };
+        let class_name = class_name.trim_start_matches('\\');
 
-        // Search the uri_classes_index for the file containing this class.
         {
             let map = self.symbols.uri_classes_index.read();
-            let files = self.files.read();
-
-            // Check whether a class with the right short name and
-            // namespace lives in this file.  Uses the per-class
-            // `file_namespace` field first (correct for multi-namespace
-            // files like example.php), falling back to the file-level
-            // `namespace_map` for single-namespace files.
-            let class_in_file = |file_uri: &str, classes: &[Arc<ClassInfo>]| -> bool {
-                match expected_ns {
-                    None => classes.iter().any(|c| c.name == last_segment),
-                    Some(exp) => {
-                        // Prefer per-class file_namespace (handles
-                        // multi-namespace files correctly).
-                        let found_via_class_ns = classes.iter().any(|c| {
-                            c.name == last_segment && c.file_namespace.as_deref() == Some(exp)
-                        });
-                        if found_via_class_ns {
-                            return true;
-                        }
-                        // Fall back to file-level namespace_map for
-                        // classes that don't have file_namespace set
-                        // (e.g. single-namespace files, stubs).
-                        let file_ns = files.get(file_uri).and_then(|state| {
-                            state
-                                .namespaces
-                                .first()
-                                .and_then(|s| s.namespace.as_deref())
-                        });
-                        file_ns == Some(exp) && classes.iter().any(|c| c.name == last_segment)
-                    }
-                }
+            let class_in_file = |classes: &[Arc<ClassInfo>]| {
+                classes
+                    .iter()
+                    .any(|class| class.fqn().eq_ignore_ascii_case(class_name))
             };
 
             // Check the current file first (common case: $this->method).
             if let Some(classes) = map.get(current_uri) {
-                if class_in_file(current_uri, classes) {
+                if class_in_file(classes) {
                     Some(current_uri.to_string())
                 } else {
                     // Search other files.
                     map.iter()
-                        .find(|(u, classes)| class_in_file(u, classes))
+                        .find(|(_, classes)| class_in_file(classes))
                         .map(|(u, _)| u.clone())
                 }
             } else {
                 map.iter()
-                    .find(|(u, classes)| class_in_file(u, classes))
+                    .find(|(_, classes)| class_in_file(classes))
                     .map(|(u, _)| u.clone())
             }
         }

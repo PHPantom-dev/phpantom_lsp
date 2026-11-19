@@ -454,6 +454,34 @@ impl PhpType {
         self.replace_bare_keyword("self", class_name)
     }
 
+    /// Replace only the `self` keyword with `replacement`, the type the
+    /// declaring class stands for (`Builder<TModel>` for a generic one).
+    ///
+    /// A `self<…>` written with its own arguments keeps them and takes only
+    /// the class name from `replacement`.
+    pub fn replace_bare_self_with(&self, replacement: &PhpType) -> PhpType {
+        match self.raw_kind() {
+            TypeKind::Named(s) if s.eq_ignore_ascii_case("self") => replacement.clone(),
+            TypeKind::Generic(g) if g.name.eq_ignore_ascii_case("self") => {
+                let name = match replacement.raw_kind() {
+                    TypeKind::Generic(r) => r.name,
+                    _ => match replacement.base_name() {
+                        Some(name) => atom(name),
+                        None => return self.clone(),
+                    },
+                };
+                PhpType::generic_atom(
+                    name,
+                    g.args
+                        .iter()
+                        .map(|a| a.replace_bare_self_with(replacement))
+                        .collect(),
+                )
+            }
+            _ => self.map_children(&|t| t.replace_bare_self_with(replacement)),
+        }
+    }
+
     /// Replace only the `parent` keyword with a concrete class name.
     ///
     /// `parent` binds to the parent of the class that *declares* the method,

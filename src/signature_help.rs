@@ -277,6 +277,8 @@ pub(crate) struct FccAssignment {
 pub(crate) struct AssignedCallable {
     /// The callable target text (`makePen`, `$obj->method`, `Foo::bar`).
     pub(crate) target: String,
+    /// Where the callable was created; its receiver and imports belong to this site.
+    pub(crate) offset: u32,
     /// The argument text a partial application with placeholders was
     /// written with (`1, ?`), or `None` for a first-class callable.
     pub(crate) bound: Option<String>,
@@ -376,6 +378,7 @@ fn fcc_assignment_in_expr(
     let callable = match assignment.rhs {
         Expression::PartialApplication(pa) => Some(AssignedCallable {
             target: extract_callable_text_from_partial(pa, content)?,
+            offset: pa.span().start.offset,
             bound: (!pa.is_first_class_callable())
                 .then(|| {
                     let list = pa.get_argument_list();

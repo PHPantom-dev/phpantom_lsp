@@ -215,14 +215,14 @@ async fn only_missing_names_of_a_template_extension_are_reported() {
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(Code::String(code)) if code == "invalid_symfony_template"
+                Some(Code::String(code)) if code == "invalid_twig_template"
             )
         })
         .map(|diagnostic| message_text(&diagnostic.message).to_string())
         .collect();
     assert_eq!(
         reported,
-        vec!["Unknown template: 'missing.html'".to_string()]
+        vec!["Unknown template 'missing.html'".to_string()]
     );
 }
 

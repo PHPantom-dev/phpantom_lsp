@@ -213,42 +213,6 @@ today and what is still missing.
 
 ---
 
-#### L53. Collection key types from the column for `keyBy` / `groupBy` / `pluck`
-
-**Impact: Medium · Complexity: Medium**
-
-`keyBy` and `groupBy` produce a collection keyed by the column they were
-given, but we type the key `array-key`
-(`virtual_members/laravel/higher_order_proxy.rs`, `plan_result`). The
-column is a literal in the overwhelming majority of calls, so the key is
-recoverable by the same model property lookup `model-property<Model>`
-validation uses. (On an `Eloquent\Collection` the argument forms
-currently lose the value type as well; that is filed in
-[bugs.md](bugs.md#laravel) and should land first.)
-
-```php
-$users->keyBy('email');   // want Collection<string, User>, get Collection<array-key, User>
-$users->groupBy('id');    // want Collection<int, Collection<int, User>>
-$posts->keyBy('user.id'); // dotted path, resolved segment by segment
-```
-
-`pluck` is the same lookup applied to the value rather than the key, and
-the higher-order proxy forms (`$users->keyBy->email`) must agree with the
-argument forms or the two spellings of one expression disagree.
-
-The framework's own annotations widen these to `array-key`, so there is no
-docblock to read — but `calebdw/phpstan-laravel` resolves all three, which
-means a project running it currently gets a more precise answer from its
-analyser than from its editor. Worth matching, including `groupBy`'s
-array-argument nesting (one level per grouper) and `preserveKeys` affecting
-only the innermost collection.
-
-**Where to change:** `plan_result` in
-`virtual_members/laravel/higher_order_proxy.rs` for the proxy forms, and
-the collection return-type patches for the argument forms. The property
-lookup already exists for `model-property<Model>`; the work is threading
-a resolved key type through the generic substitution.
-
 #### L45. `*_count` properties are offered on every relationship
 
 **Impact: Low-Medium · Complexity: High**
@@ -273,32 +237,6 @@ declaratively like `$casts` is today.
 Until then the properties stay, so this is a precision gap rather
 than a missing feature. Reported as a follow-up on
 [#312](https://github.com/PHPantom-dev/phpantom_lsp/issues/312).
-
-#### L70. Read-only accessors are offered as columns
-
-**Impact: Low-Medium · Complexity: Low**
-
-`collect_column_names` reads the fully resolved model, so every virtual
-property counts as a column, including an accessor with no backing
-column and no mutator (a legacy `getDisplayNameAttribute()`, or an
-`Attribute::make(get: ...)` with no `set:`). `display_name` then
-completes in `where('…')`, `orderBy('…')` and `create([...])`. None of
-these work at runtime: the query hits a column that does not exist, and
-mass assignment of a computed-only attribute does nothing. `$appends`
-entries are counted as columns for the same reason, though they only
-name accessors to serialize.
-
-Skip `PropertySource::Accessor { column: None, mutator: None }` and
-`ComputedProperty { mutator: None }` in `collect_column_names`, and stop
-treating `$appends` as a column source there. An accessor that
-overrides a real column (one that `$casts`, `$fillable` or the
-migration schema also declares) stays. `create()` and `fill()` still
-want accessors that have a mutator.
-
-**Where to look:** `collect_column_names` in
-`virtual_members/laravel/where_property.rs` and its callers in
-`completion/eloquent_string.rs`; `extract_column_names` in
-`virtual_members/laravel/model_extraction/` for `$appends`.
 
 #### L8. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
 

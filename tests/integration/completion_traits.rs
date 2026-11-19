@@ -3715,3 +3715,138 @@ async fn test_parent_trait_docblock_tags_substitute_generics() {
         _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
+
+/// A property the trait reads but leaves to its users to declare is typed
+/// from what every user declares it as.
+#[tokio::test]
+async fn test_trait_reads_property_every_user_declares() {
+    let backend = create_test_backend();
+
+    let uri = Uri::parse("file:///trait_host_property.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Manager { public function getStorage(string $t): Storage; }\n",
+        "interface Storage { public function load(int $id): ?object; }\n",
+        "trait WorkspaceTestTrait {\n",
+        "    protected function switchTo(int $id): void {\n",
+        "        $this->manager->\n",
+        "    }\n",
+        "}\n",
+        "class Base {}\n",
+        "class FirstTest extends Base {\n",
+        "    use WorkspaceTestTrait;\n",
+        "    /** @var Manager */\n",
+        "    protected $manager;\n",
+        "}\n",
+        "class SecondTest extends Base {\n",
+        "    use WorkspaceTestTrait;\n",
+        "    private Manager $manager;\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let result = completion_response(&backend, &uri, 5, 24, None).await;
+
+    match result.expect("Completion should return results") {
+        CompletionResponse::CompletionItemList(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(""))
+                .collect();
+            assert!(
+                names.contains(&"getStorage"),
+                "`$this->manager` should be typed from the users' declarations, got: {names:?}"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
+    }
+}
+
+/// When one user leaves the property undeclared, nothing is known about it
+/// for that user, so the trait's read stays untyped.
+#[tokio::test]
+async fn test_trait_property_untyped_when_a_user_does_not_declare_it() {
+    let backend = create_test_backend();
+
+    let uri = Uri::parse("file:///trait_host_property_partial.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Manager { public function getStorage(string $t): object; }\n",
+        "trait WorkspaceTestTrait {\n",
+        "    protected function switchTo(int $id): void {\n",
+        "        $this->manager->\n",
+        "    }\n",
+        "}\n",
+        "class FirstTest {\n",
+        "    use WorkspaceTestTrait;\n",
+        "    protected Manager $manager;\n",
+        "}\n",
+        "class SecondTest {\n",
+        "    use WorkspaceTestTrait;\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let result = completion_response(&backend, &uri, 4, 24, None).await;
+
+    let names: Vec<String> = match result {
+        Some(CompletionResponse::CompletionItemList(items)) => items
+            .iter()
+            .map(|i| i.filter_text.clone().unwrap_or_default())
+            .collect(),
+        _ => Vec::new(),
+    };
+    assert!(
+        !names.iter().any(|n| n == "getStorage"),
+        "one user does not declare `$manager`, so it should stay untyped, got: {names:?}"
+    );
+}
+
+/// The users' declarations also type the property where its value flows
+/// into a variable.
+#[tokio::test]
+async fn test_trait_host_property_flows_into_variable() {
+    let backend = create_test_backend();
+
+    let uri = Uri::parse("file:///trait_host_property_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Manager { public function getStorage(string $t): Storage; }\n",
+        "interface Storage { public function load(int $id): ?object; }\n",
+        "trait WorkspaceTestTrait {\n",
+        "    protected function switchTo(int $id): void {\n",
+        "        $storage = $this->manager->getStorage('workspace');\n",
+        "        $storage->\n",
+        "    }\n",
+        "}\n",
+        "class FirstTest {\n",
+        "    use WorkspaceTestTrait;\n",
+        "    /** @var Manager */\n",
+        "    protected $manager;\n",
+        "}\n",
+        "class SecondTest {\n",
+        "    use WorkspaceTestTrait;\n",
+        "    protected Manager $manager;\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let result = completion_response(&backend, &uri, 6, 18, None).await;
+
+    match result.expect("Completion should return results") {
+        CompletionResponse::CompletionItemList(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(""))
+                .collect();
+            assert!(
+                names.contains(&"load"),
+                "`$storage` should be the manager's storage, got: {names:?}"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
+    }
+}

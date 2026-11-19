@@ -77,8 +77,8 @@ impl Backend {
                     DiagnosticSeverity::Error,
                     INCOMPATIBLE_TRAIT_PROPERTY_CODE,
                     format!(
-                        "{} and {} define the same property (${}) in the composition of {}, but the definitions are incompatible",
-                        conflict.first_owner, conflict.second_owner, conflict.property, composed
+                        "Property {}::${} is declared incompatibly by {} and {}",
+                        composed, conflict.property, conflict.first_owner, conflict.second_owner
                     ),
                 ));
             }

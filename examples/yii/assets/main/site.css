@@ -83,3 +83,7 @@ body {
 .text-center {
     text-align: center;
 }
+
+.back-link {
+    font-weight: bold;
+}

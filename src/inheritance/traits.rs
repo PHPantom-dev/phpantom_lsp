@@ -47,7 +47,7 @@ pub(crate) fn merge_traits_into(
     class_loader: &ResolvedClassLoader<'_>,
     depth: u32,
     dedup: &mut MergeDedup,
-    self_class_name: &str,
+    self_type: &PhpType,
 ) {
     if depth > MAX_TRAIT_DEPTH {
         return;
@@ -138,7 +138,7 @@ pub(crate) fn merge_traits_into(
                 class_loader,
                 depth + 1,
                 dedup,
-                self_class_name,
+                self_type,
             );
         }
 
@@ -175,7 +175,7 @@ pub(crate) fn merge_traits_into(
                     class_loader,
                     parent_depth + 1,
                     dedup,
-                    self_class_name,
+                    self_type,
                 );
             }
 
@@ -236,8 +236,9 @@ pub(crate) fn merge_traits_into(
                 .next_back();
 
             let needs_sub = method_references_params(method, &sub_keys);
-            // Replace bare `self` with the using class name so that
-            // `self` resolves to the class that imports the trait.
+            // Replace bare `self` with the using class (and its template
+            // parameters) so that `self` resolves to the class that
+            // imports the trait.
             let needs_bare_self = method_has_bare_self(method);
             if vis_change.is_none() && !needs_sub && !needs_bare_self {
                 // Nothing to rewrite: keep the shared `Arc` instead of
@@ -255,7 +256,7 @@ pub(crate) fn merge_traits_into(
                     apply_substitution_to_method(&mut method, &trait_subs);
                 }
                 if needs_bare_self {
-                    replace_bare_self_in_method(&mut method, self_class_name);
+                    replace_bare_self_in_method(&mut method, self_type);
                 }
                 method
             };

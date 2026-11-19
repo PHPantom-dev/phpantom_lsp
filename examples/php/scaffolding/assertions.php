@@ -83,6 +83,7 @@ function runDemoAssertions(): void
     assert(!$selfOutBox->value instanceof Scaffolding\Pen, 'a Scaffolding\Pencil is not a Scaffolding\Pen — the template argument really changed');
 
     $genericDemo = new GenericsDemo();
+    assert($genericDemo->callableBox(new Scaffolding\Box(new Scaffolding\Pen())) instanceof Scaffolding\Pen, 'array callables retain the receiver generic return type');
     assert($genericDemo->boxedAlternatives(new Scaffolding\Box(new Scaffolding\Pen())) === 'pen', 'a Box<Pen> unwraps to a Pen');
     assert($genericDemo->boxedAlternatives(new Scaffolding\Box(new Scaffolding\Pencil())) === 'pencil', 'a Box<Pencil> retains the other generic alternative');
 
@@ -617,6 +618,8 @@ function runDemoAssertions(): void
     $madePens = Scaffolding\TypedCollection::make([new Scaffolding\Pen('blue')]);
     assert($madePens instanceof Scaffolding\TypedCollection, 'Scaffolding\TypedCollection::make() must return a Scaffolding\TypedCollection');
     assert($madePens->first() instanceof Scaffolding\Pen, 'Scaffolding\TypedCollection::make([Scaffolding\Pen])->first() must return Scaffolding\Pen');
+    assert($madePens->same() === $madePens, 'A fluent trait returns the collection it was called on');
+    assert($madePens->same()->first() instanceof Scaffolding\Pen, 'The fluent trait preserves the collection element type');
     assert(Scaffolding\TypedCollection::make([new Scaffolding\Pen('red')])->first() instanceof Scaffolding\Pen, 'the same holds for a directly chained call');
 
     // ── Scaffolding\ObjectMapper::wrap() → Scaffolding\TypedCollection ──────────────────────────

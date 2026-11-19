@@ -172,11 +172,22 @@ impl Backend {
         // What a Yii container hands out for a class is what its DI
         // definitions say, so those come first, from the class and from a
         // `$container->get()` or `Reference::to()` that names it alike.
+        // What handles an event is the listeners the events configuration
+        // attaches to it.
         let mut locations = if self.is_yii_project() {
-            self.yii_definition_locations(target.fqn().as_str())
+            let mut locations = self.yii_definition_locations(target.fqn().as_str());
+            locations.extend(self.yii_event_listener_locations(target.fqn().as_str()));
+            locations
         } else {
             Vec::new()
         };
+        // A Drupal plugin manager's plugins implement what it hands out,
+        // and so do those of the one manager an interface stands for.
+        locations.extend(
+            self.drupal_plugin_implementations(target.fqn().as_str())
+                .iter()
+                .filter_map(|class| self.class_declaration_location(class)),
+        );
         if let Some(implementations) =
             self.class_implementation(uri, content, target, &resolved_class_loader)
         {
@@ -703,7 +714,7 @@ impl Backend {
     /// The FQNs the reverse inheritance index lists below `target_fqn`:
     /// only the direct children in `direct_only` mode, otherwise every
     /// transitive descendant.
-    fn gti_descendants(&self, target_fqn: &str, direct_only: bool) -> Vec<String> {
+    pub(crate) fn gti_descendants(&self, target_fqn: &str, direct_only: bool) -> Vec<String> {
         let gti = self.symbols.gti_index.read();
         if direct_only {
             return gti.get(target_fqn).cloned().unwrap_or_default();

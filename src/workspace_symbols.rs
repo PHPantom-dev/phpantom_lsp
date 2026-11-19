@@ -17,12 +17,13 @@
 //! 3. **`global_defines`** — provides `DefineInfo` records for
 //!    `define()` / top-level `const` declarations.
 //!
-//! 4. **`fqn_uri_index`** — maps fully-qualified class names to file URIs
-//!    for classes discovered during parsing but not necessarily open.
-//!    Paired with `fqn_index` for rich metadata when available.
+//! 4. **`fqn_uri_index`** — maps fully-qualified class names to file URIs,
+//!    covering classes not yet parsed (vendor classes from Composer's
+//!    classmap and other sources).  Paired with `fqn_class_index` for rich
+//!    metadata when available.
 //!
-//! 5. **`fqn_uri_index`** — maps fully-qualified class names to file URIs,
-//!    covering vendor classes from Composer's classmap and other sources.
+//! 5. **Yii path aliases** — the `@name` aliases a Yii application's
+//!    configuration declares, each at the string that declares it.
 
 use std::collections::HashSet;
 
@@ -65,6 +66,8 @@ enum Placement {
     OffsetOrFileStart(u32),
     /// At the start of the file; nothing is read for it.
     FileStart,
+    /// At a position already known; nothing is read for it.
+    At(Position),
 }
 
 /// A symbol the query matched, with its position still a byte offset.
@@ -187,7 +190,7 @@ impl Backend {
     /// Searches classes, interfaces, traits, enums, their members
     /// (methods, properties, class constants), standalone functions,
     /// and global constants across all indexed files plus vendor classes
-    /// from the fqn_uri_index.  The `query` string
+    /// from the fqn_uri_index, and a Yii application's path aliases.  The `query` string
     /// is matched as a case-insensitive substring against symbol names.
     /// An empty query returns symbols from parsed files only (not the
     /// full fqn_uri_index) to avoid flooding the picker.
@@ -450,6 +453,31 @@ impl Backend {
             }
         }
 
+        // ── Yii path aliases ────────────────────────────────────────
+        // Matched with or without the `@`, which users may leave off.
+        if self.is_yii_project() {
+            let aliases = self.yii_aliases();
+            for (name, declaration) in aliases.declarations() {
+                let Some(tier) = match_tier(name, &query_lower)
+                    .or_else(|| match_tier(name.strip_prefix('@').unwrap_or(name), &query_lower))
+                else {
+                    continue;
+                };
+                let Some(file_uri) = crate::util::path_to_url(&declaration.file) else {
+                    continue;
+                };
+                pending.push(PendingSymbol {
+                    name: name.to_string(),
+                    kind: SymbolKind::Constant,
+                    tags: None,
+                    container_name: None,
+                    file_uri: file_uri.to_string(),
+                    placement: Placement::At(declaration.range.start),
+                    tier,
+                });
+            }
+        }
+
         // ── Sort by relevance then alphabetically, cap at MAX_RESULTS ──
         // Sorting before the files are read keeps the disk reads to the
         // symbols that will be answered.
@@ -487,7 +515,7 @@ impl Backend {
         for group in pending.chunk_by(|a, b| a.file_uri == b.file_uri) {
             let needs_content = group
                 .iter()
-                .any(|symbol| !matches!(symbol.placement, Placement::FileStart));
+                .any(|symbol| !matches!(symbol.placement, Placement::FileStart | Placement::At(_)));
             let content = needs_content
                 .then(|| self.get_file_content_arc(&group[0].file_uri))
                 .flatten();
@@ -495,6 +523,7 @@ impl Backend {
             for symbol in group {
                 let pos = match (&symbol.placement, &index) {
                     (Placement::FileStart, _) => Position::new(0, 0),
+                    (Placement::At(pos), _) => *pos,
                     (
                         Placement::Offset(offset) | Placement::OffsetOrFileStart(offset),
                         Some(index),

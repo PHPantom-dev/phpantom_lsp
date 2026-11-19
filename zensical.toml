@@ -15,6 +15,7 @@ nav = [
   { "Reference" = [
     { "Configuration" = "configuration.md" },
     { "CLI" = "cli.md" },
+    { "Diagnostics" = "diagnostics.md" },
   ]},
   { "Development" = [
     { "Building from Source" = "BUILDING.md" },

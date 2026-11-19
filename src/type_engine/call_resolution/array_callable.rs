@@ -6,6 +6,7 @@
 
 use crate::php_type::{PhpType, ShapeEntry, TypeKind};
 use crate::type_engine::resolver::FileCtx;
+use crate::types::{ClassInfo, MethodInfo};
 use crate::virtual_members::ResolvedClassCache;
 
 /// The return type of the method the array callable `callable` names, with
@@ -21,6 +22,30 @@ pub(crate) fn array_callable_return_type(
     current_class_fqn: &str,
     resolved_class_cache: Option<&ResolvedClassCache>,
 ) -> Option<PhpType> {
+    with_array_callable_method(
+        callable,
+        file,
+        current_class_fqn,
+        resolved_class_cache,
+        |owner, method| {
+            Some(
+                method
+                    .return_type
+                    .as_ref()?
+                    .replace_self_bound(&owner.fqn(), None),
+            )
+        },
+    )
+}
+
+/// Read a resolved array callable's method through the shared type engine.
+pub(crate) fn with_array_callable_method<T>(
+    callable: &PhpType,
+    file: &FileCtx<'_>,
+    current_class_fqn: &str,
+    resolved_class_cache: Option<&ResolvedClassCache>,
+    mut visit: impl FnMut(&ClassInfo, &MethodInfo) -> Option<T>,
+) -> Option<T> {
     let [receiver, method] = callable.shape_entries()? else {
         return None;
     };
@@ -34,8 +59,51 @@ pub(crate) fn array_callable_return_type(
         return None;
     };
     let method_name = literal.string_content()?;
-
     let receiver = &receiver.value_type;
+    with_callable_method(
+        receiver,
+        &method_name,
+        file,
+        current_class_fqn,
+        resolved_class_cache,
+        &mut visit,
+    )
+}
+
+/// Read the method a typed callable receiver names, preserving its generics.
+pub(crate) fn with_callable_method<T>(
+    receiver: &PhpType,
+    method_name: &str,
+    file: &FileCtx<'_>,
+    current_class_fqn: &str,
+    resolved_class_cache: Option<&ResolvedClassCache>,
+    visit: &mut dyn FnMut(&ClassInfo, &MethodInfo) -> Option<T>,
+) -> Option<T> {
+    match receiver.kind() {
+        TypeKind::Nullable(inner) => {
+            return with_callable_method(
+                inner,
+                method_name,
+                file,
+                current_class_fqn,
+                resolved_class_cache,
+                visit,
+            );
+        }
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
+            return members.iter().find_map(|member| {
+                with_callable_method(
+                    member,
+                    method_name,
+                    file,
+                    current_class_fqn,
+                    resolved_class_cache,
+                    visit,
+                )
+            });
+        }
+        _ => {}
+    }
     let static_only = !receiver.is_object_like();
     let owners = if static_only {
         crate::type_engine::variable::class_string_resolution::classes_named_by_type(
@@ -53,17 +121,29 @@ pub(crate) fn array_callable_return_type(
         )
     };
 
+    let hinted = match receiver.kind() {
+        TypeKind::ClassString(Some(inner)) => inner,
+        _ => receiver,
+    };
+    // A receiver without type arguments (`$this`, a bare class name) keeps
+    // the class's own template parameters, as a direct method call does.
+    let args = match hinted.kind() {
+        TypeKind::Generic(generic) => generic.args.as_slice(),
+        _ => &[],
+    };
     owners.iter().find_map(|owner| {
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        // The class cache reloads the raw declaration, so retain the type's
+        // arguments when merging inherited methods into a callable receiver.
+        let merged = crate::virtual_members::resolve_class_fully_with_type_args(
             owner,
             file.class_loader,
             resolved_class_cache,
+            args,
         );
-        let method = merged.get_method(&method_name)?;
+        let method = merged.get_method(method_name)?;
         if static_only && !method.is_static {
             return None;
         }
-        let ret = method.return_type.as_ref()?;
-        Some(ret.replace_self_bound(&owner.fqn(), None))
+        visit(owner, method)
     })
 }

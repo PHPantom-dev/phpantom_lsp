@@ -7,7 +7,11 @@ acme.greeting:
     # `::`. A class name or a `Class::method` string in YAML navigates in any
     # project, and counts among the references of what it names.
     _controller: '\Drupal\acme\Controller\GreetingController::greet'
-    _title: 'Greeting'
+    # Try: go to the definition of acme.greeter, or of greet after the `:`,
+    # which lands in the Greeter class the service is built from. Complete
+    # a method after the `:`, or find the references of Greeter::greet():
+    # this line is one of them.
+    _title_callback: 'acme.greeter:greet'
   requirements:
     _permission: 'access content'
 

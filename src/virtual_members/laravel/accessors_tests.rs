@@ -79,9 +79,97 @@ fn modern_accessor_fqn_canonical() {
 }
 
 #[test]
-fn modern_accessor_short_name() {
+fn global_attribute_class_is_not_an_eloquent_accessor() {
     let method = make_method("fullName", Some("Attribute"));
-    assert!(is_modern_accessor(&method));
+    assert!(!is_modern_accessor(&method));
+}
+
+#[test]
+fn accessor_names_without_import_context_require_the_framework_class() {
+    assert!(written_attribute_class(
+        "\\Illuminate\\Database\\Eloquent\\Casts\\Attribute",
+        None
+    ));
+    assert!(!written_attribute_class("Attribute", None));
+    assert!(!written_attribute_class("Other\\Attribute", None));
+}
+
+#[test]
+fn modern_setters_are_read_from_the_returned_attribute() {
+    use mago_syntax::cst::{ClassLikeMember, Statement};
+    for (declaration, expected) in [
+        (
+            "protected function value(): Value { return new Value(null, fn ($value) => $value); }",
+            true,
+        ),
+        (
+            "protected function value(): Value { if ($condition) { return Value::make(set: fn ($value) => $value); } return Value::get(fn () => ''); }",
+            true,
+        ),
+        ("abstract protected function value(): Value;", false),
+        (
+            "protected function value(): Value { return new Value; }",
+            false,
+        ),
+        (
+            "protected function value(): Value { return $factory; }",
+            false,
+        ),
+        (
+            "protected function value(): Value { return new $factory(set: fn ($value) => $value); }",
+            false,
+        ),
+        (
+            "protected function value(): Value { return Value::{$factory}(set: fn ($value) => $value); }",
+            false,
+        ),
+        (
+            "protected function value(): Value { return Other::make(set: fn ($value) => $value); }",
+            false,
+        ),
+        (
+            "protected function value(): Value { return Value::make(...$callbacks); }",
+            false,
+        ),
+        (
+            "protected function value(): Value { $callback = function () { return Value::set(fn ($value) => $value); }; return Value::get($callback); }",
+            false,
+        ),
+        ("protected function value(): Value { return; }", false),
+    ] {
+        let source = format!("<?php abstract class Example {{ {declaration} }}");
+        crate::parser::with_parsed_program(&source, "accessor_setter", |program, content| {
+            let class = program
+                .statements
+                .iter()
+                .find_map(|statement| match statement {
+                    Statement::Class(class) => Some(class),
+                    _ => None,
+                })
+                .unwrap();
+            let ClassLikeMember::Method(method) = &class.members[0] else {
+                panic!("expected method")
+            };
+            let context = crate::parser::DocblockCtx {
+                trivias: program.trivia.as_slice(),
+                content,
+                php_version: None,
+                use_map: [("Value".to_string(), ATTRIBUTE_CAST_FQN.to_string())]
+                    .into_iter()
+                    .collect(),
+                namespace: Some("App".to_string()),
+            };
+            assert_eq!(
+                has_attribute_setter(
+                    Some(&PhpType::named("Value".into())),
+                    method,
+                    Some(&context)
+                ),
+                expected,
+                "{declaration}"
+            );
+        });
+    }
 }
 
 #[test]

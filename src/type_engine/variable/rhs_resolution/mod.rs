@@ -76,6 +76,7 @@ mod doctrine_calls;
 mod drupal_calls;
 mod function_calls;
 mod instantiation;
+mod key_path_calls;
 mod laravel_calls;
 mod literal_text;
 mod magic_constants;
@@ -90,9 +91,10 @@ mod static_calls;
 mod symfony_calls;
 mod unary_prefix;
 
+pub(crate) use magic_constants::file_magic_constant_type;
 pub(crate) use scalar_fold::{fold_concat_types, is_literal_string_type};
 
-use arithmetic::resolve_binary_result_type;
+use arithmetic::{combine_with_lhs, combines_operand_types, resolve_binary_result_type};
 use array_access::resolve_rhs_array_access;
 use assignment_value::resolve_assignment_as_value;
 use branches::{resolve_conditional_chain, resolve_match_expression, resolve_null_coalesce_chain};
@@ -248,6 +250,35 @@ pub(super) fn peel_type_transparent<'b>(mut expr: &'b Expression<'b>) -> &'b Exp
             _ => return expr,
         }
     }
+}
+
+/// Resolve a concatenation, arithmetic, or bitwise operator.
+///
+/// These are left-associative, so `"a" . "b" . "c"` nests on the left, and
+/// generated code can chain thousands of them.  Resolving each operator's
+/// left operand recursively costs a stack frame per operator, so walk the
+/// left spine down to its first operand and fold the operators back up in
+/// a loop.  The spine stops where the recursion would have done something
+/// other than reach this function again: an operand with a recorded type,
+/// or one that is not another operand-combining operator.
+fn resolve_operand_chain<'b>(
+    binary: &'b Binary<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let mut spine = vec![binary];
+    let mut leftmost = binary.lhs;
+    while ctx.recorded_expr_type(leftmost).is_none()
+        && let Expression::Binary(inner) = peel_type_transparent(leftmost)
+        && combines_operand_types(&inner.operator)
+    {
+        spine.push(inner);
+        leftmost = inner.lhs;
+    }
+    let mut types = resolve_rhs_expression(leftmost, ctx);
+    for binary in spine.iter().rev() {
+        types = combine_with_lhs(binary, types, ctx);
+    }
+    types
 }
 
 fn resolve_rhs_expression_inner<'b>(
@@ -461,27 +492,9 @@ fn resolve_rhs_expression_inner<'b>(
             }
             resolve_var_types(&rhs_var, ctx, ctx.cursor_offset)
         }
-        // ── Concatenation: `"prefix" . $var` → string ───────────────
-        // Two operands that each hold one known scalar concatenate to the
-        // literal PHP would build (`'1' . 'a'` is `'1a'`). Otherwise a
-        // non-empty operand makes the result non-empty (`'x' . $u`).
-        Expression::Binary(binary) if binary.operator.is_concatenation() => {
-            let foldable = scalar_fold::is_cheap_scalar_operand(binary.lhs)
-                && scalar_fold::is_cheap_scalar_operand(binary.rhs);
-            let lhs = resolve_rhs_expression(binary.lhs, ctx);
-            if !foldable {
-                return vec![ResolvedType::from_type_string(scalar_fold::concat_result(
-                    &lhs,
-                    || resolve_rhs_expression(binary.rhs, ctx),
-                ))];
-            }
-            let rhs = resolve_rhs_expression(binary.rhs, ctx);
-            let folded = scalar_fold::concat_operand_scalar(binary.lhs, &lhs)
-                .zip(scalar_fold::concat_operand_scalar(binary.rhs, &rhs))
-                .and_then(|(l, r)| scalar_fold::fold_concat(&l, &r));
-            vec![ResolvedType::from_type_string(
-                folded.unwrap_or_else(|| scalar_fold::concat_result(&lhs, || rhs)),
-            )]
+        // ── Concatenation, arithmetic, bitwise: `"prefix" . $var` ────
+        Expression::Binary(binary) if combines_operand_types(&binary.operator) => {
+            resolve_operand_chain(binary, ctx)
         }
         // ── Interpolated strings: `"$a-$b"`, heredocs ───────────────
         // Command substitution (backticks) is not a plain string and is
@@ -509,11 +522,11 @@ fn resolve_rhs_expression_inner<'b>(
         Expression::Construct(Construct::Isset(_) | Construct::Empty(_)) => {
             vec![ResolvedType::from_type_string(PhpType::bool())]
         }
-        // ── Arithmetic and other binary operators ───────────────────
-        // `??` and method-chain binaries are peeled off in
-        // `resolve_rhs_expression` before this function is reached, and
-        // concatenation is handled above; everything else (arithmetic,
-        // comparison, bitwise, spaceship) is answered by operator kind.
+        // ── Comparison, logical, and other binary operators ─────────
+        // `??` is peeled off in `resolve_rhs_expression` before this
+        // function is reached, and the operand-combining operators are
+        // handled above; everything else (comparison, logical, spaceship)
+        // is answered by operator kind.
         Expression::Binary(binary) => resolve_binary_result_type(binary, ctx).unwrap_or_default(),
         // ── Catch-all: unrecognised expression types ────────────────
         // Return an empty vec — callers that need a type string for

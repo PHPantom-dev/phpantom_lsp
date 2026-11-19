@@ -196,7 +196,7 @@ impl Backend {
                     DiagnosticSeverity::Warning,
                     "unreachable_match_arm",
                     format!(
-                        "Match arm of type '{literal_type}' will never match subject of type '{subject_type}' (match uses ===)"
+                        "Match arm of type {literal_type} never matches a subject of type {subject_type}"
                     ),
                 ),
                 MatchIssue::Unhandled {
@@ -204,21 +204,13 @@ impl Backend {
                     end,
                     remaining,
                 } => {
-                    let noun = if remaining.len() == 1 {
-                        "value"
-                    } else {
-                        "values"
-                    };
                     let values: Vec<&str> = remaining.iter().map(|v| v.label.as_str()).collect();
                     (
                         start,
                         end,
                         DiagnosticSeverity::Error,
                         UNHANDLED_MATCH_CODE,
-                        format!(
-                            "Match expression does not handle remaining {noun}: {}",
-                            values.join("|")
-                        ),
+                        format!("Match expression does not handle {}", values.join(", ")),
                     )
                 }
             };

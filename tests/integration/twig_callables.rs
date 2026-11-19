@@ -345,8 +345,8 @@ async fn names_no_extension_declares_are_reported() {
     assert_eq!(
         problems(&backend, &page_uri(&dir)),
         vec![
-            ("Unknown Twig filter: 'prise'".to_string(), line),
-            ("Unknown Twig function: 'ikon'".to_string(), line),
+            ("Unknown Twig filter 'prise'".to_string(), line),
+            ("Unknown Twig function 'ikon'".to_string(), line),
         ]
     );
 }

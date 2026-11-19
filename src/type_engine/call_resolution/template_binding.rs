@@ -24,7 +24,7 @@ use crate::type_engine::variable::rhs_resolution::{
     classify_template_binding, extract_array_position, insert_or_union, is_array_like_wrapper,
     resolve_arg_call_raw_type, resolve_arg_iterable_raw_type, resolve_array_literal_generic,
 };
-use crate::types::{ClassInfo, MethodInfo, ParameterInfo};
+use crate::types::{ClassInfo, FunctionInfo, MethodInfo, ParameterInfo};
 
 use super::arg_text_types::{array_literal_element_type, array_literal_shape_type};
 use super::constant_operands::type_operator_bound_literal;
@@ -43,6 +43,32 @@ pub(crate) struct TemplateCallee<'a> {
     /// constructor these are the class's, which is where a class
     /// template's `of …` lives.
     pub template_param_bounds: &'a AtomMap<PhpType>,
+    /// The namespace the parameters' defaults were written in, which an
+    /// unqualified constant in one is looked up in before the global
+    /// namespace.
+    pub namespace: Option<&'a str>,
+}
+
+impl<'a> TemplateCallee<'a> {
+    /// The signature of the standalone function `func`.
+    pub(crate) fn of_function(func: &'a FunctionInfo) -> Self {
+        Self {
+            parameters: &func.parameters,
+            template_bindings: &func.template_bindings,
+            template_param_bounds: &func.template_param_bounds,
+            namespace: func.namespace.as_deref(),
+        }
+    }
+
+    /// The signature of `method`.
+    pub(crate) fn of_method(method: &'a MethodInfo) -> Self {
+        Self {
+            parameters: &method.parameters,
+            template_bindings: method.template_bindings(),
+            template_param_bounds: method.template_param_bounds(),
+            namespace: method.default_namespace(),
+        }
+    }
 }
 
 /// Bind each of `callee`'s templates from the call-site `arg_texts`,
@@ -85,6 +111,9 @@ pub(crate) fn bind_template_args(
     let ordered = callable_bindings_last(callee.template_bindings, callee.parameters);
     let (written, omitted): (Vec<&(Atom, Atom)>, Vec<_>) = ordered.partition(is_written);
     let mut variadic_tail: Option<Vec<&str>> = None;
+    // A default was written in the callee's file, so the call site's imports
+    // and namespace must not resolve the names in it.
+    let declared_ctx = ctx.written_in(callee.namespace);
 
     for (tpl_name, param_name) in written.into_iter().chain(omitted) {
         let Some(param_idx) = param_index(param_name) else {
@@ -100,8 +129,8 @@ pub(crate) fn bind_template_args(
         let param_hint = via_bound.as_ref().or(param.type_hint.as_ref());
         let tpl_bound = callee.template_param_bounds.get(&atom(tpl_name));
 
-        let arg_text = match bound.get(param_idx).and_then(|o| o.as_deref()) {
-            Some(text) => text,
+        let (arg_text, ctx) = match bound.get(param_idx).and_then(|o| o.as_deref()) {
+            Some(text) => (text, ctx),
             None => match omitted_arg_default(
                 param.default_value.as_deref(),
                 tpl_name,
@@ -109,7 +138,7 @@ pub(crate) fn bind_template_args(
                 param_hint,
                 &subs,
             ) {
-                Some(default) => default,
+                Some(default) => (default, &declared_ctx),
                 None => continue,
             },
         };
@@ -196,9 +225,8 @@ fn bind_constructor_template_args(
         Cow::Owned(merged)
     };
     let callee = TemplateCallee {
-        parameters: &ctor.parameters,
-        template_bindings: ctor.template_bindings(),
         template_param_bounds: &bounds,
+        ..TemplateCallee::of_method(ctor)
     };
     let mut subs = bind_template_args(&callee, arg_texts, None, ctx);
     for (name, ty) in subs.iter_mut() {

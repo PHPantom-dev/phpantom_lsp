@@ -50,7 +50,7 @@ pub(super) fn extract_instantiation_expr<'a>(
         record_dql_instantiation(inst.class, args, ctx, scope_start);
         if !class_text.is_empty() {
             emit_call_site(
-                format!("new {}", class_text),
+                CallText::Owned(format!("new {}", class_text)),
                 args,
                 &mut ctx.call_sites,
                 &mut ctx.untyped_closure_sites,
@@ -356,6 +356,7 @@ fn extract_function_call<'a>(
                 );
             }
             emit_clone_with_spans(func_call, ctx);
+            super::super::tempest::emit_function_call(func_call, ident, ctx);
             ctx.spans.push(SymbolSpan {
                 start: ident.span().start.offset,
                 end: ident.span().end.offset,
@@ -363,6 +364,7 @@ fn extract_function_call<'a>(
                     name: crate::atom::atom(name_clean),
                     is_definition: false,
                     is_docblock_reference: false,
+                    is_callback: false,
                 },
             });
             // `@yield`/`@section`/`@stack`/`@push` and their
@@ -477,7 +479,7 @@ fn extract_function_call<'a>(
     let func_text = invoked_callee_text(func_call.function);
     if !func_text.is_empty() {
         emit_call_site(
-            func_text,
+            CallText::Owned(func_text),
             &func_call.argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
@@ -501,7 +503,6 @@ fn extract_method_call<'a>(
     scope_start: u32,
     visit_receiver: bool,
 ) {
-    let subject_text = expr_to_subject_text(object);
     if visit_receiver {
         extract_from_expression(object, ctx, scope_start);
     }
@@ -511,13 +512,18 @@ fn extract_method_call<'a>(
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
         record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
         record_drupal_route_parameter_sites(&member_name, argument_list, ctx);
+        record_yii_url_argument_sites(&member_name, argument_list, ctx);
         record_drupal_hook_invocations(&member_name, argument_list, ctx);
         emit_drupal_requirement_permission_spans(&member_name, argument_list, ctx);
         record_drupal_config_list_sites(&member_name, argument_list, ctx);
         record_drupal_config_key_sites(&member_name, argument_list, ctx);
+        record_drupal_plugin_sites(&member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
+        record_yii_css_class_sites(&member_name, argument_list, ctx);
+        emit_yii_form_property_spans(&member_name, argument_list, ctx);
         emit_mock_method_spans(object, &member_name, argument_list, ctx);
         emit_entity_field_spans(object, &member_name, argument_list, ctx);
+        emit_yii_active_record_spans(object, &member_name, argument_list, ctx);
         record_dql_call(
             object,
             &member_name,
@@ -532,23 +538,24 @@ fn extract_method_call<'a>(
             object.span().start.offset,
             argument_list.left_parenthesis.end.offset,
         ));
+        let call_text = ctx.spine_texts.method_call_text(
+            object,
+            argument_list.right_parenthesis.end.offset,
+            &member_name,
+            ctx.content,
+            &mut ctx.call_sites,
+        );
         emit_call_site(
-            format!("{}->{}", subject_text, member_name),
+            call_text,
             argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
         );
-        let object_span = object.span();
         ctx.spans.push(SymbolSpan {
             start: ident.span.start.offset,
             end: ident.span.end.offset,
             kind: SymbolKind::MemberAccess {
-                subject_text: SubjectText::new(
-                    subject_text,
-                    object_span.start.offset,
-                    object_span.end.offset,
-                    ctx.content,
-                ),
+                subject_text: ctx.spine_texts.subject_text_of(object, ctx.content),
                 member_name,
                 is_static: false,
                 is_method_call: true,
@@ -603,6 +610,7 @@ fn extract_static_method_call<'a>(
                 &mut ctx.spans,
             );
         }
+        emit_yii_form_property_spans(&member_name, &static_call.argument_list, ctx);
         emit_facade_mock_method_spans(
             static_call.class,
             &member_name,
@@ -614,7 +622,7 @@ fn extract_static_method_call<'a>(
             static_call.argument_list.left_parenthesis.end.offset,
         ));
         emit_call_site(
-            format!("{}::{}", subject_text, member_name),
+            CallText::Owned(format!("{}::{}", subject_text, member_name)),
             &static_call.argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
@@ -650,10 +658,16 @@ fn extract_static_method_call<'a>(
             &static_call.argument_list,
             ctx,
         );
-        if ctx.drupal && crate::drupal::is_service_lookup(semantic_subject, &member_name) {
-            try_emit_laravel_string_span(
+        if ctx.drupal
+            && crate::drupal::is_service_lookup(semantic_subject, &member_name)
+            && let Some(id) = static_call.argument_list.arguments.first()
+        {
+            // `hasService()` asks whether a service exists.
+            push_laravel_string_span(
                 crate::symbol_map::StringKeyKind::ServiceId,
-                &static_call.argument_list,
+                false,
+                member_name.eq_ignore_ascii_case("hasService"),
+                id.value(),
                 ctx.content,
                 &mut ctx.spans,
             );
@@ -680,6 +694,12 @@ fn extract_static_method_call<'a>(
         {
             emit_drupal_route_span(index, &static_call.argument_list, ctx);
         }
+        emit_drupal_static_plugin_span(
+            semantic_subject,
+            &member_name,
+            &static_call.argument_list,
+            ctx,
+        );
         emit_drupal_static_permission_spans(
             semantic_subject,
             &member_name,
@@ -710,6 +730,7 @@ pub(super) fn extract_partial_application_expr<'a>(
                         name: crate::atom::atom(name_clean),
                         is_definition: false,
                         is_docblock_reference: false,
+                        is_callback: false,
                     },
                 });
             }
@@ -784,6 +805,8 @@ mod tests {
                 drupal,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         );
@@ -829,6 +852,8 @@ mod tests {
                 drupal: false,
                 twig: true,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         );

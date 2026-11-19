@@ -26,7 +26,7 @@ impl Backend {
             if !matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_route") {
                 return None;
             }
-            let range = self.translate_blade_range_to_php(uri, diagnostic.range);
+            let range = self.translate_template_range_to_php(uri, diagnostic.range);
             ranges_overlap(&range, &params.range).then_some((diagnostic, range))
         }).collect();
         if diagnostics.is_empty() {

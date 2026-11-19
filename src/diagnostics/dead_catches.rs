@@ -49,8 +49,8 @@ impl Backend {
                 DiagnosticSeverity::Warning,
                 DEAD_CATCH_CODE,
                 format!(
-                    "Dead catch: {} is never thrown in the try block",
-                    entry.class
+                    "Nothing in the try block throws {}",
+                    entry.class.trim_start_matches('\\')
                 ),
                 Some(DiagnosticTag::Unnecessary),
             ));

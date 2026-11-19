@@ -49,7 +49,7 @@ pub fn run() -> String {
         "contextual",
     );
     if tokens_mode != "contextual" {
-        sections.push(format!("[semantic_tokens]\nmode = \"{tokens_mode}\"\n"));
+        sections.push(format!("[semantic-tokens]\nmode = \"{tokens_mode}\"\n"));
     }
 
     let mut content = CONFIG_HEADER.to_string();
@@ -92,7 +92,7 @@ fn prompt_diagnostic_toggles() -> Vec<&'static str> {
         "Report unknown properties on classes with __get that also declare virtual properties?",
         false,
     ) {
-        diagnostics.push("report-magic-properties = true");
+        diagnostics.push("magic-properties = true");
     }
     if prompt_bool(
         "Report a member that only some classes of a union declare?",

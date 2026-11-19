@@ -340,7 +340,7 @@ impl Backend {
                             "\\Illuminate\\View\\ComponentSlot",
                         )));
                 }
-                let Some(virtual_php) = self.blade_virtual_php_arc(file_uri) else {
+                let Some(virtual_php) = self.template_virtual_php_arc(file_uri) else {
                     continue;
                 };
                 for vars in
@@ -524,7 +524,7 @@ impl Backend {
         if !is_blade {
             return self.get_file_content_arc(uri);
         }
-        let content = self.blade_virtual_php_arc(uri)?;
+        let content = self.template_virtual_php_arc(uri)?;
         map.matches_source(&content).then_some(content)
     }
 
@@ -607,7 +607,7 @@ impl Backend {
     /// Blade file once per refresh pass.
     pub(super) fn blade_caller_snapshot(&self) -> BladeCallerSnapshot {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
-        let uris = self.lowered_template_uris();
+        let uris = self.lowered_blade_uris();
         uris.into_iter()
             .filter(|uri| !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str())))
             .filter_map(|uri| {

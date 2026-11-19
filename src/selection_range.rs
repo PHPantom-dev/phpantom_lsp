@@ -10,7 +10,9 @@
 //! on the path from the program root down to the cursor.  Because the walk is
 //! generic over the untyped [`Node`] enum, every current and future AST variant
 //! contributes a selection level automatically; there are no per-variant match
-//! arms that a new syntax node could slip past.  A small set of *synthetic*
+//! arms that a new syntax node could slip past.  The one exception is a chain
+//! of the same binary operator, which is read as one flat expression (see
+//! [`collect_operator_chain`]).  A small set of *synthetic*
 //! spans (brace interiors of class-like bodies and `match` expressions, which
 //! are not the span of any single node) is added on top.  The collected spans
 //! are sorted outermost-first and linked into the `SelectionRange` list that
@@ -76,15 +78,55 @@ impl Backend {
 /// Descend into the subtree containing the cursor, pushing the span of every
 /// node on the cursor path.  Pruning to the subtree that contains `offset`
 /// keeps the walk linear in the depth of the cursor rather than the size of
-/// the file.
-fn collect(node: Node<'_, '_>, offset: u32, spans: &mut Vec<(u32, u32)>) {
-    let span = node.span();
+/// the file.  The walk keeps its own stack, since a generated expression
+/// can nest thousands of levels deep.
+fn collect<'ast, 'arena>(root: Node<'ast, 'arena>, offset: u32, spans: &mut Vec<(u32, u32)>) {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if let Node::Expression(Expression::Binary(bin)) | Node::Binary(bin) = node {
+            collect_operator_chain(bin, offset, spans, &mut stack);
+            continue;
+        }
+        let span = node.span();
+        if offset < span.start.offset || offset > span.end.offset {
+            continue; // prune: only descend into the subtree containing the cursor
+        }
+        spans.push((span.start.offset, span.end.offset));
+        push_synthetic_spans(&node, offset, spans);
+        node.visit_children(|child| stack.push(child));
+    }
+}
+
+/// A binary operator and the operators of the same kind nested down its
+/// left spine, read as one flat chain: `"a" . "b" . "c"` is one expression
+/// with three operands, so expanding from an operand selects the whole
+/// chain rather than each prefix of it in turn.  A generated chain can be
+/// thousands of operators long, which as one level per prefix would make
+/// a selection list too deep to send, and asking each prefix for its span
+/// walks down its left edge, which is quadratic over the chain.
+fn collect_operator_chain<'ast, 'arena>(
+    bin: &'ast Binary<'arena>,
+    offset: u32,
+    spans: &mut Vec<(u32, u32)>,
+    stack: &mut Vec<Node<'ast, 'arena>>,
+) {
+    let span = bin.span();
     if offset < span.start.offset || offset > span.end.offset {
-        return; // prune: only descend into the subtree containing the cursor
+        return;
     }
     spans.push((span.start.offset, span.end.offset));
-    push_synthetic_spans(&node, offset, spans);
-    node.visit_children(|child| collect(child, offset, spans));
+    let kind = std::mem::discriminant(&bin.operator);
+    stack.push(Node::Expression(bin.rhs));
+    stack.push(Node::BinaryOperator(&bin.operator));
+    let mut lhs = bin.lhs;
+    while let Expression::Binary(inner) = lhs
+        && std::mem::discriminant(&inner.operator) == kind
+    {
+        stack.push(Node::Expression(inner.rhs));
+        stack.push(Node::BinaryOperator(&inner.operator));
+        lhs = inner.lhs;
+    }
+    stack.push(Node::Expression(lhs));
 }
 
 /// Push spans that are *not* the span of any single AST node and therefore

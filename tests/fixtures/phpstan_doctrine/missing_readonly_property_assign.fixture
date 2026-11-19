@@ -5,6 +5,6 @@
 // file: rules/Properties/data/missing-readonly-property-assign.php
 // codes: uninitialized_property, invalid_readonly_write
 // expect_diagnostic: 17: Readonly property MissingReadOnlyPropertyAssign\EntityWithAGeneratedId::$unassigned is never initialized; assign it in the constructor
-// expect_diagnostic: 25: Cannot modify readonly property MissingReadOnlyPropertyAssign\EntityWithAGeneratedId::$doubleAssigned after the constructor has already initialized it
+// expect_diagnostic: 25: Cannot modify readonly property MissingReadOnlyPropertyAssign\EntityWithAGeneratedId::$doubleAssigned after the constructor has initialized it
 // expect_diagnostic: 46: Readonly property MissingReadOnlyPropertyAssign\ReadOnlyEntityWithConstructor::$id is never initialized; assign it in the constructor
 ---

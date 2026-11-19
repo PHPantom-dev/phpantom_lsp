@@ -25,12 +25,12 @@ impl Backend {
             .diagnostics
             .iter()
             .filter(|diagnostic| {
-                matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_trans")
+                matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_translation")
             })
             .map(|diagnostic| {
                 (
                     diagnostic,
-                    self.translate_blade_range_to_php(uri, diagnostic.range),
+                    self.translate_template_range_to_php(uri, diagnostic.range),
                 )
             })
             .filter(|(_, range)| ranges_overlap(range, &params.range))

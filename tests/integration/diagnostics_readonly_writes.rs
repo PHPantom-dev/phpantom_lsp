@@ -639,7 +639,7 @@ final class Box {
     assert_eq!(
         messages(php),
         vec![
-            "Cannot modify readonly property Box::$value after the constructor has already initialized it"
+            "Cannot modify readonly property Box::$value after the constructor has initialized it"
         ]
     );
 }
@@ -661,9 +661,7 @@ final class Box {
 "#;
     assert_eq!(
         messages(php),
-        vec![
-            "Cannot unset readonly property Box::$value after the constructor has already initialized it"
-        ]
+        vec!["Cannot unset readonly property Box::$value after the constructor has initialized it"]
     );
 }
 
@@ -763,7 +761,7 @@ final class Invoice {
     assert_eq!(
         messages(php),
         vec![
-            "Cannot modify @readonly property Invoice::$total after the constructor has already initialized it"
+            "Cannot modify @readonly property Invoice::$total after the constructor has initialized it"
         ]
     );
 }

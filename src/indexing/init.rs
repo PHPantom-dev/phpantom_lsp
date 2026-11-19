@@ -184,6 +184,8 @@ impl Backend {
         self.set_is_symfony(tool_packages().any(composer::is_symfony_project));
         self.set_is_twig(tool_packages().any(composer::is_twig_project));
         self.set_is_yii(tool_packages().any(composer::is_yii_project));
+        self.set_is_tempest(tool_packages().any(composer::is_tempest_project));
+        self.set_is_tempest_database(tool_packages().any(composer::is_tempest_database_project));
         // PHPUnit is often one of the tools a bin namespace installs.
         self.set_phpunit_major(
             std::iter::once(root)
@@ -499,6 +501,7 @@ impl Backend {
             classmap_scanner::scan_drupal_directories(web_root, filters, progress);
         self.note_drupal_declaration_files(declaration_files.declarations);
         self.note_drupal_service_providers(declaration_files.service_providers);
+        self.note_drupal_service_definition_files(declaration_files.service_definitions);
         self.note_drupal_config_files(
             declaration_files.default_config,
             declaration_files.config_schemas,
@@ -628,6 +631,8 @@ impl Backend {
         // Composer project.
         let mut any_twig = drupal_tree.is_some();
         let mut any_yii = false;
+        let mut any_tempest = false;
+        let mut any_tempest_database = false;
         let mut phpunit_major: Option<u8> = None;
         self.clear_drupal_web_roots();
         // Marked before any walk compiles the filters, so every walk sees
@@ -671,6 +676,8 @@ impl Backend {
                     any_symfony |= composer::is_symfony_project(tool_pkg);
                     any_twig |= composer::is_twig_project(tool_pkg);
                     any_yii |= composer::is_yii_project(tool_pkg);
+                    any_tempest |= composer::is_tempest_project(tool_pkg);
+                    any_tempest_database |= composer::is_tempest_database_project(tool_pkg);
                 }
                 for major in std::iter::once(sub_root.as_path())
                     .chain(bin_namespaces.iter().map(|ns| ns.root.as_path()))
@@ -702,6 +709,8 @@ impl Backend {
         self.set_is_symfony(any_symfony);
         self.set_is_twig(any_twig);
         self.set_is_yii(any_yii);
+        self.set_is_tempest(any_tempest);
+        self.set_is_tempest_database(any_tempest_database);
         self.set_phpunit_major(phpunit_major);
         self.laravel
             .gates

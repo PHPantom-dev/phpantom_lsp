@@ -359,6 +359,8 @@ mod tests {
                 drupal: false,
                 twig: true,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         )

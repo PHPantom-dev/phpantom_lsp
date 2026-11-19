@@ -41,7 +41,7 @@ function get_name(): string {
     );
     let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert!(
-        msgs.iter().any(|m| m.contains("incompatible")),
+        msgs.iter().any(|m| m.starts_with("Return expects")),
         "Expected message about incompatible return, got: {msgs:?}"
     );
 }
@@ -168,8 +168,7 @@ function get_name(): string {
     );
     let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert!(
-        msgs.iter()
-            .any(|m| m.contains("must not return without a value")),
+        msgs.iter().any(|m| m.contains("must return a value")),
         "Expected message about missing return value, got: {msgs:?}"
     );
 }
@@ -5061,7 +5060,7 @@ trait HasFactory
 "#;
     let messages: Vec<String> = messages_with_code(&collect(php), "type_mismatch_return")
         .into_iter()
-        .filter(|m| !m.starts_with("Return type null"))
+        .filter(|m| !m.ends_with("got null"))
         .collect();
     assert!(
         messages.is_empty(),
@@ -5713,7 +5712,56 @@ final class Masks
     let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert_eq!(messages.len(), 4, "got {messages:?}");
     assert!(
-        messages.iter().all(|m| m.contains("Return type int")),
+        messages.iter().all(|m| m.ends_with("got int")),
         "{messages:?}"
+    );
+}
+
+/// A property a trait leaves to its users to declare is narrowed by a type
+/// check the way a property the trait declares is.
+#[test]
+fn trait_reads_users_property_narrowed_by_type_check() {
+    let php = r#"<?php
+trait RendersContent
+{
+    /** @return string */
+    protected function rendered()
+    {
+        if (is_array($this->content)) {
+            return '';
+        }
+        return $this->content;
+    }
+
+    /** @return int */
+    protected function wrong()
+    {
+        return $this->content;
+    }
+}
+
+class First
+{
+    use RendersContent;
+    /** @var string|array */
+    protected $content;
+}
+
+class Second
+{
+    use RendersContent;
+    /** @var string|array */
+    protected $content;
+}
+"#;
+    let mismatches = messages_with_code(&collect(php), "type_mismatch_return");
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "only the unnarrowed read should be flagged, got: {mismatches:?}"
+    );
+    assert!(
+        mismatches[0].contains("string|array"),
+        "the read should be typed from the users' declarations, got: {mismatches:?}"
     );
 }

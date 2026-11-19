@@ -45,6 +45,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
         class_loader,
         tpl,
         narrowed: None,
+        defaulted: None,
         subs: tpl.subs,
     }
     .resolve(conditional)
@@ -67,6 +68,10 @@ struct TextArgs<'a> {
     /// Arrayable ? … : …)` reaches the inner condition as `null` alone,
     /// since its `User` part took the outer then branch.
     narrowed: Option<(usize, &'a PhpType)>,
+    /// The index of a parameter the call left out, whose text is its
+    /// default, written where the callee is declared rather than at the
+    /// call site.
+    defaulted: Option<usize>,
     /// What the call bound its templates to, with any template an
     /// enclosing condition tested narrowed to the part of its binding
     /// that reaches the branch being resolved.
@@ -79,6 +84,10 @@ impl TextArgs<'_> {
     fn arg_type(&self, param_idx: usize, arg: &str) -> Option<PhpType> {
         match self.narrowed {
             Some((idx, ty)) if idx == param_idx => Some(ty.clone()),
+            _ if self.defaulted == Some(param_idx) => self
+                .tpl
+                .default_type_resolver
+                .and_then(|resolve| resolve(arg, self.class_ctx.namespace)),
             _ => self.tpl.arg_type_resolver.and_then(|resolve| resolve(arg)),
         }
     }
@@ -201,6 +210,15 @@ impl TextArgs<'_> {
         let arg_text = arg_text_owned
             .as_deref()
             .or(default_text_resolved.as_deref());
+        // The default's constants are the ones the callee's namespace
+        // names, so its type is read there rather than at the call site.
+        let reader = TextArgs {
+            defaulted: default_text_resolved
+                .is_some()
+                .then_some(param_idx)
+                .or(self.defaulted),
+            ..*self
+        };
 
         let constant_values = condition_constants_as_values(&cond.condition, class_loader, tpl);
         let condition = constant_values.as_ref().unwrap_or(&cond.condition);
@@ -218,10 +236,10 @@ impl TextArgs<'_> {
 
         if matches!(condition.kind(), TypeKind::ClassString(_)) {
             let variadic_args = is_variadic.then(|| args.get(param_idx..).unwrap_or_default());
-            self.class_string_condition(cond, condition, param_idx, variadic_args, arg_text)
+            reader.class_string_condition(cond, condition, param_idx, variadic_args, arg_text)
         } else if condition.is_null() {
             let variadic_passed = is_variadic.then_some(arg_text_owned.is_some());
-            self.null_condition(cond, condition, param_idx, arg_text, variadic_passed)
+            reader.null_condition(cond, condition, param_idx, arg_text, variadic_passed)
         } else if matches!(condition.kind(), TypeKind::Literal(_)) {
             // Value condition (`$format is 0`, `$flags is 15`). A literal
             // argument settles it outright; anything else is settled by
@@ -229,17 +247,17 @@ impl TextArgs<'_> {
             // literal of its own, which is how a named constant
             // (`pathinfo($p, PATHINFO_FILENAME)`) or a local holding one
             // decides the branch it really takes.
-            self.judged_condition(cond, condition, param_idx, arg_text, |arg_ty| {
+            reader.judged_condition(cond, condition, param_idx, arg_text, |arg_ty| {
                 literal_condition_result(condition, arg_ty)
             })
         } else if let Some(parts) = class_const_condition_parts(condition) {
-            self.class_constant_condition(cond, parts, arg_text)
+            reader.class_constant_condition(cond, parts, arg_text)
         } else {
             // IsType equivalent (`$x is string`, `$x is array|string`,
             // …), decided by the argument's resolved type when its text
             // is not a literal (e.g. a method-call chain that returns
             // `string`).
-            self.judged_condition(cond, condition, param_idx, arg_text, |arg_ty| {
+            reader.judged_condition(cond, condition, param_idx, arg_text, |arg_ty| {
                 type_condition_result(arg_ty, condition, class_loader)
             })
         }

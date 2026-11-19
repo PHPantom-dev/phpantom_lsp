@@ -82,6 +82,12 @@ fn inherited_return_type(
     let Some(ref native) = existing.native_return_type else {
         return Some(inherited);
     };
+    // A union with `mixed` in it is `mixed`, which says nothing the native
+    // hint doesn't. This is what an ancestor's `@return TValue|null` becomes
+    // when the subclass leaves `TValue` unbound.
+    if inherited.union_members().iter().any(|m| m.is_mixed()) {
+        return None;
+    }
     let inherited = within_native_class(inherited, existing, ancestor, class_loader)?;
     inherited.without_alternatives_the_native_type_forbids(native)
 }

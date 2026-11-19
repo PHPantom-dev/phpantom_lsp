@@ -318,10 +318,6 @@ impl FunctionInfo {
             }
         }
 
-        if self.overloads.len() != other.overloads.len() {
-            return false;
-        }
-
-        true
+        self.overloads.len() == other.overloads.len()
     }
 }

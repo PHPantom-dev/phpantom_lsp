@@ -3,6 +3,7 @@
 //! `HandleTrait::handle()` gets back from the message's handler.
 
 use crate::common::{create_psr4_workspace, hover_text_at, open_document, split_cursor};
+use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
@@ -41,7 +42,7 @@ const STUBS: &[(&str, &str)] = &[
     ),
     (
         "stubs/dependency-injection/Loader/Configurator/ServiceConfigurator.php",
-        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ServiceConfigurator {\n    public function class(?string $class): static {}\n    public function parent(string $parent): static {}\n    public function args(array $arguments): static {}\n}\n",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ServiceConfigurator {\n    public function class(?string $class): static {}\n    public function parent(string $parent): static {}\n    public function decorate(?string $id): static {}\n    public function args(array $arguments): static {}\n}\n",
     ),
     (
         "stubs/dependency-injection/Loader/Configurator/ParametersConfigurator.php",
@@ -83,6 +84,26 @@ const STUBS: &[(&str, &str)] = &[
         "src/Service/Newsletter.php",
         "<?php\nnamespace App\\Service;\nclass Newsletter {}\n",
     ),
+    (
+        "src/Service/Notifier.php",
+        "<?php\nnamespace App\\Service;\nclass Notifier {}\n",
+    ),
+    (
+        "src/Service/LoggingNotifier.php",
+        "<?php\nnamespace App\\Service;\nclass LoggingNotifier extends Notifier {}\n",
+    ),
+    (
+        "src/Service/QueuedNotifier.php",
+        "<?php\nnamespace App\\Service;\nclass QueuedNotifier extends Notifier {}\n",
+    ),
+    (
+        "src/Service/TracingNotifier.php",
+        "<?php\nnamespace App\\Service;\nclass TracingNotifier extends Notifier {}\n",
+    ),
+    (
+        "src/Service/PhpNotifier.php",
+        "<?php\nnamespace App\\Service;\nclass PhpNotifier extends Notifier {}\n",
+    ),
 ];
 
 const SERVICES_YAML: &str = "parameters:
@@ -106,6 +127,12 @@ services:
     app.smtp_mailer:
         class: '%app.mailer_class%'
     app.unknown: ~
+    app.notifier:
+        class: App\\Service\\Notifier
+    app.logging_notifier:
+        class: App\\Service\\LoggingNotifier
+        decorates: app.notifier
+    App\\Service\\QueuedNotifier: { decorates: 'app.notifier' }
 ";
 
 const SERVICES_XML: &str = r#"<?xml version="1.0"?>
@@ -117,6 +144,7 @@ const SERVICES_XML: &str = r#"<?xml version="1.0"?>
   <services>
     <service id="app.xml_mailer" class="App\Service\Mailer"/>
     <service id="app.xml_alias" alias="app.xml_mailer"/>
+    <service id="app.tracing_notifier" class="App\Service\TracingNotifier" decorates="app.notifier"/>
   </services>
 </container>
 "#;
@@ -125,6 +153,7 @@ const SERVICES_PHP: &str = r#"<?php
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
 use App\Service\Newsletter;
+use App\Service\PhpNotifier;
 use App\Service\SmtpMailer;
 
 return static function (ContainerConfigurator $container): void {
@@ -137,6 +166,7 @@ return static function (ContainerConfigurator $container): void {
     $parameters->set('app.php_sender', 'PHPantom');
     $parameters->set('app.php_retries', 3);
     $services->set('app.php_child')->parent('app.mailer');
+    $services->set(PhpNotifier::class)->decorate('app.notifier');
 };
 "#;
 
@@ -167,6 +197,20 @@ final class MailController extends AbstractController
 /// configuration and `files` in place.
 async fn hover_in(files: &[(&str, &str)], path: &str, source: &str) -> String {
     let (stripped, position) = split_cursor(source);
+    let (backend, dir) = workspace(files, path, &stripped).await;
+    let uri = uri_for(&dir, path);
+    hover_text_at(&backend, &uri, position.line, position.character)
+        .await
+        .unwrap_or_default()
+}
+
+/// The project with its configuration, `files`, and `source` at `path`
+/// open.
+async fn workspace(
+    files: &[(&str, &str)],
+    path: &str,
+    source: &str,
+) -> (phpantom_lsp::Backend, tempfile::TempDir) {
     let mut all: Vec<(&str, &str)> = STUBS.to_vec();
     all.extend([
         ("config/services.yaml", SERVICES_YAML),
@@ -174,7 +218,7 @@ async fn hover_in(files: &[(&str, &str)], path: &str, source: &str) -> String {
         ("config/services.php", SERVICES_PHP),
     ]);
     all.extend(files);
-    all.push((path, stripped.as_str()));
+    all.push((path, source));
     let (backend, dir) = create_psr4_workspace(COMPOSER, &all);
     for (file, content) in [
         ("config/services.yaml", SERVICES_YAML),
@@ -187,11 +231,27 @@ async fn hover_in(files: &[(&str, &str)], path: &str, source: &str) -> String {
     for (file, content) in files {
         open_document(&backend, &uri_for(&dir, file), "php", content).await;
     }
-    let uri = uri_for(&dir, path);
-    open_document(&backend, &uri, "php", &stripped).await;
-    hover_text_at(&backend, &uri, position.line, position.character)
-        .await
-        .unwrap_or_default()
+    open_document(&backend, &uri_for(&dir, path), "php", source).await;
+    (backend, dir)
+}
+
+/// Replace the whole text of the open document at `uri`.
+async fn replace_text(backend: &phpantom_lsp::Backend, uri: &Uri, text: &str) {
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                text_document_identifier: TextDocumentIdentifier { uri: uri.clone() },
+                version: 2,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                    TextDocumentContentChangeWholeDocument {
+                        text: text.to_string(),
+                    },
+                ),
+            ],
+        })
+        .await;
 }
 
 fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
@@ -220,6 +280,15 @@ async fn aliases_are_followed_to_the_service_they_name() {
     }
 }
 
+/// A call chained straight off the lookup, with no variable in between,
+/// is a call on the service.
+#[tokio::test]
+async fn a_chained_service_lookup_is_typed() {
+    let hover = hover("        $container->get('app.mailer')->se§nd();").await;
+    assert!(hover.contains("Mailer"), "{hover}");
+    assert!(hover.contains("function send"), "{hover}");
+}
+
 #[tokio::test]
 async fn a_class_given_as_a_parameter_is_the_parameter_value() {
     let hover =
@@ -240,6 +309,90 @@ async fn php_configurators_declare_service_classes() {
         .await;
         assert!(shows(&hover, class), "{id}: {hover}");
     }
+}
+
+#[tokio::test]
+async fn a_decorated_service_is_also_typed_as_its_decorators() {
+    let decorated =
+        hover("        $notifier = $container->get('app.notifier');\n        $noti§fier;").await;
+    for class in [
+        "Notifier",
+        "LoggingNotifier",
+        "QueuedNotifier",
+        "TracingNotifier",
+        "PhpNotifier",
+    ] {
+        assert!(shows(&decorated, class), "{class}: {decorated}");
+    }
+
+    // The decorator's own ID keeps its own class.
+    let own =
+        hover("        $notifier = $container->get('app.logging_notifier');\n        $noti§fier;")
+            .await;
+    assert!(shows(&own, "LoggingNotifier"), "{own}");
+}
+
+#[tokio::test]
+async fn editing_a_declaration_retypes_the_lookup() {
+    let source = "<?php
+namespace App\\Controller;
+
+use Symfony\\Component\\DependencyInjection\\ContainerInterface;
+
+final class MailController
+{
+    public function send(ContainerInterface $container): void
+    {
+        $mailer = $container->get('app.mailer');
+        $newsletter = $container->get('app.newsletter');
+        $notifier = $container->get('app.notifier');
+        $mailer;
+        $newsletter;
+        $notifier;
+    }
+}
+";
+    let path = "src/Controller/MailController.php";
+    let (backend, dir) = workspace(&[], path, source).await;
+    let uri = uri_for(&dir, path);
+    let hover_on = |line: u32| {
+        let backend = &backend;
+        let uri = &uri;
+        async move {
+            hover_text_at(backend, uri, line, 10)
+                .await
+                .unwrap_or_default()
+        }
+    };
+    assert!(shows(&hover_on(12).await, "Mailer"));
+    assert!(shows(&hover_on(13).await, "Newsletter"));
+    assert!(hover_on(14).await.contains("LoggingNotifier"));
+
+    // A YAML definition naming another class.
+    let yaml = SERVICES_YAML.replacen(
+        "class: App\\Service\\Mailer",
+        "class: App\\Service\\Newsletter",
+        1,
+    );
+    replace_text(&backend, &uri_for(&dir, "config/services.yaml"), &yaml).await;
+    let mailer = hover_on(12).await;
+    assert!(shows(&mailer, "Newsletter"), "{mailer}");
+
+    // A configurator call, whose receiver the type engine confirms.
+    let php = SERVICES_PHP.replace(
+        "set('app.newsletter', Newsletter::class)",
+        "set('app.newsletter', SmtpMailer::class)",
+    );
+    replace_text(&backend, &uri_for(&dir, "config/services.php"), &php).await;
+    let newsletter = hover_on(13).await;
+    assert!(shows(&newsletter, "SmtpMailer"), "{newsletter}");
+
+    // A decoration dropped.
+    let yaml = yaml.replacen("        decorates: app.notifier\n", "", 1);
+    replace_text(&backend, &uri_for(&dir, "config/services.yaml"), &yaml).await;
+    let notifier = hover_on(14).await;
+    assert!(!notifier.contains("LoggingNotifier"), "{notifier}");
+    assert!(notifier.contains("QueuedNotifier"), "{notifier}");
 }
 
 #[tokio::test]

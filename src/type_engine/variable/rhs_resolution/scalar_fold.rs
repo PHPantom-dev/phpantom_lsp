@@ -154,10 +154,19 @@ pub(super) fn is_cheap_scalar_operand(expr: &Expression<'_>) -> bool {
     match expr {
         Expression::Parenthesized(inner) => is_cheap_scalar_operand(inner.expression),
         Expression::Literal(_)
+        | Expression::MagicConstant(_)
         | Expression::Variable(Variable::Direct(_))
         | Expression::ConstantAccess(_)
         | Expression::Access(Access::ClassConstant(_))
         | Expression::CompositeString(_) => true,
+        Expression::Call(mago_syntax::cst::Call::Function(call)) => {
+            matches!(call.function, Expression::Identifier(name) if crate::type_engine::variable::string_func_rules::has_string_func_rule(bytes_to_str(name.value())))
+                && call
+                    .argument_list
+                    .arguments
+                    .iter()
+                    .all(|argument| is_cheap_scalar_operand(argument.value()))
+        }
         Expression::Binary(binary) => binary.operator.is_concatenation(),
         Expression::UnaryPrefix(unary) => {
             let folds = match unary.operator {

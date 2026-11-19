@@ -9,7 +9,7 @@
 //! ```sh
 //! phpantom_lsp fix                              # apply all preferred native fixers
 //! phpantom_lsp fix --rule unused_import          # only remove unused imports
-//! phpantom_lsp fix --rule unused_import --rule deprecated  # multiple rules
+//! phpantom_lsp fix --rule unused_import --rule deprecated_usage  # multiple rules
 //! phpantom_lsp fix --dry-run                     # show what would change without writing
 //! phpantom_lsp fix src/                          # restrict to a subdirectory
 //! phpantom_lsp fix src/Foo.php                   # fix a single file
@@ -27,7 +27,7 @@
 //! 4. **Write** — write modified files back to disk (unless `--dry-run`).
 //!
 //! Rules are identified by their diagnostic code string. Native rules
-//! use bare identifiers (`unused_import`, `deprecated`). PHPStan-based
+//! use bare identifiers (`unused_import`, `deprecated_usage`). PHPStan-based
 //! rules use a `phpstan.` prefix (`phpstan.return.unusedType`). PHPStan
 //! rules are only available when `--with-phpstan` is passed.
 
@@ -104,7 +104,7 @@ struct FileFixResult {
 ///
 /// They run in this order, each on the text the one before left: a
 /// replaced deprecated call can leave an import unused.
-const NATIVE_RULES: &[&str] = &["deprecated", "unused_import"];
+const NATIVE_RULES: &[&str] = &["deprecated_usage", "unused_import"];
 
 /// Check whether a rule identifier refers to a PHPStan-based fixer.
 fn is_phpstan_rule(rule: &str) -> bool {
@@ -239,7 +239,7 @@ pub fn fix_deprecated(backend: &Backend, uri: &str, content: &str) -> (String, V
     loop {
         // A template's calls are found in the virtual PHP it lowers to,
         // and each rewrite is moved back into the template's own text.
-        let template = if backend.is_blade_file(uri) {
+        let template = if backend.is_php_template(uri) {
             let Some(template) = backend.template_text_of(uri, &current) else {
                 break;
             };
@@ -279,7 +279,7 @@ pub fn fix_deprecated(backend: &Backend, uri: &str, content: &str) -> (String, V
                 None => call.range,
             };
             fixes.push(AppliedFix {
-                rule: "deprecated".to_string(),
+                rule: "deprecated_usage".to_string(),
                 line: range.start.line + 1,
                 description: call.title(),
             });
@@ -385,7 +385,7 @@ pub async fn run(options: FixOptions) -> i32 {
                     backend.update_ast(uri, &current_content);
                 }
                 let (new_content, fixes) = match *rule {
-                    "deprecated" => fix_deprecated(&backend, uri, &current_content),
+                    "deprecated_usage" => fix_deprecated(&backend, uri, &current_content),
                     "unused_import" => fix_unused_imports(&backend, uri, &current_content),
                     _ => continue,
                 };

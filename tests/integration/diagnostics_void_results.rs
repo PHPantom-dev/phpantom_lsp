@@ -14,7 +14,7 @@ fn collect(php: &str) -> Vec<Diagnostic> {
     out.retain(|d| {
         d.code
             .as_ref()
-            .is_some_and(|c| matches!(c, Code::String(s) if s == "void_result_used"))
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "used_void_result"))
     });
     out
 }
@@ -41,7 +41,7 @@ $flushed = flush();
     assert_eq!(d.range.end, Position::new(3, 18));
     assert_eq!(
         message_text(&d.message),
-        "Result of function flush() (void) is used"
+        "Result of function flush() is used, but it returns void"
     );
 }
 
@@ -189,7 +189,7 @@ $d = $mailer->id();
     assert_eq!(got, vec![11, 16, 17, 18], "got {diags:?}");
     assert_eq!(
         message_text(&diags[0].message),
-        "Result of method Mailer::send() (void) is used"
+        "Result of method Mailer::send() is used, but it returns void"
     );
 }
 

@@ -125,38 +125,51 @@ fn closure_text(af: &function_like::arrow_function::ArrowFunction<'_>, content: 
 /// anonymous class only its constructor arguments.  The `$name` in
 /// `Foo::$name` is a static property, not a variable.
 fn collect_outer_variables(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     content: &str,
     params: &HashSet<String>,
     out: &mut Vec<String>,
 ) {
-    match node {
-        Node::DirectVariable(variable) => {
-            let name = source_text(content, variable.span());
-            if name != "$this" && !AUTO_GLOBALS.contains(&name) && !params.contains(name) {
-                out.push(name.to_string());
+    crate::parser::walk_nodes(root, |node| {
+        match node {
+            Node::DirectVariable(variable) => {
+                let name = source_text(content, variable.span());
+                if name != "$this" && !AUTO_GLOBALS.contains(&name) && !params.contains(name) {
+                    out.push(name.to_string());
+                }
             }
-        }
-        Node::ArrowFunction(af) => {
-            let mut inner = params.clone();
-            inner.extend(parameter_names(&af.parameter_list, content));
-            collect_outer_variables(Node::Expression(af.expression), content, &inner, out);
-        }
-        Node::Closure(closure) => {
-            if let Some(use_clause) = &closure.use_clause {
-                collect_outer_variables(Node::ClosureUseClause(use_clause), content, params, out);
+            Node::ArrowFunction(af) => {
+                let mut inner = params.clone();
+                inner.extend(parameter_names(&af.parameter_list, content));
+                collect_outer_variables(Node::Expression(af.expression), content, &inner, out);
             }
-        }
-        Node::AnonymousClass(class) => {
-            if let Some(arguments) = &class.argument_list {
-                collect_outer_variables(Node::PartialArgumentList(arguments), content, params, out);
+            Node::Closure(closure) => {
+                if let Some(use_clause) = &closure.use_clause {
+                    collect_outer_variables(
+                        Node::ClosureUseClause(use_clause),
+                        content,
+                        params,
+                        out,
+                    );
+                }
             }
+            Node::AnonymousClass(class) => {
+                if let Some(arguments) = &class.argument_list {
+                    collect_outer_variables(
+                        Node::PartialArgumentList(arguments),
+                        content,
+                        params,
+                        out,
+                    );
+                }
+            }
+            Node::StaticPropertyAccess(access) => {
+                collect_outer_variables(Node::Expression(access.class), content, params, out);
+            }
+            _ => return true,
         }
-        Node::StaticPropertyAccess(access) => {
-            collect_outer_variables(Node::Expression(access.class), content, params, out);
-        }
-        _ => node.visit_children(|child| collect_outer_variables(child, content, params, out)),
-    }
+        false
+    });
 }
 
 /// The names of a parameter list's parameters, `$` included.

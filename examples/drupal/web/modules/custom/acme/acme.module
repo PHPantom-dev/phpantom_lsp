@@ -8,6 +8,8 @@
 declare(strict_types=1);
 
 use Drupal\acme\Greeter;
+use Drupal\Component\EventDispatcher\Event;
+use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 
 /**
@@ -35,7 +37,8 @@ function acme_help(string $route_name, RouteMatchInterface $route_match): ?strin
     if ($route_name === 'help.page.acme' && $route_match->getParameter('name') === 'acme') {
         // Try: hover `$greeter`, typed by the class acme.services.yml
         // declares, or go to the definition of 'acme.greeter'. Complete a
-        // service ID inside `\Drupal::service('')`.
+        // service ID inside `\Drupal::service('')`. Misspell it as
+        // 'acme.greeterr' and a warning reports a service nothing declares.
         $greeter = \Drupal::service('acme.greeter');
         // Try: hover `$sameGreeter`. acme.services.yml also registers the
         // service under its class name, and a lookup by class name is typed
@@ -64,4 +67,44 @@ function acme_french_site_name(): ?string
     $name = $languageManager->getLanguageConfigOverride('fr', 'system.site')->get('name');
 
     return is_string($name) ? $name : null;
+}
+
+/**
+ * How many seconds the current request has run.
+ */
+function acme_request_age(): int
+{
+    // Try: hover `$clock`. core.services.yml builds datetime.time from
+    // Time, and acme.services.yml decorates it with RequestClock, so it is
+    // either class. Go to the definition of secondsSinceRequest(), which
+    // only RequestClock declares.
+    $clock = \Drupal::service('datetime.time');
+
+    return $clock->secondsSinceRequest();
+}
+
+/**
+ * Submit handler of GreetingForm, which names it in its `#submit` list.
+ *
+ * @param array<string, mixed> $form
+ */
+function acme_greeting_form_submit(array &$form, FormStateInterface $form_state): void
+{
+    // Try: find the references of acme_greeting_form_submit(), which list
+    // the string in GreetingForm::buildForm().
+    \Drupal::logger('acme')->info('Greeted @name.', ['@name' => $form_state->getValue('name')]);
+}
+
+/**
+ * Tells the module's subscribers a visitor has been greeted.
+ */
+function acme_announce_greeting(): void
+{
+    // Try: go to the definition of 'acme.greeted', which offers the
+    // constant GreetingEvents::GREETED first, then the key of
+    // GreetingSubscriber that subscribes by it. Hover it to see how many
+    // listeners subscribe, or find its references, the constant's included.
+    // Complete an event name inside the quotes: the names the subscribers'
+    // constant keys hold are offered.
+    \Drupal::service('event_dispatcher')->dispatch(new Event(), 'acme.greeted');
 }

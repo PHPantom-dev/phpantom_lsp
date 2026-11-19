@@ -1,5 +1,5 @@
 //! Quick-fixes for a PHPUnit data provider: add the `public` or `static`
-//! modifier the `invalid_data_provider` diagnostic reports missing, and
+//! modifier the `invalid_phpunit_data_provider` diagnostic reports missing, and
 //! create a provider the test names but does not declare.
 //!
 //! Both edit this file only: a provider declared in another file (an

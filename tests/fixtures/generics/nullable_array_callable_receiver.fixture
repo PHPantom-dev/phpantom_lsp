@@ -1,0 +1,17 @@
+// test: a nullable array callable receiver keeps its generic result
+// feature: hover
+// expect: $result = Book
+---
+<?php
+class Book {}
+/** @template T */
+class Box {
+    /** @return T */
+    public function get() {}
+}
+/** @param ?Box<Book> $box */
+function read(?Box $box): void {
+    $callback = [$box, 'get'];
+    $result = $callback();
+    $<>result;
+}

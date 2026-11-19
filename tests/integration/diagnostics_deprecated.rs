@@ -433,12 +433,12 @@ class Consumer {
     let diags = deprecated_diagnostics(&backend, uri, text);
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
-    // Should say "'Legacy' is deprecated" without a trailing colon/message
+    // Should say "Class Legacy is deprecated" without a trailing colon/message
     assert!(
         deprecated
             .iter()
-            .any(|d| message_text(&d.message) == "'Legacy' is deprecated"),
-        "Expected message to be exactly \"'Legacy' is deprecated\", got: {:?}",
+            .any(|d| message_text(&d.message) == "Class Legacy is deprecated"),
+        "Expected message to be exactly \"Class Legacy is deprecated\", got: {:?}",
         deprecated.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
@@ -2256,7 +2256,7 @@ $pdo->sqliteCreateFunction('foo', function () {});
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("'PDO::sqliteCreateFunction'")),
+            .any(|m| m.contains("Method PDO::sqliteCreateFunction()")),
         "Deprecation should name the global PDO class, got: {:?}",
         messages
     );
@@ -2667,7 +2667,7 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| message_text(&d.message).contains("see:")
+            .any(|d| message_text(&d.message).contains("; see ")
                 && message_text(&d.message).contains("NewHelper")),
         "Expected @see reference in deprecated diagnostic message, got: {:?}",
         deprecated
@@ -2704,7 +2704,7 @@ class App {
         deprecated
             .iter()
             .any(|d| message_text(&d.message).contains("sendLegacy")
-                && message_text(&d.message).contains("see:")
+                && message_text(&d.message).contains("; see ")
                 && message_text(&d.message).contains("Mailer::sendAsync()")),
         "Expected @see reference in deprecated method diagnostic, got: {:?}",
         deprecated
@@ -2736,13 +2736,13 @@ class Consumer {
         !deprecated.is_empty(),
         "Expected at least one deprecated diagnostic"
     );
-    // With bare @deprecated + @see, the message should show "See: NewClass"
+    // With bare @deprecated + @see, the message should show "see NewClass"
     assert!(
         deprecated
             .iter()
-            .any(|d| message_text(&d.message).contains("See:")
+            .any(|d| message_text(&d.message).contains("; see ")
                 && message_text(&d.message).contains("NewClass")),
-        "Expected 'See: NewClass' in diagnostic for bare @deprecated + @see, got: {:?}",
+        "Expected 'see NewClass' in diagnostic for bare @deprecated + @see, got: {:?}",
         deprecated
     );
 }
@@ -2779,7 +2779,7 @@ class App {
     assert!(
         deprecated
             .iter()
-            .any(|d| message_text(&d.message).contains("see:")
+            .any(|d| message_text(&d.message).contains("; see ")
                 && message_text(&d.message).contains("number_of()")),
         "Expected @see references in deprecated method diagnostic, got: {:?}",
         deprecated
@@ -2809,15 +2809,15 @@ class Consumer {
         deprecated
             .iter()
             .any(|d| message_text(&d.message).contains("Use NewApi instead")),
-        "Expected deprecation reason without 'see:' when no @see tags, got: {:?}",
+        "Expected deprecation reason without 'see' when no @see tags, got: {:?}",
         deprecated
     );
-    // Should NOT contain "see:" since there are no @see tags
+    // Should NOT contain "see" since there are no @see tags
     assert!(
         deprecated
             .iter()
-            .all(|d| !message_text(&d.message).contains("see:")),
-        "Should not contain 'see:' when no @see tags, got: {:?}",
+            .all(|d| !message_text(&d.message).contains("; see ")),
+        "Should not contain 'see' when no @see tags, got: {:?}",
         deprecated
     );
 }
@@ -2846,7 +2846,7 @@ class App {
     assert!(
         deprecated
             .iter()
-            .any(|d| message_text(&d.message).contains("See:")
+            .any(|d| message_text(&d.message).contains("; see ")
                 && message_text(&d.message).contains("newFunction()")),
         "Expected @see reference in deprecated function diagnostic, got: {:?}",
         deprecated
@@ -2883,7 +2883,7 @@ class App {
         deprecated
             .iter()
             .any(|d| message_text(&d.message).contains("oldSetting")
-                && message_text(&d.message).contains("see:")
+                && message_text(&d.message).contains("; see ")
                 && message_text(&d.message).contains("Config::$newSetting")),
         "Expected @see reference in deprecated property diagnostic, got: {:?}",
         deprecated
@@ -2919,7 +2919,7 @@ class App {
         deprecated
             .iter()
             .any(|d| message_text(&d.message).contains("OLD_FLAG")
-                && message_text(&d.message).contains("See:")
+                && message_text(&d.message).contains("; see ")
                 && message_text(&d.message).contains("Features::NEW_FLAG")),
         "Expected @see reference in deprecated constant diagnostic, got: {:?}",
         deprecated

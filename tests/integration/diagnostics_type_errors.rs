@@ -283,6 +283,65 @@ function test(): void {
     );
 }
 
+// ─── Argument whose class does not load ─────────────────────────────────────
+
+#[test]
+fn no_diagnostic_for_unloadable_class_passed_to_interface() {
+    // Nothing is known of the missing class's interfaces, so whether it
+    // implements the parameter's cannot be decided.
+    let php = r#"<?php
+namespace App;
+
+use Vendor\Missing\TestLogger;
+
+interface LoggerInterface {}
+
+class Factory {
+    public function addLogger(LoggerInterface $logger): void {}
+    public function addNullable(?LoggerInterface $logger): void {}
+}
+
+function test(Factory $factory): void {
+    $logger = new TestLogger();
+    $factory->addLogger($logger);
+    $factory->addNullable($logger);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "An unloadable class should leave the subtype check undecided, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_unloadable_class_where_it_cannot_fit() {
+    // A final class has no subclasses, and an object is never an int, so
+    // these stay mismatches however the missing class is declared.
+    let php = r#"<?php
+namespace App;
+
+use Vendor\Missing\TestLogger;
+
+final class Sealed {}
+
+function takes_sealed(Sealed $s): void {}
+function takes_int(int $n): void {}
+
+function test(): void {
+    $logger = new TestLogger();
+    takes_sealed($logger);
+    takes_int($logger);
+}
+"#;
+    let diags = collect(php);
+    assert_eq!(
+        type_error_count(&diags),
+        2,
+        "Expected mismatches for the final class and int parameters, got: {diags:?}"
+    );
+}
+
 // ─── No diagnostic: mixed parameter accepts anything ────────────────────────
 
 #[test]
@@ -1325,6 +1384,10 @@ fn message_always_shows_fqn() {
     // namespace which is the very information needed to resolve a
     // mismatch.
     let php = r#"<?php
+namespace Vendor { class Foo {} }
+namespace App { class Foo {} }
+
+namespace {
 /** @param \Vendor\Foo $f */
 function takes_vendor(\Vendor\Foo $f): void {}
 
@@ -1332,6 +1395,7 @@ function test(): void {
     /** @var \App\Foo $f */
     $f = null;
     takes_vendor($f);
+}
 }
 "#;
     let diags = collect(php);
@@ -2447,7 +2511,7 @@ function test(): void {
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
-        messages[0].contains("void") && messages[0].contains("returns no value"),
+        messages[0].contains("void") && messages[0].contains("returns nothing"),
         "the message should say the expression yields nothing, got {messages:?}"
     );
 }
@@ -4395,7 +4459,7 @@ function test(): void {
     takes_user($o);
 }
 "#;
-    let diags = collect(php);
+    let diags = collect_with_full_stubs(php);
     assert!(
         has_type_error(&diags),
         "Should flag stdClass passed to unrelated class param, got: {diags:?}"
@@ -17791,4 +17855,76 @@ function rewritten(string $delay, string $other): void {
         .map(|d| d.range.start.line)
         .collect();
     assert_eq!(lines, vec![25, 32, 38], "got: {diags:?}");
+}
+
+/// The non-negative cast survives being assigned to a variable first.
+#[test]
+fn int_cast_of_a_ctype_digit_checked_value_assigned_to_a_variable_is_non_negative() {
+    let php = r#"<?php
+namespace App;
+
+function inBody(string $delay): void {
+    if (ctype_digit($delay)) {
+        $seconds = (int) $delay;
+        sleep($seconds);
+    }
+}
+
+function guarded(string $delay): void {
+    if (!ctype_digit($delay)) {
+        return;
+    }
+    $seconds = (int) $delay;
+    sleep($seconds);
+}
+
+function unchecked(string $delay): void {
+    $seconds = (int) $delay;
+    sleep($seconds);
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    let lines: Vec<u32> = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "type_mismatch_argument"))
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(lines, vec![20], "got: {diags:?}");
+}
+
+/// A constant named in a class constant's initializer is never looked up
+/// through the reading file's namespace.
+#[test]
+fn constant_initializer_does_not_read_constants_through_the_readers_namespace() {
+    use crate::common::create_psr4_workspace;
+
+    let caller = r#"<?php
+namespace App;
+
+const LIMIT = 'text';
+
+function takes(array $a): void {}
+
+function test(): void {
+    takes(\Lib\Box::MAX);
+}
+"#;
+    let files = vec![
+        (
+            "src/Lib/Box.php",
+            "<?php\nnamespace Lib;\n\nconst LIMIT = 5;\n\nclass Box\n{\n    const MAX = LIMIT;\n}\n",
+        ),
+        ("src/App/run.php", caller),
+    ];
+    let composer = r#"{"autoload":{"psr-4":{"Lib\\":"src/Lib/","App\\":"src/App/"}}}"#;
+    let (backend, dir) = create_psr4_workspace(composer, &files);
+    let uri = crate::common::file_uri(&dir.path().join("src/App/run.php"));
+    backend.update_ast(&uri, caller);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(&uri, caller, &mut diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        msgs.iter().all(|m| !m.contains("'text'")),
+        "`Lib\\Box`'s initializers are not read in `App`'s namespace, got: {msgs:?}"
+    );
 }

@@ -67,11 +67,7 @@ impl Backend {
             _ => return HashMap::new(),
         };
 
-        let callee = super::TemplateCallee {
-            parameters: &method.parameters,
-            template_bindings: method.template_bindings(),
-            template_param_bounds: method.template_param_bounds(),
-        };
+        let callee = super::TemplateCallee::of_method(&method);
         let mut subs = super::bind_template_args(&callee, arg_texts, None, ctx);
 
         finish_template_subs(

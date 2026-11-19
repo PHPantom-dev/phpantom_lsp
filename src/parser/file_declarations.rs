@@ -102,7 +102,7 @@ impl Backend {
                 Statement::Function(func)
                     if bytes_to_str(func.name.value) == crate::blade::WRAPPER_FUNCTION =>
                 {
-                    Self::extract_use_statements_from_statements(
+                    Self::extract_template_use_statements(
                         func.body.statements.iter(),
                         &mut context.use_map,
                         Some(&mut decls.symbol_imports),

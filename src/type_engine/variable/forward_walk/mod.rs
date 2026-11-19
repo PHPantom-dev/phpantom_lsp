@@ -255,8 +255,8 @@ pub(crate) type WalkMemoGuard =
 
 /// Activate [`WALK_MEMO`] for the current thread.  Nested activation is a
 /// no-op.
-pub(crate) fn with_walk_memo() -> WalkMemoGuard {
-    crate::type_engine::activate_memo(&WALK_MEMO)
+pub(crate) fn with_walk_memo(scope: crate::type_engine::MemoScope) -> WalkMemoGuard {
+    crate::type_engine::activate_memo(&WALK_MEMO, scope)
 }
 
 /// The scope a walk of the body spanning `body` reaches the cursor with:
@@ -439,7 +439,7 @@ pub(crate) fn top_level_scope_for_globals<'b>(
     );
     walked_scope(ctx, span, || {
         let mut scope = ScopeState::new();
-        seed_superglobals(&mut scope);
+        seed_top_level(&mut scope, ctx);
         walk_top_level(&statements, &mut scope, ctx);
         scope
     })

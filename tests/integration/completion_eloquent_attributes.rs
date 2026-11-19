@@ -4,6 +4,7 @@ use crate::common::{
     complete_at, create_psr4_workspace, item_labels, position_after, split_cursor,
 };
 use phpantom_lsp::Backend;
+use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemTextEdit, Range, Uri,
 };
@@ -40,6 +41,8 @@ namespace Illuminate\Database\Eloquent;
 class Builder {
     /** @return $this */
     public function where($column, $operator = null, $value = null) { return $this; }
+    /** @return $this */
+    public function orderBy($column, $direction = 'asc') { return $this; }
     /** @return TModel */
     public function create(array $attributes = []) {}
     /** @return TModel */
@@ -115,6 +118,10 @@ fn workspace_with_models(account: &str, user: &str) -> (Backend, tempfile::TempD
         &[
             ("framework/Model.php", MODEL),
             ("framework/Builder.php", BUILDER),
+            (
+                "framework/Casts/Attribute.php",
+                "<?php namespace Illuminate\\Database\\Eloquent\\Casts; /** @template TGet @template TSet */ class Attribute { public function __construct(?callable $get = null, ?callable $set = null) {} public static function make(?callable $get = null, ?callable $set = null): static {} public static function get(callable $get): static {} public static function set(callable $set): static {} public function shouldCache(): static {} }",
+            ),
             ("framework/Relations/HasMany.php", HAS_MANY),
             (
                 "framework/Relations/Pivot.php",
@@ -156,21 +163,20 @@ async fn attribute_arrays_offer_inherited_and_local_column_sources() {
     let (backend, _dir, uri) = workspace();
     let items = complete_statement(&backend, &uri, "User::create(['§' => 'Ada']);").await;
     let labels = item_labels(items);
-    for column in [
-        "name",
-        "email",
-        "age",
-        "status",
-        "locked",
-        "tenant_id",
-        "display_name",
-    ] {
+    for column in ["name", "email", "age", "status", "locked", "tenant_id"] {
         assert!(
             labels.iter().any(|label| label == column),
             "missing {column}: {labels:?}"
         );
     }
-    for non_column in ["fillable", "guarded", "casts", "attributes", "posts"] {
+    for non_column in [
+        "fillable",
+        "guarded",
+        "casts",
+        "attributes",
+        "posts",
+        "display_name",
+    ] {
         assert!(
             !labels.iter().any(|label| label == non_column),
             "offered {non_column}: {labels:?}"
@@ -456,7 +462,6 @@ class User extends Account {
             "secret",
             "token",
             "public_name",
-            "display_name",
             "local",
         ] {
             assert!(
@@ -465,6 +470,7 @@ class User extends Account {
             );
         }
         assert!(!items.iter().any(|item| item.label == "name"));
+        assert!(!items.iter().any(|item| item.label == "display_name"));
         if !statement.contains("where") {
             for name in ["nickname", "email", "local"] {
                 assert_eq!(
@@ -581,6 +587,301 @@ async fn model_column_attributes_respect_guarded_property_and_unguarded_preceden
         );
         assert!(!items.iter().any(|item| item.label == "*"));
     }
+}
+
+const ACCESSOR_MODEL: &str = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Casts\Attribute as Value;
+use Illuminate\Database\Eloquent\Attributes as Columns;
+/** @property-read string $legacy_only */
+#[Columns\Fillable(['fillable_column', 'overlapping'])]
+#[Columns\Appends(['attribute_only', 'overlapping'])]
+class User extends Account {
+    protected $casts = ['cast_column' => 'string'];
+    protected $attributes = ['default_column' => 'default'];
+    protected $hidden = ['hidden_computed', 'hidden_column'];
+    protected $visible = ['visible_computed', 'visible_column'];
+    protected $appends = ['legacy_only', 'modern_only', 'appended_unknown', 'overlapping'];
+
+    public function getLegacyOnlyAttribute(): string { return 'computed'; }
+    protected function modernOnly(): Value { return Value::make(get: fn () => 'computed'); }
+    protected function getterFactory(): Value { return Value::get(fn () => 'computed'); }
+    protected function nullSetter(): Value { return Value::make(set: null, get: fn () => 'computed'); }
+    public function getHiddenComputedAttribute(): string { return 'computed'; }
+    public function getVisibleComputedAttribute(): string { return 'computed'; }
+    public function getNameAttribute(): string { return 'stored'; }
+    public function getCastColumnAttribute(): string { return 'stored'; }
+    public function getDefaultColumnAttribute(): string { return 'stored'; }
+    public function getFillableColumnAttribute(): string { return 'stored'; }
+
+    public function getLegacyWritableAttribute(): string { return 'writable'; }
+    public function setLegacyWritableAttribute($value): void { $this->attributes['name'] = $value; }
+    protected function modernWritable(): Value { return Value::make(get: fn () => 'writable', set: fn ($value) => ['name' => $value]); }
+    protected function setterFactory(): Value { return Value::set(set: fn ($value) => ['name' => $value]); }
+    protected function positionalSetter(): Value { return Value::make(null, fn ($value) => ['name' => $value]); }
+    protected function constructorSetter(): Value { return new Value(set: fn ($value) => ['name' => $value]); }
+    protected function chainedSetter(): Value { return (Value::make(set: fn ($value) => ['name' => $value]))->shouldCache(); }
+    /** @return Value<string, string> */
+    protected function documentedSetter(): Value { return $this->attributeFactory(); }
+}
+"#;
+
+#[tokio::test]
+async fn computed_accessors_do_not_complete_as_query_columns() {
+    let (backend, _dir, uri) = workspace_with_models(ACCOUNT, ACCESSOR_MODEL);
+    for statement in ["User::where('§', 1);", "$query->orderBy('§');"] {
+        let items = item_labels(complete_statement(&backend, &uri, statement).await);
+        for column in [
+            "name",
+            "email",
+            "cast_column",
+            "default_column",
+            "fillable_column",
+            "hidden_column",
+            "visible_column",
+            "overlapping",
+        ] {
+            assert!(
+                items.iter().any(|item| item == column),
+                "missing {column}: {items:?}"
+            );
+        }
+        for computed in [
+            "legacy_only",
+            "modern_only",
+            "getter_factory",
+            "null_setter",
+            "hidden_computed",
+            "visible_computed",
+            "appended_unknown",
+            "attribute_only",
+            "legacy_writable",
+            "modern_writable",
+            "setter_factory",
+            "positional_setter",
+            "constructor_setter",
+            "chained_setter",
+            "documented_setter",
+        ] {
+            assert!(
+                !items.iter().any(|item| item == computed),
+                "offered {computed}: {items:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn computed_accessors_do_not_create_dynamic_where_methods() {
+    let (backend, _dir, uri) = workspace_with_models(ACCOUNT, ACCESSOR_MODEL);
+    for statement in ["User::where§", "$query->where§"] {
+        let items = complete_statement(&backend, &uri, statement).await;
+        let names: Vec<_> = items
+            .iter()
+            .map(|item| item.filter_text.as_deref().unwrap_or(&item.label))
+            .collect();
+        for column in [
+            "whereName",
+            "whereCastColumn",
+            "whereDefaultColumn",
+            "whereFillableColumn",
+        ] {
+            assert!(
+                names.iter().any(|name| name.starts_with(column)),
+                "missing {column}: {names:?}"
+            );
+        }
+        for computed in [
+            "whereLegacyOnly",
+            "whereModernOnly",
+            "whereHiddenComputed",
+            "whereVisibleComputed",
+            "whereLegacyWritable",
+            "whereModernWritable",
+            "whereAppendedUnknown",
+            "whereAttributeOnly",
+        ] {
+            assert!(
+                !names.iter().any(|name| name.starts_with(computed)),
+                "offered {computed}: {names:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn computed_accessors_with_setters_complete_in_attribute_arrays() {
+    let (backend, _dir, uri) = workspace_with_models(ACCOUNT, ACCESSOR_MODEL);
+    for statement in ["User::create(['§']);", "$user->fill(['§']);"] {
+        let items = item_labels(complete_statement(&backend, &uri, statement).await);
+        for writable in [
+            "name",
+            "cast_column",
+            "default_column",
+            "fillable_column",
+            "legacy_writable",
+            "modern_writable",
+            "setter_factory",
+            "positional_setter",
+            "constructor_setter",
+            "chained_setter",
+            "documented_setter",
+        ] {
+            assert!(
+                items.iter().any(|item| item == writable),
+                "missing {writable}: {items:?}"
+            );
+        }
+        for readonly in [
+            "legacy_only",
+            "modern_only",
+            "getter_factory",
+            "null_setter",
+            "hidden_computed",
+            "visible_computed",
+            "appended_unknown",
+            "attribute_only",
+        ] {
+            assert!(
+                !items.iter().any(|item| item == readonly),
+                "offered {readonly}: {items:?}"
+            );
+        }
+    }
+    // The lookup array is queried before it is assigned, so it takes
+    // columns only; the values array takes writable attributes.
+    let lookup =
+        item_labels(complete_statement(&backend, &uri, "User::firstOrCreate(['§']);").await);
+    assert!(lookup.iter().any(|item| item == "name"), "{lookup:?}");
+    assert!(
+        !lookup.iter().any(|item| item == "modern_writable"),
+        "{lookup:?}"
+    );
+    let values =
+        item_labels(complete_statement(&backend, &uri, "User::firstOrCreate([], ['§']);").await);
+    assert!(
+        values.iter().any(|item| item == "modern_writable"),
+        "{values:?}"
+    );
+}
+
+#[tokio::test]
+async fn computed_accessors_remain_model_properties() {
+    let (backend, _dir, uri) = workspace_with_models(ACCOUNT, ACCESSOR_MODEL);
+    let items = item_labels(complete_statement(&backend, &uri, "$user->§").await);
+    for property in [
+        "legacy_only",
+        "modern_only",
+        "getter_factory",
+        "hidden_computed",
+        "visible_computed",
+    ] {
+        assert!(
+            items.iter().any(|item| item == property),
+            "missing {property}: {items:?}"
+        );
+    }
+    assert!(!items.iter().any(|item| item == "appended_unknown"));
+    assert!(!items.iter().any(|item| item == "attribute_only"));
+}
+
+#[tokio::test]
+async fn computed_accessor_setter_changes_refresh_completions() {
+    let (backend, dir, uri) = workspace_with_models(ACCOUNT, ACCESSOR_MODEL);
+    let statement = "$user->fill(['modern_§']);";
+    assert_eq!(
+        item_labels(complete_statement(&backend, &uri, statement).await),
+        ["modern_writable"]
+    );
+    let changed = ACCESSOR_MODEL.replace(
+        "get: fn () => 'writable', set: fn ($value) => ['name' => $value]",
+        "get: fn () => 'writable'",
+    );
+    let model_uri = Uri::from_file_path(dir.path().join("app/Models/User.php")).unwrap();
+    crate::common::open_php(&backend, &model_uri, &changed).await;
+    assert!(
+        complete_statement(&backend, &uri, statement)
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn computed_accessors_preserve_schema_backed_columns() {
+    let user = "<?php namespace App\\Models; class User extends Account { public function getSchemaColumnAttribute(): string { return 'stored'; } }";
+    let (backend, dir, uri) = workspace_with_models(ACCOUNT, user);
+    std::fs::create_dir_all(dir.path().join("config")).unwrap();
+    std::fs::create_dir_all(dir.path().join("database/migrations")).unwrap();
+    std::fs::write(dir.path().join("config/database.php"), "<?php return ['default' => 'sqlite', 'connections' => ['sqlite' => ['driver' => 'sqlite']]];").unwrap();
+    std::fs::write(
+        dir.path()
+            .join("database/migrations/2026_01_01_create_users.php"),
+        r#"<?php
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\Schema\Blueprint;
+return new class extends \Illuminate\Database\Migrations\Migration {
+    public function up(): void {
+        Schema::create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('schema_column');
+        });
+    }
+};
+"#,
+    )
+    .unwrap();
+    backend
+        .initialized(tower_lsp_server::gen_lsp_types::InitializedParams {})
+        .await;
+    for statement in ["User::where('schema_§', 1);", "$user->fill(['schema_§']);"] {
+        assert_eq!(
+            item_labels(complete_statement(&backend, &uri, statement).await),
+            ["schema_column"]
+        );
+    }
+}
+
+#[tokio::test]
+async fn computed_accessors_inherit_setters_and_respect_method_overrides() {
+    let account = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Casts\Attribute as Value;
+trait AttributeFields {
+    protected function inheritedWritable(): Value { return Value::make(set: fn ($value) => ['name' => $value]); }
+    protected function overridden(): Value { return Value::make(set: fn ($value) => ['name' => $value]); }
+    public function getInheritedReadonlyAttribute(): string { return ''; }
+}
+class Account extends \Illuminate\Database\Eloquent\Model { use AttributeFields; }
+"#;
+    let user = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Casts\Attribute;
+class User extends Account {
+    protected function overridden(): Attribute { return Attribute::make(get: fn () => 'computed'); }
+    protected function unrelated(): \Attribute { return new \Attribute(); }
+}
+"#;
+    let (backend, _dir, uri) = workspace_with_models(account, user);
+    let writable = item_labels(complete_statement(&backend, &uri, "$user->fill(['§']);").await);
+    assert!(
+        writable.iter().any(|name| name == "inherited_writable"),
+        "{writable:?}"
+    );
+    for excluded in ["overridden", "inherited_readonly", "unrelated"] {
+        assert!(
+            !writable.iter().any(|name| name == excluded),
+            "{writable:?}"
+        );
+    }
+    let properties = item_labels(complete_statement(&backend, &uri, "$user->§").await);
+    assert!(
+        properties.iter().any(|name| name == "inherited_readonly"),
+        "{properties:?}"
+    );
+    assert!(
+        !properties.iter().any(|name| name == "unrelated"),
+        "{properties:?}"
+    );
 }
 
 #[tokio::test]

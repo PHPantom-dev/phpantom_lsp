@@ -4,16 +4,21 @@ use super::*;
 
 // ─── Call site emission ─────────────────────────────────────────────────────
 
-/// Build and push a [`CallSite`] from an argument list and its call expression string.
+/// Build and push a [`CallSite`] from an argument list and its call expression.
 pub(super) fn emit_call_site(
-    call_expression: String,
+    call_expression: CallText,
     argument_list: &ArgumentList<'_>,
     call_sites: &mut CallSites,
     untyped_closure_sites: &mut Vec<UntypedClosureSite>,
 ) {
-    if call_expression.is_empty() {
-        return;
-    }
+    let expression = match &call_expression {
+        CallText::Owned(text) if text.is_empty() => return,
+        CallText::Owned(text) => CallExpression::Text(text),
+        CallText::Arena { start, len } => CallExpression::Stored {
+            start: *start,
+            len: *len,
+        },
+    };
     let args = argument_list.arguments.iter().map(|arg| match arg {
         // The hint for a spread goes before its `...`.
         Argument::Positional(pos) => match &pos.ellipsis {
@@ -34,7 +39,7 @@ pub(super) fn emit_call_site(
     call_sites.push(
         argument_list.left_parenthesis.end.offset,
         argument_list.right_parenthesis.start.offset,
-        &call_expression,
+        expression,
         argument_list
             .arguments
             .tokens
@@ -42,6 +47,10 @@ pub(super) fn emit_call_site(
             .map(|t| t.start.offset),
         args,
     );
+    let call_expression = match &call_expression {
+        CallText::Owned(text) => text.as_str(),
+        CallText::Arena { start, len } => call_sites.stored_text(*start, *len),
+    };
 
     // Check arguments for closures/arrows with untyped parameters or
     // missing return types.
@@ -50,7 +59,7 @@ pub(super) fn emit_call_site(
             Argument::Positional(pos) => pos.value,
             Argument::Named(named) => named.value,
         };
-        collect_untyped_closure_site(expr, &call_expression, arg_idx, untyped_closure_sites);
+        collect_untyped_closure_site(expr, call_expression, arg_idx, untyped_closure_sites);
     }
 }
 
@@ -95,7 +104,7 @@ pub(in crate::symbol_map::extraction) fn emit_partial_call_site(
     call_sites.push(
         argument_list.left_parenthesis.end.offset,
         argument_list.right_parenthesis.start.offset,
-        &call_expression,
+        CallExpression::Text(&call_expression),
         argument_list
             .arguments
             .tokens

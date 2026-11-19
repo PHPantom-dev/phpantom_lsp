@@ -4,7 +4,9 @@
 //! A route argument only means something under the routes that dispatch to
 //! its handler, so its span's key names the handler as well as the argument
 //! (see [`route_argument_key`]), and the routes are looked up by handler in
-//! the route side tables of the files that declare them.
+//! the route side tables of the files that declare them.  An argument a URL
+//! generator passes is keyed by the route it names instead (see
+//! [`url_argument_key`]), and the routes are looked up by name.
 
 use tower_lsp_server::gen_lsp_types::{Location, Range};
 
@@ -95,6 +97,17 @@ pub(crate) fn route_argument_key(handler: &str, name: &str) -> String {
 
 /// The handler and the argument name of a route argument's key.
 pub(crate) fn split_route_argument_key(key: &str) -> (&str, &str) {
+    key.rsplit_once('#').unwrap_or(("", key))
+}
+
+/// The key of a [`StringKeyKind::YiiUrlArgument`] span: the argument
+/// `name` a URL generator call passes the route `route`.
+pub(crate) fn url_argument_key(route: &str, name: &str) -> String {
+    format!("{route}#{name}")
+}
+
+/// The route and the argument name of a URL argument's key.
+pub(crate) fn split_url_argument_key(key: &str) -> (&str, &str) {
     key.rsplit_once('#').unwrap_or(("", key))
 }
 
@@ -189,12 +202,32 @@ impl Backend {
         let (handler, name) = split_route_argument_key(key);
         let mut found: Vec<(String, u32, u32)> = Vec::new();
         self.visit_yii_handler_routes(handler, |uri, route| {
-            for placeholder in &route.placeholders {
-                if placeholder.name == name {
-                    found.push((uri.to_string(), placeholder.start, placeholder.end));
+            push_placeholders(&mut found, uri, route, name);
+        });
+        self.placeholder_locations(found)
+    }
+
+    /// Where the paths of the routes named in a URL argument's key declare
+    /// it: each `{name}` of theirs.
+    pub(crate) fn yii_url_argument_locations(&self, key: &str) -> Vec<Location> {
+        let (route_name, name) = split_url_argument_key(key);
+        let mut found: Vec<(String, u32, u32)> = Vec::new();
+        self.visit_declaring_symbol_maps(|uri, map| {
+            for route in &map.routes {
+                if route
+                    .name_start
+                    .is_some_and(|start| declared_name_at(map, start) == Some(route_name))
+                {
+                    push_placeholders(&mut found, uri, route, name);
                 }
             }
         });
+        self.placeholder_locations(found)
+    }
+
+    /// The locations of the placeholders `found` lists by file and byte
+    /// range.
+    fn placeholder_locations(&self, mut found: Vec<(String, u32, u32)>) -> Vec<Location> {
         found.sort_unstable();
         found.dedup();
 
@@ -218,6 +251,20 @@ impl Backend {
             }
         }
         locations
+    }
+}
+
+/// Add each placeholder `name` of `route`, declared in `uri`, to `found`.
+fn push_placeholders(
+    found: &mut Vec<(String, u32, u32)>,
+    uri: &str,
+    route: &RouteSite,
+    name: &str,
+) {
+    for placeholder in &route.placeholders {
+        if placeholder.name == name {
+            found.push((uri.to_string(), placeholder.start, placeholder.end));
+        }
     }
 }
 

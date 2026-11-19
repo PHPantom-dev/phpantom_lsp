@@ -724,6 +724,11 @@ impl Audit {
         tp.add(e.template_bindings.capacity() * size_of::<(Atom, Atom)>());
         self.m_tmpl += tp;
         self.m_tmpl += atom_map_ty(&e.template_param_bounds);
+        if let Some(relations) = &e.record_relations {
+            let mut rel = Sz::default();
+            rel.add(relations.len() * size_of::<crate::types::RecordRelation>());
+            self.m_struct += rel;
+        }
         self.m_docs += s(&e.return_description);
         self.m_docs += vs(&e.links);
         self.m_docs += see(&e.see_refs);
@@ -1391,6 +1396,11 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                     * size_of::<crate::symbol_map::MessengerHandlerSite>(),
             );
             sym.add(
+                sm.event_constant_keys.capacity()
+                    * size_of::<crate::symbol_map::EventConstantKey>(),
+            );
+            sym.add(sm.event_listener_lists.capacity() * size_of::<(u32, u32)>());
+            sym.add(
                 sm.twig_callables.capacity() * size_of::<crate::symbol_map::TwigCallableSite>(),
             );
             sym.add(
@@ -1405,10 +1415,22 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             sym.add(
                 sm.container_values.capacity() * size_of::<crate::symbol_map::ContainerValueSite>(),
             );
+            sym.add(
+                sm.service_decorations.capacity()
+                    * size_of::<crate::symbol_map::ServiceDecoration>(),
+            );
             sym.add(sm.entity_types.capacity() * size_of::<crate::symbol_map::EntityTypeSite>());
             sym.add(
                 sm.drupal_plugin_classes.capacity()
                     * size_of::<crate::symbol_map::PluginClassSite>(),
+            );
+            sym.add(
+                sm.drupal_plugin_managers.capacity()
+                    * size_of::<crate::symbol_map::PluginManagerSite>(),
+            );
+            sym.add(
+                sm.drupal_plugins.capacity()
+                    * size_of::<crate::symbol_map::PluginDeclarationSite>(),
             );
             sym.add(sm.drupal_route_patterns.capacity() * size_of::<String>());
             sym.add(sm.drupal_route_aliases.capacity() * size_of::<String>());
@@ -1420,6 +1442,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for site in &sm.drupal_computed_hooks {
                 sym.add(site.shape.capacity());
             }
+            sym.add(
+                sm.drupal_callbacks.capacity() * size_of::<crate::symbol_map::DrupalCallbackSite>(),
+            );
             for name in sm
                 .drupal_route_patterns
                 .iter()
@@ -1460,6 +1485,29 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             sym.add(
                 sm.yii_definitions.capacity() * size_of::<crate::symbol_map::YiiDefinitionSite>(),
             );
+            sym.add(
+                sm.yii_definition_bodies.capacity()
+                    * size_of::<crate::symbol_map::YiiDefinitionBody>(),
+            );
+            sym.add(std::mem::size_of_val(sm.tempest_routes.as_ref()));
+            sym.add(std::mem::size_of_val(sm.tempest_uri_calls.as_ref()));
+            for route in &sm.tempest_routes {
+                sym.add(route.path.capacity());
+                sym.add(route.original_path.as_deref().map_or(0, str::len));
+                sym.add(std::mem::size_of_val(route.decorators.as_ref()));
+                sym.add(route.placeholders.capacity() * size_of::<(u32, u32)>());
+                sym.add(std::mem::size_of_val(route.parameters.as_ref()));
+            }
+            sym.add(sm.yii_relations.capacity() * size_of::<crate::symbol_map::YiiRelationSite>());
+            for site in &sm.yii_relations {
+                sym.add(site.subject.heap_bytes());
+            }
+            sym.add(sm.yii_queries.capacity() * size_of::<crate::symbol_map::YiiQuerySite>());
+            for site in &sm.yii_queries {
+                sym.add(site.subject.heap_bytes());
+                sym.add(site.tables.capacity() * size_of::<crate::symbol_map::YiiQueryTable>());
+            }
+            sym.add(sm.yii_query_names.capacity() * size_of::<crate::symbol_map::YiiQueryName>());
         }
     }
     eprintln!(
@@ -1670,9 +1718,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     let n_blade;
     {
         let m = backend.files.read();
-        let lowerings: Vec<&crate::file_state::BladeFileState> = m
+        let lowerings: Vec<&crate::file_state::TemplateFileState> = m
             .values()
-            .filter_map(|state| state.blade.as_ref())
+            .filter_map(|state| state.template.as_ref())
             .collect();
         n_blade = lowerings.len();
         for lowering in lowerings {
@@ -1792,7 +1840,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         );
     };
     probe("blade lowerings", &mut || {
-        clear_file_state_field(backend, |state| state.blade = None)
+        clear_file_state_field(backend, |state| state.template = None)
     });
     probe("schema_index", &mut || {
         *backend.laravel.schema_index.write() = Default::default()

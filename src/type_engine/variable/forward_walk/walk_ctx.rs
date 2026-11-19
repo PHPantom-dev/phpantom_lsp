@@ -146,7 +146,12 @@ impl CursorScope {
     /// Record `scope` as the one at the cursor, when `expr` holds it.
     pub(crate) fn reached(&self, expr: &Expression<'_>, scope: &ScopeState, cursor: u32) {
         let span = expr.span();
-        if span.start.offset <= cursor && cursor <= span.end.offset {
+        self.reached_span(span.start.offset, span.end.offset, scope, cursor);
+    }
+
+    /// [`Self::reached`] for a node whose span the caller already knows.
+    pub(crate) fn reached_span(&self, start: u32, end: u32, scope: &ScopeState, cursor: u32) {
+        if start <= cursor && cursor <= end {
             self.record(scope);
         }
     }

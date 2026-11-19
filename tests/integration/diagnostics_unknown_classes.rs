@@ -223,9 +223,9 @@ class MyProvider {
         let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| {
-                message_text(&d.message).contains("'self'")
-                    || message_text(&d.message).contains("'static'")
-                    || message_text(&d.message).contains("'parent'")
+                message_text(&d.message).contains("self not found")
+                    || message_text(&d.message).contains("static not found")
+                    || message_text(&d.message).contains("parent not found")
             }),
             "should not flag self/static/parent, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
@@ -418,7 +418,7 @@ class MyProvider {
         assert!(
             !diags
                 .iter()
-                .any(|d| message_text(&d.message).contains("'T'")),
+                .any(|d| message_text(&d.message).contains("T not found")),
             "should not flag method-level @template param T, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -794,7 +794,7 @@ class MyProvider {
         assert!(
             !diags
                 .iter()
-                .any(|d| message_text(&d.message).contains("'bar'")),
+                .any(|d| message_text(&d.message).contains("bar not found")),
             "should not flag single-quoted literal as unknown class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -1430,7 +1430,7 @@ namespace B {
         let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
         assert_eq!(
             messages,
-            vec!["Class 'B\\Foo' not found"],
+            vec!["Class B\\Foo not found"],
             "only block B's `Foo` is unknown"
         );
     }

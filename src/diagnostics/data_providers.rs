@@ -23,7 +23,7 @@ use crate::virtual_members::resolve_class_fully_cached;
 
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
-pub(crate) const INVALID_DATA_PROVIDER_CODE: &str = "invalid_data_provider";
+pub(crate) const INVALID_DATA_PROVIDER_CODE: &str = "invalid_phpunit_data_provider";
 
 /// The modifier a data provider lacks.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

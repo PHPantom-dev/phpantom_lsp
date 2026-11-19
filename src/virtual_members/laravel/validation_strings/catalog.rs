@@ -13,6 +13,7 @@ use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::class_lookup::{Fqn, is_subtype_of};
 use crate::names::OwnedResolvedNames;
+use crate::parser::walk_nodes;
 use crate::type_engine::resolver::{VarResolutionCtx, resolve_target_classes};
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind, MethodInfo, PropertySource, Visibility};
 
@@ -530,8 +531,11 @@ fn rule_aliases(content: &str) -> Vec<(String, String)> {
     })
 }
 
-fn collect_aliases(node: Node<'_, '_>, content: &str, out: &mut Vec<(String, String)>) {
-    if let Node::Method(method) = node {
+fn collect_aliases(root: Node<'_, '_>, content: &str, out: &mut Vec<(String, String)>) {
+    walk_nodes(root, |node| {
+        let Node::Method(method) = node else {
+            return true;
+        };
         if method.name.value.eq_ignore_ascii_case(b"normalizeRule")
             && let MethodBody::Concrete(body) = &method.body
         {
@@ -556,9 +560,8 @@ fn collect_aliases(node: Node<'_, '_>, content: &str, out: &mut Vec<(String, Str
                 ControlFlow::Continue(())
             });
         }
-        return;
-    }
-    node.visit_children(|child| collect_aliases(child, content, out));
+        false
+    });
 }
 
 #[cfg(test)]

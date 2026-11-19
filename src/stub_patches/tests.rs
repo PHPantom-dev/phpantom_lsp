@@ -487,3 +487,74 @@ fn an_unrelated_function_keeps_its_parameter_types() {
 
     assert_eq!(func.parameters[0].type_hint, Some(PhpType::string()));
 }
+
+#[test]
+fn tempest_query_accepts_model_class_names_without_changing_native_types() {
+    let mut function = empty_function("query");
+    function.namespace = Some("Tempest\\Database".into());
+    function.template_params = vec![atom("TModel")];
+    let mut model = param("$model", "TModel");
+    model.native_type_hint = Some(PhpType::parse("string|object"));
+    function.parameters = vec![model].into();
+
+    apply_third_party_function_patches(&mut function);
+
+    assert_eq!(
+        function.parameters[0].type_hint,
+        Some(PhpType::parse("class-string<TModel>|TModel|string"))
+    );
+    assert_eq!(
+        function.parameters[0].native_type_hint,
+        Some(PhpType::parse("string|object"))
+    );
+}
+
+#[test]
+fn tempest_query_patch_leaves_namesakes_and_corrected_annotations_unchanged() {
+    for (namespace, name, template, parameter, hint) in [
+        (None, "query", "TModel", "$model", "TModel"),
+        (Some("App"), "query", "TModel", "$model", "TModel"),
+        (
+            Some("Tempest\\Database"),
+            "inspect",
+            "TModel",
+            "$model",
+            "TModel",
+        ),
+        (
+            Some("Tempest\\Database"),
+            "query",
+            "TOther",
+            "$model",
+            "TModel",
+        ),
+        (
+            Some("Tempest\\Database"),
+            "query",
+            "TModel",
+            "$other",
+            "TModel",
+        ),
+        (
+            Some("Tempest\\Database"),
+            "query",
+            "TModel",
+            "$model",
+            "class-string<TModel>|TModel|string",
+        ),
+    ] {
+        let mut function = empty_function(name);
+        function.namespace = namespace.map(str::to_string);
+        function.template_params = vec![atom(template)];
+        function.parameters = vec![param(parameter, hint)].into();
+        apply_third_party_function_patches(&mut function);
+        assert_eq!(function.parameters[0].type_hint, Some(PhpType::parse(hint)));
+    }
+    let mut function = empty_function("query");
+    function.namespace = Some("Tempest\\Database".into());
+    apply_third_party_function_patches(&mut function);
+    assert!(function.parameters.is_empty());
+    function.template_params = vec![atom("TModel")];
+    apply_third_party_function_patches(&mut function);
+    assert!(function.parameters.is_empty());
+}

@@ -99,7 +99,12 @@ pub(crate) fn compile_ignore_rules(rules: &[IgnoreRule]) -> Vec<CompiledIgnoreRu
             Some(CompiledIgnoreRule {
                 message,
                 path,
-                identifier: rule.identifier.clone(),
+                identifier: rule.identifier.as_deref().map(|identifier| {
+                    super::identifiers::current_identifier_or_warn(
+                        identifier,
+                        "[[diagnostics.ignore]] identifier",
+                    )
+                }),
             })
         })
         .collect()
@@ -158,6 +163,18 @@ mod tests {
         let mut diagnostics = vec![diag("anything", "unknown_class")];
         filter_ignored_by_config(&mut diagnostics, "src/Foo.php", &rules);
         assert_eq!(diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn an_old_identifier_suppresses_the_renamed_code() {
+        let rules = compile_ignore_rules(&[IgnoreRule {
+            message: None,
+            path: None,
+            identifier: Some("invalid_laravel_trans".to_string()),
+        }]);
+        let mut diagnostics = vec![diag("trans", "invalid_laravel_translation")];
+        filter_ignored_by_config(&mut diagnostics, "src/Foo.php", &rules);
+        assert!(diagnostics.is_empty());
     }
 
     #[test]

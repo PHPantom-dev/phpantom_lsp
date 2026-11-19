@@ -134,7 +134,7 @@ impl Backend {
                 severity,
                 INVALID_STRING_CONVERSION_CODE,
                 format!(
-                    "Object of class {} cannot be converted to string (no __toString() method)",
+                    "Object of class {} cannot be converted to string",
                     finding.classes.join("|")
                 ),
             ));

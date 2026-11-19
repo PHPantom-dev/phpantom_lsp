@@ -218,7 +218,7 @@ impl Backend {
                         range,
                         DiagnosticSeverity::Hint,
                         UNUSED_PARAMETER_CODE,
-                        format!("Unused parameter '{name}'"),
+                        format!("Unused parameter {name}"),
                         Some(DiagnosticTag::Unnecessary),
                     ));
                 }

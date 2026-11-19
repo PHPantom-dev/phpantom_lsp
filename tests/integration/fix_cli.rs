@@ -949,3 +949,29 @@ fn replaces_deprecated_calls_in_a_template() {
     assert_eq!(fixes, 2);
     assert_eq!(result, "<div>{{ sum(sum(1, 2), 3) }}</div>\n");
 }
+
+/// A Tempest view's expressions are reordered in the PHP it lowers to, so
+/// its rewrites go through the view's source map too.
+#[test]
+fn replaces_deprecated_calls_in_a_tempest_view() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///lib.php",
+        &format!("{DEPRECATED_FUNCTIONS}\n").replace("namespace App;", "namespace Lib;"),
+    );
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let path = dir.path().join("page.view.php");
+    let content = "<div :title=\"\\Lib\\add(1, 2)\" :if=\"true\">{{ \\Lib\\add(3, 4) }}</div>\n";
+    std::fs::write(&path, content).expect("failed to write the view");
+    let uri = tower_lsp_server::gen_lsp_types::Uri::from_file_path(&path)
+        .expect("a file URI")
+        .to_string();
+
+    let (result, fixes) = fix_deprecated(&backend, &uri, content);
+
+    assert_eq!(fixes, 2);
+    assert_eq!(
+        result,
+        "<div :title=\"sum(1, 2)\" :if=\"true\">{{ sum(3, 4) }}</div>\n"
+    );
+}

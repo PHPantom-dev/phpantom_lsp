@@ -616,7 +616,7 @@ fn check_scope(
                 None => continue,
             };
 
-            let message = format!("Undefined variable '{}'", access.name);
+            let message = format!("Undefined variable {}", access.name);
 
             ctx.diagnostics.push(make_diagnostic(
                 range,

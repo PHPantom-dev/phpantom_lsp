@@ -715,7 +715,7 @@ function at_index(NodeInterface $node): mixed {
     if ($node instanceof LeafNode) {
         return null;
     }
-    $node->getChildren();   // Method 'getChildren' not found on class 'NodeInterface'
+    $node->getChildren();   // Method NodeInterface::getChildren() not found
 }
 ```
 
@@ -728,3 +728,30 @@ the subject keeps the declared interface. Store the permitted list on
 enum's cases are subtracted.
 
 Found by `analyze` on azjezz/psl, whose tree nodes are sealed this way.
+
+---
+
+## T71. A service `#[AsDecorator]` registers does not take over the ID
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+#[AsDecorator(decorates: 'app.mailer')]
+final class LoggingMailer extends Mailer
+{
+    public function sentCount(): int { return 0; }
+}
+
+$container->get('app.mailer')->sentCount(); // Method Mailer::sentCount() not found
+```
+
+A lookup of a service that a services file or a PHP configurator
+decorates is typed as the decorator's class too (`service_decorators` in
+`src/symfony/container.rs`, fed by `SymbolMap::service_decorations`).
+A class that the resource loader registers and that decorates a service
+with Symfony's `#[AsDecorator]` attribute is not read, though that is how
+most applications decorate. Record a `ServiceDecoration` for the
+attribute's `decorates` argument (a string or `Foo::class`) with the
+class as the decorator, where `#[AsMessageHandler]` is read in
+`src/symbol_map/extraction/symfony.rs`, and count the file as one that
+declares in `declares_symfony_keys`.

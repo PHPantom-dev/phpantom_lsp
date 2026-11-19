@@ -131,13 +131,28 @@ fn collect_chain_operands_inner<'b>(
     joins: fn(&BinaryOperator<'_>) -> bool,
     out: &mut Vec<&'b Expression<'b>>,
 ) {
-    if let Expression::Binary(bin) = expr
+    // The chain nests on the left and can be thousands of operators long,
+    // so walk its left spine in a loop rather than a frame per operator.
+    let mut right_operands = Vec::new();
+    let mut leftmost = expr;
+    while let Expression::Binary(bin) = leftmost
         && joins(&bin.operator)
     {
-        collect_chain_operands_inner(bin.lhs, joins, out);
-        collect_chain_operands_inner(bin.rhs, joins, out);
-        return;
+        right_operands.push(bin.rhs);
+        leftmost = bin.lhs;
     }
+    push_chain_operand(leftmost, joins, out);
+    for rhs in right_operands.into_iter().rev() {
+        collect_chain_operands_inner(rhs, joins, out);
+    }
+}
+
+/// One operand of a chain that is not itself joined by the chain's operator.
+fn push_chain_operand<'b>(
+    expr: &'b Expression<'b>,
+    joins: fn(&BinaryOperator<'_>) -> bool,
+    out: &mut Vec<&'b Expression<'b>>,
+) {
     if let Expression::Parenthesized(inner) = expr {
         let inner_ops = collect_chain_operands(inner.expression, joins);
         if inner_ops.len() > 1 {

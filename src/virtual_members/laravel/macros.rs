@@ -189,20 +189,22 @@ pub(crate) fn extract_mixin_registrations(content: &str) -> Vec<MixinRegistratio
 /// Recursively collect every `X::mixin(new Y)` / `X::mixin(Y::class)` call
 /// whose target and mixin argument both resolve to a class FQN.
 fn collect_mixin_calls(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     resolved: &OwnedResolvedNames,
     out: &mut Vec<MixinRegistration>,
 ) {
-    if let Node::StaticMethodCall(smc) = node
-        && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
-        && bytes_to_str(ident.value).eq_ignore_ascii_case("mixin")
-        && let Some(target) = resolve_target_fqn(smc.class, resolved)
-        && let Some(arg) = smc.argument_list.arguments.first()
-        && let Some(mixin_fqn) = resolve_mixin_argument_fqn(arg.value(), resolved)
-    {
-        out.push(MixinRegistration { target, mixin_fqn });
-    }
-    node.visit_children(|child| collect_mixin_calls(child, resolved, out));
+    crate::parser::walk_nodes(root, |node| {
+        if let Node::StaticMethodCall(smc) = node
+            && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
+            && bytes_to_str(ident.value).eq_ignore_ascii_case("mixin")
+            && let Some(target) = resolve_target_fqn(smc.class, resolved)
+            && let Some(arg) = smc.argument_list.arguments.first()
+            && let Some(mixin_fqn) = resolve_mixin_argument_fqn(arg.value(), resolved)
+        {
+            out.push(MixinRegistration { target, mixin_fqn });
+        }
+        true
+    });
 }
 
 /// A name a class answers through `__call` because of a registration the
@@ -246,35 +248,39 @@ pub(crate) fn extract_open_call_names(content: &str) -> Vec<OpenCallName> {
     let resolved = NameResolver::new(&arena).resolve(program);
     let owned = OwnedResolvedNames::from_resolved(&resolved);
 
-    fn collect(node: Node<'_, '_>, resolved: &OwnedResolvedNames, out: &mut Vec<OpenCallName>) {
-        if let Node::StaticMethodCall(smc) = node
-            && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
-            && let Some(target) = resolve_target_fqn(smc.class, resolved)
-        {
-            let method = bytes_to_str(ident.value);
-            let mut args = smc.argument_list.arguments.iter().map(|a| a.value());
-            let first = args.next();
-            let name = || first.and_then(macro_name);
-            let fact = if method.eq_ignore_ascii_case("macro") {
-                match name() {
-                    Some(_) if args.next().is_some_and(|c| closure_signature(c).is_some()) => None,
-                    name => Some(name),
+    fn collect(root: Node<'_, '_>, resolved: &OwnedResolvedNames, out: &mut Vec<OpenCallName>) {
+        crate::parser::walk_nodes(root, |node| {
+            if let Node::StaticMethodCall(smc) = node
+                && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
+                && let Some(target) = resolve_target_fqn(smc.class, resolved)
+            {
+                let method = bytes_to_str(ident.value);
+                let mut args = smc.argument_list.arguments.iter().map(|a| a.value());
+                let first = args.next();
+                let name = || first.and_then(macro_name);
+                let fact = if method.eq_ignore_ascii_case("macro") {
+                    match name() {
+                        Some(_) if args.next().is_some_and(|c| closure_signature(c).is_some()) => {
+                            None
+                        }
+                        name => Some(name),
+                    }
+                } else if method.eq_ignore_ascii_case("mixin") {
+                    first
+                        .and_then(|arg| resolve_mixin_argument_fqn(arg, resolved))
+                        .is_none()
+                        .then_some(None)
+                } else if method.eq_ignore_ascii_case("resolveRelationUsing") {
+                    Some(name())
+                } else {
+                    None
+                };
+                if let Some(name) = fact {
+                    out.push(OpenCallName { target, name });
                 }
-            } else if method.eq_ignore_ascii_case("mixin") {
-                first
-                    .and_then(|arg| resolve_mixin_argument_fqn(arg, resolved))
-                    .is_none()
-                    .then_some(None)
-            } else if method.eq_ignore_ascii_case("resolveRelationUsing") {
-                Some(name())
-            } else {
-                None
-            };
-            if let Some(name) = fact {
-                out.push(OpenCallName { target, name });
             }
-        }
-        node.visit_children(|child| collect(child, resolved, out));
+            true
+        });
     }
 
     let mut out = Vec::new();
@@ -540,23 +546,24 @@ pub(crate) fn extract_strict_attributes(content: &str) -> Option<bool> {
     let resolved = NameResolver::new(&arena).resolve(program);
     let owned = OwnedResolvedNames::from_resolved(&resolved);
 
-    fn collect(node: Node<'_, '_>, resolved: &OwnedResolvedNames, strict: &mut Option<bool>) {
-        if let Node::StaticMethodCall(call) = node
-            && let ClassLikeMemberSelector::Identifier(method) = &call.method
-            && matches!(
-                bytes_to_str(method.value).to_ascii_lowercase().as_str(),
-                "preventaccessingmissingattributes" | "shouldbestrict"
-            )
-            && resolve_target_fqn(call.class, resolved)
-                .is_some_and(|target| target == super::ELOQUENT_MODEL_FQN)
-        {
-            let off =
-                call.argument_list.arguments.first().is_some_and(|arg| {
+    fn collect(root: Node<'_, '_>, resolved: &OwnedResolvedNames, strict: &mut Option<bool>) {
+        crate::parser::walk_nodes(root, |node| {
+            if let Node::StaticMethodCall(call) = node
+                && let ClassLikeMemberSelector::Identifier(method) = &call.method
+                && matches!(
+                    bytes_to_str(method.value).to_ascii_lowercase().as_str(),
+                    "preventaccessingmissingattributes" | "shouldbestrict"
+                )
+                && resolve_target_fqn(call.class, resolved)
+                    .is_some_and(|target| target == super::ELOQUENT_MODEL_FQN)
+            {
+                let off = call.argument_list.arguments.first().is_some_and(|arg| {
                     matches!(arg.value(), Expression::Literal(Literal::False(_)))
                 });
-            *strict = Some(!off);
-        }
-        node.visit_children(|child| collect(child, resolved, strict));
+                *strict = Some(!off);
+            }
+            true
+        });
     }
 
     let mut strict = None;
@@ -578,26 +585,28 @@ pub(crate) fn extract_date_factory_class(content: &str) -> Option<String> {
     let owned = OwnedResolvedNames::from_resolved(&resolved);
     let mut configured = None;
 
-    fn collect(node: Node<'_, '_>, resolved: &OwnedResolvedNames, configured: &mut Option<String>) {
-        if let Node::StaticMethodCall(call) = node
-            && let ClassLikeMemberSelector::Identifier(method) = &call.method
-            && matches!(
-                bytes_to_str(method.value).to_ascii_lowercase().as_str(),
-                "use" | "useclass"
-            )
-            && resolve_target_fqn(call.class, resolved).is_some_and(|target| {
-                matches!(
-                    target.as_str(),
-                    "Illuminate\\Support\\Facades\\Date" | "Illuminate\\Support\\DateFactory"
+    fn collect(root: Node<'_, '_>, resolved: &OwnedResolvedNames, configured: &mut Option<String>) {
+        crate::parser::walk_nodes(root, |node| {
+            if let Node::StaticMethodCall(call) = node
+                && let ClassLikeMemberSelector::Identifier(method) = &call.method
+                && matches!(
+                    bytes_to_str(method.value).to_ascii_lowercase().as_str(),
+                    "use" | "useclass"
                 )
-            })
-            && let Some(arg) = call.argument_list.arguments.first()
-            && let Some(class) = crate::parser::class_fetch_target(arg.value())
-            && let Some(class) = resolve_target_fqn(class, resolved)
-        {
-            *configured = Some(class);
-        }
-        node.visit_children(|child| collect(child, resolved, configured));
+                && resolve_target_fqn(call.class, resolved).is_some_and(|target| {
+                    matches!(
+                        target.as_str(),
+                        "Illuminate\\Support\\Facades\\Date" | "Illuminate\\Support\\DateFactory"
+                    )
+                })
+                && let Some(arg) = call.argument_list.arguments.first()
+                && let Some(class) = crate::parser::class_fetch_target(arg.value())
+                && let Some(class) = resolve_target_fqn(class, resolved)
+            {
+                *configured = Some(class);
+            }
+            true
+        });
     }
 
     collect(Node::Program(program), &owned, &mut configured);
@@ -867,182 +876,166 @@ pub(crate) fn inject_macros(index: &LaravelMacroIndex, class: Arc<ClassInfo>) ->
 
 /// Recursively collect every `X::macro(...)` static-method-call node.
 fn collect_macro_calls<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     out: &mut Vec<&'ast StaticMethodCall<'arena>>,
 ) {
-    if let Node::StaticMethodCall(smc) = node
-        && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
-        && bytes_to_str(ident.value).eq_ignore_ascii_case("macro")
-    {
-        out.push(smc);
-    }
-    node.visit_children(|child| collect_macro_calls(child, out));
+    crate::parser::walk_nodes(root, |node| {
+        if let Node::StaticMethodCall(smc) = node
+            && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
+            && bytes_to_str(ident.value).eq_ignore_ascii_case("macro")
+        {
+            out.push(smc);
+        }
+        true
+    });
 }
 
 fn collect_instance_macro_registrations(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     resolved: &OwnedResolvedNames,
     content: &str,
     php_version: Option<PhpVersion>,
     out: &mut Vec<MacroRegistration>,
 ) {
-    match node {
-        Node::Program(program) => {
-            for statement in program.statements.iter() {
-                collect_instance_macro_registrations(
-                    Node::Statement(statement),
-                    resolved,
-                    content,
-                    php_version,
-                    out,
-                );
+    crate::parser::walk_nodes(root, |node| {
+        match node {
+            Node::Statement(Statement::Function(function)) => collect_instance_macros_in_body(
+                Node::Block(&function.body),
+                &typed_parameter_targets(&function.parameter_list, resolved),
+                resolved,
+                content,
+                php_version,
+                out,
+            ),
+            // Each method of a class-like opens a variable scope of its own.
+            Node::Class(_) | Node::Trait(_) | Node::Enum(_) => {
+                let members = crate::parser::class_like_members(node).unwrap_or_default();
+                crate::parser::for_each_concrete_method(members, |method, body| {
+                    collect_instance_macros_in_body(
+                        Node::Block(body),
+                        &typed_parameter_targets(&method.parameter_list, resolved),
+                        resolved,
+                        content,
+                        php_version,
+                        out,
+                    );
+                });
             }
+            // A closure or arrow function in top-level code opens a variable
+            // scope of its own; the body walker computes it from the empty
+            // enclosing scope.
+            Node::Closure(_) | Node::ArrowFunction(_) => collect_instance_macros_in_body(
+                node,
+                &HashMap::new(),
+                resolved,
+                content,
+                php_version,
+                out,
+            ),
+            _ => return true,
         }
-        Node::Statement(Statement::Namespace(namespace)) => {
-            for statement in namespace.statements().iter() {
-                collect_instance_macro_registrations(
-                    Node::Statement(statement),
-                    resolved,
-                    content,
-                    php_version,
-                    out,
-                );
-            }
-        }
-        Node::Statement(Statement::Function(function)) => collect_instance_macros_in_body(
-            Node::Block(&function.body),
-            &typed_parameter_targets(&function.parameter_list, resolved),
-            resolved,
-            content,
-            php_version,
-            out,
-        ),
-        // Each method of a class-like opens a variable scope of its own.
-        Node::Class(_) | Node::Trait(_) | Node::Enum(_) => {
-            let members = crate::parser::class_like_members(node).unwrap_or_default();
-            crate::parser::for_each_concrete_method(members, |method, body| {
-                collect_instance_macros_in_body(
-                    Node::Block(body),
-                    &typed_parameter_targets(&method.parameter_list, resolved),
-                    resolved,
-                    content,
-                    php_version,
-                    out,
-                );
-            });
-        }
-        // A closure or arrow function in top-level code opens a variable
-        // scope of its own; the body walker computes it from the empty
-        // enclosing scope.
-        Node::Closure(_) | Node::ArrowFunction(_) => collect_instance_macros_in_body(
-            node,
-            &HashMap::new(),
-            resolved,
-            content,
-            php_version,
-            out,
-        ),
-        _ => node.visit_children(|child| {
-            collect_instance_macro_registrations(child, resolved, content, php_version, out)
-        }),
-    }
+        false
+    });
 }
 
+/// Collect the `$typed->macro(...)` registrations under `root`, where
+/// `typed_targets` maps the variables in scope to the class they hold.
+///
+/// Walks the body with an explicit stack; only a nested function-like, which
+/// opens a scope of its own, recurses.
 fn collect_instance_macros_in_body(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     typed_targets: &HashMap<String, String>,
     resolved: &OwnedResolvedNames,
     content: &str,
     php_version: Option<PhpVersion>,
     out: &mut Vec<MacroRegistration>,
 ) {
-    match node {
-        // A closure sees only its `use (...)` captures plus its own
-        // parameters; a typed parameter overrides everything else.
-        Node::Closure(closure) => {
-            let mut scope: HashMap<String, String> = HashMap::new();
-            if let Some(use_clause) = &closure.use_clause {
-                for capture in use_clause.variables.iter() {
-                    let name = bytes_to_str(capture.variable.name);
-                    if let Some(target) = typed_targets.get(name) {
-                        scope.insert(name.to_string(), target.clone());
+    crate::parser::walk_nodes(root, |node| {
+        match node {
+            // A closure sees only its `use (...)` captures plus its own
+            // parameters; a typed parameter overrides everything else.
+            Node::Closure(closure) => {
+                let mut scope: HashMap<String, String> = HashMap::new();
+                if let Some(use_clause) = &closure.use_clause {
+                    for capture in use_clause.variables.iter() {
+                        let name = bytes_to_str(capture.variable.name);
+                        if let Some(target) = typed_targets.get(name) {
+                            scope.insert(name.to_string(), target.clone());
+                        }
                     }
                 }
-            }
-            for param in closure.parameter_list.parameters.iter() {
-                scope.remove(bytes_to_str(param.variable.name));
-            }
-            scope.extend(typed_parameter_targets(&closure.parameter_list, resolved));
-            collect_instance_macros_in_body(
-                Node::Block(&closure.body),
-                &scope,
-                resolved,
-                content,
-                php_version,
-                out,
-            );
-        }
-        // An arrow function captures the enclosing scope automatically; its
-        // own parameters shadow captured names.
-        Node::ArrowFunction(arrow) => {
-            let mut scope = typed_targets.clone();
-            for param in arrow.parameter_list.parameters.iter() {
-                scope.remove(bytes_to_str(param.variable.name));
-            }
-            scope.extend(typed_parameter_targets(&arrow.parameter_list, resolved));
-            collect_instance_macros_in_body(
-                Node::Expression(arrow.expression),
-                &scope,
-                resolved,
-                content,
-                php_version,
-                out,
-            );
-        }
-        // A nested named function starts a fresh variable scope.
-        Node::Function(function) => collect_instance_macros_in_body(
-            Node::Block(&function.body),
-            &typed_parameter_targets(&function.parameter_list, resolved),
-            resolved,
-            content,
-            php_version,
-            out,
-        ),
-        // So does each method of an anonymous class.
-        Node::AnonymousClass(class) => {
-            crate::parser::for_each_concrete_method(class.members.as_slice(), |method, body| {
+                for param in closure.parameter_list.parameters.iter() {
+                    scope.remove(bytes_to_str(param.variable.name));
+                }
+                scope.extend(typed_parameter_targets(&closure.parameter_list, resolved));
                 collect_instance_macros_in_body(
-                    Node::Block(body),
-                    &typed_parameter_targets(&method.parameter_list, resolved),
+                    Node::Block(&closure.body),
+                    &scope,
                     resolved,
                     content,
                     php_version,
                     out,
                 );
-            });
-        }
-        _ => {
-            if let Node::MethodCall(call) = node
-                && let ClassLikeMemberSelector::Identifier(ident) = &call.method
-                && bytes_to_str(ident.value).eq_ignore_ascii_case("macro")
-                && let Expression::Variable(Variable::Direct(dv)) = call.object
-                && let Some(target) = typed_targets.get(bytes_to_str(dv.name))
-                && let Some(reg) = build_instance_registration(call, target, content, php_version)
-            {
-                out.push(reg);
             }
-            node.visit_children(|child| {
+            // An arrow function captures the enclosing scope automatically;
+            // its own parameters shadow captured names.
+            Node::ArrowFunction(arrow) => {
+                let mut scope = typed_targets.clone();
+                for param in arrow.parameter_list.parameters.iter() {
+                    scope.remove(bytes_to_str(param.variable.name));
+                }
+                scope.extend(typed_parameter_targets(&arrow.parameter_list, resolved));
                 collect_instance_macros_in_body(
-                    child,
-                    typed_targets,
+                    Node::Expression(arrow.expression),
+                    &scope,
                     resolved,
                     content,
                     php_version,
                     out,
-                )
-            });
+                );
+            }
+            // A nested named function starts a fresh variable scope.
+            Node::Function(function) => collect_instance_macros_in_body(
+                Node::Block(&function.body),
+                &typed_parameter_targets(&function.parameter_list, resolved),
+                resolved,
+                content,
+                php_version,
+                out,
+            ),
+            // So does each method of an anonymous class.
+            Node::AnonymousClass(class) => {
+                crate::parser::for_each_concrete_method(
+                    class.members.as_slice(),
+                    |method, body| {
+                        collect_instance_macros_in_body(
+                            Node::Block(body),
+                            &typed_parameter_targets(&method.parameter_list, resolved),
+                            resolved,
+                            content,
+                            php_version,
+                            out,
+                        );
+                    },
+                );
+            }
+            _ => {
+                if let Node::MethodCall(call) = node
+                    && let ClassLikeMemberSelector::Identifier(ident) = &call.method
+                    && bytes_to_str(ident.value).eq_ignore_ascii_case("macro")
+                    && let Expression::Variable(Variable::Direct(dv)) = call.object
+                    && let Some(target) = typed_targets.get(bytes_to_str(dv.name))
+                    && let Some(reg) =
+                        build_instance_registration(call, target, content, php_version)
+                {
+                    out.push(reg);
+                }
+                return true;
+            }
         }
-    }
+        false
+    });
 }
 
 fn typed_parameter_targets(
@@ -1278,42 +1271,45 @@ pub(crate) fn parse_provider_referenced_classes(content: &str) -> Vec<String> {
 }
 
 fn collect_provider_method_refs(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     resolved: &OwnedResolvedNames,
     seen: &mut HashSet<String>,
     out: &mut Vec<String>,
 ) {
-    match node {
+    crate::parser::walk_nodes(root, |node| match node {
         Node::Class(_) | Node::AnonymousClass(_) | Node::Trait(_) | Node::Enum(_) => {
             let members = crate::parser::class_like_members(node).unwrap_or_default();
             crate::parser::for_each_concrete_method(members, |_, body| {
                 collect_class_refs(Node::Block(body), resolved, seen, out);
             });
+            false
         }
-        Node::Interface(_) => {}
-        _ => node.visit_children(|child| collect_provider_method_refs(child, resolved, seen, out)),
-    }
+        Node::Interface(_) => false,
+        _ => true,
+    });
 }
 
 fn collect_class_refs(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     resolved: &OwnedResolvedNames,
     seen: &mut HashSet<String>,
     out: &mut Vec<String>,
 ) {
-    match node {
-        Node::StaticMethodCall(call) => push_resolved_expr_fqn(call.class, resolved, seen, out),
-        Node::Instantiation(instantiation) => {
-            push_resolved_expr_fqn(instantiation.class, resolved, seen, out)
+    crate::parser::walk_nodes(root, |node| {
+        match node {
+            Node::StaticMethodCall(call) => push_resolved_expr_fqn(call.class, resolved, seen, out),
+            Node::Instantiation(instantiation) => {
+                push_resolved_expr_fqn(instantiation.class, resolved, seen, out)
+            }
+            Node::ClassConstantAccess(access) if crate::parser::is_class_fetch(access) => {
+                push_resolved_expr_fqn(access.class, resolved, seen, out)
+            }
+            _ => {}
         }
-        Node::ClassConstantAccess(access) if crate::parser::is_class_fetch(access) => {
-            push_resolved_expr_fqn(access.class, resolved, seen, out)
-        }
-        _ => {}
-    }
-    // Always descend: a static call's or instantiation's arguments can
-    // themselves reference further helper classes.
-    node.visit_children(|child| collect_class_refs(child, resolved, seen, out));
+        // Always descend: a static call's or instantiation's arguments can
+        // themselves reference further helper classes.
+        true
+    });
 }
 
 fn push_resolved_expr_fqn(
@@ -1332,14 +1328,16 @@ fn push_resolved_expr_fqn(
 /// Recursively collect the FQN of every `Something::class` constant reachable
 /// from `node`, resolving short names via the file's `use` statements.
 /// `self`/`static`/`parent` are skipped (no concrete FQN).
-fn collect_class_consts(node: Node<'_, '_>, resolved: &OwnedResolvedNames, out: &mut Vec<String>) {
-    if let Node::ClassConstantAccess(cca) = node
-        && crate::parser::is_class_fetch(cca)
-        && let Some(fqn) = resolve_target_fqn(cca.class, resolved)
-    {
-        out.push(fqn);
-    }
-    node.visit_children(|child| collect_class_consts(child, resolved, out));
+fn collect_class_consts(root: Node<'_, '_>, resolved: &OwnedResolvedNames, out: &mut Vec<String>) {
+    crate::parser::walk_nodes(root, |node| {
+        if let Node::ClassConstantAccess(cca) = node
+            && crate::parser::is_class_fetch(cca)
+            && let Some(fqn) = resolve_target_fqn(cca.class, resolved)
+        {
+            out.push(fqn);
+        }
+        true
+    });
 }
 
 /// Extract the parameter list and return-type hint of the closure/arrow-fn

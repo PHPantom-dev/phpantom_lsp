@@ -19,7 +19,7 @@ use crate::names::OwnedResolvedNames;
 use crate::symbol_map::{StringKeyDependency, SymbolMap};
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan};
 
-use super::ast_update::{AstIndexUpdate, BladeLowering};
+use super::ast_update::{AstIndexUpdate, TemplateLowering};
 
 /// An [`AstIndexUpdate`] alongside what the same file contributed on its
 /// previous parse, which the publication replaces.
@@ -44,7 +44,7 @@ struct PreparedAstIndexUpdate {
     functions: Vec<FunctionInfo>,
     defines: Vec<(String, DefineInfo)>,
     symbol_map: Arc<SymbolMap>,
-    blade: Option<BladeLowering>,
+    template: Option<TemplateLowering>,
     old_function_fqns: Vec<String>,
     old_define_names: Vec<String>,
     new_function_fqns: Vec<String>,
@@ -280,6 +280,7 @@ impl Backend {
 
         let mut connections_changed = false;
         for update in &updates {
+            self.note_tempest_php_change(&update.uri);
             connections_changed |= crate::doctrine::connection::record(
                 &self.doctrine_connections,
                 &update.uri,
@@ -356,7 +357,7 @@ impl Backend {
                 functions: update.functions,
                 defines: update.defines,
                 symbol_map: update.symbol_map,
-                blade: update.blade,
+                template: update.template,
                 old_function_fqns,
                 old_define_names,
                 new_function_fqns: Vec::new(),
@@ -549,12 +550,12 @@ impl Backend {
     fn publish_file_states(&self, prepared: &mut [PreparedAstIndexUpdate]) {
         let mut files = self.files.write();
         for update in prepared.iter_mut() {
-            let blade = match update.blade.take() {
-                Some(blade) => Some(crate::file_state::BladeFileState {
+            let template = match update.template.take() {
+                Some(blade) => Some(crate::file_state::TemplateFileState {
                     virtual_php: blade.virtual_php,
                     source_map: Arc::new(blade.source_map),
                 }),
-                None => files.get(&update.uri).and_then(|old| old.blade.clone()),
+                None => files.get(&update.uri).and_then(|old| old.template.clone()),
             };
             self.note_symfony_declarations(&update.uri, &update.symbol_map);
             self.note_wordpress_hooks(&update.uri, &update.symbol_map);
@@ -566,7 +567,7 @@ impl Backend {
                 resolved_names: Some(Arc::clone(&update.resolved_names)),
                 namespaces: std::mem::take(&mut update.namespace_spans),
                 pest_uses: update.pest_uses.take(),
-                blade,
+                template,
             };
             files.insert(update.uri.clone(), Arc::new(state));
         }
@@ -973,7 +974,11 @@ impl Backend {
         // A receiver's type is settled against the classes of the whole
         // workspace, so a signature change anywhere can turn a call that
         // was not a render into one, or the other way round.
-        self.blade.typed_receiver_spans_cache.write().clear();
+        // Retired here because `invalidate_container_index` only retires
+        // them when a configurator's typed calls make the index depend on
+        // signatures.
+        self.retire_typed_receiver_spans();
+        self.invalidate_container_index(true);
         self.laravel.morph_column_spans_cache.write().clear();
     }
 

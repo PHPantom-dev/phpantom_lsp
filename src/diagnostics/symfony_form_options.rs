@@ -19,7 +19,7 @@ use crate::symfony::form_options::{FormOptions, options_sites};
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 /// Diagnostic code used for an option a form type does not accept.
-pub(crate) const UNKNOWN_FORM_OPTION_CODE: &str = "unknown_form_option";
+pub(crate) const UNKNOWN_FORM_OPTION_CODE: &str = "invalid_symfony_form_option";
 
 impl Backend {
     /// Report each key of a form type's options array that names no option
@@ -82,12 +82,12 @@ impl Backend {
                     ) else {
                         continue;
                     };
-                    let short = form_type.rsplit('\\').next().unwrap_or(&form_type);
+                    let class = form_type.trim_start_matches('\\');
                     out.push(make_diagnostic(
                         range,
                         DiagnosticSeverity::Error,
                         UNKNOWN_FORM_OPTION_CODE,
-                        format!("Unknown form option '{name}' for {short}"),
+                        format!("Unknown form option '{name}' for {class}"),
                     ));
                 }
             }

@@ -748,10 +748,13 @@ mod tests {
                 let text = content[span.start as usize..span.end as usize].to_string();
                 let what = match span.kind {
                     SymbolKind::MemberAccess {
-                        subject_text: SubjectText::Owned(class),
+                        subject_text: subject @ SubjectText::Owned { .. },
                         member_name,
                         ..
-                    } => format!("{class}::${member_name}"),
+                    } => format!(
+                        "{}::${member_name}",
+                        subject.synthesised().unwrap_or_default()
+                    ),
                     SymbolKind::ClassReference { name, .. } => name.to_string(),
                     other => panic!("unexpected span {other:?}"),
                 };

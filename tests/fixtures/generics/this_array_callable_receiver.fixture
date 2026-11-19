@@ -1,0 +1,15 @@
+// test: an array callable on `$this` keeps the class's own template parameter
+// feature: hover
+// expect: $result = T
+---
+<?php
+/** @template T */
+class Box {
+    /** @return T */
+    public function get() {}
+    public function f(): void {
+        $callback = [$this, 'get'];
+        $result = $callback();
+        $<>result;
+    }
+}

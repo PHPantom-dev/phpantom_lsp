@@ -96,11 +96,15 @@ impl Backend {
             .filter(|r| r.contains_conditional())
         {
             let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, rctx);
+            let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+                Self::resolve_arg_text_to_type(t, &rctx.written_in(namespace))
+            };
             let tpl = TemplateContext {
                 defaults: Some(&method_subs),
                 params: bound.template_params(),
                 bindings: bound.template_bindings(),
                 arg_type_resolver: Some(&arg_ty_resolver),
+                default_type_resolver: Some(&default_ty_resolver),
                 this_type: None,
                 subs: None,
             };
@@ -114,6 +118,7 @@ impl Backend {
                         calling: rctx.current_class.map(|c| c.fqn().as_str()),
                         declaring: Some(owner.fqn().as_str()),
                         written_class: Some(&|name: &str| rctx.written_names().resolve_class(name)),
+                        namespace: bound.default_namespace(),
                     },
                     rctx.file.class_loader,
                     &tpl,

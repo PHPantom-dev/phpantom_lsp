@@ -72,8 +72,13 @@ impl Backend {
                 // Content is loaded only once a true FQN match needs a position.
                 for span in &symbol_map.spans {
                     let matched = match &span.kind {
-                        SymbolKind::ClassReference { name, is_fqn, .. } => {
-                            let resolved = fqn_resolver.fqn(name, *is_fqn, span.start);
+                        SymbolKind::ClassReference {
+                            name,
+                            is_fqn,
+                            context,
+                        } => {
+                            let resolved =
+                                fqn_resolver.class_fqn(name, *is_fqn, *context, span.start);
                             class_names_match(strip_fqn_prefix(&resolved), target, target_short)
                         }
                         SymbolKind::ClassDeclaration { name } if include_declaration => {

@@ -20,7 +20,7 @@ use tower_lsp_server::gen_lsp_types::{
 };
 
 use crate::Backend;
-use crate::symbol_map::{ClassRefContext, SymbolKind, SymbolMap, SymbolSpan};
+use crate::symbol_map::{ClassRefContext, DocblockMemberRef, SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::{byte_range_to_lsp_range, offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, FunctionInfo, MethodInfo};
 
@@ -349,19 +349,19 @@ impl Backend {
 
     fn translate_item_to_blade(&self, item: &mut CallHierarchyItem) {
         let uri = item.uri.to_string();
-        if !self.is_blade_file(&uri) {
+        if !self.is_php_template(&uri) {
             return;
         }
-        item.range = self.translate_blade_range(&uri, item.range);
-        item.selection_range = self.translate_blade_range(&uri, item.selection_range);
+        item.range = self.translate_template_range(&uri, item.range);
+        item.selection_range = self.translate_template_range(&uri, item.selection_range);
     }
 
     fn translate_ranges_to_blade(&self, uri: &str, ranges: &mut [Range]) {
-        if !self.is_blade_file(uri) {
+        if !self.is_php_template(uri) {
             return;
         }
         for range in ranges {
-            *range = self.translate_blade_range(uri, *range);
+            *range = self.translate_template_range(uri, *range);
         }
     }
 }
@@ -371,6 +371,8 @@ impl Backend {
 /// Reading a same-named property (`$this->leaf`), naming the method in a
 /// `@see` tag, and calling it (`$this->leaf()`) all reference the same member,
 /// so both directions filter down to the occurrences that actually invoke it.
+/// A Drupal form callback's `'::method'` is a call Drupal makes on the form,
+/// which the resolution of its subject keeps to forms and traits.
 fn is_call_site(span: &SymbolSpan) -> bool {
     match &span.kind {
         SymbolKind::FunctionCall {
@@ -382,7 +384,11 @@ fn is_call_site(span: &SymbolSpan) -> bool {
             is_method_call,
             docblock_ref,
             ..
-        } => *is_method_call && !docblock_ref.is_reference(),
+        } => {
+            *is_method_call
+                && (!docblock_ref.is_reference()
+                    || *docblock_ref == DocblockMemberRef::FormCallback)
+        }
         SymbolKind::ClassReference { context, .. } => matches!(context, ClassRefContext::New),
         _ => false,
     }
@@ -564,6 +570,41 @@ fn push_unique_range(ranges: &mut Vec<Range>, range: Range) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blade_hierarchy_translation_preserves_virtual_item_data_and_source_ranges() {
+        let backend = Backend::new_test();
+        let uri = crate::util::path_to_uri(&std::env::temp_dir().join("hierarchy.blade.php"));
+        let source = "<p>📚 {{ renderLabel() }}</p>\r\n";
+        backend
+            .open_files
+            .write()
+            .insert(uri.clone(), Arc::new(source.to_string()));
+        backend.update_ast(&uri, source);
+        let start = source.find("renderLabel").unwrap();
+        let selection = byte_range_to_lsp_range(source, start, start + "renderLabel".len());
+        let range = byte_range_to_lsp_range(source, start, start + "renderLabel()".len());
+        let virtual_selection = backend.translate_template_range_to_php(&uri, selection);
+        let virtual_range = backend.translate_template_range_to_php(&uri, range);
+        let data = serde_json::json!({"kind": "php", "offset": 42});
+        let mut item = CallHierarchyItem {
+            name: "renderLabel".to_string(),
+            kind: LspSymbolKind::Function,
+            tags: None,
+            detail: None,
+            uri: crate::util::parse_url(&uri).unwrap(),
+            range: virtual_range,
+            selection_range: virtual_selection,
+            data: Some(data.clone()),
+        };
+        backend.translate_item_to_blade(&mut item);
+        assert_eq!(item.range, range);
+        assert_eq!(item.selection_range, selection);
+        assert_eq!(item.data, Some(data));
+        let mut call_ranges = [virtual_selection];
+        backend.translate_ranges_to_blade(&uri, &mut call_ranges);
+        assert_eq!(call_ranges, [selection]);
+    }
 
     const URI: &str = "file:///call_hierarchy.php";
 

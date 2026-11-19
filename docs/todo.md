@@ -34,6 +34,17 @@ contributor even though it's short.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
+## Sprint 9 — Startup performance
+
+| #   | Item                                                                                                                                                            | Impact      | Complexity  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+|     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
+| T61 | [A regression that changes where a call resolves goes unnoticed](todo/type-inference.md#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed) | Medium      | Medium      |
+| P92 | [Startup's file walks and resource indexing run on one core](todo/performance.md#p92-startups-file-walks-and-resource-indexing-run-on-one-core) | Medium | Medium |
+| P86 | [A Symfony app's generated `config/reference.php` is slow to parse](todo/performance.md#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse) | Medium | Medium |
+| P91 | [Parsing and merging of the full index take turns](todo/performance.md#p91-parsing-and-merging-of-the-full-index-take-turns) | Medium-High | Medium-High |
+|     | **Release 1.1.0**                                                                                                                                               |             |             |
+
 # Feature Sets
 
 A feature set is the work toward one goal: making PHPantom fully usable
@@ -64,6 +75,7 @@ ships, remove every row that names it.
 | F62 | [Check Symfony logout route names](todo/lsp-features.md#f62-check-symfony-logout-route-names) | Low         | Low-Medium  |
 | F65 | [Check interpolated and listed Twig names](todo/lsp-features.md#f65-check-interpolated-and-listed-twig-names) | Low         | Medium      |
 | F30 | [Symfony translations outside YAML, XLIFF, and the `trans` filter](todo/lsp-features.md#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter) | Low-Medium  | Medium      |
+| T71 | [A service `#[AsDecorator]` registers does not take over the ID](todo/type-inference.md#t71-a-service-asdecorator-registers-does-not-take-over-the-id) | Low-Medium | Low |
 | T54 | [Messenger handlers a service tag registers](todo/type-inference.md#t54-messenger-handlers-a-service-tag-registers) | Low-Medium  | Medium      |
 | F61 | [Port TwigStan's tests](todo/lsp-features.md#f61-port-twigstans-tests) | Low-Medium | Medium |
 | T55 | [Symfony array parameters are typed as plain `array`](todo/type-inference.md#t55-symfony-array-parameters-are-typed-as-plain-array) | Low         | Medium      |
@@ -117,14 +129,10 @@ ships, remove every row that names it.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | F59 | [Send Twig, YAML, and XML documents to the server from Zed](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed) (Zed PR) | Medium | Low |
-| DR11 | [Form and render callbacks](todo/drupal.md#dr11-form-and-render-callbacks) | Low-Medium | Low-Medium |
 | DR12 | [Translation placeholders](todo/drupal.md#dr12-translation-placeholders) | Low-Medium | Low-Medium |
 | DR13 | [Module names and `*.info.yml`](todo/drupal.md#dr13-module-names-and-infoyml) | Low-Medium | Low-Medium |
-| DR10 | [Plugin IDs](todo/drupal.md#dr10-plugin-ids) | Medium | Medium |
 | DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |
 | DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) | Medium-High | High        |
-| DR16 | [Event subscribers](todo/drupal.md#dr16-event-subscribers) | Medium | Low-Medium |
-| DR17 | [Warn on unknown service IDs](todo/drupal.md#dr17-warn-on-unknown-service-ids) | Medium | Low-Medium |
 | DR18 | [Warn on unknown entity type IDs](todo/drupal.md#dr18-warn-on-unknown-entity-type-ids) | Medium | Low-Medium |
 | DR19 | [Warn on unknown hook names](todo/drupal.md#dr19-warn-on-unknown-hook-names) | Low-Medium | Medium |
 | DR20 | [Complete route names built in code](todo/drupal.md#dr20-complete-route-names-built-in-code) | Low-Medium | Medium |
@@ -132,18 +140,21 @@ ships, remove every row that names it.
 | DR22 | [Complete permissions built in code](todo/drupal.md#dr22-complete-permissions-built-in-code) | Low-Medium | Medium |
 | DR23 | [Warn on unknown permission names](todo/drupal.md#dr23-warn-on-unknown-permission-names) | Medium | Low-Medium |
 | DR24 | [Warn on unknown theme hook names](todo/drupal.md#dr24-warn-on-unknown-theme-hook-names) | Low-Medium | Medium-High |
-| DR25 | [Warn on unknown plugin IDs](todo/drupal.md#dr25-warn-on-unknown-plugin-ids) | Medium | Low-Medium |
-| DR26 | [Annotation class names](todo/drupal.md#dr26-annotation-class-names) | Low-Medium | Low-Medium |
+| DR28 | [Plugin types a manager builds at run time](todo/drupal.md#dr28-plugin-types-a-manager-builds-at-run-time) | Medium | Medium |
+| DR27 | [Plugin IDs in YAML](todo/drupal.md#dr27-plugin-ids-in-yaml) | Low-Medium | Medium |
+| DR32 | [`'::method'` callbacks in a form alter hook](todo/drupal.md#dr32-method-callbacks-in-a-form-alter-hook) | Low-Medium | Low-Medium |
+| DR33 | [Render callbacks that are not trusted](todo/drupal.md#dr33-render-callbacks-that-are-not-trusted) | Low-Medium | Low |
+| DR34 | [Callback parameter checks](todo/drupal.md#dr34-callback-parameter-checks) | Low | Low-Medium |
+| DR35 | [Invokable classes and services as callbacks](todo/drupal.md#dr35-invokable-classes-and-services-as-callbacks) | Low | Low-Medium |
+| DR36 | [Array callables that name their class in a string](todo/drupal.md#dr36-array-callables-that-name-their-class-in-a-string) | Low | Low |
+| DR37 | [Listener methods in subscriber maps](todo/drupal.md#dr37-listener-methods-in-subscriber-maps) | Low-Medium | Low-Medium |
 
 ## Yii
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| Y6  | [`$params` keys in configuration](todo/yii.md#y6-params-keys-in-configuration) | Medium      | Medium      |
 | Y9  | [Views a template renders by name](todo/yii.md#y9-views-a-template-renders-by-name) | Medium      | Medium      |
-| Y10 | [The renderer's configured view path](todo/yii.md#y10-the-renderers-configured-view-path) (builds on Y6) | Medium      | Medium      |
-| Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
-| Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
+| Y10 | [The renderer's configured view path](todo/yii.md#y10-the-renderers-configured-view-path) | Medium      | Medium      |
 
 ## PHPUnit & Pest
 
@@ -154,7 +165,6 @@ ships, remove every row that names it.
 | TS8 | [Port PHPStan's PHPUnit and Mockery extension tests](todo/testing.md#ts8-port-phpstans-phpunit-and-mockery-extension-tests) | Medium | Low-Medium |
 | TS9 | [PHPUnit and Pest demo project](todo/testing.md#ts9-phpunit-and-pest-demo-project) | Medium | Low-Medium |
 | TS11 | [Mock unions in property docblocks](todo/testing.md#ts11-mock-unions-in-property-docblocks) | Medium | Low-Medium |
-| TS7 | [Prophecy](todo/testing.md#ts7-prophecy) | Low         | Low-Medium  |
 
 ## Laravel & Blade
 
@@ -167,10 +177,8 @@ ships, remove every row that names it.
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L56 | [Typed Laravel connection names](todo/laravel.md#l56-typed-laravel-connection-names)                                                                                        | Medium      | Medium      |
 | L58 | [Laravel rate limiter names](todo/laravel.md#l58-laravel-rate-limiter-names)                                                                                                | Medium      | Medium      |
-| L53 | [Collection key types from the column for `keyBy` / `groupBy` / `pluck`](todo/laravel.md#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck)                   | Medium      | Medium      |
 | BL20 | [Port Bladestan's tests](todo/blade.md#bl20-port-bladestans-tests) | Medium | Medium |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
-| L70 | [Read-only accessors are offered as columns](todo/laravel.md#l70-read-only-accessors-are-offered-as-columns) | Low-Medium | Low |
 | L71 | [Inertia page props and asset helpers on a typed URL generator](todo/laravel.md#l71-inertia-page-props-and-asset-helpers-on-a-typed-url-generator) | Low | Low-Medium |
 | L59 | [Typed controller middleware names](todo/laravel.md#l59-typed-controller-middleware-names)                                                                                  | Low-Medium  | Medium      |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |
@@ -210,11 +218,12 @@ ships, remove every row that names it.
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
-| D19 | [`invalid_member_access` cannot tell a property read from a write](todo/diagnostics.md#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
+| D19 | [`inaccessible_member` cannot tell a property read from a write](todo/diagnostics.md#d19-inaccessible_member-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
 | D20 | [`Foo::$bar` and `Foo::bar` are the same span](todo/diagnostics.md#d20-foobar-and-foobar-are-the-same-span)                                                                  | Low         | Medium      |
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |
 | D50 | [`unused-parameters` skips methods a subclass can override](todo/diagnostics.md#d50-unused-parameters-skips-methods-a-subclass-can-override) | Low         | Medium-High |
+| D52 | [`incompatible_override` only checks a `static` return type](todo/diagnostics.md#d52-incompatible_override-only-checks-a-static-return-type) | Medium      | Medium-High |
 
 ## Code Generation & Refactoring
 
@@ -287,5 +296,7 @@ ships, remove every row that names it.
 | X14 | [Forward Zed's `file_scan_exclusions` and `file_types`](todo/indexing.md#x14-forward-zeds-file_scan_exclusions-and-file_types) (waiting on [zed#66121](https://github.com/zed-industries/zed/pull/66121)) | Low         | Low         |
 | X18 | [Watch `[indexing] include` and stub paths outside the workspace](todo/indexing.md#x18-watch-indexing-include-and-stub-paths-outside-the-workspace)                                         | Low-Medium  | Medium      |
 | X13 | [Decide how workspace-wide edits treat excluded files](todo/indexing.md#x13-decide-how-workspace-wide-edits-treat-excluded-files)                                           | Low-Medium  | Medium      |
+| X22 | [Read the remaining YAML files with the shared parser](todo/indexing.md#x22-read-the-remaining-yaml-files-with-the-shared-parser) | Low-Medium  | Medium-High |
+| X23 | [Read XML files with a parser](todo/indexing.md#x23-read-xml-files-with-a-parser) | Low-Medium  | Medium-High |
 | X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium-High |
 | X12 | [Say when an exclude hid the class a diagnostic names](todo/indexing.md#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names)                                           | Low-Medium  | Medium-High |

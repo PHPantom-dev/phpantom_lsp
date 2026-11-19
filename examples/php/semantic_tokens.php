@@ -14,7 +14,7 @@
  *    cannot work out for itself, leaving everything else to your editor's
  *    coloring. Topics marked "(full mode)" need
  *
- *        [semantic_tokens]
+ *        [semantic-tokens]
  *        mode = "full"
  *
  *    in `.phpantom.toml`. See docs/configuration.md for the other modes.

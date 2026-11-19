@@ -10,6 +10,36 @@ use crate::virtual_members::laravel::where_property::{
 
 use crate::test_fixtures::make_class;
 
+#[test]
+fn accessor_sources_without_columns_follow_the_requested_operation() {
+    use super::{AttributeNameKind, collect_attribute_names};
+    use crate::types::PropertySource;
+    let mut model = make_model("App\\Models\\Example");
+    for (name, mutator) in [
+        ("readonly", None),
+        ("writable", Some("setWritableAttribute")),
+    ] {
+        model.properties.push(Arc::new(PropertyInfo {
+            source: Some(PropertySource::Accessor {
+                method: format!("get{name}Attribute"),
+                mutator: mutator.map(str::to_string),
+                column: None,
+            }),
+            ..PropertyInfo::virtual_property(name, Some("string"))
+        }));
+    }
+    for (kind, expected) in [
+        (AttributeNameKind::Column, Vec::<String>::new()),
+        (AttributeNameKind::Writable, vec!["writable".to_string()]),
+        (
+            AttributeNameKind::Serializable,
+            vec!["readonly".to_string(), "writable".to_string()],
+        ),
+    ] {
+        assert_eq!(collect_attribute_names(&model, kind), expected);
+    }
+}
+
 fn make_model(name: &str) -> ClassInfo {
     let mut c = make_class(name);
     c.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
@@ -461,5 +491,9 @@ fn columns_exclude_synthesized_relationship_properties() {
         model.properties.push(Arc::new(property));
     }
     let columns = super::collect_column_names(&model);
-    assert_eq!(columns, ["display_name"]);
+    assert!(columns.is_empty(), "{columns:?}");
+    assert_eq!(
+        super::collect_attribute_names(&model, super::AttributeNameKind::Serializable),
+        ["display_name"]
+    );
 }

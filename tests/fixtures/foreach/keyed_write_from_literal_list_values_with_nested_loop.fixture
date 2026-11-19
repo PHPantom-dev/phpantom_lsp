@@ -1,0 +1,28 @@
+// test: a nested loop's own continue does not make the keys a literal list's values write optional
+// feature: hover
+// expect: $labels = array{1: 0, 2: 0, 3: 0}
+---
+<?php
+
+final class Graph {
+    private const int WHITE = 0;
+
+    /** @param list<int> $edges */
+    public static function labels(array $edges): void {
+        $labels = [];
+        foreach ([1, 2, 3] as $node) {
+            $labels[$node] = self::WHITE;
+            foreach ($edges as $edge) {
+                if ($edge === $node) {
+                    continue;
+                }
+                break;
+            }
+            switch ($node) {
+                case 2:
+                    continue;
+            }
+        }
+        $<>labels;
+    }
+}

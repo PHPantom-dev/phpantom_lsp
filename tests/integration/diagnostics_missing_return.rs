@@ -70,7 +70,7 @@ $anon = new class {
         .iter()
         .map(|d| message_text(&d.message).to_string())
         .collect();
-    assert!(messages[0].starts_with("Method find() should return Repo"));
+    assert!(messages[0].starts_with("Method Repo::find() should return Repo"));
     assert!(messages[2].starts_with("Closure should return string"));
 }
 

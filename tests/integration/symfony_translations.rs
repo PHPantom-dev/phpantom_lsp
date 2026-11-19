@@ -464,9 +464,9 @@ async fn keys_no_catalogue_declares_are_reported() {
     assert_eq!(
         translation_problems(&backend, &uri, CHECKED_PHP),
         vec![
-            "Unknown translation key: 'demo.card' in domain 'admin'".to_string(),
-            "Unknown translation key: 'demo.cards' in domain 'messages'".to_string(),
-            "Unknown translation key: 'demo.titel' in domain 'messages'".to_string(),
+            "Unknown translation key 'demo.card' in domain 'admin'".to_string(),
+            "Unknown translation key 'demo.cards' in domain 'messages'".to_string(),
+            "Unknown translation key 'demo.titel' in domain 'messages'".to_string(),
         ]
     );
 }
@@ -498,7 +498,7 @@ async fn a_domain_with_a_catalogue_that_is_not_read_is_not_judged() {
 
     assert_eq!(
         translation_problems(&backend, &uri, CHECKED_PHP),
-        vec!["Unknown translation key: 'demo.card' in domain 'admin'".to_string()]
+        vec!["Unknown translation key 'demo.card' in domain 'admin'".to_string()]
     );
 }
 
@@ -528,6 +528,6 @@ async fn only_the_directories_the_translator_loads_tell_which_domains_are_judged
 
     assert_eq!(
         translation_problems(&backend, &uri, CHECKED_PHP),
-        vec!["Unknown translation key: 'demo.card' in domain 'admin'".to_string()]
+        vec!["Unknown translation key 'demo.card' in domain 'admin'".to_string()]
     );
 }

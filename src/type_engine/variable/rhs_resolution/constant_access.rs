@@ -48,8 +48,8 @@ pub(super) fn resolve_rhs_constant_access(
 /// no namespace to try.
 fn global_constant_type(name: &str, offset: u32, ctx: &VarResolutionCtx<'_>) -> Option<PhpType> {
     let value = ctx.lookup_constant(name, offset)??;
+    let rctx = ctx.as_resolution_ctx();
     infer_type_from_constant_value(&value).or_else(|| {
-        let rctx = ctx.as_resolution_ctx();
         let resolve = |text: &str| {
             let text = text.trim();
             let is_constant_name = text
@@ -69,5 +69,8 @@ fn global_constant_type(name: &str, offset: u32, ctx: &VarResolutionCtx<'_>) -> 
             &value,
             &resolve,
         )
+        .or_else(|| {
+            crate::type_engine::call_resolution::global_constant_class_reference_type(&value, &rctx)
+        })
     })
 }

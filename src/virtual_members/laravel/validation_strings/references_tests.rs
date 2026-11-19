@@ -574,7 +574,8 @@ fn enum_candidates_only_offer_known_string_and_integer_backing_values() {
             case Text = 'pending';
             case Number = 42;
             case InProgress;
-            case Computed = 'pen' . 'ding';
+            case Computed = 'in' . 'progress';
+            case UnknownConcat = 'prefix' . UNKNOWN_VALUE . 'suffix';
             case Missing = UNKNOWN_VALUE;
             case Fraction = 1.25;
         }
@@ -598,6 +599,6 @@ fn enum_candidates_only_offer_known_string_and_integer_backing_values() {
             .iter()
             .map(|candidate| candidate.name.as_str())
             .collect::<Vec<_>>(),
-        ["pending", "42"]
+        ["pending", "42", "inprogress"]
     );
 }

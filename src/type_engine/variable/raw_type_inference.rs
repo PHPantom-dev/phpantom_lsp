@@ -771,7 +771,11 @@ pub(in crate::type_engine) fn resolve_string_func_return_type(
     args: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    if !super::string_func_rules::has_string_func_rule(func_name) {
+    if !super::string_func_rules::is_builtin_string_function(
+        func_name,
+        ctx.function_loader(),
+        args.span().start.offset,
+    ) {
         return None;
     }
     super::string_func_rules::string_func_return_type(func_name, &AstArrayFuncArgs { args, ctx })

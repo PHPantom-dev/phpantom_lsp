@@ -63,8 +63,8 @@ impl Backend {
                             out.push(make_diagnostic(
                                 range,
                                 DiagnosticSeverity::Warning,
-                                "invalid_validation_rule",
-                                format!("Unknown validation rule '{name}'."),
+                                "invalid_laravel_validation_rule",
+                                format!("Unknown validation rule '{name}'"),
                             ));
                         }
                     }
@@ -92,8 +92,8 @@ impl Backend {
                         out.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::Warning,
-                            "invalid_validation_message",
-                            format!("Unknown validation field or rule in '{key}'."),
+                            "invalid_laravel_validation_message",
+                            format!("Unknown validation field or rule in '{key}'"),
                         ));
                     }
                 }

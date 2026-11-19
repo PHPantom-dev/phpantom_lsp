@@ -43,7 +43,7 @@ function show(Invoice $invoice): void {
     assert_eq!(d.range.end, Position::new(4, 17));
     assert_eq!(
         message_text(&d.message),
-        "Object of class Invoice cannot be converted to string (no __toString() method)"
+        "Object of class Invoice cannot be converted to string"
     );
 }
 
@@ -138,7 +138,7 @@ echo Status::Open;
     assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     assert_eq!(
         message_text(&diags[0].message),
-        "Object of class Status cannot be converted to string (no __toString() method)"
+        "Object of class Status cannot be converted to string"
     );
 }
 
@@ -157,7 +157,7 @@ function show(Invoice|Receipt|null $doc): void {
     assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
     assert_eq!(
         message_text(&diags[0].message),
-        "Object of class Invoice|Receipt cannot be converted to string (no __toString() method)"
+        "Object of class Invoice|Receipt cannot be converted to string"
     );
 }
 
@@ -265,6 +265,6 @@ namespace Other {
     );
     assert_eq!(
         message_text(&diags[0].message),
-        "Object of class App\\Invoice cannot be converted to string (no __toString() method)"
+        "Object of class App\\Invoice cannot be converted to string"
     );
 }

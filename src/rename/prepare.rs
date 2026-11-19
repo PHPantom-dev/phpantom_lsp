@@ -122,7 +122,10 @@ impl Backend {
         // The range below is built from this span's byte offsets, and the
         // editor shows it as the text about to be replaced.  A map that
         // predates the buffer would put it over unrelated code.
-        if !self.rename_map_matches(uri, content) || !span_spells_its_name(content, &span) {
+        if !self.rename_map_matches(uri, content)
+            || !span_spells_its_name(content, &span)
+            || self.is_callback_naming_no_function(&span.kind)
+        {
             return None;
         }
 
@@ -267,7 +270,10 @@ impl Backend {
         // from this span.  If the map it came from predates the buffer the
         // whole response is nonsense, so drop it rather than rename the
         // wrong symbol.
-        if !self.rename_map_matches(uri, content) || !span_spells_its_name(content, &span) {
+        if !self.rename_map_matches(uri, content)
+            || !span_spells_its_name(content, &span)
+            || self.is_callback_naming_no_function(&span.kind)
+        {
             return Ok(None);
         }
 
@@ -460,6 +466,13 @@ impl Backend {
                         kind: SymbolKind::CompactVariable { .. },
                         ..
                     }) => bare_name.to_string(),
+                    _ if loc_content.as_deref().is_some_and(|content| {
+                        range_text(content, location.range)
+                            .is_some_and(|text| !text.starts_with('$'))
+                    }) =>
+                    {
+                        bare_name.to_string()
+                    }
                     _ => {
                         if new_name.starts_with('$') {
                             new_name.to_string()
@@ -625,7 +638,7 @@ impl Backend {
     ) -> Option<PrepareRenameResult> {
         let span = self.lookup_symbol_at_position(uri, content, position)?;
         let SymbolKind::MemberAccess {
-            subject_text: crate::symbol_map::SubjectText::Owned(_),
+            subject_text: crate::symbol_map::SubjectText::Owned { .. },
             member_name,
             is_method_call: false,
             ..
@@ -690,6 +703,19 @@ impl Backend {
         Some((target_uri, target_content, target_position))
     }
 
+    /// Whether `kind` is a Drupal callback string that names no function,
+    /// but an invokable class or service.
+    fn is_callback_naming_no_function(&self, kind: &SymbolKind) -> bool {
+        matches!(
+            kind,
+            SymbolKind::FunctionCall {
+                name,
+                is_callback: true,
+                ..
+            } if !self.callback_names_function(name)
+        )
+    }
+
     /// Extract the renameable symbol name and its source range.
     ///
     /// Returns `None` for symbols that cannot be renamed.
@@ -716,7 +742,11 @@ impl Backend {
             SymbolKind::ClassDeclaration { name } => Some((name.to_string(), range)),
             SymbolKind::MemberAccess { member_name, .. } => Some((member_name.to_string(), range)),
             SymbolKind::MemberDeclaration { name, .. } => Some((name.to_string(), range)),
-            SymbolKind::FunctionCall { name, .. } => Some((name.to_string(), range)),
+            // A callback string's function name keeps the leading `\` that
+            // makes it global; the name to edit goes without it.
+            SymbolKind::FunctionCall { name, .. } => {
+                Some((crate::util::strip_fqn_prefix(name).to_string(), range))
+            }
             SymbolKind::ConstantReference { name, .. } => Some((name.to_string(), range)),
             SymbolKind::NamespaceDeclaration { name } => Some((name.to_string(), range)),
             SymbolKind::LaravelMacroString { name } => Some((name.clone(), range)),

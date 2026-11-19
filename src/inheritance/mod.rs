@@ -49,9 +49,10 @@ pub(crate) use generics::{
     apply_generic_args, apply_substitution_to_conditional, apply_substitution_to_method,
     apply_substitution_to_property, bind_inherited_class_keywords,
     bind_inherited_class_keywords_in_property, bind_template_args, build_generic_subs,
-    build_substitution_map, class_scoped_template_values, default_type_args, extends_type_args,
-    fill_template_bounds, generic_arg_offset, method_has_inherited_class_keyword,
-    method_references_params, property_has_inherited_class_keyword, property_references_params,
+    build_substitution_map, class_scoped_template_values, declared_self_type, default_type_args,
+    extends_type_args, fill_template_bounds, generic_arg_offset,
+    method_has_inherited_class_keyword, method_references_params,
+    property_has_inherited_class_keyword, property_references_params,
     template_values_with_defaults,
 };
 

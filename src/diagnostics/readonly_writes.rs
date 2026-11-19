@@ -513,16 +513,13 @@ impl Backend {
                     form.verb(),
                     owner
                 ),
-                Some(Verdict::AlreadyInitialized(owner)) => format!(
-                    "Cannot {} {} after the constructor has initialized it",
-                    form.verb(),
-                    owner
-                ),
-                Some(Verdict::AssignedTwice(owner)) => format!(
-                    "Cannot {} {} after the constructor has already initialized it",
-                    form.verb(),
-                    owner
-                ),
+                Some(Verdict::AlreadyInitialized(owner) | Verdict::AssignedTwice(owner)) => {
+                    format!(
+                        "Cannot {} {} after the constructor has initialized it",
+                        form.verb(),
+                        owner
+                    )
+                }
                 Some(Verdict::Indirect(owner)) => {
                     format!("Cannot indirectly modify {}", owner)
                 }

@@ -223,7 +223,11 @@ impl Backend {
                 read.push((crate::util::path_to_uri(&path), replacements));
             }
         }
+        if read.is_empty() {
+            return;
+        }
         self.drupal.service_replacements.write().extend(read);
+        self.retire_typed_receiver_spans();
     }
 
     /// Read a service provider again after its file changed.  Cheap for
@@ -247,10 +251,18 @@ impl Backend {
         }
         let replacements = service_class_replacements(content);
         let mut all = self.drupal.service_replacements.write();
-        if replacements.is_empty() {
-            all.remove(uri);
+        let changed = if replacements.is_empty() {
+            all.remove(uri).is_some()
+        } else if all.get(uri) == Some(&replacements) {
+            false
         } else {
             all.insert(uri.to_string(), replacements);
+            true
+        };
+        drop(all);
+        // A replacement types the service, and so its lookups' receivers.
+        if changed {
+            self.retire_typed_receiver_spans();
         }
     }
 
@@ -258,6 +270,7 @@ impl Backend {
     pub(crate) fn forget_drupal_service_provider(&self, uri: &str) {
         if self.drupal.service_replacements.read().contains_key(uri) {
             self.drupal.service_replacements.write().remove(uri);
+            self.retire_typed_receiver_spans();
         }
     }
 

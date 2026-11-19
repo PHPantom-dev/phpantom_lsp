@@ -317,6 +317,16 @@ pub(super) fn scan_files_parallel_full(
     files: &[(PathBuf, crate::ClassCompletionOrigin)],
     progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
+    scan_files_parallel_noting(files, progress, |_, _| false).0
+}
+
+/// [`scan_files_parallel_full`], also returning the files whose path and
+/// content `note` picks, read while their content is at hand.
+fn scan_files_parallel_noting(
+    files: &[(PathBuf, crate::ClassCompletionOrigin)],
+    progress: Option<&ScanProgress>,
+    note: impl Fn(&Path, &[u8]) -> bool + Sync,
+) -> (WorkspaceScanResult, Vec<PathBuf>) {
     let scanned = crate::parallel::map_in_blocks(
         "scan_files_parallel_full",
         files,
@@ -324,20 +334,27 @@ pub(super) fn scan_files_parallel_full(
         |(path, origin)| {
             progress_add_done(progress);
             let content = read_for_scan(path).ok()?;
+            let noted = note(path, &content);
             let scan = super::find_symbols_and_global_tags(&content);
-            (!scan.classes.is_empty()
+            let declares = !scan.classes.is_empty()
                 || !scan.functions.is_empty()
                 || !scan.constants.is_empty()
-                || !scan.globals.is_empty())
-            .then_some((scan, path, *origin))
+                || !scan.globals.is_empty();
+            (declares || noted).then_some((declares.then_some(scan), path, *origin, noted))
         },
     );
 
     let mut result = WorkspaceScanResult::default();
-    for (scan, path, origin) in scanned {
-        merge_scanned_file(&mut result, scan, path, origin);
+    let mut noted_files = Vec::new();
+    for (scan, path, origin, noted) in scanned {
+        if noted {
+            noted_files.push(path.clone());
+        }
+        if let Some(scan) = scan {
+            merge_scanned_file(&mut result, scan, path, origin);
+        }
     }
-    result
+    (result, noted_files)
 }
 
 /// Scan all `.php` files under the workspace root using the full-scan
@@ -705,15 +722,26 @@ pub fn scan_drupal_directories(
                 declaration_files.declarations.push(path.to_path_buf());
             } else if crate::drupal::is_template_file(path, web_root) {
                 declaration_files.templates.push(path.to_path_buf());
+            } else if crate::drupal::services::is_test_services_file(path, web_root) {
+                declaration_files
+                    .service_definitions
+                    .push(path.to_path_buf());
             }
         }
     }
 
     progress_add_total(progress, php_files.len());
-    (
-        scan_files_parallel_full(&php_files, progress),
-        declaration_files,
-    )
+    // Test code's containers are mocks, so what it defines is left out.
+    let (result, defining) = scan_files_parallel_noting(&php_files, progress, |path, content| {
+        crate::drupal::services::may_define_services(content)
+            && !path
+                .strip_prefix(web_root)
+                .unwrap_or(path)
+                .components()
+                .any(|part| part.as_os_str() == "tests")
+    });
+    declaration_files.service_definitions.extend(defining);
+    (result, declaration_files)
 }
 
 /// The files a Drupal web root declares things in.
@@ -734,6 +762,9 @@ pub struct DrupalDeclarationFiles {
     /// The Twig templates theme hooks are drawn with (see
     /// `drupal::is_template_file`), recorded without being read.
     pub templates: Vec<PathBuf>,
+    /// The PHP files that may define services, and test modules' services
+    /// files (see `drupal::services`), recorded without being read.
+    pub service_definitions: Vec<PathBuf>,
 }
 
 /// The extensions besides `.php` that Drupal treats as PHP source.

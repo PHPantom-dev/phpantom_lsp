@@ -210,9 +210,9 @@ impl Backend {
             }
 
             let message = format!(
-                "Class `{}` differs in case from its declaration `{}`. PSR-4 autoloading is \
-                 case-sensitive, so this loads on a case-insensitive filesystem but fails on Linux.",
-                written, canonical,
+                "Class {} is declared as {}, and autoloading it fails on a case-sensitive filesystem",
+                written.trim_start_matches('\\'),
+                canonical.trim_start_matches('\\'),
             );
 
             out.push(ClassCaseMismatch {

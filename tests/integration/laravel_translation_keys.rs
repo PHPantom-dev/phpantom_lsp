@@ -115,11 +115,11 @@ async fn workspace(
     (backend, dir, uri, content)
 }
 
-/// The `invalid_laravel_trans` messages the slow pass reports on `uri`.
+/// The `invalid_laravel_translation` messages the slow pass reports on `uri`.
 fn trans_diagnostics(backend: &phpantom_lsp::Backend, uri: &Uri, content: &str) -> Vec<String> {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diags);
-    messages_with_code(&diags, "invalid_laravel_trans")
+    messages_with_code(&diags, "invalid_laravel_translation")
 }
 
 fn location_in<'a>(found: &'a [Location], suffix: &str) -> Option<&'a Location> {

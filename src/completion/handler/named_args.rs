@@ -45,6 +45,22 @@ impl Backend {
             None => return Vec::new(),
         };
 
+        if let Some(items) =
+            self.tempest_view_named_completions(uri, &na_ctx, content, position, ctx)
+        {
+            return items;
+        }
+        if let Some(items) = self.tempest_route_named_completions(&na_ctx, content, position, ctx) {
+            return items;
+        }
+        if let Some(items) =
+            self.tempest_model_property_named_completions(&na_ctx, content, position, ctx)
+        {
+            return items;
+        }
+        if let Some(items) = self.container_named_completions(&na_ctx, content, position, ctx) {
+            return items;
+        }
         let mut params = self.resolve_named_arg_params(&na_ctx, content, position, ctx);
 
         // If resolution failed, the parser may have choked on

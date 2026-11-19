@@ -27,7 +27,6 @@ function foo(string $str) {
         assert_eq!(diags.len(), 1);
         assert!(message_text(&diags[0].message).contains("int"));
         assert!(message_text(&diags[0].message).contains("string"));
-        assert!(message_text(&diags[0].message).contains("==="));
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
     }
 

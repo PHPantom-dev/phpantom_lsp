@@ -416,15 +416,13 @@ pub(crate) fn innermost_node_at<'ast, 'arena, T>(
     mut pick: impl FnMut(mago_syntax::cst::Node<'ast, 'arena>) -> Option<T>,
 ) -> Option<T> {
     use mago_span::HasSpan;
-    let holds = |node: &mago_syntax::cst::Node<'_, '_>| {
-        let span = node.span();
-        span.start.offset <= offset && offset <= span.end.offset
-    };
-    if !holds(&root) {
+    let root_span = root.span();
+    if offset < root_span.start.offset || root_span.end.offset < offset {
         return None;
     }
     let mut found = None;
     let mut node = root;
+    let mut node_start = root_span.start.offset;
     loop {
         if let Some(picked) = pick(node) {
             found = Some(picked);
@@ -432,15 +430,43 @@ pub(crate) fn innermost_node_at<'ast, 'arena, T>(
         // An offset on the boundary of two siblings belongs to the later.
         let mut next = None;
         node.visit_children(|child| {
-            if holds(&child) {
-                next = Some(child);
+            let (start, end) = child_span(node, node_start, child);
+            if start <= offset && offset <= end {
+                next = Some((child, start));
             }
         });
         match next {
-            Some(child) => node = child,
+            Some((child, start)) => (node, node_start) = (child, start),
             None => return found,
         }
     }
+}
+
+/// The span of `child`, a child of `parent`, which starts at `parent_start`.
+///
+/// `Binary::span` finds an operator's start by walking down its left edge,
+/// so asking every operator of a long left-nested chain for its span is
+/// quadratic.  An operator's left operand, and the operator inside the
+/// expression that wraps it, start where their parent does, so a walk down
+/// the tree that knows the parent's start passes it in.
+fn child_span(
+    parent: mago_syntax::cst::Node<'_, '_>,
+    parent_start: u32,
+    child: mago_syntax::cst::Node<'_, '_>,
+) -> (u32, u32) {
+    use mago_span::HasSpan;
+    use mago_syntax::cst::{Expression, Node};
+    if !shares_start(parent, child) {
+        let span = child.span();
+        return (span.start.offset, span.end.offset);
+    }
+    let end = match child {
+        Node::Expression(Expression::Binary(binary)) | Node::Binary(binary) => {
+            binary.rhs.span().end.offset
+        }
+        _ => child.span().end.offset,
+    };
+    (parent_start, end)
 }
 
 /// Call `visit` with every node under `root`, in source order, together
@@ -462,6 +488,117 @@ pub(crate) fn for_each_node_with_ancestors<'ast, 'arena>(
         ancestors.push(node);
         node.visit_children(|child| children.push(child));
         pending.extend(children.drain(..).rev().map(|child| (child, depth + 1)));
+    }
+}
+
+/// Call `visit` with every node under `root`, `root` included, in source
+/// order, descending into a node's children only when `visit` returns
+/// `true` for it.
+///
+/// Walks with an explicit stack rather than recursing, so a deeply nested
+/// expression cannot overflow the thread's stack.
+pub(crate) fn walk_nodes<'ast, 'arena>(
+    root: mago_syntax::cst::Node<'ast, 'arena>,
+    mut visit: impl FnMut(mago_syntax::cst::Node<'ast, 'arena>) -> bool,
+) {
+    let mut pending = vec![root];
+    let mut children = Vec::new();
+    while let Some(node) = pending.pop() {
+        if visit(node) {
+            node.visit_children(|child| children.push(child));
+            pending.extend(children.drain(..).rev());
+        }
+    }
+}
+
+/// Like [`walk_nodes`], but each node also gets a `state` handed down from
+/// its parent: `visit` returns the state its children get, or `None` to skip
+/// them.
+pub(crate) fn walk_nodes_with<'ast, 'arena, S: Copy>(
+    root: mago_syntax::cst::Node<'ast, 'arena>,
+    state: S,
+    mut visit: impl FnMut(mago_syntax::cst::Node<'ast, 'arena>, S) -> Option<S>,
+) {
+    let mut pending = vec![(root, state)];
+    let mut children = Vec::new();
+    while let Some((node, state)) = pending.pop() {
+        if let Some(state) = visit(node, state) {
+            node.visit_children(|child| children.push((child, state)));
+            pending.extend(children.drain(..).rev());
+        }
+    }
+}
+
+/// What `pick` makes of the first node under `root`, `root` included and
+/// in source order, that it accepts.
+pub(crate) fn find_node<'ast, 'arena, T>(
+    root: mago_syntax::cst::Node<'ast, 'arena>,
+    mut pick: impl FnMut(mago_syntax::cst::Node<'ast, 'arena>) -> Option<T>,
+) -> Option<T> {
+    let mut pending = vec![root];
+    let mut children = Vec::new();
+    while let Some(node) = pending.pop() {
+        if let Some(found) = pick(node) {
+            return Some(found);
+        }
+        node.visit_children(|child| children.push(child));
+        pending.extend(children.drain(..).rev());
+    }
+    None
+}
+
+/// Like [`walk_nodes_with`], but each node also carries the offset it
+/// starts at.
+///
+/// Start offsets are found the way [`innermost_node_at`] finds them, so a
+/// long operator chain costs linear rather than quadratic time.
+pub(crate) fn walk_nodes_with_start<'ast, 'arena, S: Copy>(
+    root: mago_syntax::cst::Node<'ast, 'arena>,
+    state: S,
+    mut visit: impl FnMut(mago_syntax::cst::Node<'ast, 'arena>, u32, S) -> Option<S>,
+) {
+    use mago_span::HasSpan;
+    let mut pending = vec![(root, root.span().start.offset, state)];
+    let mut children = Vec::new();
+    while let Some((node, start, state)) = pending.pop() {
+        if let Some(state) = visit(node, start, state) {
+            node.visit_children(|child| {
+                children.push((child, child_start(node, start, child), state))
+            });
+            pending.extend(children.drain(..).rev());
+        }
+    }
+}
+
+/// The start offset of `child`, a child of `parent`, which starts at
+/// `parent_start`.  See [`child_span`].
+fn child_start(
+    parent: mago_syntax::cst::Node<'_, '_>,
+    parent_start: u32,
+    child: mago_syntax::cst::Node<'_, '_>,
+) -> u32 {
+    use mago_span::HasSpan;
+    if shares_start(parent, child) {
+        parent_start
+    } else {
+        child.start_position().offset
+    }
+}
+
+/// Whether `child`, a child of `parent`, starts where `parent` does without
+/// that being cheap to see: an operator's left operand, and the operator
+/// inside the expression that wraps it.
+fn shares_start(
+    parent: mago_syntax::cst::Node<'_, '_>,
+    child: mago_syntax::cst::Node<'_, '_>,
+) -> bool {
+    use mago_syntax::cst::{Expression, Node};
+    match (parent, child) {
+        (Node::Expression(Expression::Binary(wrapped)), Node::Binary(inner)) => {
+            std::ptr::eq(wrapped, inner)
+        }
+        (Node::Binary(binary), Node::Expression(lhs)) => std::ptr::eq(binary.lhs, lhs),
+        _ => false,
     }
 }
 

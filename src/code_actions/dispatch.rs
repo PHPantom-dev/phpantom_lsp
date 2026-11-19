@@ -172,6 +172,7 @@ static COLLECTORS: &[Collector] = &[
     skip_in_template(QUICKFIX, Backend::collect_fix_namespace_actions),
     skip_in_template(QUICKFIX, Backend::collect_fix_class_name_actions),
     offer(QUICKFIX, Backend::collect_fix_class_case_actions),
+    offer(QUICKFIX, Backend::collect_yii_definition_key_actions),
     offer(EXTRACT, Backend::collect_extract_interface_actions),
     skip_in_template(REFACTOR, Backend::collect_create_test_actions),
     offer_in_resource(QUICKFIX, Backend::collect_create_missing_view_actions),
@@ -223,7 +224,7 @@ impl Backend {
         // context stay in the template's coordinates, which is where the
         // collectors report a template's diagnostics, and what the editor
         // matches an action's diagnostics against.
-        let is_template = self.is_blade_file(uri);
+        let is_template = self.is_php_template(uri);
         let template = if is_template {
             // Nothing to offer for a template edited since it was lowered.
             let Some(template) = self.template_text(uri) else {
@@ -237,7 +238,7 @@ impl Backend {
         let translated;
         let params = if is_template {
             let mut moved = params.clone();
-            moved.range = self.translate_blade_range_to_php(uri, params.range);
+            moved.range = self.translate_template_range_to_php(uri, params.range);
             translated = moved;
             &translated
         } else {
@@ -388,7 +389,7 @@ impl Backend {
         // resolve reads the same text, and has nothing to resolve to once
         // the template no longer matches it.
         let template = self.template_text(&data.uri);
-        if template.is_none() && self.is_blade_file(&data.uri) {
+        if template.is_none() && self.is_php_template(&data.uri) {
             return (action, None);
         }
         let Some(content) = self.analysable_content(&data.uri) else {

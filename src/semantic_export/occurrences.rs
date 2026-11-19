@@ -121,6 +121,7 @@ pub(super) fn export_span(
             name,
             is_definition,
             is_docblock_reference,
+            is_callback,
         } => {
             let loader = backend.function_loader_with(
                 context.resolved_names.as_deref(),
@@ -137,7 +138,7 @@ pub(super) fn export_span(
                 resolved_symbol: symbol,
                 is_definition: *is_definition,
             });
-            if !is_definition && function.is_none() && !is_docblock_reference {
+            if !is_definition && function.is_none() && !is_docblock_reference && !is_callback {
                 output.diagnostics.push(ExportDiagnostic {
                     kind: ExportDiagnosticKind::UnresolvedFunction,
                     range,
@@ -168,7 +169,12 @@ pub(super) fn export_span(
                     return;
                 }
                 OccurrenceKind::Property
-            } else if *docblock_ref == DocblockMemberRef::EntityField {
+            } else if matches!(
+                docblock_ref,
+                DocblockMemberRef::EntityField
+                    | DocblockMemberRef::YiiAttribute
+                    | DocblockMemberRef::YiiProperty { .. }
+            ) {
                 OccurrenceKind::Property
             } else {
                 member_occurrence_kind(&source.source, range, *is_static, *is_method_call)
@@ -190,11 +196,18 @@ pub(super) fn export_span(
             // A string naming no method of a mock is an ordinary argument
             // (`$gate->allows('update')`), not an occurrence of anything,
             // and so is a key of an array passed to something other than a
-            // repository.
+            // repository, or a name passed to the `get()` of something
+            // other than a record, or a field helper's string given
+            // something other than a form model, or a form callback's
+            // `'::method'` outside a form.
             if target.is_none()
                 && matches!(
                     docblock_ref,
-                    DocblockMemberRef::MockedMethod | DocblockMemberRef::EntityField
+                    DocblockMemberRef::MockedMethod
+                        | DocblockMemberRef::EntityField
+                        | DocblockMemberRef::YiiAttribute
+                        | DocblockMemberRef::YiiProperty { form_model: true }
+                        | DocblockMemberRef::FormCallback
                 )
             {
                 return;

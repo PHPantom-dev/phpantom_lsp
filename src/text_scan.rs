@@ -10,6 +10,18 @@
 
 use std::borrow::Cow;
 
+/// Escape a completion value for the quote surrounding a PHP string literal.
+pub(crate) fn escape_literal_value(value: &str, quote: char) -> String {
+    let mut text = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch == '\\' || ch == quote || (quote == '"' && ch == '$') {
+            text.push('\\');
+        }
+        text.push(ch);
+    }
+    text
+}
+
 /// The first occurrence of `needle` in `bytes[from..limit]`, as an offset
 /// into `bytes`.  `None` when the window is empty or out of range.
 pub(crate) fn find(bytes: &[u8], from: usize, limit: usize, needle: &[u8]) -> Option<usize> {

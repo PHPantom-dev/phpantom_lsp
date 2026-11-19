@@ -33,7 +33,7 @@ class Bar extends Foo {
         assert!(message_text(&diags[0].message).contains("must be compatible with"));
         assert!(message_text(&diags[0].message).contains("Bar::foo()"));
         assert!(message_text(&diags[0].message).contains("Foo::foo()"));
-        assert!(message_text(&diags[0].message).contains("'static'"));
+        assert!(message_text(&diags[0].message).contains("Foo::foo(): ?static"));
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 

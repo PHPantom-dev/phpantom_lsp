@@ -122,10 +122,7 @@ async fn an_open_template_is_diagnosed_and_its_namers_follow_its_creation() {
             other => format!("{other:?}"),
         })
         .collect();
-    assert_eq!(
-        messages,
-        vec!["Unknown template: 'footer.html'".to_string()]
-    );
+    assert_eq!(messages, vec!["Unknown template 'footer.html'".to_string()]);
     assert_eq!(found[0].range.start.line, 1);
 
     // Reopening a template the project already declares changes nothing

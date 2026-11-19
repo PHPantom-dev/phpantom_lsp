@@ -947,7 +947,7 @@ async fn a_view_string_parameter_reports_a_name_no_template_answers() {
 
     assert_eq!(
         view_diagnostics(&backend, &uri, VIEW_STRING_RENDERER),
-        vec!["Unknown view: 'users.nope'".to_string()],
+        vec!["Unknown view 'users.nope'".to_string()],
     );
 }
 
@@ -1026,7 +1026,7 @@ class PackageRenderer
 
     assert_eq!(
         view_diagnostics(&backend, &uri, caller),
-        vec!["Unknown view: 'widgets::missing'".to_string()],
+        vec!["Unknown view 'widgets::missing'".to_string()],
     );
 }
 

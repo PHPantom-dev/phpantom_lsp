@@ -1,5 +1,12 @@
 //! PHPantom — a fast, lightweight PHP language server.
 //!
+//! **This crate's Rust API is internal.** It is published only so that
+//! `cargo install phpantom_lsp` works. The supported interfaces are the
+//! language server protocol, the command line, and `.phpantom.toml`; the
+//! version number follows those. Any public item here, feature-gated
+//! modules such as `semantic_export` included, can change or disappear
+//! in any release, patch releases too.
+//!
 //! Diagnostics are debounced: each `did_change` bumps a per-file version
 //! counter and spawns a delayed task. The task only publishes if its
 //! version still matches (i.e. no newer edit arrived in the meantime).
@@ -146,6 +153,12 @@ pub(crate) struct WatchedFileInputs {
     pub(crate) is_symfony: bool,
     /// Whether the project uses Twig, which adds the template watchers.
     pub(crate) is_twig: bool,
+    /// Whether the project renders Tempest views, which adds the watcher
+    /// for Tempest's extensionless CLI bootstrap.
+    pub(crate) is_tempest: bool,
+    /// Whether the project is a Yii application, which adds the stylesheet
+    /// watchers.
+    pub(crate) is_yii: bool,
     /// Directory symlinks the index reached through, one relative-pattern
     /// watcher each. Empty when the client cannot match a relative
     /// pattern, since then there is nothing to ask it for.
@@ -242,6 +255,27 @@ pub fn configure_allocator() {
     }
 }
 
+/// Returns the current thread's free pages to the OS when dropped.
+///
+/// mimalloc keeps the pages a thread frees in that thread's own heap and
+/// only gives them back when the same thread next calls into the
+/// allocator. A blocking-pool thread that finishes a burst of work (a
+/// first parse of a multi-megabyte stub file, a diagnostic pass) and then
+/// parks makes no such call, so everything the burst freed stays resident
+/// until Tokio reaps the idle thread ten seconds later. Dropping this at
+/// the end of each blocking task hands those pages back while the thread
+/// is still running. No-op when mimalloc is not the active allocator.
+pub(crate) struct PurgeThreadHeapOnDrop;
+
+impl Drop for PurgeThreadHeapOnDrop {
+    fn drop(&mut self) {
+        #[cfg(all(feature = "mimalloc", target_os = "linux"))]
+        unsafe {
+            libmimalloc_sys::mi_collect(false);
+        }
+    }
+}
+
 pub mod analyse;
 pub mod atom;
 mod backend;
@@ -258,6 +292,7 @@ mod code_lens;
 pub mod completion;
 pub mod composer;
 pub mod config;
+mod container_calls;
 mod definition;
 pub mod diagnostics;
 pub mod docblock;
@@ -299,6 +334,7 @@ mod phpstan;
 pub(crate) mod phpstan_ignore;
 pub(crate) mod process;
 pub mod progress;
+mod prophecy;
 mod reference_counts;
 mod reference_index;
 mod references;
@@ -320,9 +356,12 @@ mod signature_render;
 pub mod stub_map;
 pub mod stub_patches;
 pub mod stubs;
+mod stylesheets;
 mod symbol_index;
 pub(crate) mod symbol_map;
 mod symfony;
+mod tempest;
+pub mod template;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
@@ -521,6 +560,7 @@ pub struct BackendState {
     pub(crate) laravel: backend::laravel::LaravelState,
     /// The project's Blade templates, beyond each one's own lowering.
     pub(crate) blade: blade::state::BladeState,
+    pub(crate) tempest: tempest::TempestState,
     /// Whether the workspace is an application rather than a library.
     ///
     /// A library's configuration is supplied by whatever application
@@ -552,12 +592,26 @@ pub struct BackendState {
     /// [`crate::composer::is_yii_project`].  Starts `true` so a workspace with
     /// no `composer.json` to classify behaves as before.
     pub(crate) is_yii: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project renders Tempest views, so its `.view.php` files
+    /// are lowered as templates.  See [`crate::composer::is_tempest_project`].
+    /// Starts `true` so a workspace with no `composer.json` to classify
+    /// behaves as before.
+    pub(crate) is_tempest: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project uses Tempest's database layer, which model
+    /// property names are read in.  See
+    /// [`crate::composer::is_tempest_database_project`].  Kept separate from
+    /// view detection: installing the database does not make PHP files with
+    /// a `.view.php` suffix Tempest templates.  Starts `true` so a workspace
+    /// with no `composer.json` to classify behaves as before.
+    pub(crate) is_tempest_database: Arc<std::sync::atomic::AtomicBool>,
     /// The major version of PHPUnit the project's `composer.lock` installs,
     /// `0` when it is not known.  In a workspace of several projects, the
     /// lowest of theirs.  Decides whether a data provider has to be static.
     pub(crate) phpunit_major: Arc<std::sync::atomic::AtomicU8>,
     /// The Yii path aliases the project's configuration declares.
     pub(crate) yii: yii::YiiState,
+    /// The CSS class names the project's stylesheets declare.
+    pub(crate) stylesheets: stylesheets::StylesheetState,
     /// The files that fire or use a WordPress hook.
     pub(crate) wordpress_hooks: wordpress::hooks::HookFiles,
     /// The web roots of the workspace's Drupal projects.

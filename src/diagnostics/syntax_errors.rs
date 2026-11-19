@@ -97,12 +97,12 @@ mod tests {
         let content = "<?php\n";
         backend.publish_parse_failure(
             uri,
-            vec![("Parse failed (internal error)".to_string(), 0, 0)],
+            vec![("PHPantom could not parse this file".to_string(), 0, 0)],
         );
         let mut out = Vec::new();
         backend.collect_syntax_error_diagnostics(uri, content, &mut out);
         assert_eq!(out.len(), 1);
-        assert!(crate::util::message_text(&out[0].message).contains("Parse failed"));
+        assert!(crate::util::message_text(&out[0].message).contains("could not parse"));
         assert_eq!(out[0].range.start.line, 0);
         assert_eq!(out[0].range.start.character, 0);
     }

@@ -199,6 +199,11 @@ pub(crate) fn hook_class_extension(fqn: &str) -> Option<&str> {
 }
 
 impl Backend {
+    /// Whether the Drupal walk found a module named `name`.
+    pub(crate) fn has_drupal_module(&self, name: &str) -> bool {
+        self.drupal.extensions.read().is_theme(name) == Some(false)
+    }
+
     /// Remember the extensions the Drupal walk found.
     pub(crate) fn note_drupal_extensions(&self, extensions: Vec<Extension>) {
         self.drupal.extensions.write().add(extensions);

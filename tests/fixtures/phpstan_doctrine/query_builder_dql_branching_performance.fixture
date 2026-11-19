@@ -3,7 +3,7 @@
 // Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testBranchingPerformance.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/query-builder-branches-performance.php
-// codes: unknown_class, unknown_entity_field, unknown_dql_variable
+// codes: unknown_class, invalid_doctrine_field, invalid_dql_alias
 // PHPantom reports a variable nothing declares at its first use, where upstream reports the call that builds the query.
 // expect_diagnostic: 23: Undefined DQL variable 'p'
 ---

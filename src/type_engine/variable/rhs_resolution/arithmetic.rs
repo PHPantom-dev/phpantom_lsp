@@ -19,9 +19,10 @@ use crate::types::ResolvedType;
 use super::resolve_rhs_expression;
 use super::scalar_fold;
 
-/// The result type a binary operator produces, or `None` for an operator
-/// this module does not classify (concatenation and `??` are handled by
-/// their own dedicated callers before this is reached).
+/// The result type of a comparison, logical, or `instanceof` operator, or
+/// `None` for an operator this does not classify.  The operators that
+/// combine their operands' types go through [`combine_with_lhs`] instead,
+/// and `??` is handled by its own dedicated caller.
 pub(super) fn resolve_binary_result_type<'b>(
     binary: &'b Binary<'b>,
     ctx: &VarResolutionCtx<'_>,
@@ -80,72 +81,109 @@ pub(super) fn resolve_binary_result_type<'b>(
         return Some(vec![ResolvedType::from_type_string(PhpType::bool())]);
     }
 
-    // Modulo (%): always int.
-    if matches!(binary.operator, BinaryOperator::Modulo(_)) {
-        let lhs_types = resolve_rhs_expression(binary.lhs, ctx);
-        let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
-        return Some(vec![ResolvedType::from_type_string(
-            infer_modulo_result_type(&lhs_types, &rhs_types),
-        )]);
-    }
-
-    // Addition (+): PHP overloads this for array union vs numeric addition.
-    if matches!(binary.operator, BinaryOperator::Addition(_)) {
-        let lhs_types = resolve_rhs_expression(binary.lhs, ctx);
-        let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
-        return Some(vec![ResolvedType::from_type_string(
-            infer_addition_result_type(&lhs_types, &rhs_types),
-        )]);
-    }
-
-    // Arithmetic: -, *, /, **.
-    if matches!(
-        binary.operator,
-        BinaryOperator::Subtraction(_)
-            | BinaryOperator::Multiplication(_)
-            | BinaryOperator::Division(_)
-            | BinaryOperator::Exponentiation(_)
-    ) {
-        let lhs_types = resolve_rhs_expression(binary.lhs, ctx);
-        let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
-        let op_kind = ArithmeticOpKind::from_binary_operator(&binary.operator);
-        return Some(vec![ResolvedType::from_type_string(
-            infer_arithmetic_result_type(&lhs_types, &rhs_types, op_kind),
-        )]);
-    }
-
-    // Bitwise operators (&, |, ^, <<, >>).
-    // When both operands are strings, PHP applies bitwise ops
-    // character-by-character and returns a string.  Otherwise int — or the
-    // exact value, when both operands are known integers.
-    if let Some(op) = bitwise_op(&binary.operator) {
-        let lhs_types = resolve_rhs_expression(binary.lhs, ctx);
-        let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
-        if let Some(result) = overloaded_number_result(&lhs_types, &rhs_types, true) {
-            return Some(vec![ResolvedType::from_type_string(result)]);
-        }
-        // `&`, `|` and `^` are the ones PHP overloads for strings; a shift
-        // always produces an int.
-        if matches!(op, BitwiseOp::And | BitwiseOp::Or | BitwiseOp::Xor)
-            && let Some(ty) = string_overload_result(&lhs_types, &rhs_types)
-        {
-            return Some(vec![ResolvedType::from_type_string(ty)]);
-        }
-        // A mask built from constants (`$flags = JSON_PRETTY_PRINT |
-        // JSON_THROW_ON_ERROR`) keeps its value, so a call that is handed it
-        // can still read the bits it sets.
-        if let Some(value) = single_literal_int(&lhs_types)
-            .zip(single_literal_int(&rhs_types))
-            .and_then(|(lhs, rhs)| const_fold::apply_bitwise(op, lhs, rhs))
-        {
-            return Some(vec![ResolvedType::from_type_string(PhpType::literal_int(
-                value.to_string(),
-            ))]);
-        }
-        return Some(vec![ResolvedType::from_type_string(PhpType::int())]);
-    }
-
     None
+}
+
+/// Whether the operator's result is computed from the types of both of its
+/// operands: concatenation, arithmetic, and the bitwise operators.  These
+/// are the ones [`combine_with_lhs`] answers.
+pub(super) fn combines_operand_types(operator: &BinaryOperator) -> bool {
+    operator.is_concatenation()
+        || bitwise_op(operator).is_some()
+        || matches!(
+            operator,
+            BinaryOperator::Modulo(_)
+                | BinaryOperator::Addition(_)
+                | BinaryOperator::Subtraction(_)
+                | BinaryOperator::Multiplication(_)
+                | BinaryOperator::Division(_)
+                | BinaryOperator::Exponentiation(_)
+        )
+}
+
+/// The result type of `binary`, an operator [`combines_operand_types`]
+/// accepts, given the already-resolved type of its left operand.
+///
+/// Taking the left operand's type rather than resolving it lets a long
+/// left-nested chain (`"a" . "b" . "c" . …`) be folded bottom-up in a loop
+/// instead of one recursive call per operator.
+pub(super) fn combine_with_lhs<'b>(
+    binary: &'b Binary<'b>,
+    lhs_types: Vec<ResolvedType>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    // Concatenation: two operands that each hold one known scalar
+    // concatenate to the literal PHP would build (`'1' . 'a'` is `'1a'`).
+    // Otherwise a non-empty operand makes the result non-empty (`'x' . $u`).
+    if binary.operator.is_concatenation() {
+        let foldable = scalar_fold::is_cheap_scalar_operand(binary.lhs)
+            && scalar_fold::is_cheap_scalar_operand(binary.rhs);
+        if !foldable {
+            return vec![ResolvedType::from_type_string(scalar_fold::concat_result(
+                &lhs_types,
+                || resolve_rhs_expression(binary.rhs, ctx),
+            ))];
+        }
+        let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
+        let folded = scalar_fold::concat_operand_scalar(binary.lhs, &lhs_types)
+            .zip(scalar_fold::concat_operand_scalar(binary.rhs, &rhs_types))
+            .and_then(|(l, r)| scalar_fold::fold_concat(&l, &r));
+        return vec![ResolvedType::from_type_string(folded.unwrap_or_else(
+            || scalar_fold::concat_result(&lhs_types, || rhs_types),
+        ))];
+    }
+
+    let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
+    let result = match binary.operator {
+        // Modulo (%): always int.
+        BinaryOperator::Modulo(_) => infer_modulo_result_type(&lhs_types, &rhs_types),
+        // Addition (+): PHP overloads this for array union vs numeric addition.
+        BinaryOperator::Addition(_) => infer_addition_result_type(&lhs_types, &rhs_types),
+        // Arithmetic: -, *, /, **.
+        BinaryOperator::Subtraction(_)
+        | BinaryOperator::Multiplication(_)
+        | BinaryOperator::Division(_)
+        | BinaryOperator::Exponentiation(_) => {
+            let op_kind = ArithmeticOpKind::from_binary_operator(&binary.operator);
+            infer_arithmetic_result_type(&lhs_types, &rhs_types, op_kind)
+        }
+        // Bitwise operators (&, |, ^, <<, >>).
+        _ => match bitwise_op(&binary.operator) {
+            Some(op) => bitwise_result_type(op, &lhs_types, &rhs_types),
+            None => return vec![],
+        },
+    };
+    vec![ResolvedType::from_type_string(result)]
+}
+
+/// When both operands are strings, PHP applies bitwise ops
+/// character-by-character and returns a string.  Otherwise int — or the
+/// exact value, when both operands are known integers.
+fn bitwise_result_type(
+    op: BitwiseOp,
+    lhs_types: &[ResolvedType],
+    rhs_types: &[ResolvedType],
+) -> PhpType {
+    if let Some(result) = overloaded_number_result(lhs_types, rhs_types, true) {
+        return result;
+    }
+    // `&`, `|` and `^` are the ones PHP overloads for strings; a shift
+    // always produces an int.
+    if matches!(op, BitwiseOp::And | BitwiseOp::Or | BitwiseOp::Xor)
+        && let Some(ty) = string_overload_result(lhs_types, rhs_types)
+    {
+        return ty;
+    }
+    // A mask built from constants (`$flags = JSON_PRETTY_PRINT |
+    // JSON_THROW_ON_ERROR`) keeps its value, so a call that is handed it
+    // can still read the bits it sets.
+    if let Some(value) = single_literal_int(lhs_types)
+        .zip(single_literal_int(rhs_types))
+        .and_then(|(lhs, rhs)| const_fold::apply_bitwise(op, lhs, rhs))
+    {
+        return PhpType::literal_int(value.to_string());
+    }
+    PhpType::int()
 }
 
 /// A built-in class whose instances overload PHP's arithmetic operators.

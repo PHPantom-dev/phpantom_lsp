@@ -119,6 +119,21 @@ impl Backend {
                             &resolved_class_loader,
                         )
                     }),
+                    DocblockMemberRef::YiiAttribute => candidates.retain(|class| {
+                        crate::yii::active_record::is_record(class, &resolved_class_loader)
+                    }),
+                    DocblockMemberRef::YiiProperty { form_model: true } => {
+                        candidates = crate::yii::forms::form_model_classes(
+                            candidates,
+                            &resolved_class_loader,
+                        );
+                    }
+                    DocblockMemberRef::FormCallback => {
+                        candidates = crate::drupal::forms::form_callback_classes(
+                            candidates,
+                            &resolved_class_loader,
+                        );
+                    }
                     _ => {}
                 }
 
@@ -157,10 +172,20 @@ impl Backend {
                     .unwrap_or_default(),
             },
 
-            SymbolKind::ClassReference { name, is_fqn, .. } => {
+            SymbolKind::ClassReference {
+                name,
+                is_fqn,
+                context,
+            } => {
                 // The type *is* the class itself, named as written.
+                let discovered =
+                    self.drupal_annotation_class_at(uri, name, *is_fqn, *context, symbol.start);
+                let (name, is_fqn) = match &discovered {
+                    Some(fqn) => (fqn.as_str(), true),
+                    None => (name.as_str(), *is_fqn),
+                };
                 return self
-                    .resolve_class_reference(uri, content, name, *is_fqn, offset)
+                    .resolve_class_reference(uri, content, name, is_fqn, offset)
                     .map(|loc| vec![loc]);
             }
 

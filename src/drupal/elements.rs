@@ -51,6 +51,31 @@ pub(crate) fn trailing_literal(text: &str) -> Option<&str> {
     Some(&inner[inner.rfind(quote)? + 1..])
 }
 
+/// Whether `target` ends with the offsets `['keys…']`, in order.
+pub(crate) fn ends_with_keys(mut target: &str, keys: &[&str]) -> bool {
+    for key in keys.iter().rev() {
+        let Some(rest) = target
+            .trim_end()
+            .strip_suffix(']')
+            .and_then(|rest| strip_quoted(rest.trim_end(), key))
+            .and_then(|rest| rest.trim_end().strip_suffix('['))
+        else {
+            return false;
+        };
+        target = rest;
+    }
+    true
+}
+
+/// `text` without the string literal `key` it ends with.
+fn strip_quoted<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    ['\'', '"'].into_iter().find_map(|quote| {
+        text.strip_suffix(quote)?
+            .strip_suffix(key)?
+            .strip_suffix(quote)
+    })
+}
+
 impl Backend {
     /// The classes that declare the plugin `id` as a key of `kind`, in a
     /// stable order.

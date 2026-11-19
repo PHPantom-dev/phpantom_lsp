@@ -23,8 +23,12 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_twig_callable_attributes(class, ctx);
     emit_twig_global_declarations(class, ctx);
     emit_yii_route_argument_spans(class, ctx);
+    tempest::record_route_attributes(class, ctx);
+    emit_yii_asset_bundle_spans(class, ctx);
     emit_drupal_entity_type_spans(class, ctx);
     emit_drupal_render_element_spans(class, ctx);
+    emit_drupal_plugin_declarations(class, ctx);
+    emit_drupal_plugin_manager(class, ctx);
     emit_drupal_route_attribute_spans(class, ctx);
     emit_drupal_hook_attribute_spans(class, ctx);
     emit_drupal_computed_hook_sites(&class.members, class.name.span.start.offset, ctx);
@@ -86,6 +90,8 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     ctx.covers_default_class = covers_default_class;
     let yii_view_scope = yii_class_scope(class, ctx);
     let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, yii_view_scope);
+    let yii_category = yii_class_category(class.span(), class.members.iter(), ctx);
+    let prev_yii_category = std::mem::replace(&mut ctx.yii_category, yii_category);
     let prev_class_name_offset = ctx.class_name_offset.replace(class.name.span.start.offset);
 
     for member in class.members.iter() {
@@ -94,6 +100,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
 
     ctx.class_name_offset = prev_class_name_offset;
     ctx.yii_view_scope = prev_yii_view_scope;
+    ctx.yii_category = prev_yii_category;
     ctx.covers_default_class = prev_covers_default_class;
     ctx.in_controller = prev_in_controller;
     ctx.in_mailable = prev_in_mailable;
@@ -227,10 +234,13 @@ pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut Extract
     // A view a trait or an enum renders is under a view path its code
     // does not show.
     let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, YiiViewScope::Class(None));
+    let yii_category = yii_class_category(trait_def.span(), trait_def.members.iter(), ctx);
+    let prev_yii_category = std::mem::replace(&mut ctx.yii_category, yii_category);
     for member in trait_def.members.iter() {
         extract_from_class_member(member, ctx);
     }
     ctx.yii_view_scope = prev_yii_view_scope;
+    ctx.yii_category = prev_yii_category;
 }
 
 pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut ExtractionCtx<'a>) {
@@ -272,10 +282,13 @@ pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut Extraction
     // A view a trait or an enum renders is under a view path its code
     // does not show.
     let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, YiiViewScope::Class(None));
+    let yii_category = yii_class_category(enum_def.span(), enum_def.members.iter(), ctx);
+    let prev_yii_category = std::mem::replace(&mut ctx.yii_category, yii_category);
     for member in enum_def.members.iter() {
         extract_from_class_member(member, ctx);
     }
     ctx.yii_view_scope = prev_yii_view_scope;
+    ctx.yii_category = prev_yii_category;
 }
 
 // ─── Class member extractors ────────────────────────────────────────────────
@@ -987,6 +1000,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
             name,
             is_definition: true,
             is_docblock_reference: false,
+            is_callback: false,
         },
     });
     emit_drupal_hook_doc_span(func, ctx);
@@ -1107,6 +1121,7 @@ pub(super) fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<Sym
                 name,
                 is_definition: false,
                 is_docblock_reference: false,
+                is_callback: false,
             },
             UseItemKind::Constant => SymbolKind::ConstantReference {
                 name,

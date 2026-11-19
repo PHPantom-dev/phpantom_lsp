@@ -267,6 +267,9 @@ fn named_function_call<'b>(
         // argument's resolved type, so the branch a call takes matches
         // what it was actually handed.
         let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
+        let default_ty_resolver = |t: &str, namespace: Option<&str>| {
+            Backend::resolve_arg_text_to_type(t, &rctx.written_in(namespace))
+        };
         let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         let text_args = arg_texts.join(", ");
         // A function whose arguments decide its result (`json_encode(…,
@@ -303,6 +306,7 @@ fn named_function_call<'b>(
                 params: &func_info.template_params,
                 bindings: &func_info.template_bindings,
                 arg_type_resolver: Some(&arg_ty_resolver),
+                default_type_resolver: Some(&default_ty_resolver),
                 this_type: None,
                 subs: subs.as_ref(),
             };
@@ -315,6 +319,7 @@ fn named_function_call<'b>(
                     calling: Some(current_class_name),
                     declaring: None,
                     written_class: Some(&|name: &str| ctx.written_names().resolve_class(name)),
+                    namespace: func_info.namespace.as_deref(),
                 },
                 ctx.file.class_loader,
                 &tpl,

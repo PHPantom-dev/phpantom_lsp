@@ -38,7 +38,7 @@ impl Backend {
             return empty_spans();
         }
         let content = self
-            .blade_virtual_php_arc(uri)
+            .template_virtual_php_arc(uri)
             .or_else(|| self.get_file_content_arc(uri));
         let Some(content) = content.filter(|content| map.matches_source(content)) else {
             return empty_spans();
@@ -263,11 +263,13 @@ fn collect_table_metadata(
     })
 }
 
-fn visit_expressions(node: Node<'_, '_>, visitor: &mut impl FnMut(&Expression<'_>)) {
-    if let Node::Expression(expr) = node {
-        visitor(expr);
-    }
-    node.visit_children(|child| visit_expressions(child, visitor));
+fn visit_expressions(root: Node<'_, '_>, visitor: &mut impl FnMut(&Expression<'_>)) {
+    crate::parser::walk_nodes(root, |node| {
+        if let Node::Expression(expr) = node {
+            visitor(expr);
+        }
+        true
+    });
 }
 
 fn empty_spans() -> Arc<Vec<SymbolSpan>> {

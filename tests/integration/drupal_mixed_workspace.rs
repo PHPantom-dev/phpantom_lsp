@@ -579,6 +579,43 @@ async fn drupal_services_work_in_the_drupal_site() {
 }
 
 #[tokio::test]
+async fn unknown_drupal_services_are_reported_only_in_the_drupal_site() {
+    let (backend, dir) = workspace(&mixed_files()).await;
+    let unknown = |path: &str, content: &str| {
+        let mut found = crate::common::slow_diagnostic_messages(
+            &backend,
+            uri_for(&dir, path).as_str(),
+            content,
+            "invalid_drupal_service",
+        );
+        found.extend(crate::common::slow_diagnostic_messages(
+            &backend,
+            uri_for(&dir, path).as_str(),
+            content,
+            "invalid_symfony_service",
+        ));
+        found
+    };
+
+    // A service a bundle registers is the Symfony application's, which
+    // no Drupal services file declares.
+    let symfony = SYMFONY_CONSUMER.replace(
+        "$container->get('app.');",
+        "$container->get('app.');\n        $container->get('router');",
+    );
+    assert!(unknown(SYMFONY_CONSUMER_PATH, &symfony).is_empty());
+
+    let drupal = DRUPAL_CONSUMER.replace(
+        "$greeter;",
+        "$greeter;\n        \\Drupal::service('acme.greeterr');",
+    );
+    assert_eq!(
+        unknown(DRUPAL_CONSUMER_PATH, &drupal),
+        vec!["Unknown service 'acme.greeterr'".to_string()]
+    );
+}
+
+#[tokio::test]
 async fn drupal_entity_types_work_in_the_drupal_site() {
     let (backend, dir) = workspace(&mixed_files()).await;
     let notes = uri_for(&dir, DRUPAL_NOTES_PATH);

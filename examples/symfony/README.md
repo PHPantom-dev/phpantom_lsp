@@ -12,6 +12,9 @@ catalogues together, the way a real Symfony project does.
   `controller`.
 - Use find references on a class or method mentioned there, such as
   `DemoController::legacy()`. The YAML and XML occurrences are included.
+- A method a service's `calls:` names in `config/services.yaml`, such as
+  `setSender`, goes to its declaration and completes from the public
+  methods of the service's class.
 - Rename `legacy` in `config/routes.yaml`, or rename `UserRepository` from
   `config/doctrine/User.orm.xml`. The PHP declaration and every configuration
   file that names it are renamed together.
@@ -108,6 +111,9 @@ catalogues together, the way a real Symfony project does.
   the service ID `app.mailer`, or `$supportEmail`, read with
   `getParameter()`. In `src/Query/QueryBus.php`, hover `$count`, which
   `HandleTrait::handle()` gets back from the message's handler.
+- A service that decorates another takes over its ID. In `DemoController`,
+  hover `$slugger`: `config/services.yaml` builds `app.slugger` from
+  `Slugger` and decorates it with `CachingSlugger`, so it is either class.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
 - In `DemoController`, hover `$users`. `getRepository(User::class)` returns

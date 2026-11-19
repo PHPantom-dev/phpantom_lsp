@@ -74,6 +74,18 @@ impl Backend {
             }
         }
 
+        if self.affects_tempest_inference(&uri) {
+            if self.sync_ast_updates {
+                self.refresh_tempest_inference_after_edit(&uri);
+            } else {
+                let backend = self.clone_for_blocking();
+                let uri = uri.clone();
+                spawn_blocking_detached("did_open Tempest inference", move || {
+                    backend.refresh_tempest_inference_after_edit(&uri);
+                });
+            }
+        }
+
         // Baseline for the first save: without it, that save would have to
         // re-diagnose every open file to be safe.
         self.capture_declaration_baseline(&uri);
@@ -200,6 +212,9 @@ impl Backend {
         // incomplete code cannot be parsed.
         if self.sync_ast_updates {
             self.update_ast(&uri, &text);
+            if self.affects_tempest_inference(&uri) {
+                self.refresh_tempest_inference_after_edit(&uri);
+            }
             self.schedule_diagnostics(uri.clone());
         } else {
             let backend = self.clone_for_blocking();
@@ -235,6 +250,12 @@ impl Backend {
                             elapsed
                         );
                     }
+                    // Republishing a view takes its parse lock, this one
+                    // included, to parse the buffer as it is by then.
+                    drop(_parse_guard);
+                    if backend.affects_tempest_inference(&uri) {
+                        backend.refresh_tempest_inference_after_edit(&uri);
+                    }
                     backend.schedule_diagnostics(uri_for_diagnostics);
                     true
                 })
@@ -255,6 +276,7 @@ impl Backend {
 
     pub(crate) async fn on_did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
+        self.note_tempest_php_change(&uri);
 
         self.open_files.write().remove(&uri);
         self.did_change_parse_locks.lock().remove(&uri);
@@ -284,9 +306,18 @@ impl Backend {
                 move |backend: &Backend, uri: &str| match crate::util::read_php_source(&path) {
                     Some(content) => {
                         backend.update_ast(uri, &content);
+                        if backend.affects_tempest_inference(uri) {
+                            backend.refresh_tempest_inference_after_edit(uri);
+                        }
                         backend.put_to_sleep([uri]);
                     }
-                    None => backend.forget_closed_file(uri),
+                    None => {
+                        let tempest = backend.affects_tempest_inference(uri);
+                        backend.forget_closed_file(uri);
+                        if tempest {
+                            backend.refresh_tempest_inference_after_edit(uri);
+                        }
+                    }
                 };
             if self.sync_ast_updates {
                 reparse(self, &uri);
@@ -306,7 +337,11 @@ impl Backend {
                 });
             }
         } else {
+            let tempest = self.affects_tempest_inference(&uri);
             self.forget_closed_file(&uri);
+            if tempest {
+                self.refresh_tempest_inference_after_edit(&uri);
+            }
         }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
@@ -373,6 +408,7 @@ impl Backend {
             let caller_uri = uri.clone();
             spawn_blocking_detached("did_save blade inference", move || {
                 backend.refresh_blade_inference_for_caller(&caller_uri);
+                backend.refresh_tempest_inference();
             });
         }
 

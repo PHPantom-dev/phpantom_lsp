@@ -78,10 +78,7 @@ class ViewServiceProvider
         diags
             .into_iter()
             .filter_map(|d| match &d.code {
-                Some(Code::String(code))
-                    if code.ends_with("_view_variable")
-                        || code == "type_mismatch_view_variable" =>
-                {
+                Some(Code::String(code)) if code.ends_with("_blade_variable") => {
                     Some((code.clone(), message_text(&d.message).to_string()))
                 }
                 _ => None,
@@ -131,7 +128,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(
             diags[0].1.contains("$user") && diags[0].1.contains("profile"),
             "message should name the variable and the view, got {:?}",
@@ -154,7 +151,7 @@ class ViewServiceProvider
         assert!(
             diags
                 .iter()
-                .all(|(code, _)| code == "missing_view_variable")
+                .all(|(code, _)| code == "missing_blade_variable")
         );
     }
 
@@ -169,7 +166,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert_eq!(diags[0].0, "type_mismatch_blade_variable");
         assert!(
             diags[0].1.contains("$title") && diags[0].1.contains("string"),
             "message should name the variable and the declared type, got {:?}",
@@ -188,7 +185,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "unused_view_variable");
+        assert_eq!(diags[0].0, "unused_blade_variable");
         assert!(
             diags[0].1.contains("$usre"),
             "message should name the typo, got {:?}",
@@ -253,7 +250,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(
             diags[0].1.contains("$siteName"),
             "message should name the layout's variable, got {:?}",
@@ -366,7 +363,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
     }
 
     /// `Route::view()` names its template second, and its data third.
@@ -381,7 +378,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "routes/web.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(diags[0].1.contains("$user"), "got {:?}", diags[0].1);
     }
 
@@ -576,7 +573,7 @@ class ViewServiceProvider
         let diags =
             call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(
             diags[0].1.contains("$caption"),
             "the includer already has $user in scope; only $caption is short, got {:?}",
@@ -649,7 +646,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(
             diags[0].1.contains("$siteName"),
             "message should name the layout's variable, got {:?}",
@@ -683,7 +680,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "unused_view_variable");
+        assert_eq!(diags[0].0, "unused_blade_variable");
         assert!(
             diags[0].1.contains("$nope"),
             "only the name no candidate reads is unknown, got {:?}",
@@ -728,7 +725,7 @@ class ViewServiceProvider
         let diags =
             call_site_diagnostics(&backend, &dir, "resources/views/table.blade.php", "blade").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert_eq!(diags[0].0, "type_mismatch_blade_variable");
         assert!(
             diags[0].1.contains("$row") && diags[0].1.contains("string"),
             "message should name the item and the element type, got {:?}",
@@ -772,7 +769,7 @@ class ViewServiceProvider
         let diags =
             call_site_diagnostics(&backend, &dir, "resources/views/table.blade.php", "blade").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert_eq!(diags[0].0, "type_mismatch_blade_variable");
         assert!(
             diags[0].1.contains("$key"),
             "message should name the key, got {:?}",
@@ -797,7 +794,7 @@ class ViewServiceProvider
         let diags =
             call_site_diagnostics(&backend, &dir, "resources/views/table.blade.php", "blade").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(
             diags[0].1.contains("$caption"),
             "message should name the variable the partial is short of, got {:?}",
@@ -823,7 +820,7 @@ class ViewServiceProvider
         let diags =
             call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(diags[0].1.contains("$title"), "got {:?}", diags[0].1);
     }
 
@@ -856,7 +853,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(
             diags[0].1.contains("$user"),
             "message should name the variable the shape is short of, got {:?}",
@@ -875,7 +872,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert_eq!(diags[0].0, "type_mismatch_blade_variable");
         assert!(
             diags[0].1.contains("$title"),
             "message should name the variable whose type is wrong, got {:?}",
@@ -896,7 +893,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(
             diags[0].1.contains("$user"),
             "message should name the optional key, got {:?}",
@@ -915,7 +912,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "unused_view_variable");
+        assert_eq!(diags[0].0, "unused_blade_variable");
         assert!(
             diags[0].1.contains("$extra"),
             "message should name the key nothing reads, got {:?}",
@@ -962,7 +959,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(
             diags[0].1.contains("$user"),
             "the shape carries $title; only $user is short, got {:?}",
@@ -1002,7 +999,7 @@ class ViewServiceProvider
         let diags =
             call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert_eq!(diags[0].0, "type_mismatch_blade_variable");
         assert!(
             diags[0].1.contains("$user") && diags[0].1.contains("surrounding scope"),
             "message should name the variable and where it came from, got {:?}",
@@ -1027,7 +1024,7 @@ class ViewServiceProvider
         let diags =
             call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert_eq!(diags[0].0, "type_mismatch_blade_variable");
         assert!(
             diags[0].1.contains("$row"),
             "message should name the loop binding, got {:?}",
@@ -1076,7 +1073,7 @@ class ViewServiceProvider
         let diags =
             call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert_eq!(diags[0].0, "type_mismatch_blade_variable");
     }
 
     /// An item name built at runtime binds a variable whose name cannot be
@@ -1173,7 +1170,7 @@ class ViewServiceProvider
         ))
         .await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(
             diags[0].1.contains("$data"),
             "only $data is passed by no caller, got {:?}",
@@ -1250,7 +1247,7 @@ class ViewServiceProvider
         assert!(
             diags
                 .iter()
-                .all(|(code, _)| code != "missing_view_variable"),
+                .all(|(code, _)| code != "missing_blade_variable"),
             "a cycle settles nothing, got {diags:?}"
         );
     }
@@ -1302,7 +1299,7 @@ class ViewServiceProvider
         }
         let diags = call_site_diagnostics(&backend, &dir, &path(DEPTH - 1, 0), "blade").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(
             diags[0].1.contains("$b") && !diags[0].1.contains("$a"),
             "only $b fails to reach the leaf along every path, got {:?}",

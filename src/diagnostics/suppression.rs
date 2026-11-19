@@ -192,7 +192,7 @@ pub(crate) fn filter_ignored_by_comment(diagnostics: &mut Vec<Diagnostic>, conte
                     Some(
                         trimmed
                             .split(',')
-                            .map(|s| s.trim())
+                            .map(|s| super::identifiers::current_identifier(s.trim()))
                             .filter(|s| !s.is_empty())
                             .collect(),
                     )
@@ -286,6 +286,33 @@ mod tests {
             tags: None,
             data: None,
         }
+    }
+
+    // ── filter_ignored_by_comment ───────────────────────────────────
+
+    #[test]
+    fn an_old_identifier_in_a_comment_suppresses_the_renamed_code() {
+        let content = "<?php\n// @phpantom-ignore unused_variable, invalid_member_access\n$a->b;\n";
+        let mut diagnostics = vec![
+            make_diagnostic(
+                make_range(2, 0, 2, 5),
+                DiagnosticSeverity::Error,
+                "inaccessible_member",
+                "private",
+            ),
+            make_diagnostic(
+                make_range(2, 0, 2, 2),
+                DiagnosticSeverity::Warning,
+                "unknown_class",
+                "class",
+            ),
+        ];
+        filter_ignored_by_comment(&mut diagnostics, content);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].code,
+            Some(Code::String("unknown_class".to_string()))
+        );
     }
 
     // ── ranges_overlap ──────────────────────────────────────────────
@@ -496,7 +523,7 @@ mod tests {
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("unknown_class".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Class 'Foo' not found".to_string().into(),
+            message: "Class Foo not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan.clone(), precise.clone()];
@@ -599,7 +626,7 @@ mod tests {
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("unknown_class".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Class 'Bar' not found".to_string().into(),
+            message: "Class Bar not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan.clone(), precise_other_line.clone()];
@@ -625,7 +652,7 @@ mod tests {
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("unknown_class".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Class 'Foo' not found".to_string().into(),
+            message: "Class Foo not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan_precise.clone(), native_precise.clone()];

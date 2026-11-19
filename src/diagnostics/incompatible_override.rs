@@ -88,8 +88,13 @@ impl Backend {
                             DiagnosticSeverity::Error,
                             "incompatible_override",
                             format!(
-                                "Declaration of {}::{}() must be compatible with {}::{}(): return type '{}' must be 'static'",
-                                class_info.name, method.name, source_name, method.name, child_native
+                                "Declaration of {}::{}(): {} must be compatible with {}::{}(): {}",
+                                class_info.fqn(),
+                                method.name,
+                                child_native,
+                                source_name.trim_start_matches('\\'),
+                                method.name,
+                                parent_native,
                             ),
                         ));
                     }

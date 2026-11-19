@@ -41,6 +41,17 @@ fn is_unloadable_short_name(ty: &PhpType, class_loader: &ResolvedClassLoader<'_>
         && class_loader(Fqn::new(name)).is_none()
 }
 
+/// The class a `Foo` or `Foo<Bar>` names, or `None` for any other type,
+/// including a keyword such as `object` or `array<int>`.
+fn class_like_base_name(ty: &PhpType) -> Option<&str> {
+    let name = match ty.kind() {
+        TypeKind::Named(n) => n.as_str(),
+        TypeKind::Generic(g) => g.name.as_str(),
+        _ => return None,
+    };
+    (crate::php_type::is_class_like_name(name) && !is_array_like_name(name)).then_some(name)
+}
+
 /// Returns `true` when the type is an array that says nothing about its
 /// values: bare `array`, `mixed[]`, or `array<K, mixed>`.
 ///
@@ -768,6 +779,18 @@ impl Compat<'_> {
             return Some(true);
         }
 
+        // An argument whose class does not load has no known parents or
+        // interfaces, so whether it extends or implements the class the
+        // parameter names cannot be decided either way. The missing class
+        // is reported where it is named; failing every parameter it is
+        // passed to as well would report one missing package over and over.
+        if let Some(arg_name) = class_like_base_name(arg_type)
+            && self.may_be_extended_by_unknown_class(param_type)
+            && (self.class_loader)(Fqn::new(arg_name)).is_none()
+        {
+            return Some(true);
+        }
+
         // Skip anonymous class arguments.  Anonymous classes are stored
         // with synthetic names (`__anonymous@<offset>`) that are not
         // indexed globally, so the class loader cannot resolve their
@@ -788,6 +811,19 @@ impl Compat<'_> {
             return Some(true);
         }
         None
+    }
+
+    /// Whether some class we know nothing about could satisfy `param_type`:
+    /// a class or interface that is not final, or `iterable`, which any
+    /// class reaching `Traversable` does.
+    fn may_be_extended_by_unknown_class(self, param_type: &PhpType) -> bool {
+        if let TypeKind::Named(name) = param_type.kind()
+            && name.eq_ignore_ascii_case("iterable")
+        {
+            return true;
+        }
+        class_like_base_name(param_type)
+            .is_some_and(|name| (self.class_loader)(Fqn::new(name)).is_none_or(|cls| !cls.is_final))
     }
 
     /// Callable specifications and the values a `callable` accepts.

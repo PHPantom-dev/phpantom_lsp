@@ -55,6 +55,8 @@ pub(in crate::type_engine) struct CallAssertionInfo<'a> {
     template_bindings: Vec<(Atom, Atom)>,
     /// The `of …` bounds of the callee's templates.
     template_param_bounds: AtomMap<PhpType>,
+    /// The namespace the callee's parameter defaults were written in.
+    default_namespace: Option<Atom>,
 }
 
 /// Try to extract assertion metadata from a call expression.
@@ -90,6 +92,7 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 template_params: func_info.template_params,
                 template_bindings: func_info.template_bindings,
                 template_param_bounds: func_info.template_param_bounds,
+                default_namespace: func_info.namespace.as_deref().map(atom),
             })
         }
         Call::StaticMethod(static_call) => {
@@ -224,6 +227,7 @@ fn build_method_assertion_info<'a>(
         template_param_bounds: extras
             .map(|e| e.template_param_bounds.clone())
             .unwrap_or_default(),
+        default_namespace: extras.and_then(|e| e.default_namespace),
     })
 }
 
@@ -849,6 +853,7 @@ fn resolve_assertion_template_type(
         parameters: &info.parameters,
         template_bindings: &info.template_bindings,
         template_param_bounds: &info.template_param_bounds,
+        namespace: info.default_namespace.as_deref(),
     };
     template_argument_at_call(tpl_name, &callee, info.argument_list, ctx, &mut None)
         .unwrap_or_else(|| asserted_type.clone())
@@ -861,24 +866,17 @@ fn resolve_assertion_template_type(
 /// the template bare; a tag can also name it inside another type
 /// (`@phpstan-assert-if-true ReflectionClass<T> $this`), and the argument
 /// binds it just the same.  A template the call leaves unbound stays as
-/// written.
+/// written.  `template_params` are the callee's own templates.
 pub(in crate::type_engine) fn bind_call_templates(
     asserted: &PhpType,
     template_params: &[Atom],
-    template_bindings: &[(Atom, Atom)],
-    template_param_bounds: &AtomMap<PhpType>,
-    parameters: &[ParameterInfo],
+    callee: &TemplateCallee<'_>,
     argument_list: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
     if template_params.is_empty() {
         return asserted.clone();
     }
-    let callee = TemplateCallee {
-        parameters,
-        template_bindings,
-        template_param_bounds,
-    };
     let mut argument_bindings = None;
     let mut subs = std::collections::HashMap::new();
     for tpl in template_params {
@@ -886,7 +884,7 @@ pub(in crate::type_engine) fn bind_call_templates(
             continue;
         }
         if let Some(bound) =
-            template_argument_at_call(tpl, &callee, argument_list, ctx, &mut argument_bindings)
+            template_argument_at_call(tpl, callee, argument_list, ctx, &mut argument_bindings)
         {
             subs.insert(tpl.to_string(), bound);
         }

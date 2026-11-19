@@ -4,7 +4,7 @@
 // project: phpstan_doctrine
 // file: rules/DeadCode/data/bug-383.php
 // codes: unused_property, unwritten_property
-// expect_diagnostic: 13: Property PHPStan\Rules\Doctrine\ORMAttributes\Bug383\Campus::$id is never written, only read // SKIP: reported as uninitialized_property
-// expect_diagnostic: 19: Property PHPStan\Rules\Doctrine\ORMAttributes\Bug383\Campus::$students is never written, only read // SKIP: reported as uninitialized_property
-// expect_diagnostic: 29: Property PHPStan\Rules\Doctrine\ORMAttributes\Bug383\Student::$campus is unused // SKIP: a property any framework attribute marks counts as read and written
+// expect_diagnostic: 13: Property PHPStan\Rules\Doctrine\ORMAttributes\Bug383\Campus::$id is read but never written // SKIP: reported as uninitialized_property
+// expect_diagnostic: 19: Property PHPStan\Rules\Doctrine\ORMAttributes\Bug383\Campus::$students is read but never written // SKIP: reported as uninitialized_property
+// expect_diagnostic: 29: Unused property PHPStan\Rules\Doctrine\ORMAttributes\Bug383\Student::$campus // SKIP: a property any framework attribute marks counts as read and written
 ---

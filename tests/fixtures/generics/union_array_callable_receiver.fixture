@@ -1,0 +1,18 @@
+// test: an array callable finds a generic method through a union receiver
+// feature: hover
+// expect: $result = Book
+---
+<?php
+class Book {}
+class Missing {}
+/** @template T */
+class Box {
+    /** @return T */
+    public function get() {}
+}
+/** @param Missing|Box<Book> $box */
+function read(object $box): void {
+    $callback = [$box, 'get'];
+    $result = $callback();
+    $<>result;
+}

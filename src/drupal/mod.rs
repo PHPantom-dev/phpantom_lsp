@@ -20,12 +20,15 @@ pub(crate) mod computed_hooks;
 pub(crate) mod config;
 pub(crate) mod config_keys;
 pub(crate) mod elements;
+pub(crate) mod forms;
 pub(crate) mod hooks;
 pub(crate) mod libraries;
 pub(crate) mod links;
 pub(crate) mod permissions;
+pub(crate) mod plugins;
 pub(crate) mod routing;
 pub(crate) mod service_providers;
+pub(crate) mod services;
 pub(crate) mod template_variables;
 pub(crate) mod theme_hooks;
 pub(crate) mod types;
@@ -33,7 +36,11 @@ pub(crate) mod upcasting;
 
 use crate::Backend;
 use crate::atom::Atom;
-use crate::symbol_map::{ReceiverClass, StringKeyKind, SymbolKind};
+use crate::symbol_map::{ReceiverClass, StringKeyKind, SymbolKind, SymbolMap};
+
+/// An entity type ID with the class and storage handler of its
+/// declaration (see [`crate::symbol_map::EntityTypeSite`]).
+type EntityTypeDeclaration = (String, Atom, Option<Atom>);
 
 /// The web roots of the workspace's Drupal projects, and the declaration
 /// files found under them.
@@ -70,9 +77,30 @@ pub(crate) struct DrupalState {
     /// The services each service provider's `alter()` gives another class,
     /// keyed by the provider's URI; see [`service_providers`].
     service_replacements: RwLock<BTreeMap<String, Vec<(Atom, Atom)>>>,
+    /// The plugin types and the plugins of each, until a file that declares
+    /// a plugin manager or a plugin changes; see [`plugins`].
+    plugin_index: RwLock<Option<std::sync::Arc<plugins::PluginIndex>>>,
+    /// Counts the changes to files the plugin index reads, so an index read
+    /// while one landed is not kept.
+    plugin_generation: std::sync::atomic::AtomicU64,
+    /// The plugin managers and plugins each file declares, by URI, which
+    /// the plugin index is read from.  Copied out of the symbol map, so
+    /// that a plugin class of an installed package can let go of its parse
+    /// once indexed (see [`Backend::put_to_sleep`]), as Drupal core's
+    /// thousands of them do.
+    plugin_sources: RwLock<BTreeMap<String, plugins::PluginSources>>,
+    /// The entity types each closed test module's file declares, by URI,
+    /// copied out of its symbol map the same way: only test code sees them
+    /// (see [`Backend::drupal_entity_types_seen_from`]).
+    entity_type_test_sources: RwLock<BTreeMap<String, Vec<EntityTypeDeclaration>>>,
     /// The default configuration files and configuration schema files of
     /// every extension, and the configuration names read from them.
     config: config::ConfigSources,
+    /// The PHP files that may define services and the services files of
+    /// test modules, by URI; see [`services`].
+    service_definition_files: RwLock<std::collections::HashSet<String>>,
+    /// What those files define, once read.
+    php_service_ids: RwLock<Option<std::sync::Arc<services::PhpServiceIds>>>,
 }
 
 /// A kind of file Drupal reads declarations from.
@@ -322,6 +350,40 @@ pub(crate) fn is_hook_php_file(path: &Path, web_root: &Path) -> bool {
     (by_name || in_hook_dir) && !is_test_fixture(path, web_root) && !is_unloaded(path, web_root)
 }
 
+/// The entity types `map` declares: each ID, with the class and storage
+/// handler of its declaration.
+fn entity_type_sites(map: &SymbolMap) -> impl Iterator<Item = (&str, Atom, Option<Atom>)> + '_ {
+    map.entity_types.iter().filter_map(|site| {
+        let at = map.spans.partition_point(|span| span.start < site.start);
+        map.spans[at..]
+            .iter()
+            .take_while(|span| span.start == site.start)
+            .find_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalEntityType,
+                    key,
+                    ..
+                } => Some((key.as_str(), site.class, site.storage)),
+                _ => None,
+            })
+    })
+}
+
+/// Add the entity class and storage handler of each of `sites` (see
+/// [`entity_type_sites`]) that declares the entity type `id` to `found`,
+/// once each.
+fn collect_entity_types<'a>(
+    sites: impl IntoIterator<Item = (&'a str, Atom, Option<Atom>)>,
+    id: &str,
+    found: &mut Vec<(Atom, Option<Atom>)>,
+) {
+    for (declared, class, storage) in sites {
+        if declared == id && !found.contains(&(class, storage)) {
+            found.push((class, storage));
+        }
+    }
+}
+
 /// Whether `path` lies under a `tests` folder of the web root: it belongs to
 /// a test module, which no real site enables.  Roughly half of core's
 /// declaration files are.
@@ -356,9 +418,22 @@ impl Backend {
         *self.drupal.theme_hook_index.write() = None;
         *self.drupal.library_builders.write() = None;
         *self.drupal.theme_suggestions.write() = None;
+        *self.drupal.plugin_index.write() = None;
+        // Which files are test modules' depends on the web roots, so those
+        // are noted again as the files are read.
+        self.drupal
+            .plugin_sources
+            .write()
+            .retain(|_, sources| !sources.from_test);
+        self.drupal.entity_type_test_sources.write().clear();
         *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
         self.drupal.service_replacements.write().clear();
+        self.drupal.service_definition_files.write().clear();
+        *self.drupal.php_service_ids.write() = None;
         self.drupal.config.clear();
+        // The service providers' replacements and the plugin managers type
+        // receivers, so lookups confirmed against them go with them.
+        self.retire_typed_receiver_spans();
     }
 
     /// Remember the declaration files the Drupal walk found: the YAML for
@@ -454,31 +529,69 @@ impl Backend {
     pub(crate) fn drupal_entity_types(&self, id: &str) -> Vec<(Atom, Option<Atom>)> {
         let mut found: Vec<(Atom, Option<Atom>)> = Vec::new();
         self.visit_declaring_symbol_maps(|_, map| {
-            for site in &map.entity_types {
-                let at = map.spans.partition_point(|span| span.start < site.start);
-                let declares_id = map.spans[at..]
-                    .iter()
-                    .take_while(|span| span.start == site.start)
-                    .any(|span| {
-                        matches!(
-                            &span.kind,
-                            SymbolKind::StringKey {
-                                kind: StringKeyKind::DrupalEntityType,
-                                key,
-                                ..
-                            } if key == id
-                        )
-                    });
-                if declares_id
-                    && !found
-                        .iter()
-                        .any(|(class, storage)| *class == site.class && *storage == site.storage)
-                {
-                    found.push((site.class, site.storage));
-                }
-            }
+            collect_entity_types(entity_type_sites(map), id, &mut found);
         });
         found
+    }
+
+    /// [`Self::drupal_entity_types`] as code in the file at `uri` sees them:
+    /// test code also sees the entity types test modules declare, since the
+    /// tests that run it enable those modules.  A site's own code never
+    /// does, because no real site enables a test module.  Drupal allows one
+    /// declaration per ID among the enabled modules, so test modules are
+    /// only read for an ID the rest of the site leaves undeclared.
+    pub(crate) fn drupal_entity_types_seen_from(
+        &self,
+        id: &str,
+        uri: Option<&str>,
+    ) -> Vec<(Atom, Option<Atom>)> {
+        let mut found = self.drupal_entity_types(id);
+        if found.is_empty()
+            && uri
+                .and_then(crate::util::uri_to_path)
+                .is_some_and(|path| self.is_drupal_test_path(&path))
+        {
+            let sources = self.drupal.entity_type_test_sources.read();
+            let sites = sources.values().flatten();
+            collect_entity_types(
+                sites.map(|(id, class, storage)| (id.as_str(), *class, *storage)),
+                id,
+                &mut found,
+            );
+        }
+        found
+    }
+
+    /// Keep the closed test modules' files that declare entity types in
+    /// step with the symbol map of the file at `uri` (`None` once it is
+    /// gone).
+    pub(crate) fn note_drupal_entity_type_test_sources(&self, uri: &str, map: Option<&SymbolMap>) {
+        let declarations: Vec<EntityTypeDeclaration> = match map {
+            Some(map)
+                if !map.entity_types.is_empty() && self.is_closed_drupal_test_fixture(uri) =>
+            {
+                entity_type_sites(map)
+                    .map(|(id, class, storage)| (id.to_string(), class, storage))
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        if self
+            .drupal
+            .entity_type_test_sources
+            .read()
+            .get(uri)
+            .map_or(&[][..], Vec::as_slice)
+            == declarations.as_slice()
+        {
+            return;
+        }
+        let mut sources = self.drupal.entity_type_test_sources.write();
+        if declarations.is_empty() {
+            sources.remove(uri);
+        } else {
+            sources.insert(uri.to_string(), declarations);
+        }
     }
 
     /// The shapes of the route names the project's route builders give the

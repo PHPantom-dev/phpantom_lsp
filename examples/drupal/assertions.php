@@ -17,15 +17,35 @@ use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Controller\NoteController;
 use Drupal\acme\Element\GreetingCard;
 use Drupal\acme\Entity\Note;
+use Drupal\acme\Event\GreetingEvents;
+use Drupal\acme\EventSubscriber\GreetingSubscriber;
+use Drupal\acme\EventSubscriber\RequestSubscriber;
+use Drupal\acme\Form\GreetingForm;
 use Drupal\acme\Form\SettingsForm;
 use Drupal\acme\Greeter;
 use Drupal\acme\Hook\AcmeHooks;
+use Drupal\acme\Plugin\Block\FarewellBlock;
+use Drupal\acme\Plugin\Block\GreetingBlock;
 use Drupal\acme\NoteCounter;
+use Drupal\acme\RequestClock;
+use Drupal\Component\Datetime\Time;
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Component\FileCache\FileCacheFactory;
 use Drupal\Component\Serialization\Yaml;
 use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Block\Attribute\Block;
+use Drupal\Core\Block\BlockBase;
+use Drupal\Core\Block\BlockManager;
+use Drupal\Core\Config\ConfigEvents;
+use Drupal\Core\Field\Attribute\FieldType;
+use Drupal\Core\Field\Attribute\FieldWidget;
+use Drupal\Core\Field\Plugin\Field\FieldType\StringItem;
+use Drupal\Core\Field\Plugin\Field\FieldWidget\StringTextfieldWidget;
+use Drupal\Core\Validation\Attribute\Constraint;
+use Drupal\Core\Validation\Plugin\Validation\Constraint\UniqueFieldConstraint;
 use Drupal\Core\Config\ConfigBase;
 use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\DependencyInjection\ClassResolver;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\DependencyInjection\YamlFileLoader;
@@ -39,17 +59,26 @@ use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\ConfigTarget;
+use Drupal\Core\Form\FormInterface;
+use Drupal\Core\Form\FormState;
 use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Language\LanguageManager;
+use Drupal\Core\Security\TrustedCallbackInterface;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Link;
+use Drupal\Core\Plugin\Discovery\AnnotatedClassDiscovery;
 use Drupal\Core\Render\Attribute\FormElement;
 use Drupal\Core\Render\Attribute\RenderElement;
 use Drupal\Core\Render\Element\Details;
 use Drupal\Core\Render\Element\RenderElementBase;
 use Drupal\Core\Url;
+use Drupal\Core\Utility\CallableResolver;
 use Drupal\language\ConfigurableLanguageManager;
 use Drupal\language\LanguageServiceProvider;
+use Symfony\Component\EventDispatcher\EventDispatcher;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Component\HttpKernel\KernelEvents;
 
 $passed = 0;
 $failed = 0;
@@ -114,11 +143,14 @@ $container = new ContainerBuilder();
 (new YamlFileLoader($container))->load("$module/acme.services.yml");
 
 check('acme.greeter is declared in acme.services.yml', $container->hasDefinition('acme.greeter'));
+check('The misspelt acme.greeterr is no service of the module', !$container->has('acme.greeterr'));
 check('acme.greeter is built from Greeter', $container->getDefinition('acme.greeter')->getClass() === Greeter::class);
 check('The class acme.services.yml names exists', class_exists((string) $container->getDefinition('acme.greeter')->getClass()));
 check('The Greeter class name is an alias of acme.greeter', $container->hasAlias(Greeter::class) && (string) $container->getAlias(Greeter::class) === 'acme.greeter');
 check("acme.greeter receives core's config.factory", (string) $container->getDefinition('acme.greeter')->getArgument(0) === 'config.factory');
 check('acme.greeter receives the acme.greeting_format parameter', $container->getDefinition('acme.greeter')->getArgument(1) === '%acme.greeting_format%');
+$greeterCalls = $container->getDefinition('acme.greeter')->getMethodCalls();
+check("acme.greeter's calls: calls setStringTranslation, which Greeter takes from StringTranslationTrait", ($greeterCalls[0][0] ?? null) === 'setStringTranslation' && method_exists(Greeter::class, 'setStringTranslation'));
 check('acme.greeting_format is a parameter declared in acme.services.yml', is_string($container->getParameter('acme.greeting_format')));
 check('Greeter takes the format as its second argument', (new ReflectionMethod(Greeter::class, '__construct'))->getParameters()[1]->getType()?->getName() === 'string');
 
@@ -148,6 +180,77 @@ check('LanguageServiceProvider::alter() builds language_manager from Configurabl
 check('Only ConfigurableLanguageManager declares getLanguageConfigOverride()', method_exists(ConfigurableLanguageManager::class, 'getLanguageConfigOverride') && !method_exists(LanguageManager::class, 'getLanguageConfigOverride'));
 check('acme_french_site_name() looks up language_manager', str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('language_manager')"));
 
+// The module decorates core's clock, so the container hands out
+// RequestClock for datetime.time.
+check('core.services.yml builds datetime.time from Time', $core->getDefinition('datetime.time')->getClass() === Time::class);
+check('acme.request_clock is built from RequestClock', $container->getDefinition('acme.request_clock')->getClass() === RequestClock::class);
+check('acme.request_clock decorates datetime.time', ($container->getDefinition('acme.request_clock')->getDecoratedService()[0] ?? null) === 'datetime.time');
+check('RequestClock can stand in for Time', is_subclass_of(RequestClock::class, TimeInterface::class) && is_subclass_of(Time::class, TimeInterface::class));
+check('Only RequestClock declares secondsSinceRequest()', method_exists(RequestClock::class, 'secondsSinceRequest') && !method_exists(Time::class, 'secondsSinceRequest'));
+check('RequestClock::secondsSinceRequest() returns an int', is_int((new RequestClock(new Time()))->secondsSinceRequest()));
+check('acme_request_age() looks up datetime.time', str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('datetime.time')"));
+
+// ─── Event subscribers ──────────────────────────────────────────────────────
+
+/**
+ * The methods a subscriber's map names for each event: the value is one
+ * method, a method with its priority, or a list of either.
+ *
+ * @return array<string, list<string>>
+ */
+function listenerMethods(array $events): array
+{
+    $methods = [];
+    foreach ($events as $event => $listeners) {
+        if (is_string($listeners)) {
+            $listeners = [[$listeners]];
+        } elseif (is_string($listeners[0] ?? null)) {
+            $listeners = [$listeners];
+        }
+        $methods[$event] = array_map(fn (array $listener) => $listener[0], $listeners);
+    }
+    return $methods;
+}
+
+$subscribers = [
+    'acme.greeting_subscriber' => [GreetingSubscriber::class, [
+        KernelEvents::RESPONSE => ['onResponse'],
+        ConfigEvents::SAVE => ['onConfigSave'],
+        GreetingEvents::GREETED => ['onGreeted'],
+    ]],
+    'acme.request_subscriber' => [RequestSubscriber::class, [
+        KernelEvents::REQUEST => ['onRequest'],
+    ]],
+];
+foreach ($subscribers as $id => [$class, $expected]) {
+    $definition = $container->getDefinition($id);
+    check("$id is built from " . (new ReflectionClass($class))->getShortName(), $definition->getClass() === $class);
+    check("$id is tagged event_subscriber, which Drupal registers listeners from", $definition->hasTag('event_subscriber'));
+    check("$class is an event subscriber", is_subclass_of($class, EventSubscriberInterface::class));
+    $methods = listenerMethods($class::getSubscribedEvents());
+    check("$class subscribes to the events its map names", $methods === $expected);
+    foreach (array_merge(...array_values($methods)) as $method) {
+        check("$class::$method(), which its map names, is a public method", method_exists($class, $method) && (new ReflectionMethod($class, $method))->isPublic());
+    }
+}
+check('GreetingSubscriber builds its map by assignment', str_contains((string) file_get_contents("$module/src/EventSubscriber/GreetingSubscriber.php"), '$events[KernelEvents::RESPONSE][] = '));
+check('RequestSubscriber returns its map as a literal', str_contains((string) file_get_contents("$module/src/EventSubscriber/RequestSubscriber.php"), 'return [KernelEvents::REQUEST => '));
+check('A misspelt listener such as onRespons is no method of GreetingSubscriber', !method_exists(GreetingSubscriber::class, 'onRespons'));
+
+// A key written as a class constant subscribes to the event the constant
+// holds, which is the name a dispatcher call writes.
+check('GreetingEvents::GREETED holds acme.greeted', GreetingEvents::GREETED === 'acme.greeted');
+check('GreetingSubscriber keys its map by GreetingEvents::GREETED, which makes it the definition of acme.greeted', str_contains((string) file_get_contents("$module/src/EventSubscriber/GreetingSubscriber.php"), '$events[GreetingEvents::GREETED][] = '));
+check('GreetingEvents declares GREETED itself, as a plain string', (new ReflectionClassConstant(GreetingEvents::class, 'GREETED'))->getDeclaringClass()->getName() === GreetingEvents::class && is_string(GreetingEvents::GREETED));
+$greetedListeners = 0;
+foreach ($subscribers as [$class]) {
+    $greetedListeners += count(listenerMethods($class::getSubscribedEvents())['acme.greeted'] ?? []);
+}
+check('One listener in the module subscribes to acme.greeted', $greetedListeners === 1);
+check("acme_announce_greeting() dispatches acme.greeted on core's event_dispatcher", str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('event_dispatcher')->dispatch(new Event(), 'acme.greeted')"));
+check('core.services.yml builds event_dispatcher from Symfony\'s EventDispatcher', ltrim((string) $core->getDefinition('event_dispatcher')->getClass(), '\\') === EventDispatcher::class);
+check("EventDispatcher takes the event name second in dispatch()", (new ReflectionMethod(EventDispatcher::class, 'dispatch'))->getParameters()[1]->getName() === 'eventName');
+
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
 $routes = Yaml::decode((string) file_get_contents("$module/acme.routing.yml"));
@@ -157,6 +260,9 @@ check('acme.greeting is declared in acme.routing.yml', isset($routes['acme.greet
 check('acme.greeting points at GreetingController::greet()', $controllerClass === GreetingController::class && method_exists($controllerClass, $controllerMethod));
 check('The _controller string names a public method', (new ReflectionMethod($controllerClass, $controllerMethod))->isPublic());
 check('acme.greeting declares the {name} the controller takes', str_contains($routes['acme.greeting']['path'], '{name}') && (new ReflectionMethod(GreetingController::class, 'greet'))->getParameters()[0]->getName() === 'name');
+[$titleService, $titleMethod] = explode(':', $routes['acme.greeting']['defaults']['_title_callback'] ?? '') + [1 => ''];
+check("acme.greeting's title callback is the greet() method of the acme.greeter service", $titleService === 'acme.greeter' && $titleMethod === 'greet' && $container->getDefinition('acme.greeter')->getClass() === Greeter::class && (new ReflectionMethod(Greeter::class, 'greet'))->isPublic());
+check('Greeter::greet() takes the {name} of the route, which the title resolver passes it by name', (new ReflectionMethod(Greeter::class, 'greet'))->getParameters()[0]->getName() === 'name');
 check('GreetingController inherits the helpers of ControllerBase', is_subclass_of(GreetingController::class, ControllerBase::class));
 check('ControllerBase::redirect(), which greetTheWorld() calls, takes a route name first', (new ReflectionMethod(ControllerBase::class, 'redirect'))->getParameters()[0]->getName() === 'route_name');
 check('Url::fromRoute() takes a route name first', (new ReflectionMethod(Url::class, 'fromRoute'))->getParameters()[0]->getName() === 'route_name');
@@ -317,6 +423,46 @@ preg_match_all("/'#type'(?:\\] =| =>) '([^']+)'/", $controllerSource, $namedElem
 check('GreetingController names the custom and a core element in a literal and an assignment', $namedElements[1] === ['acme_greeting_card', 'details']);
 check('every element GreetingController names is declared', array_diff($namedElements[1], $declaredElements) === []);
 
+// ─── Plugins ────────────────────────────────────────────────────────────────
+
+// A plugin manager's constructor names its plugins' subdirectory and
+// attribute, which is how PHPantom finds the plugin types.
+$blockManagerSource = (string) file_get_contents("$web/core/lib/Drupal/Core/Block/BlockManager.php");
+check("core's BlockManager reads blocks from Plugin/Block by the Block attribute", str_contains($blockManagerSource, "parent::__construct('Plugin/Block', \$namespaces, \$module_handler, BlockPluginInterface::class, Block::class,"));
+check('core declares plugin.manager.block as BlockManager', (Yaml::decode((string) file_get_contents("$web/core/core.services.yml"))['services']['plugin.manager.block']['class'] ?? null) === BlockManager::class);
+
+$greetingBlock = new ReflectionClass(GreetingBlock::class);
+check('GreetingBlock declares the acme_greeting_block block by attribute', (attributeArguments($greetingBlock, Block::class)['id'] ?? null) === 'acme_greeting_block');
+check('GreetingBlock is in the Plugin\\Block namespace discovery reads', $greetingBlock->getNamespaceName() === 'Drupal\\acme\\Plugin\\Block');
+check('GreetingBlock is a block with the greeting() the controller calls', $greetingBlock->isSubclassOf(BlockBase::class) && $greetingBlock->hasMethod('greeting'));
+check("GreetingController creates the acme_greeting_block block", str_contains($controllerSource, "->createInstance('acme_greeting_block')"));
+
+// An annotated plugin names its annotations without importing them;
+// annotated discovery reads them from the namespace of the plugin type's
+// annotation class and from core's annotations.
+$farewellBlock = new ReflectionClass(FarewellBlock::class);
+check('FarewellBlock imports neither Block nor Translation', !preg_match('/^use .*\\\\(Block|Translation);$/m', (string) file_get_contents((string) $farewellBlock->getFileName())));
+$annotatedBlocks = (new AnnotatedClassDiscovery('Plugin/Block', new ArrayObject(['Drupal\\acme' => ["$module/src"]]), 'Drupal\\Core\\Block\\Annotation\\Block'))->getDefinitions();
+check("core's block discovery finds FarewellBlock by its @Block annotation", ($annotatedBlocks['acme_farewell_block']['class'] ?? null) === FarewellBlock::class);
+check("core's block discovery reads its @Translation as core's Translation annotation", ($annotatedBlocks['acme_farewell_block']['admin_label'] ?? null) instanceof TranslatableMarkup);
+
+// The plugins Note's base field names are core's.
+check("core's StringItem declares the string field type", (attributeArguments(new ReflectionClass(StringItem::class), FieldType::class)['id'] ?? null) === 'string');
+check("core's StringTextfieldWidget declares the string_textfield widget", (attributeArguments(new ReflectionClass(StringTextfieldWidget::class), FieldWidget::class)['id'] ?? null) === 'string_textfield');
+check("core's UniqueFieldConstraint declares the UniqueField constraint", (attributeArguments(new ReflectionClass(UniqueFieldConstraint::class), Constraint::class)['id'] ?? null) === 'UniqueField');
+$fieldTypeIds = [];
+foreach ([...glob("$web/core/lib/Drupal/Core/Field/Plugin/Field/FieldType/*.php"), ...glob("$web/core/modules/*/src/Plugin/Field/FieldType/*.php")] as $file) {
+    $class = (string) preg_replace('~^.*?/src/|^.*?/lib/~', '', substr($file, 0, -4));
+    $class = str_replace('/', '\\', str_contains($file, '/core/modules/') ? 'Drupal/' . basename(dirname($file, 5)) . '/' . $class : $class);
+    if (class_exists($class)) {
+        $fieldTypeIds[] = attributeArguments(new ReflectionClass($class), FieldType::class)['id'] ?? null;
+    }
+}
+check('Core declares field types, the string one among them', in_array('string', $fieldTypeIds, true));
+check('The misspelt strin is no field type of core', !in_array('strin', $fieldTypeIds, true));
+$noteSource = (string) file_get_contents("$module/src/Entity/Note.php");
+check("Note names the string field type, its widget, and the UniqueField constraint", str_contains($noteSource, "BaseFieldDefinition::create('string')") && str_contains($noteSource, "['type' => 'string_textfield']") && str_contains($noteSource, "->addConstraint('UniqueField')"));
+
 // ─── Libraries ──────────────────────────────────────────────────────────────
 
 // A library is `<extension>/<key>`, the key a top-level one of the
@@ -360,6 +506,49 @@ foreach ($attached as $where => $names) {
 }
 check("core's Twig extension declares attach_library()", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Template/TwigExtension.php"), "new TwigFunction('attach_library'"));
 check("core's ThemeManager collects the #attached a preprocess function sets", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Theme/ThemeManager.php"), "foreach (['#attached', '#cache'] as \$key)"));
+
+// ─── Callbacks ──────────────────────────────────────────────────────────────
+
+// Drupal rewrites a '::method' callback as a call on the form object, and
+// calls every other one as written. Each one GreetingForm declares names a
+// public method or function, so each one is callable.
+$greetingForm = new GreetingForm();
+$greetingFormState = (new FormState())->setFormObject($greetingForm);
+$greetingBuild = $greetingForm->buildForm([], $greetingFormState);
+$greetingCallbacks = [
+    ...$greetingBuild['#validate'],
+    $greetingBuild['name']['#value_callback'],
+    $greetingBuild['name']['#ajax']['callback'],
+    ...$greetingBuild['#after_build'],
+    ...$greetingBuild['actions']['submit']['#submit'],
+];
+check('GreetingForm declares a callback of each shape', $greetingCallbacks === ['::validateName', GreetingForm::class . '::trimName', '::refreshGreeting', 'Drupal\acme\Form\GreetingForm::addHint', '::submitForm', 'acme_greeting_form_submit']);
+foreach ($greetingCallbacks as $callback) {
+    check("Drupal can call GreetingForm's $callback", is_callable($greetingFormState->prepareCallback($callback)));
+}
+check("FormState rewrites '::validateName' as a call on the form object", $greetingFormState->prepareCallback('::validateName') === [$greetingForm, 'validateName']);
+// A value callback must be a native callable: a static method named by its
+// class is one, and an instance method named by its class or '::method' is
+// not.
+check('the value callback trimName is a native callable', is_callable(GreetingForm::class . '::trimName'));
+check('an instance method named by its class is no native callable', !is_callable(GreetingForm::class . '::validateName'));
+check("'::trimName' is no native callable", !is_callable('::trimName'));
+// Drupal calls a callback from outside the form, where only a public
+// method is callable.
+check('validateName is public', (new ReflectionMethod(GreetingForm::class, 'validateName'))->isPublic());
+check('a private method is not callable from outside its class', !is_callable([new class { public function run(): void { $this->hidden(); } private function hidden(): void {} }, 'hidden']));
+check('GreetingForm is a form', $greetingForm instanceof FormInterface);
+
+// The card's lazy builder names a method of the acme.greeter service, which
+// Drupal's CallableResolver finds through the container. A lazy builder
+// must be a trusted callback.
+check("GreetingController::card() has the lazy builder 'acme.greeter:buildGreeting'", str_contains((string) file_get_contents("$module/src/Controller/GreetingController.php"), "'#lazy_builder' => ['acme.greeter:buildGreeting', [\$name]]"));
+$lazyContainer = new ContainerBuilder();
+$lazyContainer->set('acme.greeter', (new ReflectionClass(Greeter::class))->newInstanceWithoutConstructor());
+$lazyCallable = (new CallableResolver(new ClassResolver($lazyContainer)))->getCallableFromDefinition('acme.greeter:buildGreeting');
+check("CallableResolver calls 'acme.greeter:buildGreeting' on the service", is_array($lazyCallable) && $lazyCallable[0] instanceof Greeter && $lazyCallable[1] === 'buildGreeting');
+check('acme.services.yml builds acme.greeter from Greeter, which declares buildGreeting()', $container->getDefinition('acme.greeter')->getClass() === Greeter::class && (new ReflectionMethod(Greeter::class, 'buildGreeting'))->isPublic());
+check('Greeter trusts buildGreeting() as a render callback', is_subclass_of(Greeter::class, TrustedCallbackInterface::class) && in_array('buildGreeting', Greeter::trustedCallbacks(), true));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

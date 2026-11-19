@@ -116,3 +116,74 @@ async fn route_names_are_judged_once_the_project_registers_a_route() {
         messages[0]
     );
 }
+
+/// `spatie/laravel-package-tools` providers register route files through
+/// `$package->hasRoutes('web')` rather than `loadRoutesFrom()`, as Filament
+/// does.  Its route file names routes under a group prefix computed per
+/// panel, which leaves every name under the literal outer prefix unjudgeable.
+#[tokio::test]
+async fn package_tools_route_files_are_scanned() {
+    const TOOLS_PROVIDER: &str = "\
+<?php
+namespace Acme;
+
+use Spatie\\LaravelPackageTools\\Package;
+use Spatie\\LaravelPackageTools\\PackageServiceProvider;
+
+class PkgServiceProvider extends PackageServiceProvider {
+    public function configurePackage(Package $package): void {
+        $package->name('pkg')->hasRoutes('web');
+    }
+}
+";
+    const PANEL_ROUTES: &str = "\
+<?php
+use Illuminate\\Support\\Facades\\Route;
+
+Route::name('pkg.')->group(function (): void {
+    foreach (['admin', 'app'] as $panelId) {
+        Route::name(\"{$panelId}.\")->group(function (): void {
+            Route::get('/dashboard', fn () => 'ok')->name('dashboard');
+        });
+    }
+});
+";
+    const PANEL_CONSUMER: &str = "\
+<?php
+namespace App;
+class Links {
+    public function demo(): void {
+        route('pkg.admin.dashboard');
+        route('nope');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("bootstrap/providers.php", PROVIDERS_PHP),
+            ("vendor/acme/pkg/src/PkgServiceProvider.php", TOOLS_PROVIDER),
+            ("vendor/acme/pkg/routes/web.php", PANEL_ROUTES),
+            ("routes/web.php", APP_ROUTES),
+            ("src/Links.php", PANEL_CONSUMER),
+        ],
+    );
+    let uri = Uri::from_file_path(dir.path().join("src/Links.php")).unwrap();
+    backend.initialized(InitializedParams {}).await;
+    open_php(&backend, &uri, PANEL_CONSUMER).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), PANEL_CONSUMER, &mut diags);
+    let messages: Vec<_> = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_route"))
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
+
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the missing route should be flagged, got: {messages:?}"
+    );
+    assert!(messages[0].contains("nope"), "unexpected: {}", messages[0]);
+}

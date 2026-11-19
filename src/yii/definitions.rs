@@ -34,9 +34,13 @@ use crate::types::{ClassInfo, MethodInfo};
 
 /// The member a definition key names: the method of a `'name()'` key, as
 /// `(name, true)`, or the property of a `'$name'` key, as `(name, false)`.
+///
+/// What follows a method key's `()` is not read, so one method can be
+/// called twice under two keys (`'addItem()-first'`, `'addItem()-second'`).
 pub(crate) fn definition_key(key: &str) -> Option<(&str, bool)> {
-    let (name, is_method) = match key.strip_suffix("()") {
-        Some(name) => (name, true),
+    let (name, is_method) = match key.split_once("()") {
+        Some((_, rest)) if rest.contains("()") => return None,
+        Some((name, _)) => (name, true),
         None => (key.strip_prefix('$')?, false),
     };
     let mut chars = name.chars();
@@ -72,10 +76,20 @@ fn is_definition_group(group: &str) -> bool {
     matches!(group, "di" | "di-web" | "di-console" | "widgets") || group.starts_with("widgets-")
 }
 
-/// The definition files `package` contributes: each file a definition group
-/// of its `config-plugin` lists, under its `source-directory`.  A group that
-/// names another (`'$di'`) adds no file of its own.
+/// The definition files `package` contributes.
 fn package_definition_files(package: &serde_json::Value, root: &Path) -> Vec<PathBuf> {
+    package_group_files(package, root, is_definition_group)
+}
+
+/// The files `package` contributes to the groups `is_group` accepts: each
+/// file such a group of its `config-plugin` lists, under its
+/// `source-directory`.  A group that names another (`'$di'`) adds no file
+/// of its own.
+pub(crate) fn package_group_files(
+    package: &serde_json::Value,
+    root: &Path,
+    is_group: fn(&str) -> bool,
+) -> Vec<PathBuf> {
     let Some(extra) = package.get("extra") else {
         return Vec::new();
     };
@@ -90,30 +104,41 @@ fn package_definition_files(package: &serde_json::Value, root: &Path) -> Vec<Pat
     let dir = root.join(source);
     let mut files = Vec::new();
     for (group, entries) in groups {
-        if !is_definition_group(group) {
-            continue;
-        }
-        let entries: Vec<&str> = match entries {
-            serde_json::Value::String(file) => vec![file.as_str()],
-            serde_json::Value::Array(list) => list.iter().filter_map(|e| e.as_str()).collect(),
-            _ => continue,
-        };
-        for entry in entries {
-            // `?` marks a file that may be missing, which is read when it
-            // is there.
-            let entry = entry.trim_start_matches('?');
-            if entry.starts_with('$') {
-                continue;
-            }
-            match entry.rsplit_once('/').unwrap_or(("", entry)) {
-                (sub, pattern) if pattern.contains('*') => {
-                    glob_files(&dir.join(sub), pattern, &mut files);
-                }
-                _ => files.push(dir.join(entry)),
-            }
+        if is_group(group) {
+            group_files(entries, &dir, &mut files);
         }
     }
     files
+}
+
+/// The files the entries of one `config-plugin` group list, a file or a
+/// list of them, relative to `dir`.  A pattern (`di/*.php`) lists the files
+/// it matches, and an entry that names another group (`'$di'`) adds no file
+/// of its own.
+pub(crate) fn group_files(entries: &serde_json::Value, dir: &Path, out: &mut Vec<PathBuf>) {
+    let entries: Vec<&str> = match entries {
+        serde_json::Value::String(file) => vec![file.as_str()],
+        serde_json::Value::Array(list) => list.iter().filter_map(|e| e.as_str()).collect(),
+        _ => return,
+    };
+    for entry in entries {
+        // `?` marks a file that may be missing, which is read when it is
+        // there.
+        let entry = entry.trim_start_matches('?');
+        if entry.starts_with('$') {
+            continue;
+        }
+        match entry.rsplit_once('/').unwrap_or(("", entry)) {
+            (sub, pattern) if pattern.contains('*') => {
+                let mut matched = Vec::new();
+                glob_files(&dir.join(sub), pattern, &mut matched);
+                // yiisoft/config reads a pattern's files in name order.
+                matched.sort_unstable();
+                out.extend(matched);
+            }
+            _ => out.push(dir.join(entry)),
+        }
+    }
 }
 
 /// The files in `dir` whose names match `pattern`, a name with `*`s in it.
@@ -187,6 +212,8 @@ fn read_package_definition_files(paths: &[PathBuf]) -> Vec<PackageDefinitionFile
                 drupal: false,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             path.parent(),
             crate::drupal::hooks::DrupalFile::Other,
@@ -204,7 +231,7 @@ fn read_package_definition_files(paths: &[PathBuf]) -> Vec<PackageDefinitionFile
 }
 
 /// The location of the bytes `[start, end)` of `content`, at `uri`.
-fn location(uri: &str, lines: &LineIndex, start: u32, end: u32) -> Option<Location> {
+pub(crate) fn location(uri: &str, lines: &LineIndex, start: u32, end: u32) -> Option<Location> {
     Some(Location {
         uri: crate::util::parse_url(uri)?,
         range: Range {
@@ -221,6 +248,15 @@ impl Backend {
         if let Some(known) = known.as_ref() {
             return Arc::clone(known);
         }
+        let found = Arc::new(read_package_definition_files(
+            &self.yii_package_definition_paths(),
+        ));
+        *known = Some(Arc::clone(&found));
+        found
+    }
+
+    /// The definition files the installed packages contribute.
+    pub(crate) fn yii_package_definition_paths(&self) -> Vec<PathBuf> {
         let vendors = self.workspace.vendor_dir_paths.lock().clone();
         let mut paths = Vec::new();
         for vendor in &vendors {
@@ -235,9 +271,7 @@ impl Backend {
         }
         paths.sort_unstable();
         paths.dedup();
-        let found = Arc::new(read_package_definition_files(&paths));
-        *known = Some(Arc::clone(&found));
-        found
+        paths
     }
 
     /// Forget what the installed packages define, once they changed.
@@ -335,7 +369,16 @@ impl Backend {
                     .as_ref()
                     .map(|ty| format!("{ty} "))
                     .unwrap_or_default();
-                format!("Parameter `{ty}${name}` of `{callable}`")
+                let mut detail = format!("Parameter `{ty}${name}` of `{callable}`");
+                if let Some(description) = parameter
+                    .description
+                    .as_deref()
+                    .filter(|description| !description.is_empty())
+                {
+                    detail.push_str("\n\n");
+                    detail.push_str(description);
+                }
+                detail
             }
             None => format!("`{callable}` has no parameter `${name}`"),
         }
@@ -414,6 +457,8 @@ mod tests {
         assert_eq!(definition_key("$"), None);
         assert_eq!(definition_key("set logger()"), None);
         assert_eq!(definition_key("1st()"), None);
+        assert_eq!(definition_key("addItem()-theme"), Some(("addItem", true)));
+        assert_eq!(definition_key("a()b()"), None);
     }
 
     #[test]

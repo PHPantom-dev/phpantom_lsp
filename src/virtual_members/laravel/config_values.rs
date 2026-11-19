@@ -358,7 +358,7 @@ fn resolve_config_class_name(name: &str, use_map: &HashMap<String, String>) -> S
 
 /// Build a [`ConfigNode`] from an arbitrary expression: arrays become
 /// [`ConfigNode::Array`], everything else is classified as a leaf value.
-fn node_from_expr(
+pub(crate) fn node_from_expr(
     expr: &Expression<'_>,
     content: &str,
     use_map: &HashMap<String, String>,

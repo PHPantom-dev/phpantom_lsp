@@ -328,6 +328,14 @@ impl Backend {
                 .is_some()
     }
 
+    /// Whether a function named `name` exists, read as the fully qualified
+    /// name a Drupal callback string spells, its leading `\\` included.  A
+    /// callback that names none names an invokable class or service.
+    pub(crate) fn callback_names_function(&self, name: &str) -> bool {
+        let fqn = name.trim_start_matches('\\');
+        self.has_indexed_function(fqn) || self.find_or_load_declared_function(&[fqn]).is_some()
+    }
+
     /// Whether discovery or full parsing has seen this exact class FQN.
     ///
     /// Laravel's optional root facade aliases are used only when no real

@@ -12,13 +12,21 @@ pub(super) fn extract_construct_expr<'a>(
     match construct {
         Construct::Isset(isset) => {
             emit_keyword(&isset.isset, ctx);
+            let from = ctx.spans.len();
             for val in isset.values.iter() {
                 extract_from_expression(val, ctx, scope_start);
+            }
+            if ctx.yii_params {
+                mark_yii_param_reads_optional(from, ctx);
             }
         }
         Construct::Empty(empty) => {
             emit_keyword(&empty.empty, ctx);
+            let from = ctx.spans.len();
             extract_from_expression(empty.value, ctx, scope_start);
+            if ctx.yii_params {
+                mark_yii_param_reads_optional(from, ctx);
+            }
         }
         Construct::Eval(eval) => {
             emit_keyword(&eval.eval, ctx);

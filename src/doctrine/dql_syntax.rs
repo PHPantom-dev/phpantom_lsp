@@ -83,8 +83,8 @@ pub(crate) fn check(text: &str, grammar: Grammar) -> Option<SyntaxError> {
         None => "end of string".to_string(),
     };
     let message = match expected {
-        Some(expected) => format!("DQL syntax error: expected {expected}, got {got}"),
-        None => format!("DQL syntax error: unexpected {got}"),
+        Some(expected) => format!("DQL expects {expected}, got {got}"),
+        None => format!("Unexpected {got} in DQL"),
     };
     Some(SyntaxError {
         range: token.map(|token| token.start..token.end),
@@ -1372,47 +1372,47 @@ mod tests {
         rejects(
             "SELECT e FROM App\\Entity\\User",
             Grammar::Statement,
-            "<end>: DQL syntax error: expected an identification variable, got end of string",
+            "<end>: DQL expects an identification variable, got end of string",
         );
         rejects(
             "SELECT e FROM User e WHERE e.id = 1)",
             Grammar::Statement,
-            "): DQL syntax error: expected end of string, got ')'",
+            "): DQL expects end of string, got ')'",
         );
         rejects(
             "SELECT e FROM User e WHERE foo",
             Grammar::Statement,
-            "<end>: DQL syntax error: expected =, <, <=, <>, >, >= or !=, got end of string",
+            "<end>: DQL expects =, <, <=, <>, >, >= or !=, got end of string",
         );
         rejects(
             "SELECT e FROM User e WHERE e.id = NULL",
             Grammar::Statement,
-            "NULL: DQL syntax error: expected a literal, got 'NULL'",
+            "NULL: DQL expects a literal, got 'NULL'",
         );
         rejects(
             "SELECT e FROM User e ORDER BY e.id WHERE e.id = 1",
             Grammar::Statement,
-            "WHERE: DQL syntax error: expected end of string, got 'WHERE'",
+            "WHERE: DQL expects end of string, got 'WHERE'",
         );
         rejects(
             "SELEC e FROM User e",
             Grammar::Statement,
-            "SELEC: DQL syntax error: expected SELECT, UPDATE or DELETE, got 'SELEC'",
+            "SELEC: DQL expects SELECT, UPDATE or DELETE, got 'SELEC'",
         );
         rejects(
             "SELECT e FROM User e WHERE e.name = 'open",
             Grammar::Statement,
-            "': DQL syntax error: expected a literal, got '''",
+            "': DQL expects a literal, got '''",
         );
         rejects(
             "SELECT LOWER(e.name FROM User e",
             Grammar::Statement,
-            "<end>: DQL syntax error: expected ')', got end of string",
+            "<end>: DQL expects ')', got end of string",
         );
         rejects(
             "SELECT e FROM User e WHERE e.id IN :ids",
             Grammar::Statement,
-            ":ids: DQL syntax error: expected '(', got ':ids'",
+            ":ids: DQL expects '(', got ':ids'",
         );
     }
 
@@ -1423,12 +1423,12 @@ mod tests {
         rejects(
             "e.id = 1)",
             Grammar::Condition,
-            "): DQL syntax error: expected end of string, got ')'",
+            "): DQL expects end of string, got ')'",
         );
         rejects(
             "e.id = 1 OR e.nickname) IS NULL",
             Grammar::Condition,
-            "): DQL syntax error: expected =, <, <=, <>, >, >= or !=, got ')'",
+            "): DQL expects =, <, <=, <>, >, >= or !=, got ')'",
         );
         accepts("e", Grammar::SelectList);
         accepts("e.id, e.title AS t", Grammar::SelectList);
@@ -1444,7 +1444,7 @@ mod tests {
         rejects(
             "e.nickname)",
             Grammar::Operand,
-            "): DQL syntax error: expected end of string, got ')'",
+            "): DQL expects end of string, got ')'",
         );
         accepts("DISTINCT e.id", Grammar::Aggregate);
         accepts("SELECT p.id FROM Post p", Grammar::Subselect);
@@ -1452,7 +1452,7 @@ mod tests {
         rejects(
             "",
             Grammar::Condition,
-            "<end>: DQL syntax error: expected an expression, got end of string",
+            "<end>: DQL expects an expression, got end of string",
         );
     }
 

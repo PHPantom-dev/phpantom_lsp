@@ -36,14 +36,24 @@ pub(crate) fn namespace_mismatch_diagnostic(
         return None;
     }
 
-    let expected_display = expected_ns.as_deref().unwrap_or("<global>");
-    let actual_display = actual_ns.as_deref().unwrap_or("<global>");
+    let message = match (actual_ns.as_deref(), expected_ns.as_deref()) {
+        (Some(actual), Some(expected)) => {
+            format!("Namespace {actual} does not match the PSR-4 namespace {expected}")
+        }
+        (Some(actual), None) => {
+            format!("Namespace {actual} does not match PSR-4, which expects the global namespace")
+        }
+        (None, Some(expected)) => {
+            format!("File has no namespace, but PSR-4 expects namespace {expected}")
+        }
+        (None, None) => return None,
+    };
 
     Some(make_diagnostic(
         range,
         DiagnosticSeverity::Warning,
         "namespace_mismatch",
-        format!("Namespace `{actual_display}` does not match PSR-4 expected `{expected_display}`"),
+        message,
     ))
 }
 

@@ -118,6 +118,13 @@ pub(super) fn extract_from_expression<'a>(
     ) {
         // A route chain is read whole, from its outermost call.
         record_yii_route_chain(expr, ctx);
+        // And so is a query chain, whose names are read against the tables
+        // the whole chain names.
+        record_yii_query_chain(expr, ctx, scope_start);
+        // So is the subject text of each link, which spells the chain
+        // before it: rendering the links one by one, innermost first,
+        // would render each from scratch.
+        ctx.spine_texts.prime(expr, ctx.content);
         let mut links: Vec<&'a Call<'a>> = Vec::new();
         let mut receiver = expr;
         while let Expression::Call(call) = receiver {
@@ -184,17 +191,34 @@ pub(super) fn extract_from_expression<'a>(
         Expression::Assignment(assign) => extract_assignment_expr(assign, ctx, scope_start),
 
         // ── Binary operations ──
-        Expression::Binary(bin) => {
-            record_morph_column_comparison(bin, ctx.content, &mut ctx.morph_column_sites);
-            extract_from_expression(bin.lhs, ctx, scope_start);
-            // Tag the RHS of `instanceof` with the Instanceof context.
-            if bin.operator.is_instanceof()
-                && let Expression::Identifier(ident) = bin.rhs
-            {
-                ctx.spans
-                    .push(identifier_class_ref(ident, ClassRefContext::Instanceof));
-            } else {
-                extract_from_expression(bin.rhs, ctx, scope_start);
+        // Left-associative operators nest on the left (`"a" . "b" . "c"` is
+        // `("a" . "b") . "c"`), and generated code can chain thousands of
+        // them, so walk the left spine in a loop rather than a frame per
+        // operator.  Every operator's LHS starts at the leftmost operand, so
+        // they all share one `lhs_spans` mark.
+        Expression::Binary(_) => {
+            let mut spine: Vec<&'a Binary<'a>> = Vec::new();
+            let mut leftmost = expr;
+            while let Expression::Binary(bin) = leftmost {
+                record_morph_column_comparison(bin, ctx.content, &mut ctx.morph_column_sites);
+                spine.push(bin);
+                leftmost = bin.lhs;
+            }
+            let lhs_spans = ctx.spans.len();
+            extract_from_expression(leftmost, ctx, scope_start);
+            for bin in spine.iter().rev() {
+                if ctx.yii_params && bin.operator.is_null_coalesce() {
+                    mark_yii_param_reads_optional(lhs_spans, ctx);
+                }
+                // Tag the RHS of `instanceof` with the Instanceof context.
+                if bin.operator.is_instanceof()
+                    && let Expression::Identifier(ident) = bin.rhs
+                {
+                    ctx.spans
+                        .push(identifier_class_ref(ident, ClassRefContext::Instanceof));
+                } else {
+                    extract_from_expression(bin.rhs, ctx, scope_start);
+                }
             }
         }
 
@@ -246,7 +270,8 @@ pub(super) fn extract_from_expression<'a>(
             emit_drupal_render_element_reads(&array.elements, ctx);
             emit_drupal_render_array_spans(&array.elements, ctx);
             emit_drupal_attached_array_spans(&array.elements, ctx);
-            emit_yii_definition_spans(&array.elements, ctx);
+            emit_drupal_callback_spans(&array.elements, ctx);
+            emit_yii_definition_spans(&array.elements, array.span().start.offset, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::LegacyArray(array) => {
@@ -255,7 +280,8 @@ pub(super) fn extract_from_expression<'a>(
             emit_drupal_render_element_reads(&array.elements, ctx);
             emit_drupal_render_array_spans(&array.elements, ctx);
             emit_drupal_attached_array_spans(&array.elements, ctx);
-            emit_yii_definition_spans(&array.elements, ctx);
+            emit_drupal_callback_spans(&array.elements, ctx);
+            emit_yii_definition_spans(&array.elements, array.span().start.offset, ctx);
             extract_from_array_elements(&array.elements, ctx, scope_start);
         }
         Expression::List(list) => {
@@ -264,6 +290,9 @@ pub(super) fn extract_from_expression<'a>(
 
         // ── Array access ──
         Expression::ArrayAccess(access) => {
+            if ctx.yii_params {
+                record_yii_param_read(access, ctx);
+            }
             extract_from_expression(access.array, ctx, scope_start);
             // An index that is still a bare `Identifier` can only have come
             // from the unquoted offset of a simple interpolation

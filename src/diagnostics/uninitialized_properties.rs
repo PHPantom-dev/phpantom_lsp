@@ -752,10 +752,7 @@ impl Backend {
                         owner
                     )
                 } else {
-                    format!(
-                        "Property {} is never initialized; give it a default value or assign it in the constructor",
-                        owner
-                    )
+                    format!("Property {} is never initialized", owner)
                 };
                 let Some(range) = self.offset_range_to_lsp_range(
                     uri,

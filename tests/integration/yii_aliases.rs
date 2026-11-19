@@ -176,7 +176,8 @@ async fn an_alias_in_any_string_goes_to_its_declaration() {
         );
     }
 
-    // The path after the alias is not the alias.
+    // The path after the alias is not the alias: it goes to the file it
+    // names, and a directory is no location a client can open.
     let found = definitions(
         &backend,
         &uri_for(&dir, "src/Web/Asset.php"),
@@ -184,6 +185,21 @@ async fn an_alias_in_any_string_goes_to_its_declaration() {
     )
     .await;
     assert!(found.is_empty(), "{found:?}");
+    let found = definitions(
+        &backend,
+        &uri_for(&dir, "src/Web/Asset.php"),
+        position_in(ASSET_PHP, "'@views/blog/_card.php'", 15),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0]
+            .uri
+            .to_file_path()
+            .unwrap()
+            .ends_with("resources/views/blog/_card.php"),
+        "{found:?}"
+    );
 }
 
 #[tokio::test]
@@ -247,6 +263,15 @@ async fn hovering_an_alias_shows_its_path() {
         markup.contains("`@root/resources/views`, which is `resources/views`"),
         "{markup}"
     );
+
+    // Yii drops the separator a path ends in, which leaves nothing of a
+    // URL alias declared as `/`, so the path is shown as written.
+    let position = position_in(ASSET_PHP, "'@baseUrl/favicon.svg'", 2);
+    let hover = hover_response(&backend, &uri, position.line, position.character)
+        .await
+        .expect("a hover");
+    let markup = hover_text(&hover);
+    assert!(markup.contains("**Alias** `@baseUrl`\n\n`/`"), "{markup}");
 }
 
 #[tokio::test]
@@ -278,5 +303,114 @@ async fn the_path_after_an_alias_links_to_what_it_names() {
             link("/blog/_card.php'", "resources/views/blog/_card.php"),
             link("/logs'", "runtime/logs"),
         ]
+    );
+}
+
+#[tokio::test]
+async fn an_alias_is_a_workspace_symbol_at_its_declaration() {
+    let (backend, dir) = workspace(&[]).await;
+    let aliases = uri_for(&dir, "config/common/aliases.php");
+    for query in ["@views", "views", "VIEWS"] {
+        let found: Vec<(String, Location)> = backend
+            .handle_workspace_symbol(query)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|symbol| symbol.base_symbol_information.name.starts_with('@'))
+            .map(|symbol| (symbol.base_symbol_information.name, symbol.location))
+            .collect();
+        let start = position_in(ALIASES_PHP, "'@views'", 1);
+        assert_eq!(
+            found,
+            vec![(
+                "@views".to_string(),
+                Location {
+                    uri: aliases.clone(),
+                    range: Range { start, end: start },
+                }
+            )],
+            "for {query}"
+        );
+    }
+}
+
+/// A session whose client folds part of a line and shows collapsed text
+/// when `collapsed_text` is set, and folds whole lines only otherwise.
+async fn folding_workspace(collapsed_text: bool) -> (Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in files() {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+    }
+    let backend = Backend::new_test();
+    #[allow(deprecated)] // `root_uri` is what this generation of clients sends
+    let params = InitializeParams {
+        root_uri: Some(Uri::from_file_path(dir.path()).unwrap()),
+        capabilities: ClientCapabilities {
+            text_document: Some(TextDocumentClientCapabilities {
+                folding_range: Some(FoldingRangeClientCapabilities {
+                    line_folding_only: Some(!collapsed_text),
+                    folding_range: Some(ClientFoldingRangeOptions {
+                        collapsed_text: Some(true),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    backend.initialize(params).await.unwrap();
+    backend.initialized(InitializedParams {}).await;
+    let uri = uri_for(&dir, "src/Web/Asset.php");
+    open_document(&backend, &uri, "php", ASSET_PHP).await;
+    (backend, dir)
+}
+
+#[tokio::test]
+async fn an_aliased_path_folds_to_the_path_it_resolves_to() {
+    let (backend, dir) = folding_workspace(true).await;
+    let uri = uri_for(&dir, "src/Web/Asset.php");
+    let found: Vec<(Position, Position, String)> = backend
+        .handle_folding_range(uri.as_str(), ASSET_PHP)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|range| {
+            Some((
+                Position::new(range.start_line, range.start_character?),
+                Position::new(range.end_line, range.end_character?),
+                range.collapsed_text?,
+            ))
+        })
+        .collect();
+    let fold = |needle: &str, shown: &str| {
+        (
+            position_in(ASSET_PHP, needle, 1),
+            position_in(ASSET_PHP, needle, needle.len() - 1),
+            shown.to_string(),
+        )
+    };
+    assert_eq!(
+        found,
+        vec![
+            fold("'@views/blog'", "resources/views/blog"),
+            fold("'@views/blog/_card.php'", "resources/views/blog/_card.php"),
+            fold("'@runtime/missing'", "runtime/missing"),
+            fold("'@baseUrl/favicon.svg'", "/favicon.svg"),
+            fold("'@views'", "resources/views"),
+            fold("'@runtime/logs'", "runtime/logs"),
+        ]
+    );
+
+    // A client that folds whole lines only gets none of them.
+    let (backend, dir) = folding_workspace(false).await;
+    let uri = uri_for(&dir, "src/Web/Asset.php");
+    let ranges = backend
+        .handle_folding_range(uri.as_str(), ASSET_PHP)
+        .unwrap_or_default();
+    assert!(
+        ranges.iter().all(|range| range.collapsed_text.is_none()),
+        "{ranges:?}"
     );
 }

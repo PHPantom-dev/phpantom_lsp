@@ -1,15 +1,21 @@
 //! The entity types a Drupal entity class declares, by attribute or by the
 //! annotation older code uses, the route names Drupal's static and
-//! constructor calls read, and the libraries a render array attaches (see
+//! constructor calls read, the libraries a render array attaches, and the
+//! methods and functions a form or render array's callbacks name (see
 //! [`crate::drupal`]).
 
 use super::*;
+use crate::drupal::forms::{
+    AJAX, AJAX_CALLBACK, CALLBACK_KEYS, CALLBACK_LIST_KEYS, LAZY_BUILDER, RENDER_CALLBACK_KEYS,
+    VALUE_CALLBACK,
+};
 use crate::symbol_map::extraction::symfony::{
     RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
 use crate::symbol_map::{
-    DeclaredParameter, DrupalRouteSite, EntityTypeSite, PluginClassSite, ReceiverClass,
-    StringKeyKind, TypedReceiverSite,
+    CallbackKey, CallbackShape, DeclaredParameter, DrupalCallbackSite, DrupalRouteSite,
+    EntityTypeSite, ModuleGuard, PluginClassSite, PluginDeclarationSite, PluginManagerSite,
+    ReceiverClass, StaticPluginSite, StringKeyKind, TypedReceiverSite,
 };
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
@@ -244,6 +250,416 @@ fn annotation_plugin_id(doc: &str, from: usize) -> Option<(usize, usize)> {
         .into_iter()
         .find(|entry| entry.path.is_empty() && entry.key == "id")
         .map(|entry| (entry.value_start, entry.value_end))
+}
+
+/// Record the ID each attribute of `class`, and the first annotation of its
+/// docblock, give it, when the class is in a `Drupal\` namespace: the
+/// plugins among them are told apart later, by the plugin types the
+/// project's plugin managers declare (see [`crate::drupal::plugins`]).
+pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_declarations(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some(fqn) = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .map(|fqn| fqn.trim_start_matches('\\'))
+        .filter(|fqn| fqn.starts_with("Drupal\\"))
+        .map(crate::atom::atom)
+    else {
+        return;
+    };
+    for attribute in class
+        .attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+    {
+        // Plugin attributes take the ID first, by name or by place.  One
+        // that is no string, such as a class constant, is recorded empty:
+        // its plugin type then has a plugin whose ID is not known.
+        let Some(value) = attribute_arguments(attribute, &["id"])
+            .into_iter()
+            .find(|(parameter, _)| *parameter == "id")
+            .map(|(_, value)| value)
+        else {
+            continue;
+        };
+        let (id, start, end) = match resolved_string_literal(value, ctx.content) {
+            Some((id, start, end)) if !id.is_empty() => (id, start, end),
+            Some(_) => continue,
+            None => {
+                let span = value.span();
+                ("", span.start.offset as usize, span.end.offset as usize)
+            }
+        };
+        let written = bytes_to_str(attribute.name.value());
+        let marker = ctx
+            .resolved_name_at(attribute.name.span().start.offset)
+            .unwrap_or(written)
+            .trim_start_matches('\\');
+        ctx.drupal_plugins.push(PluginDeclarationSite {
+            start: start as u32,
+            end: end as u32,
+            id: id.to_string(),
+            class: fqn,
+            marker: crate::atom::atom(marker),
+            is_annotation: false,
+            doc_start: start as u32,
+            doc_end: end as u32,
+        });
+    }
+    let Some((doc, offset)) = get_docblock_text_with_offset(ctx.trivias, ctx.content, class) else {
+        return;
+    };
+    if let Some((name, (start, end))) = doc_annotations(doc)
+        .find_map(|(name, from)| Some((name, annotation_plugin_id(doc, from)?)))
+        .filter(|(_, (start, end))| start < end)
+    {
+        ctx.drupal_plugins.push(PluginDeclarationSite {
+            start: offset + start as u32,
+            end: offset + end as u32,
+            id: doc[start..end].to_string(),
+            class: fqn,
+            marker: crate::atom::atom(name),
+            is_annotation: true,
+            doc_start: offset,
+            doc_end: offset + doc.len() as u32,
+        });
+    }
+}
+
+/// The annotations that open a line of the docblock `doc`: each one's name
+/// as written, and the offset just past its `(`.
+fn doc_annotations(doc: &str) -> impl Iterator<Item = (&str, usize)> {
+    doc.match_indices('@').filter_map(move |(at, _)| {
+        let line_start = doc[..at].rfind('\n').map_or(0, |newline| newline + 1);
+        if !doc[line_start..at]
+            .chars()
+            .all(|c| c.is_whitespace() || c == '*' || c == '/')
+        {
+            return None;
+        }
+        let rest = &doc[at + 1..];
+        let length = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '\\'))
+            .unwrap_or(rest.len());
+        let name = &rest[..length];
+        let opens = rest[length..].starts_with('(');
+        let capitalised = name
+            .trim_start_matches('\\')
+            .starts_with(|c: char| c.is_ascii_uppercase());
+        (opens && capitalised).then_some((name, at + 1 + length + 1))
+    })
+}
+
+/// Record the plugin type a plugin manager's constructor declares by the
+/// call it makes to its parent's: `parent::__construct('Plugin/Block',
+/// $namespaces, $module_handler, BlockPluginInterface::class, Block::class,
+/// 'Drupal\Core\Block\Annotation\Block')`.  Whether the parent is
+/// `DefaultPluginManager` is told later, when the types are read.
+pub(in crate::symbol_map::extraction) fn emit_drupal_plugin_manager(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some(body) = class.members.iter().find_map(|member| match member {
+        ClassLikeMember::Method(method)
+            if bytes_to_str(method.name.value).eq_ignore_ascii_case("__construct") =>
+        {
+            match &method.body {
+                MethodBody::Concrete(body) => Some(body),
+                MethodBody::Abstract(_) => None,
+            }
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+    const PARAMETERS: [&str; 6] = [
+        "subdir",
+        "namespaces",
+        "module_handler",
+        "plugin_interface",
+        "plugin_definition_attribute_name",
+        "plugin_definition_annotation_name",
+    ];
+    let Some(arguments) = body.statements.iter().find_map(|statement| {
+        let Statement::Expression(statement) = statement else {
+            return None;
+        };
+        let Expression::Call(Call::StaticMethod(call)) = statement.expression else {
+            return None;
+        };
+        let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+            return None;
+        };
+        (matches!(call.class, Expression::Parent(_))
+            && bytes_to_str(method.value).eq_ignore_ascii_case("__construct"))
+        .then_some(&call.argument_list)
+    }) else {
+        return;
+    };
+    let argument = |wanted: usize| {
+        arguments
+            .arguments
+            .iter()
+            .enumerate()
+            .find_map(|(index, argument)| match argument {
+                Argument::Positional(positional) if index == wanted => Some(positional.value),
+                Argument::Named(named) if bytes_to_str(named.name.value) == PARAMETERS[wanted] => {
+                    Some(named.value)
+                }
+                _ => None,
+            })
+    };
+    let Some((subdir, _, _)) = argument(0)
+        .and_then(|value| resolved_string_literal(value, ctx.content))
+        .filter(|(subdir, _, _)| !subdir.is_empty())
+    else {
+        return;
+    };
+    let Some(fqn) = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
+    else {
+        return;
+    };
+    let class_at = |index: usize| {
+        argument(index)
+            .and_then(|value| message_class(value, ctx))
+            .map(|name| crate::atom::atom(&name))
+    };
+    let discovery = read_manager_discovery(class, ctx);
+    let site = PluginManagerSite {
+        class: fqn,
+        subdir: subdir.to_string(),
+        fifth: class_at(4),
+        sixth: class_at(5),
+        sets_discovery: discovery.sets_discovery,
+        decorates_discovery: discovery.decorates,
+        static_plugins: discovery.static_plugins,
+    };
+    ctx.drupal_plugin_managers.push(site);
+}
+
+/// The decorators a manager's `getDiscovery()` may wrap its parent's
+/// discovery in without finding plugins no class or [`StaticPluginSite`]
+/// declares: derivatives are read from their base plugin's ID, and a static
+/// decorator's plugins from the `setDefinition()` calls the class makes.
+const ADDITIVE_DISCOVERY_DECORATORS: [&str; 3] = [
+    "Drupal\\Component\\Plugin\\Discovery\\StaticDiscoveryDecorator",
+    "Drupal\\Component\\Plugin\\Discovery\\DerivativeDiscoveryDecorator",
+    "Drupal\\Core\\Plugin\\Discovery\\ContainerDerivativeDiscoveryDecorator",
+];
+
+/// How a plugin manager class finds its plugins, beyond what its parent's
+/// discovery reads.
+#[derive(Default)]
+struct ManagerDiscovery {
+    /// It may find plugins no class or `setDefinition()` call declares.
+    sets_discovery: bool,
+    /// It declares a `getDiscovery()` that only decorates its parent's.
+    decorates: bool,
+    static_plugins: Vec<StaticPluginSite>,
+}
+
+/// Read how the plugin manager `class` sets its discovery: each assignment
+/// to `$this->discovery`, the `getDiscovery()` it declares, and the plugins
+/// it declares by `setDefinition('id', [...])`.
+///
+/// A `getDiscovery()` that starts from `parent::getDiscovery()`, wraps it in
+/// [`ADDITIVE_DISCOVERY_DECORATORS`] only, and returns `$this->discovery`
+/// still finds every plugin the default discovery does, plus the ones a
+/// `setDefinition()` with a literal ID adds, as core's constraint manager
+/// does for Symfony's constraints.  Any other shape may find plugins
+/// nothing here declares.
+fn read_manager_discovery(class: &Class<'_>, ctx: &ExtractionCtx<'_>) -> ManagerDiscovery {
+    use mago_syntax::cst::Node;
+    let is_this_discovery = |expr: &Expression<'_>| {
+        matches!(expr, Expression::Access(Access::Property(access))
+            if matches!(access.object, Expression::Variable(Variable::Direct(variable)) if variable.name == b"$this")
+                && matches!(&access.property, ClassLikeMemberSelector::Identifier(name) if name.value == b"discovery"))
+    };
+    let is_parent_discovery = |expr: &Expression<'_>| {
+        matches!(expr, Expression::Call(Call::StaticMethod(call))
+            if matches!(call.class, Expression::Parent(_))
+                && matches!(&call.method, ClassLikeMemberSelector::Identifier(name)
+                    if bytes_to_str(name.value).eq_ignore_ascii_case("getDiscovery")))
+    };
+    let is_additive_decorator = |expr: &Expression<'_>| {
+        let Expression::Instantiation(instantiation) = expr else {
+            return false;
+        };
+        let Expression::Identifier(identifier) = instantiation.class else {
+            return false;
+        };
+        let written = bytes_to_str(identifier.value());
+        let resolved = ctx
+            .resolved_name_at(identifier.span().start.offset)
+            .unwrap_or(written)
+            .trim_start_matches('\\');
+        ADDITIVE_DISCOVERY_DECORATORS
+            .iter()
+            .any(|decorator| decorator.eq_ignore_ascii_case(resolved))
+            && instantiation
+                .argument_list
+                .as_ref()
+                .and_then(|arguments| arguments.arguments.first())
+                .is_some_and(|first| is_this_discovery(first.value()))
+    };
+
+    let mut discovery = ManagerDiscovery::default();
+    let mut starts_from_parent = false;
+    let mut declares_get_discovery = false;
+    crate::parser::for_each_concrete_method(class.members.as_slice(), |method, body| {
+        let is_get_discovery = bytes_to_str(method.name.value).eq_ignore_ascii_case("getDiscovery");
+        declares_get_discovery |= is_get_discovery;
+        crate::parser::for_each_node_with_ancestors(Node::Block(body), |node, _| match node {
+            Node::Assignment(assignment) if is_this_discovery(assignment.lhs) => {
+                if !is_get_discovery || !assignment.operator.is_assign() {
+                    discovery.sets_discovery = true;
+                } else if is_parent_discovery(assignment.rhs) {
+                    starts_from_parent = true;
+                } else if !is_additive_decorator(assignment.rhs) {
+                    discovery.sets_discovery = true;
+                }
+            }
+            Node::Return(statement) if is_get_discovery => {
+                if !statement.value.is_some_and(is_this_discovery) {
+                    discovery.sets_discovery = true;
+                }
+            }
+            Node::MethodCall(call)
+                if matches!(&call.method, ClassLikeMemberSelector::Identifier(name)
+                    if bytes_to_str(name.value).eq_ignore_ascii_case("setDefinition")) =>
+            {
+                let mut arguments = call.argument_list.arguments.iter();
+                let id = arguments
+                    .next()
+                    .and_then(|first| resolved_string_literal(first.value(), ctx.content))
+                    .filter(|(id, _, _)| !id.is_empty());
+                // A plugin is its ID and its class: one whose either is
+                // unreadable leaves what the manager finds unknown.
+                let class = arguments
+                    .next()
+                    .and_then(|definition| {
+                        crate::parser::array_literal_elements(definition.value())
+                    })
+                    .and_then(|entries| {
+                        entries.iter().find_map(|entry| match entry {
+                            ArrayElement::KeyValue(entry)
+                                if resolved_string_literal(entry.key, ctx.content)
+                                    .is_some_and(|(key, _, _)| key == "class") =>
+                            {
+                                message_class(entry.value, ctx)
+                            }
+                            _ => None,
+                        })
+                    });
+                match (id, class) {
+                    (Some((id, _, _)), Some(class)) => {
+                        discovery.static_plugins.push(StaticPluginSite {
+                            id: id.to_string(),
+                            class: crate::atom::atom(&class),
+                        });
+                    }
+                    _ => discovery.sets_discovery = true,
+                }
+            }
+            _ => {}
+        });
+    });
+    if declares_get_discovery && !starts_from_parent {
+        discovery.sets_discovery = true;
+    }
+    discovery.decorates = declares_get_discovery && !discovery.sets_discovery;
+    if discovery.sets_discovery {
+        // What the class finds is unknown anyway.
+        discovery.static_plugins.clear();
+    }
+    discovery
+}
+
+/// Record the plugin IDs a method call names by its arguments rather than
+/// by its receiver alone: the widget or formatter the `type` of
+/// `setDisplayOptions('form' | 'view', [...])` names, for the type engine to
+/// confirm the receiver is a field definition.
+pub(in crate::symbol_map::extraction) fn record_drupal_plugin_sites(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || !member_name.eq_ignore_ascii_case("setDisplayOptions") {
+        return;
+    }
+    let mut arguments = argument_list.arguments.iter();
+    let (Some(Argument::Positional(display)), Some(Argument::Positional(options))) =
+        (arguments.next(), arguments.next())
+    else {
+        return;
+    };
+    let Some(manager) = resolved_string_literal(display.value, ctx.content)
+        .and_then(|(display, _, _)| crate::drupal::plugins::display_manager(display))
+    else {
+        return;
+    };
+    let Some(entries) = crate::parser::array_literal_elements(options.value) else {
+        return;
+    };
+    for entry in entries.iter() {
+        let ArrayElement::KeyValue(entry) = entry else {
+            continue;
+        };
+        if !resolved_string_literal(entry.key, ctx.content).is_some_and(|(key, _, _)| key == "type")
+        {
+            continue;
+        }
+        if let Some((id, start, end)) = resolved_string_literal(entry.value, ctx.content) {
+            ctx.typed_receiver_sites.push(TypedReceiverSite {
+                start: start as u32,
+                end: end as u32,
+                key: crate::drupal::plugins::plugin_key(manager, id),
+                is_write: false,
+                is_optional: false,
+                guards: 0,
+                receiver: ReceiverClass::FieldDisplayOptions,
+            });
+        }
+    }
+}
+
+/// Record the field type `BaseFieldDefinition::create('string')` names.
+pub(in crate::symbol_map::extraction) fn emit_drupal_static_plugin_span(
+    class: &str,
+    method: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Some(manager) = crate::drupal::plugins::static_call_manager(class, method) else {
+        return;
+    };
+    let Some((id, start, end)) = crate::call_args::first_param_arg(argument_list, "type")
+        .and_then(|argument| resolved_string_literal(argument.value(), ctx.content))
+    else {
+        return;
+    };
+    ctx.spans.push(SymbolSpan {
+        start: start as u32,
+        end: end as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalPlugin,
+            key: crate::drupal::plugins::plugin_key(manager, id),
+            is_write: false,
+            is_optional: crate::drupal::plugins::may_catch_missing_plugin(ctx.content),
+        },
+    });
 }
 
 /// Record the render element name a `'#type' => 'x'` entry of an array
@@ -855,9 +1271,15 @@ fn built_name(expression: &Expression<'_>, content: &str) -> BuiltName {
     if let Some((key, start, end)) = resolved_string_literal(expression, content) {
         return BuiltName::Literal(key.to_string(), start as u32, end as u32);
     }
+    BuiltName::Pattern(name_shape(expression))
+}
+
+/// The shape of the name `expression` builds: its text where it is a
+/// string, `*` where it is anything else (`search.view_*`).
+pub(crate) fn name_shape(expression: &Expression<'_>) -> String {
     let mut pattern = String::new();
     push_name_parts(expression, &mut pattern);
-    BuiltName::Pattern(pattern)
+    pattern
 }
 
 /// Append the shape of `expression` to `pattern`: its text where it is a
@@ -2022,7 +2444,7 @@ pub(in crate::symbol_map::extraction) fn record_drupal_route_parameter_sites(
 
 /// The argument a call passes its parameter `index` in: positional, or
 /// named `name`.
-fn argument_at<'a, 'arena>(
+pub(in crate::symbol_map::extraction) fn argument_at<'a, 'arena>(
     argument_list: &'a ArgumentList<'arena>,
     index: usize,
     name: &[u8],
@@ -2038,9 +2460,10 @@ fn argument_at<'a, 'arena>(
         })
 }
 
-/// The keys of an array literal of route parameters that are written out,
-/// each with the byte range of its text.
-fn parameter_keys<'arena>(
+/// The keys of an array literal of route parameters, or of a Yii URL
+/// generator's route arguments, that are written out, each with the byte
+/// range of its text.
+pub(in crate::symbol_map::extraction) fn parameter_keys<'arena>(
     parameters: &Expression<'arena>,
     content: &str,
 ) -> Vec<(&'arena str, u32, u32)> {
@@ -2349,6 +2772,458 @@ fn push_library(expression: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
     }
 }
 
+// ─── Callbacks ──────────────────────────────────────────────────────────────
+
+/// Whether `content` quotes a key Drupal reads a callback under, found in
+/// one pass over its `#`s.
+pub(in crate::symbol_map::extraction) fn has_callback_key(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    memchr::memchr_iter(b'#', bytes).any(|at| {
+        at > 0 && matches!(bytes[at - 1], b'\'' | b'"') && {
+            let rest = &bytes[at..];
+            CALLBACK_LIST_KEYS
+                .iter()
+                .chain(&CALLBACK_KEYS)
+                .chain([&LAZY_BUILDER, &AJAX])
+                .any(|key| {
+                    rest.starts_with(key.as_bytes())
+                        && matches!(rest.get(key.len()), Some(b'\'' | b'"'))
+                })
+        }
+    })
+}
+
+/// Record the callbacks an array literal's entries name under the keys
+/// Drupal reads callbacks from.
+pub(in crate::symbol_map::extraction) fn emit_drupal_callback_spans(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_callback_keys {
+        return;
+    }
+    for element in elements.iter() {
+        if let ArrayElement::KeyValue(entry) = element
+            && let Some((key, _, _)) = resolved_string_literal(entry.key, ctx.content)
+        {
+            push_keyed_callbacks(key, entry.value, ctx);
+        }
+    }
+}
+
+/// Record the callbacks an assignment into a form or render array names:
+/// `$form['#submit'][] = …`, a whole list or callback under its key, and
+/// `$form['x']['#ajax']['callback'] = …`.
+pub(in crate::symbol_map::extraction) fn emit_drupal_callback_assignment(
+    assign: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal_callback_keys || !assign.operator.is_assign() {
+        return;
+    }
+    match assign.lhs {
+        Expression::ArrayAppend(append) => {
+            if let Expression::ArrayAccess(access) = append.array
+                && let Some((key, _, _)) = resolved_string_literal(access.index, ctx.content)
+                && CALLBACK_LIST_KEYS.contains(&key)
+            {
+                push_callback(assign.rhs, callback_key(key), ctx);
+            }
+        }
+        Expression::ArrayAccess(access) => {
+            let Some((key, _, _)) = resolved_string_literal(access.index, ctx.content) else {
+                return;
+            };
+            if key == AJAX_CALLBACK && accesses_keys(access.array, &[AJAX], ctx.content) {
+                push_callback(assign.rhs, CallbackKey::Form, ctx);
+            } else if let Expression::ArrayAccess(list) = access.array
+                && let Some((list_key, _, _)) = resolved_string_literal(list.index, ctx.content)
+                && CALLBACK_LIST_KEYS.contains(&list_key)
+            {
+                // `$form['#entity_builders']['name'] = …`, a keyed entry.
+                push_callback(assign.rhs, callback_key(list_key), ctx);
+            } else {
+                push_keyed_callbacks(key, assign.rhs, ctx);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// How Drupal calls the callbacks under the callback key `key`.
+fn callback_key(key: &str) -> CallbackKey {
+    if key == VALUE_CALLBACK {
+        CallbackKey::Value
+    } else if RENDER_CALLBACK_KEYS.contains(&key) {
+        CallbackKey::Render
+    } else {
+        CallbackKey::Form
+    }
+}
+
+/// Record the callbacks `value`, written under `key`, names.
+fn push_keyed_callbacks(key: &str, value: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) {
+    if CALLBACK_KEYS.contains(&key) {
+        push_callback(value, callback_key(key), ctx);
+        return;
+    }
+    let lazy_builder = key == LAZY_BUILDER;
+    if !lazy_builder && key != AJAX && !CALLBACK_LIST_KEYS.contains(&key) {
+        return;
+    }
+    let Some(entries) = crate::parser::array_literal_elements(value) else {
+        return;
+    };
+    for entry in entries.iter() {
+        match entry {
+            ArrayElement::Value(item) if key != AJAX => {
+                push_callback(item.value, callback_key(key), ctx);
+            }
+            ArrayElement::KeyValue(entry) if !lazy_builder && key != AJAX => {
+                push_callback(entry.value, callback_key(key), ctx);
+            }
+            ArrayElement::KeyValue(entry)
+                if key == AJAX && is_literal_key(entry.key, AJAX_CALLBACK, ctx.content) =>
+            {
+                push_callback(entry.value, CallbackKey::Form, ctx);
+            }
+            _ => {}
+        }
+        if lazy_builder {
+            return;
+        }
+    }
+}
+
+/// Record what one callback names: a method of the form for `'::method'`,
+/// a method of the class for `'Class::method'` or a class name joined to
+/// `'::method'`, a service and a method of its class for
+/// `'service:method'`, and a function for a name without a colon, each
+/// method under `key`.  An array callable is read wherever it is written,
+/// so only its key is recorded here.
+fn push_callback(callback: &Expression<'_>, key: CallbackKey, ctx: &mut ExtractionCtx<'_>) {
+    if let Expression::Binary(binary) = callback
+        && binary.operator.is_concatenation()
+    {
+        push_joined_callback(binary.lhs, binary.rhs, key, ctx);
+        return;
+    }
+    if let Some(elements) = crate::parser::array_literal_elements(callback) {
+        let mut items = elements.iter();
+        if let (Some(ArrayElement::Value(_)), Some(ArrayElement::Value(method)), None) =
+            (items.next(), items.next(), items.next())
+            && let Some((_, start, _)) = resolved_string_literal(method.value, ctx.content)
+        {
+            push_callback_site(start as u32, key, CallbackShape::ArrayCallable, ctx);
+        }
+        return;
+    }
+    let Some((value, start, end)) = resolved_string_literal(callback, ctx.content) else {
+        return;
+    };
+    if let Some((class, method)) = value.rsplit_once("::") {
+        if !is_identifier(method) || !ctx.content[..end].ends_with(method) {
+            return;
+        }
+        let method_start = (end - method.len()) as u32;
+        if class.is_empty() {
+            push_callback_method(
+                SubjectText::owned("$this".to_string()),
+                false,
+                DocblockMemberRef::FormCallback,
+                method,
+                method_start,
+                ctx,
+            );
+            push_callback_site(method_start, key, CallbackShape::FormMethod, ctx);
+            return;
+        }
+        // A class name in a string is a runtime name, which is fully
+        // qualified whether or not it says so.  Drupal calls the method of
+        // an instance of the class unless the string is a native callable,
+        // which only `#value_callback` requires.
+        let class = class.strip_prefix('\\').unwrap_or(class);
+        if is_qualified_name(class) {
+            push_callback_method(
+                SubjectText::owned(format!("\\{class}")),
+                false,
+                DocblockMemberRef::No,
+                method,
+                method_start,
+                ctx,
+            );
+            let class_end = method_start as usize - 2;
+            let class_start = class_end.saturating_sub(class.len());
+            let spelled = ctx.content.get(class_start..class_end) == Some(class);
+            let class = spelled.then_some((class_start as u32, class_end as u32));
+            push_callback_site(method_start, key, CallbackShape::ClassMethod { class }, ctx);
+        }
+    } else if let Some((service, method)) = value.split_once(':') {
+        push_service_callback(service, method, start, end, key, ctx);
+    } else {
+        let name = value.strip_prefix('\\').unwrap_or(value);
+        if is_qualified_name(name) {
+            ctx.spans.push(SymbolSpan {
+                start: start as u32,
+                end: end as u32,
+                kind: SymbolKind::FunctionCall {
+                    name: crate::atom::atom(&format!("\\{name}")),
+                    is_definition: false,
+                    is_docblock_reference: false,
+                    is_callback: true,
+                },
+            });
+        }
+    }
+}
+
+/// Record the service a `'service:method'` callback, its content running
+/// from `start` to `end`, names, and the method of the service's class,
+/// which the type engine finds through the container as it does for
+/// `\Drupal::service('service')`.
+fn push_service_callback(
+    service: &str,
+    method: &str,
+    start: usize,
+    end: usize,
+    key: CallbackKey,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !crate::drupal::routing::is_plain_name(service)
+        || !is_identifier(method)
+        || !ctx.content[start..end].starts_with(service)
+        || !ctx.content[..end].ends_with(method)
+    {
+        return;
+    }
+    ctx.spans.push(SymbolSpan {
+        start: start as u32,
+        end: (start + service.len()) as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::ServiceId,
+            key: service.to_string(),
+            is_write: false,
+            is_optional: false,
+        },
+    });
+    let method_start = (end - method.len()) as u32;
+    push_callback_method(
+        SubjectText::owned(crate::drupal::routing::service_subject(service)),
+        false,
+        DocblockMemberRef::No,
+        method,
+        method_start,
+        ctx,
+    );
+    push_callback_site(method_start, key, CallbackShape::ServiceMethod, ctx);
+}
+
+/// Record the method `X::class . '::method'`, `static::class . '::method'`,
+/// `self::class . '::method'` or `__CLASS__ . '::method'` names.  The
+/// `'::method'` half is never read on its own.
+fn push_joined_callback(
+    class: &Expression<'_>,
+    method: &Expression<'_>,
+    key: CallbackKey,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some((value, _, end)) = resolved_string_literal(method, ctx.content) else {
+        return;
+    };
+    let Some(name) = value
+        .strip_prefix("::")
+        .filter(|name| is_identifier(name) && ctx.content[..end].ends_with(name))
+    else {
+        return;
+    };
+    let subject = match class {
+        Expression::Access(Access::ClassConstant(fetch))
+            if crate::parser::is_class_fetch(fetch) =>
+        {
+            let span = fetch.class.span();
+            SubjectText::new(
+                expr_to_subject_text(fetch.class),
+                span.start.offset,
+                span.end.offset,
+                ctx.content,
+            )
+        }
+        Expression::MagicConstant(MagicConstant::Class(_)) => {
+            SubjectText::owned("self".to_string())
+        }
+        _ => return,
+    };
+    let method_start = (end - name.len()) as u32;
+    // Read as `'Class::method'`, which Drupal calls on an instance.
+    push_callback_method(
+        subject,
+        false,
+        DocblockMemberRef::No,
+        name,
+        method_start,
+        ctx,
+    );
+    push_callback_site(method_start, key, CallbackShape::JoinedMethod, ctx);
+}
+
+/// Record that the method span at `start` is a callback under `key`.
+fn push_callback_site(
+    start: u32,
+    key: CallbackKey,
+    shape: CallbackShape,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    ctx.drupal_callbacks
+        .push(DrupalCallbackSite { start, key, shape });
+}
+
+/// Record the method `name`, at `start`, of `subject` that a callback
+/// names, read like the method of an array callable.
+fn push_callback_method(
+    subject: SubjectText,
+    is_static: bool,
+    docblock_ref: DocblockMemberRef,
+    name: &str,
+    start: u32,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    ctx.spans.push(SymbolSpan {
+        start,
+        end: start + name.len() as u32,
+        kind: SymbolKind::MemberAccess {
+            subject_text: subject,
+            member_name: crate::atom::atom(name),
+            is_static,
+            is_method_call: true,
+            docblock_ref,
+            is_array_callable: true,
+            is_nullsafe: false,
+        },
+    });
+}
+
+/// Whether `name` is a class or function name, its namespace included.
+fn is_qualified_name(name: &str) -> bool {
+    name.split('\\').all(is_identifier)
+}
+
+/// The code `program` runs only when a module is installed (see
+/// [`ModuleGuard`]): the branch an `if` takes when a `moduleExists('m')`
+/// it requires holds, and the rest of a block after an `if` that leaves
+/// it when one is false.
+pub(in crate::symbol_map::extraction) fn module_guards(
+    program: &Program<'_>,
+    content: &str,
+) -> Vec<ModuleGuard> {
+    use mago_syntax::cst::Node;
+    let mut guards = Vec::new();
+    let guard_list = |statements: &[Statement<'_>], end: u32, guards: &mut Vec<ModuleGuard>| {
+        for statement in statements {
+            let Statement::If(if_stmt) = statement else {
+                continue;
+            };
+            let then: Vec<&Statement<'_>> = if_stmt.body.statements().iter().collect();
+            let (Some(first), Some(last)) = (then.first(), then.last()) else {
+                continue;
+            };
+            let mut required = Vec::new();
+            collect_required_modules(if_stmt.condition, true, content, &mut required);
+            for module in required {
+                guards.push(ModuleGuard {
+                    start: first.span().start.offset,
+                    end: last.span().end.offset,
+                    module,
+                });
+            }
+            // `if (!moduleExists('m')) { return; }` with nothing else to
+            // run guards what follows it.
+            let has_else = !if_stmt.body.else_if_statements().is_empty()
+                || if_stmt.body.else_statements().is_some();
+            let leaves = then.iter().any(|statement| {
+                crate::type_engine::type_ops::condition_facts::statement_leaves_block(
+                    statement,
+                    &|_| false,
+                )
+            });
+            if !has_else && leaves {
+                let mut missing = Vec::new();
+                collect_required_modules(if_stmt.condition, false, content, &mut missing);
+                let start = if_stmt.span().end.offset;
+                for module in missing {
+                    guards.push(ModuleGuard { start, end, module });
+                }
+            }
+        }
+    };
+    guard_list(
+        program.statements.as_slice(),
+        program.span().end.offset,
+        &mut guards,
+    );
+    crate::parser::for_each_node_with_ancestors(Node::Program(program), |node, _| {
+        if let Node::Block(block) = node {
+            guard_list(
+                block.statements.as_slice(),
+                block.span().end.offset,
+                &mut guards,
+            );
+        }
+    });
+    guards
+}
+
+/// Add to `modules` each module whose `moduleExists('m')` must be `holds`
+/// for `condition` to be true: the call itself, or under a `!`, an `&&`,
+/// or, for a call that must be false, an `||`.
+fn collect_required_modules(
+    condition: &Expression<'_>,
+    holds: bool,
+    content: &str,
+    modules: &mut Vec<String>,
+) {
+    match condition {
+        Expression::Parenthesized(inner) => {
+            collect_required_modules(inner.expression, holds, content, modules)
+        }
+        Expression::UnaryPrefix(unary) if matches!(unary.operator, UnaryPrefixOperator::Not(_)) => {
+            collect_required_modules(unary.operand, !holds, content, modules)
+        }
+        Expression::Binary(binary)
+            if (holds
+                && matches!(
+                    binary.operator,
+                    BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
+                ))
+                || (!holds
+                    && matches!(
+                        binary.operator,
+                        BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+                    )) =>
+        {
+            collect_required_modules(binary.lhs, holds, content, modules);
+            collect_required_modules(binary.rhs, holds, content, modules);
+        }
+        Expression::Call(Call::Method(call)) if holds => {
+            let ClassLikeMemberSelector::Identifier(name) = &call.method else {
+                return;
+            };
+            if !bytes_to_str(name.value).eq_ignore_ascii_case("moduleExists") {
+                return;
+            }
+            if let Some((module, _, _)) = call
+                .argument_list
+                .arguments
+                .first()
+                .and_then(|argument| resolved_string_literal(argument.value(), content))
+                && !module.is_empty()
+            {
+                modules.push(module.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2503,6 +3378,8 @@ class SettingsForm {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         );
@@ -2567,6 +3444,8 @@ class SettingsForm {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         );
@@ -2649,6 +3528,8 @@ class Note {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         );
@@ -2702,6 +3583,8 @@ class Note {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         );
@@ -2748,6 +3631,8 @@ class Note {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         );
@@ -2837,6 +3722,8 @@ trait LayoutRoutes {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         );
@@ -2924,6 +3811,8 @@ abstract class Base {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         );
@@ -3066,6 +3955,8 @@ final class About {
                 drupal: true,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         );
@@ -3163,6 +4054,8 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
                     drupal: true,
                     twig: false,
                     doctrine: false,
+                    yii_params: false,
+                    tempest: false,
                 },
                 None,
                 file,
@@ -3280,6 +4173,8 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
                 drupal,
                 twig: false,
                 doctrine: false,
+                yii_params: false,
+                tempest: false,
             },
             None,
         )
@@ -3523,5 +4418,85 @@ $build['more']['#theme'] = 'item_list';
             )]
         );
         assert!(map_of(php, false).twig_contexts.is_empty());
+    }
+
+    #[test]
+    fn a_callback_key_is_one_a_quote_opens_and_closes() {
+        for (php, expected) in [
+            ("$form['#submit'][] = 'x';", true),
+            ("['#ajax' => []]", true),
+            ("[\"#lazy_builder\" => []]", true),
+            ("$form['#value_callback'] = 'x';", true),
+            ("$form['#submitted'] = 1;", false),
+            ("# submit, '#type' => 'x'", false),
+            ("#[Hook('form_alter')]", false),
+        ] {
+            assert_eq!(has_callback_key(php), expected, "{php}");
+        }
+    }
+
+    /// The text each callback span of `php` covers, with what it names:
+    /// `subject::method` for a method and `function name` for a function.
+    fn callbacks(php: &str, drupal: bool) -> Vec<(String, String)> {
+        let map = map_of(php, drupal);
+        let source = map.source(php).expect("the map's own source");
+        map.spans
+            .iter()
+            .filter_map(|span| {
+                let named = match &span.kind {
+                    SymbolKind::MemberAccess {
+                        subject_text,
+                        member_name,
+                        is_array_callable: true,
+                        ..
+                    } => format!("{}::{member_name}", subject_text.as_str(source)),
+                    SymbolKind::FunctionCall {
+                        name,
+                        is_callback: true,
+                        ..
+                    } => format!("function {name}"),
+                    _ => return None,
+                };
+                Some((
+                    php[span.start as usize..span.end as usize].to_string(),
+                    named,
+                ))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn each_callback_shape_names_its_method_or_function() {
+        let php = r#"<?php
+namespace Acme;
+$form['#submit'][] = '::save';
+$form['#validate'] = ['\Acme\Helper::check', Helper::class . '::check', 'acme_check', 'acme.checker:check'];
+$form['x']['#ajax']['callback'] = static::class . '::refresh';
+$form['y'] = ['#ajax' => ['callback' => __CLASS__ . '::refresh'], 'callback' => '::nothing'];
+$form['#lazy_builder'] = ['Acme\Builder::build', ['::argument']];
+$form['#value_callback'] = self::class . '::value';
+$form['#markup'] = '::nothing';
+$joined = static::class . '::nothing';
+"#;
+        let expected = [
+            ("save", "$this::save"),
+            ("check", "\\Acme\\Helper::check"),
+            ("check", "Helper::check"),
+            ("acme_check", "function \\acme_check"),
+            ("check", "\\Drupal::service('acme.checker')::check"),
+            ("refresh", "static::refresh"),
+            ("refresh", "self::refresh"),
+            ("build", "\\Acme\\Builder::build"),
+            ("value", "self::value"),
+        ];
+        let found = callbacks(php, true);
+        assert_eq!(
+            found
+                .iter()
+                .map(|(text, named)| (text.as_str(), named.as_str()))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(callbacks(php, false), Vec::new());
     }
 }

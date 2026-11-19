@@ -250,21 +250,23 @@ pub(crate) fn extract_storage_driver_registrations(
 /// Recursively collect every `Storage::extend('driver', closure)` call whose
 /// target resolves to the facade or the manager.
 fn collect_extend_calls(
-    node: Node<'_, '_>,
+    root: Node<'_, '_>,
     resolved: &OwnedResolvedNames,
     content: &str,
     out: &mut Vec<StorageDriverRegistration>,
 ) {
-    if let Node::StaticMethodCall(smc) = node
-        && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
-        && bytes_to_str(ident.value).eq_ignore_ascii_case("extend")
-        && resolve_target_fqn(smc.class, resolved)
-            .is_some_and(|target| STORAGE_EXTEND_TARGETS.contains(&target.as_str()))
-        && let Some(reg) = build_driver_registration(smc, resolved, content)
-    {
-        out.push(reg);
-    }
-    node.visit_children(|child| collect_extend_calls(child, resolved, content, out));
+    crate::parser::walk_nodes(root, |node| {
+        if let Node::StaticMethodCall(smc) = node
+            && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
+            && bytes_to_str(ident.value).eq_ignore_ascii_case("extend")
+            && resolve_target_fqn(smc.class, resolved)
+                .is_some_and(|target| STORAGE_EXTEND_TARGETS.contains(&target.as_str()))
+            && let Some(reg) = build_driver_registration(smc, resolved, content)
+        {
+            out.push(reg);
+        }
+        true
+    });
 }
 
 /// Build a [`StorageDriverRegistration`] from an `extend('driver', closure)`

@@ -46,7 +46,7 @@ pub(crate) fn class_name_mismatch_diagnostic(
         DiagnosticSeverity::Warning,
         "class_name_mismatch",
         format!(
-            "Class name `{}` does not match filename `{expected_name}`",
+            "Class name {} does not match the PSR-4 class name {expected_name}",
             class.name
         ),
     ))

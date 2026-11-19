@@ -46,8 +46,8 @@ pub struct DiagnosticsConfig {
     /// provider) will flag unknown property access instead of
     /// suppressing it. This matches PHPStan's `reportMagicProperties`
     /// behaviour.
-    #[serde(rename = "report-magic-properties")]
-    pub report_magic_properties: Option<bool>,
+    #[serde(rename = "magic-properties")]
+    pub magic_properties: Option<bool>,
 
     /// Report a member that only some classes of a union declare.
     ///
@@ -216,8 +216,8 @@ impl DiagnosticsConfig {
     /// Whether magic property reporting is enabled.
     ///
     /// Defaults to `false` (off) when not explicitly set.
-    pub fn report_magic_properties_enabled(&self) -> bool {
-        self.report_magic_properties.unwrap_or(false)
+    pub fn magic_properties_enabled(&self) -> bool {
+        self.magic_properties.unwrap_or(false)
     }
 
     /// Whether the partial-union-members diagnostic is enabled.

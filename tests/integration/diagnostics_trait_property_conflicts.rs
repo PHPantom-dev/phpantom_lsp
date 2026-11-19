@@ -34,7 +34,7 @@ final class Composed { use Left; use Right; }
     );
     assert_eq!(
         message_text(&diags[0].message),
-        "Left and Right define the same property ($prop) in the composition of Composed, but the definitions are incompatible"
+        "Property Composed::$prop is declared incompatibly by Left and Right"
     );
     assert_eq!(diags[0].range.start.line, 3);
 }
@@ -60,7 +60,7 @@ class Person {
 "#;
     let msgs = messages(php);
     assert_eq!(msgs.len(), 1, "{msgs:?}");
-    assert!(msgs[0].starts_with("Person and HasName"), "{msgs:?}");
+    assert!(msgs[0].ends_with("by Person and HasName"), "{msgs:?}");
 }
 
 #[test]
@@ -72,9 +72,9 @@ class C { use A, B; }
 "#;
     let msgs = messages(php);
     assert_eq!(msgs.len(), 3, "{msgs:?}");
-    assert!(msgs.iter().any(|m| m.contains("($v)")));
-    assert!(msgs.iter().any(|m| m.contains("($x)")));
-    assert!(msgs.iter().any(|m| m.contains("($y)")));
+    assert!(msgs.iter().any(|m| m.contains("::$v ")));
+    assert!(msgs.iter().any(|m| m.contains("::$x ")));
+    assert!(msgs.iter().any(|m| m.contains("::$y ")));
 }
 
 #[test]
@@ -86,8 +86,8 @@ class C { use A, B; }
 "#;
     let msgs = messages(php);
     assert_eq!(msgs.len(), 2, "{msgs:?}");
-    assert!(msgs.iter().any(|m| m.contains("($typed)")));
-    assert!(msgs.iter().any(|m| m.contains("($n)")));
+    assert!(msgs.iter().any(|m| m.contains("::$typed ")));
+    assert!(msgs.iter().any(|m| m.contains("::$n ")));
 }
 
 #[test]
@@ -110,7 +110,7 @@ class C { use Outer, Other; }
 "#;
     let msgs = messages(php);
     assert_eq!(msgs.len(), 1, "{msgs:?}");
-    assert!(msgs[0].starts_with("Outer and Other"), "{msgs:?}");
+    assert!(msgs[0].ends_with("by Outer and Other"), "{msgs:?}");
 }
 
 #[test]
@@ -122,7 +122,7 @@ trait Both { use Left, Right; }
 "#;
     let msgs = messages(php);
     assert_eq!(msgs.len(), 1, "{msgs:?}");
-    assert!(msgs[0].contains("composition of Both"), "{msgs:?}");
+    assert!(msgs[0].starts_with("Property Both::"), "{msgs:?}");
 }
 
 #[test]

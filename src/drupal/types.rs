@@ -52,15 +52,16 @@ pub(crate) fn service_classes(
     (!classes.is_empty()).then_some(classes)
 }
 
-/// What `getStorage(id)` on `owner`, an entity type manager, returns: each
-/// declaration's storage handler class with its tagged type.  `None` for
-/// another call or an ID the project does not declare, so the call keeps the
-/// declared `EntityStorageInterface`.
+/// What `getStorage(id)` on `owner`, an entity type manager, returns in the
+/// file at `uri`: each declaration's storage handler class with its tagged
+/// type.  `None` for another call or an ID the project does not declare, so
+/// the call keeps the declared `EntityStorageInterface`.
 pub(crate) fn storage_type(
     backend: &Backend,
     owner: &ClassInfo,
     method_name: &str,
     id: &str,
+    uri: Option<&str>,
     class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Vec<(Arc<ClassInfo>, PhpType)>> {
     if !method_name.eq_ignore_ascii_case("getStorage")
@@ -70,7 +71,7 @@ pub(crate) fn storage_type(
         return None;
     }
     let storages: Vec<(Arc<ClassInfo>, PhpType)> = backend
-        .drupal_entity_types(id)
+        .drupal_entity_types_seen_from(id, uri)
         .into_iter()
         .filter_map(|(entity, storage)| {
             let storage = storage?;
@@ -191,14 +192,15 @@ fn query_tag(entities: Vec<Atom>, counting: bool) -> PhpType {
     PhpType::generic(ENTITY_QUERY, arguments)
 }
 
-/// What `\Drupal::entityQuery(id)` returns: a query tagged with the entity
-/// classes the project declares `id` for.  `None` for another call, an
+/// What `\Drupal::entityQuery(id)` returns in the file at `uri`: a query
+/// tagged with the entity classes the project declares `id` for.  `None` for another call, an
 /// aggregate query, which keeps core's type, or an ID nothing declares.
 pub(crate) fn entity_query_type(
     backend: &Backend,
     class: &str,
     method_name: &str,
     id: &str,
+    uri: Option<&str>,
 ) -> Option<PhpType> {
     if !method_name.eq_ignore_ascii_case("entityQuery")
         || class.strip_prefix('\\').unwrap_or(class) != "Drupal"
@@ -207,7 +209,7 @@ pub(crate) fn entity_query_type(
         return None;
     }
     let mut entities: Vec<Atom> = Vec::new();
-    for (entity, _) in backend.drupal_entity_types(id) {
+    for (entity, _) in backend.drupal_entity_types_seen_from(id, uri) {
         if !entities.contains(&entity) {
             entities.push(entity);
         }

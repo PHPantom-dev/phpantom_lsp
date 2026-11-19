@@ -179,7 +179,7 @@ impl Backend {
                     );
                 (descriptor.hover_label, detail)
             }
-            StringKeyKind::View => {
+            StringKeyKind::View | StringKeyKind::TempestView { .. } => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,
                 );
@@ -360,10 +360,8 @@ impl Backend {
                 }
                 (label, detail)
             }
-            // Every listener declares the event it subscribes to, so the
-            // declarations are its listeners.
             StringKeyKind::SymfonyEvent => {
-                let listeners = self.symfony_declaration_locations(*kind, key).len();
+                let listeners = self.symfony_event_listener_count(key);
                 let detail = match listeners {
                     0 => "No listener in the project subscribes to it".to_string(),
                     1 => "1 listener in the project".to_string(),
@@ -406,6 +404,22 @@ impl Backend {
                 }
                 ("Route", detail)
             }
+            // A parameter is shown by its name, with the type the template
+            // declares it with.
+            StringKeyKind::YiiViewParameter => {
+                let (view, name) = crate::yii::view_parameters::split_parameter_key(key);
+                shown = name;
+                let detail = match self.yii_view_parameter_type(key) {
+                    Some(ty) => format!(
+                        "`{}` in `{}`",
+                        crate::diagnostics::helpers::shown_type(&ty),
+                        self.yii_view_display(view)
+                    ),
+                    None if view.is_empty() => "Shared by every view".to_string(),
+                    None => format!("Not declared by `{}`", self.yii_view_display(view)),
+                };
+                ("View parameter", detail)
+            }
             // An argument is shown by its name, under the paths that
             // declare it.
             StringKeyKind::YiiRouteArgument => {
@@ -421,6 +435,21 @@ impl Backend {
                         .collect::<Vec<_>>()
                         .join("\n\n")
                 };
+                ("Route argument", detail)
+            }
+            // An argument is shown by its name, under the paths of the
+            // routes it names.
+            StringKeyKind::YiiUrlArgument => {
+                let (route, name) = crate::yii::routes::split_url_argument_key(key);
+                shown = name;
+                let mut detail = format!("Route `{}`", route);
+                let paths = self.yii_route_paths(route);
+                if paths.is_empty() {
+                    detail.push_str("\n\nNot declared in the project's routes");
+                }
+                for path in paths {
+                    detail.push_str(&format!("\n\nPath `{}`", path));
+                }
                 ("Route argument", detail)
             }
             // An argument is shown by its name, as the parameter it fills.
@@ -467,22 +496,80 @@ impl Backend {
                 shown = &view_path;
                 let detail = self
                     .yii_view_file(key)
-                    .and_then(|file| crate::util::path_to_url(&file))
-                    .and_then(|uri| self.workspace_relative_path(uri.as_str()))
+                    .map(|file| self.yii_view_display(&file.to_string_lossy()))
                     .map_or_else(
                         || "No template is there".to_string(),
                         |path| format!("`{}`", path),
                     );
                 ("View", detail)
             }
+            StringKeyKind::YiiViewPath => {
+                view_path = self.yii_view_display(key);
+                shown = &view_path;
+                let detail = if self.yii_view_dir_exists(key) == Some(true) {
+                    "Views are named relative to this directory"
+                } else {
+                    "No directory is there"
+                };
+                ("View directory", detail.to_string())
+            }
+            StringKeyKind::YiiAssetFile => {
+                view_path = self.yii_asset_display(key);
+                shown = &view_path;
+                let detail = if self.yii_asset_file(key).is_some() {
+                    "A file of the asset bundle"
+                } else {
+                    "No file is there"
+                };
+                ("Asset file", detail.to_string())
+            }
             // Strings start with an `@` for many reasons besides an alias,
             // so only a declared one is shown.
             StringKeyKind::YiiAlias => ("Alias", self.yii_alias_detail(key)?),
+            StringKeyKind::CssClass => ("CSS class", self.css_class_detail(key)),
+            // A params key is keyed by the whole path the read names.
+            StringKeyKind::YiiParam => {
+                view_path = crate::yii::params::param_key_display(key);
+                shown = &view_path;
+                let detail = self
+                    .yii_param_detail(key)
+                    .unwrap_or_else(|| "No params file declares it".to_string());
+                ("Param", detail)
+            }
+            // Shown by its ID, under the category it is looked up in.
+            StringKeyKind::YiiTranslation => {
+                shown = crate::yii::translations::split_message_key(key).1;
+                let found = self.yii_message_detail(key);
+                let mut detail = format!("Category {}", inline_code(&found.category));
+                if let Some((locale, text)) = &found.text {
+                    detail.push_str(&format!(
+                        "\n\n{}: {}",
+                        inline_code(locale),
+                        inline_code(text)
+                    ));
+                }
+                if found.locales.is_empty() {
+                    detail.push_str("\n\nNo message file of the category declares it");
+                } else {
+                    let locales: Vec<String> = found
+                        .locales
+                        .iter()
+                        .map(|locale| inline_code(locale))
+                        .collect();
+                    detail.push_str(&format!("\n\nDeclared for {}", locales.join(", ")));
+                }
+                ("Translation", detail)
+            }
             StringKeyKind::WordPressHook => ("Hook", self.wordpress_hook_detail(key)),
             StringKeyKind::DrupalRenderElement => {
                 ("Render element", self.drupal_render_element_detail(key))
             }
             StringKeyKind::DrupalThemeHook => ("Theme hook", self.drupal_theme_hook_detail(key)),
+            // Shown by its ID, under the manager it belongs to.
+            StringKeyKind::DrupalPlugin => {
+                shown = crate::drupal::plugins::split_plugin_key(key).1;
+                ("Plugin", self.drupal_plugin_detail(key))
+            }
             // A variable is shown by its key, under the hook it belongs to;
             // any other `#` key of the array is a property of the render API.
             StringKeyKind::DrupalThemeHookVariable => {

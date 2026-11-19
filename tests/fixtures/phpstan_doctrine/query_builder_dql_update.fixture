@@ -3,6 +3,6 @@
 // Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testUpdateIssue.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/query-builder-dql-update.php
-// codes: unknown_class, unknown_entity_field
+// codes: unknown_class, invalid_doctrine_field
 // expect_diagnostic: 31: Could not analyse QueryBuilder with dynamic arguments. // SKIP: a query builder with dynamic arguments is not reported
 ---

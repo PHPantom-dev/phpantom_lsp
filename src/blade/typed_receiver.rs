@@ -29,6 +29,7 @@
 //! [`Backend::typed_receiver_key_kind`]).
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::literal::Literal;
@@ -40,13 +41,17 @@ use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::symbol_map::{ReceiverClass, StringKeyKind, SymbolMap, SymbolSpan, TypedReceiverSite};
 
-/// One file's confirmed extra string-key spans, and the source length they
-/// were derived from.
+/// One file's confirmed extra string-key spans, with the epoch and the
+/// source length they were derived from.
 ///
 /// The length is the same staleness signal [`SymbolMap::matches_source`]
 /// uses: an insertion or removal since the spans were computed moves every
-/// offset in them, so they have to be recomputed rather than reused.
-pub(crate) type TypedReceiverSpans = (u32, Arc<Vec<SymbolSpan>>);
+/// offset in them, so they have to be recomputed rather than reused.  The
+/// epoch is [`BladeState::typed_receiver_epoch`] as it read before the
+/// receivers were resolved.
+///
+/// [`BladeState::typed_receiver_epoch`]: super::state::BladeState::typed_receiver_epoch
+pub(crate) type TypedReceiverSpans = (u64, u32, Arc<Vec<SymbolSpan>>);
 
 impl Backend {
     /// The string-key spans of `uri` whose call is recognised by the
@@ -68,36 +73,80 @@ impl Backend {
         if map.typed_receiver_sites.is_empty() {
             return empty_spans();
         }
-        if let Some((source_len, spans)) = self.blade.typed_receiver_spans_cache.read().get(uri)
+        // Read before resolving: a change that retypes a receiver while
+        // the sites are being confirmed then retires the answer, instead of
+        // the answer being cached as current when it may predate the change.
+        let epoch = self.blade.typed_receiver_epoch.load(Ordering::Acquire);
+        if let Some((cached_epoch, source_len, spans)) =
+            self.blade.typed_receiver_spans_cache.read().get(uri)
+            && *cached_epoch == epoch
             && *source_len == map.source_len
         {
             return Arc::clone(spans);
         }
 
         let Some(content) = self.effective_content(uri) else {
+            note_partial_answer();
             return empty_spans();
         };
         // The recorded offsets index the text the map was built from; a
         // buffer that has grown or shrunk since is a different text.
         if !map.matches_source(&content) {
+            note_partial_answer();
             return empty_spans();
         }
 
-        // Confirming a site resolves its receiver, which can read the
-        // declarations a configurator file makes (a `get('app.mailer')` is
-        // typed by them), and so come back here for the file still being
-        // confirmed.  That file's declarations are not known yet: it reads
-        // as declaring nothing, and the partial answer is not cached.
+        // Confirming a site resolves its receiver, which can look a service
+        // up (a `get('app.mailer')` is typed by what the configurator files
+        // declare), and building the container index confirms every
+        // configurator's calls, this file's among them.  Build it before
+        // this file is marked as being confirmed, so that it can.
+        if self.is_symfony_project() {
+            self.prepare_container_index();
+        }
+        // Otherwise a file being confirmed can come back here, as declaring
+        // nothing: the partial answer is not cached.
         let Some(_confirming) = ConfirmingGuard::enter(uri) else {
+            note_partial_answer();
             return empty_spans();
         };
+        let partial_before = partial_answers();
         let spans =
             Arc::new(self.confirm_typed_receiver_sites(uri, &content, &map.typed_receiver_sites));
-        self.blade
-            .typed_receiver_spans_cache
-            .write()
-            .insert(uri.to_string(), (map.source_len, Arc::clone(&spans)));
+        #[cfg(test)]
+        if let Some(hook) = BEFORE_CACHING.take() {
+            hook(self);
+        }
+        // An answer worked out from a partial one is partial too (the count
+        // has already moved for whoever reads it further up), and so is one
+        // worked out against a container index still being built.
+        if partial_answers() != partial_before || crate::symfony::container::building_index() {
+            return spans;
+        }
+        let mut cache = self.blade.typed_receiver_spans_cache.write();
+        // An answer a change has already retired would only stand in for,
+        // or replace, a newer one.
+        if self.blade.typed_receiver_epoch.load(Ordering::Acquire) == epoch {
+            cache.insert(uri.to_string(), (epoch, map.source_len, Arc::clone(&spans)));
+        }
         spans
+    }
+
+    /// Retire the confirmed spans of every file, for a change that may
+    /// retype a receiver anywhere: a signature, what the service container
+    /// declares, or the plugin managers.
+    ///
+    /// Call it once a confirmation that reads the new epoch can only read
+    /// the new state: after the change is published, or while holding a
+    /// lock such a confirmation has to wait for, as the `files` lock a
+    /// batch is published under.
+    pub(crate) fn retire_typed_receiver_spans(&self) {
+        self.blade
+            .typed_receiver_epoch
+            .fetch_add(1, Ordering::Release);
+        if !self.blade.typed_receiver_spans_cache.read().is_empty() {
+            self.blade.typed_receiver_spans_cache.write().clear();
+        }
     }
 
     /// Drop the confirmed spans of one file, so the next reader recomputes
@@ -114,8 +163,23 @@ impl Backend {
     /// The source every offset in a file's symbol map indexes: a Blade
     /// template's virtual PHP, and any other file's own text.
     fn effective_content(&self, uri: &str) -> Option<Arc<String>> {
-        self.blade_virtual_php_arc(uri)
+        self.template_virtual_php_arc(uri)
             .or_else(|| self.get_file_content_arc(uri))
+    }
+
+    /// [`Self::confirm_typed_receiver_sites`] for `sites`, some of the
+    /// candidate sites of the file at `uri` whose symbol map is `map`,
+    /// worked out afresh and not cached.  `None` when the file's text no
+    /// longer matches its map.
+    pub(crate) fn confirm_typed_receiver_sites_of(
+        &self,
+        uri: &str,
+        map: &SymbolMap,
+        sites: &[TypedReceiverSite],
+    ) -> Option<Vec<SymbolSpan>> {
+        let content = self.effective_content(uri)?;
+        map.matches_source(&content)
+            .then(|| self.confirm_typed_receiver_sites(uri, &content, sites))
     }
 
     /// Resolve the receiver of every candidate site and keep the spans of
@@ -140,6 +204,9 @@ impl Backend {
         let file_ctx = self.file_context(uri);
         let loaders = self.file_loaders(&file_ctx);
         let _parse_guard = crate::parser::with_parse_cache(content);
+        let in_drupal_site = self.is_in_drupal_web_root(uri);
+        let catches_missing_plugin =
+            in_drupal_site && crate::drupal::plugins::may_catch_missing_plugin(content);
 
         with_parsed_program(content, "blade_typed_receiver", |program, content| {
             let mut calls: Vec<ReceiverCall<'_, '_, '_>> = Vec::new();
@@ -189,7 +256,61 @@ impl Backend {
                             }
                             continue;
                         }
-                        confirmed.push(site.to_span(kind));
+                        if kind == StringKeyKind::DrupalPlugin && site.receiver.bare_plugin_key() {
+                            // The ID is one of the manager's the receiver
+                            // is, or the one the call always looks it up in.
+                            let manager = if site.receiver == ReceiverClass::ConstraintTarget {
+                                Some(crate::atom::atom(crate::drupal::plugins::CONSTRAINTS))
+                            } else {
+                                self.drupal_plugin_manager_of(
+                                    &ty.top_level_class_names(),
+                                    loaders.resolved_class_loader(),
+                                )
+                            };
+                            if let Some(manager) = manager {
+                                let mut span = site.to_span(kind);
+                                if let crate::symbol_map::SymbolKind::StringKey {
+                                    key,
+                                    is_optional,
+                                    ..
+                                } = &mut span.kind
+                                {
+                                    *key = crate::drupal::plugins::plugin_key(&manager, &site.key);
+                                    // A file that may catch a missing
+                                    // plugin's exception does without the
+                                    // plugin, and so does a manager that
+                                    // looks its plugins up its own way.
+                                    *is_optional |= catches_missing_plugin
+                                        || self
+                                            .drupal_plugin_index()
+                                            .looks_up_own_way(&manager, call.method);
+                                }
+                                confirmed.push(span);
+                            }
+                            continue;
+                        }
+                        let mut span = site.to_span(kind);
+                        // A Drupal lookup on a plain PSR container may ask
+                        // any other container, whose services are not the
+                        // site's.
+                        if kind == StringKeyKind::ServiceId
+                            && site.receiver == ReceiverClass::ContainerLookup
+                            && in_drupal_site
+                            && !crate::drupal::services::SERVICE_CONTAINERS.iter().any(
+                                |container| {
+                                    crate::class_lookup::is_subtype_of_named(
+                                        &ty,
+                                        container,
+                                        loaders.resolved_class_loader(),
+                                    )
+                                },
+                            )
+                            && let crate::symbol_map::SymbolKind::StringKey { is_optional, .. } =
+                                &mut span.kind
+                        {
+                            *is_optional = true;
+                        }
+                        confirmed.push(span);
                     }
                 }
             }
@@ -210,6 +331,20 @@ impl Backend {
         receiver: ReceiverClass,
         class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<StringKeyKind> {
+        // A route argument is the route's that the call names first, so the
+        // call is confirmed by that name, through the project's own
+        // wrappers too.
+        if receiver == ReceiverClass::YiiUrlArguments {
+            let name = self.typed_receiver_key_kind(
+                ty,
+                method,
+                0,
+                ReceiverClass::UrlGenerator,
+                class_loader,
+            );
+            return (name == Some(StringKeyKind::YiiRoute))
+                .then_some(StringKeyKind::YiiUrlArgument);
+        }
         // A Drupal target is not worth a subtype check outside Drupal: a
         // Symfony project's `get()` is never asked about the config factory.
         if let Some((_, kind)) = receiver.targets().iter().find(|(fqn, kind)| {
@@ -427,10 +562,47 @@ impl Drop for ForwardingGuard {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Run once, on this thread, between confirming a file's sites and
+    /// caching them: a test's stand-in for a change landing on another
+    /// thread meanwhile.
+    static BEFORE_CACHING: std::cell::Cell<Option<fn(&Backend)>> =
+        const { std::cell::Cell::new(None) };
+}
+
 thread_local! {
     /// The files whose sites are being confirmed on this thread.
     static CONFIRMING: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::default();
+}
+
+thread_local! {
+    /// How many times [`Backend::typed_receiver_spans_for`] has answered
+    /// on this thread with spans it could not work out, see
+    /// [`partial_answers`].
+    static PARTIAL_ANSWERS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+pub(crate) fn note_partial_answer() {
+    PARTIAL_ANSWERS.with(|count| count.set(count.get() + 1));
+}
+
+/// A count that moves whenever [`Backend::typed_receiver_spans_for`]
+/// answers on this thread with no spans for a file it could not confirm
+/// (one already being confirmed further up, or whose text no longer
+/// matches its map) rather than the file's actual spans, and whenever the
+/// container index skips such a file.  Whatever is
+/// derived from the answers between two readings that differ is partial
+/// and must not be cached.
+pub(crate) fn partial_answers() -> u64 {
+    PARTIAL_ANSWERS.with(std::cell::Cell::get)
+}
+
+/// Whether the sites of the file at `uri` are being confirmed on this
+/// thread.
+pub(crate) fn is_confirming(uri: &str) -> bool {
+    CONFIRMING.with(|confirming| confirming.borrow().contains(uri))
 }
 
 /// Marks one file as being confirmed for as long as it lives.
@@ -563,3 +735,7 @@ impl<'ast, 'arena, 'w, 'sites>
         }
     }
 }
+
+#[cfg(test)]
+#[path = "typed_receiver_tests.rs"]
+mod tests;

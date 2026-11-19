@@ -49,6 +49,12 @@ final class DemoController extends AbstractController
         // container builder, or complete inside get('') to see the services
         // the installed bundles declare too, such as 'cache.app'.
         $container->get('app.default_mailer')->send($userId);
+        // Try: hover $slugger. config/services.yaml builds app.slugger from
+        // Slugger and decorates it with CachingSlugger, so it is either
+        // class, and cachedCount(), which only CachingSlugger declares, is
+        // no unknown method.
+        $slugger = $container->get('app.slugger');
+        $slugger->cachedCount();
         // Try: hover $users, or complete after $users->. The mapping in
         // config/doctrine/User.orm.xml names UserRepository as the entity's
         // repository, so getRepository() returns it, not EntityRepository.

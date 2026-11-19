@@ -3,7 +3,7 @@
 //!
 //! `view('name')` / `View::make('name')` resolve against Blade templates on
 //! disk, and `render('name.html.twig')` against a Symfony project's Twig
-//! templates; `invalid_laravel_view` and `invalid_symfony_template`
+//! templates; `invalid_laravel_view` and `invalid_twig_template`
 //! (`diagnostics/laravel_string_keys.rs`) fire when a name matches none of
 //! them. A typo is the likelier mistake, so the declared names within a
 //! small edit distance are offered first. After them comes the offer to
@@ -144,7 +144,7 @@ impl Backend {
                     (
                         &templates[..],
                         can_create.then_some(path),
-                        "invalid_symfony_template",
+                        "invalid_twig_template",
                         "template",
                     )
                 }

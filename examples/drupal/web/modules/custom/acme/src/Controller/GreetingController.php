@@ -100,7 +100,32 @@ final class GreetingController extends ControllerBase
         ];
         $build['more']['#type'] = 'details';
         $build['more']['#title'] = $this->t('More');
+        // Try: go to the definition of buildGreeting, which lands on the
+        // method of Greeter, the class of the acme.greeter service, or of
+        // acme.greeter, which lands on its key in acme.services.yml. Find
+        // the references of Greeter::buildGreeting(), or rename it, and the
+        // string follows.
+        $build['later'] = [
+            '#lazy_builder' => ['acme.greeter:buildGreeting', [$name]],
+            '#create_placeholder' => true,
+        ];
 
         return $build;
+    }
+
+    /**
+     * The greeting block, built outside any region.
+     *
+     * @return array<string, mixed>
+     */
+    public function block(): array
+    {
+        // Try: go to the definition of 'acme_greeting_block', which lands on
+        // the GreetingBlock class, or complete a block ID inside
+        // createInstance(''); core's blocks are offered too. createInstance()
+        // gives a GreetingBlock, so greeting() goes to its method.
+        $block = \Drupal::service('plugin.manager.block')->createInstance('acme_greeting_block');
+
+        return ['#markup' => $block->greeting()];
     }
 }

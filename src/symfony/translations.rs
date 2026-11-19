@@ -261,13 +261,14 @@ fn shipped_domains(vendor: &Path, domains: &mut Vec<String>) -> bool {
 /// The directories the translator of the project at `root` loads its own
 /// catalogues from: `framework.translator.default_path` (`translations/` by
 /// default) and `framework.translator.paths`, as the YAML under
-/// `config/packages/` sets them.  `None` when they cannot be told: a
-/// configuration in another format names the translator, or a directory is
-/// spelled with a parameter other than `%kernel.project_dir%`.
-fn translator_dirs(root: &Path) -> Option<Vec<PathBuf>> {
+/// `packages/` of the configuration directory `config_dir` sets them.
+/// `None` when they cannot be told: the configuration directory is not
+/// known, a configuration in another format names the translator, or a
+/// directory is spelled with a parameter other than `%kernel.project_dir%`.
+fn translator_dirs(root: &Path, config_dir: Option<PathBuf>) -> Option<Vec<PathBuf>> {
     let mut default_paths = Vec::new();
     let mut paths = Vec::new();
-    let mut pending = vec![root.join("config/packages")];
+    let mut pending = vec![config_dir?.join("packages")];
     while let Some(dir) = pending.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -408,7 +409,7 @@ impl Backend {
         let mut read = Vec::new();
         let mut unread = Vec::new();
         for (root, vendor) in self.translation_projects() {
-            let Some(dirs) = translator_dirs(&root) else {
+            let Some(dirs) = translator_dirs(&root, self.symfony_config_dir(&root)) else {
                 return Vec::new();
             };
             if !shipped_domains(&vendor, &mut shipped) {

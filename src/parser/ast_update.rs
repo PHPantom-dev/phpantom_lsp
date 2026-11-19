@@ -27,6 +27,10 @@ use crate::Backend;
 
 use super::DocblockCtx;
 
+/// The longest source whose parse reuses the thread-local arena; see
+/// [`with_reusable_arena`].
+const REUSABLE_ARENA_MAX_SOURCE_BYTES: usize = 512 * 1024;
+
 /// Run `f` with a parsing arena, reusing a thread-local `LocalArena` across
 /// calls instead of allocating a fresh one each time.
 ///
@@ -42,11 +46,21 @@ use super::DocblockCtx;
 /// still using the arena). Such re-entrant calls fall back to a throwaway
 /// `LocalArena` so the shared arena is never aliased — the borrow held for the
 /// duration of `f` makes `try_borrow_mut` fail for the nested call.
-fn with_reusable_arena<R>(f: impl FnOnce(&LocalArena) -> R) -> R {
+///
+/// A reset keeps the arena's last chunk, which grows to the size of
+/// everything the arena held before it, so one parse of a multi-megabyte
+/// file (a stub package that declares a whole framework in one file)
+/// would leave its thread holding tens of megabytes for good. Sources
+/// longer than [`REUSABLE_ARENA_MAX_SOURCE_BYTES`] therefore parse in a
+/// throwaway arena, which costs nothing next to parsing them.
+fn with_reusable_arena<R>(source_len: usize, f: impl FnOnce(&LocalArena) -> R) -> R {
     thread_local! {
         static ARENA: RefCell<LocalArena> = const { RefCell::new(LocalArena::new()) };
     }
 
+    if source_len > REUSABLE_ARENA_MAX_SOURCE_BYTES {
+        return f(&LocalArena::new());
+    }
     ARENA.with(|cell| match cell.try_borrow_mut() {
         Ok(mut arena) => {
             arena.reset();
@@ -79,22 +93,23 @@ pub(crate) struct AstIndexUpdate {
     pub(super) symbol_map: Arc<SymbolMap>,
     /// The lowering a template was parsed as, published together with
     /// `symbol_map` because the map's offsets index its virtual PHP.
-    pub(super) blade: Option<BladeLowering>,
+    pub(super) template: Option<TemplateLowering>,
     /// The database connections the file configures through
     /// `DriverManager::getConnection()`.
     pub(super) doctrine_connections: Vec<crate::doctrine::connection::Connection>,
 }
 
-/// A Blade template lowered to the virtual PHP everything else reads it as,
+/// A template lowered to the virtual PHP everything else reads it as,
 /// with the source map that carries positions back to the template.
-pub(crate) struct BladeLowering {
+pub(crate) struct TemplateLowering {
     pub(super) virtual_php: Arc<String>,
-    pub(super) source_map: crate::blade::source_map::BladeSourceMap,
+    pub(super) source_map: crate::template::source_map::TemplateSourceMap,
     /// The scope this lowering was seeded from, so a batch that outlives a
     /// newer scope written by call-site re-inference can be told apart from
     /// one still describing the current scope (see
     /// [`Backend::apply_ast_index_parse_results_batch`]).
-    scope: BladeScope,
+    scope: Option<BladeScope>,
+    tempest_scope: Option<Arc<crate::tempest::inference::Scope>>,
 }
 
 impl Backend {
@@ -105,8 +120,8 @@ impl Backend {
     /// changed (or a class was added/removed), meaning other open files
     /// that reference those classes may have stale diagnostics.
     pub fn update_ast(&self, uri: &str, content: &str) -> bool {
-        let blade = self.lower_blade_template(uri, content);
-        let content_to_parse = blade.as_ref().map_or_else(
+        let template = self.lower_template(uri, content);
+        let content_to_parse = template.as_ref().map_or_else(
             || Arc::new(content.to_string()),
             |lowering| Arc::clone(&lowering.virtual_php),
         );
@@ -131,7 +146,7 @@ impl Backend {
         let uri_owned = uri.to_string();
 
         let result = crate::util::catch_panic_unwind_safe("parse", uri, None, || {
-            self.update_ast_inner(&uri_owned, content_owned, blade)
+            self.update_ast_inner(&uri_owned, content_owned, template)
         });
 
         // The refreshes below that rebuild from the registered provider list
@@ -146,9 +161,11 @@ impl Backend {
         // to files that register a `Storage::extend()` driver.
         self.refresh_laravel_storage_drivers(uri, content);
 
-        // Keep the classes Drupal service providers give services coherent
-        // with edits to the providers.
+        // Keep the classes Drupal service providers give services, and the
+        // services PHP code may define, coherent with edits to the files
+        // that do.
         self.refresh_drupal_service_provider(uri, content);
+        self.refresh_drupal_service_definitions(uri, content);
 
         // Keep the reverse pivot index coherent with edits to files that
         // declare (or previously declared) a many-to-many relationship.
@@ -186,11 +203,11 @@ impl Backend {
         match result {
             Some(changed) => changed,
             None => {
-                // Parser panicked — store a single "Parse failed" error
+                // Parser panicked — store a single "could not parse" error
                 // so the syntax-error diagnostic collector can report it.
                 self.publish_parse_failure(
                     uri,
-                    vec![("Parse failed (internal error)".to_string(), 0, 0)],
+                    vec![("PHPantom could not parse this file".to_string(), 0, 0)],
                 );
                 false
             }
@@ -207,7 +224,7 @@ impl Backend {
         &self,
         uri: &str,
         content: Arc<String>,
-        blade: Option<BladeLowering>,
+        template: Option<TemplateLowering>,
     ) -> bool {
         let (mut update, parsed) = if self.open_files.read().contains_key(uri) {
             let mut parse_errors = Vec::new();
@@ -216,7 +233,7 @@ impl Backend {
                 parse_errors = errors;
                 program
             });
-            let update = with_reusable_arena(|arena| {
+            let update = with_reusable_arena(parsed.content().len(), |arena| {
                 self.ast_index_update_from(
                     arena,
                     uri,
@@ -229,7 +246,7 @@ impl Backend {
         } else {
             (self.build_ast_index_update(uri, &content), None)
         };
-        update.blade = blade;
+        update.template = template;
         let changed = self.apply_ast_index_updates_batch(vec![update]);
         if let Some(parsed) = parsed {
             self.keep_parse(uri, parsed);
@@ -260,7 +277,25 @@ impl Backend {
     /// parsed yet) and resolving their expression types from many threads
     /// at once has deadlocked against the batch-publish locks.  The serial
     /// refresh passes own the cache; this path only reads it.
-    pub(crate) fn lower_blade_template(&self, uri: &str, content: &str) -> Option<BladeLowering> {
+    pub(crate) fn lower_template(&self, uri: &str, content: &str) -> Option<TemplateLowering> {
+        if self.is_tempest_view(uri) {
+            self.tempest
+                .has_views
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            let scope = self.tempest.scopes.read().get(uri).cloned();
+            let (virtual_php, source_map) = match scope.as_deref() {
+                Some(scope) => {
+                    crate::tempest::preprocessor::preprocess_with_scope(content, Some(scope))
+                }
+                None => crate::tempest::preprocessor::preprocess(content),
+            };
+            return Some(TemplateLowering {
+                virtual_php: Arc::new(virtual_php),
+                source_map,
+                scope: None,
+                tempest_scope: scope,
+            });
+        }
         if !self.is_blade_file(uri) {
             return None;
         }
@@ -285,10 +320,11 @@ impl Backend {
             Some(&components),
             &directives,
         );
-        Some(BladeLowering {
+        Some(TemplateLowering {
             virtual_php: Arc::new(virtual_php),
             source_map,
-            scope: injected,
+            scope: Some(injected),
+            tempest_scope: None,
         })
     }
 
@@ -310,12 +346,12 @@ impl Backend {
         // would leave it describing different text than the symbol map
         // `did_change` published, which is exactly what the rename's
         // `matches_source` check refuses to plan against.
-        let blade = if self.is_blade_file(uri) && !self.open_files.read().contains_key(uri) {
-            self.lower_blade_template(uri, content)
+        let template = if self.is_php_template(uri) && !self.open_files.read().contains_key(uri) {
+            self.lower_template(uri, content)
         } else {
             None
         };
-        let content = blade
+        let content = template
             .as_ref()
             .map_or(content, |lowering| lowering.virtual_php.as_str());
 
@@ -323,12 +359,12 @@ impl Backend {
             self.build_ast_index_update(uri, content)
         }) {
             Some(mut update) => {
-                update.blade = blade;
+                update.template = template;
                 AstIndexParseResult::Update(Box::new(update))
             }
             None => AstIndexParseResult::ParseFailed {
                 uri: uri_owned,
-                errors: vec![("Parse failed (internal error)".to_string(), 0, 0)],
+                errors: vec![("PHPantom could not parse this file".to_string(), 0, 0)],
             },
         }
     }
@@ -371,11 +407,20 @@ impl Backend {
                     if open_uris.contains_key(&update.uri) {
                         continue;
                     }
-                    if let Some(blade) = &update.blade {
+                    if self.is_tempest_view(&update.uri)
+                        && update
+                            .template
+                            .as_ref()
+                            .and_then(|t| t.tempest_scope.as_ref())
+                            != self.tempest.scopes.read().get(&update.uri)
+                    {
+                        continue;
+                    }
+                    if let Some(scope) = update.template.as_ref().and_then(|t| t.scope.as_ref()) {
                         let current = injected_vars.get(&update.uri);
                         let stale = match current {
-                            Some(current) => *current != blade.scope,
-                            None => blade.scope != BladeScope::default(),
+                            Some(current) => current != scope,
+                            None => *scope != BladeScope::default(),
                         };
                         if stale {
                             continue;
@@ -416,7 +461,7 @@ impl Backend {
     }
 
     fn build_ast_index_update(&self, uri: &str, content: &str) -> AstIndexUpdate {
-        with_reusable_arena(|arena| {
+        with_reusable_arena(content.len(), |arena| {
             let (parse_errors, program) = parse_with_errors(arena, content);
             self.ast_index_update_from(arena, uri, content, parse_errors, program)
         })
@@ -460,7 +505,7 @@ impl Backend {
         // workspace-symbol results.  They stay in the virtual PHP, so
         // the calls the lowering emits still resolve against them
         // within the template.
-        if self.is_blade_file(uri) {
+        if self.is_php_template(uri) {
             functions.retain(|func| !crate::blade::is_synthetic_function(&func.name));
         }
 
@@ -491,6 +536,10 @@ impl Backend {
             }
         }
 
+        for func in &mut functions {
+            super::initializers::expand_parameter_file_constants(&mut func.parameters, uri);
+        }
+
         Self::qualify_function_names(
             &mut functions,
             &decls.namespace_spans,
@@ -511,14 +560,51 @@ impl Backend {
             None,
             Some(&doc_ctx),
         );
+        // A value is read wherever the constant is, so the names in it are
+        // qualified against the block that wrote it, as a class constant's
+        // are.
+        let multi_block = decls.namespace_spans.len() > 1;
         let defines: Vec<(String, DefineInfo)> = define_entries
             .into_iter()
             .map(|(name, offset, value)| {
+                let block = NamespaceSpan::containing(&decls.namespace_spans, offset)
+                    .filter(|_| multi_block);
+                let (use_map, constant_imports, namespace) = match block {
+                    Some(span) => (
+                        &span.use_map,
+                        &span.symbol_imports.constants,
+                        &span.namespace,
+                    ),
+                    None => (
+                        &decls.use_map,
+                        &decls.symbol_imports.constants,
+                        &decls.namespace,
+                    ),
+                };
+                let value = value.map(|value| {
+                    let value =
+                        super::initializers::expand_file_constants(&value, uri).unwrap_or(value);
+                    super::name_resolution::qualify_initializer(
+                        &value,
+                        use_map,
+                        constant_imports,
+                        namespace,
+                    )
+                    .unwrap_or(value)
+                });
                 (
                     name,
                     DefineInfo {
                         file_uri: uri.to_string(),
                         name_offset: offset,
+                        namespace: namespace
+                            .as_deref()
+                            .filter(|_| {
+                                value
+                                    .as_deref()
+                                    .is_some_and(super::initializers::names_unqualified_constant)
+                            })
+                            .map(atom),
                         value,
                     },
                 )
@@ -545,6 +631,7 @@ impl Backend {
             .classes_with_ns
             .into_iter()
             .map(|(mut cls, ns, _)| {
+                super::initializers::expand_class_file_constants(&mut cls, uri);
                 cls.file_namespace = ns.as_deref().map(atom);
                 cls.cache_fqn_in_uri(uri);
                 // Keyed by FQN, so this has to wait until the class
@@ -567,11 +654,19 @@ impl Backend {
         let mut symbol_map = if from_stub_path && !is_open {
             SymbolMap::default()
         } else {
-            let yii_dir = if self.is_yii_project() {
-                crate::util::uri_to_path(uri).and_then(|path| path.parent().map(Path::to_path_buf))
+            let yii_path = if self.is_yii_project() {
+                crate::util::uri_to_path(uri)
             } else {
                 None
             };
+            let yii_dir = yii_path
+                .as_deref()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf);
+            let yii_params = yii_path.as_deref().is_some_and(|path| {
+                memchr::memmem::find(content.as_bytes(), b"$params").is_some()
+                    && self.yii_receives_params(path)
+            });
             crate::symbol_map::extraction::extract_symbol_map_for_file(
                 program,
                 content,
@@ -582,6 +677,8 @@ impl Backend {
                     drupal: self.is_drupal_project(),
                     twig: self.is_twig_project(),
                     doctrine: self.is_doctrine_project(),
+                    yii_params,
+                    tempest: self.is_tempest_project(),
                 },
                 yii_dir.as_deref(),
                 self.drupal_file(uri),
@@ -646,7 +743,7 @@ impl Backend {
             functions,
             defines,
             symbol_map,
-            blade: None,
+            template: None,
             doctrine_connections,
         }
     }

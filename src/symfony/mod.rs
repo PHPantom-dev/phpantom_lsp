@@ -13,11 +13,13 @@
 //! Event names, Messenger bus names, and serializer groups are string keys
 //! too (see [`tags`], [`messenger`], and [`serializer`]).  A form type's
 //! options are read from its class and the classes it builds on whenever
-//! they are asked for (see [`form_options`]).  Form fields, validation mappings, and the listener
-//! methods an event subscription names name a class's members, so they are
-//! member accesses instead (see [`forms`] and [`validation`]).  The
-//! Messenger handlers a project registers are recorded beside the spans of
-//! the file that declares them (see [`messenger`]).  What a service or
+//! they are asked for (see [`form_options`]).  Form fields, validation
+//! mappings, the listener methods an event subscription names, and the
+//! methods a service definition's `calls:` names name a class's members, so
+//! they are member accesses instead (see [`forms`], [`validation`], and
+//! [`service_calls`]).  The Messenger handlers a project registers are
+//! recorded beside the spans of the file that declares them (see
+//! [`messenger`]).  What a service or
 //! parameter declaration gives its name, a class or a value, is recorded
 //! beside its span too, for the type engine (see [`container`]).
 //! A declaration is a span with `is_write` set, or a configurator call
@@ -34,13 +36,16 @@
 pub(crate) mod bundles;
 pub(crate) mod config_tree;
 pub(crate) mod container;
+pub(crate) mod event_constants;
 pub(crate) mod form_options;
 pub(crate) mod forms;
+pub(crate) mod kernel;
 pub(crate) mod messenger;
 pub(crate) mod resources;
 pub(crate) mod route_world;
 pub(crate) mod routes;
 pub(crate) mod serializer;
+pub(crate) mod service_calls;
 pub(crate) mod tags;
 pub(crate) mod translations;
 pub(crate) mod validation;
@@ -123,10 +128,18 @@ pub(crate) struct SymfonyState {
     /// Held while they are read, so the workers that ask at once read them
     /// once.
     bundle_declarations: parking_lot::Mutex<Option<std::sync::Arc<bundles::BundleDeclarations>>>,
+    /// Each service ID's and parameter's declarations, by name.
+    container_index: container::ContainerIndexState,
     /// The translation domains an undeclared key is reported in.
     judged_translation_domains: translations::JudgedDomains,
     /// The form types and type extensions the installed packages declare.
     vendor_form_classes: form_options::VendorFormClasses,
+    /// Where the project's kernels keep their configuration.
+    kernel_config: RwLock<kernel::KernelConfig>,
+    /// The names of the class constants subscribers key their maps by,
+    /// built when first asked for and dropped when a file that keys by one
+    /// changes.
+    event_constant_names: RwLock<Option<std::sync::Arc<crate::atom::AtomSet>>>,
 }
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
@@ -134,7 +147,7 @@ pub(crate) struct SymfonyState {
 /// key, an event listener, a Messenger bus, a Drupal entity type, a Drupal
 /// route, or a Drupal hook, outright or through a configurator call still
 /// to be confirmed, or registers a Messenger handler, or imports routes, or
-/// declares a Twig loader.
+/// declares a Twig loader, or carries a Tempest route attribute.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that
 /// uses Twig declares its templates, filters, and functions and nothing
@@ -149,13 +162,17 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         | KeyFramework::Twig
         | KeyFramework::Yii
         | KeyFramework::Drupal => enabled(kind),
-        KeyFramework::Laravel | KeyFramework::WordPress => false,
+        KeyFramework::Laravel | KeyFramework::WordPress | KeyFramework::Tempest => false,
     };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
+        || !map.tempest_routes.is_empty()
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
         || (!map.yii_definitions.is_empty() && enabled(StringKeyKind::YiiDefinitionArgument))
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
+        || (!map.service_decorations.is_empty() && enabled(StringKeyKind::ServiceId))
         || (map.declares_twig_loader && enabled(StringKeyKind::TwigTemplate))
+        || (!map.event_constant_keys.is_empty() && enabled(StringKeyKind::SymfonyEvent))
+        || (map.sets_unread_yii_view_parameters && enabled(StringKeyKind::YiiViewParameter))
         || ((!map.drupal_route_patterns.is_empty() || !map.drupal_route_aliases.is_empty())
             && enabled(StringKeyKind::DrupalRoute))
         || map.spans.iter().any(|span| {
@@ -173,6 +190,10 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
             .iter()
             .any(|site| site.is_write && site.receiver.names_any(counts))
 }
+
+/// The classes the constant keys of one lookup of event names have loaded,
+/// by name, each fully resolved, or `None` when it does not load.
+type EventConstantClasses = crate::atom::AtomMap<Option<std::sync::Arc<crate::types::ClassInfo>>>;
 
 impl Backend {
     /// Whether the project builds a Symfony service container; see
@@ -200,7 +221,7 @@ impl Backend {
             // The hook functions' names are WordPress's own, and a project
             // that calls them is a WordPress one whatever its
             // `composer.json` says, or whether it has one at all.
-            KeyFramework::WordPress => true,
+            KeyFramework::WordPress | KeyFramework::Tempest => true,
         }
     }
 
@@ -209,7 +230,11 @@ impl Backend {
     /// Dependencies are never part of the project's own configuration, so a
     /// vendor file that happens to be parsed is left out.
     pub(crate) fn note_symfony_declarations(&self, uri: &str, map: &SymbolMap) {
-        if !self.reads_service_container() && !self.is_twig_project() && !self.is_yii_project() {
+        if !self.reads_service_container()
+            && !self.is_twig_project()
+            && !self.is_yii_project()
+            && !self.is_tempest_project()
+        {
             return;
         }
         let declares = declares_symfony_keys(map, |kind| self.string_key_kind_enabled(kind))
@@ -224,18 +249,25 @@ impl Backend {
         self.note_drupal_hook_declarations(uri, Some(map));
         self.note_drupal_theme_hook_sources(uri, Some(map));
         self.note_drupal_library_builder_sources(uri, Some(map));
+        self.note_drupal_plugin_sources(uri, Some(map));
+        self.note_drupal_entity_type_test_sources(uri, Some(map));
         self.note_drupal_theme_suggestions(map);
         let was_declaring = self.symfony.declaring_uris.read().contains(uri);
+        if was_declaring || !map.event_constant_keys.is_empty() {
+            self.forget_event_constant_names();
+        }
         // Only take the write lock when the answer changes.
-        if was_declaring == declares {
-            return;
+        if was_declaring != declares {
+            let mut uris = self.symfony.declaring_uris.write();
+            if declares {
+                uris.insert(uri.to_string());
+            } else {
+                uris.remove(uri);
+            }
         }
-        let mut uris = self.symfony.declaring_uris.write();
-        if declares {
-            uris.insert(uri.to_string());
-        } else {
-            uris.remove(uri);
-        }
+        // After the declaring files: a lookup that reads the container's
+        // new generation builds its index from them.
+        self.note_container_declarations(uri, declares.then_some(map));
     }
 
     /// Forget a file that no longer exists.
@@ -244,8 +276,33 @@ impl Backend {
         self.note_drupal_hook_declarations(uri, None);
         self.note_drupal_theme_hook_sources(uri, None);
         self.note_drupal_library_builder_sources(uri, None);
+        self.note_drupal_plugin_sources(uri, None);
+        self.note_drupal_entity_type_test_sources(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
+            self.forget_event_constant_names();
+        }
+        self.note_container_declarations(uri, None);
+    }
+
+    /// The names of the class constants the project's subscribers key their
+    /// maps by, of any class.
+    pub(crate) fn event_constant_names(&self) -> std::sync::Arc<crate::atom::AtomSet> {
+        if let Some(names) = self.symfony.event_constant_names.read().as_ref() {
+            return std::sync::Arc::clone(names);
+        }
+        let mut names = crate::atom::AtomSet::default();
+        self.visit_declaring_symbol_maps(|_, map| {
+            names.extend(map.event_constant_keys.iter().map(|key| key.constant));
+        });
+        let names = std::sync::Arc::new(names);
+        *self.symfony.event_constant_names.write() = Some(std::sync::Arc::clone(&names));
+        names
+    }
+
+    fn forget_event_constant_names(&self) {
+        if self.symfony.event_constant_names.read().is_some() {
+            *self.symfony.event_constant_names.write() = None;
         }
     }
 
@@ -314,8 +371,12 @@ impl Backend {
             | KeyFramework::Symfony
             | KeyFramework::Twig
             | KeyFramework::Yii
-            | KeyFramework::WordPress => true,
+            | KeyFramework::WordPress
+            | KeyFramework::Tempest => true,
         };
+        let mut event_constants =
+            (kind == StringKeyKind::SymfonyEvent).then(EventConstantClasses::default);
+        let loader = self.resolved_class_loader_with(&[]);
         for uri in uris {
             let Some(map) = self.symbol_map_for(&uri) else {
                 continue;
@@ -337,7 +398,83 @@ impl Backend {
                     visit(&uri, &map, span.start, span.end, key);
                 }
             }
+            if let Some(classes) = &mut event_constants {
+                for key in &map.event_constant_keys {
+                    if let Some(value) = self.event_constant_value(key, &loader, classes) {
+                        visit(&uri, &map, key.start, key.end, &value);
+                    }
+                }
+            }
         }
+    }
+
+    /// How many listeners subscribe to the event `name`: every declaration
+    /// of it is a subscription, and a subscription may list several.
+    pub(crate) fn symfony_event_listener_count(&self, name: &str) -> usize {
+        let mut listeners = 0;
+        self.visit_symfony_declarations(
+            StringKeyKind::SymfonyEvent,
+            |_, map, start, _, declared| {
+                if declared == name {
+                    listeners += map.event_listeners_at(start);
+                }
+            },
+        );
+        listeners
+    }
+
+    /// Visit every event subscription keyed by a class constant that holds
+    /// a plain string, among the ones `wanted` keeps: the file, the key, and
+    /// the event name it declares.  Only the keys kept load their class.
+    pub(crate) fn visit_event_constant_keys(
+        &self,
+        wanted: impl Fn(&crate::symbol_map::EventConstantKey) -> bool,
+        mut visit: impl FnMut(&str, &crate::symbol_map::EventConstantKey, &str),
+    ) {
+        if !self.string_key_kind_enabled(StringKeyKind::SymfonyEvent) {
+            return;
+        }
+        let loader = self.resolved_class_loader_with(&[]);
+        let mut classes = EventConstantClasses::default();
+        self.visit_declaring_symbol_maps(|uri, map| {
+            for key in map.event_constant_keys.iter().filter(|key| wanted(key)) {
+                if let Some(value) = self.event_constant_value(key, &loader, &mut classes) {
+                    visit(uri, key, &value);
+                }
+            }
+        });
+    }
+
+    /// The event name a subscription keyed by a class constant declares:
+    /// the constant's value, when it is a plain string literal.  The class
+    /// is read with what it inherits, so a constant from a parent or an
+    /// interface counts.
+    fn event_constant_value(
+        &self,
+        key: &crate::symbol_map::EventConstantKey,
+        loader: &crate::class_lookup::ResolvedClassLoader<'_>,
+        classes: &mut EventConstantClasses,
+    ) -> Option<String> {
+        let class = classes
+            .entry(key.class)
+            .or_insert_with(|| {
+                let class = loader(crate::class_lookup::Fqn::new(key.class.as_str()))?;
+                Some(crate::virtual_members::resolve_class_fully_cached(
+                    &class,
+                    loader,
+                    &self.resolved_class_cache,
+                ))
+            })
+            .as_ref()?;
+        let constant = class.get_constant(key.constant.as_str())?;
+        if constant.is_enum_case {
+            return None;
+        }
+        let value = constant.value.as_deref()?.trim();
+        // A constant's initializer cannot interpolate, so a double-quoted
+        // string is a plain one too, with its escapes decoded.
+        crate::text_scan::unquote_php_string(value)?;
+        crate::text_scan::decode_php_string_literal(value).map(std::borrow::Cow::into_owned)
     }
 
     /// Every service ID, container parameter, route name, translation key

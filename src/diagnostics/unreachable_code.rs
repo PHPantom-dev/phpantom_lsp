@@ -100,7 +100,7 @@ impl Backend {
                 range,
                 DiagnosticSeverity::Hint,
                 UNREACHABLE_CODE_CODE,
-                "Unreachable code".to_string(),
+                "This code is unreachable".to_string(),
             );
             diagnostic.tags = Some(vec![DiagnosticTag::Unnecessary]);
             out.push(diagnostic);

@@ -42,6 +42,26 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Vec<Location> {
+        if let Some(location) = self.container_argument_definition(uri, content, position) {
+            return vec![location];
+        }
+        if let Some(location) = self.tempest_view_argument_definition(uri, content, position) {
+            return vec![location];
+        }
+        let routes = self.tempest_route_definition(uri, content, position);
+        if !routes.is_empty() {
+            return routes;
+        }
+        let properties = self.tempest_model_property_definition(uri, content, position);
+        if !properties.is_empty() {
+            return properties;
+        }
+        if self.is_yii_config_plugin_file(uri)
+            && let Some(locations) =
+                self.resolve_yii_config_plugin_definition(uri, content, position)
+        {
+            return locations;
+        }
         // Consult precomputed symbol map (retries one byte earlier for
         // end-of-token edge cases).
         let symbol = self.lookup_symbol_at_position(uri, content, position);
@@ -49,6 +69,27 @@ impl Backend {
             && let Some(resolved) = self.resolve_from_symbol(s, uri, content, position)
         {
             return resolved;
+        }
+
+        // A relation an Active Record call names is declared by an arm of
+        // the record's `relationQuery()` or by a getter, not by a member of
+        // its name, so it is kept beside the spans.
+        if let Some(location) = self.yii_relation_definition(uri, content, position) {
+            return vec![location];
+        }
+
+        // A table or column a `yiisoft/db` query names is created by a
+        // migration.
+        if let Some(location) =
+            self.yii_query_definition(uri, content, position_to_offset(content, position))
+        {
+            return vec![location];
+        }
+
+        // A segment of a key path an `ArrayHelper` call reads names a
+        // property or a method of the value the keys before it reach.
+        if let Some(location) = self.yii_array_path_definition(uri, content, position) {
+            return vec![location];
         }
 
         // Laravel config fallback: declaration sites in config/*.php
@@ -352,9 +393,20 @@ impl Backend {
                 self.resolve_self_static_parent(uri, content, position, *ssp_kind)
             }
 
-            SymbolKind::ClassReference { name, is_fqn, .. } => self
-                .resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
-                .map(|loc| vec![loc]),
+            SymbolKind::ClassReference {
+                name,
+                is_fqn,
+                context,
+            } => {
+                let discovered =
+                    self.drupal_annotation_class_at(uri, name, *is_fqn, *context, symbol.start);
+                let (name, is_fqn) = match &discovered {
+                    Some(fqn) => (fqn.as_str(), true),
+                    None => (name.as_str(), *is_fqn),
+                };
+                self.resolve_class_reference(uri, content, name, is_fqn, cursor_offset)
+                    .map(|loc| vec![loc])
+            }
 
             SymbolKind::MemberDeclaration { name, .. } => {
                 // Return self-location so editors detect "definition ==
@@ -386,6 +438,7 @@ impl Backend {
                 name,
                 is_definition,
                 is_docblock_reference,
+                ..
             } => {
                 // The cursor is on the function's own name at its
                 // declaration, so there is nothing to jump to: resolving

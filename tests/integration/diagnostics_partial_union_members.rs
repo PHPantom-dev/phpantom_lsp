@@ -43,7 +43,7 @@ fn reports_method_missing_from_one_branch() {
     let diags = diagnostics(USER_OR_GUEST, true);
     assert_eq!(
         partial(&diags),
-        vec!["Method 'name' exists on User but not on Guest".to_string()],
+        vec!["Method name() exists on User but not on Guest".to_string()],
         "got: {diags:?}"
     );
     assert_eq!(diags.len(), 1, "got: {diags:?}");
@@ -62,7 +62,7 @@ function f(Cat|Rock $v): void {
 "#;
     assert_eq!(
         partial(&diagnostics(text, true)),
-        vec!["Property 'name' exists on Cat but not on Rock".to_string()]
+        vec!["Property $name exists on Cat but not on Rock".to_string()]
     );
 }
 
@@ -79,7 +79,7 @@ function f(A|B|C $v): void {
 "#;
     assert_eq!(
         partial(&diagnostics(text, true)),
-        vec!["Method 'go' exists on A but not on B, C".to_string()]
+        vec!["Method go() exists on A but not on B, C".to_string()]
     );
 }
 
@@ -135,8 +135,8 @@ function f(A|B|NotLoadable $v): void {
     assert_eq!(
         partial(&diagnostics(text, true)),
         vec![
-            "Method 'go' exists on A but not on B".to_string(),
-            "Method 'go' exists on A but not on B".to_string(),
+            "Method go() exists on A but not on B".to_string(),
+            "Method go() exists on A but not on B".to_string(),
         ]
     );
 }
@@ -194,9 +194,9 @@ function f($x): void {
     assert_eq!(
         partial(&diagnostics(text, true)),
         vec![
-            "Method 'i' exists on A&I but not on C".to_string(),
-            "Method 'a' exists on A&I but not on C".to_string(),
-            "Method 'c' exists on C but not on A&I".to_string(),
+            "Method i() exists on A&I but not on C".to_string(),
+            "Method a() exists on A&I but not on C".to_string(),
+            "Method c() exists on C but not on A&I".to_string(),
         ]
     );
 }
@@ -328,7 +328,7 @@ function f(A|B $v): void {
 "#;
     assert_eq!(
         partial(&diagnostics(text, true)),
-        vec!["Method 'make' exists on A but not on B".to_string()]
+        vec!["Method make() exists on A but not on B".to_string()]
     );
 }
 

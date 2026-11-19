@@ -8,9 +8,10 @@ nothing; a data provider PHPUnit cannot call and a `setUp()` or
 listing the tests that cover it or are named after it, and a test one
 back to its class, and a class without a test can have one created;
 Pest closures know the test case `Pest.php` binds them to; Mockery mocks
-keep the mocked class; and the method a PHPUnit or Mockery expectation
-names by string completes, navigates, renames, and is reported when the
-mocked class has no such method.
+keep the mocked class, and Prophecy prophecies offer its methods; and
+the method a PHPUnit or Mockery expectation names by string completes,
+navigates, renames, and is reported when the mocked class has no such
+method.
 
 PHPStan's PHPUnit extension (`phpstan/phpstan-phpunit`) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
@@ -48,25 +49,6 @@ them. Add an assertion fixture per library covering the common forms
 (`Assert::string()`, `Assert::isInstanceOf()`, `Assert::notNull()`,
 `Assert::allIsInstanceOf()` and the `nullOr*` variants,
 `Psl\Type\shape()->coerce()`), and file each one that fails as a bug.
-
----
-
-## TS7. Prophecy
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-$repo = $this->prophesize(OrderRepository::class);
-$repo->findOpen()->willReturn([]);
-$service = new Billing($repo->reveal());
-```
-
-Phpactor completes the mocked class's methods on an `ObjectProphecy`.
-Check what PHPantom does with current Prophecy, which declares
-`ObjectProphecy` generic: `reveal()` should give the mocked class, and
-a call on the prophecy should complete the mocked class's methods and
-give a `MethodProphecy`. PHPUnit 10 removed `prophesize()`, so Prophecy
-is declining; fix only what is cheap.
 
 ---
 

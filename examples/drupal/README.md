@@ -3,7 +3,8 @@
 A standalone editor playground for PHPantom on Drupal 11. It is a
 `drupal/recommended-project` site with one custom module, `acme`, and one
 theme, `acme_theme`, declaring a service, a route, a content entity type,
-a render element, hooks, a theme hook, permissions, and configuration the
+a render element, a block plugin, hooks, a theme hook, permissions, event
+subscribers, and configuration the
 way a real Drupal module declares them.
 
 Run `composer install` here first. Composer puts core and contrib into
@@ -30,7 +31,9 @@ Run `composer install` here first. Composer puts core and contrib into
   the definition of `'entity_type.manager'`, which lands in core's
   `core.services.yml`. Complete an ID inside `\Drupal::service('')`,
   `$container->get('')`, or after `@` in `acme.services.yml`, and find the
-  references of a service from its declaration.
+  references of a service from its declaration. Misspell `'acme.greeter'` in
+  `acme.module` and the lookup is reported, since no services file declares
+  the ID and no service provider defines it.
 - Entity type IDs navigate between the entity class that declares them and
   the code that asks the entity type manager for them, and type what that
   code gets back. In `web/modules/custom/acme/src/NoteCounter.php`, hover
@@ -54,6 +57,11 @@ Run `composer install` here first. Composer puts core and contrib into
   `web/modules/custom/acme/src/CoreLinks.php`, `'entity.node.canonical'`,
   which core's entity route provider builds, and `'view.content.page_1'`,
   which Views builds for the content view's page, are not.
+- A controller or title callback written as `service:method` names a method
+  of the service's class. In `web/modules/custom/acme/acme.routing.yml`, go
+  to the definition of `greet` in `acme.greeter:greet`, which lands in
+  `Greeter`, complete a method after the `:`, or find the references of
+  `Greeter::greet()` to see the routing file among them.
 - Route parameters navigate from the keys that pass them to the placeholder
   of the route's path. In `worldLink()`, go to the definition of `'name'`,
   which lands on `{name}` in `acme.routing.yml`, or complete a key inside the
@@ -134,6 +142,11 @@ Run `composer install` here first. Composer puts core and contrib into
   hover `$languageManager`: core declares `language_manager` as
   `LanguageManager`, and the language module's `LanguageServiceProvider`
   swaps in `ConfigurableLanguageManager`, so it is either class.
+- A service that decorates another takes over its ID. In
+  `acme_request_age()` in `web/modules/custom/acme/acme.module`, hover
+  `$clock`: core declares `datetime.time` as `Time`, and
+  `acme.services.yml` decorates it with `RequestClock`, so it is either
+  class and `secondsSinceRequest()` is no unknown method.
 - Render element names in `#type` navigate to the element class that
   declares them. In `card()` in
   `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the
@@ -142,6 +155,64 @@ Run `composer install` here first. Composer puts core and contrib into
   `Details` class. Complete a name inside `'#type' => ''` or
   `$build['more']['#type'] = ''`; core's elements are offered too. A name
   no element class declares is reported.
+- Form and render callbacks navigate to the method or function they name.
+  In `web/modules/custom/acme/src/Form/GreetingForm.php`, go to the
+  definition of `validateName` in `'::validateName'`, which lands on the
+  form's own method, hover `trimName` in `static::class . '::trimName'`, or
+  go to the definition of `addHint` in
+  `'Drupal\acme\Form\GreetingForm::addHint'` and of
+  `'acme_greeting_form_submit'`, a function of `acme.module`. Find the
+  references of a callback method, or rename it, and the strings follow.
+  Complete inside a callback string: after `'::` the form's public methods
+  are offered, after `'Class::` the class's, after `'service:` the service
+  class's, and before any colon the functions. A callback Drupal cannot
+  call is reported: misspell `'::validateName'`, make `validateName`
+  private, or make `trimName` non-static, which Drupal ignores as a value
+  callback.
+  A `'service:method'` callback leads to the method of the service's
+  class: in `card()` in
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, go to
+  the definition of `buildGreeting` in `'acme.greeter:buildGreeting'`,
+  which lands on Greeter's method, or of `acme.greeter`, which lands on
+  its key in `acme.services.yml`.
+- Plugin IDs navigate to the plugin class that declares them, for every
+  plugin type a plugin manager declares, core's and contributed modules'
+  included. In `block()` in
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the
+  definition of `'acme_greeting_block'`, which lands on
+  `src/Plugin/Block/GreetingBlock.php`, or complete a block ID inside
+  `createInstance('')`. The block it creates is a `GreetingBlock`, so
+  `greeting()` goes to its method. In
+  `web/modules/custom/acme/src/Entity/Note.php`, the field type
+  `BaseFieldDefinition::create()` takes, the widget the form display
+  options name, and the constraint `addConstraint()` takes navigate to
+  core's plugin classes and complete. Misspell `'string'` as `'strin'` and
+  the field type is reported, since no plugin declares it. Go to the
+  implementations of `BlockManagerInterface` to list every block.
+- Annotations on a plugin class find their class the way plugin discovery
+  does, without a `use` import. In
+  `web/modules/custom/acme/src/Plugin/Block/FarewellBlock.php`, go to the
+  definition of `@Block`, which lands on core's block annotation class, or
+  of `@Translation`, which lands on core's `Translation` annotation.
+- An event subscriber's `getSubscribedEvents()` names the methods that
+  listen to each event, whether it returns the map or builds it by
+  assignment. In
+  `web/modules/custom/acme/src/EventSubscriber/GreetingSubscriber.php`, go
+  to the definition of `'onResponse'`, which lands on the method, or hover
+  it; rename `onResponse()` and the string follows. Misspell a method name
+  in the map and it is reported. In `RequestSubscriber.php`, which returns
+  its map, find the references of `onRequest()`: the string is one of them.
+- Event names navigate from the dispatcher calls that name them to the
+  subscriptions that listen to them, and a class constant a subscriber
+  keys its map by is the event's definition. In `acme_announce_greeting()`
+  in `web/modules/custom/acme/acme.module`, go to the definition of
+  `'acme.greeted'`, which offers `GreetingEvents::GREETED` in
+  `src/Event/GreetingEvents.php` first, then the key of
+  `GreetingSubscriber`, or hover it to see how many listeners subscribe.
+  Find the references of `GREETED`, or of `'acme.greeted'`: the constant,
+  the subscription, and the dispatch are one list. Complete an event name
+  inside the quotes of `dispatch()` or of the dispatcher's other methods
+  that take one.
 
 ## What the Symfony support already reads
 
@@ -153,13 +224,11 @@ project. What works today:
   to `GreetingController` and to its `greet()` method, and in
   `web/modules/custom/acme/acme.services.yml`, `class:` goes to `Greeter`.
   Each counts among the references of the class or method it names.
-
-What does not work yet:
-
-- **Event subscribers.** The `getSubscribedEvents()` map of an event
-  subscriber is read only in a Symfony project, so in a Drupal site its
-  event names and listener methods neither complete nor navigate. See
-  `docs/todo/drupal.md`.
+- **Methods under `calls:`.** In
+  `web/modules/custom/acme/acme.services.yml`, `setStringTranslation` goes
+  to the method `Greeter` takes from core's `StringTranslationTrait`, and a
+  method name there completes from the public methods of the service's
+  class.
 
 ## Runtime assertions
 

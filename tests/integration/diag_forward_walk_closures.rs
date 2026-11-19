@@ -598,7 +598,7 @@ it('does a thing', function (): void {
                 matches!(
                     c,
                     tower_lsp_server::gen_lsp_types::Code::String(s)
-                        if s == "unresolved_member_access" || s == "unknown_member"
+                        if s == "unresolved_member_access" || s == "unknown_member" || s == "unknown_class"
                 )
             })
         })
@@ -923,7 +923,7 @@ class Runner {
                 matches!(
                     c,
                     Code::String(s)
-                        if s == "unresolved_member_access" || s == "unknown_member"
+                        if s == "unresolved_member_access" || s == "unknown_member" || s == "unknown_class"
                 )
             })
         })
@@ -988,7 +988,7 @@ class Cases {
                 matches!(
                     c,
                     Code::String(s)
-                        if s == "unresolved_member_access" || s == "unknown_member"
+                        if s == "unresolved_member_access" || s == "unknown_member" || s == "unknown_class"
                 )
             })
         })
@@ -1048,7 +1048,7 @@ class Cases {
                 matches!(
                     c,
                     Code::String(s)
-                        if s == "unresolved_member_access" || s == "unknown_member"
+                        if s == "unresolved_member_access" || s == "unknown_member" || s == "unknown_class"
                 )
             })
         })

@@ -39,6 +39,8 @@ pub(crate) struct TemplateUseBlock {
 /// the template's first line opens.
 #[derive(Debug, Clone, Copy)]
 enum TemplateTop {
+    /// A PHP template can always put a native import before its markup.
+    PhpTemplate,
     /// The start of the template, which the import is written before.
     LineStart(Position),
     /// Just inside the `@php` / `<?php` block the template opens with,
@@ -55,6 +57,7 @@ impl TemplateUseBlock {
     /// Every position [`Self::import_edit`] may write an import at.
     pub(crate) fn anchors(&self) -> impl Iterator<Item = Position> + '_ {
         let top = match self.top {
+            TemplateTop::PhpTemplate => Position::default(),
             TemplateTop::LineStart(at) | TemplateTop::PhpBlock(at) | TemplateTop::LineEnd(at) => at,
         };
         self.line_ends.iter().copied().chain(std::iter::once(top))
@@ -94,6 +97,13 @@ impl TemplateUseBlock {
             .next_back();
 
         let (position, new_text) = match (anchor, self.top) {
+            (_, TemplateTop::PhpTemplate) => (
+                Position::default(),
+                format!(
+                    "<?php use {import}{}; ?>\n",
+                    alias.map_or_else(String::new, |alias| format!(" as {alias}"))
+                ),
+            ),
             (Some(end), _) => (end, format!("\n{}", directive())),
             (None, TemplateTop::LineStart(start)) => (start, format!("{}\n", directive())),
             (None, TemplateTop::PhpBlock(inside)) => (
@@ -135,6 +145,18 @@ pub(crate) fn analyze_template_use_block(
     template: &str,
     map: Option<&BladeSourceMap>,
 ) -> UseBlockInfo {
+    if map.is_some_and(|map| map.copied.is_some()) {
+        return UseBlockInfo {
+            existing: Vec::new(),
+            fallback: FirstImport::Inline(Position::default()),
+            has_namespace: false,
+            indent: String::new(),
+            template: Some(TemplateUseBlock {
+                line_ends: Vec::new(),
+                top: TemplateTop::PhpTemplate,
+            }),
+        };
+    }
     let to_php = |position: Position| match map {
         Some(map) => map.blade_to_php(position),
         None => position,

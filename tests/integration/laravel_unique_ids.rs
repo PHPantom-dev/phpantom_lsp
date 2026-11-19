@@ -125,7 +125,7 @@ class Example extends Model { use HasUuids; }",
         );
         assert_eq!(
             message_text(&diagnostics[0].message),
-            format!("Return type {expected} is incompatible with declared return type {wrong}")
+            format!("Return expects {wrong}, got {expected}")
         );
 
         let position = TextDocumentPositionParams {
@@ -214,6 +214,6 @@ async fn unique_ids_refresh_when_an_inherited_trait_changes() {
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert_eq!(
         message_text(&diagnostics[0].message),
-        "Return type int is incompatible with declared return type string"
+        "Return expects string, got int"
     );
 }

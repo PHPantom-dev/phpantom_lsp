@@ -392,7 +392,7 @@ fn racing_template_parses_leave_one_consistent_lowering() {
     backend.update_ast(uri, template);
     backend.apply_ast_index_parse_results_batch(vec![stale]);
 
-    let virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+    let virtual_php = backend.template_virtual_php_arc(uri).unwrap();
     let symbol_map = backend.symbol_map_for(uri).unwrap();
     assert!(
         symbol_map.matches_source(&virtual_php),
@@ -407,7 +407,7 @@ fn racing_template_parses_leave_one_consistent_lowering() {
     let position = crate::text_position::offset_to_position(&virtual_php, item.start as usize);
     assert_eq!(
         backend
-            .try_translate_php_to_blade(uri, position)
+            .try_translate_php_to_template(uri, position)
             .map(|p| p.line),
         Some(1),
         "App\\Item is on the template's second line"
@@ -440,17 +440,38 @@ fn stale_scope_batch_does_not_clobber_a_fresher_reinference() {
         },
     );
     backend.update_ast(uri, template);
-    let fresh_virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+    let fresh_virtual_php = backend.template_virtual_php_arc(uri).unwrap();
 
     // The index worker's batch, built from the empty scope, lands last.
     backend.apply_ast_index_parse_results_batch(vec![stale]);
 
     assert_eq!(
-        backend.blade_virtual_php_arc(uri).unwrap(),
+        backend.template_virtual_php_arc(uri).unwrap(),
         fresh_virtual_php,
         "a batch built from a scope the template has moved past must not \
          overwrite the lowering built from the current scope"
     );
+}
+
+#[test]
+fn stale_tempest_index_batch_keeps_the_current_inferred_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let view = dir.path().join("shop.view.php");
+    let caller = dir.path().join("caller.php");
+    let template = "{{ $count + 1 }}";
+    let php = "<?php \\Tempest\\View\\view(__DIR__.'/shop.view.php', count: 3);";
+    std::fs::write(&view, template).unwrap();
+    std::fs::write(&caller, php).unwrap();
+    let uri = crate::util::path_to_uri(&view);
+    let backend = Backend::new_test();
+    let stale = backend.parse_ast_index_update_for_index(&uri, template);
+    backend.update_ast(&crate::util::path_to_uri(&caller), php);
+    backend.update_ast(&uri, template);
+    backend.refresh_tempest_inference();
+    let fresh = backend.template_virtual_php_arc(&uri).unwrap();
+    assert!(fresh.contains("@var 3 $count"));
+    backend.apply_ast_index_parse_results_batch(vec![stale]);
+    assert_eq!(backend.template_virtual_php_arc(&uri).unwrap(), fresh);
 }
 
 /// A `belongsToMany` body with `->as(...)`, `->using(...)`, and
@@ -621,7 +642,7 @@ fn ast_index_parse_result_batch_records_failures_and_empty_noops() {
     let changed =
         backend.apply_ast_index_parse_results_batch(vec![AstIndexParseResult::ParseFailed {
             uri: uri.to_string(),
-            errors: vec![("Parse failed (internal error)".to_string(), 10, 20)],
+            errors: vec![("PHPantom could not parse this file".to_string(), 10, 20)],
         }]);
 
     assert!(!changed);
@@ -629,7 +650,11 @@ fn ast_index_parse_result_batch_records_failures_and_empty_noops() {
         backend
             .file_state(uri)
             .map(|state| state.parse_errors.clone()),
-        Some(vec![("Parse failed (internal error)".to_string(), 10, 20)])
+        Some(vec![(
+            "PHPantom could not parse this file".to_string(),
+            10,
+            20
+        )])
     );
 }
 
@@ -778,7 +803,7 @@ fn an_unclosed_call_keeps_its_braced_namespace_block_indexed() {
     assert!(
         errors
             .iter()
-            .any(|(message, _, _)| message.ends_with("unexpected end of file, expected `}`")),
+            .any(|(message, _, _)| message.ends_with("Unexpected end of file, expected '}'")),
         "the block's missing `}}` is still reported: {errors:?}"
     );
 }

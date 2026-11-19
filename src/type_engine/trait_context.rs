@@ -123,6 +123,60 @@ pub(crate) fn trait_host_classes(
     hosts
 }
 
+/// The classes that use `trait_cls`, when every one of them declares a
+/// typed `prop_name`.
+///
+/// A trait can read a property it leaves to its users to declare.  What
+/// the read gives is whatever the host it runs in declares, so the users'
+/// declarations together are the property's type.  That holds only when
+/// all of them declare it: a user that does not leaves the property
+/// untyped whenever the trait runs there, so a partial answer would claim
+/// more than is known.  An assignment in the trait's own body is no
+/// substitute, since it says nothing about what another method reads after
+/// a user overwrites it.
+///
+/// A host's own private property counts, because the trait's code runs as
+/// part of that class; one private to the host's parent does not, and
+/// inheritance already leaves it out.
+///
+/// `receivers` are the classes the read's object was resolved to.  The
+/// hosts stand in only when the object is the trait itself (`$this`, along
+/// with whatever its users are all guaranteed to be) and none of those
+/// declares a typed `prop_name`; otherwise the receivers already answer.
+///
+/// Returns an empty vector otherwise, when some user does not declare the
+/// property, and whenever [`trait_host_classes`] does.
+pub(crate) fn trait_hosts_declaring_property<'a>(
+    trait_cls: &ClassInfo,
+    receivers: impl IntoIterator<Item = &'a ClassInfo>,
+    prop_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &ResolvedClassLoader<'_>,
+    backend: Option<&crate::Backend>,
+) -> Vec<Arc<ClassInfo>> {
+    if trait_cls.kind != ClassLikeKind::Trait {
+        return Vec::new();
+    }
+    let trait_fqn = trait_cls.fqn();
+    let mut reads_the_trait = false;
+    for receiver in receivers {
+        if crate::inheritance::resolve_property_type_hint(receiver, prop_name, class_loader)
+            .is_some()
+        {
+            return Vec::new();
+        }
+        reads_the_trait |= receiver.fqn() == trait_fqn;
+    }
+    if !reads_the_trait {
+        return Vec::new();
+    }
+    let hosts = trait_host_classes(trait_cls, all_classes, class_loader, backend);
+    let all_declare = hosts.iter().all(|host| {
+        crate::inheritance::resolve_property_type_hint(host, prop_name, class_loader).is_some()
+    });
+    if all_declare { hosts } else { Vec::new() }
+}
+
 /// The FQNs every class using `trait_cls` is an instance of.
 ///
 /// A using class counts as an instance of itself, so a trait with a single

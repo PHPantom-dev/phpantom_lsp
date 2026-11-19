@@ -65,11 +65,16 @@ impl ExprTypes {
     /// out, so the resolver works it out the ordinary way instead of
     /// reading a recorded blank.
     fn insert(&mut self, expr: &Expression<'_>, types: Vec<ResolvedType>) {
+        let span = expr.span();
+        self.insert_spanned((span.start.offset, span.end.offset), types);
+    }
+
+    /// [`Self::insert`] for a node whose span the caller already knows.
+    fn insert_spanned(&mut self, (start, end): (u32, u32), types: Vec<ResolvedType>) {
         if types.is_empty() {
             return;
         }
-        let span = expr.span();
-        self.0.push((span.start.offset, span.end.offset, types));
+        self.0.push((start, end, types));
     }
 }
 
@@ -118,9 +123,10 @@ pub(crate) fn process_condition<'b>(
 struct ExprWalk<'b> {
     types: ExprTypes,
     /// Write-free sub-expressions evaluated since the last write, outermost
-    /// only.  If a write follows, they read a scope the caller will not
-    /// see, so they are typed against it before the write lands.
-    pending: Vec<&'b Expression<'b>>,
+    /// only, with their spans.  If a write follows, they read a scope the
+    /// caller will not see, so they are typed against it before the write
+    /// lands.
+    pending: Vec<(&'b Expression<'b>, (u32, u32))>,
     /// Where the innermost fork's entries in `pending` start.  A write
     /// inside a fork only invalidates what the fork itself evaluated: the
     /// entries below were evaluated on the scope the fork was copied from,
@@ -180,11 +186,7 @@ impl<'b> ExprWalk<'b> {
                 | BinaryOperator::Or(_)
                 | BinaryOperator::LowOr(_) => self.short_circuit_value(expr, scope, ctx),
                 BinaryOperator::NullCoalesce(_) => self.coalesce(bin, scope, ctx),
-                _ => {
-                    let lhs = self.expr(bin.lhs, scope, ctx);
-                    let rhs = self.expr(bin.rhs, scope, ctx);
-                    lhs.or(rhs)
-                }
+                _ => self.operand_chain(bin, scope, ctx),
             },
             // The receiver of a member access or an offset read is evaluated
             // before the access: `($x = f())->prop`, `($x = $map[$k])[0]`.
@@ -229,17 +231,36 @@ impl<'b> ExprWalk<'b> {
         if result.wrote || matches!(expr, Expression::Literal(_)) {
             return;
         }
-        self.drop_pending_inside(expr);
-        self.pending.push(expr);
+        let span = expr.span();
+        self.push_pending(expr, (span.start.offset, span.end.offset));
+    }
+
+    /// [`Self::done`] for a node whose span the caller already knows.
+    fn done_spanned(&mut self, expr: &'b Expression<'b>, span: (u32, u32), result: ExprResult) {
+        if result.wrote || matches!(expr, Expression::Literal(_)) {
+            return;
+        }
+        self.push_pending(expr, span);
+    }
+
+    fn push_pending(&mut self, expr: &'b Expression<'b>, span: (u32, u32)) {
+        self.drop_pending_within(span);
+        self.pending.push((expr, span));
     }
 
     fn drop_pending_inside(&mut self, expr: &Expression<'_>) {
         let span = expr.span();
+        self.drop_pending_within((span.start.offset, span.end.offset));
+    }
+
+    fn drop_pending_within(&mut self, (start, end): (u32, u32)) {
         while self.pending.len() > self.base
-            && self.pending.last().is_some_and(|last| {
-                let inner = last.span();
-                inner.start.offset >= span.start.offset && inner.end.offset <= span.end.offset
-            })
+            && self
+                .pending
+                .last()
+                .is_some_and(|(_, (inner_start, inner_end))| {
+                    *inner_start >= start && *inner_end <= end
+                })
         {
             self.pending.pop();
         }
@@ -261,9 +282,9 @@ impl<'b> ExprWalk<'b> {
             pending,
             base,
         } = self;
-        for expr in pending.drain(*base..) {
+        for (expr, span) in pending.drain(*base..) {
             let resolved = resolve_rhs_with_types(expr, scope, ctx, Some(types));
-            types.insert(expr, resolved);
+            types.insert_spanned(span, resolved);
         }
     }
 
@@ -387,6 +408,46 @@ impl<'b> ExprWalk<'b> {
         ExprResult { wrote: true }
     }
 
+    /// An operator that evaluates both of its operands, in order:
+    /// `"a" . $b`, `$n + 1`, `$x === $y`.
+    ///
+    /// These are left-associative, so `"a" . "b" . "c"` nests on the left,
+    /// and generated code can chain thousands of them.  Walk the left spine
+    /// in a loop instead of a frame per operator.  Entering each operator
+    /// below `bin` in turn, before its first operand, is what recursing
+    /// into each did: nothing runs in between.
+    #[inline(never)]
+    fn operand_chain(
+        &mut self,
+        bin: &'b Binary<'b>,
+        scope: &mut ScopeState,
+        ctx: &ForwardWalkCtx<'_>,
+    ) -> ExprResult {
+        let mut spine: Vec<(&'b Expression<'b>, &'b Binary<'b>)> = Vec::new();
+        let mut leftmost = bin.lhs;
+        while let Expression::Binary(inner) = leftmost
+            && evaluates_both_operands(&inner.operator)
+        {
+            spine.push((leftmost, inner));
+            leftmost = inner.lhs;
+        }
+        // Every operator in the spine starts where its first operand does.
+        let start = leftmost.span().start.offset;
+        for (node, _) in &spine {
+            record_node_scope(start, scope);
+            if let Some(cursor_scope) = ctx.cursor_scope {
+                let (start, end) = span_from(node, start);
+                cursor_scope.reached_span(start, end, scope, ctx.cursor_offset);
+            }
+        }
+        let mut result = self.expr(leftmost, scope, ctx);
+        for (node, inner) in spine.into_iter().rev() {
+            result = result.or(self.expr(inner.rhs, scope, ctx));
+            self.done_spanned(node, span_from(node, start), result);
+        }
+        result.or(self.expr(bin.rhs, scope, ctx))
+    }
+
     /// A `&&` / `||` whose value is used rather than tested: its operands
     /// still short-circuit, so it is walked as the condition it is.
     ///
@@ -415,33 +476,69 @@ impl<'b> ExprWalk<'b> {
         ctx: &ForwardWalkCtx<'_>,
         pinned: &[String],
     ) -> Condition<'b> {
-        record_node_scope(expr.span().start.offset, scope);
-        if let Some(cursor_scope) = ctx.cursor_scope {
-            cursor_scope.reached(expr, scope, ctx.cursor_offset);
-        }
-        let condition = match split_condition(expr) {
-            Split::Leaf(leaf) => self.leaf(leaf, scope, ctx, pinned),
-            Split::Not(inner) => Condition::not(self.cond(inner, scope, ctx, &[])),
-            Split::And(lhs, rhs) => {
-                let (left, right) = self.short_circuit(true, lhs, rhs, scope, ctx, pinned);
-                Condition::and(left, right)
+        // `&&` and `||` are left-associative, so `a && b && c` nests on the
+        // left, and generated code can chain thousands of them.  Walk the
+        // left spine down to its first operand in a loop, then build the
+        // operators back up, instead of a frame per operator.  The left
+        // operand of each starts on the scope the whole condition started
+        // on, so entering them in turn is what recursing into each did.
+        type SpineEntry<'b> = (
+            &'b Expression<'b>,
+            (u32, u32),
+            &'b Expression<'b>,
+            Option<ScopeState>,
+        );
+        let mut spine: Vec<SpineEntry<'b>> = Vec::new();
+        let mut node = expr;
+        let mut span = span_from(node, expr.span().start.offset);
+        let mut seeded = false;
+        let first = loop {
+            record_node_scope(span.0, scope);
+            if let Some(cursor_scope) = ctx.cursor_scope {
+                cursor_scope.reached_span(span.0, span.1, scope, ctx.cursor_offset);
             }
-            Split::Or(lhs, rhs) => {
-                // What a leg concludes about a member path is checked against
-                // what the scope already knew about it, so the paths every
-                // leg names are seeded before the legs split.
-                seed_property_keys_into_scope(expr, scope, ctx);
-                let base = scope.clone();
-                let (left, right) = self.short_circuit(false, lhs, rhs, scope, ctx, pinned);
-                Condition::or(left, right, base, pinned.to_vec())
+            match split_condition(node) {
+                Split::Leaf(leaf) => break self.leaf(leaf, scope, ctx, pinned),
+                Split::Not(inner) => break Condition::not(self.cond(inner, scope, ctx, &[])),
+                Split::And(lhs, rhs) => {
+                    spine.push((node, span, rhs, None));
+                    span = left_operand_span(node, lhs, span.0);
+                    node = lhs;
+                }
+                Split::Or(lhs, rhs) => {
+                    // What a leg concludes about a member path is checked
+                    // against what the scope already knew about it, so the
+                    // paths every leg names are seeded before the legs split.
+                    // The outermost `||` of the spine names every path an
+                    // inner one does, and seeding skips a path already in
+                    // scope, so seeding once is enough.
+                    if !seeded {
+                        seed_property_keys_into_scope(node, scope, ctx);
+                        seeded = true;
+                    }
+                    spine.push((node, span, rhs, Some(scope.clone())));
+                    span = left_operand_span(node, lhs, span.0);
+                    node = lhs;
+                }
             }
         };
-        self.done(
-            expr,
-            ExprResult {
-                wrote: condition.wrote,
-            },
-        );
+        self.done_spanned(node, span, ExprResult { wrote: first.wrote });
+        let mut condition = first;
+        for (node, span, rhs, base) in spine.into_iter().rev() {
+            let and = base.is_none();
+            let right = self.short_circuit(and, &condition, rhs, scope, ctx, pinned);
+            condition = match base {
+                None => Condition::and(condition, right),
+                Some(base) => Condition::or(condition, right, base, pinned.to_vec()),
+            };
+            self.done_spanned(
+                node,
+                span,
+                ExprResult {
+                    wrote: condition.wrote,
+                },
+            );
+        }
         condition
     }
 
@@ -457,21 +554,21 @@ impl<'b> ExprWalk<'b> {
         Condition::leaf(leaf, scope.clone(), wrote, pinned)
     }
 
-    /// `lhs && rhs` (`and`) or `lhs || rhs`: the right operand runs only
-    /// when the left one was truthy (`&&`) or falsy (`||`), so it runs on
-    /// the scope the left one left in that outcome, and a lookup inside it
-    /// sees both the narrowing and the writes: `if (($a = g()) && $a->bar())`.
+    /// The right operand of `lhs && rhs` (`and`) or `lhs || rhs`, given
+    /// what `lhs` proved: it runs only when the left one was truthy (`&&`)
+    /// or falsy (`||`), so it runs on the scope the left one left in that
+    /// outcome, and a lookup inside it sees both the narrowing and the
+    /// writes: `if (($a = g()) && $a->bar())`.
     #[inline(never)]
     fn short_circuit(
         &mut self,
         and: bool,
-        lhs: &'b Expression<'b>,
+        left: &Condition<'b>,
         rhs: &'b Expression<'b>,
         scope: &mut ScopeState,
         ctx: &ForwardWalkCtx<'_>,
         pinned: &[String],
-    ) -> (Condition<'b>, Condition<'b>) {
-        let left = self.cond(lhs, scope, ctx, pinned);
+    ) -> Condition<'b> {
         let (mut path, rhs_pinned) = if and {
             let rhs_pinned = with_pinned(pinned, left.pinned(ctx));
             (left.truthy(ctx).clone(), rhs_pinned)
@@ -487,7 +584,7 @@ impl<'b> ExprWalk<'b> {
             self.flush(scope, ctx);
             scope.merge_branch(&path);
         }
-        (left, right)
+        right
     }
 
     /// `$a ?? $b`: the right operand runs only when the left one is null.
@@ -820,6 +917,44 @@ impl ExprResult {
             wrote: self.wrote || other.wrote,
         }
     }
+}
+
+/// Whether the operator always evaluates both of its operands, unlike the
+/// short-circuiting `&&`, `||` and `??`.
+fn evaluates_both_operands(operator: &BinaryOperator<'_>) -> bool {
+    !matches!(
+        operator,
+        BinaryOperator::And(_)
+            | BinaryOperator::LowAnd(_)
+            | BinaryOperator::Or(_)
+            | BinaryOperator::LowOr(_)
+            | BinaryOperator::NullCoalesce(_)
+    )
+}
+
+/// The span of `expr`, given where it starts.
+///
+/// `Binary::span` finds an operator's start by walking down its left edge,
+/// so asking every operator of a long left-nested chain for its span is
+/// quadratic.  Every operator in the chain's spine starts where the chain
+/// does, so a walk down the spine knows the start and passes it in.
+fn span_from(expr: &Expression<'_>, start: u32) -> (u32, u32) {
+    let end = match expr {
+        Expression::Binary(bin) => bin.rhs.span().end.offset,
+        _ => expr.span().end.offset,
+    };
+    (start, end)
+}
+
+/// The span of `lhs`, the left operand of the condition `node` that
+/// starts at `start`.  When `node` is the operator itself, rather than the
+/// operator wrapped in parentheses or a cast, the two start together.
+fn left_operand_span(node: &Expression<'_>, lhs: &Expression<'_>, start: u32) -> (u32, u32) {
+    let start = match node {
+        Expression::Binary(bin) if std::ptr::eq(bin.lhs, lhs) => start,
+        _ => lhs.span().start.offset,
+    };
+    span_from(lhs, start)
 }
 
 /// The variable passed directly as an argument of the call (or

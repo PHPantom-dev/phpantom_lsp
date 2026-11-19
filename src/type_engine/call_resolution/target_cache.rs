@@ -21,6 +21,7 @@ use crate::Backend;
 use crate::atom::{Atom, atom};
 use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
+use crate::type_engine::MemoScope;
 use crate::types::*;
 
 // ─── Thread-local memos ─────────────────────────────────────────────────────
@@ -41,7 +42,10 @@ type BodyInferMemo = crate::type_engine::BoundedMemo<BodyInferKey, Option<PhpTyp
 /// method)`.
 type CallSiteArgFrames = Vec<((Atom, Atom), Box<[PhpType]>)>;
 
+type DeclarationArgFrames = Vec<((Atom, u32), Box<[PhpType]>)>;
+
 thread_local! {
+    static DECLARATION_ARGS: RefCell<DeclarationArgFrames> = const { RefCell::new(Vec::new()) };
     /// When `Some`, `resolve_instance_method_callable` caches results
     /// by `"FQN::method_lower"`.  Activated by
     /// [`activate_type_engine_caches`], cleared on guard drop.
@@ -102,8 +106,8 @@ pub(crate) fn test_body_inferences() -> usize {
 type CallableTargetCacheGuard =
     crate::type_engine::MemoGuard<HashMap<String, Option<ResolvedCallableTarget>>>;
 
-fn with_callable_target_cache() -> CallableTargetCacheGuard {
-    crate::type_engine::activate_memo(&CALLABLE_TARGET_CACHE)
+fn with_callable_target_cache(scope: MemoScope) -> CallableTargetCacheGuard {
+    crate::type_engine::activate_memo(&CALLABLE_TARGET_CACHE, scope)
 }
 
 // ── Body return type inference ──────────────────────────────────────────────
@@ -112,8 +116,8 @@ fn with_callable_target_cache() -> CallableTargetCacheGuard {
 /// The guard [`with_body_infer_memo`] hands back.
 type BodyInferMemoGuard = crate::type_engine::MemoGuard<BodyInferMemo>;
 
-fn with_body_infer_memo() -> BodyInferMemoGuard {
-    crate::type_engine::activate_memo(&BODY_INFER_MEMO)
+fn with_body_infer_memo(scope: MemoScope) -> BodyInferMemoGuard {
+    crate::type_engine::activate_memo(&BODY_INFER_MEMO, scope)
 }
 
 /// Activate only the body-return-inference memo, for a pass that walks
@@ -127,7 +131,7 @@ fn with_body_infer_memo() -> BodyInferMemoGuard {
 /// scopes nested inside the pass, which leave it alone because nested
 /// activation is a no-op.
 pub(crate) fn activate_body_infer_memo() -> impl Drop {
-    with_body_infer_memo()
+    with_body_infer_memo(MemoScope::Shared)
 }
 
 // ── Call-site argument frames ───────────────────────────────────────────────
@@ -135,6 +139,44 @@ pub(crate) fn activate_body_infer_memo() -> impl Drop {
 /// Pops the frame it pushed, so an inference that unwinds cannot leave a
 /// call's argument types seeding an unrelated body.
 struct CallSiteArgsGuard;
+
+struct DeclarationArgsGuard;
+
+impl Drop for DeclarationArgsGuard {
+    fn drop(&mut self) {
+        DECLARATION_ARGS.with(|frames| {
+            frames.borrow_mut().pop();
+        });
+    }
+}
+
+/// Read a particular declaration under a call site's parameter types. The
+/// declaration URI and span distinguish same-named functions in other files.
+pub(crate) fn with_declaration_arguments(
+    uri: &str,
+    start: u32,
+    args: &[PhpType],
+) -> (impl Drop, impl Drop, impl Drop) {
+    DECLARATION_ARGS.with(|frames| frames.borrow_mut().push(((atom(uri), start), args.into())));
+    (
+        DeclarationArgsGuard,
+        crate::type_engine::variable::forward_walk::suspend_diagnostic_scope(),
+        crate::type_engine::resolver::with_isolated_chain_cache(),
+    )
+}
+
+/// The innermost invocation currently reading this declaration, if any.
+pub(crate) fn declaration_param_types(uri: Option<&str>, start: u32) -> Option<Box<[PhpType]>> {
+    let uri = uri?;
+    DECLARATION_ARGS.with(|frames| {
+        frames
+            .borrow()
+            .iter()
+            .rev()
+            .find(|((file, offset), _)| file == uri && *offset == start)
+            .map(|(_, args)| args.clone())
+    })
+}
 
 impl Drop for CallSiteArgsGuard {
     fn drop(&mut self) {
@@ -199,7 +241,7 @@ pub(crate) fn body_inference_context() -> u64 {
     use std::hash::{Hash, Hasher};
 
     let depth = body_infer_depth();
-    if depth == 0 {
+    if depth == 0 && DECLARATION_ARGS.with(|frames| frames.borrow().is_empty()) {
         return 0;
     }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -215,6 +257,7 @@ pub(crate) fn body_inference_context() -> u64 {
     });
     visited.hash(&mut hasher);
     BODY_INFER_ARGS.with(|cell| cell.borrow().hash(&mut hasher));
+    DECLARATION_ARGS.with(|cell| cell.borrow().hash(&mut hasher));
     // Never `0`, which stands for "no inference running".
     hasher.finish() | 1
 }
@@ -504,13 +547,27 @@ pub(crate) struct TypeEngineCaches {
 ///
 /// [`RequestScope`]: crate::backend::requests::RequestScope
 pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
+    type_engine_caches(MemoScope::Shared)
+}
+
+/// [`activate_type_engine_caches`] with memos of their own, which set any
+/// an outer pass installed aside until the guard drops: for a pass whose
+/// answers may differ from the outer one's, as confirming configurator
+/// calls against a container index still being built does.
+pub(crate) fn isolated_type_engine_caches() -> TypeEngineCaches {
+    type_engine_caches(MemoScope::Isolated)
+}
+
+fn type_engine_caches(scope: MemoScope) -> TypeEngineCaches {
     TypeEngineCaches {
-        _callable_target: with_callable_target_cache(),
-        _body_infer: with_body_infer_memo(),
-        _out_type: super::out_param::with_out_type_memo(),
-        _walk: crate::type_engine::variable::forward_walk::with_walk_memo(),
-        _include: crate::type_engine::variable::forward_walk::with_include_memo(),
-        _form_request_rules: crate::virtual_members::laravel::validation_rules::with_rules_memo(),
+        _callable_target: with_callable_target_cache(scope),
+        _body_infer: with_body_infer_memo(scope),
+        _out_type: super::out_param::with_out_type_memo(scope),
+        _walk: crate::type_engine::variable::forward_walk::with_walk_memo(scope),
+        _include: crate::type_engine::variable::forward_walk::with_include_memo(scope),
+        _form_request_rules: crate::virtual_members::laravel::validation_rules::with_rules_memo(
+            scope,
+        ),
     }
 }
 

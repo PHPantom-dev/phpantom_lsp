@@ -243,6 +243,23 @@ impl Backend {
                     &self.resolved_class_cache,
                 );
             }
+            crate::symbol_map::DocblockMemberRef::YiiAttribute => {
+                candidates
+                    .retain(|class| crate::yii::active_record::is_record(class, class_loader));
+                // A record that declares no properties names a column of
+                // its table, which a migration creates.
+                if let Some(location) = candidates.iter().find_map(|record| {
+                    self.yii_column_location(record, mctx.member_name, class_loader)
+                }) {
+                    return Some(location);
+                }
+            }
+            crate::symbol_map::DocblockMemberRef::YiiProperty { form_model: true } => {
+                candidates = crate::yii::forms::form_model_classes(candidates, class_loader);
+            }
+            crate::symbol_map::DocblockMemberRef::FormCallback => {
+                candidates = crate::drupal::forms::form_callback_classes(candidates, class_loader);
+            }
             _ => {}
         }
         let first = candidates.first()?;
@@ -650,7 +667,11 @@ impl Backend {
             return Some((effective_name.to_string(), cls, fqn));
         }
 
-        None
+        // A call on a Prophecy `ObjectProphecy<Foo>` names `Foo`'s method.
+        crate::prophecy::revealed_classes(target_class, class_loader)
+            .iter()
+            .find_map(|mocked| Self::find_declaring_class(mocked, effective_name, class_loader))
+            .map(|(cls, fqn)| (effective_name.to_string(), cls, fqn))
     }
 
     // ─── Member Access Context Extraction ───────────────────────────────────

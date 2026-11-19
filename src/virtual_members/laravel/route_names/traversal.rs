@@ -206,25 +206,18 @@ pub(super) enum MacroBody<'ast, 'arena> {
 
 /// Find the closure a macro registration points at, by its byte offset.
 pub(super) fn macro_body_at<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
+    root: Node<'ast, 'arena>,
     offset: u32,
 ) -> Option<MacroBody<'ast, 'arena>> {
-    match node {
+    crate::parser::find_node(root, |node| match node {
         Node::Closure(closure) if closure.span().start.offset == offset => {
-            return Some(MacroBody::Closure(closure));
+            Some(MacroBody::Closure(closure))
         }
         Node::ArrowFunction(arrow) if arrow.span().start.offset == offset => {
-            return Some(MacroBody::Arrow(arrow));
+            Some(MacroBody::Arrow(arrow))
         }
-        _ => {}
-    }
-    let mut found = None;
-    node.visit_children(|child| {
-        if found.is_none() {
-            found = macro_body_at(child, offset);
-        }
-    });
-    found
+        _ => None,
+    })
 }
 
 /// A file that a route source pulls in, opened for scanning.

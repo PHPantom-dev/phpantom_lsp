@@ -828,7 +828,7 @@ impl ClassInfo {
     /// returns `false`.
     pub fn class_level_signature_eq(&self, other: &ClassInfo) -> bool {
         // ── Class-level metadata ────────────────────────────────────
-        if self.kind != other.kind
+        !(self.kind != other.kind
             || self.name != other.name
             || self.file_namespace != other.file_namespace
             || self.parent_class != other.parent_class
@@ -858,12 +858,7 @@ impl ClassInfo {
             || self.trait_aliases != other.trait_aliases
             || self.class_docblock != other.class_docblock
             || self.backed_type != other.backed_type
-            || self.laravel != other.laravel
-        {
-            return false;
-        }
-
-        true
+            || self.laravel != other.laravel)
     }
 
     /// The member half of [`signature_eq`](Self::signature_eq): the

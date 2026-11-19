@@ -33,15 +33,21 @@ pub(crate) use context::{ArgumentSlot, attribute_class_start, scalar_argument_at
 /// names is what it should look like.
 pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
-        StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::Property,
+        StringKeyKind::Config | StringKeyKind::ConfigResource(_) | StringKeyKind::YiiParam => {
+            CompletionItemKind::Property
+        }
         StringKeyKind::View
+        | StringKeyKind::TempestView { .. }
         | StringKeyKind::TwigTemplate
         | StringKeyKind::YiiView
+        | StringKeyKind::YiiAssetFile
         | StringKeyKind::Asset
         | StringKeyKind::MixAsset
         | StringKeyKind::ViteAsset
         | StringKeyKind::InertiaPage => CompletionItemKind::File,
-        StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
+        StringKeyKind::Trans
+        | StringKeyKind::SymfonyTranslation
+        | StringKeyKind::YiiTranslation => CompletionItemKind::Text,
         StringKeyKind::DrupalPermission => CompletionItemKind::Constant,
         StringKeyKind::DrupalConfigName => CompletionItemKind::File,
         StringKeyKind::DrupalConfigKey => CompletionItemKind::Field,
@@ -51,9 +57,9 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::GateAbility => CompletionItemKind::Method,
         StringKeyKind::Env => CompletionItemKind::Constant,
         StringKeyKind::ServiceId => CompletionItemKind::Reference,
-        StringKeyKind::DrupalEntityType | StringKeyKind::DrupalRenderElement => {
-            CompletionItemKind::Class
-        }
+        StringKeyKind::DrupalEntityType
+        | StringKeyKind::DrupalRenderElement
+        | StringKeyKind::DrupalPlugin => CompletionItemKind::Class,
         StringKeyKind::ContainerParameter => CompletionItemKind::Property,
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
         StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook | StringKeyKind::DrupalHook => {
@@ -62,6 +68,8 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
         StringKeyKind::SerializerGroup => CompletionItemKind::EnumMember,
         StringKeyKind::YiiRouteArgument
+        | StringKeyKind::YiiUrlArgument
+        | StringKeyKind::YiiViewParameter
         | StringKeyKind::DrupalRouteParameter
         | StringKeyKind::DrupalThemeHookVariable => CompletionItemKind::Field,
         StringKeyKind::YiiDefinitionArgument => CompletionItemKind::Variable,
@@ -79,6 +87,8 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         | StringKeyKind::Stack
         | StringKeyKind::TwigBlock
         | StringKeyKind::ContainerBinding => CompletionItemKind::Value,
+        StringKeyKind::YiiViewPath => CompletionItemKind::Folder,
+        StringKeyKind::CssClass => CompletionItemKind::Constant,
     }
 }
 
@@ -222,35 +232,54 @@ impl Backend {
             // would have to confirm in every file that fires a hook.
             StringKeyKind::DrupalHook => self.drupal_documented_hooks().into(),
             StringKeyKind::DrupalThemeHook => self.drupal_theme_hook_names().into(),
-            // A translation key is completed in the domain it is looked up
-            // in, a configuration key under the key it is nested in, which
+            // A translation key is completed in the domain or the category it
+            // is looked up in, a configuration key under the key it is nested in, which
             // only the Symfony completion knows, and a route argument from
-            // the routes of the handler it is written in, and a Drupal route
-            // parameter from the route its call names, and a theme hook's
+            // the routes of the handler it is written in, and a Yii URL
+            // argument or a Drupal route parameter from the route its call
+            // names (`crate::completion::yii_route_params`), and a theme hook's
             // variable from the `#theme` of its render array, and a DI
-            // definition's argument from the method it is passed to.  A hook name is
+            // definition's argument from the method it is passed to, and a
+            // plugin ID from the manager its receiver is, and a Yii view's
+            // parameter from the template its render names
+            // (`crate::completion::yii_views`).  A hook name is
             // completed with its patterns as snippets, which only the
             // WordPress completion builds.
             StringKeyKind::SymfonyTranslation
+            | StringKeyKind::YiiTranslation
             | StringKeyKind::WordPressHook
             | StringKeyKind::SymfonyConfigKey
             | StringKeyKind::YiiRouteArgument
+            | StringKeyKind::YiiUrlArgument
+            | StringKeyKind::YiiViewParameter
             | StringKeyKind::YiiDefinitionArgument
             | StringKeyKind::DrupalRouteParameter
             | StringKeyKind::DrupalConfigKey
             | StringKeyKind::DrupalThemeHookVariable
+            | StringKeyKind::DrupalPlugin
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::TwigBlock
             | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
-            | StringKeyKind::YiiView => Arc::new([]),
+            | StringKeyKind::YiiView
+            | StringKeyKind::YiiViewPath
+            | StringKeyKind::TempestView { .. } => Arc::new([]),
             // Any string can start with an alias, so the names are offered
             // wherever one is typed (`crate::completion::yii_aliases`).
             StringKeyKind::YiiAlias => Arc::new([]),
+            // A string holds several class names, and only the one being
+            // typed is replaced (`crate::completion::css_classes`).
+            StringKeyKind::CssClass => Arc::new([]),
+            // The keys of a params read are offered a level at a time, under
+            // the keys read before it (`crate::completion::yii_params`).
+            StringKeyKind::YiiParam => Arc::new([]),
             // A path is completed a directory at a time from the files on
             // disk (see `try_laravel_string_key_completion_inner`).
             StringKeyKind::Asset | StringKeyKind::ViteAsset => Arc::new([]),
+            // So is a file an asset bundle lists, from the directory the
+            // bundle names (`crate::completion::yii_assets`).
+            StringKeyKind::YiiAssetFile => Arc::new([]),
         }
     }
 

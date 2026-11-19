@@ -202,11 +202,27 @@ fn resolve_member_key_type(
     }
 
     // Look up the member's type on the resolved class(es).
+    let mut owners: Vec<&Arc<crate::types::ClassInfo>> = obj_types
+        .iter()
+        .filter_map(|rt| rt.class_info.as_ref())
+        .collect();
+    // Inside a trait, a property neither the trait nor what its users are
+    // all guaranteed to be declares is what each user declares on its own.
+    let hosts = if is_call {
+        Vec::new()
+    } else {
+        crate::type_engine::trait_context::trait_hosts_declaring_property(
+            ctx.current_class,
+            owners.iter().map(|cls| cls.as_ref()),
+            member_name,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+            ctx.file.backend,
+        )
+    };
+    owners.extend(&hosts);
     let mut member_results: Vec<ResolvedType> = Vec::new();
-    for rt in obj_types {
-        let Some(ref cls) = rt.class_info else {
-            continue;
-        };
+    for cls in owners {
         let type_hint = if is_call {
             crate::inheritance::resolve_method_return_type(cls, member_name, ctx.file.class_loader)
         } else {

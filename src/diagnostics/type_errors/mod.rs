@@ -14,6 +14,8 @@
 mod arguments;
 mod enum_from;
 
+pub(crate) use arguments::{PassedArgument, PassedCall};
+
 use mago_syntax::cst::Program;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::literal::Literal;

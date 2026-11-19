@@ -3,5 +3,5 @@
 // Ported from PHPStan's Doctrine extension, QueryBuilderDqlFirstClassCallableTest::testFirstClassCallableInMatchArm.
 // project: phpstan_doctrine
 // file: rules/Doctrine/ORM/data/query-builder-first-class-callable.php
-// codes: unknown_class, unknown_entity_field
+// codes: unknown_class, invalid_doctrine_field
 ---

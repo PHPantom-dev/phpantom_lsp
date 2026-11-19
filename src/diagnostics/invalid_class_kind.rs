@@ -264,6 +264,16 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<VariableInstant
     }
 }
 
+/// The word a message names a class-like of `kind` with, mid-sentence.
+fn kind_word(kind: ClassLikeKind) -> &'static str {
+    match kind {
+        ClassLikeKind::Class => "class",
+        ClassLikeKind::Interface => "interface",
+        ClassLikeKind::Trait => "trait",
+        ClassLikeKind::Enum => "enum",
+    }
+}
+
 /// Check whether a class's kind is valid for the given context.
 ///
 /// Returns `Some((severity, message))` when the kind is invalid, or
@@ -275,142 +285,80 @@ fn check_kind_in_context(
     class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<(DiagnosticSeverity, String)> {
     let kind = class.kind;
+    let fqn = fqn.trim_start_matches('\\');
+    let error = |message: String| Some((DiagnosticSeverity::Error, message));
+    let warning = |message: String| Some((DiagnosticSeverity::Warning, message));
 
     match ctx {
         ClassRefContext::New => {
             // Cannot instantiate abstract classes, interfaces, traits, or enums.
             match kind {
-                ClassLikeKind::Interface => Some((
-                    DiagnosticSeverity::Error,
-                    format!("Cannot instantiate interface '{}'", fqn),
-                )),
-                ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::Error,
-                    format!("Cannot instantiate trait '{}'", fqn),
-                )),
-                ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::Error,
-                    format!("Cannot instantiate enum '{}'", fqn),
-                )),
-                ClassLikeKind::Class if class.is_abstract => Some((
-                    DiagnosticSeverity::Error,
-                    format!("Cannot instantiate abstract class '{}'", fqn),
-                )),
+                ClassLikeKind::Interface => error(format!("Cannot instantiate interface {fqn}")),
+                ClassLikeKind::Trait => error(format!("Cannot instantiate trait {fqn}")),
+                ClassLikeKind::Enum => error(format!("Cannot instantiate enum {fqn}")),
+                ClassLikeKind::Class if class.is_abstract => {
+                    error(format!("Cannot instantiate abstract class {fqn}"))
+                }
                 _ => None,
             }
         }
         ClassRefContext::ExtendsClass => {
             // `class A extends X` — X must be a non-final class.
             match kind {
-                ClassLikeKind::Interface => Some((
-                    DiagnosticSeverity::Error,
-                    format!(
-                        "'{}' is an interface and cannot be used in 'extends' for a class (use 'implements' instead)",
-                        fqn
-                    ),
+                ClassLikeKind::Interface => error(format!(
+                    "Cannot extend interface {fqn}; use implements instead"
                 )),
-                ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::Error,
-                    format!(
-                        "'{}' is a trait and cannot be used in 'extends' (use 'use' inside the class body instead)",
-                        fqn
-                    ),
+                ClassLikeKind::Trait => error(format!(
+                    "Cannot extend trait {fqn}; use it inside the class body instead"
                 )),
-                ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::Error,
-                    format!("'{}' is an enum and cannot be extended", fqn),
-                )),
-                ClassLikeKind::Class if class.is_final => Some((
-                    DiagnosticSeverity::Error,
-                    format!("Cannot extend final class '{}'", fqn),
-                )),
+                ClassLikeKind::Enum => error(format!("Cannot extend enum {fqn}")),
+                ClassLikeKind::Class if class.is_final => {
+                    error(format!("Cannot extend final class {fqn}"))
+                }
                 _ => None,
             }
         }
         ClassRefContext::ExtendsInterface => {
             // `interface A extends X` — X must be an interface.
             match kind {
-                ClassLikeKind::Class => Some((
-                    DiagnosticSeverity::Error,
-                    format!(
-                        "'{}' is a class, but interfaces can only extend other interfaces",
-                        fqn
-                    ),
+                ClassLikeKind::Interface => None,
+                _ => error(format!(
+                    "An interface cannot extend {} {fqn}",
+                    kind_word(kind)
                 )),
-                ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::Error,
-                    format!(
-                        "'{}' is a trait, but interfaces can only extend other interfaces",
-                        fqn
-                    ),
-                )),
-                ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::Error,
-                    format!(
-                        "'{}' is an enum, but interfaces can only extend other interfaces",
-                        fqn
-                    ),
-                )),
-                _ => None,
             }
         }
         ClassRefContext::Implements => {
             // `class A implements X` / `enum A implements X` — X must be an interface.
             match kind {
-                ClassLikeKind::Class => Some((
-                    DiagnosticSeverity::Error,
-                    format!(
-                        "'{}' is a class, not an interface (use 'extends' to inherit from a class)",
-                        fqn
-                    ),
+                ClassLikeKind::Class => {
+                    error(format!("Cannot implement class {fqn}; use extends instead"))
+                }
+                ClassLikeKind::Trait => error(format!(
+                    "Cannot implement trait {fqn}; use it inside the class body instead"
                 )),
-                ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::Error,
-                    format!(
-                        "'{}' is a trait, not an interface (use 'use' inside the class body for traits)",
-                        fqn
-                    ),
-                )),
-                ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::Error,
-                    format!("'{}' is an enum, not an interface", fqn),
-                )),
+                ClassLikeKind::Enum => error(format!("Cannot implement enum {fqn}")),
                 _ => None,
             }
         }
         ClassRefContext::TraitUse => {
             // `class A { use X; }` — X must be a trait.
             match kind {
-                ClassLikeKind::Class => Some((
-                    DiagnosticSeverity::Error,
-                    format!(
-                        "'{}' is a class, not a trait (use 'extends' to inherit from a class)",
-                        fqn
-                    ),
+                ClassLikeKind::Class => error(format!(
+                    "Cannot use class {fqn} as a trait; use extends instead"
                 )),
-                ClassLikeKind::Interface => Some((
-                    DiagnosticSeverity::Error,
-                    format!(
-                        "'{}' is an interface, not a trait (use 'implements' for interfaces)",
-                        fqn
-                    ),
+                ClassLikeKind::Interface => error(format!(
+                    "Cannot use interface {fqn} as a trait; use implements instead"
                 )),
-                ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::Error,
-                    format!("'{}' is an enum, not a trait", fqn),
-                )),
+                ClassLikeKind::Enum => error(format!("Cannot use enum {fqn} as a trait")),
                 _ => None,
             }
         }
         ClassRefContext::Instanceof => {
             // `$x instanceof X` — traits always evaluate to false.
             if kind == ClassLikeKind::Trait {
-                Some((
-                    DiagnosticSeverity::Warning,
-                    format!(
-                        "'instanceof' with trait '{}' always evaluates to false",
-                        fqn
-                    ),
+                warning(format!(
+                    "No value is an instance of trait {fqn}, so this is always false"
                 ))
             } else {
                 None
@@ -419,25 +367,17 @@ fn check_kind_in_context(
         ClassRefContext::Catch => {
             // `catch (X $e)` — traits can never catch, non-Throwable is an error.
             match kind {
-                ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::Warning,
-                    format!("Trait '{}' in catch block will never catch anything", fqn),
+                ClassLikeKind::Trait => warning(format!(
+                    "No value is an instance of trait {fqn}, so this never catches anything"
                 )),
-                ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::Error,
-                    format!(
-                        "Enum '{}' cannot be caught (only classes and interfaces that implement Throwable can be caught)",
-                        fqn
-                    ),
+                ClassLikeKind::Enum => error(format!(
+                    "Cannot catch enum {fqn}, because it does not implement Throwable"
                 )),
                 ClassLikeKind::Class | ClassLikeKind::Interface => {
                     if !is_throwable(class, class_loader) {
-                        Some((
-                            DiagnosticSeverity::Error,
-                            format!(
-                                "'{}' does not implement Throwable and cannot be caught",
-                                fqn
-                            ),
+                        error(format!(
+                            "Cannot catch {} {fqn}, because it does not implement Throwable",
+                            kind_word(kind)
                         ))
                     } else {
                         None
@@ -448,12 +388,8 @@ fn check_kind_in_context(
         ClassRefContext::TypeHint => {
             // Traits in type-hint positions — type check always fails.
             if kind == ClassLikeKind::Trait {
-                Some((
-                    DiagnosticSeverity::Warning,
-                    format!(
-                        "Trait '{}' used as a type hint will always fail type checking",
-                        fqn
-                    ),
+                warning(format!(
+                    "No value is an instance of trait {fqn}, so this type never matches"
                 ))
             } else {
                 None

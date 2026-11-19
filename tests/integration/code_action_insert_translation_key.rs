@@ -11,7 +11,7 @@ fn translation_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
-    diagnostics.into_iter().filter(|diagnostic| matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_trans")).collect()
+    diagnostics.into_iter().filter(|diagnostic| matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_translation")).collect()
 }
 
 fn actions(

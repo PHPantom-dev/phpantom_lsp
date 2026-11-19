@@ -114,7 +114,7 @@ pub(crate) struct WorkspaceEnv {
     /// `client_indexing` is.
     pub(crate) client_stubs: Arc<RwLock<config::ClientStubOptions>>,
     /// The inlay hint toggles the editor forwarded, beside the
-    /// `[inlay_hints]` section of `config`. Shared by `Arc` for the same
+    /// `[inlay-hints]` section of `config`. Shared by `Arc` for the same
     /// reason `client_indexing` is.
     pub(crate) client_inlay_hints: Arc<RwLock<config::ClientInlayHintOptions>>,
     /// Directory symlinks the workspace walks have indexed through.

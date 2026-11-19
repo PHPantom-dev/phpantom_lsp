@@ -104,25 +104,29 @@ impl Backend {
                 "Class"
             };
 
-            let message = if missing.len() == 1 {
-                let m = &missing[0];
-                let source = method_source_description(&class_info, &m.name, class_loader);
+            let method_list: Vec<String> = missing
+                .iter()
+                .map(
+                    |m| match method_source(&class_info, &m.name, class_loader) {
+                        Some(source) => {
+                            format!("{}::{}()", source.trim_start_matches('\\'), m.name)
+                        }
+                        None => format!("{}()", m.name),
+                    },
+                )
+                .collect();
+            let message = if let [method] = &method_list[..] {
                 format!(
-                    "{} '{}' must implement method '{}()' from {}",
-                    kind_label, class_info.name, m.name, source
+                    "{} {} must implement method {}",
+                    kind_label,
+                    class_info.fqn(),
+                    method
                 )
             } else {
-                let method_list: Vec<String> = missing
-                    .iter()
-                    .map(|m| {
-                        let source = method_source_description(&class_info, &m.name, class_loader);
-                        format!("'{}()' from {}", m.name, source)
-                    })
-                    .collect();
                 format!(
-                    "{} '{}' must implement {} methods: {}",
+                    "{} {} must implement {} methods: {}",
                     kind_label,
-                    class_info.name,
+                    class_info.fqn(),
                     missing.len(),
                     method_list.join(", ")
                 )
@@ -138,14 +142,14 @@ impl Backend {
     }
 }
 
-/// Describe where a missing method was required from: the interface,
-/// parent class, or trait the class names directly that leads to the
+/// Where a missing method was required from: the interface, parent
+/// class, or trait the class names directly that leads to the
 /// declaration.
-fn method_source_description(
-    class: &crate::types::ClassInfo,
+fn method_source<'a>(
+    class: &'a crate::types::ClassInfo,
     method_name: &str,
     class_loader: &ResolvedClassLoader<'_>,
-) -> String {
+) -> Option<&'a str> {
     use crate::inheritance::{ancestors, find_declaring_ancestor, find_declaring_trait};
 
     let declares = |c: &crate::types::ClassInfo| c.has_method(method_name);
@@ -159,7 +163,7 @@ fn method_source_description(
             && (declares(&iface)
                 || find_declaring_ancestor(&iface, class_loader, &declares).is_some())
         {
-            return format!("interface '{}'", iface_name);
+            return Some(iface_name);
         }
     }
 
@@ -172,21 +176,20 @@ fn method_source_description(
                     .is_some()
         })
     {
-        return format!("class '{}'", parent_name);
+        return Some(parent_name);
     }
 
     // Check used traits for abstract methods.
-    for trait_name in &class.used_traits {
-        if find_declaring_trait(
-            std::slice::from_ref(trait_name),
-            class_loader,
-            &declares_abstract,
-        )
-        .is_some()
-        {
-            return format!("trait '{}'", trait_name);
-        }
-    }
-
-    "its hierarchy".to_string()
+    class
+        .used_traits
+        .iter()
+        .find(|&trait_name| {
+            find_declaring_trait(
+                std::slice::from_ref(trait_name),
+                class_loader,
+                &declares_abstract,
+            )
+            .is_some()
+        })
+        .map(|v| v as _)
 }

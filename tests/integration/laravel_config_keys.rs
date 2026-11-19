@@ -129,8 +129,8 @@ async fn an_unknown_key_in_an_application_is_reported() {
     assert_eq!(
         messages,
         vec![
-            "Unknown config key: 'acme.gateway.key'".to_string(),
-            "Unknown config key: 'app.tzimezone'".to_string(),
+            "Unknown config key 'acme.gateway.key'".to_string(),
+            "Unknown config key 'app.tzimezone'".to_string(),
         ],
         "a key under an undeclared root and a typo are both unknown, a written key is not"
     );
@@ -165,7 +165,7 @@ async fn a_provider_namespace_whose_file_is_missing_is_unjudgeable() {
 
     assert_eq!(
         messages,
-        vec!["Unknown config key: 'app.tzimezone'".to_string()],
+        vec!["Unknown config key 'app.tzimezone'".to_string()],
     );
 }
 
@@ -189,7 +189,7 @@ async fn a_provider_namespace_named_at_runtime_leaves_unknown_roots_alone() {
 
     assert_eq!(
         messages,
-        vec!["Unknown config key: 'app.tzimezone'".to_string()],
+        vec!["Unknown config key 'app.tzimezone'".to_string()],
     );
 }
 
@@ -204,7 +204,7 @@ async fn a_key_written_at_runtime_is_a_declaration() {
         "only the disk nothing configures is unknown, got: {messages:?}"
     );
     assert!(
-        messages[0].contains("storage disk: 'nowhere'"),
+        messages[0].contains("storage disk 'nowhere'"),
         "the flagged key should be the unconfigured disk, got: {}",
         messages[0]
     );

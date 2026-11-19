@@ -29,7 +29,7 @@ use crate::php_type::PhpType;
 use super::helpers::make_diagnostic;
 
 /// A declaration the layout above it does not accept.
-const COVARIANCE_CODE: &str = "blade_signature_widens_layout";
+const COVARIANCE_CODE: &str = "incompatible_blade_signature";
 /// A second `@bladestan-signature` block in one template.
 const DUPLICATE_CODE: &str = "duplicate_blade_signature";
 
@@ -121,7 +121,9 @@ impl Backend {
                 DiagnosticSeverity::Error,
                 COVARIANCE_CODE,
                 format!(
-                    "Layout '{layout}' declares ${name} as {inherited}, which {declared} does not satisfy: a template may narrow its layout's declaration, never widen it",
+                    "Layout '{layout}' declares ${name} as {}, which {} does not narrow",
+                    super::helpers::shown_type(&inherited),
+                    super::helpers::shown_type(&declared),
                 ),
             ));
         }

@@ -61,7 +61,7 @@ impl Backend {
     /// every completion, hover, go-to-definition, code-action and
     /// diagnostic request against it.
     pub(crate) fn analysable_content(&self, uri: &str) -> Option<Arc<String>> {
-        self.blade_virtual_php_arc(uri)
+        self.template_virtual_php_arc(uri)
             .or_else(|| self.get_file_content_arc(uri))
     }
 
@@ -72,8 +72,8 @@ impl Backend {
         uri: &str,
         position: Position,
     ) -> Option<(Arc<String>, Position)> {
-        match self.blade_virtual_php_arc(uri) {
-            Some(virtual_php) => Some((virtual_php, self.translate_blade_to_php(uri, position))),
+        match self.template_virtual_php_arc(uri) {
+            Some(virtual_php) => Some((virtual_php, self.translate_template_to_php(uri, position))),
             None => Some((self.get_file_content_arc(uri)?, position)),
         }
     }
@@ -85,7 +85,7 @@ impl Backend {
         uri: &str,
         content: &'a str,
     ) -> AnalysableContent<'a> {
-        match self.blade_virtual_php_arc(uri) {
+        match self.template_virtual_php_arc(uri) {
             Some(virtual_php) => AnalysableContent::Shared(virtual_php),
             None => AnalysableContent::Borrowed(content),
         }

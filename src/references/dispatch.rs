@@ -97,6 +97,17 @@ impl Backend {
             );
             let mut locations =
                 self.dispatch_symbol_references(sym, uri, content, include_declaration, mode);
+            // An event string and the constant that holds it are one event.
+            if mode == ReferenceSearchMode::References {
+                self.link_event_references(
+                    sym,
+                    uri,
+                    content,
+                    position,
+                    include_declaration,
+                    &mut locations,
+                );
+            }
             // A YAML/XML occurrence of a class or namespace is a reference
             // the user can be shown, but not one a PHP-shaped edit can be
             // written over: its text may be the escaped `App\\Handler` form
@@ -126,6 +137,18 @@ impl Backend {
             if !locations.is_empty() {
                 return Some(locations);
             }
+        }
+
+        if mode == ReferenceSearchMode::References
+            && let Some(mut locations) = self.event_constant_initializer_references(
+                uri,
+                content,
+                position,
+                include_declaration,
+            )
+        {
+            sort_locations_for_references(&mut locations);
+            return Some(locations);
         }
 
         if self.resolved_class_cache.read().laravel().is_enabled()
@@ -175,7 +198,7 @@ impl Backend {
     }
 
     /// Dispatch a symbol-map hit to the appropriate reference finder.
-    fn dispatch_symbol_references(
+    pub(super) fn dispatch_symbol_references(
         &self,
         span: &SymbolSpan,
         uri: &str,
@@ -228,12 +251,17 @@ impl Backend {
                 }
                 self.find_variable_references(uri, content, name, span_start, include_declaration)
             }
-            SymbolKind::ClassReference { name, is_fqn, .. } => {
-                let ctx = self.file_context(uri);
-                let fqn = if *is_fqn {
-                    name.to_string()
-                } else {
-                    ctx.resolve_name_at(name, span_start)
+            SymbolKind::ClassReference {
+                name,
+                is_fqn,
+                context,
+            } => {
+                let discovered =
+                    self.drupal_annotation_class_at(uri, name, *is_fqn, *context, span_start);
+                let fqn = match discovered {
+                    Some(fqn) => fqn,
+                    None if *is_fqn => name.to_string(),
+                    None => self.file_context(uri).resolve_name_at(name, span_start),
                 };
                 self.find_class_references(&fqn, include_declaration)
             }
@@ -269,13 +297,19 @@ impl Backend {
                 // the name-only search an unresolved receiver falls back to
                 // would match every method of that name.  Likewise an
                 // attribute's named-argument label whose parameter the
-                // constructor does not promote names no property.
+                // constructor does not promote names no property, and a
+                // field helper's string given something other than a form
+                // model names none either, nor does a form callback's
+                // `'::method'` outside a form.
                 if hierarchy.is_none()
                     && matches!(
                         docblock_ref,
                         DocblockMemberRef::MockedMethod
                             | DocblockMemberRef::AttributeNamedArg
                             | DocblockMemberRef::EntityField
+                            | DocblockMemberRef::YiiAttribute
+                            | DocblockMemberRef::YiiProperty { form_model: true }
+                            | DocblockMemberRef::FormCallback
                     )
                 {
                     return Vec::new();

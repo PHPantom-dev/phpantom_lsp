@@ -208,7 +208,7 @@ impl Backend {
     /// when the registered directive set actually moved, so the pass cannot
     /// repeat itself: the second scan publishes the same set.
     fn reparse_blade_templates(&self) {
-        let uris = self.lowered_template_uris();
+        let uris = self.lowered_blade_uris();
         for uri in uris {
             if let Some(content) = self.get_file_content(&uri) {
                 self.update_ast(&uri, &content);

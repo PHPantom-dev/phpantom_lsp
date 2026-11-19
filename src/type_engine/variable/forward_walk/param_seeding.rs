@@ -94,9 +94,19 @@ pub(crate) fn seed_params<'b>(
     // While a body is being read for its return type, the call site that
     // asked has already resolved the arguments; a parameter they decide
     // more precisely than the signature seeds from them instead.
-    let call_args = method_name.and_then(|name| {
-        crate::type_engine::call_resolution::call_site_param_types(&ctx.current_class.fqn(), name)
-    });
+    let call_args = method_name
+        .and_then(|name| {
+            crate::type_engine::call_resolution::call_site_param_types(
+                &ctx.current_class.fqn(),
+                name,
+            )
+        })
+        .or_else(|| {
+            crate::type_engine::call_resolution::declaration_param_types(
+                ctx.file.uri,
+                method_span_start,
+            )
+        });
 
     let trait_prototype = trait_prototype_method(method_name, ctx);
     // The parameters Drupal upcasts to an entity before a controller runs,

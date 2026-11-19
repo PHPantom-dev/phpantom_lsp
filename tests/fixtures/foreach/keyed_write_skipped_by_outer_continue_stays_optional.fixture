@@ -1,0 +1,19 @@
+// test: a continue from a nested loop that skips the outer write keeps the keys optional
+// feature: hover
+// expect: $labels = array{1?: 0, 2?: 0, 3?: 0}
+---
+<?php
+
+/** @param list<int> $edges */
+function labels(array $edges): void {
+    $labels = [];
+    foreach ([1, 2, 3] as $node) {
+        foreach ($edges as $edge) {
+            if ($edge === $node) {
+                continue 2;
+            }
+        }
+        $labels[$node] = 0;
+    }
+    $<>labels;
+}

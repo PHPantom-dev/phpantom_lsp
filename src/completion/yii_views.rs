@@ -13,19 +13,22 @@ use std::path::Path;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp_server::gen_lsp_types::{CompletionResponse, Position};
+use tower_lsp_server::gen_lsp_types::{
+    CompletionItem, CompletionItemTextEdit, CompletionResponse, Position, Range, TextEdit,
+};
 
 use crate::Backend;
 use crate::completion::eloquent_string::detect_string_call_context;
 use crate::completion::laravel_string_keys::{string_key_item_kind, string_key_response};
 use crate::completion::source::code_context::CodeContext;
 use crate::symbol_map::{ReceiverClass, StringKeyKind};
-use crate::text_position::position_to_offset;
+use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{AccessKind, FileContext};
-use crate::yii::views::{is_view_render_method, view_candidates};
+use crate::yii::views::{is_layout_method, is_view_render_method, view_candidates};
 
 impl Backend {
-    /// Complete the view a render call's string is being typed as.
+    /// Complete the view a render call's or a `withLayout()`'s string is
+    /// being typed as.
     pub(crate) fn try_yii_view_completion(
         &self,
         uri: &str,
@@ -43,7 +46,12 @@ impl Backend {
             return None;
         }
         let method = content.get(paren.callee_name_start?..paren.code_before)?;
-        if !is_view_render_method(method) {
+        let is_layout = is_layout_method(method);
+        if !is_layout && !is_view_render_method(method) {
+            return None;
+        }
+        // Only the renderer resolves an alias, and only in a layout.
+        if !is_layout && typed.starts_with('@') {
             return None;
         }
         let file = crate::util::uri_to_path(uri)?;
@@ -54,7 +62,11 @@ impl Backend {
             if !self.is_yii_view_receiver(content, cursor, code, ctx) {
                 return None;
             }
-            view_base_at(content, dir, quote as u32, ctx)?
+            if is_layout && typed.starts_with('@') {
+                String::new()
+            } else {
+                view_base_at(content, dir, quote as u32, ctx, is_layout)?
+            }
         } else if is_dir_concatenation(between) && typed.starts_with('/') {
             dir.to_string_lossy().into_owned()
         } else {
@@ -69,6 +81,90 @@ impl Backend {
             literal_start,
             position,
         )
+    }
+
+    /// Complete a key of the parameters a render call passes its view, from
+    /// the `@var` block the template opens with.
+    ///
+    /// The view is read from the call's first argument the way
+    /// [`Self::try_yii_view_completion`] reads one being typed: a name the
+    /// receiver's type confirms, or a path built from `__DIR__`.
+    pub(crate) fn try_yii_view_parameter_completion(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        code: &CodeContext<'_>,
+        ctx: &FileContext,
+    ) -> Option<CompletionResponse> {
+        let cursor = position_to_offset(content, position) as usize;
+        let (quote, _) = code.open_string?;
+        if !matches!(code.last_code_byte(), Some(b'[' | b',')) {
+            return None;
+        }
+        let (bracket, _) = code.nested_pair(b'[', b'(')?;
+        let paren = code.enclosing_paren()?;
+        if paren.commas != 1 || paren.callee_operator.is_none_or(|op| op.is_static) {
+            return None;
+        }
+        let method = content.get(paren.callee_name_start?..paren.code_before)?;
+        if !is_view_render_method(method) {
+            return None;
+        }
+        let file = crate::util::uri_to_path(uri)?;
+        let dir = file.parent()?;
+        let dir_text = dir.to_string_lossy();
+        let first = content.get(paren.offset + 1..bracket)?.trim();
+        let first = first.strip_suffix(',')?.trim_end();
+        let view = if let Some(path) = first
+            .strip_prefix("__DIR__")
+            .and_then(|rest| rest.trim_start().strip_prefix('.'))
+        {
+            let path = plain_string_literal(path.trim_start())?;
+            if !path.starts_with('/') {
+                return None;
+            }
+            crate::yii::views::normalize_view_path(&format!("{dir_text}{path}"))
+        } else {
+            let name = plain_string_literal(first)?;
+            if !self.is_yii_view_receiver(content, cursor, code, ctx) {
+                return None;
+            }
+            let name_quote =
+                paren.offset + 1 + content.get(paren.offset + 1..)?.find(['\'', '"'])?;
+            let base = view_base_at(content, dir, name_quote as u32, ctx, false)?;
+            let current = (base == dir_text).then_some(dir_text.as_ref());
+            crate::yii::views::view_key(name, Some(&base), current)?
+        };
+
+        let prefix = content.get(quote + 1..cursor)?.as_bytes();
+        let edit_range = Range {
+            start: offset_to_position(content, quote + 1),
+            end: position,
+        };
+        let items: Vec<CompletionItem> = self
+            .yii_view_parameter_names(&view)
+            .into_iter()
+            .filter(|(name, _)| {
+                name.as_bytes()
+                    .get(..prefix.len())
+                    .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+            })
+            .enumerate()
+            .map(|(index, (name, ty))| CompletionItem {
+                label: name.clone(),
+                kind: Some(string_key_item_kind(&StringKeyKind::YiiViewParameter)),
+                detail: Some(ty),
+                sort_text: Some(format!("{index:05}")),
+                filter_text: Some(name.clone()),
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
+                    range: edit_range,
+                    new_text: name,
+                })),
+                ..Default::default()
+            })
+            .collect();
+        (!items.is_empty()).then_some(CompletionResponse::CompletionItemList(items))
     }
 
     /// Whether the receiver of the call the cursor's string is the first
@@ -101,6 +197,14 @@ impl Backend {
     }
 }
 
+/// The contents of `text` when it is one string literal with nothing to
+/// interpolate or unescape.
+fn plain_string_literal(text: &str) -> Option<&str> {
+    let quote = text.chars().next().filter(|c| *c == '\'' || *c == '"')?;
+    let inner = text.strip_prefix(quote)?.strip_suffix(quote)?;
+    (!inner.contains([quote, '\\', '$'])).then_some(inner)
+}
+
 /// Whether the code between a call's `(` and the string is `__DIR__ .`.
 fn is_dir_concatenation(between: &str) -> bool {
     between
@@ -110,8 +214,15 @@ fn is_dir_concatenation(between: &str) -> bool {
 
 /// The view path a name passed at `quote` is relative to: the one the
 /// call's own receiver chain or the class around it gives its renderer, or
-/// outside a class, the template's own directory.
-fn view_base_at(content: &str, dir: &Path, quote: u32, ctx: &FileContext) -> Option<String> {
+/// outside a class, the template's own directory, which a layout is never
+/// relative to.
+fn view_base_at(
+    content: &str,
+    dir: &Path,
+    quote: u32,
+    ctx: &FileContext,
+    is_layout: bool,
+) -> Option<String> {
     crate::parser::with_parsed_program(content, "yii_view_completion", |program, content| {
         let mut found = ViewBaseFinder::default();
         let finder = ViewBaseWalker { quote };
@@ -119,7 +230,7 @@ fn view_base_at(content: &str, dir: &Path, quote: u32, ctx: &FileContext) -> Opt
             mago_syntax::walker::Walker::walk_statement(&finder, statement, &mut found);
         }
         let Some(class) = found.class else {
-            return Some(dir.to_string_lossy().into_owned());
+            return (!is_layout).then(|| dir.to_string_lossy().into_owned());
         };
         let class_fqn = {
             let short = crate::atom::bytes_to_str(class.name.value);

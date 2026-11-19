@@ -74,7 +74,9 @@ use crate::parser::with_parsed_program;
 use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, PhpVersion};
 
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
-use super::uninitialized_properties::{ClassBody, UNINITIALIZED_PROPERTY_CODE, class_bodies};
+use super::uninitialized_properties::{ClassBody, class_bodies};
+
+pub(crate) const UNINITIALIZED_PROPERTY_READ_CODE: &str = "uninitialized_property_read";
 
 /// A read of a property of an object created with `new`, before anything
 /// wrote the property.
@@ -900,7 +902,7 @@ impl Backend {
             out.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::Warning,
-                UNINITIALIZED_PROPERTY_CODE,
+                UNINITIALIZED_PROPERTY_READ_CODE,
                 format!(
                     "Property {}::${} is read before it is initialized",
                     read.class, read.property

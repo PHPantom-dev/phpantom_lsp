@@ -135,6 +135,9 @@ const THIRD_PARTY_ASSERT_IF_TRUE: &[(&str, &str, &str)] = &[(
 /// confined to the embedded stubs: this one has to reach vendor code, so
 /// it does nothing at all for a class whose FQN is not in the list.
 pub fn apply_third_party_class_patches(class: &mut ClassInfo) {
+    if super::active_record::patch(class) {
+        return;
+    }
     let fqn = class.fqn();
     if let Some(methods) = super::mockery::mock_methods_of(fqn.as_str()) {
         for idx in 0..class.methods.len() {
@@ -706,12 +709,12 @@ fn patch_method_return_type(class: &mut ClassInfo, method_name: &str, return_typ
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Index of the method named exactly `name`.
-fn method_index(class: &ClassInfo, name: &str) -> Option<usize> {
+pub(super) fn method_index(class: &ClassInfo, name: &str) -> Option<usize> {
     class.methods.iter().position(|m| m.name.as_str() == name)
 }
 
 /// Replace the method at `idx` with a copy `f` has mutated.
-fn update_method_at(
+pub(super) fn update_method_at(
     class: &mut ClassInfo,
     idx: usize,
     f: impl FnOnce(&mut crate::types::MethodInfo),
@@ -757,7 +760,7 @@ fn add_iterator_templates(class: &mut ClassInfo) {
 ///
 /// Each entry is `(param_name, optional_bound)`.  The bound, if present,
 /// is parsed into a `PhpType` and stored in `template_param_bounds`.
-fn add_templates(class: &mut ClassInfo, templates: &[(&str, Option<&str>)]) {
+pub(super) fn add_templates(class: &mut ClassInfo, templates: &[(&str, Option<&str>)]) {
     for &(name, bound) in templates {
         let param = atom(name);
         if !class.template_params.contains(&param) {

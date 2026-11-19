@@ -14,4 +14,6 @@ return [
     '@vendor' => '@root/vendor',
     // The demo's own alias. PostController renders its templates from it.
     '@views' => '@root/resources/views',
+    // The message files config/common/di/translator.php reads.
+    '@messages' => '@root/resources/messages',
 ];

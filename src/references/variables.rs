@@ -86,6 +86,11 @@ impl Backend {
         // can see the variable (via explicit `use` or implicit arrow
         // capture) without being shadowed.
         let mut reachable_scopes = Self::collect_capture_scopes(&symbol_map, var_name, scope_start);
+        for scope in
+            self.tempest_route_parameter_scopes(&symbol_map, content, var_name, scope_start)
+        {
+            reachable_scopes.extend(Self::collect_capture_scopes(&symbol_map, var_name, scope));
+        }
         // `global $var` binds a function's `$var` to the file's top-level
         // `$var`, so the program scope and every scope that declares the
         // global are one variable.
@@ -158,6 +163,7 @@ impl Backend {
             }
         }
 
+        self.extend_tempest_route_parameter_references(uri, var_name, scope_start, &mut locations);
         sort_locations_for_references(&mut locations);
 
         locations

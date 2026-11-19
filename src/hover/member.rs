@@ -388,6 +388,24 @@ impl Backend {
                     &resolved_class_loader,
                 )
             }),
+            DocblockMemberRef::YiiAttribute => {
+                candidates.retain(|class| {
+                    crate::yii::active_record::is_record(class, &resolved_class_loader)
+                });
+                if let Some(detail) = candidates.iter().find_map(|record| {
+                    self.yii_column_detail(record, member_name, &resolved_class_loader)
+                }) {
+                    return Some(super::formatting::make_hover(detail));
+                }
+            }
+            DocblockMemberRef::YiiProperty { form_model: true } => {
+                candidates =
+                    crate::yii::forms::form_model_classes(candidates, &resolved_class_loader);
+            }
+            DocblockMemberRef::FormCallback => {
+                candidates =
+                    crate::drupal::forms::form_callback_classes(candidates, &resolved_class_loader);
+            }
             _ => {}
         }
 

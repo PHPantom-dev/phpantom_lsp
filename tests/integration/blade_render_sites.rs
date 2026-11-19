@@ -146,7 +146,7 @@ mod tests {
         diags
             .into_iter()
             .filter_map(|d| match &d.code {
-                Some(Code::String(code)) if code.ends_with("_view_variable") => {
+                Some(Code::String(code)) if code.ends_with("_blade_variable") => {
                     Some((code.clone(), message_text(&d.message).to_string()))
                 }
                 _ => None,
@@ -220,7 +220,7 @@ mod tests {
 
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(diags[0].1.contains("$title"), "got {:?}", diags[0].1);
     }
 
@@ -287,13 +287,13 @@ mod tests {
         assert!(
             diags
                 .iter()
-                .any(|(code, message)| code == "missing_view_variable"
+                .any(|(code, message)| code == "missing_blade_variable"
                     && message.contains("$heading")),
             "got {diags:?}"
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unused_view_variable" && message.contains("$title")
+                |(code, message)| code == "unused_blade_variable" && message.contains("$title")
             ),
             "got {diags:?}"
         );
@@ -367,7 +367,7 @@ mod tests {
 
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "unused_view_variable");
+        assert_eq!(diags[0].0, "unused_blade_variable");
         assert!(diags[0].1.contains("$titel"), "got {:?}", diags[0].1);
     }
 
@@ -440,14 +440,15 @@ mod tests {
         let diags = call_site_diagnostics(&backend, &dir, "app/OrderShipped.php", "php").await;
         assert_eq!(diags.len(), 2, "got {diags:?}");
         assert!(
-            diags.iter().any(
-                |(code, message)| code == "missing_view_variable" && message.contains("$title")
-            ),
+            diags
+                .iter()
+                .any(|(code, message)| code == "missing_blade_variable"
+                    && message.contains("$title")),
             "got {diags:?}"
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unused_view_variable" && message.contains("$titel")
+                |(code, message)| code == "unused_blade_variable" && message.contains("$titel")
             ),
             "the typo in with: should be reported, got {diags:?}"
         );
@@ -469,14 +470,15 @@ mod tests {
         let diags = call_site_diagnostics(&backend, &dir, "app/OrderShipped.php", "php").await;
         assert_eq!(diags.len(), 2, "got {diags:?}");
         assert!(
-            diags.iter().any(
-                |(code, message)| code == "missing_view_variable" && message.contains("$title")
-            ),
+            diags
+                .iter()
+                .any(|(code, message)| code == "missing_blade_variable"
+                    && message.contains("$title")),
             "got {diags:?}"
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unused_view_variable" && message.contains("$titel")
+                |(code, message)| code == "unused_blade_variable" && message.contains("$titel")
             ),
             "the typo in with: should be reported, got {diags:?}"
         );
@@ -597,14 +599,15 @@ mod tests {
         let diags = call_site_diagnostics(&backend, &dir, "app/OrderShipped.php", "php").await;
         assert_eq!(diags.len(), 2, "got {diags:?}");
         assert!(
-            diags.iter().any(
-                |(code, message)| code == "missing_view_variable" && message.contains("$title")
-            ),
+            diags
+                .iter()
+                .any(|(code, message)| code == "missing_blade_variable"
+                    && message.contains("$title")),
             "got {diags:?}"
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unused_view_variable" && message.contains("$titel")
+                |(code, message)| code == "unused_blade_variable" && message.contains("$titel")
             ),
             "got {diags:?}"
         );
@@ -663,7 +666,7 @@ mod tests {
 
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(diags[0].1.contains("$title"), "got {:?}", diags[0].1);
     }
 
@@ -720,7 +723,7 @@ mod tests {
 
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(diags[0].1.contains("$title"), "got {:?}", diags[0].1);
     }
 
@@ -799,14 +802,15 @@ mod tests {
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert_eq!(diags.len(), 2, "got {diags:?}");
         assert!(
-            diags.iter().any(
-                |(code, message)| code == "missing_view_variable" && message.contains("$title")
-            ),
+            diags
+                .iter()
+                .any(|(code, message)| code == "missing_blade_variable"
+                    && message.contains("$title")),
             "got {diags:?}"
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unused_view_variable" && message.contains("$titel")
+                |(code, message)| code == "unused_blade_variable" && message.contains("$titel")
             ),
             "got {diags:?}"
         );
@@ -857,13 +861,13 @@ mod tests {
         assert!(
             diags
                 .iter()
-                .any(|(code, message)| code == "missing_view_variable"
+                .any(|(code, message)| code == "missing_blade_variable"
                     && message.contains("$heading")),
             "got {diags:?}"
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unused_view_variable" && message.contains("$title")
+                |(code, message)| code == "unused_blade_variable" && message.contains("$title")
             ),
             "got {diags:?}"
         );
@@ -903,9 +907,10 @@ mod tests {
             "both conditional renders are short of $title: {diags:?}"
         );
         assert!(
-            diags.iter().all(
-                |(code, message)| code == "missing_view_variable" && message.contains("$title")
-            ),
+            diags
+                .iter()
+                .all(|(code, message)| code == "missing_blade_variable"
+                    && message.contains("$title")),
             "got {diags:?}"
         );
     }
@@ -935,7 +940,7 @@ mod tests {
 
         let diags = call_site_diagnostics(&backend, &dir, "app/Sender.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "missing_view_variable");
+        assert_eq!(diags[0].0, "missing_blade_variable");
         assert!(diags[0].1.contains("$title"), "got {:?}", diags[0].1);
     }
 
@@ -1073,7 +1078,7 @@ mod tests {
 
         let diags = call_site_diagnostics(&backend, &dir, "app/RowController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert_eq!(diags[0].0, "type_mismatch_blade_variable");
         assert!(diags[0].1.contains("$row"), "got {:?}", diags[0].1);
     }
 

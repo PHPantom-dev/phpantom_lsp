@@ -301,6 +301,14 @@ pub(crate) struct SymbolMap {
     /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
     /// register.  Empty for every file that declares none.
     pub messenger_handlers: Vec<MessengerHandlerSite>,
+    /// The event subscriptions the file's subscribers key by a class
+    /// constant, in the order each subscriber's map is read.  Empty for
+    /// every file that has none.
+    pub event_constant_keys: Vec<EventConstantKey>,
+    /// The event subscriptions whose value lists other than one listener
+    /// (`[['onEvent', 10], ['onOther']]`), by where their key starts, with
+    /// how many it lists.  Every other subscription names one.
+    pub event_listener_lists: Vec<(u32, u32)>,
     /// The Twig filters and functions the file declares, in source order.
     /// Empty for every file that declares none.
     pub twig_callables: Vec<TwigCallableSite>,
@@ -311,12 +319,26 @@ pub(crate) struct SymbolMap {
     /// parameter declarations give, sorted by `start`.  Empty for every file
     /// that declares none.
     pub container_values: Vec<ContainerValueSite>,
+    /// The services the file's declarations say decorate another, in
+    /// source order.  Empty for every file that declares none.
+    pub service_decorations: Vec<ServiceDecoration>,
     /// The entity types the file's entity classes declare, sorted by
     /// `start`.  Empty for every file that declares none.
     pub entity_types: Vec<EntityTypeSite>,
     /// The classes the file's Drupal plugin declarations are written on,
     /// sorted by `start`.  Empty for every file that declares none.
     pub drupal_plugin_classes: Vec<PluginClassSite>,
+    /// The plugin types the file's plugin managers declare.  Empty for
+    /// every file that declares none.
+    pub drupal_plugin_managers: Vec<PluginManagerSite>,
+    /// The IDs the attributes and annotations of the file's classes in a
+    /// `Drupal\` namespace give them, sorted by `start`: the plugins among
+    /// them are told apart by the plugin types (see `drupal::plugins`).
+    pub drupal_plugins: Vec<PluginDeclarationSite>,
+    /// The code the file runs only when a module is installed, by a
+    /// `moduleExists('m')` check (see [`ModuleGuard`]).  Empty for every
+    /// file that checks none.
+    pub drupal_module_guards: Vec<ModuleGuard>,
     /// The shapes of the Drupal route names the file's route builders give
     /// routes they build from parts, `*` for each part that is not
     /// written out (`search.view_*`).  Empty for every file that builds
@@ -336,12 +358,34 @@ pub(crate) struct SymbolMap {
     /// The invoking calls of the core methods that fire hooks under
     /// computed names.  Empty for every other file.
     pub drupal_computed_hooks: Vec<ComputedHookSite>,
+    /// The callbacks the file's form and render arrays name under their
+    /// callback keys, sorted by `start`.  Empty for every file that names
+    /// none.
+    pub drupal_callbacks: Vec<DrupalCallbackSite>,
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,
+    /// Method attributes whose URI argument may declare a Tempest route.
+    /// Their classes are confirmed through the `Route` interface on lookup.
+    pub tempest_routes: Box<[crate::tempest::routes::RouteAttribute]>,
+    /// Sorted argument-list starts of calls to the resolved Tempest `uri()` helper.
+    pub tempest_uri_calls: Box<[u32]>,
     /// The classes the file's Yii DI definitions bind and build, in source
     /// order.  Empty for every file that writes none.
     pub yii_definitions: Vec<YiiDefinitionSite>,
+    /// The file's Yii DI definition arrays that build a known class, in
+    /// source order.  Empty for every file that writes none.
+    pub yii_definition_bodies: Vec<YiiDefinitionBody>,
+    /// The relations the file's Yii Active Record calls name, in source
+    /// order.  Empty for every file that names none.
+    pub yii_relations: Vec<YiiRelationSite>,
+    /// The file's `yiisoft/db` query chains that name tables or columns,
+    /// each outer chain before the chains its arguments hold.  Empty for
+    /// every file that writes none.
+    pub yii_queries: Vec<YiiQuerySite>,
+    /// The table and column names those chains write, chain by chain in
+    /// the same order.
+    pub yii_query_names: Vec<YiiQueryName>,
     /// The DQL identification variables the file's queries and query
     /// builders declare, with what each stands for.  Empty for every file
     /// that declares none.
@@ -367,6 +411,10 @@ pub(crate) struct SymbolMap {
     /// class that is one, or a service tagged `twig.loader`.  Such a loader
     /// can serve any template name, so no name can be told missing.
     pub declares_twig_loader: bool,
+    /// Whether the file sets parameters every Yii view shares in a way that
+    /// cannot be read (`setParameters($parameters)`), so that any name could
+    /// be one of them.
+    pub sets_unread_yii_view_parameters: bool,
     /// The Symfony routes the file loads from elsewhere, and the ones it
     /// declares in a way that cannot be read, including every route of a
     /// kernel that loads them itself or a router configured to load them
@@ -388,6 +436,15 @@ pub(crate) struct SymbolMap {
 }
 
 impl SymbolMap {
+    /// How many listeners the event subscription whose key starts at
+    /// `start` names.
+    pub(crate) fn event_listeners_at(&self, start: u32) -> usize {
+        self.event_listener_lists
+            .iter()
+            .find(|(key, _)| *key == start)
+            .map_or(1, |(_, listeners)| *listeners as usize)
+    }
+
     /// Whether this map's offsets are valid indices into `content`.
     ///
     /// A length match means no text was inserted or removed since the map

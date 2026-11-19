@@ -14,6 +14,33 @@ use crate::types::SymbolImports;
 use crate::util::short_name;
 
 impl Backend {
+    /// Template imports remain file-wide even when lowering puts the PHP
+    /// region inside a component's isolated slot scope.
+    pub(crate) fn extract_template_use_statements<'ast, 'arena: 'ast>(
+        statements: impl Iterator<Item = &'ast Statement<'arena>>,
+        use_map: &mut HashMap<String, String>,
+        mut symbol_imports: Option<&mut SymbolImports>,
+    ) {
+        use mago_syntax::walker::Walker;
+        struct Imports;
+        impl<'ast, 'arena> Walker<'ast, 'arena, Vec<&'ast Use<'arena>>> for Imports {
+            fn walk_in_use(
+                &self,
+                statement: &'ast Use<'arena>,
+                imports: &mut Vec<&'ast Use<'arena>>,
+            ) {
+                imports.push(statement);
+            }
+        }
+        let mut imports = Vec::new();
+        for statement in statements {
+            Imports.walk_statement(statement, &mut imports);
+        }
+        for import in imports {
+            Self::extract_use_items(&import.items, use_map, symbol_imports.as_deref_mut());
+        }
+    }
+
     /// Walk statements and extract `use` statement mappings.
     ///
     /// Class imports go to `use_map`.  Function and constant imports go to

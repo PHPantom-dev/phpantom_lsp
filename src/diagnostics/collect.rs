@@ -14,7 +14,10 @@ type SlowCollectFn =
     fn(&Backend, &helpers::FileDiagnosticContext, &str, &str, &mut Vec<Diagnostic>);
 
 struct SlowCollector {
-    /// The name the `analyse` CLI attributes the collector's time to.
+    /// The name the `analyse` CLI attributes the collector's time to: a
+    /// diagnostic code the collector reports, or, when it reports several
+    /// with no one of them standing for the rest, plain words with spaces
+    /// that cannot be mistaken for a code.
     name: &'static str,
     collect: SlowCollectFn,
     /// The projects the collector runs in.
@@ -89,7 +92,7 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_discarded_result_diagnostics_with_context,
     ),
     always(
-        "void_result_used",
+        "used_void_result",
         Backend::collect_void_result_diagnostics_with_context,
     ),
     always(
@@ -122,11 +125,11 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         collect: Backend::collect_uninitialized_property_diagnostics_with_context,
         runs_in: Framework::Any,
         reads_every_body: true,
-        codes: &[],
+        codes: &[super::uninitialized_reads::UNINITIALIZED_PROPERTY_READ_CODE],
     },
     // Whether a private member is used can be decided by any method.
     SlowCollector {
-        name: "unused_private_member",
+        name: "unused private members",
         collect: Backend::collect_unused_private_member_diagnostics,
         runs_in: Framework::Any,
         reads_every_body: true,
@@ -163,7 +166,7 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_undefined_variable_diagnostics_with_context,
     ),
     always(
-        "match_type_mismatch",
+        "match arms",
         Backend::collect_match_type_diagnostics_with_context,
     ),
     always(
@@ -175,7 +178,7 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_invalid_class_kind_diagnostics_with_context,
     ),
     always(
-        "enum_error",
+        "enums",
         Backend::collect_enum_error_diagnostics_with_context,
     ),
     always(
@@ -187,11 +190,11 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_override_attribute_diagnostics_with_context,
     ),
     always(
-        "invalid_data_provider",
+        "invalid_phpunit_data_provider",
         Backend::collect_data_provider_diagnostics_with_context,
     ),
     always(
-        "missing_parent_call",
+        "missing_phpunit_parent_call",
         Backend::collect_parent_call_diagnostics_with_context,
     ),
     always(
@@ -199,46 +202,72 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_dynamic_member_name_diagnostics_with_context,
     ),
     always(
-        "unknown_form_option",
+        "invalid_symfony_form_option",
         Backend::collect_form_option_diagnostics,
     ),
-    always("dql_syntax_error", Backend::collect_dql_syntax_diagnostics),
+    always(
+        "Yii definitions",
+        Backend::collect_yii_definition_diagnostics,
+    ),
+    always(
+        "invalid_yii_event_listener",
+        |backend, _, uri, content, out| {
+            backend.collect_yii_event_listener_diagnostics(uri, content, out)
+        },
+    ),
+    always(
+        "invalid_yii_relation",
+        Backend::collect_yii_relation_diagnostics,
+    ),
+    always("Yii queries", Backend::collect_yii_query_diagnostics),
+    always(
+        "Yii view parameters",
+        Backend::collect_yii_view_parameter_diagnostics,
+    ),
+    always(
+        "invalid_dql_syntax",
+        Backend::collect_dql_syntax_diagnostics,
+    ),
     always(
         "invalid_drupal_route_parameter",
         Backend::collect_drupal_route_parameter_diagnostics,
     ),
+    always(
+        "invalid_drupal_callback",
+        Backend::collect_drupal_callback_diagnostics,
+    ),
     SlowCollector {
-        name: "invalid_string_key",
+        name: "framework string keys",
         collect: Backend::collect_invalid_laravel_string_key_diagnostics,
         runs_in: Framework::StringKeys,
         reads_every_body: false,
         codes: &[],
     },
     laravel(
-        "invalid_validation_rule",
+        "invalid_laravel_validation_rule",
         Backend::collect_validation_string_diagnostics,
     ),
     laravel(
-        "invalid_command_parameter",
+        "invalid_laravel_command_parameter",
         Backend::collect_invalid_command_param_diagnostics,
     ),
     laravel(
-        "blade_call_site",
+        "Blade call sites",
         Backend::collect_blade_call_site_diagnostics,
     ),
-    laravel("blade_signature", |backend, ctx, uri, _, out| {
+    laravel("Blade signatures", |backend, ctx, uri, _, out| {
         backend.collect_blade_signature_diagnostics(ctx, uri, out)
     }),
-    laravel("blade_directive_balance", |backend, _, uri, _, out| {
+    laravel("Blade directives", |backend, _, uri, _, out| {
         backend.collect_blade_directive_diagnostics(uri, out)
     }),
-    laravel("blade_component_tag_balance", |backend, _, uri, _, out| {
+    laravel("Blade component tags", |backend, _, uri, _, out| {
         backend.collect_blade_component_tag_diagnostics(uri, out)
     }),
-    laravel("blade_unknown_component", |backend, _, uri, _, out| {
+    laravel("Blade components", |backend, _, uri, _, out| {
         backend.collect_blade_unknown_component_diagnostics(uri, out)
     }),
-    laravel("blade_section", |backend, _, uri, _, out| {
+    laravel("Blade sections", |backend, _, uri, _, out| {
         backend.collect_blade_section_diagnostics(uri, out)
     }),
 ];
@@ -254,8 +283,8 @@ impl Backend {
     /// Returns `true` if the URI should be skipped for diagnostics: stub
     /// files (embedded or under a stub path), and resource documents (YAML,
     /// XML, and XLIFF files), which are not PHP.  A Twig template, a Symfony
-    /// validation mapping, and a Drupal file that reads library names are
-    /// resource documents too, but what they hold is judged (see
+    /// validation mapping, a Drupal file that reads library names, and a Yii
+    /// project's `composer.json` are resource documents too, but what they hold is judged (see
     /// [`Self::collect_resource_diagnostics`]).  Vendor
     /// files are
     /// not skipped here: users
@@ -271,12 +300,15 @@ impl Backend {
     }
 
     /// Whether the resource document at `uri` is one whose contents are
-    /// judged: a Twig template, a Symfony validation mapping, or a Drupal
-    /// libraries or info file.
+    /// judged: a Twig template, a Symfony validation mapping, a Drupal
+    /// libraries or info file, or a Yii project's `composer.json`.
     pub(crate) fn has_resource_diagnostics(&self, uri: &str) -> bool {
         self.is_twig_template_uri(uri)
-            || (crate::symfony::validation::is_validation_mapping_uri(uri)
-                && self.is_symfony_project())
+            || self.is_yii_config_plugin_uri(uri)
+            || (self.is_symfony_project()
+                && crate::symfony::validation::is_validation_mapping_uri(
+                    &self.symfony_config_uri(uri),
+                ))
             || self.reads_drupal_libraries(uri)
     }
 
@@ -299,6 +331,8 @@ impl Backend {
     ) {
         if self.is_twig_template_uri(uri_str) {
             self.collect_template_diagnostics(uri_str, content, out);
+        } else if self.is_yii_config_plugin_uri(uri_str) {
+            self.collect_yii_config_plugin_diagnostics(uri_str, content, out);
         } else if self.reads_drupal_libraries(uri_str) {
             let ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
             if ctx.symbol_map.matches_source(content) {
@@ -334,7 +368,7 @@ impl Backend {
     /// imports/variables, namespace/class-name mismatches, and
     /// docblock/native type-hint contradictions.  These are cheap — no type
     /// resolution.
-    pub(crate) fn collect_fast_diagnostics(
+    pub fn collect_fast_diagnostics(
         &self,
         uri_str: &str,
         content: &str,
@@ -354,6 +388,9 @@ impl Backend {
         self.collect_class_name_mismatch_diagnostics(uri_str, content, out);
         self.collect_docblock_native_mismatch_diagnostics(uri_str, content, out);
         self.collect_unreachable_code_diagnostics(uri_str, content, out);
+        if self.is_yii_config_plugin_file(uri_str) {
+            self.collect_yii_config_plugin_diagnostics(uri_str, content, out);
+        }
     }
 
     /// Collect Phase 2 (slow) diagnostics: unknown class/member/function,

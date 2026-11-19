@@ -143,14 +143,14 @@ impl UnusedMember {
 
     fn message(&self) -> String {
         let what = match self.kind {
-            MemberKind::Property => "Property",
-            MemberKind::Method => "Method",
-            MemberKind::Constant => "Constant",
+            MemberKind::Property => "property",
+            MemberKind::Method => "method",
+            MemberKind::Constant => "constant",
         };
         match self.usage {
-            Usage::Unused => format!("{what} {} is unused", self.label),
-            Usage::OnlyWritten => format!("{what} {} is never read, only written", self.label),
-            Usage::OnlyRead => format!("{what} {} is never written, only read", self.label),
+            Usage::Unused => format!("Unused {what} {}", self.label),
+            Usage::OnlyWritten => format!("Property {} is written but never read", self.label),
+            Usage::OnlyRead => format!("Property {} is read but never written", self.label),
         }
     }
 }

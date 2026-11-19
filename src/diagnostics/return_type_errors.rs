@@ -125,12 +125,12 @@ impl Backend {
                     }
                     // Bare `return;` in a non-void function — error.
                     None => format!(
-                        "Function with return type {} must not return without a value",
+                        "A function with return type {} must return a value",
                         ret.declared_type,
                     ),
                     // `return $expr;` in a void function — error.
                     Some(_) if ret.declared_type.is_void() => {
-                        "Void function must not return a value".to_string()
+                        "A void function must not return a value".to_string()
                     }
                     // `return $expr;` with a compatible type — OK.
                     Some(ty)
@@ -168,10 +168,7 @@ impl Backend {
                         return None;
                     }
                     // `return $expr;` with an incompatible type — error.
-                    Some(ty) => format!(
-                        "Return type {} is incompatible with declared return type {}",
-                        ty, ret.declared_type,
-                    ),
+                    Some(ty) => format!("Return expects {}, got {}", ret.declared_type, ty,),
                 };
                 Some(((ret.start, ret.end), message))
             },

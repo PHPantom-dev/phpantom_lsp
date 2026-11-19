@@ -434,8 +434,10 @@ pub(super) struct TimestampConfig {
 /// Extract column names from `$fillable`, `$guarded`, `$hidden`, `$visible`,
 /// and `$appends` arrays.
 ///
-/// These properties contain simple string lists of column names without
-/// type information.  The `LaravelModelProvider` uses them as a
+/// These properties contain simple string lists of attribute names without
+/// type information. `$appends` is retained for serialization completion;
+/// it does not establish a database column. The `LaravelModelProvider` uses
+/// the other lists as a
 /// last-resort fallback, synthesizing `mixed`-typed virtual properties
 /// for columns not already covered by `$casts` or `$attributes`.
 ///

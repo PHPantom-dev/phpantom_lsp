@@ -77,8 +77,8 @@
 //!   project's configured view root (or the matching package namespace's
 //!   own view directory) and open it.
 //! - **Create missing component** — when a `<x-…>` or `<livewire:…>` tag
-//!   names no component (`unknown_blade_component`,
-//!   `unknown_livewire_component`), offer the closest component names and
+//!   names no component (`invalid_blade_component`,
+//!   `invalid_livewire_component`), offer the closest component names and
 //!   to create the component: an anonymous component's template, or a
 //!   component class and its template.
 //! - **Create test** — on a class, or one of its public methods, that
@@ -151,6 +151,7 @@ mod simplify_null;
 mod sort_use_statements;
 mod update_docblock;
 mod use_line_deletion;
+mod yii_definition_keys;
 pub(crate) use use_line_deletion::{
     build_line_deletion_edit, build_use_directive_deletion_edit, range_touches_use_import,
 };

@@ -177,6 +177,10 @@ enum ProxiedResult {
     Mapped,
     /// A collection of the member's elements (`flatMap`).
     Flattened,
+    /// The member supplies a new key for the original value.
+    Keyed(PhpType),
+    /// The member supplies the key for a group of original values.
+    Grouped(PhpType),
 }
 
 /// Everything the wrapping rules need about one proxy instantiation.
@@ -191,6 +195,8 @@ struct ProxyContext<'a> {
     /// mapped value that is not a model.  Resolved once: the check walks a
     /// parent chain and the answer is the same for every member.
     collection_is_eloquent: bool,
+    /// Lazy keys are yielded directly; grouping delegates to an eager collection.
+    collection_is_lazy: bool,
     class_loader: &'a ResolvedClassLoader<'a>,
 }
 
@@ -369,11 +375,18 @@ impl<'a> ProxyContext<'a> {
                 && class_loader(Fqn::new(collection.as_str()))
                     .is_some_and(|cls| is_subtype_of(&cls, ELOQUENT_COLLECTION_FQN, class_loader));
 
+        let collection_is_lazy =
+            matches!(result, ProxiedResult::Keyed(_) | ProxiedResult::Grouped(_))
+                && class_loader(Fqn::new(&collection)).is_some_and(|class| {
+                    is_subtype_of(&class, "Illuminate\\Support\\LazyCollection", class_loader)
+                });
+
         Self {
             key,
             result,
             collection,
             collection_is_eloquent,
+            collection_is_lazy,
             class_loader,
         }
     }
@@ -400,6 +413,30 @@ impl<'a> ProxyContext<'a> {
                     self.mapped_collection(&element),
                     vec![ARRAY_KEY.clone(), element],
                 )
+            }
+            ProxiedResult::Keyed(value) | ProxiedResult::Grouped(value) => {
+                let grouped = matches!(self.result, ProxiedResult::Grouped(_));
+                let lazy = self.collection_is_lazy;
+                let member = member.cloned().unwrap_or_else(PhpType::mixed);
+                let key = super::collection_projection::collection_key_type(
+                    &member,
+                    grouped,
+                    lazy && !grouped,
+                    true,
+                    self.class_loader,
+                );
+                if grouped {
+                    super::collection_projection::grouped_collection(
+                        self.collection,
+                        PhpType::int(),
+                        value.clone(),
+                        &[key],
+                        lazy,
+                        false,
+                    )
+                } else {
+                    PhpType::generic_atom(self.collection, vec![key, value.clone()])
+                }
             }
         }
     }
@@ -439,14 +476,14 @@ fn plan_result(method: &str, key: &PhpType, value: &PhpType, collection: Atom) -
         "flatMap" => return ProxiedResult::Flattened,
 
         // The member becomes the collection's key.
-        "keyBy" => PhpType::generic_atom(collection, vec![ARRAY_KEY.clone(), value.clone()]),
+        "keyBy" => return ProxiedResult::Keyed(value.clone()),
 
         // Collections of collections.  `groupBy` is annotated `static<…,
         // static<…>>` and `Eloquent\Collection` does not override it, so the
         // outer stays on the collection it came from.  `partition` *is*
         // overridden, with an explicit `->toBase()`, so only that one drops
         // to the base collection.
-        "groupBy" => PhpType::generic_atom(collection, vec![ARRAY_KEY.clone(), same_collection()]),
+        "groupBy" => return ProxiedResult::Grouped(value.clone()),
         "partition" => PhpType::generic_atom(
             *SUPPORT_COLLECTION_FQN,
             vec![PhpType::int(), same_collection()],

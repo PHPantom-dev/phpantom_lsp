@@ -2558,6 +2558,7 @@ async fn test_use_const_shows_only_constants() {
                 file_uri: "file:///config.php".to_string(),
                 name_offset: 0,
                 value: Some("'1.0.0'".to_string()),
+                namespace: None,
             },
         );
     }
