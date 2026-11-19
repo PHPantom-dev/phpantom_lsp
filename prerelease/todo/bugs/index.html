@@ -867,6 +867,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Crashes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b744-framework-scanners-overflow-the-stack-on-a-generated-operator-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B744. Framework scanners overflow the stack on a generated operator chain
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1507,6 +1524,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Crashes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b744-framework-scanners-overflow-the-stack-on-a-generated-operator-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B744. Framework scanners overflow the stack on a generated operator chain
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1712,7 +1746,30 @@ task, or sweeps of the sample projects under <code>projects/</code>. Entries are
 grouped by the mechanism that has to change, not by the symptom that
 surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b744-framework-scanners-overflow-the-stack-on-a-generated-operator-chain">B744. Framework scanners overflow the stack on a generated operator chain<a class="headerlink" href="#b744-framework-scanners-overflow-the-stack-on-a-generated-operator-chain" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>A generated file holding one long operator chain still aborts the server
+with a stack overflow in a Laravel project:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span> <span class="k">return</span> <span class="s2">"a"</span> <span class="o">.</span> <span class="s2">"a"</span> <span class="o">.</span> <span class="s2">"a"</span> <span class="cm">/* … 20,000 operands … */</span><span class="p">;</span>
+</code></pre></div>
+<p>The core walkers (symbol map, forward walker, RHS resolver, scope
+collector, folding, selection range, code-action cursor walks) now walk a
+chain's left spine in a loop. Several framework scanners still descend
+through <code>Node::visit_children</code> by recursing once per node, which costs a
+stack frame per operator: <code>validation_strings/context.rs</code> overflows in the
+slow diagnostic pass of a Laravel project, and the same shape is in the
+other files under <code>virtual_members/laravel/</code> that recurse from inside a
+<code>visit_children</code> closure (<code>aliases.rs</code>, <code>expr_walker.rs</code>, <code>macros.rs</code>,
+<code>morph_map.rs</code>, <code>route_names/traversal.rs</code>, <code>storage.rs</code>,
+<code>typed_morph_columns.rs</code>, <code>validation_rules.rs</code>, and the rest of
+<code>validation_strings/</code>), in <code>drupal/theme_hooks.rs</code>, <code>references/events.rs</code>,
+and in the <code>convert_to_closure</code> and PHPStan <code>fix_return_type</code> code actions.</p>
+<p>Move them onto an explicit stack, the way <code>for_each_node_with_ancestors</code>
+and <code>innermost_node_at</code> in <code>parser/ast_helpers.rs</code> already walk. A shared
+pre-order helper that lets the visitor skip a node's children would cover
+most of them. Add a Laravel-enabled variant of
+<code>generated_length_operator_chains_do_not_overflow</code> in
+<code>tests/integration/crash_sandbox.rs</code> once they are moved.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="conditional-return-types">Conditional return types<a class="headerlink" href="#conditional-return-types" title="Permanent link">&para;</a></h2>
@@ -1736,22 +1793,22 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Reproduced on <code>75f27a0ba</code> and on <code>d0b36afac</code> (before #568), so the
 per-thread index reuse did not introduce it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// config/c00.php</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function configure0(ContainerBuilder $container): void {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    $container-&gt;register('app.s0', ContainerBuilder::class);</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">// config/c01.php</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">function configure1(ContainerBuilder $container): void {</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    $container-&gt;get('app.s0')-&gt;register('app.s1', ContainerBuilder::class);</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">// config/c02.php</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">function configure2(ContainerBuilder $container): void {</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    $container-&gt;get('app.s1')-&gt;register('app.s2', ContainerBuilder::class);</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">}</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">// config/c03.php</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">function configure3(ContainerBuilder $container): void {</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">    $container-&gt;get('app.s2')-&gt;register('app.s3', ContainerBuilder::class);</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// config/c00.php</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function configure0(ContainerBuilder $container): void {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    $container-&gt;register('app.s0', ContainerBuilder::class);</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">// config/c01.php</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">function configure1(ContainerBuilder $container): void {</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    $container-&gt;get('app.s0')-&gt;register('app.s1', ContainerBuilder::class);</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">}</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">// config/c02.php</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">function configure2(ContainerBuilder $container): void {</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">    $container-&gt;get('app.s1')-&gt;register('app.s2', ContainerBuilder::class);</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">}</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">// config/c03.php</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">function configure3(ContainerBuilder $container): void {</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">    $container-&gt;get('app.s2')-&gt;register('app.s3', ContainerBuilder::class);</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="x">}</span>
 </code></pre></div>
 <p>The container index ends up with <code>app.s0</code> and <code>app.s1</code> only, so
 <code>$container-&gt;get('app.s2')</code> and <code>'app.s3'</code> resolve to nothing everywhere.
