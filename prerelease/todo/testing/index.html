@@ -1468,7 +1468,9 @@ rather than shown. Add <code>examples/testing/</code>, a Composer project in the
 shape of <code>examples/symfony/</code> that installs <code>phpunit/phpunit</code>,
 <code>pestphp/pest</code>, and <code>mockery/mockery</code>, with a small library under
 <code>src/</code> and its tests under <code>tests/</code>: assertion narrowing, data
-providers and <code>@depends</code> in both annotation and attribute form,
+providers and <code>@depends</code> in both annotation and attribute form
+(including the check that a provider is public and static, with its
+quick fixes, which <code>examples/php/diagnostics.php</code> can only describe),
 coverage attributes and the lens they feed, a <code>Pest.php</code> binding a test
 case, and a Mockery mock. Put a "Try:" comment at each site and a line
 in its README. Since the tests can actually run, <code>vendor/bin/phpunit</code>
