@@ -1010,6 +1010,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b746-self-inside-a-trait-means-the-trait-alone-outside-parameter-hints" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B746. <code>self</code> inside a trait means the trait alone outside parameter hints
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1633,6 +1650,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b746-self-inside-a-trait-means-the-trait-alone-outside-parameter-hints" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B746. <code>self</code> inside a trait means the trait alone outside parameter hints
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1704,7 +1738,39 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b746-self-inside-a-trait-means-the-trait-alone-outside-parameter-hints">B746. <code>self</code> inside a trait means the trait alone outside parameter hints<a class="headerlink" href="#b746-self-inside-a-trait-means-the-trait-alone-outside-parameter-hints" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>A parameter typed <code>self</code> inside a trait, and <code>$this</code>, both see the class
+the trait's <code>@phpstan-require-extends</code> or <code>@phpstan-require-implements</code>
+names. Every other place <code>self</code> is written in the trait still resolves to
+the trait alone, so the required class's members are unknown there:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">abstract class Model {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public function getTable(): string { return ''; }</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">/** @phpstan-require-extends Model */</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">trait Stamps {</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    public ?self $parent = null;</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    public function fluent(): self { return $this; }</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    public function run(self $model): void {</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">        $model-&gt;fluent()-&gt;getTable(); // Method Stamps::getTable() not found</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">        $model-&gt;parent?-&gt;getTable();  // Method Stamps::getTable() not found</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">        $this-&gt;fluent()-&gt;              // offers only the trait's methods</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">        /** @var self $m */</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="x">        $m = make();</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="x">        $m-&gt;getTable();               // Method Stamps::getTable() not found</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="x">    }</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="x">}</span>
+</code></pre></div>
+<p>The bounds are added where <code>$this</code> and parameters are seeded
+(<code>trait_context::extend_this_with_trait_bounds</code>), not where <code>self</code> is
+resolved, so return types, property types and <code>@var</code> tags miss them.
+Resolving <code>self</code> in a trait to the trait plus its bounds in one place
+would cover all of them, including a <code>self|Foo</code> parameter, which the
+parameter seeding leaves to the trait alone.</p>
 
 
 
