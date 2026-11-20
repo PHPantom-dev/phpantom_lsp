@@ -207,7 +207,7 @@ pub(crate) use middleware::{LaravelMiddlewareIndex, MiddlewareTarget};
 pub(crate) use model_extraction::{
     attribute_entry_offset, extract_laravel_metadata, extract_laravel_trait_metadata,
     has_inheritable_model_metadata, has_scope_attribute, inherit_model_column_attributes,
-    inherit_model_metadata, relationship_return_type,
+    inherit_model_metadata, relationship_has_default, relationship_return_type,
 };
 pub(crate) use model_type::{expand_model_type, has_model_type_operator};
 pub(crate) use morph_columns::is_morph_type_column;

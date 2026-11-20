@@ -548,7 +548,16 @@ impl<'a> ModelMembers<'a> {
             None
         };
 
-        let type_hint = build_property_type(kind, related_type, custom_collection.as_deref())?;
+        let has_default = method
+            .extras
+            .as_ref()
+            .is_some_and(|extras| extras.relation_has_default);
+        let type_hint = build_property_type(
+            kind,
+            related_type,
+            custom_collection.as_deref(),
+            has_default,
+        )?;
 
         // Attach any pivot configuration recovered from the relationship
         // body (`->as(...)` / `->using(...)` / `->withPivot(...)`) so hover

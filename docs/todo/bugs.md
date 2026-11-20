@@ -49,28 +49,7 @@ No outstanding items.
 
 ## Laravel
 
-### B745. A singular relationship with `withDefault()` is typed nullable
-
-**Impact: Low · Complexity: Medium**
-
-```php
-public function author(): BelongsTo
-{
-    return $this->belongsTo(User::class)->withDefault();
-}
-// $post->author is ?User, but withDefault() hands back an empty User
-// instead of null
-```
-
-`build_property_type` makes every `hasOne`, `belongsTo`, `morphOne` and
-`hasOneThrough` property nullable, following the `?TRelatedModel` result
-Laravel declares on the relation class. `withDefault()` returns the same
-relation type, so nothing in the return type tells the two apart; only the
-method body does. The fact has to be read from the body at extraction (as
-`config_related_models` is) and reach the model provider for relationship
-methods declared in traits and parent classes too, so a per-class list on
-`LaravelMetadata` alone is not enough. Larastan has the same gap. The
-nullable type only shows on hover and with `possibly-empty-mismatches` on.
+No outstanding items.
 
 ## Blade
 

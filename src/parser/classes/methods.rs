@@ -12,7 +12,9 @@ use crate::parser::{
 };
 use crate::php_type::PhpType;
 use crate::types::*;
-use crate::virtual_members::laravel::{has_scope_attribute, relationship_return_type};
+use crate::virtual_members::laravel::{
+    has_scope_attribute, relationship_has_default, relationship_return_type,
+};
 
 use super::resolve_written_class;
 
@@ -77,6 +79,7 @@ pub(super) fn extract_method<'a>(
     // So is a Yii Active Record relation getter's.
     let return_type =
         crate::yii::active_record::relation_getter_return_type(return_type, method, doc_ctx);
+    let relation_has_default = relationship_has_default(return_type.as_ref(), method);
     let has_attribute_setter = crate::virtual_members::laravel::has_attribute_setter(
         return_type.as_ref(),
         method,
@@ -157,6 +160,7 @@ pub(super) fn extract_method<'a>(
         is_no_discard: crate::parser::has_no_discard_attribute(&method.attribute_lists, doc_ctx),
         extras: MethodExtras {
             has_attribute_setter,
+            relation_has_default,
             return_description: info.and_then(docblock::extract_return_description_from_info),
             links: info
                 .map(docblock::extract_link_urls_from_info)
