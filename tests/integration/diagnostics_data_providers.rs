@@ -24,7 +24,7 @@ fn a_provider_must_be_public() {
     let php = r#"<?php
 namespace Tests;
 
-final class PriceTest
+final class PriceTest extends \PHPUnit\Framework\TestCase
 {
     /**
      * @dataProvider prices
@@ -50,7 +50,7 @@ fn an_attribute_provider_must_be_public_and_static() {
     let php = r#"<?php
 use PHPUnit\Framework\Attributes\DataProvider;
 
-final class PriceTest
+final class PriceTest extends \PHPUnit\Framework\TestCase
 {
     #[DataProvider('prices')]
     public function testPrice(int $n): void {}
@@ -83,7 +83,7 @@ final class Prices
     public function all(): array { return [[1]]; }
 }
 
-final class PriceTest
+final class PriceTest extends \PHPUnit\Framework\TestCase
 {
     #[DataProviderExternal(Prices::class, 'all')]
     public function testPrice(int $n): void {}
@@ -106,7 +106,7 @@ fn valid_providers_and_dependencies_are_not_reported() {
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Depends;
 
-abstract class BaseTest
+abstract class BaseTest extends \PHPUnit\Framework\TestCase
 {
     public static function shared(): iterable { yield [1]; }
 }
@@ -137,10 +137,35 @@ fn a_missing_provider_is_not_reported_here() {
     let php = r#"<?php
 use PHPUnit\Framework\Attributes\DataProvider;
 
-final class PriceTest
+final class PriceTest extends \PHPUnit\Framework\TestCase
 {
     #[DataProvider('nothing')]
     public function testPrice(int $n): void {}
+}
+"#;
+    assert_eq!(collect(php), vec![]);
+}
+
+/// Codeception reads the same tag and attribute in a Cest, which is no
+/// PHPUnit test case, and calls a protected instance method.
+#[test]
+fn a_provider_outside_a_phpunit_test_case_is_not_reported() {
+    let php = r#"<?php
+namespace Tests;
+
+use Codeception\Attribute\DataProvider;
+
+final class LoginCest
+{
+    /**
+     * @dataProvider credentials
+     */
+    public function testLogin(object $I): void {}
+
+    #[DataProvider('credentials')]
+    public function testLogout(object $I): void {}
+
+    protected function credentials(): array { return []; }
 }
 "#;
     assert_eq!(collect(php), vec![]);

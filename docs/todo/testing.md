@@ -114,7 +114,9 @@ rather than shown. Add `examples/testing/`, a Composer project in the
 shape of `examples/symfony/` that installs `phpunit/phpunit`,
 `pestphp/pest`, and `mockery/mockery`, with a small library under
 `src/` and its tests under `tests/`: assertion narrowing, data
-providers and `@depends` in both annotation and attribute form,
+providers and `@depends` in both annotation and attribute form
+(including the check that a provider is public and static, with its
+quick fixes, which `examples/php/diagnostics.php` can only describe),
 coverage attributes and the lens they feed, a `Pest.php` binding a test
 case, and a Mockery mock. Put a "Try:" comment at each site and a line
 in its README. Since the tests can actually run, `vendor/bin/phpunit`

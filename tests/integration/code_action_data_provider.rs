@@ -30,7 +30,7 @@ fn makes_a_provider_public_and_static() {
     let content = r#"<?php
 use PHPUnit\Framework\Attributes\DataProvider;
 
-final class PriceTest
+final class PriceTest extends \PHPUnit\Framework\TestCase
 {
     #[DataProvider('prices')]
     public function testPrice(int $n): void {}
@@ -60,7 +60,7 @@ fn makes_a_provider_without_modifiers_static() {
     let content = r#"<?php
 use PHPUnit\Framework\Attributes\DataProvider;
 
-final class PriceTest
+final class PriceTest extends \PHPUnit\Framework\TestCase
 {
     #[DataProvider('prices')]
     public function testPrice(int $n): void {}
@@ -80,7 +80,7 @@ fn creates_a_missing_provider() {
     let content = r#"<?php
 namespace Tests;
 
-final class PriceTest
+final class PriceTest extends \PHPUnit\Framework\TestCase
 {
     /**
      * @dataProvider prices
@@ -94,7 +94,7 @@ final class PriceTest
         r#"<?php
 namespace Tests;
 
-final class PriceTest
+final class PriceTest extends \PHPUnit\Framework\TestCase
 {
     /**
      * @dataProvider prices

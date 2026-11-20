@@ -1,5 +1,9 @@
 //! Data providers PHPUnit refuses to call.
 //!
+//! Only references inside a `PHPUnit\Framework\TestCase` subclass are
+//! judged.  Other runners read the same `@dataProvider` tag with rules of
+//! their own: a Codeception Cest calls a `protected` instance method.
+//!
 //! PHPUnit reaches a data provider through reflection and calls it before
 //! the test case is constructed, so the method must be `public`, and from
 //! PHPUnit 10 on also `static` (a deprecation in 10, an error from 11).
@@ -15,7 +19,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{find_class_at_offset, is_subtype_of};
 use crate::symbol_map::{DocblockMemberRef, SymbolKind};
 use crate::type_engine::resolver::{SubjectOutcome, resolve_subject_outcome};
 use crate::types::{AccessKind, ClassInfo, Visibility};
@@ -24,6 +28,8 @@ use crate::virtual_members::resolve_class_fully_cached;
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 pub(crate) const INVALID_DATA_PROVIDER_CODE: &str = "invalid_phpunit_data_provider";
+
+const PHPUNIT_TEST_CASE: &str = "PHPUnit\\Framework\\TestCase";
 
 /// The modifier a data provider lacks.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -181,7 +187,17 @@ impl Backend {
             if !wanted(span.start, span.end) {
                 continue;
             }
+            let Some(test_class) = find_class_at_offset(&ctx.file.classes, span.start) else {
+                continue;
+            };
             let loaders = loaders.get_or_insert_with(|| self.file_loaders(&ctx.file));
+            if !is_subtype_of(
+                test_class,
+                PHPUNIT_TEST_CASE,
+                loaders.resolved_class_loader(),
+            ) {
+                continue;
+            }
             let subject = subject_text.as_str(source);
             let rctx = loaders.resolution_ctx_at(content, span.start);
             let SubjectOutcome::Resolved { classes, .. } =
@@ -232,10 +248,6 @@ impl Backend {
                 // A missing provider can only be created on the test class
                 // the reference sits in.
                 None if subject == "static" => {
-                    let Some(test_class) = find_class_at_offset(&ctx.file.classes, span.start)
-                    else {
-                        continue;
-                    };
                     if test_class.fqn() != class.fqn() || test_class.end_offset == 0 {
                         continue;
                     }
@@ -271,7 +283,7 @@ mod tests {
     use super::*;
 
     const ANNOTATED: &str = r#"<?php
-final class LegacyTest
+final class LegacyTest extends \PHPUnit\Framework\TestCase
 {
     /**
      * @dataProvider cases
