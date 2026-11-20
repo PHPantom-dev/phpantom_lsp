@@ -369,6 +369,7 @@ impl ScopeState {
         // sibling branch already covers them after control-flow rejoins.
         // Preserve class-backed alternatives (and their completion
         // metadata) while collapsing only redundant non-class values.
+        ResolvedType::widen_truthy_mixed_entries(entry);
         *entry = ResolvedType::collapse_redundant_runtime_literals(std::mem::take(entry));
         ResolvedType::join_complete_enum_entries(entry);
 

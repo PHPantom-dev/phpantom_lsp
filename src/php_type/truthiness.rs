@@ -12,7 +12,8 @@ fn named_truthiness(name: &str) -> Option<bool> {
     match name.to_ascii_lowercase().as_str() {
         "object" | "non-falsy-string" | "truthy-string" | "non-empty-array" | "non-empty-list"
         | "positive-int" | "negative-int" | "non-zero-int" | "callable" | "closure"
-        | "class-string" | "interface-string" | "trait-string" | "enum-string" => Some(true),
+        | "class-string" | "interface-string" | "trait-string" | "enum-string"
+        | "non-empty-mixed" => Some(true),
         other if is_keyword_type(other) => None,
         _ => Some(true),
     }
@@ -131,6 +132,8 @@ impl PhpType {
             // truthy test has at least one entry.  Carrying that in the
             // type is what lets a later `foreach` know its body runs.
             _ if self.is_array_like() => Some(self.non_empty_array_form()),
+            // A truthy value of any type is what `non-empty-mixed` names.
+            _ if self.is_mixed() => Some(PhpType::non_empty_mixed()),
             // `''` and `'0'` are the falsy strings, so a string that
             // survives is neither.
             TypeKind::Named(name) => Some(match name.as_str() {
@@ -251,6 +254,21 @@ impl PhpType {
         }
     }
 
+    /// Whether `members` between them hold every falsy value.
+    ///
+    /// `non-empty-mixed` is every value but the falsy ones, so beside
+    /// members that make up the rest it is `mixed` again: the join of the
+    /// two sides of an `if ($x)` on a `mixed` subject.
+    pub fn hold_every_falsy_value<'a>(members: impl Iterator<Item = &'a PhpType> + Clone) -> bool {
+        let Some(falsy) = PhpType::mixed().falsy_type() else {
+            return false;
+        };
+        falsy
+            .union_members()
+            .into_iter()
+            .all(|value| members.clone().any(|member| value.is_subtype_of(member)))
+    }
+
     /// The non-empty counterpart of an array type: `array<K, V>` becomes
     /// `non-empty-array<K, V>` and `list<T>` becomes `non-empty-list<T>`.
     /// The `T[]` slice spelling is sugar for `array<T>` and refines the
@@ -332,6 +350,8 @@ impl PhpType {
                 self.clone()
             }
             TypeKind::Named(name) if name == "non-empty-array" => PhpType::named(atom("array")),
+            // A truthy value that was an array may have lost its only entry.
+            TypeKind::Named(name) if name == "non-empty-mixed" => PhpType::mixed(),
             TypeKind::Named(name) if is_list_name(name.as_str()) => {
                 PhpType::generic_array(PhpType::int(), PhpType::mixed())
             }

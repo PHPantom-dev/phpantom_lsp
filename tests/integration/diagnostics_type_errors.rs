@@ -18096,6 +18096,51 @@ class C {
     );
 }
 
+/// An untyped subject that passes `!empty()` is truthy, and handed to a
+/// parameter declared `array` a truthy value can only be a non-empty
+/// array, so `array_reduce()` cannot return the `null` it gives back for
+/// an empty one.
+#[test]
+fn array_reduce_of_untyped_truthy_value_is_not_nullable() {
+    let php = r#"<?php
+class C {
+    /** @return array */
+    public static function reduceOrder($array, $a) {
+        $array = $array ?: [];
+        if (!empty($a['children'])) {
+            $array = array_merge($array, array_reduce($a['children'], [static::class, 'reduceOrder']));
+        }
+        return $array;
+    }
+
+    /** @return array */
+    public static function declared(mixed $c) {
+        if ($c) {
+            return array_reduce($c, [static::class, 'reduceOrder']);
+        }
+        return [];
+    }
+
+    /** @return array */
+    public static function plain($c) {
+        if ($c) {
+            return array_reduce($c, [static::class, 'reduceOrder']);
+        }
+        return [];
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "got: {:?}",
+        diags
+            .iter()
+            .map(|d| (d.range.start.line, &d.message))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Indexing a union of arrays reads what every alternative holds, so an
 /// `array<TValue>` template bound from the element is the join of both
 /// shapes and neither alternative fails the parameter it was inferred from.

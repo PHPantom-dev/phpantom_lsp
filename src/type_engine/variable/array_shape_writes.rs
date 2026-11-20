@@ -345,6 +345,12 @@ pub(super) fn apply_nested_array_unset(base: &PhpType, keys: &[Option<String>]) 
     if keys.len() == 1 {
         return base.after_element_unset(key);
     }
+    // Removing an entry never creates the arrays above it, so a value of
+    // unknown type stays unknown rather than becoming one built to hold
+    // the path.  A truthy one may have lost its only entry.
+    if base.is_mixed() || base.is_named("non-empty-mixed") {
+        return PhpType::mixed();
+    }
     let inner_base = match key {
         Some(k) => shape_slot_base(base, k),
         None => keyed_slot_base(base),

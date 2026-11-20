@@ -705,6 +705,24 @@ impl ResolvedType {
         collapsed
     }
 
+    /// Widen a `non-empty-mixed` entry back to `mixed` once the entries
+    /// beside it hold every falsy value, which is where the two sides of
+    /// an `if ($x)` on a `mixed` subject meet again.
+    pub(crate) fn widen_truthy_mixed_entries(entries: &mut [ResolvedType]) {
+        let is_truthy_mixed = |rt: &ResolvedType| {
+            rt.class_info.is_none() && rt.type_string.is_named("non-empty-mixed")
+        };
+        if entries.len() < 2
+            || !entries.iter().any(is_truthy_mixed)
+            || !PhpType::hold_every_falsy_value(entries.iter().map(|rt| &rt.type_string))
+        {
+            return;
+        }
+        for rt in entries.iter_mut().filter(|rt| is_truthy_mixed(rt)) {
+            rt.type_string = PhpType::mixed();
+        }
+    }
+
     /// Remove entries whose type is a subset of another entry's, e.g.
     /// `string|null` ⊆ `int|string|null` drops the former.
     ///

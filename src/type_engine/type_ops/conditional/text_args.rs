@@ -92,6 +92,39 @@ impl TextArgs<'_> {
         }
     }
 
+    /// Judge an argument of type `arg_ty`, holding a `mixed` one to the
+    /// parameter's native type when that is what decides the condition.
+    ///
+    /// A call that returns at all was handed a value the native type
+    /// accepts, so a `mixed` argument to an `array` parameter is an array
+    /// there, and a truthy one (`non-empty-mixed`) a non-empty array.  A
+    /// native type that leaves the condition open as well keeps the
+    /// argument undecided as it was.
+    fn judge_held_to_native(
+        &self,
+        param_idx: usize,
+        arg_ty: &PhpType,
+        judge: impl Fn(&PhpType) -> Option<bool>,
+    ) -> Option<bool> {
+        judge(arg_ty).or_else(|| {
+            let truthy = arg_ty.is_named("non-empty-mixed");
+            if !truthy && !arg_ty.is_mixed() {
+                return None;
+            }
+            let native = self
+                .params
+                .get(param_idx)?
+                .native_type_hint
+                .as_ref()
+                .filter(|native| !native.is_mixed())?;
+            if truthy {
+                judge(&native.truthy_type()?)
+            } else {
+                judge(native)
+            }
+        })
+    }
+
     /// Resolve `conditional` against this call.
     fn resolve(&self, conditional: &PhpType) -> Option<PhpType> {
         let Self {
@@ -313,7 +346,9 @@ impl TextArgs<'_> {
             (None, Some(text)) if text.trim().is_empty() => Some(true),
             (None, Some(text)) => condition_result_from_text(condition, text).or_else(|| {
                 let arg_ty = self.arg_type(param_idx, text);
-                let decided = arg_ty.as_ref().and_then(judge);
+                let decided = arg_ty
+                    .as_ref()
+                    .and_then(|ty| self.judge_held_to_native(param_idx, ty, judge));
                 if decided.is_none() {
                     undecided_ty = arg_ty;
                 }
@@ -346,7 +381,7 @@ impl TextArgs<'_> {
         let decided = arg_text.and_then(|arg| {
             condition_result_from_text(condition, arg).or_else(|| {
                 let arg_ty = self.arg_type(param_idx, arg)?;
-                let decided = judge(&arg_ty);
+                let decided = self.judge_held_to_native(param_idx, &arg_ty, &judge);
                 if decided.is_none() {
                     undecided_ty = Some(arg_ty);
                 }

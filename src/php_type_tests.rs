@@ -5661,6 +5661,29 @@ fn a_native_declaration_rules_out_the_alternatives_it_forbids() {
 }
 
 #[test]
+fn truthy_mixed_is_non_empty_mixed_until_rejoined_with_every_falsy_value() {
+    let truthy = PhpType::mixed().truthy_type().unwrap();
+    assert_eq!(truthy.to_string(), "non-empty-mixed");
+    assert_eq!(truthy.truthiness(), Some(true));
+    assert_eq!(truthy.falsy_type(), None);
+    // The two sides of an `if ($x)` make up `mixed` again.
+    let falsy = PhpType::mixed().falsy_type().unwrap();
+    assert_eq!(
+        PhpType::union(vec![truthy.clone(), falsy]).simplified(),
+        PhpType::mixed()
+    );
+    // A falsy value the other side does not hold keeps it truthy-only.
+    assert_eq!(
+        PhpType::union(vec![truthy.clone(), PhpType::null()])
+            .simplified()
+            .to_string(),
+        "non-empty-mixed|null"
+    );
+    // Removing an entry may leave an empty array behind.
+    assert_eq!(truthy.after_element_unset(None), PhpType::mixed());
+}
+
+#[test]
 fn truthy_type_strips_null_from_every_nullable_union_member() {
     // A lone nullable member loses its `null` the same way a bare `?T`
     // passed directly to `truthy_type` does.
