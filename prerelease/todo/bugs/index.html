@@ -944,23 +944,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b745-a-singular-relationship-with-withdefault-is-typed-nullable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B745. A singular relationship with <code>withDefault()</code> is typed nullable
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1043,23 +1026,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b746-self-inside-a-trait-means-the-trait-alone-outside-parameter-hints" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B746. <code>self</code> inside a trait means the trait alone outside parameter hints
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1618,23 +1584,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b745-a-singular-relationship-with-withdefault-is-typed-nullable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B745. A singular relationship with <code>withDefault()</code> is typed nullable
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1718,23 +1667,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b746-self-inside-a-trait-means-the-trait-alone-outside-parameter-hints" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B746. <code>self</code> inside a trait means the trait alone outside parameter hints
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1794,24 +1726,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h3 id="b745-a-singular-relationship-with-withdefault-is-typed-nullable">B745. A singular relationship with <code>withDefault()</code> is typed nullable<a class="headerlink" href="#b745-a-singular-relationship-with-withdefault-is-typed-nullable" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">public function author(): BelongsTo</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">{</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    return $this-&gt;belongsTo(User::class)-&gt;withDefault();</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">// $post-&gt;author is ?User, but withDefault() hands back an empty User</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">// instead of null</span>
-</code></pre></div>
-<p><code>build_property_type</code> makes every <code>hasOne</code>, <code>belongsTo</code>, <code>morphOne</code> and
-<code>hasOneThrough</code> property nullable, following the <code>?TRelatedModel</code> result
-Laravel declares on the relation class. <code>withDefault()</code> returns the same
-relation type, so nothing in the return type tells the two apart; only the
-method body does. The fact has to be read from the body at extraction (as
-<code>config_related_models</code> is) and reach the model provider for relationship
-methods declared in traits and parent classes too, so a per-class list on
-<code>LaravelMetadata</code> alone is not enough. Larastan has the same gap. The
-nullable type only shows on hover and with <code>possibly-empty-mismatches</code> on.</p>
+<p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
@@ -1827,14 +1742,14 @@ nullable type only shows on hover and with <code>possibly-empty-mismatches</code
 <code>-&gt;name('…')</code> registration with the full name to <code>routes/web.php</code> or
 <code>routes/api.php</code>. When the app loads that file under a named group, the
 group's prefix is applied a second time:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// bootstrap/app.php</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">-&gt;withRouting(then: function () {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    Route::name('api.')-&gt;group(base_path('routes/api.php'));</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">})</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">// app/Http/Controllers/UserController.php</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">route('api.users.index'); // quick fix appends -&gt;name('api.users.index')</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">                          // to routes/api.php, registering api.api.users.index</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// bootstrap/app.php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">-&gt;withRouting(then: function () {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    Route::name('api.')-&gt;group(base_path('routes/api.php'));</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">})</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">// app/Http/Controllers/UserController.php</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">route('api.users.index'); // quick fix appends -&gt;name('api.users.index')</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">                          // to routes/api.php, registering api.api.users.index</span>
 </code></pre></div>
 <p>The unknown-route diagnostic stays, and the route the fix wrote has the
 wrong name. Route discovery already reads such a file with its group's
@@ -1843,39 +1758,7 @@ fix can ask the route table which prefix the target file is loaded under:
 strip it from the generated name when the requested name starts with it,
 and pick the other file (or decline) when it does not.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b746-self-inside-a-trait-means-the-trait-alone-outside-parameter-hints">B746. <code>self</code> inside a trait means the trait alone outside parameter hints<a class="headerlink" href="#b746-self-inside-a-trait-means-the-trait-alone-outside-parameter-hints" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>A parameter typed <code>self</code> inside a trait, and <code>$this</code>, both see the class
-the trait's <code>@phpstan-require-extends</code> or <code>@phpstan-require-implements</code>
-names. Every other place <code>self</code> is written in the trait still resolves to
-the trait alone, so the required class's members are unknown there:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">abstract class Model {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    public function getTable(): string { return ''; }</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">}</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">/** @phpstan-require-extends Model */</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">trait Stamps {</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    public ?self $parent = null;</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    public function fluent(): self { return $this; }</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">    public function run(self $model): void {</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">        $model-&gt;fluent()-&gt;getTable(); // Method Stamps::getTable() not found</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">        $model-&gt;parent?-&gt;getTable();  // Method Stamps::getTable() not found</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">        $this-&gt;fluent()-&gt;              // offers only the trait's methods</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">        /** @var self $m */</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="x">        $m = make();</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="x">        $m-&gt;getTable();               // Method Stamps::getTable() not found</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="x">    }</span>
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="x">}</span>
-</code></pre></div>
-<p>The bounds are added where <code>$this</code> and parameters are seeded
-(<code>trait_context::extend_this_with_trait_bounds</code>), not where <code>self</code> is
-resolved, so return types, property types and <code>@var</code> tags miss them.
-Resolving <code>self</code> in a trait to the trait plus its bounds in one place
-would cover all of them, including a <code>self|Foo</code> parameter, which the
-parameter seeding leaves to the trait alone.</p>
+<p>No outstanding items.</p>
 
 
 
