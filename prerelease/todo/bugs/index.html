@@ -900,6 +900,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Standard-library return types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b757-array_reduce-with-a-callable-array-callback-returns-null" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B757. <code>array_reduce()</code> with a callable-array callback returns <code>null</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -982,23 +999,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Templates">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b756-a-union-of-array-shapes-binds-tvalue-from-one-alternative" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B756. A union of array shapes binds <code>TValue</code> from one alternative
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1557,6 +1557,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Standard-library return types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b757-array_reduce-with-a-callable-array-callback-returns-null" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B757. <code>array_reduce()</code> with a callable-array callback returns <code>null</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1639,23 +1656,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Templates">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b756-a-union-of-array-shapes-binds-tvalue-from-one-alternative" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B756. A union of array shapes binds <code>TValue</code> from one alternative
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1752,7 +1752,30 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="conditional-return-types">Conditional return types<a class="headerlink" href="#conditional-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b757-array_reduce-with-a-callable-array-callback-returns-null">B757. <code>array_reduce()</code> with a callable-array callback returns <code>null</code><a class="headerlink" href="#b757-array_reduce-with-a-callable-array-callback-returns-null" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class C {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    /** @return array */</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    public static function reduceOrder($array, $a) {</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        $array = $array ?: [];</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        if (!empty($a['children'])) {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">            // reported: Argument 2 ($arrays) expects array, got null</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">            $array = array_merge($array, array_reduce($a['children'], [static::class, 'reduceOrder']));</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">        }</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        return $array;</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    }</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">}</span>
+</code></pre></div>
+<p>The callback <code>[static::class, 'reduceOrder']</code> returns <code>array</code>, but the
+call resolves to plain <code>null</code>: <code>TCarry</code> binds nothing from a callable
+array, so only the <code>null</code> of <code>TCarry|null</code> survives. Even once it binds,
+the <code>null</code> stays, because the stub patch drops it only when <code>$initial</code> is
+passed. An array the call already knows is non-empty (here through
+<code>!empty()</code>) never reaches the empty-array case that returns <code>null</code>
+either. Drupal's <code>FieldUiTable::reduceOrder()</code> hits this.</p>
+<p><strong>Where to look:</strong> <code>patch_array_reduce</code> in
+<code>src/stub_patches/functions.rs</code>, and the <code>CallableReturnType</code> binding in
+<code>src/type_engine/call_resolution/template_binding.rs</code>.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
@@ -1793,35 +1816,7 @@ for the same mismatch.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
-<h3 id="b756-a-union-of-array-shapes-binds-tvalue-from-one-alternative">B756. A union of array shapes binds <code>TValue</code> from one alternative<a class="headerlink" href="#b756-a-union-of-array-shapes-binds-tvalue-from-one-alternative" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class C {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public static function reduceOrder($array, $a) { return []; }</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    /** @param list&lt;string&gt; $list */</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    public static function t(array $regions, array $list, $w) {</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        $tree = ['' =&gt; ['name' =&gt; '', 'children' =&gt; []]];</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">        $trees = array_fill_keys(array_keys($regions), $tree);</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">        foreach ($list as $name) {</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">            $r = (string) $w;</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">            $trees[$r]['']['children'][$name] = ['name' =&gt; $name, 'weight' =&gt; $w];</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">        }</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">        foreach ($regions as $region_name =&gt; $region) {</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">            // reported: expects array&lt;array{name: '', children: non-empty-array&lt;…&gt;}&gt;,</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">            // got array{'': array{name: '', children: array{}}}|array{'': array{…non-empty…}}</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">            $x = array_reduce($trees[$region_name], [static::class, 'reduceOrder']);</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">        }</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="x">    }</span>
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="x">}</span>
-</code></pre></div>
-<p>The argument is a union of two shapes (before and after the loop wrote
-into it), and <code>array_reduce()</code>'s <code>array&lt;TValue&gt;</code> binds <code>TValue</code> to the
-values of only one of them, so the other alternative fails the check
-against the parameter it was inferred from. Binding a template from a
-union should join what each alternative binds. Drupal's
-<code>FieldUiTable::tablePreRender()</code> hits this.</p>
-<p><strong>Where to look:</strong>
-<code>src/type_engine/call_resolution/template_binding.rs</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
