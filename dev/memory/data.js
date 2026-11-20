@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795144178107,
+  "lastUpdate": 1795147064811,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13992,6 +13992,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_wordpress_plugin",
             "value": 84,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 100.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8d1891c3b9877f3b8173ed0e04a278de3fd9cdbc",
+          "message": "Variable variables replace what a local held",
+          "timestamp": "2026-11-20T04:27:35+01:00",
+          "tree_id": "00f4e925cbb34692290773790c0d6c6b118a82a6",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8d1891c3b9877f3b8173ed0e04a278de3fd9cdbc"
+        },
+        "date": 1795147054569,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 272.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 44.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 81.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 73.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 79.7,
             "unit": "MiB"
           },
           {
