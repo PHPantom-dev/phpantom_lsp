@@ -1332,17 +1332,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l58-laravel-rate-limiter-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L58. Laravel rate limiter names
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l39-unused-view-and-translation-key-detection" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2039,17 +2028,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l58-laravel-rate-limiter-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L58. Laravel rate limiter names
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l39-unused-view-and-translation-key-detection" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2729,16 +2707,6 @@ fluent <code>Route::middleware()</code> calls remain syntactically unambiguous.<
 literals seen elsewhere in the project and connect those occurrences for
 navigation and references, but do not diagnose a name merely because the
 static index has not seen it.</p>
-<h4 id="l58-laravel-rate-limiter-names">L58. Laravel rate limiter names<a class="headerlink" href="#l58-laravel-rate-limiter-names" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Rate limiter names are registered through <code>RateLimiter::for('name', …)</code> in
-service providers. Scan literal registrations using the same provider-aware
-shape as the macro scanner, then complete, navigate, and validate
-<code>throttle:name</code> middleware parameters and <code>new RateLimited('name')</code> against
-the discovered set. Numeric inline limits such as <code>throttle:60,1</code> remain
-values rather than named registrations. Keep the world open when no
-registration source can be read so a partial index does not create false
-diagnostics.</p>
 <h4 id="l39-unused-view-and-translation-key-detection">L39. Unused view and translation key detection<a class="headerlink" href="#l39-unused-view-and-translation-key-detection" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>The reverse of the invalid-key diagnostics: keys that are <em>declared</em>
