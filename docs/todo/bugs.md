@@ -90,7 +90,32 @@ No outstanding items.
 
 ## Code actions
 
-No outstanding items.
+### B747. "Create route" ignores the name prefix the target routes file is loaded under
+
+**Impact: Low · Complexity: Low-Medium**
+
+The "Create route" quick fix on an unknown `route('…')` name appends a
+`->name('…')` registration with the full name to `routes/web.php` or
+`routes/api.php`. When the app loads that file under a named group, the
+group's prefix is applied a second time:
+
+```php
+// bootstrap/app.php
+->withRouting(then: function () {
+    Route::name('api.')->group(base_path('routes/api.php'));
+})
+
+// app/Http/Controllers/UserController.php
+route('api.users.index'); // quick fix appends ->name('api.users.index')
+                          // to routes/api.php, registering api.api.users.index
+```
+
+The unknown-route diagnostic stays, and the route the fix wrote has the
+wrong name. Route discovery already reads such a file with its group's
+prefix (`enumerate_all_routes` walks `bootstrap/app.php` first), so the
+fix can ask the route table which prefix the target file is loaded under:
+strip it from the generated name when the requested name starts with it,
+and pick the other file (or decline) when it does not.
 
 ## Miscellaneous
 
