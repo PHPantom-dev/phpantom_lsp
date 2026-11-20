@@ -26,6 +26,7 @@ fn definitions_of(
         file_path,
         workspace_root,
         macros,
+        None,
         &mut collector,
     );
     collector.into_discovery().definitions(target)
@@ -50,6 +51,7 @@ fn routes_and_open_names(content: &str) -> (Vec<RouteEntry>, Vec<String>, Vec<St
         None,
         None,
         &MacroScope::default(),
+        None,
         &mut collector,
     );
     (
@@ -87,7 +89,15 @@ fn routes_with_macros(content: &str, macro_source: &str, names: &[&str]) -> Vec<
     };
 
     let mut collector = RouteCollector::default();
-    walk_route_file(content, &test_uri(), None, None, &scope, &mut collector);
+    walk_route_file(
+        content,
+        &test_uri(),
+        None,
+        None,
+        &scope,
+        None,
+        &mut collector,
+    );
     collector.routes
 }
 
@@ -938,6 +948,7 @@ fn routes_of_file(path: &Path, workspace_root: &Path) -> Vec<RouteEntry> {
         Some(path),
         Some(workspace_root),
         &MacroScope::default(),
+        None,
         &mut collector,
     );
     collector.routes
@@ -1334,6 +1345,7 @@ fn actions_of(content: &str) -> Vec<(String, String, String, String, Option<Stri
         None,
         None,
         &MacroScope::default(),
+        None,
         &mut collector,
     );
     collector

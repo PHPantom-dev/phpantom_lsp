@@ -45,38 +45,39 @@ No outstanding items.
 
 ## Array types
 
-No outstanding items.
+### B752. A required shape key removed by `unset()` is not reported
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+/** @param array{foo: int} $shape */
+function f(array $shape): void {
+    unset($shape['foo']);
+    takesFoo($shape); // expects array{foo: int}; nothing reported
+}
+```
+
+The variable resolves to `array{}` correctly, but a missing required key
+is only reported for an array literal at the call site
+(`enumerates_all_keys` in `src/diagnostics/type_errors/arguments.rs`).
+A shape held in a variable is treated as open, since the engine may not
+have seen every key assigned. An explicit `unset()` of a key the
+declared shape requires is not that kind of uncertainty: the key is
+provably gone. The same applies to `$e = []; takesFoo($e);`, where the
+value was a literal one assignment ago.
+
+The shape needs to record whether its key set is known to be complete
+(a literal, a sealed declared type, or one of those minus `unset` keys)
+rather than the call site guessing from the argument's syntax.
+(php-typing-conformance: `arrays_sealed_shape_mutation`.)
+
+**Where to look:** the `unset` handling in the forward walker,
+`missing_required_shape_keys` and `enumerates_all_keys` in
+`src/diagnostics/type_errors/arguments.rs`.
 
 ## Laravel
 
-### B748. Route files pulled in by another file are read from disk, not the editor
-
-**Impact: Low · Complexity: Low-Medium**
-
-Route discovery reads a route file a group includes
-(`Route::name('api.')->group(base_path('routes/api.php'))` in
-`bootstrap/app.php`, or `Route::group([], __DIR__ . '/sub.php')`) straight
-from disk, while a top-level route file is read through the editor's
-buffer. Unsaved edits to an included file are invisible until it is
-saved:
-
-```php
-// bootstrap/app.php
-->withRouting(then: function () {
-    Route::name('api.')->group(base_path('routes/api.php'));
-})
-
-// routes/api.php, edited but not saved
-Route::get('/users', …)->name('users.index');
-
-// app/Http/Controllers/UserController.php
-route('api.users.index'); // still reported as an unknown route
-```
-
-This also means applying the "Create route" quick fix to such a file
-leaves the diagnostic in place until the file is saved. The include
-traversal (`open_included_file`) needs to read through the same
-buffer-aware path `walk_workspace_route_file` uses.
+No outstanding items.
 
 ## Blade
 

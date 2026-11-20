@@ -493,17 +493,9 @@ async fn create_missing_route_strips_the_prefix_its_target_file_is_loaded_under(
         &edits_for_uri(fixes[0].edit.as_ref().unwrap(), &target),
     );
     assert!(updated.contains("Route::get('/users', [\\App\\Http\\Controllers\\UserController::class, 'index'])->name('users.index');"), "{updated}");
-    let (backend, _dir, uri) = create_initialized_psr4_workspace(
-        LARAVEL_SRC_COMPOSER,
-        &[
-            ("src/Links.php", source),
-            ("bootstrap/app.php", BOOTSTRAP_GROUPS),
-            ("routes/api.php", &updated),
-            ("routes/web.php", ROUTES),
-        ],
-        "src/Links.php",
-    )
-    .await;
+    // Applied but not saved: `routes/api.php` is only reached through the
+    // bootstrap group, and its open buffer is what clears the diagnostic.
+    open_php(&backend, &target, &updated).await;
     assert!(self::diagnostics(&backend, &uri, source).is_empty());
 }
 

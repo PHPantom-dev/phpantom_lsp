@@ -693,7 +693,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
         if !scanned.insert(canonical.clone()) {
             continue;
         }
-        if let Ok(content) = std::fs::read_to_string(route_path)
+        if let Some(content) = read_route_source(Some(backend), route_path)
             && let Some(uri) = crate::util::path_to_url(route_path)
         {
             collector.sources.push(canonical);
@@ -704,6 +704,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
                 Some(route_path),
                 workspace_root.as_deref(),
                 &macros,
+                Some(backend),
                 &mut collector,
             );
             if route_path
@@ -778,6 +779,7 @@ fn walk_workspace_route_file(
         path.as_deref(),
         workspace_root,
         macros,
+        Some(backend),
         collector,
     );
     if file_uri.contains("/vendor/") {
@@ -799,6 +801,7 @@ pub(super) fn walk_route_file(
     file_path: Option<&Path>,
     workspace_root: Option<&Path>,
     macros: &MacroScope,
+    buffers: Option<&Backend>,
     sink: &mut RouteCollector,
 ) {
     let open = RefCell::new(HashSet::new());
@@ -820,6 +823,7 @@ pub(super) fn walk_route_file(
             names,
             uri: &uri,
             lines: &lines,
+            buffers,
         };
 
         let mut scope = Scope::default();
@@ -1231,7 +1235,7 @@ fn walk_macro(
     paths: ScanPaths<'_>,
     sink: &mut RouteCollector,
 ) -> bool {
-    let Some(open) = open_route_macro(paths.macros, method) else {
+    let Some(open) = open_route_macro(paths.macros, method, paths.buffers) else {
         return false;
     };
     let name_prefix = match chain {
