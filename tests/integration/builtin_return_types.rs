@@ -468,6 +468,61 @@ function probe(array $numbers): void {
     assert_assigned_types(content, &[("$seeded", "int"), ("$unseeded", "int|null")]);
 }
 
+/// A callback named by an array callable or a callable string reduces to
+/// what the method or function it names returns.
+#[test]
+fn array_reduce_binds_carry_from_named_callbacks() {
+    let content = r#"<?php
+function sum(?int $carry, int $n): int { return (int) $carry + $n; }
+class C {
+    /** @return array<string> */
+    public static function collect($carry, $item) { return []; }
+    /** @param list<int> $numbers */
+    public static function probe(array $numbers): void {
+        $viaStatic = array_reduce($numbers, [static::class, 'collect']);
+        $viaClass = array_reduce($numbers, [C::class, 'collect']);
+        $viaString = array_reduce($numbers, 'sum');
+        $viaStaticString = array_reduce($numbers, 'C::collect');
+    }
+    /** @return list<int> */
+    public function gather($carry, $item) { return []; }
+    /** @param list<int> $numbers */
+    public function probeInstance(array $numbers): void {
+        $viaThis = array_reduce($numbers, [$this, 'gather']);
+    }
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$viaStatic", "array<string>|null"),
+            ("$viaClass", "array<string>|null"),
+            ("$viaString", "int|null"),
+            ("$viaStaticString", "array<string>|null"),
+            ("$viaThis", "list<int>|null"),
+        ],
+    );
+}
+
+/// Reducing an array that cannot be empty runs the callback at least once,
+/// so the `null` an empty array would produce cannot happen.
+#[test]
+fn array_reduce_drops_null_for_a_non_empty_array() {
+    let content = r#"<?php
+/**
+ * @param non-empty-list<int> $numbers
+ * @param list<int> $maybe
+ */
+function probe(array $numbers, array $maybe): void {
+    $reduced = array_reduce($numbers, static fn (?int $carry, int $n): int => (int) $carry + $n);
+    if ($maybe !== []) {
+        $checked = array_reduce($maybe, static fn (?int $carry, int $n): int => (int) $carry + $n);
+    }
+}
+"#;
+    assert_assigned_types(content, &[("$reduced", "int"), ("$checked", "int")]);
+}
+
 /// A string builtin handed literals produces a literal, one per
 /// alternative the subject can be. The stub's bare `string` is what the
 /// function can return in general, not what this call returns, and a

@@ -18068,6 +18068,34 @@ function test(): void {
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// An `array_reduce()` callback named by an array callable binds the
+/// carry to the method's return, and a `!empty()` check rules out the
+/// empty array that would reduce to `null`.
+#[test]
+fn array_reduce_with_array_callable_returns_the_method_type() {
+    let php = r#"<?php
+class C {
+    /**
+     * @param array{children?: list<array<mixed>>} $a
+     * @return array
+     */
+    public static function reduceOrder($array, $a) {
+        $array = $array ?: [];
+        if (!empty($a['children'])) {
+            $array = array_merge($array, array_reduce($a['children'], [static::class, 'reduceOrder']));
+        }
+        return $array;
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
 /// Indexing a union of arrays reads what every alternative holds, so an
 /// `array<TValue>` template bound from the element is the join of both
 /// shapes and neither alternative fails the parameter it was inferred from.

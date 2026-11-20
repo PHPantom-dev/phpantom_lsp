@@ -33,35 +33,7 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B757. `array_reduce()` with a callable-array callback returns `null`
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-class C {
-    /** @return array */
-    public static function reduceOrder($array, $a) {
-        $array = $array ?: [];
-        if (!empty($a['children'])) {
-            // reported: Argument 2 ($arrays) expects array, got null
-            $array = array_merge($array, array_reduce($a['children'], [static::class, 'reduceOrder']));
-        }
-        return $array;
-    }
-}
-```
-
-The callback `[static::class, 'reduceOrder']` returns `array`, but the
-call resolves to plain `null`: `TCarry` binds nothing from a callable
-array, so only the `null` of `TCarry|null` survives. Even once it binds,
-the `null` stays, because the stub patch drops it only when `$initial` is
-passed. An array the call already knows is non-empty (here through
-`!empty()`) never reaches the empty-array case that returns `null`
-either. Drupal's `FieldUiTable::reduceOrder()` hits this.
-
-**Where to look:** `patch_array_reduce` in
-`src/stub_patches/functions.rs`, and the `CallableReturnType` binding in
-`src/type_engine/call_resolution/template_binding.rs`.
+No outstanding items.
 
 ## Reachability
 
@@ -69,7 +41,37 @@ No outstanding items.
 
 ## Narrowing
 
-No outstanding items.
+### B758. A truthiness check leaves a `mixed` subject unrefined
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+class C {
+    /** @return array */
+    public static function reduceOrder($array, $a) {
+        $array = $array ?: [];
+        if (!empty($a['children'])) {
+            // reported: Argument 2 ($arrays) expects array, got array|null
+            $array = array_merge($array, array_reduce($a['children'], [static::class, 'reduceOrder']));
+        }
+        return $array;
+    }
+}
+```
+
+`!empty($a['children'])` (and `if ($x)`) keeps a `mixed` subject as plain
+`mixed`, so nothing after the check knows the value is truthy. Handed to a
+parameter declared `array`, a truthy value can only be a non-empty array,
+which is what lets `array_reduce()` drop the `null` it returns for an empty
+one. PHPStan narrows such a subject to `mixed~(0|0.0|''|'0'|array{}|false|null)`;
+we have `non-empty-mixed` for the same idea but never produce it. Two
+pieces: the truthy narrowing of `mixed` (`PhpType::truthy_type` and the
+`!empty()` arm in `forward_walk/cond_narrowing/null_narrowing.rs`), and a
+conditional return that decides `$array is non-empty-array` against the
+argument held to the parameter's native type
+(`type_engine/type_ops/conditional.rs`). An untyped parameter (`$c` with no
+hint) gets no type at all after `!empty($c)`, which is the same gap.
+Drupal's `FieldUiTable::reduceOrder()` hits this.
 
 ## Array types
 

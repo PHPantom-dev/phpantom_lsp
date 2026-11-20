@@ -38,6 +38,56 @@ pub(crate) fn array_callable_return_type(
     )
 }
 
+/// The return type of what the callable string `callable` names: the
+/// function `'strlen'`, or the static method `'Foo::bar'`, with `self` and
+/// `static` bound to the class it is called on.
+///
+/// PHP reads a callable string as a fully qualified name, whatever
+/// namespace the string is written in.
+pub(crate) fn string_callable_return_type(
+    callable: &PhpType,
+    file: &FileCtx<'_>,
+    function_loader: crate::type_engine::resolver::FunctionLoaderFn<'_>,
+    resolved_class_cache: Option<&ResolvedClassCache>,
+) -> Option<PhpType> {
+    let TypeKind::Literal(literal) = callable.kind() else {
+        return None;
+    };
+    let text = literal.string_content()?;
+    let is_name = |name: &str| {
+        !name.is_empty()
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\' || !c.is_ascii())
+    };
+    let text = text.trim_start_matches('\\');
+    if let Some((class, method_name)) = text.split_once("::") {
+        if !is_name(class) || !is_name(method_name) {
+            return None;
+        }
+        let owner = (file.class_loader)(crate::class_lookup::Fqn::new(class))?;
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &owner,
+            file.class_loader,
+            resolved_class_cache,
+        );
+        // Named by its class, the method is called statically, which PHP
+        // refuses for an instance method.
+        let method = merged.get_method(method_name).filter(|m| m.is_static)?;
+        return Some(
+            method
+                .return_type
+                .as_ref()?
+                .replace_self_bound(&owner.fqn(), None),
+        );
+    }
+    if !is_name(text) {
+        return None;
+    }
+    function_loader?(&format!("\\{text}"), 0)?.return_type
+}
+
 /// Read a resolved array callable's method through the shared type engine.
 pub(crate) fn with_array_callable_method<T>(
     callable: &PhpType,

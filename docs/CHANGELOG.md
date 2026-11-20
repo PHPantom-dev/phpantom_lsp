@@ -256,6 +256,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Type inference
 
+- **`array_reduce()` with a named callback.** A callback written as `[static::class, 'method']`, `[$this, 'method']`, `'Foo::method'` or `'function'` reduces to what that method or function returns, instead of `null`. Reducing an array that cannot be empty is never `null` either.
 - **Constraint closures passed to `load()`.** In `$post->load(['comments' => fn ($query) => ...])` and `loadMissing()`, on a model or a collection of models, `$query` is the relation, as it already was for `with()`, so its methods complete and are checked.
 - **Reading an element of a union of arrays.** `$trees[$key]`, where `$trees` may be one of several array types, is whatever any of them holds there rather than what one of them does, so passing it to a function like `array_reduce()` is no longer reported against the other.
 - **Keys written into an untyped variable.** After `$args['foo'] = $foo` on an untyped parameter, the array still counts as holding whatever other keys it came with, so passing it to a function that takes an array shape no longer reports an undeclared key.

@@ -640,70 +640,13 @@ fn array_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<
 
 /// What calling the callable string `callable` returns: the function
 /// `'strlen'` names, or the static method `'Foo::bar'` names.
-///
-/// PHP reads a callable string as a fully qualified name, whatever
-/// namespace the string is written in.
 fn string_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
-    let TypeKind::Literal(literal) = callable.kind() else {
-        return vec![];
-    };
-    let Some(text) = literal.string_content() else {
-        return vec![];
-    };
-    let is_name = |name: &str| {
-        !name.is_empty()
-            && !name.starts_with(|c: char| c.is_ascii_digit())
-            && name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\' || !c.is_ascii())
-    };
-    let text = text.trim_start_matches('\\');
-    if let Some((class, method)) = text.split_once("::") {
-        if !is_name(class) || !is_name(method) {
-            return vec![];
-        }
-        let owners: Vec<_> = (ctx.file.class_loader)(crate::class_lookup::Fqn::new(class))
-            .into_iter()
-            .collect();
-        return class_method_return(&owners, method, true, ctx);
-    }
-    if !is_name(text) {
-        return vec![];
-    }
-    let Some(function_loader) = ctx.function_loader() else {
-        return vec![];
-    };
-    function_loader(&format!("\\{text}"), 0)
-        .and_then(|f| f.return_type)
-        .map(|ret| callable_return_resolution(&ret, ctx))
-        .unwrap_or_default()
-}
-
-/// What calling `method_name` on the first of `owners` that has it returns.
-///
-/// A callable that names the class rather than an object (`[Foo::class,
-/// 'bar']`, `'Foo::bar'`) calls the method statically, which PHP refuses
-/// for an instance method, so `statically` admits only a `static` one.
-fn class_method_return(
-    owners: &[std::sync::Arc<crate::types::ClassInfo>],
-    method_name: &str,
-    statically: bool,
-    ctx: &VarResolutionCtx<'_>,
-) -> Vec<ResolvedType> {
-    for owner in owners {
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            owner,
-            ctx.file.class_loader,
-            ctx.resolved_class_cache,
-        );
-        if let Some(ret) = merged
-            .get_method(method_name)
-            .filter(|m| m.is_static || !statically)
-            .and_then(|m| m.return_type.as_ref())
-        {
-            let ret = ret.replace_self_bound(&owner.fqn(), None);
-            return callable_return_resolution(&ret, ctx);
-        }
-    }
-    vec![]
+    crate::type_engine::call_resolution::string_callable_return_type(
+        callable,
+        &ctx.file,
+        ctx.function_loader(),
+        ctx.resolved_class_cache,
+    )
+    .map(|ret| callable_return_resolution(&ret, ctx))
+    .unwrap_or_default()
 }

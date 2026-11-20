@@ -485,21 +485,26 @@ fn patch_range(func: &mut FunctionInfo) {
 }
 
 /// Patch `array_reduce()` to have a conditional return type keyed on
-/// `$initial`.
+/// `$initial` and `$array`.
 ///
 /// The stub's `@return TCarry|null` covers the one case that really can
 /// produce `null`: an empty array with no initial value. Handing the call an
-/// initial value makes that the result instead, so the `null` branch cannot
-/// happen and every reduction over a seeded accumulator carries a nullable it
-/// never is.
+/// initial value makes that the result instead, and an array that cannot be
+/// empty runs the callback at least once, so either way the `null` branch
+/// cannot happen and the reduction would carry a nullable it never is.
 fn patch_array_reduce(func: &mut FunctionInfo) {
-    conditional_on(
-        func,
-        "$initial",
-        PhpType::null(),
-        PhpType::union(vec![PhpType::named(atom("TCarry")), PhpType::null()]),
-        PhpType::named(atom("TCarry")),
+    if !func.parameters.iter().any(|p| p.name == "$array") {
+        return;
+    }
+    let carry = PhpType::named(atom("TCarry"));
+    let unseeded = PhpType::conditional(
+        "$array",
+        false,
+        PhpType::parse("non-empty-array"),
+        carry.clone(),
+        PhpType::union(vec![carry.clone(), PhpType::null()]),
     );
+    conditional_on(func, "$initial", PhpType::null(), unseeded, carry);
 }
 
 /// Give `get_class()` the generic that ties its result to the object it was
