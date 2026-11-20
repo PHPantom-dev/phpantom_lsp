@@ -150,8 +150,7 @@ impl crate::Backend {
         );
         for path in paths {
             let uri = crate::util::path_to_uri(&path);
-            let open = self.open_files.read().get(&uri).cloned();
-            let content = match open {
+            let content = match self.open_buffer_at_path(&path) {
                 Some(content) => content,
                 None => match std::fs::read_to_string(&path) {
                     Ok(content) => Arc::new(content),

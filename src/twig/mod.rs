@@ -261,7 +261,7 @@ impl Backend {
             .collect();
         for path in paths {
             let uri = crate::util::path_to_uri(&path);
-            let open = self.open_files.read().get(&uri).cloned();
+            let open = self.open_buffer_at_path(&path);
             if self.is_resource_uri(&uri) {
                 let content = match open {
                     Some(content) => content,

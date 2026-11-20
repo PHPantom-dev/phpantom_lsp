@@ -84,13 +84,8 @@ pub(super) fn in_parsed_route_file<R>(
 /// The text of a file a route walk opens: the editor's buffer when the file
 /// is open there, else the file on disk.
 pub(super) fn read_route_source(buffers: Option<&Backend>, path: &Path) -> Option<Arc<String>> {
-    if let Some(backend) = buffers
-        && let Some(content) = backend
-            .open_files
-            .read()
-            .get(&crate::util::path_to_uri(path))
-    {
-        return Some(Arc::clone(content));
+    if let Some(content) = buffers.and_then(|backend| backend.open_buffer_at_path(path)) {
+        return Some(content);
     }
     std::fs::read_to_string(path).ok().map(Arc::new)
 }
