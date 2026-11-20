@@ -922,6 +922,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b744-a-nullsafe-chain-compared-greater-than-a-value-does-not-prove-its-receiver" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B744. A nullsafe chain compared greater than a value does not prove its receiver
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -943,6 +960,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Laravel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b745-a-singular-relationship-with-withdefault-is-typed-nullable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B745. A singular relationship with <code>withDefault()</code> is typed nullable
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1562,6 +1596,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b744-a-nullsafe-chain-compared-greater-than-a-value-does-not-prove-its-receiver" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B744. A nullsafe chain compared greater than a value does not prove its receiver
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1583,6 +1634,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Laravel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b745-a-singular-relationship-with-withdefault-is-typed-nullable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B745. A singular relationship with <code>withDefault()</code> is typed nullable
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1722,11 +1790,40 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b744-a-nullsafe-chain-compared-greater-than-a-value-does-not-prove-its-receiver">B744. A nullsafe chain compared greater than a value does not prove its receiver<a class="headerlink" href="#b744-a-nullsafe-chain-compared-greater-than-a-value-does-not-prove-its-receiver" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if ($line-&gt;product?-&gt;supply_amount &gt; 0) {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    Cart::add($line-&gt;product); // still ?Product</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>null &gt; $x</code> is false for every <code>$x</code>, so a true <code>$a?-&gt;b &gt; $x</code> (or
+<code>$x &lt; $a?-&gt;b</code>) proves <code>$a</code> is not null, the same proof
+<code>apply_nullsafe_receiver_narrowing</code> already draws from a truthy chain or an
+identity check against a non-null value. Only the strict greater-than
+direction carries it: <code>null &gt;= 0</code> and <code>null &lt; 1</code> are both true. The miss
+only shows with <code>possibly-empty-mismatches</code> on, as a nullable argument
+mismatch on the receiver.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b745-a-singular-relationship-with-withdefault-is-typed-nullable">B745. A singular relationship with <code>withDefault()</code> is typed nullable<a class="headerlink" href="#b745-a-singular-relationship-with-withdefault-is-typed-nullable" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">public function author(): BelongsTo</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    return $this-&gt;belongsTo(User::class)-&gt;withDefault();</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">// $post-&gt;author is ?User, but withDefault() hands back an empty User</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">// instead of null</span>
+</code></pre></div>
+<p><code>build_property_type</code> makes every <code>hasOne</code>, <code>belongsTo</code>, <code>morphOne</code> and
+<code>hasOneThrough</code> property nullable, following the <code>?TRelatedModel</code> result
+Laravel declares on the relation class. <code>withDefault()</code> returns the same
+relation type, so nothing in the return type tells the two apart; only the
+method body does. The fact has to be read from the body at extraction (as
+<code>config_related_models</code> is) and reach the model provider for relationship
+methods declared in traits and parent classes too, so a per-class list on
+<code>LaravelMetadata</code> alone is not enough. Larastan has the same gap. The
+nullable type only shows on hover and with <code>possibly-empty-mismatches</code> on.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
@@ -1744,26 +1841,26 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 the trait's <code>@phpstan-require-extends</code> or <code>@phpstan-require-implements</code>
 names. Every other place <code>self</code> is written in the trait still resolves to
 the trait alone, so the required class's members are unknown there:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">abstract class Model {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public function getTable(): string { return ''; }</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">/** @phpstan-require-extends Model */</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">trait Stamps {</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    public ?self $parent = null;</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    public function fluent(): self { return $this; }</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    public function run(self $model): void {</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">        $model-&gt;fluent()-&gt;getTable(); // Method Stamps::getTable() not found</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">        $model-&gt;parent?-&gt;getTable();  // Method Stamps::getTable() not found</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">        $this-&gt;fluent()-&gt;              // offers only the trait's methods</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">        /** @var self $m */</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="x">        $m = make();</span>
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="x">        $m-&gt;getTable();               // Method Stamps::getTable() not found</span>
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="x">    }</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">abstract class Model {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    public function getTable(): string { return ''; }</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">}</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">/** @phpstan-require-extends Model */</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">trait Stamps {</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    public ?self $parent = null;</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    public function fluent(): self { return $this; }</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">    public function run(self $model): void {</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">        $model-&gt;fluent()-&gt;getTable(); // Method Stamps::getTable() not found</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">        $model-&gt;parent?-&gt;getTable();  // Method Stamps::getTable() not found</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">        $this-&gt;fluent()-&gt;              // offers only the trait's methods</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">        /** @var self $m */</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="x">        $m = make();</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="x">        $m-&gt;getTable();               // Method Stamps::getTable() not found</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="x">    }</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="x">}</span>
 </code></pre></div>
 <p>The bounds are added where <code>$this</code> and parameters are seeded
 (<code>trait_context::extend_this_with_trait_bounds</code>), not where <code>self</code> is
