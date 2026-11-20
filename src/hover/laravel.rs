@@ -119,6 +119,10 @@ impl Backend {
                 shown = crate::drupal::config_keys::split_config_key(key).1;
                 ("Configuration key", self.drupal_config_key_detail(key))
             }
+            StringKeyKind::DrupalFieldName => {
+                shown = crate::drupal::fields::split_field_key(key).1;
+                ("Field", self.drupal_field_name_detail(key))
+            }
             StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
             StringKeyKind::TwigBlock => (
                 "Block",

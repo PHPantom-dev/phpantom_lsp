@@ -165,6 +165,18 @@ pub enum PropertySource {
     /// framework conventions, while still losing to types derived from
     /// real PHP code (casts, accessors, relationship methods).
     DocblockTag,
+    /// A field of a Drupal content entity.  The entity reads and writes it
+    /// through its magic `__get()` and `__set()`: a write stores the value
+    /// into the field's item list, so the property keeps its type whatever
+    /// is written.  Where it is declared moves with every edit above the
+    /// declaration, so it is looked up when asked (see
+    /// [`crate::drupal::fields`]).
+    DrupalField,
+    /// A property of a Drupal field item, which the item, and the item
+    /// list for its first item, reads and writes through its magic
+    /// `__get()` and `__set()`, so the property keeps its type whatever is
+    /// written (see [`crate::drupal::field_items`]).
+    DrupalItemProperty,
 }
 
 /// What a property's docblock says about writing to it.
@@ -200,6 +212,15 @@ impl PropertyInfo {
             && self.deprecated_replacement == other.deprecated_replacement
             && self.is_virtual == other.is_virtual
             && self.source == other.source
+    }
+
+    /// Whether a write to this property goes through the magic `__set()`
+    /// of a class that has one, rather than replacing the property's value.
+    pub fn writes_through_magic_set(&self) -> bool {
+        matches!(
+            self.source,
+            Some(PropertySource::DrupalField | PropertySource::DrupalItemProperty)
+        )
     }
 
     /// Return the type hint as a string, if present.
