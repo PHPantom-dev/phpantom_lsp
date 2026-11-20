@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795062157459,
+  "lastUpdate": 1795138682852,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13820,6 +13820,65 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 103.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7f43f6853a78b2eb712f8652a2ba7cb32a3039f3",
+          "message": "fix(laravel): retain custom builders after local scopes",
+          "timestamp": "2026-11-20T02:03:27+01:00",
+          "tree_id": "d8d50335b10044083096baef9bc130f0c80ca6f8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7f43f6853a78b2eb712f8652a2ba7cb32a3039f3"
+        },
+        "date": 1795138669077,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_drupal_module",
+            "value": 270,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_hello_world",
+            "value": 44,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 80.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_tempest_view",
+            "value": 75.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 78.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 99.3,
             "unit": "MiB"
           }
         ]
