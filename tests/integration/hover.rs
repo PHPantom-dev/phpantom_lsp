@@ -17976,5 +17976,108 @@ class Post extends Model {
         "{defaulted}"
     );
     let cls = crate::common::hover_last(&backend, php, "$cls;");
-    assert!(cls.contains("$cls = class-string<self>"), "{cls}");
+    assert!(cls.contains("$cls = class-string<Stamps&Model>"), "{cls}");
+}
+
+/// `self` in a trait's return types, property types and `@var` tags names
+/// a class using the trait, like a `self` parameter does, so it reads as
+/// the trait intersected with its `@phpstan-require-extends` class.
+#[test]
+fn hover_self_in_trait_signatures_with_required_class() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+abstract class Model {
+    public function getTable(): string { return ''; }
+}
+class Other {}
+function make(): mixed { return null; }
+/** @phpstan-require-extends Model */
+trait Stamps {
+    public ?self $parent = null;
+    public function fluent(): self { return $this; }
+    public function run(self $model, self|Other $either): void {
+        $returned = $model->fluent();
+        $property = $model->parent;
+        $chained = $this->fluent();
+        /** @var self $annotated */
+        $annotated = make();
+        $returned;
+        $property;
+        $chained;
+        $annotated;
+        $either;
+    }
+}
+class Post extends Model {
+    use Stamps;
+}
+"#;
+    let returned = crate::common::hover_last(&backend, php, "$returned;");
+    assert!(
+        returned.contains("$returned = Stamps&Model\n"),
+        "{returned}"
+    );
+    let property = crate::common::hover_last(&backend, php, "$property;");
+    assert!(
+        property.contains("$property = Stamps&Model|null"),
+        "{property}"
+    );
+    let chained = crate::common::hover_last(&backend, php, "$chained;");
+    assert!(chained.contains("$chained = Stamps&Model\n"), "{chained}");
+    let annotated = crate::common::hover_last(&backend, php, "$annotated;");
+    assert!(
+        annotated.contains("$annotated = Stamps&Model\n"),
+        "{annotated}"
+    );
+    let either = crate::common::hover_last(&backend, php, "$either;");
+    assert!(either.contains("$either = Stamps&Model\n"), "{either}");
+    assert!(either.contains("$either = Other\n"), "{either}");
+}
+
+/// `static` and `$this` in a trait name a class using it just as `self`
+/// does, as return types and in `@var` tags, so they read as the same
+/// intersection rather than a union of the trait and its required class.
+#[test]
+fn hover_static_and_this_in_trait_with_required_class() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+abstract class Model {
+    public function getTable(): string { return ''; }
+}
+function make(): mixed { return null; }
+/** @phpstan-require-extends Model */
+trait Stamps {
+    public function st(): static { return $this; }
+    /** @return $this */
+    public function th() { return $this; }
+    public function run(self $model): void {
+        $viaStatic = $model->st();
+        $viaThis = $model->th();
+        $fromThis = $this->st();
+        /** @var static $annotatedStatic */
+        $annotatedStatic = make();
+        /** @var $this $annotatedThis */
+        $annotatedThis = make();
+        $viaStatic;
+        $viaThis;
+        $fromThis;
+        $annotatedStatic;
+        $annotatedThis;
+    }
+}
+"#;
+    for var in [
+        "$viaStatic",
+        "$viaThis",
+        "$fromThis",
+        "$annotatedStatic",
+        "$annotatedThis",
+    ] {
+        let hover = crate::common::hover_last(&backend, php, &format!("{var};"));
+        assert!(
+            hover.contains(&format!("{var} = Stamps&Model\n")),
+            "{hover}"
+        );
+        assert!(!hover.contains(&format!("{var} = Model\n")), "{hover}");
+    }
 }

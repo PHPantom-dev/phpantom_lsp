@@ -8359,6 +8359,64 @@ class Post extends Model {
     );
 }
 
+/// `self` written anywhere in a trait, not only on a parameter, names a
+/// class using the trait, so a return type, a property type, a `@var` tag
+/// and a `self|Foo` parameter all see the required class's members.
+#[test]
+fn self_inside_trait_sees_required_class_everywhere() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+abstract class Model {
+    public function getTable(): string { return ''; }
+}
+
+class Other {}
+
+function make(): mixed { return null; }
+
+/** @phpstan-require-extends Model */
+trait Stamps {
+    public ?self $parent = null;
+
+    public function fluent(): self { return $this; }
+
+    public function run(self $model, self|Other $either): void {
+        $model->fluent()->getTable();
+        $model->parent?->getTable();
+        $this->fluent()->getTable();
+        $this->parent?->getTable();
+        if ($either instanceof Other) {
+            return;
+        }
+        $either->getTable();
+
+        /** @var self $m */
+        $m = make();
+        $m->getTable();
+        $m->notOnModel();
+    }
+}
+
+class Post extends Model {
+    use Stamps;
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<String> = diags
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
+    assert!(
+        !messages.iter().any(|m| m.contains("getTable")),
+        "getTable() comes from the required class, got: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("notOnModel")),
+        "a member neither the trait nor the required class has must still be flagged, got: {messages:?}"
+    );
+}
+
 /// `$this->` and `static::` inside a closure nested within a trait
 /// method should be suppressed just like direct trait method bodies.
 #[test]

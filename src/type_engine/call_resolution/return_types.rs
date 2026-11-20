@@ -644,7 +644,11 @@ impl Backend {
                 // (`?static`) and union (`static|null`) forms, plus
                 // generic wrappers like `self<RuleError>`, `static<T>`.
                 if ret.is_self_like() {
-                    return vec![Arc::new(class_info.clone())];
+                    return crate::type_engine::type_ops::resolution::with_trait_requirements(
+                        vec![Arc::new(class_info.clone())],
+                        all_classes,
+                        class_loader,
+                    );
                 }
                 return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     &bind_receiver(decide_nested(method, ret.clone())),
@@ -675,7 +679,11 @@ impl Backend {
                 // the class the method was called on, not the trait/parent
                 // that declares the fluent method.
                 if inferred.is_self_like() {
-                    return vec![Arc::new(class_info.clone())];
+                    return crate::type_engine::type_ops::resolution::with_trait_requirements(
+                        vec![Arc::new(class_info.clone())],
+                        all_classes,
+                        class_loader,
+                    );
                 }
                 return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     &inferred,

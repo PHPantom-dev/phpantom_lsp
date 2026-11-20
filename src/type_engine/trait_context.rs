@@ -57,33 +57,61 @@ pub(crate) fn trait_this_bounds(
         return Vec::new();
     }
 
-    let load = |name: &str| -> Option<Arc<ClassInfo>> {
-        crate::class_lookup::find_class_by_name(all_classes, name)
-            .map(Arc::clone)
-            .or_else(|| class_loader(Fqn::new(name)))
-    };
-
-    let mut bounds: Vec<Arc<ClassInfo>> = Vec::new();
-    if let Some(ref required) = trait_cls.require_extends
-        && let Some(cls) = load(required)
-    {
-        ClassInfo::push_unique_arc(&mut bounds, cls);
-    }
-    for required in &trait_cls.require_implements {
-        if let Some(cls) = load(required) {
-            ClassInfo::push_unique_arc(&mut bounds, cls);
-        }
-    }
+    let mut bounds = trait_required_classes(trait_cls, all_classes, class_loader);
     if !bounds.is_empty() {
         return bounds;
     }
 
     for name in shared_user_ancestors(trait_cls, all_classes, class_loader, backend) {
-        if let Some(cls) = load(&name) {
+        if let Some(cls) = load_class(&name, all_classes, class_loader) {
             ClassInfo::push_unique_arc(&mut bounds, cls);
         }
     }
     bounds
+}
+
+/// The classes `trait_cls`'s `@phpstan-require-extends` and
+/// `@phpstan-require-implements` tags name, loaded.
+///
+/// No value is ever an instance of a trait itself, only of a class using
+/// it, and a class using it without satisfying the tags is an error of its
+/// own.  So any instance a type naming the trait describes is also one of
+/// these.  Unlike [`trait_this_bounds`], this reads only the tags, never
+/// the project's using classes, so it is cheap enough to consult wherever
+/// a type naming a trait is resolved.
+///
+/// Returns an empty vector for a non-trait and for a trait without tags.
+pub(crate) fn trait_required_classes(
+    trait_cls: &ClassInfo,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    if trait_cls.kind != ClassLikeKind::Trait
+        || (trait_cls.require_extends.is_none() && trait_cls.require_implements.is_empty())
+    {
+        return Vec::new();
+    }
+    let mut bounds: Vec<Arc<ClassInfo>> = Vec::new();
+    for required in trait_cls
+        .require_extends
+        .iter()
+        .chain(&trait_cls.require_implements)
+    {
+        if let Some(cls) = load_class(required, all_classes, class_loader) {
+            ClassInfo::push_unique_arc(&mut bounds, cls);
+        }
+    }
+    bounds
+}
+
+fn load_class(
+    name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<Arc<ClassInfo>> {
+    crate::class_lookup::find_class_by_name(all_classes, name)
+        .map(Arc::clone)
+        .or_else(|| class_loader(Fqn::new(name)))
 }
 
 /// The classes that use `trait_cls`, loaded.
