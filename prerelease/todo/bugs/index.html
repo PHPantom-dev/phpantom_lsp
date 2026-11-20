@@ -961,23 +961,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b757-on-windows-a-route-file-reached-through-an-include-ignores-its-open-buffer" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B757. On Windows, a route file reached through an include ignores its open buffer
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1618,23 +1601,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b757-on-windows-a-route-file-reached-through-an-include-ignores-its-open-buffer" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B757. On Windows, a route file reached through an include ignores its open buffer
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1783,36 +1749,7 @@ either. Drupal's <code>FieldUiTable::reduceOrder()</code> hits this.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h3 id="b757-on-windows-a-route-file-reached-through-an-include-ignores-its-open-buffer">B757. On Windows, a route file reached through an include ignores its open buffer<a class="headerlink" href="#b757-on-windows-a-route-file-reached-through-an-include-ignores-its-open-buffer" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<p><code>routes/web_backstage.php</code> is loaded only through
-<code>Route::name('admin.')-&gt;group(base_path('routes/web_backstage.php'))</code> in
-<code>bootstrap/app.php</code>. On Windows, adding a route to it in the editor
-without saving does not register the route: <code>route('admin.patient.index')</code>
-stays reported as an unknown route until the file is saved. The same
-happens after applying "Create missing route" to such a file, since its
-edit is unsaved. Linux is unaffected. Two tests fail on the Windows CI
-runner:</p>
-<ul>
-<li><code>laravel_route_names::an_unsaved_edit_to_a_file_a_group_loads_is_seen</code>
-  (<code>["Unknown route 'admin.patient.index'"]</code>)</li>
-<li><code>code_action_create_missing_route::create_missing_route_strips_the_prefix_its_target_file_is_loaded_under</code>
-  (the diagnostic is still there after the fix is opened as a buffer)</li>
-</ul>
-<p><code>open_included_file()</code> canonicalizes the include target with
-<code>dunce::canonicalize</code>, and <code>read_route_source()</code> turns that path back into
-a URI with <code>path_to_uri()</code> and looks it up in <code>open_files</code> by exact
-string. The buffer is keyed by the URI the client sent, and on Windows the
-two spell the same file differently (a temp dir under an 8.3 short name
-such as <code>RUNNER~1</code> expands when canonicalized, and the drive letter's case
-and encoding can differ), so the lookup misses and the file is read from
-disk. The lookup should compare files by canonical path, the way
-<code>RouteDiscovery::sources</code> already does, rather than by the string of a
-rebuilt URI. Check the other <code>open_files.get(&amp;path_to_uri(..))</code> callers
-for the same mismatch.</p>
-<p><strong>Where to look:</strong>
-<code>src/virtual_members/laravel/route_names/traversal.rs</code>
-(<code>read_route_source</code>, <code>open_included_file</code>).</p>
+<p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
