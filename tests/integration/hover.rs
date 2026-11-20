@@ -17934,3 +17934,47 @@ function size(array $data): void {
     let key = crate::common::hover_last(&backend, php, "$key;");
     assert!(key.contains("$key = string"), "{key}");
 }
+
+/// A `self` parameter in a trait sees the required class like `$this` does,
+/// keeps the `null` a `?self` or `= null` admits, and a `class-string<self>`
+/// stays a class name rather than becoming an instance.
+#[test]
+fn hover_self_parameter_in_trait_with_required_class() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+abstract class Model {
+    public function getTable(): string { return ''; }
+}
+
+/** @phpstan-require-extends Model */
+trait Stamps {
+    public static function a(self $plain, ?self $nullable, self $defaulted = null): void {
+        $plain;
+        $nullable;
+        $defaulted;
+    }
+    /** @param class-string<self> $cls */
+    public static function b(string $cls): void {
+        $cls;
+    }
+}
+
+class Post extends Model {
+    use Stamps;
+}
+"#;
+    let plain = crate::common::hover_last(&backend, php, "$plain;");
+    assert!(plain.contains("$plain = Stamps&Model\n"), "{plain}");
+    let nullable = crate::common::hover_last(&backend, php, "$nullable;");
+    assert!(
+        nullable.contains("$nullable = Stamps&Model|null"),
+        "{nullable}"
+    );
+    let defaulted = crate::common::hover_last(&backend, php, "$defaulted;");
+    assert!(
+        defaulted.contains("$defaulted = Stamps&Model|null"),
+        "{defaulted}"
+    );
+    let cls = crate::common::hover_last(&backend, php, "$cls;");
+    assert!(cls.contains("$cls = class-string<self>"), "{cls}");
+}
