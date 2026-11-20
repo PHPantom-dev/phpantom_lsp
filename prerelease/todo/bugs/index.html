@@ -922,6 +922,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b749-switch-and-match-do-not-narrow-the-way-the-same-in-an-if-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B749. <code>switch</code> and <code>match</code> do not narrow the way the same <code>===</code> in an <code>if</code> does
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b750-gettype-comparisons-narrow-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B750. <code>gettype()</code> comparisons narrow nothing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b751-loose-against-a-non-numeric-string-keeps-int-and-float" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B751. Loose <code>==</code> against a non-numeric string keeps <code>int</code> and <code>float</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1562,6 +1601,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b749-switch-and-match-do-not-narrow-the-way-the-same-in-an-if-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B749. <code>switch</code> and <code>match</code> do not narrow the way the same <code>===</code> in an <code>if</code> does
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b750-gettype-comparisons-narrow-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B750. <code>gettype()</code> comparisons narrow nothing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b751-loose-against-a-non-numeric-string-keeps-int-and-float" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B751. Loose <code>==</code> against a non-numeric string keeps <code>int</code> and <code>float</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1722,15 +1800,75 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b749-switch-and-match-do-not-narrow-the-way-the-same-in-an-if-does">B749. <code>switch</code> and <code>match</code> do not narrow the way the same <code>===</code> in an <code>if</code> does<a class="headerlink" href="#b749-switch-and-match-do-not-narrow-the-way-the-same-in-an-if-does" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>if (get_class($x) === Foo::class)</code> and <code>if ($x::class === Foo::class)</code>
+both narrow <code>Foo|Bar</code> to <code>Foo</code>. The same comparison spelled as a <code>switch</code>
+or <code>match</code> subject only narrows in one of four forms:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function f(Foo|Bar $x): void {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    switch (get_class($x)) { case Foo::class: $x-&gt;fooOnly(); } // partial_union_member</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    switch ($x::class)     { case Foo::class: $x-&gt;fooOnly(); } // partial_union_member</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    echo match (get_class($x)) { Foo::class =&gt; $x-&gt;fooOnly(), default =&gt; '' }; // partial_union_member</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    echo match ($x::class)     { Foo::class =&gt; $x-&gt;fooOnly(), default =&gt; '' }; // narrows</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>The <code>case</code>/arm narrowing recognises its own subset of subjects instead
+of applying the facts <code>subject === label</code> would produce in an <code>if</code>. The
+fix is to have <code>process_switch</code> and the match-arm narrowing build that
+comparison and send it through the shared condition narrowing, so every
+form the <code>if</code> path learns (including <code>gettype()</code>, B750) works in all
+three places.</p>
+<p><strong>Where to look:</strong> <code>process_switch</code> in
+<code>src/type_engine/variable/forward_walk/control_flow.rs</code>, the match-arm
+narrowing, and <code>src/type_engine/type_ops/condition_facts/class_checks.rs</code>
+for the <code>if</code> path that already works.</p>
+<h3 id="b750-gettype-comparisons-narrow-nothing">B750. <code>gettype()</code> comparisons narrow nothing<a class="headerlink" href="#b750-gettype-comparisons-narrow-nothing" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<p><code>gettype($x) === 'integer'</code> leaves <code>int|string</code> as it is, in an <code>if</code> as
+well as in a <code>switch</code> or <code>match</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function f(int|string $x): void {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    if (gettype($x) === 'integer') {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">        takesInt($x); // reported: expects int, got int|string</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    }</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>gettype()</code> returns a fixed set of names (<code>'boolean'</code>, <code>'integer'</code>,
+<code>'double'</code>, <code>'string'</code>, <code>'array'</code>, <code>'object'</code>, <code>'resource'</code>,
+<code>'resource (closed)'</code>, <code>'NULL'</code>, <code>'unknown type'</code>), each standing for one
+type, so comparing it to a literal narrows like the matching <code>is_*()</code>
+call. Psalm and PHPStan both do this. Once B749 is fixed, the <code>switch</code>
+and <code>match</code> forms come for free.</p>
+<p><strong>Where to look:</strong> <code>src/type_engine/type_ops/condition_facts/builtin_checks.rs</code>,
+next to the <code>is_*()</code> handling.</p>
+<h3 id="b751-loose-against-a-non-numeric-string-keeps-int-and-float">B751. Loose <code>==</code> against a non-numeric string keeps <code>int</code> and <code>float</code><a class="headerlink" href="#b751-loose-against-a-non-numeric-string-keeps-int-and-float" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>In PHP 8, comparing an <code>int</code> or <code>float</code> to a non-numeric string compares
+them as strings, so <code>$key == 'foo'</code> can never hold for a number. The
+narrowing keeps those alternatives anyway:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @param 'foo'|'bar'|int $key */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function f(string|int $key): void {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    if ($key == 'foo') {</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">        takesFoo($key); // reported: expects 'foo', got 'foo'|int</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    }</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>apply_loose_literal_narrowing</code> pins only alternatives for which <code>==</code>
+means <code>===</code>, and leaves the rest alone in both directions. In the
+true branch it can drop <code>int</code>, <code>float</code> and their literals when the
+literal is a non-numeric string. Leading and trailing whitespace still
+counts as numeric (<code>' 1'</code>), so use PHP's own numeric-string rule. The
+false branch must leave them alone. (php-typing-conformance:
+<code>assertions_key_loose_narrowing</code>.)</p>
+<p><strong>Where to look:</strong>
+<code>src/type_engine/variable/forward_walk/cond_narrowing/loose_equality.rs</code>.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b752-a-required-shape-key-removed-by-unset-is-not-reported">B752. A required shape key removed by <code>unset()</code> is not reported<a class="headerlink" href="#b752-a-required-shape-key-removed-by-unset-is-not-reported" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param array{foo: int} $shape */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function f(array $shape): void {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    unset($shape['foo']);</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    takesFoo($shape); // expects array{foo: int}; nothing reported</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @param array{foo: int} $shape */</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function f(array $shape): void {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    unset($shape['foo']);</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    takesFoo($shape); // expects array{foo: int}; nothing reported</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>The variable resolves to <code>array{}</code> correctly, but a missing required key
 is only reported for an array literal at the call site

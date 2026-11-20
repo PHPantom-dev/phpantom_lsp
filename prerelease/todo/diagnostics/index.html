@@ -1066,6 +1066,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d53-docblock_missing_null-skips-a-tag-that-refines-a-nullable-hint" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D53. <code>docblock_missing_null</code> skips a tag that refines a nullable hint
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1635,6 +1646,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d53-docblock_missing_null-skips-a-tag-that-refines-a-nullable-hint" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D53. <code>docblock_missing_null</code> skips a tag that refines a nullable hint
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2013,8 +2035,39 @@ check can grow into them without a rename.</p>
 with the parent's templates substituted the way inheritance merging does,
 and native types only: a docblock that disagrees with the parent is not
 an error PHP raises.</p>
+<p>Typed properties belong here too. A redeclared property must keep its
+parent's native type exactly, since properties are invariant, and PHP
+refuses the class otherwise ("Type of Child::$p must be ?Countable (as
+in class Base)"). Nothing reports it today:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">class Base { public ?\Countable $p = null; }</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">final class Child extends Base { public ?\Iterator $p = null; } // fatal at load</span>
+</code></pre></div>
 <p><strong>Where to look:</strong> <code>src/diagnostics/incompatible_override.rs</code> and the
 subtype check behind <code>src/diagnostics/type_errors/</code>.</p>
+<h2 id="d53-docblock_missing_null-skips-a-tag-that-refines-a-nullable-hint">D53. <code>docblock_missing_null</code> skips a tag that refines a nullable hint<a class="headerlink" href="#d53-docblock_missing_null-skips-a-tag-that-refines-a-nullable-hint" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p><code>docblock_missing_null</code> only fires when the tag repeats the hint word for
+word without its <code>null</code> (<code>@param string $name</code> on <code>?string $name</code>). A tag
+that refines the type and also leaves out the <code>null</code> gets nothing:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @param list&lt;int&gt; $items */</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">function takesItems(?array $items): void {}</span>
+</code></pre></div>
+<p>The php-typing-conformance suite expects a report here
+(<code>phpdoc_advanced_param_typehint_array_nullable_mismatch</code>, a <code>style</code>
+test), next to the plain <code>string</code>/<code>?string</code> case that already passes.
+The reader of <code>list&lt;int&gt;</code> has to look at the signature to learn that
+<code>null</code> is accepted, which is the same problem the exact-copy case flags.</p>
+<p>The reason the check stops at exact copies is that refining tags are
+common, and PHPStan and Psalm read them as <code>list&lt;int&gt;|null</code> without
+complaint, so flagging every <code>@param non-empty-string</code> on a <code>?string</code>
+could be noisy. Decide where the line goes. One option is to flag any
+plain <code>@param</code>/<code>@return</code> that leaves out a <code>null</code> its hint spells,
+since the "Update docblock" fix (<code>|null</code>) is the same in both cases
+and the diagnostic is only a <code>Hint</code>. Another is to stop at container
+refinements (<code>list&lt;int&gt;</code> and <code>array&lt;…&gt;</code> on <code>?array</code>).</p>
+<p><strong>Where to look:</strong> <code>omits_only_null_of</code> and its caller in
+<code>src/diagnostics/docblock_native_mismatch.rs</code>. The module comment there
+explains the current rule and will need updating.</p>
 
 
 
