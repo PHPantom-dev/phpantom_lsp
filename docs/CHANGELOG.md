@@ -256,6 +256,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Type inference
 
 - **Keys written into an untyped variable.** After `$args['foo'] = $foo` on an untyped parameter, the array still counts as holding whatever other keys it came with, so passing it to a function that takes an array shape no longer reports an undeclared key.
+- **Variable variables replace what a local held.** After `$$name = 1` inside a function, the locals `$name` could name no longer keep the types they held before, so passing one on is no longer reported against its old type.
 - **`global` replaces what a local held.** After `$a = 'text'; global $a;` inside a function, `$a` no longer keeps the string it held before, so passing it on is no longer reported against that string.
 - **`?->` chains compared greater than a value.** Inside `if ($line->product?->stock > 0)`, `$line->product` is known to be non-null, since a `null` chain is never greater than anything.
 - **`self` parameters in traits.** A parameter typed `self` inside a trait now sees the members of the class its `@phpstan-require-extends` or `@phpstan-require-implements` names, as `$this` already did, so a closure such as `static function (self $model)` in a model trait no longer reports the model's methods as unknown. Contributed by @pataar.

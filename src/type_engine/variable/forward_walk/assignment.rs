@@ -209,6 +209,17 @@ pub(crate) fn process_assignment_expr<'b>(
             process_expr(assignment.rhs, scope, ctx)
         };
 
+        if let Some(name) = variable_variable_write_target(assignment.lhs) {
+            if matches!(
+                crate::parser::unwrap_parens(assignment.rhs),
+                Expression::Assignment(_)
+            ) {
+                process_assignment_expr(assignment.rhs, scope, ctx);
+            }
+            widen_variable_variable_write(name, scope);
+            return;
+        }
+
         if !assignment.operator.is_assign() {
             // Compound assignment: $x op= expr.
             // The type depends on the operator.

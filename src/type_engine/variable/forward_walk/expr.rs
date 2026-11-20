@@ -338,6 +338,12 @@ impl<'b> ExprWalk<'b> {
         // The assigned value runs first, and can itself assign:
         // `if ($a = $b = expr())`, `if ($a = ($b = f())->m())`.
         self.expr(assignment.rhs, scope, ctx);
+        if let Some(name) = variable_variable_write_target(assignment.lhs) {
+            self.write(expr, scope, ctx);
+            widen_variable_variable_write(name, scope);
+            record_scope_snapshot(expr.span().end.offset, scope);
+            return ExprResult { wrote: true };
+        }
         if assignment.operator.is_assign() {
             if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
                 let value = resolve_rhs_with_types(assignment.rhs, scope, ctx, Some(&self.types));
