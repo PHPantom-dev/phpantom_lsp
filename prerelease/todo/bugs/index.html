@@ -944,6 +944,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Laravel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b748-route-files-pulled-in-by-another-file-are-read-from-disk-not-the-editor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B748. Route files pulled in by another file are read from disk, not the editor
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -998,23 +1015,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Code actions">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b747-create-route-ignores-the-name-prefix-the-target-routes-file-is-loaded-under" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B747. "Create route" ignores the name prefix the target routes file is loaded under
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1584,6 +1584,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Laravel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b748-route-files-pulled-in-by-another-file-are-read-from-disk-not-the-editor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B748. Route files pulled in by another file are read from disk, not the editor
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1638,23 +1655,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Code actions">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b747-create-route-ignores-the-name-prefix-the-target-routes-file-is-loaded-under" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B747. "Create route" ignores the name prefix the target routes file is loaded under
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1726,7 +1726,29 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b748-route-files-pulled-in-by-another-file-are-read-from-disk-not-the-editor">B748. Route files pulled in by another file are read from disk, not the editor<a class="headerlink" href="#b748-route-files-pulled-in-by-another-file-are-read-from-disk-not-the-editor" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p>Route discovery reads a route file a group includes
+(<code>Route::name('api.')-&gt;group(base_path('routes/api.php'))</code> in
+<code>bootstrap/app.php</code>, or <code>Route::group([], __DIR__ . '/sub.php')</code>) straight
+from disk, while a top-level route file is read through the editor's
+buffer. Unsaved edits to an included file are invisible until it is
+saved:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// bootstrap/app.php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">-&gt;withRouting(then: function () {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    Route::name('api.')-&gt;group(base_path('routes/api.php'));</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">})</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">// routes/api.php, edited but not saved</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">Route::get('/users', …)-&gt;name('users.index');</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">// app/Http/Controllers/UserController.php</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">route('api.users.index'); // still reported as an unknown route</span>
+</code></pre></div>
+<p>This also means applying the "Create route" quick fix to such a file
+leaves the diagnostic in place until the file is saved. The include
+traversal (<code>open_included_file</code>) needs to read through the same
+buffer-aware path <code>walk_workspace_route_file</code> uses.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
@@ -1736,27 +1758,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
-<h3 id="b747-create-route-ignores-the-name-prefix-the-target-routes-file-is-loaded-under">B747. "Create route" ignores the name prefix the target routes file is loaded under<a class="headerlink" href="#b747-create-route-ignores-the-name-prefix-the-target-routes-file-is-loaded-under" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<p>The "Create route" quick fix on an unknown <code>route('…')</code> name appends a
-<code>-&gt;name('…')</code> registration with the full name to <code>routes/web.php</code> or
-<code>routes/api.php</code>. When the app loads that file under a named group, the
-group's prefix is applied a second time:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// bootstrap/app.php</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">-&gt;withRouting(then: function () {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    Route::name('api.')-&gt;group(base_path('routes/api.php'));</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">})</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">// app/Http/Controllers/UserController.php</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">route('api.users.index'); // quick fix appends -&gt;name('api.users.index')</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">                          // to routes/api.php, registering api.api.users.index</span>
-</code></pre></div>
-<p>The unknown-route diagnostic stays, and the route the fix wrote has the
-wrong name. Route discovery already reads such a file with its group's
-prefix (<code>enumerate_all_routes</code> walks <code>bootstrap/app.php</code> first), so the
-fix can ask the route table which prefix the target file is loaded under:
-strip it from the generated name when the requested name starts with it,
-and pick the other file (or decline) when it does not.</p>
+<p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
