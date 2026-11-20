@@ -364,7 +364,7 @@ pub(crate) fn process_switch<'b>(
     let mut branch_scopes: Vec<ScopeState> = Vec::new();
     let mut has_default = false;
 
-    // Every literal label, which the `default` arm has seen fail.
+    // Every label, which the `default` arm has seen fail.
     let all_labels: Vec<&Expression<'b>> = cases
         .iter()
         .filter_map(|case| match case {
@@ -384,12 +384,18 @@ pub(crate) fn process_switch<'b>(
         let mut case_scope = pre_switch_scope.clone();
         if !falls_into_next {
             if !is_default {
-                apply_switch_arm_narrowing(switch.expression, labels, &[], &mut case_scope, ctx);
-            } else if labels.is_empty() {
-                apply_switch_arm_narrowing(
+                apply_subject_match_narrowing(
                     switch.expression,
-                    &[],
+                    labels,
+                    false,
+                    &mut case_scope,
+                    ctx,
+                );
+            } else if labels.is_empty() {
+                apply_subject_mismatch_narrowing(
+                    switch.expression,
                     &all_labels,
+                    false,
                     &mut case_scope,
                     ctx,
                 );

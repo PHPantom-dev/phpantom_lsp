@@ -225,6 +225,7 @@ ships, remove every row that names it.
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |
 | D50 | [`unused-parameters` skips methods a subclass can override](todo/diagnostics.md#d50-unused-parameters-skips-methods-a-subclass-can-override) | Low         | Medium-High |
 | D52 | [`incompatible_override` only checks a `static` return type](todo/diagnostics.md#d52-incompatible_override-only-checks-a-static-return-type) | Medium      | Medium-High |
+| D53 | [`docblock_missing_null` skips a tag that refines a nullable hint](todo/diagnostics.md#d53-docblock_missing_null-skips-a-tag-that-refines-a-nullable-hint) | Low         | Low         |
 
 ## Code Generation & Refactoring
 

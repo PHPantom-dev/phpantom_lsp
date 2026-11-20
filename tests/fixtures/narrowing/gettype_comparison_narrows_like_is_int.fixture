@@ -1,0 +1,14 @@
+// test: comparing gettype() to a type name narrows like the matching is_*() call
+// feature: hover
+// expect_hover: $narrowed => int
+// expect_absent: string
+---
+<?php
+
+function check(int|string $x): void
+{
+    if (gettype($x) === 'integer') {
+        $narrowed = $x;
+        echo $narr<>owed;
+    }
+}

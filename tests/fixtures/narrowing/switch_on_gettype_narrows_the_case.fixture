@@ -1,0 +1,16 @@
+// test: a switch on gettype() narrows the subject inside the case
+// feature: hover
+// expect_hover: $narrowed => string
+// expect_absent: int
+---
+<?php
+
+function check(int|string $x): void
+{
+    switch (gettype($x)) {
+        case 'string':
+            $narrowed = $x;
+            echo $narr<>owed;
+            break;
+    }
+}

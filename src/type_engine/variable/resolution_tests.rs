@@ -629,7 +629,7 @@ function test(
     );
     assert_eq!(
         resolve_literal_test_var(content, "$runtime_domains"),
-        "int|float"
+        "1|float"
     );
 }
 

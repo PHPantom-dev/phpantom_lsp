@@ -37,7 +37,6 @@ use mago_span::HasSpan;
 use mago_syntax::cst::unary::{UnaryPostfixOperator, UnaryPrefixOperator};
 
 use crate::atom::bytes_to_str;
-use crate::type_engine::type_ops::condition_facts;
 use crate::types::ResolvedType;
 
 /// The types of sub-expressions recorded where they were evaluated, keyed
@@ -802,10 +801,11 @@ impl<'b> ExprWalk<'b> {
     /// `switch` without `default` there is no "no arm ran" scope to fold
     /// into the join.
     ///
-    /// A `match ($x::class)` arm sees its subject narrowed to the classes it
-    /// names, a `match ($suit)` arm to the enum cases it names less the ones
-    /// an arm above it took, and a `match (true)` arm runs where one of its
-    /// conditions held and every condition above it did not.
+    /// An arm runs where the subject was identical to one of its
+    /// conditions and to none of the conditions above it, so it sees what
+    /// `subject === condition` proves in an `if`, and `default` runs once
+    /// every condition failed, wherever it is written.  A `match (true)`
+    /// arm runs where one of its conditions held instead.
     #[inline(never)]
     fn match_arms(
         &mut self,
@@ -818,23 +818,39 @@ impl<'b> ExprWalk<'b> {
         if match_expr.expression.is_true() {
             return subject.or(self.match_true_arms(expr, match_expr, scope, ctx));
         }
-        let class_subject = condition_facts::match_class_subject_var(match_expr.expression);
-        let case_arms = class_subject
-            .is_none()
-            .then(|| MatchEnumCaseArms::of(match_expr, scope, ctx))
-            .flatten();
+        let mut failed = scope.clone();
+        let mut default_arm = None;
         let mut wrote = false;
         let mut arms = Vec::with_capacity(match_expr.arms.len());
-        for (index, arm) in match_expr.arms.iter().enumerate() {
-            let mut arm_scope = scope.clone();
-            if let (Some(var), MatchArm::Expression(expr_arm)) = (class_subject, arm) {
-                apply_class_match_arm_narrowing(var, expr_arm, &mut arm_scope, ctx);
+        for arm in match_expr.arms.iter() {
+            match arm {
+                MatchArm::Expression(expr_arm) => {
+                    let conditions: Vec<&'b Expression<'b>> =
+                        expr_arm.conditions.iter().copied().collect();
+                    let mut arm_scope = failed.clone();
+                    apply_subject_match_narrowing(
+                        match_expr.expression,
+                        &conditions,
+                        true,
+                        &mut arm_scope,
+                        ctx,
+                    );
+                    apply_subject_mismatch_narrowing(
+                        match_expr.expression,
+                        &conditions,
+                        true,
+                        &mut failed,
+                        ctx,
+                    );
+                    wrote |= self.fork(expr_arm.expression, &mut arm_scope, ctx).wrote;
+                    arms.push(arm_scope);
+                }
+                MatchArm::Default(def_arm) => default_arm = Some(def_arm.expression),
             }
-            if let Some(case_arms) = &case_arms {
-                case_arms.narrow_arm(index, &mut arm_scope, ctx);
-            }
-            wrote |= self.fork(arm.expression(), &mut arm_scope, ctx).wrote;
-            arms.push(arm_scope);
+        }
+        if let Some(default_arm) = default_arm {
+            wrote |= self.fork(default_arm, &mut failed, ctx).wrote;
+            arms.push(failed);
         }
         self.join_arms(expr, wrote, arms, scope, ctx);
         ExprResult {

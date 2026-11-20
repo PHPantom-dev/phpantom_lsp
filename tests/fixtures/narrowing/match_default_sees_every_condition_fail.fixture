@@ -1,0 +1,17 @@
+// test: a match default arm sees the subject unequal to every condition above it
+// feature: hover
+// expect_hover: $rest => Beta
+// expect_absent: Alpha
+---
+<?php
+
+class Alpha {}
+class Beta {}
+
+function check(Alpha|Beta $x): void
+{
+    echo match ($x::class) {
+        Alpha::class => 'a',
+        default => ($rest = $x) && $re<>st,
+    };
+}

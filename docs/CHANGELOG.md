@@ -348,6 +348,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Assertions of a nullable or union type.** After a `@phpstan-assert ?Dog $x`, `$x` is `Dog|null` instead of `Dog`, and an assertion like `Dog|int` keeps both halves. The same goes for a template bound to such a type, so `assertSame($expected, $actual)` with an `int|string` `$expected` leaves `$actual` an `int|string`.
 - **Assertions whose type is a template.** A `@phpstan-assert` naming a `@template` now narrows to the type of the argument it is bound from, so after `$this->assertSame(4, $width)`, `$width` is `4` instead of `object`, and passing it on to an `int` parameter is no longer reported. Contributed by @phcorp. Closes #473.
 - **A `finally` block sees the paths that returned early.** After `if (null !== $tool) { return; }` in the `try`, a `null !== $tool` check in the `finally` block is no longer treated as dead code. A `return` or rethrow inside a `catch` counts too. Contributed by @phcorp.
+- **`switch` and `match` narrow like the same comparison in an `if`.** A `case` or arm narrows its subject the way `subject == label` (or `===` for `match`) does in an `if`, so `switch (get_class($x))` and `match (gettype($x))` narrow `$x`, and an arm further down knows the conditions above it failed.
+- **`gettype()` comparisons narrow the value.** `gettype($x) === 'integer'` narrows `$x` like `is_int($x)`, and the same holds for the other type names `gettype()` returns.
+- **Loose `==` against a non-numeric string rules out numbers.** Inside `if ($key == 'foo')`, an `int` or `float` alternative of `$key` is dropped, since PHP 8 never considers a number equal to a non-numeric string.
 
 #### Generics and templates
 

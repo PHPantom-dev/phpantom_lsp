@@ -14,6 +14,7 @@ use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::type_resolution;
+use crate::type_engine::variable::forward_walk::{self, condition_narrowing_overrides};
 use crate::types::ResolvedType;
 
 use super::{peel_type_transparent, resolve_rhs_expression};
@@ -378,7 +379,6 @@ pub(super) fn resolve_match_expression(
         match_expr.expression,
     );
     let is_true_subject = match_expr.expression.is_true();
-    let narrows = is_true_subject || subject_var.is_some();
     let mut combined = Vec::new();
     // Reaching an arm means every arm above it was tested and
     // failed, so the inverse of their conditions holds in its body
@@ -395,16 +395,24 @@ pub(super) fn resolve_match_expression(
         // Narrowed variable types, so that the arm expression
         // resolves against the narrowed class.
         let mut overrides = carried.clone();
-        if narrows && let MatchArm::Expression(expr_arm) = arm {
+        if let MatchArm::Expression(expr_arm) = arm {
             // The arm's own conditions describe its body more
-            // precisely than the carried inverses, so they win.
-            overrides.extend(extract_match_arm_narrowings(expr_arm, subject_var, ctx));
-            if subject_var.is_none() {
-                // The shared pipeline needs the forward walker's
-                // scope to seed the subjects; where there is none
-                // the `instanceof` extractor above is all we get.
-                overrides.extend(match_true_arm_narrowings(expr_arm, ctx));
+            // precisely than the carried inverses, so they win.  The
+            // shared pipeline needs the forward walker's scope to seed
+            // the subjects; where there is none the `instanceof` and
+            // `::class` extractor is all we get.
+            if is_true_subject || subject_var.is_some() {
+                overrides.extend(extract_match_arm_narrowings(expr_arm, subject_var, ctx));
             }
+            overrides.extend(any_condition_narrowings(expr_arm, |condition| {
+                if is_true_subject {
+                    condition_narrowing_overrides(condition, true, ctx)
+                } else {
+                    let comparison =
+                        forward_walk::subject_comparison(match_expr.expression, condition, true);
+                    condition_narrowing_overrides(&comparison, true, ctx)
+                }
+            }));
         }
         // The arm is resolved with the cursor inside it, as a
         // ternary's branches are: a lookup that has no scope to read
@@ -420,26 +428,31 @@ pub(super) fn resolve_match_expression(
             &mut combined,
             widen_unresolved_branch(arm_expr, arm_results),
         );
-        if is_true_subject && let MatchArm::Expression(expr_arm) = arm {
-            // Every condition of this arm was not `true` for the
-            // arms below it, so all of their inverses hold together,
-            // on top of what the arms above already proved.
+        if let MatchArm::Expression(expr_arm) = arm {
+            // Every condition of this arm failed for the arms below it,
+            // so all of their inverses hold together, on top of what the
+            // arms above already proved.
             for condition in expr_arm.conditions.iter() {
-                if !crate::type_engine::variable::forward_walk::match_true_condition_is_boolean(
-                    condition,
-                    || resolve_rhs_expression(condition, ctx),
-                ) {
-                    continue;
-                }
+                let comparison;
+                let failed = if is_true_subject {
+                    if !forward_walk::match_true_condition_is_boolean(condition, || {
+                        resolve_rhs_expression(condition, ctx)
+                    }) {
+                        continue;
+                    }
+                    condition
+                } else {
+                    comparison =
+                        forward_walk::subject_comparison(match_expr.expression, condition, true);
+                    &comparison
+                };
                 let carried_ctx =
                     (!carried.is_empty()).then(|| ctx.with_match_arm_narrowing(carried.clone()));
-                carried.extend(
-                    crate::type_engine::variable::forward_walk::condition_narrowing_overrides(
-                        condition,
-                        false,
-                        carried_ctx.as_ref().unwrap_or(ctx),
-                    ),
-                );
+                carried.extend(condition_narrowing_overrides(
+                    failed,
+                    false,
+                    carried_ctx.as_ref().unwrap_or(ctx),
+                ));
             }
         }
     }
@@ -518,7 +531,8 @@ fn extract_match_arm_narrowings(
     narrowed.into_iter().collect()
 }
 
-/// The narrowing a `match (true)` arm's conditions establish for its body.
+/// The narrowing a `match` arm's conditions establish for its body, given
+/// what `narrow` reads from one condition.
 ///
 /// This runs the same condition pipeline an `if` body gets, so every rule
 /// in it (`!== null`, type guards, assertions, …) reaches a match arm, not
@@ -527,23 +541,20 @@ fn extract_match_arm_narrowings(
 /// An arm runs when *any* of its conditions matched, so a fact only holds
 /// inside the body when every condition proves it: the per-condition maps
 /// are intersected by subject and unioned by type.
-fn match_true_arm_narrowings(
-    expr_arm: &MatchExpressionArm<'_>,
-    ctx: &VarResolutionCtx<'_>,
+fn any_condition_narrowings<'c>(
+    expr_arm: &'c MatchExpressionArm<'c>,
+    narrow: impl Fn(&'c Expression<'c>) -> HashMap<String, Vec<ResolvedType>>,
 ) -> HashMap<String, Vec<ResolvedType>> {
     let mut conditions = expr_arm.conditions.iter();
     let Some(first) = conditions.next() else {
         return HashMap::new();
     };
-    let mut merged =
-        crate::type_engine::variable::forward_walk::condition_narrowing_overrides(first, true, ctx);
+    let mut merged = narrow(first);
     for condition in conditions {
         if merged.is_empty() {
             break;
         }
-        let next = crate::type_engine::variable::forward_walk::condition_narrowing_overrides(
-            condition, true, ctx,
-        );
+        let next = narrow(condition);
         merged.retain(|name, types| match next.get(name) {
             Some(other) => {
                 ResolvedType::extend_unique(types, other.clone());
