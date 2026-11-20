@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 /**
  * @template TModel of \App\Models\Baker
  * @extends Builder<TModel>
+ * @mixin Baker
  */
 class BakerBuilder extends Builder
 {
