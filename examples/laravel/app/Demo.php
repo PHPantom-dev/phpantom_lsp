@@ -1156,6 +1156,10 @@ class Demo
         BlogPost::with('');              // offers: author, comments, …
         BlogAuthor::with('posts.');      // dot-notation: offers nested relations on BlogPost
 
+        // Try: go to definition on each segment of 'posts.author'. posts
+        // jumps to BlogAuthor::posts() and author to BlogPost::author().
+        BlogAuthor::with('posts.author');
+
         // Column name completion in where(), orderBy(), select(), etc.
         BlogAuthor::where('');           // offers: name, email, active, genre, …
         BlogPost::orderBy('');           // offers: title, published, author_id, …

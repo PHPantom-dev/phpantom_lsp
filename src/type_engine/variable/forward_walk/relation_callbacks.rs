@@ -199,7 +199,8 @@ fn declared_relation_method(
                 class.fqn().as_str(),
                 "Illuminate\\Database\\Eloquent\\Builder"
                     | "Illuminate\\Database\\Eloquent\\Concerns\\QueriesRelationships"
-            ) || (method == "with" && class.fqn() == "Illuminate\\Database\\Eloquent\\Model"),
+            ) || (matches!(method, "with" | "load" | "loadMissing")
+                && class.fqn() == "Illuminate\\Database\\Eloquent\\Model"),
         );
     }
     for name in &class.used_traits {
@@ -248,7 +249,13 @@ pub(crate) fn eager_callback_arguments<'a>(
     let ClassLikeMemberSelector::Identifier(name) = selector else {
         return None;
     };
-    if !crate::atom::bytes_to_str(name.value).eq_ignore_ascii_case("with") {
+    // A model's `load()` and `loadMissing()` hand their array to `with()` on
+    // a fresh query, so their callbacks constrain the same relations.
+    let called = crate::atom::bytes_to_str(name.value);
+    let method_name = ["with", "load", "loadMissing"]
+        .into_iter()
+        .find(|method| method.eq_ignore_ascii_case(called))?;
+    if is_static && method_name != "with" {
         return None;
     }
     let argument = arguments.arguments.iter().nth(arg_idx)?.value();
@@ -284,16 +291,16 @@ pub(crate) fn eager_callback_arguments<'a>(
             let Some(class) = receiver.class_info.as_ref() else {
                 return false;
             };
-            if !is_framework_relation_method(receiver, class, "with", ctx) {
+            if !is_framework_relation_method(receiver, class, method_name, ctx) {
                 return false;
             }
-            let Some(method) = class.get_method_arc("with").or_else(|| {
+            let Some(method) = class.get_method_arc(method_name).or_else(|| {
                 crate::virtual_members::resolve_class_fully_maybe_cached(
                     class,
                     ctx.file.class_loader,
                     ctx.resolved_class_cache,
                 )
-                .get_method_arc("with")
+                .get_method_arc(method_name)
             }) else {
                 return false;
             };

@@ -80,6 +80,16 @@ const RELATION_METHODS: &[&str] = &[
     "withExists",
 ];
 
+/// Relation methods that take each string argument as a relation name.
+const VARIADIC_RELATION_METHODS: &[&str] = &[
+    "with",
+    "without",
+    "load",
+    "loadMissing",
+    "loadCount",
+    "withCount",
+];
+
 /// Methods whose first string argument is a column/attribute name.
 const COLUMN_METHODS: &[&str] = &[
     "where",
@@ -243,11 +253,18 @@ pub(crate) fn detect_eloquent_string_context(
                 .is_some_and(|(name, _)| name.eq_ignore_ascii_case("array"))
     })?;
     let (method, _) = extract_identifier_backwards(&content[..call.code_before])?;
-    if RELATION_METHODS
-        .iter()
-        .any(|name| name.eq_ignore_ascii_case(method))
-    {
+    if is_relation_method(method) {
         let ctx = detect_string_call_context(content, cursor_offset, code)?;
+        // `with('a', 'b')` and its siblings read every argument as a
+        // relation, but the rest take one relation followed by a column
+        // (`withSum('posts', 'votes')`) or an operator (`has('posts', '>=')`).
+        if ctx.arg_index > 0
+            && !VARIADIC_RELATION_METHODS
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(method))
+        {
+            return None;
+        }
         return Some(EloquentStringContext {
             kind: EloquentStringKind::Relation,
             partial: ctx.partial,
@@ -294,6 +311,12 @@ pub(crate) fn detect_eloquent_string_context(
         argument: Some(argument),
         names,
     })
+}
+
+fn is_relation_method(method: &str) -> bool {
+    RELATION_METHODS
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(method))
 }
 
 /// Whether `arg` is the `$attributes` of `firstOrCreate()` and its
@@ -458,6 +481,71 @@ impl Backend {
         } else {
             Some(CompletionResponse::CompletionItemList(items))
         }
+    }
+
+    /// Go to the relationship method the segment of a relation string under
+    /// the cursor names, e.g. `comments` in `$post->load('author.comments')`.
+    ///
+    /// Each segment of a dotted path is looked up on the model the segments
+    /// before it reach, the same walk completion does for the segment being
+    /// typed.
+    pub(crate) fn eloquent_relation_definition(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Option<Location> {
+        let offset = position_to_offset(content, position) as usize;
+        // The call-site index answers "which method encloses the cursor"
+        // without a scan of the file, so a definition request anywhere
+        // else does not pay for the lexical scan below.
+        let map = self.symbol_map_for(uri)?;
+        let call = map.find_enclosing_call_site(offset as u32)?;
+        let (method, _) = extract_identifier_backwards(call.call_expression)?;
+        if !is_relation_method(method) {
+            return None;
+        }
+
+        let code = crate::completion::source::code_context::code_context_at(content, offset)?;
+        let es_ctx = detect_eloquent_string_context(content, offset, &code)?;
+        if es_ctx.kind != EloquentStringKind::Relation {
+            return None;
+        }
+
+        let start = es_ctx.string_content_start;
+        let end = offset
+            + content[offset..]
+                .find([es_ctx.quote_char, '\n'])
+                .unwrap_or(content.len() - offset);
+        let literal = &content[start..end];
+        let cursor = offset - start;
+        // `withCount('comments as total')` aliases the count and
+        // `with('comments:id,body')` picks columns; neither suffix is part
+        // of the relation path.
+        let path_end = literal.find([' ', ':']).unwrap_or(literal.len());
+        if cursor > path_end {
+            return None;
+        }
+        let path = &literal[..path_end];
+        let segment_start = path[..cursor].rfind('.').map_or(0, |dot| dot + 1);
+        let segment_end = path[cursor..]
+            .find('.')
+            .map_or(path.len(), |dot| cursor + dot);
+        let segment = &path[segment_start..segment_end];
+        if segment.is_empty() {
+            return None;
+        }
+
+        let ctx = self.file_context(uri);
+        let model =
+            self.resolve_eloquent_model_from_subject(&es_ctx, content, offset as u32, &ctx)?;
+        let owner = if segment_start == 0 {
+            model.fqn().to_string()
+        } else {
+            let class_loader = self.resolved_class_loader(&ctx);
+            resolve_relation_chain(&model, &path[..segment_start - 1], &class_loader, None)?
+        };
+        self.class_member_declaration_location(&owner, segment, false)
     }
 
     /// Resolve the model the method call's receiver queries or holds.

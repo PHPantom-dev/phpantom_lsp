@@ -77,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Laravel
 
+- **Go to a relation from its name.** Go-to-definition on a relation name in `with()`, `load()`, `whereHas()` and the other relation methods jumps to the relationship method. Each segment of a dotted path such as `'posts.author'` goes to the relation on the model the path has reached, including inside an eager-loading constraint closure.
 - **Container call parameters.** The parameter keys passed to `app()->call()` complete from the callable's parameters and go to them. Contributed by @shuvroroy.
 - **Laravel asset paths and Inertia pages.** The paths `asset()`, `mix()`, `@vite` and `Vite::asset()` name, and the pages `Inertia::render()`, `inertia()` and `Route::inertia()` render, complete from the files on disk, jump to the file, and are reported when nothing is there. An unknown Inertia page gets a quick fix that creates it. Page directories and extensions are read from `config/inertia.php`.
 - **Laravel related classes.** Code lenses on an Eloquent model go to its factory, policy, observers, migrations, API resources, and custom collection, and a factory, policy, or observer gets one back to its model. An event lists the listeners that handle it, whether registered or discovered from their `handle()` type hint, and a listener links to the events it handles.
@@ -255,6 +256,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Type inference
 
+- **Constraint closures passed to a model's `load()`.** In `$post->load(['comments' => fn ($query) => ...])` and `loadMissing()`, `$query` is the relation, as it already was for `with()`, so its methods complete and are checked.
 - **Reading an element of a union of arrays.** `$trees[$key]`, where `$trees` may be one of several array types, is whatever any of them holds there rather than what one of them does, so passing it to a function like `array_reduce()` is no longer reported against the other.
 - **Keys written into an untyped variable.** After `$args['foo'] = $foo` on an untyped parameter, the array still counts as holding whatever other keys it came with, so passing it to a function that takes an array shape no longer reports an undeclared key.
 - **Variable variables replace what a local held.** After `$$name = 1` inside a function, the locals `$name` could name no longer keep the types they held before, so passing one on is no longer reported against its old type.

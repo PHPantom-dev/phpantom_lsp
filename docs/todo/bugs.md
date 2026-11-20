@@ -77,7 +77,28 @@ No outstanding items.
 
 ## Laravel
 
-No outstanding items.
+### B758. Constraint closures passed to a collection's `load()` are untyped
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+/** @var \Illuminate\Database\Eloquent\Collection<int, Post> $posts */
+$posts->load(['comments' => fn ($query) => $query->with('author')]);
+// $query is untyped: no completion after `$query->`, and
+// go-to-definition on 'author' finds nothing.
+```
+
+A model's `load()` and `loadMissing()` type the closure as the relation,
+like `with()`, but Eloquent's `Collection::load()` and `loadMissing()`
+pass the same array to `with()` on the first model's query and are not
+recognised. Two things stop them: the framework check only counts
+declarations on `Builder`, `QueriesRelationships` and `Model`, and
+`find_models_from_receivers` cannot read the model out of a
+`Collection<int, Post>` receiver.
+
+**Where to look:** `eager_callback_arguments`,
+`declared_relation_method` and `find_models_from_receivers` in
+`src/type_engine/variable/forward_walk/relation_callbacks.rs`.
 
 ## Blade
 
