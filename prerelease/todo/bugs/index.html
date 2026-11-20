@@ -1064,10 +1064,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b754-include-and-variable-variables-leave-a-functions-locals-as-they-were" class="md-nav__link">
+  <a href="#b754-an-include-whose-path-does-not-resolve-leaves-a-functions-locals-as-they-were" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B754. <code>include</code> and variable variables leave a function's locals as they were
+        B754. An include whose path does not resolve leaves a function's locals as they were
       </span>
     </span>
   </a>
@@ -1754,10 +1754,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b754-include-and-variable-variables-leave-a-functions-locals-as-they-were" class="md-nav__link">
+  <a href="#b754-an-include-whose-path-does-not-resolve-leaves-a-functions-locals-as-they-were" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B754. <code>include</code> and variable variables leave a function's locals as they were
+        B754. An include whose path does not resolve leaves a function's locals as they were
       </span>
     </span>
   </a>
@@ -1924,25 +1924,27 @@ an alias updates (or, where it cannot follow, forgets) the other.
 parameters and <code>use (&amp;$x)</code> captures; a local <code>=&amp;</code> is the case it misses.</p>
 <p><strong>Where to look:</strong> the <code>=&amp;</code> assignment handling in
 <code>src/type_engine/variable/forward_walk/assignment.rs</code>.</p>
-<h3 id="b754-include-and-variable-variables-leave-a-functions-locals-as-they-were">B754. <code>include</code> and variable variables leave a function's locals as they were<a class="headerlink" href="#b754-include-and-variable-variables-leave-a-functions-locals-as-they-were" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function f(string $name): void {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    $a = 'text';</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    include 'part.php'; // may assign $a</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    takesInt($a);       // reported: expects int, got 'text'</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    $b = 'text';</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">    $$name = 1;         // may be $b</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">    takesInt($b);       // reported: expects int, got 'text'</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">}</span>
+<h3 id="b754-an-include-whose-path-does-not-resolve-leaves-a-functions-locals-as-they-were">B754. An include whose path does not resolve leaves a function's locals as they were<a class="headerlink" href="#b754-an-include-whose-path-does-not-resolve-leaves-a-functions-locals-as-they-were" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function f(Output $output): void {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    $data = require $cacheFilePath; // may assign $output</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    $output-&gt;write('…');            // still read as Output</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>An <code>include</code>/<code>require</code> inside a function runs the file in the function's
-scope, and <code>$$name = …</code> writes a local the walker cannot name. Both can
-replace any local, but the walker keeps every local's type across them.
-<code>extract()</code> is already handled; these two need the same treatment
-(forget what is known about the locals they may write).</p>
-<p><strong>Where to look:</strong> the statement and assignment handling in
-<code>src/type_engine/variable/forward_walk/</code>.</p>
+scope. When the path resolves, the walker applies what the file's top
+level assigns. When it does not, the walker keeps every local's type, as
+PHPStan does. Widening every local to <code>mixed</code> there, as <code>extract()</code> of
+unknown keys and <code>$$name = …</code> do, is sound but costly: the common
+<code>$data = require $path;</code> idiom for loading a PHP array file then turns
+every typed parameter and local after it into <code>mixed</code>, which put 20 new
+errors on phpstan-src's <code>ResultCacheManager</code> and <code>PHPStanDiagnoseExtension</code>.
+A fix needs a way to tell the two apart, such as reading an include whose
+value is used as a file that returns rather than one that assigns, or a
+config switch, rather than widening unconditionally.</p>
+<p><strong>Where to look:</strong> <code>ExprWalk::include</code> in
+<code>src/type_engine/variable/forward_walk/expr.rs</code> and <code>include_locals</code> in
+<code>includes.rs</code>.</p>
 
 
 
