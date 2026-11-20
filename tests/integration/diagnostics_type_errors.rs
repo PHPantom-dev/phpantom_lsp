@@ -12325,11 +12325,76 @@ takesPair([0 => 'a', 1 => 'b']);
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
-/// A shape inferred from a variable records the keys we saw assigned,
-/// which is a lower bound on the keys the value has — a branch we could
-/// not follow may add more. Only a literal at the call site is proof.
+/// A variable's sealed shape lists every key the value has, whether the
+/// shape came from a literal one assignment ago, from a declared type, or
+/// from one of those with a key `unset()`.
 #[test]
-fn a_shape_that_did_not_come_from_a_literal_argument_stays_silent() {
+fn a_variable_whose_sealed_shape_lacks_a_required_key_is_reported() {
+    let php = r#"<?php
+/** @param array{host: string, port: int} $config */
+function takesConfig(array $config): void {}
+
+/** @param array{host: string, port: int} $config */
+function withoutPort(array $config): void {
+    unset($config['port']);
+    takesConfig($config);
+}
+
+function emptyConfig(): void {
+    $config = [];
+    takesConfig($config);
+}
+
+$partial = ['host' => 'localhost'];
+takesConfig($partial);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(
+        messages[0].contains("missing required key 'port'"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[1].contains("missing required keys 'host', 'port'"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[2].contains("missing required key 'port'"),
+        "got {messages:?}"
+    );
+}
+
+/// A key `unset()` and written again is back, and removing a key the
+/// parameter does not ask for leaves the ones it does.
+#[test]
+fn a_variable_that_still_holds_the_required_keys_after_unset_stays_silent() {
+    let php = r#"<?php
+/** @param array{host: string} $config */
+function takesConfig(array $config): void {}
+
+/** @param array{host: string, port: int} $config */
+function withoutPort(array $config): void {
+    unset($config['port']);
+    takesConfig($config);
+}
+
+/** @param array{host: string} $config */
+function rewritten(array $config): void {
+    unset($config['host']);
+    $config['host'] = 'localhost';
+    takesConfig($config);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A key written into a value whose keys are not all known (a plain
+/// `array`, an untyped parameter) joins the keys that value already had,
+/// one of which may be the one the parameter asks for. A key assigned on
+/// only some paths is optional, which is not reported as missing.
+#[test]
+fn a_shape_that_may_hold_more_keys_stays_silent() {
     let php = r#"<?php
 /** @param array{host: string, port: int} $config */
 function takesConfig(array $config): void {}
@@ -12342,8 +12407,21 @@ function build(bool $withPort): array {
     return $config;
 }
 
-$partial = ['host' => 'localhost'];
-takesConfig($partial);
+function typed(array $config): void {
+    $config['host'] = 'localhost';
+    takesConfig($config);
+}
+
+function untyped($config): void {
+    $config['host'] = 'localhost';
+    takesConfig($config);
+}
+
+function spread(array $more): void {
+    $config = ['host' => 'localhost', ...$more];
+    takesConfig($config);
+}
+
 takesConfig(build(true));
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
@@ -12498,11 +12576,11 @@ takeNames(['a', 3]);
     assert!(messages[0].contains("'a', 3"), "got {messages:?}");
 }
 
-/// A shape inferred from a variable lists the keys we saw assigned, which
-/// is a lower bound on what the value has, so only a literal is proof that
-/// a listed key is absent.
+/// A variable's sealed shape lists every key the value has, so a key an
+/// unsealed parameter shape lists is absent when the shape lacks it. One
+/// assigned on only some paths is optional, which is not reported.
 #[test]
-fn a_shape_that_did_not_come_from_a_literal_stays_silent_against_an_unsealed_shape() {
+fn a_variable_missing_a_key_an_unsealed_shape_lists_is_reported() {
     let php = r#"<?php
 /** @param array{foo: int, ...} $shape */
 function take(array $shape): void {}
@@ -12519,7 +12597,11 @@ $partial = ['bar' => 'x'];
 take($partial);
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
-    assert!(messages.is_empty(), "got {messages:?}");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("missing required key 'foo'"),
+        "got {messages:?}"
+    );
 }
 
 /// A typed array may hold the entries an unsealed shape requires, though
@@ -17927,4 +18009,21 @@ function test(): void {
         msgs.iter().all(|m| !m.contains("'text'")),
         "`Lib\\Box`'s initializers are not read in `App`'s namespace, got: {msgs:?}"
     );
+}
+
+/// `global $a` rebinds `$a` to the global of that name, so the value the
+/// local held before is gone even when nothing is known about the global.
+#[test]
+fn global_statement_replaces_what_the_local_held() {
+    let php = r#"<?php
+function takesInt(int $i): void {}
+
+function test(): void {
+    $a = 'text';
+    global $a;
+    takesInt($a);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
 }

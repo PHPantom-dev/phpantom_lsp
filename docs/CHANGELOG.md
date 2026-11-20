@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic member names that cannot name a member.** A property name written as an expression that holds an array or an object without `__toString()`, and a method name that is not a string, are now reported, since PHP throws an `Error` for them. A `Stringable` object still names a property, but never a method.
 - **Properties `clone()` writes are checked.** The properties PHP 8.5's `clone($object, [...])` sets on the copy are checked like an assignment: a property the class does not have, one the calling code cannot write, or a value of the wrong type is reported. The keys also jump to their property and follow it through find-references and rename.
 - **Typed properties nothing initializes.** A typed property with no default that only its own class can assign, and that the class never does, is now reported, since reading it throws. Properties a framework fills through an attribute count as initialized, and so do the generated identifiers and version fields of Doctrine entities. A public one is reported where it is read: on an object fresh from `new`, before anything writes it. A readonly property the constructor assigns twice is reported too.
+- **Arrays in variables that miss a required key.** An array held in a variable that lacks a key the parameter's shape requires, such as one left by `$config = []` or by `unset($config['port'])`, is now reported, as an array written in the call already was.
 
 #### Type inference
 
@@ -254,6 +255,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Type inference
 
+- **Keys written into an untyped variable.** After `$args['foo'] = $foo` on an untyped parameter, the array still counts as holding whatever other keys it came with, so passing it to a function that takes an array shape no longer reports an undeclared key.
+- **`global` replaces what a local held.** After `$a = 'text'; global $a;` inside a function, `$a` no longer keeps the string it held before, so passing it on is no longer reported against that string.
 - **`?->` chains compared greater than a value.** Inside `if ($line->product?->stock > 0)`, `$line->product` is known to be non-null, since a `null` chain is never greater than anything.
 - **`self` parameters in traits.** A parameter typed `self` inside a trait now sees the members of the class its `@phpstan-require-extends` or `@phpstan-require-implements` names, as `$this` already did, so a closure such as `static function (self $model)` in a model trait no longer reports the model's methods as unknown. Contributed by @pataar.
 - **`self` everywhere in traits.** Return types, property types and `@var` tags written `self`, `static` or `$this` inside a trait with `@phpstan-require-extends` or `@phpstan-require-implements` now see the required class's members too, so `$this->fluent()->getTable()` completes and is no longer reported as unknown.

@@ -554,8 +554,11 @@ fn apply_array_write<'b>(
     }
     // The write lands on whichever value the variable holds, so every
     // alternative a branch join left behind takes it. A variable that holds
-    // nothing yet auto-vivifies to an empty array.
+    // nothing yet auto-vivifies to an empty array. One that holds a value of
+    // unknown type (an untyped parameter, say) may already be an array with
+    // other keys, which a plain `array` base keeps open.
     let base_type = match scope.get(base_name) {
+        [] if scope.contains(base_name) => PhpType::array(),
         [] => PhpType::array_shape(Vec::new()),
         base_types => ResolvedType::types_joined(base_types),
     };

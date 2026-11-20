@@ -125,35 +125,7 @@ false branch must leave them alone. (php-typing-conformance:
 
 ## Array types
 
-### B752. A required shape key removed by `unset()` is not reported
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @param array{foo: int} $shape */
-function f(array $shape): void {
-    unset($shape['foo']);
-    takesFoo($shape); // expects array{foo: int}; nothing reported
-}
-```
-
-The variable resolves to `array{}` correctly, but a missing required key
-is only reported for an array literal at the call site
-(`enumerates_all_keys` in `src/diagnostics/type_errors/arguments.rs`).
-A shape held in a variable is treated as open, since the engine may not
-have seen every key assigned. An explicit `unset()` of a key the
-declared shape requires is not that kind of uncertainty: the key is
-provably gone. The same applies to `$e = []; takesFoo($e);`, where the
-value was a literal one assignment ago.
-
-The shape needs to record whether its key set is known to be complete
-(a literal, a sealed declared type, or one of those minus `unset` keys)
-rather than the call site guessing from the argument's syntax.
-(php-typing-conformance: `arrays_sealed_shape_mutation`.)
-
-**Where to look:** the `unset` handling in the forward walker,
-`missing_required_shape_keys` and `enumerates_all_keys` in
-`src/diagnostics/type_errors/arguments.rs`.
+No outstanding items.
 
 ## Laravel
 
@@ -181,4 +153,60 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B753. A write through a reference does not reach the variable it aliases
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+function f(): void {
+    $a = 'text';
+    $r = &$a;
+    $r = 1;
+    takesInt($a); // reported: expects int, got 'text'
+
+    $b = ['x' => 1];
+    $e = &$b['y']; // creates $b['y'] (null)
+    $e = 1;
+    takesY($b); // $b still reads as array{x: 1}
+}
+```
+
+`$r = &$a` binds `$r` to the same value as `$a`, but the forward walker
+treats it as a plain assignment, so later writes to `$r` leave `$a`'s
+type as it was. Taking a reference to an element (`&$b['y']`) also
+creates that element, which the walker does not record either. Every
+consumer reads the stale type: hover, completion, and every diagnostic
+that checks the variable, including the missing-shape-key check.
+
+The walker needs to track reference bindings: a write to either side of
+an alias updates (or, where it cannot follow, forgets) the other.
+`by_ref.rs` already handles references passed to by-reference
+parameters and `use (&$x)` captures; a local `=&` is the case it misses.
+
+**Where to look:** the `=&` assignment handling in
+`src/type_engine/variable/forward_walk/assignment.rs`.
+
+### B754. `include` and variable variables leave a function's locals as they were
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+function f(string $name): void {
+    $a = 'text';
+    include 'part.php'; // may assign $a
+    takesInt($a);       // reported: expects int, got 'text'
+
+    $b = 'text';
+    $$name = 1;         // may be $b
+    takesInt($b);       // reported: expects int, got 'text'
+}
+```
+
+An `include`/`require` inside a function runs the file in the function's
+scope, and `$$name = …` writes a local the walker cannot name. Both can
+replace any local, but the walker keeps every local's type across them.
+`extract()` is already handled; these two need the same treatment
+(forget what is known about the locals they may write).
+
+**Where to look:** the statement and assignment handling in
+`src/type_engine/variable/forward_walk/`.

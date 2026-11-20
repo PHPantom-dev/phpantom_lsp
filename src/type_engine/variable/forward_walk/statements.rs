@@ -151,7 +151,9 @@ pub(crate) fn process_statement<'b>(
                         // written in.
                         scope.set(var_name, ctx.resolved_types_for(php_type));
                     } else {
-                        scope.set_empty(var_name);
+                        // `global` rebinds the name to the global, so
+                        // whatever the local held before is gone.
+                        scope.set_unknown(var_name);
                     }
                 }
             }
