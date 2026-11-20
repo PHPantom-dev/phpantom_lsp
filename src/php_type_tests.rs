@@ -4381,6 +4381,24 @@ mod simplification_tests {
         );
     }
 
+    /// A benevolent union stays benevolent through a join that adds nothing
+    /// it does not already hold, and becomes enforced again once something
+    /// outside it joins.
+    #[test]
+    fn runtime_value_join_keeps_benevolence_it_still_covers() {
+        let lenient = PhpType::benevolent(PhpType::parse("array|int|float"));
+        let covered = PhpType::join_runtime_value_types(vec![
+            lenient.clone(),
+            PhpType::parse("array{a: true}"),
+            PhpType::literal_int("0"),
+        ]);
+        assert!(covered.is_benevolent(), "{covered}");
+        assert_eq!(covered.to_string(), "array|int|float");
+
+        let widened = PhpType::join_runtime_value_types(vec![lenient, PhpType::string()]);
+        assert!(!widened.is_benevolent(), "{widened}");
+    }
+
     #[test]
     fn runtime_value_join_absorbs_real_value_subsets() {
         assert_eq!(

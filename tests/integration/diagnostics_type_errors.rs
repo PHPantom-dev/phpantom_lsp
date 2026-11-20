@@ -15664,6 +15664,36 @@ function shaped(string $key): void {
     );
 }
 
+/// A write lands in each alternative of a union of a plain `array` and
+/// shapes, rather than in the first shape alone with the plain `array`
+/// dropped. Here the write goes through a reference into the array.
+#[test]
+fn a_write_into_an_array_or_shape_union_keeps_the_plain_array() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @return list<string> */
+function children(array $e): array { return []; }
+function merge(array $a, array $b): array { return $a; }
+
+/** @param array $element */
+function preRenderLinks($element) {
+    $element += ['#links' => [], '#attached' => []];
+    foreach (children($element) as $key) {
+        $child = &$element[$key];
+        if (isset($child['#links']) && empty($child['#printed'])) {
+            $element['#links'] += $child['#links'];
+            $child['#printed'] = TRUE;
+        }
+        if (isset($child['#attached'])) {
+            $element['#attached'] = merge($element['#attached'], $child['#attached']);
+        }
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 #[test]
 fn a_shape_with_extra_keys_satisfies_an_unsealed_shape() {
     let php = r#"<?php
