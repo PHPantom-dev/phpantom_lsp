@@ -1,0 +1,17 @@
+// test: appending through a reference to a dynamic element builds the grouped array
+// feature: hover
+// expect: list<int>
+// expect_absent: null
+---
+<?php
+
+/** @param list<array{k: string, v: int}> $rows */
+function test(array $rows): void {
+    $groups = [];
+    foreach ($rows as $row) {
+        $group = &$groups[$row['k']];
+        $group[] = $row['v'];
+        unset($group);
+    }
+    echo $<>groups;
+}

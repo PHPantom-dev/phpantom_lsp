@@ -50,7 +50,8 @@ pub(super) fn extract_nested_array_access_chain<'a, 'b>(
 
 /// A single key segment in a (possibly nested) array write like
 /// `$var['a'][$i]['b'] = …`.
-pub(super) enum ArrayWriteKey {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ArrayWriteKey {
     /// A string-literal key tracked as a shape entry, e.g. `['name']`.
     Shape(String),
     /// A dynamic (variable / expression / numeric) key tracked as a
@@ -71,6 +72,19 @@ pub(super) enum ArrayWriteKey {
     /// A trailing `[]` append, as in `$var['a'][] = …`. Only ever the
     /// last segment of a chain.
     Append,
+}
+
+impl ArrayWriteKey {
+    /// The key a literal segment names, as a shape spells it.
+    pub(crate) fn literal(&self) -> Option<std::borrow::Cow<'_, str>> {
+        match self {
+            ArrayWriteKey::Shape(key) => Some(std::borrow::Cow::Borrowed(key)),
+            ArrayWriteKey::Keyed {
+                slot: Some(slot), ..
+            } => Some(std::borrow::Cow::Owned(slot.to_string())),
+            _ => None,
+        }
+    }
 }
 
 /// Merge a nested array write with a mix of literal-string and dynamic
@@ -103,7 +117,7 @@ pub(super) enum ArrayWriteKey {
 ///
 /// `value_type` is stored as given. A loop write whose value can change from
 /// one pass to the next comes in already widened by [`loop_written_value`].
-pub(super) fn merge_nested_array_write(
+pub(crate) fn merge_nested_array_write(
     base: &PhpType,
     keys: &[ArrayWriteKey],
     value_type: &PhpType,

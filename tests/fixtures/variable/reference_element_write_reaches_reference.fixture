@@ -1,0 +1,13 @@
+// test: a write to an array element changes a reference bound to it
+// feature: hover
+// expect: $e = 'z'
+// expect_absent: null
+---
+<?php
+
+function test(): void {
+    $b = ['x' => 1];
+    $e = &$b['y'];
+    $b['y'] = 'z';
+    echo $<>e;
+}

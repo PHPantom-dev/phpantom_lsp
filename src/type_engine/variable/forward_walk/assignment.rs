@@ -8,6 +8,9 @@ use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::type_engine::type_ops::condition_facts;
 use crate::types::{ClassInfo, ResolvedType};
 
+use super::super::array_shape_writes::ArrayWriteKey;
+use super::scope_state::RefTarget;
+
 use super::super::rhs_resolution::{
     assignment_value, coalesce_assign_value, compound_assignment_result,
 };
@@ -238,6 +241,15 @@ pub(crate) fn process_assignment_expr<'b>(
             process_assignment_expr(assignment.rhs, scope, ctx);
         }
 
+        // Reference assignment: `$r = &$a;` / `$e = &$b['k'];`
+        if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs
+            && let Expression::UnaryPrefix(prefix) = crate::parser::unwrap_parens(assignment.rhs)
+            && matches!(prefix.operator, UnaryPrefixOperator::Reference(_))
+            && process_reference_assignment(bytes_to_str(dv.name), prefix.operand, scope, ctx)
+        {
+            return;
+        }
+
         // Array destructuring: `[$a, $b] = …` / `list($a, $b) = …`
         if matches!(assignment.lhs, Expression::Array(_) | Expression::List(_)) {
             process_destructuring_assignment(assignment, scope, ctx);
@@ -363,6 +375,8 @@ pub(crate) fn process_assignment_expr<'b>(
         // key while resolving.
         scope.invalidate_dependent_keys(&lhs_name);
         scope.invalidate_proofs(&lhs_name);
+        // A new array leaves the elements bound out of the old one behind.
+        scope.detach_bound_elements(&lhs_name);
         // `$cb = function () { $this->stop(); };` — work out now what
         // invoking this closure does to its captures, so a later
         // `call_user_func($cb)` can apply it without the closure's body in
@@ -489,6 +503,121 @@ fn ternary_arm_implications<'b>(
         .cloned()
         .unwrap_or_default();
     Some((implied, non_null))
+}
+
+/// Bind `lhs` to what `target` names, as `$lhs = &target;` does: the two
+/// share one value from here on, so a later write to either reaches the
+/// other.
+///
+/// Returns `false` for a target the walker does not follow (a property, a
+/// call's result), leaving the caller to store the value as a plain
+/// assignment would.  `lhs` is unbound from whatever it shared a value
+/// with before either way.
+fn process_reference_assignment<'b>(
+    lhs: &str,
+    target: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let target = crate::parser::unwrap_parens(target);
+    let span = target.span();
+    if ctx.cursor_offset >= span.start.offset && ctx.cursor_offset <= span.end.offset {
+        return true;
+    }
+    scope.unbind_reference(&atom(lhs));
+    let (types, bound) = match target {
+        Expression::Variable(Variable::Direct(dv)) => {
+            let name = bytes_to_str(dv.name);
+            if name == lhs || name == "$this" {
+                return false;
+            }
+            // Taking a reference to a variable that does not exist yet
+            // creates it, holding `null`.
+            if !scope.contains(name) {
+                scope.set(name, vec![ResolvedType::from_type_string(PhpType::null())]);
+            }
+            (scope.get(name).to_vec(), Some(RefTarget::Var(atom(name))))
+        }
+        Expression::ArrayAccess(access) => {
+            let Some((base, chain)) =
+                super::super::array_shape_writes::extract_nested_array_access_chain(access)
+            else {
+                return false;
+            };
+            if condition_facts::is_member_path_key(&base) {
+                return false;
+            }
+            let keys = super::array_assignment::array_write_keys(&chain, &[], scope, ctx);
+            let mut element = resolve_rhs_with_scope(target, scope, ctx);
+            // Taking a reference to a missing element creates it, holding
+            // `null`.  Only a literal key says which entry that is; a
+            // dynamic one may well name an element the array has.
+            let literal = keys.iter().all(|key| key.literal().is_some());
+            if literal && element_missing(scope.get(&base), scope.contains(&base), &keys) {
+                ResolvedType::extend_unique(
+                    &mut element,
+                    vec![ResolvedType::from_type_string(PhpType::null())],
+                );
+                super::array_assignment::process_array_key_write(
+                    access,
+                    element.clone(),
+                    false,
+                    scope,
+                    ctx,
+                );
+            }
+            // `$node = &$node['children'][$k]` walks a reference down into
+            // the array it named: the array it leaves is no longer
+            // reachable through any name the walker tracks.
+            let bound = (base != lhs).then(|| RefTarget::Element {
+                base: atom(&base),
+                keys,
+            });
+            (element, bound)
+        }
+        _ => return false,
+    };
+    scope.invalidate_dependent_keys(lhs);
+    scope.invalidate_proofs(lhs);
+    scope.detach_bound_elements(lhs);
+    if types.is_empty() {
+        scope.set_untyped(lhs);
+    } else {
+        scope.set(lhs, types);
+    }
+    if let Some(bound) = bound {
+        scope.bind_reference(lhs, bound);
+    }
+    true
+}
+
+/// Whether the array variable holding `array` (with `declared` saying
+/// whether the variable exists at all) can be missing the entry the
+/// literal `keys` lead to: some alternative of it is a sealed shape that
+/// lists no such key.
+///
+/// An optional entry (`key?: T`) is not counted as missing, matching how
+/// a read of one is typed.
+fn element_missing(array: &[ResolvedType], declared: bool, keys: &[ArrayWriteKey]) -> bool {
+    fn missing(ty: &PhpType, keys: &[ArrayWriteKey]) -> bool {
+        let Some((key, rest)) = keys.split_first() else {
+            return false;
+        };
+        let Some(key) = key.literal() else {
+            return false;
+        };
+        ty.union_members().iter().any(|member| {
+            member.shape_entries().is_some()
+                && member.as_unsealed_shape().is_none()
+                && member
+                    .shape_entry(&key)
+                    .is_none_or(|entry| missing(&entry.value_type, rest))
+        })
+    }
+    if array.is_empty() {
+        return !declared;
+    }
+    missing(&ResolvedType::types_joined(array), keys)
 }
 
 /// Give a `new X()` stored in a property the template arguments the

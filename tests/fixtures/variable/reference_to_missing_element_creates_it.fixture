@@ -1,0 +1,12 @@
+// test: a reference to a missing array element creates it, and writes through the reference land in it
+// feature: hover
+// expect: y: 1
+---
+<?php
+
+function test(): void {
+    $b = ['x' => 1];
+    $e = &$b['y'];
+    $e = 1;
+    echo $<>b;
+}

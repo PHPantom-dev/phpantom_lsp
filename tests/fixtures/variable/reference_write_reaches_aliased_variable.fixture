@@ -1,0 +1,13 @@
+// test: a write through a reference changes the variable it aliases
+// feature: hover
+// expect: $a = 1
+// expect_absent: text
+---
+<?php
+
+function test(): void {
+    $a = 'text';
+    $r = &$a;
+    $r = 1;
+    echo $<>a;
+}

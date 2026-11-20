@@ -133,6 +133,8 @@ pub(crate) fn process_statement<'b>(
                 if let Variable::Direct(dv) = var {
                     let var_name = bytes_to_str(dv.name);
                     imported.push(var_name);
+                    // `global` binds the name to the global by reference.
+                    scope.unbind_reference(&atom(var_name));
                     if let Some((_, php_type)) = declared.iter().find(|(name, _)| name == var_name)
                     {
                         scope.set(var_name, resolve_type_to_resolved_types(php_type, ctx));

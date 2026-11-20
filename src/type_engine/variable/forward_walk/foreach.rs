@@ -1244,10 +1244,14 @@ pub(crate) fn bind_foreach_value<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // Unwrap `&$value` (by-reference foreach) to get the inner variable.
+    // Unwrap `&$value` (by-reference foreach) to get the inner variable,
+    // which stops sharing a value with whatever it was bound to before.
     let value_expr = if let Expression::UnaryPrefix(up) = value_expr
         && matches!(up.operator, UnaryPrefixOperator::Reference(_))
     {
+        if let Expression::Variable(Variable::Direct(dv)) = up.operand {
+            scope.unbind_reference(&crate::atom::atom(bytes_to_str(dv.name)));
+        }
         up.operand
     } else {
         value_expr

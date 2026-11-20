@@ -1,0 +1,13 @@
+// test: a write through one element reference leaves a reference to another element alone
+// feature: hover
+// expect: $second = int
+---
+<?php
+
+/** @param array{first: string, second: int} $pair */
+function test(array $pair): void {
+    $first = &$pair['first'];
+    $second = &$pair['second'];
+    $first = 'changed';
+    echo $<>second;
+}
