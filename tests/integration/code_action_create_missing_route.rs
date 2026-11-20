@@ -466,3 +466,93 @@ async fn create_missing_route_rejects_non_utf8_boundaries_from_an_older_index() 
     assert_eq!(changed.len(), SOURCE.len());
     assert!(actions(&backend, &uri, &changed, diagnostics).is_empty());
 }
+
+const BOOTSTRAP_GROUPS: &str = "<?php\nuse Illuminate\\Support\\Facades\\Route;\nreturn Application::configure(basePath: dirname(__DIR__))\n    ->withRouting(then: function () {\n        Route::name('api.')->group(base_path('routes/api.php'));\n        Route::name('admin.')->group(base_path('routes/web.php'));\n    })\n    ->create();\n";
+
+#[tokio::test]
+async fn create_missing_route_strips_the_prefix_its_target_file_is_loaded_under() {
+    let source = "<?php\nroute('api.users.index');\n";
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_SRC_COMPOSER,
+        &[
+            ("src/Links.php", source),
+            ("bootstrap/app.php", BOOTSTRAP_GROUPS),
+            ("routes/api.php", ROUTES),
+            ("routes/web.php", ROUTES),
+        ],
+        "src/Links.php",
+    )
+    .await;
+    let diagnostics = diagnostics(&backend, &uri, source);
+    assert_eq!(diagnostics.len(), 1);
+    let fixes = actions(&backend, &uri, source, diagnostics);
+    assert_eq!(fixes.len(), 1);
+    let target = workspace_uri(&backend, "routes/api.php");
+    let updated = apply_edits(
+        ROUTES,
+        &edits_for_uri(fixes[0].edit.as_ref().unwrap(), &target),
+    );
+    assert!(updated.contains("Route::get('/users', [\\App\\Http\\Controllers\\UserController::class, 'index'])->name('users.index');"), "{updated}");
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_SRC_COMPOSER,
+        &[
+            ("src/Links.php", source),
+            ("bootstrap/app.php", BOOTSTRAP_GROUPS),
+            ("routes/api.php", &updated),
+            ("routes/web.php", ROUTES),
+        ],
+        "src/Links.php",
+    )
+    .await;
+    assert!(self::diagnostics(&backend, &uri, source).is_empty());
+}
+
+#[tokio::test]
+async fn create_missing_route_uses_the_other_file_when_the_prefix_does_not_fit() {
+    // `routes/api.php` is the natural target from inside it, but it is loaded
+    // under `api.` and the name does not start with that.
+    let source = format!("{ROUTES}route('admin.users.index');\n");
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_SRC_COMPOSER,
+        &[
+            ("bootstrap/app.php", BOOTSTRAP_GROUPS),
+            ("routes/api.php", &source),
+            ("routes/web.php", ROUTES),
+        ],
+        "routes/api.php",
+    )
+    .await;
+    let fixes = actions(
+        &backend,
+        &uri,
+        &source,
+        diagnostics(&backend, &uri, &source),
+    );
+    assert_eq!(fixes.len(), 1);
+    let edit = fixes[0].edit.as_ref().unwrap();
+    assert!(edits_for_uri(edit, &uri).is_empty());
+    let updated = apply_edits(
+        ROUTES,
+        &edits_for_uri(edit, &workspace_uri(&backend, "routes/web.php")),
+    );
+    assert!(updated.contains("->name('users.index');"), "{updated}");
+}
+
+#[tokio::test]
+async fn create_missing_route_declines_when_no_route_file_prefix_fits() {
+    let source = "<?php\nroute('users.index');\n";
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_SRC_COMPOSER,
+        &[
+            ("src/Links.php", source),
+            ("bootstrap/app.php", BOOTSTRAP_GROUPS),
+            ("routes/api.php", ROUTES),
+            ("routes/web.php", ROUTES),
+        ],
+        "src/Links.php",
+    )
+    .await;
+    let diagnostics = diagnostics(&backend, &uri, source);
+    assert_eq!(diagnostics.len(), 1);
+    assert!(actions(&backend, &uri, source, diagnostics).is_empty());
+}

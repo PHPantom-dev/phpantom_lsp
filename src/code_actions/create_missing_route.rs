@@ -88,11 +88,18 @@ impl Backend {
                     state.resolved_names.as_deref(),
                     || !self.has_indexed_class("Route"),
                 );
-            let target_path = root.join(if api {
-                "routes/api.php"
+            let (preferred, other) = if api {
+                ("routes/api.php", "routes/web.php")
             } else {
-                "routes/web.php"
-            });
+                ("routes/web.php", "routes/api.php")
+            };
+            let Some((target_path, name)) = [preferred, other].into_iter().find_map(|file| {
+                let path = root.join(file);
+                let name = name_within_file(key, &routes.file_name_prefixes(&path))?;
+                Some((path, name))
+            }) else {
+                continue;
+            };
             let Some(target) = crate::util::path_to_url(&target_path) else {
                 continue;
             };
@@ -101,7 +108,7 @@ impl Backend {
                 continue;
             }
             let source = existing.as_deref().map_or("", String::as_str);
-            let Some((edit, position)) = route_insertion(source, &route_stub(key)) else {
+            let Some((edit, position)) = route_insertion(source, &route_stub(name)) else {
                 continue;
             };
             let edit = if existing.is_some() {
@@ -164,6 +171,28 @@ fn api_resource_context(
         })
         .is_some()
     })
+}
+
+/// The name a registration appended to a route file must be given for the
+/// route to be called `key`, given the name prefixes the file is loaded under
+/// (none when the route scan does not read it).
+///
+/// The longest prefix `key` extends wins.  `None` when no known prefix fits:
+/// one that is not statically known could be anything.
+fn name_within_file<'k>(key: &'k str, prefixes: &[Option<&str>]) -> Option<&'k str> {
+    if prefixes.is_empty() {
+        return Some(key);
+    }
+    let mut longest: Option<&str> = None;
+    for prefix in prefixes.iter().flatten() {
+        if key.len() > prefix.len()
+            && key.starts_with(prefix)
+            && longest.is_none_or(|longest| prefix.len() > longest.len())
+        {
+            longest = Some(prefix);
+        }
+    }
+    longest.map(|prefix| &key[prefix.len()..])
 }
 
 fn route_stub(name: &str) -> String {

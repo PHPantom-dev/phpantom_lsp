@@ -49,7 +49,34 @@ No outstanding items.
 
 ## Laravel
 
-No outstanding items.
+### B748. Route files pulled in by another file are read from disk, not the editor
+
+**Impact: Low · Complexity: Low-Medium**
+
+Route discovery reads a route file a group includes
+(`Route::name('api.')->group(base_path('routes/api.php'))` in
+`bootstrap/app.php`, or `Route::group([], __DIR__ . '/sub.php')`) straight
+from disk, while a top-level route file is read through the editor's
+buffer. Unsaved edits to an included file are invisible until it is
+saved:
+
+```php
+// bootstrap/app.php
+->withRouting(then: function () {
+    Route::name('api.')->group(base_path('routes/api.php'));
+})
+
+// routes/api.php, edited but not saved
+Route::get('/users', …)->name('users.index');
+
+// app/Http/Controllers/UserController.php
+route('api.users.index'); // still reported as an unknown route
+```
+
+This also means applying the "Create route" quick fix to such a file
+leaves the diagnostic in place until the file is saved. The include
+traversal (`open_included_file`) needs to read through the same
+buffer-aware path `walk_workspace_route_file` uses.
 
 ## Blade
 
@@ -69,32 +96,7 @@ No outstanding items.
 
 ## Code actions
 
-### B747. "Create route" ignores the name prefix the target routes file is loaded under
-
-**Impact: Low · Complexity: Low-Medium**
-
-The "Create route" quick fix on an unknown `route('…')` name appends a
-`->name('…')` registration with the full name to `routes/web.php` or
-`routes/api.php`. When the app loads that file under a named group, the
-group's prefix is applied a second time:
-
-```php
-// bootstrap/app.php
-->withRouting(then: function () {
-    Route::name('api.')->group(base_path('routes/api.php'));
-})
-
-// app/Http/Controllers/UserController.php
-route('api.users.index'); // quick fix appends ->name('api.users.index')
-                          // to routes/api.php, registering api.api.users.index
-```
-
-The unknown-route diagnostic stays, and the route the fix wrote has the
-wrong name. Route discovery already reads such a file with its group's
-prefix (`enumerate_all_routes` walks `bootstrap/app.php` first), so the
-fix can ask the route table which prefix the target file is loaded under:
-strip it from the generated name when the requested name starts with it,
-and pick the other file (or decline) when it does not.
+No outstanding items.
 
 ## Miscellaneous
 
