@@ -255,6 +255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Type inference
 
+- **Reading an element of a union of arrays.** `$trees[$key]`, where `$trees` may be one of several array types, is whatever any of them holds there rather than what one of them does, so passing it to a function like `array_reduce()` is no longer reported against the other.
 - **Keys written into an untyped variable.** After `$args['foo'] = $foo` on an untyped parameter, the array still counts as holding whatever other keys it came with, so passing it to a function that takes an array shape no longer reports an undeclared key.
 - **Variable variables replace what a local held.** After `$$name = 1` inside a function, the locals `$name` could name no longer keep the types they held before, so passing one on is no longer reported against its old type.
 - **Writes through a reference.** After `$r = &$a;`, a write to either `$r` or `$a` changes the other too, and after `$e = &$items['key'];` writes through `$e` land in `$items`, including the `null` element the reference creates. `unset()` and binding the reference somewhere else end the link.

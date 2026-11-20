@@ -18067,3 +18067,34 @@ function test(): void {
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+/// Indexing a union of arrays reads what every alternative holds, so an
+/// `array<TValue>` template bound from the element is the join of both
+/// shapes and neither alternative fails the parameter it was inferred from.
+#[test]
+fn union_of_shapes_binds_template_from_every_alternative() {
+    let php = r#"<?php
+class C {
+    public static function reduceOrder($array, $a) { return []; }
+
+    /** @param list<string> $list */
+    public static function t(array $regions, array $list, $w) {
+        $tree = ['' => ['name' => '', 'children' => []]];
+        $trees = array_fill_keys(array_keys($regions), $tree);
+        foreach ($list as $name) {
+            $r = (string) $w;
+            $trees[$r]['']['children'][$name] = ['name' => $name, 'weight' => $w];
+        }
+        foreach ($regions as $region_name => $region) {
+            $x = array_reduce($trees[$region_name], [static::class, 'reduceOrder']);
+        }
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "union of shapes should bind TValue from both alternatives, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}

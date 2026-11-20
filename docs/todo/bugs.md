@@ -33,7 +33,35 @@ No outstanding items.
 
 ## Standard-library return types
 
-No outstanding items.
+### B757. `array_reduce()` with a callable-array callback returns `null`
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+class C {
+    /** @return array */
+    public static function reduceOrder($array, $a) {
+        $array = $array ?: [];
+        if (!empty($a['children'])) {
+            // reported: Argument 2 ($arrays) expects array, got null
+            $array = array_merge($array, array_reduce($a['children'], [static::class, 'reduceOrder']));
+        }
+        return $array;
+    }
+}
+```
+
+The callback `[static::class, 'reduceOrder']` returns `array`, but the
+call resolves to plain `null`: `TCarry` binds nothing from a callable
+array, so only the `null` of `TCarry|null` survives. Even once it binds,
+the `null` stays, because the stub patch drops it only when `$initial` is
+passed. An array the call already knows is non-empty (here through
+`!empty()`) never reaches the empty-array case that returns `null`
+either. Drupal's `FieldUiTable::reduceOrder()` hits this.
+
+**Where to look:** `patch_array_reduce` in
+`src/stub_patches/functions.rs`, and the `CallableReturnType` binding in
+`src/type_engine/call_resolution/template_binding.rs`.
 
 ## Reachability
 
@@ -89,40 +117,7 @@ No outstanding items.
 
 ## Templates
 
-### B756. A union of array shapes binds `TValue` from one alternative
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-class C {
-    public static function reduceOrder($array, $a) { return []; }
-
-    /** @param list<string> $list */
-    public static function t(array $regions, array $list, $w) {
-        $tree = ['' => ['name' => '', 'children' => []]];
-        $trees = array_fill_keys(array_keys($regions), $tree);
-        foreach ($list as $name) {
-            $r = (string) $w;
-            $trees[$r]['']['children'][$name] = ['name' => $name, 'weight' => $w];
-        }
-        foreach ($regions as $region_name => $region) {
-            // reported: expects array<array{name: '', children: non-empty-array<…>}>,
-            // got array{'': array{name: '', children: array{}}}|array{'': array{…non-empty…}}
-            $x = array_reduce($trees[$region_name], [static::class, 'reduceOrder']);
-        }
-    }
-}
-```
-
-The argument is a union of two shapes (before and after the loop wrote
-into it), and `array_reduce()`'s `array<TValue>` binds `TValue` to the
-values of only one of them, so the other alternative fails the check
-against the parameter it was inferred from. Binding a template from a
-union should join what each alternative binds. Drupal's
-`FieldUiTable::tablePreRender()` hits this.
-
-**Where to look:**
-`src/type_engine/call_resolution/template_binding.rs`.
+No outstanding items.
 
 ## Framework names in strings
 
