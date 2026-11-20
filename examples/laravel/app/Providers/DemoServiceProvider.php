@@ -14,12 +14,14 @@ use App\Support\PastryCounter;
 use App\Support\PlainOven;
 use App\View\Composers\SidebarComposer;
 use Carbon\CarbonImmutable;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\View;
@@ -74,6 +76,7 @@ class DemoServiceProvider extends BaseDemoServiceProvider
     public function boot(): void
     {
         $this->registerValidationRules();
+        $this->registerRateLimiters();
 
         // Omitting the namespace adds ordinary PHP and JSON translation keys
         // from this directory, just like those under lang/.
@@ -181,6 +184,11 @@ class DemoServiceProvider extends BaseDemoServiceProvider
 
             return new FilesystemAdapter(new Filesystem($adapter), $adapter, $config);
         });
+    }
+
+    public function registerRateLimiters(): void
+    {
+        RateLimiter::for('bakery-uploads', static fn () => Limit::perMinute(10));
     }
 
     public function registerValidationRules(): void

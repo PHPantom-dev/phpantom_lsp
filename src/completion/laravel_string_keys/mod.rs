@@ -57,6 +57,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
         StringKeyKind::Middleware => CompletionItemKind::Class,
         StringKeyKind::GateAbility => CompletionItemKind::Method,
+        StringKeyKind::RateLimiter => CompletionItemKind::Value,
         StringKeyKind::Env => CompletionItemKind::Constant,
         StringKeyKind::ServiceId => CompletionItemKind::Reference,
         StringKeyKind::DrupalEntityType
@@ -209,6 +210,7 @@ impl Backend {
             }
             StringKeyKind::GateAbility => self.cached_gate_abilities(),
             StringKeyKind::Middleware => self.laravel.middleware.read().all_names().into(),
+            StringKeyKind::RateLimiter => Arc::clone(&self.cached_rate_limiters().names),
             StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
             StringKeyKind::MixAsset => self.mix_manifest_keys(typed_prefix).into(),
             StringKeyKind::InertiaPage => self.inertia_pages().page_names().into(),
