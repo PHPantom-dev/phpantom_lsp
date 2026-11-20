@@ -666,6 +666,8 @@ class Demo
         BlogPost::query()->with(['author' => ['posts' => function ($q) {
             $q->getModel()->getTitle(); // → BlogPost::getTitle(); the terminal eager relation is HasMany.
         }]]);
+        // A collection of models eager-loads like a model does.
+        BlogAuthor::all()->load(['posts' => fn ($q) => $q->getModel()->getTitle()]); // → HasMany<BlogPost, BlogAuthor>
 
         if ($bakerQuery) {
             $query = Bakery::query();

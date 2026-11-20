@@ -104,6 +104,10 @@ class Collection {
     /** @return TModel|null */
     public function first(): mixed { return null; }
     public function count(): int { return 0; }
+    /** @return $this */
+    public function load($relations) { return $this; }
+    /** @return $this */
+    public function loadMissing($relations) { return $this; }
 }
 ";
 
@@ -4919,6 +4923,38 @@ class Consumer {
         relation_string_definition(consumer, "'stock_transactions' =>", 3).await,
         Some(("Product.php".to_string(), 8)),
     );
+}
+
+/// A collection of models eager-loads through `with()` on the first model's
+/// query, so its constraint closures see the same relations as a model's.
+#[tokio::test]
+async fn test_goto_definition_relation_string_in_collection_eager_load_callback() {
+    for (method, hint) in [
+        ("load", "Collection<int, Product>"),
+        ("loadMissing", "Collection<int, Product>"),
+        ("load", "Collection<Product>"),
+    ] {
+        let consumer = format!(
+            "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Collection;
+class Consumer {{
+    /** @param {hint} $products */
+    public function run(Collection $products): void {{
+        $products->{method}([
+            'stock_transactions' => fn ($query) => $query->with('unit'),
+        ]);
+    }}
+}}
+"
+        );
+        assert_eq!(
+            relation_string_definition(&consumer, "with('unit')", 7).await,
+            Some(("StockTransaction.php".to_string(), 6)),
+            "{method} on {hint}"
+        );
+    }
 }
 
 /// Only the first argument of `withSum()` is a relation; the second is a

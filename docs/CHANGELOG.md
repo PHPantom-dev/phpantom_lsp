@@ -256,7 +256,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Type inference
 
-- **Constraint closures passed to a model's `load()`.** In `$post->load(['comments' => fn ($query) => ...])` and `loadMissing()`, `$query` is the relation, as it already was for `with()`, so its methods complete and are checked.
+- **Constraint closures passed to `load()`.** In `$post->load(['comments' => fn ($query) => ...])` and `loadMissing()`, on a model or a collection of models, `$query` is the relation, as it already was for `with()`, so its methods complete and are checked.
 - **Reading an element of a union of arrays.** `$trees[$key]`, where `$trees` may be one of several array types, is whatever any of them holds there rather than what one of them does, so passing it to a function like `array_reduce()` is no longer reported against the other.
 - **Keys written into an untyped variable.** After `$args['foo'] = $foo` on an untyped parameter, the array still counts as holding whatever other keys it came with, so passing it to a function that takes an array shape no longer reports an undeclared key.
 - **Variable variables replace what a local held.** After `$$name = 1` inside a function, the locals `$name` could name no longer keep the types they held before, so passing one on is no longer reported against its old type.

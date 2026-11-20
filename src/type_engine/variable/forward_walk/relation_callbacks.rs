@@ -8,7 +8,7 @@ use crate::atom::atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
-use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, ResolvedType};
+use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN, MAX_INHERITANCE_DEPTH, ResolvedType};
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, ELOQUENT_MODEL_FQN, RELATION_QUERY_METHODS, extends_eloquent_model,
     model_builder_type, related_model_type, resolve_relation_chain_details,
@@ -200,7 +200,9 @@ fn declared_relation_method(
                 "Illuminate\\Database\\Eloquent\\Builder"
                     | "Illuminate\\Database\\Eloquent\\Concerns\\QueriesRelationships"
             ) || (matches!(method, "with" | "load" | "loadMissing")
-                && class.fqn() == "Illuminate\\Database\\Eloquent\\Model"),
+                && class.fqn() == ELOQUENT_MODEL_FQN)
+                || (matches!(method, "load" | "loadMissing")
+                    && class.fqn() == ELOQUENT_COLLECTION_FQN),
         );
     }
     for name in &class.used_traits {
@@ -249,8 +251,9 @@ pub(crate) fn eager_callback_arguments<'a>(
     let ClassLikeMemberSelector::Identifier(name) = selector else {
         return None;
     };
-    // A model's `load()` and `loadMissing()` hand their array to `with()` on
-    // a fresh query, so their callbacks constrain the same relations.
+    // A model's or model collection's `load()` and `loadMissing()` hand their
+    // array to `with()` on a fresh query, so their callbacks constrain the
+    // same relations.
     let called = crate::atom::bytes_to_str(name.value);
     let method_name = ["with", "load", "loadMissing"]
         .into_iter()
@@ -594,7 +597,7 @@ fn morph_model_builders(
 
 /// Given resolved receivers, find the underlying Eloquent model:
 /// the receiver itself when it is a model class, or the model extracted
-/// from a `Builder<Model>` receiver.
+/// from a `Builder<Model>` or `Collection<int, Model>` receiver.
 fn find_models_from_receivers(
     receivers: &[ResolvedType],
     rctx: &ResolutionCtx<'_>,
@@ -625,6 +628,18 @@ fn find_models_from_receivers(
             })
             .collect()
         };
+        // A collection eager-loads through its first model's query. The model
+        // is the last argument, so `Collection<Post>` names it too.
+        if let Some(model) = crate::inheritance::extract_generic_args_from_ancestor(
+            &receiver.type_string,
+            ELOQUENT_COLLECTION_FQN,
+            rctx.file.class_loader,
+        )
+        .and_then(|mut args| args.pop())
+        {
+            models.extend(as_models(&model));
+            continue;
+        }
         if cls.fqn() != ELOQUENT_BUILDER_FQN
             && !crate::virtual_members::laravel::helpers::extends_eloquent_builder(
                 cls,
