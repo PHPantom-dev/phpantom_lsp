@@ -185,30 +185,3 @@ parameters and `use (&$x)` captures; a local `=&` is the case it misses.
 
 **Where to look:** the `=&` assignment handling in
 `src/type_engine/variable/forward_walk/assignment.rs`.
-
-### B754. An include whose path does not resolve leaves a function's locals as they were
-
-**Impact: Low · Complexity: Medium**
-
-```php
-function f(Output $output): void {
-    $data = require $cacheFilePath; // may assign $output
-    $output->write('…');            // still read as Output
-}
-```
-
-An `include`/`require` inside a function runs the file in the function's
-scope. When the path resolves, the walker applies what the file's top
-level assigns. When it does not, the walker keeps every local's type, as
-PHPStan does. Widening every local to `mixed` there, as `extract()` of
-unknown keys and `$$name = …` do, is sound but costly: the common
-`$data = require $path;` idiom for loading a PHP array file then turns
-every typed parameter and local after it into `mixed`, which put 20 new
-errors on phpstan-src's `ResultCacheManager` and `PHPStanDiagnoseExtension`.
-A fix needs a way to tell the two apart, such as reading an include whose
-value is used as a file that returns rather than one that assigns, or a
-config switch, rather than widening unconditionally.
-
-**Where to look:** `ExprWalk::include` in
-`src/type_engine/variable/forward_walk/expr.rs` and `include_locals` in
-`includes.rs`.

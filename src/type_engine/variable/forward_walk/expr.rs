@@ -103,6 +103,33 @@ pub(crate) fn process_expr<'b>(
     walk.types
 }
 
+/// [`process_expr`] for an expression statement, which throws the value of
+/// `expr` away.
+pub(crate) fn process_discarded_expr<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> ExprTypes {
+    let mut discarded = expr;
+    loop {
+        discarded = match discarded {
+            Expression::Parenthesized(inner) => inner.expression,
+            Expression::UnaryPrefix(unary)
+                if matches!(unary.operator, UnaryPrefixOperator::ErrorControl(_)) =>
+            {
+                unary.operand
+            }
+            _ => break,
+        };
+    }
+    let mut walk = ExprWalk {
+        discarded: Some(discarded),
+        ..ExprWalk::default()
+    };
+    walk.expr(expr, scope, ctx);
+    walk.types
+}
+
 /// Walk a condition in evaluation order, applying the writes it makes to
 /// `scope`, and return what each of its outcomes proves.
 ///
@@ -131,6 +158,9 @@ struct ExprWalk<'b> {
     /// entries below were evaluated on the scope the fork was copied from,
     /// which the write does not touch.
     base: usize,
+    /// The expression whose value the statement being walked throws away,
+    /// when that is all the statement is (`require $path;`).
+    discarded: Option<&'b Expression<'b>>,
 }
 
 impl<'b> ExprWalk<'b> {
@@ -280,6 +310,7 @@ impl<'b> ExprWalk<'b> {
             types,
             pending,
             base,
+            ..
         } = self;
         for (expr, span) in pending.drain(*base..) {
             let resolved = resolve_rhs_with_types(expr, scope, ctx, Some(types));
@@ -698,8 +729,26 @@ impl<'b> ExprWalk<'b> {
         ctx: &ForwardWalkCtx<'_>,
     ) -> ExprResult {
         let evaluated = self.expr(path, scope, ctx);
-        let Some(locals) = include_locals(path, scope, ctx).filter(|locals| !locals.is_empty())
-        else {
+        let Some(locals) = include_locals(path, scope, ctx) else {
+            // A file that cannot be followed may assign any local.  One whose
+            // value is used (`$data = require $path;`) is read as a file that
+            // returns a value, and one included once as a file of
+            // declarations, so only a plain include run for its effects
+            // (`include $template;`) forgets what the locals held.
+            let runs_for_effects = matches!(
+                expr,
+                Expression::Construct(Construct::Include(_) | Construct::Require(_))
+            ) && self.discarded.is_some_and(|d| std::ptr::eq(d, expr));
+            if !runs_for_effects {
+                return evaluated;
+            }
+            self.done(expr, ExprResult::default());
+            self.flush(scope, ctx);
+            widen_variable_variable_write(None, scope);
+            record_scope_snapshot(expr.span().end.offset, scope);
+            return ExprResult { wrote: true };
+        };
+        let Some(locals) = locals.filter(|locals| !locals.is_empty()) else {
             return evaluated;
         };
         // The include's own value, and the path it read, came from the

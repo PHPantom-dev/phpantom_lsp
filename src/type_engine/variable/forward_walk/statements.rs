@@ -280,7 +280,11 @@ pub(crate) fn process_expression_statement<'b>(
         };
 
     if !skip_assignment {
-        process_assignment_expr(expr, scope, ctx);
+        if matches!(expr, Expression::Assignment(_)) {
+            process_assignment_expr(expr, scope, ctx);
+        } else {
+            process_discarded_expr(expr, scope, ctx);
+        }
     } else {
         // The docblock stands in for the outermost write alone; whatever
         // the expression does on the way there still happens, and it reads
@@ -309,7 +313,7 @@ pub(crate) fn process_expression_statement<'b>(
                 }
             }
             None => {
-                process_expr(value, scope, ctx);
+                process_discarded_expr(value, scope, ctx);
             }
         }
     }

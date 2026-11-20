@@ -276,3 +276,39 @@ function showPost(Post $item): void {
         "got: {lines:?}"
     );
 }
+
+/// The hover on `$output` in the last line of `body`, inside
+/// `function f(Output $output, string $path)`.
+fn hover_after_unresolved_include(body: &str) -> String {
+    let main = format!(
+        "<?php\nclass Output {{ public function write(): void {{}} }}\nfunction f(Output $output, string $path): void {{\n    {body}\n    $output->write();\n}}\n"
+    );
+    hover_in_project(&[("main.php", &main)], 4, 6).unwrap_or_default()
+}
+
+#[test]
+fn an_include_that_cannot_be_followed_may_assign_any_local() {
+    for body in ["include $path;", "require $path;", "@include($path);"] {
+        let hover = hover_after_unresolved_include(body);
+        assert!(
+            hover.contains("$output = mixed"),
+            "`{body}` may reassign $output, got: {hover}"
+        );
+    }
+}
+
+#[test]
+fn an_include_read_for_its_value_or_once_keeps_the_locals() {
+    for body in [
+        "$data = require $path;",
+        "return require $path;",
+        "require_once $path;",
+        "include_once $path;",
+    ] {
+        let hover = hover_after_unresolved_include(body);
+        assert!(
+            hover.contains("Output"),
+            "`{body}` keeps $output, got: {hover}"
+        );
+    }
+}
