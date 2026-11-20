@@ -961,23 +961,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b758-constraint-closures-passed-to-a-collections-load-are-untyped" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B758. Constraint closures passed to a collection's <code>load()</code> are untyped
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1618,23 +1601,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b758-constraint-closures-passed-to-a-collections-load-are-untyped" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B758. Constraint closures passed to a collection's <code>load()</code> are untyped
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1783,23 +1749,7 @@ either. Drupal's <code>FieldUiTable::reduceOrder()</code> hits this.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h3 id="b758-constraint-closures-passed-to-a-collections-load-are-untyped">B758. Constraint closures passed to a collection's <code>load()</code> are untyped<a class="headerlink" href="#b758-constraint-closures-passed-to-a-collections-load-are-untyped" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @var \Illuminate\Database\Eloquent\Collection&lt;int, Post&gt; $posts */</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$posts-&gt;load(['comments' =&gt; fn ($query) =&gt; $query-&gt;with('author')]);</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">// $query is untyped: no completion after `$query-&gt;`, and</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">// go-to-definition on 'author' finds nothing.</span>
-</code></pre></div>
-<p>A model's <code>load()</code> and <code>loadMissing()</code> type the closure as the relation,
-like <code>with()</code>, but Eloquent's <code>Collection::load()</code> and <code>loadMissing()</code>
-pass the same array to <code>with()</code> on the first model's query and are not
-recognised. Two things stop them: the framework check only counts
-declarations on <code>Builder</code>, <code>QueriesRelationships</code> and <code>Model</code>, and
-<code>find_models_from_receivers</code> cannot read the model out of a
-<code>Collection&lt;int, Post&gt;</code> receiver.</p>
-<p><strong>Where to look:</strong> <code>eager_callback_arguments</code>,
-<code>declared_relation_method</code> and <code>find_models_from_receivers</code> in
-<code>src/type_engine/variable/forward_walk/relation_callbacks.rs</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
