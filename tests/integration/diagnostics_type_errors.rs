@@ -15619,7 +15619,47 @@ final class Builder {
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
-        messages[0].contains("got non-empty-array<'x'|class-string, 1|2>"),
+        messages[0].contains("got array{x: 1|2, ...<class-string, 2>}"),
+        "got {messages:?}"
+    );
+}
+
+/// A write below a key the walker cannot name may land on any entry of the
+/// shape, but a read of one entry still sees only what that entry held or
+/// what the write put there, not every other entry's value.
+#[test]
+fn a_write_through_a_dynamic_key_keeps_the_other_entries_apart() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @return list<string> */
+function children(array $e): array { return []; }
+function merge(array $a, array $b): array { return $a; }
+
+/** @param array $element */
+function preRenderLinks($element) {
+    $element += ['#links' => [], '#attached' => []];
+    foreach (children($element) as $key) {
+        if (isset($element[$key]['#links'])) {
+            $element['#links'] += $element[$key]['#links'];
+            $element[$key]['#printed'] = true;
+        }
+        if (isset($element[$key]['#attached'])) {
+            $element['#attached'] = merge($element['#attached'], $element[$key]['#attached']);
+        }
+    }
+}
+
+function takes_string(string $s): void {}
+function shaped(string $key): void {
+    $a = ['count' => 1, 'rows' => []];
+    $a[$key]['seen'] = true;
+    takes_string($a['rows']);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("got array{}|array{seen: true}"),
         "got {messages:?}"
     );
 }

@@ -45,47 +45,43 @@ No outstanding items.
 
 ## Array types
 
-### B755. A write through a dynamic key pools a shape's entries and loses a benevolent union
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @return list<string> */
-function children(array $e): array { return []; }
-function merge(array $a, array $b): array { return $a; }
-
-/** @param array $element */
-function preRenderLinks($element) {
-    $element += ['#links' => [], '#attached' => []];
-    foreach (children($element) as $key) {
-        if (isset($element[$key]['#links'])) {
-            $element['#links'] += $element[$key]['#links'];
-            $element[$key]['#printed'] = true;
-        }
-        if (isset($element[$key]['#attached'])) {
-            // reported: expects array, got array|array{'#printed': true, ...}|int|float
-            $element['#attached'] = merge($element['#attached'], $element[$key]['#attached']);
-        }
-    }
-}
-```
-
-A write at a key the walker cannot name widens the shape to
-`array<K, V>`, pooling every entry's value into `V`, so a later read of
-`'#attached'` sees the `'#links'` value too. That value is the benevolent
-`array|int|float` `+=` produces for two untyped operands, which the
-pooling turns into a plain union that the argument check then reports.
-Either half alone would leave the read clean: keeping the known entries
-next to the dynamic one (an unsealed shape), or keeping the benevolence
-through the join. Drupal's `Link::preRenderLinks()` hits this through a
-reference to `$element[$key]`.
-
-**Where to look:** `merge_nested_array_write` in
-`src/type_engine/variable/array_shape_writes.rs`.
+No outstanding items.
 
 ## Laravel
 
-No outstanding items.
+### B757. On Windows, a route file reached through an include ignores its open buffer
+
+**Impact: Medium · Complexity: Low-Medium**
+
+`routes/web_backstage.php` is loaded only through
+`Route::name('admin.')->group(base_path('routes/web_backstage.php'))` in
+`bootstrap/app.php`. On Windows, adding a route to it in the editor
+without saving does not register the route: `route('admin.patient.index')`
+stays reported as an unknown route until the file is saved. The same
+happens after applying "Create missing route" to such a file, since its
+edit is unsaved. Linux is unaffected. Two tests fail on the Windows CI
+runner:
+
+- `laravel_route_names::an_unsaved_edit_to_a_file_a_group_loads_is_seen`
+  (`["Unknown route 'admin.patient.index'"]`)
+- `code_action_create_missing_route::create_missing_route_strips_the_prefix_its_target_file_is_loaded_under`
+  (the diagnostic is still there after the fix is opened as a buffer)
+
+`open_included_file()` canonicalizes the include target with
+`dunce::canonicalize`, and `read_route_source()` turns that path back into
+a URI with `path_to_uri()` and looks it up in `open_files` by exact
+string. The buffer is keyed by the URI the client sent, and on Windows the
+two spell the same file differently (a temp dir under an 8.3 short name
+such as `RUNNER~1` expands when canonicalized, and the drive letter's case
+and encoding can differ), so the lookup misses and the file is read from
+disk. The lookup should compare files by canonical path, the way
+`RouteDiscovery::sources` already does, rather than by the string of a
+rebuilt URI. Check the other `open_files.get(&path_to_uri(..))` callers
+for the same mismatch.
+
+**Where to look:**
+`src/virtual_members/laravel/route_names/traversal.rs`
+(`read_route_source`, `open_included_file`).
 
 ## Blade
 

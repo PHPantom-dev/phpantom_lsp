@@ -260,6 +260,11 @@ impl PhpType {
     /// entries already say whether it can be empty) and a type that is
     /// non-empty by name already.
     pub fn non_empty_array_form(&self) -> PhpType {
+        // An unsealed shape answers `kind()` with its widened `array<K, V>`,
+        // and refining that would drop the entries it lists.
+        if self.as_unsealed_shape().is_some() {
+            return self.clone();
+        }
         match self.kind() {
             TypeKind::Named(name) if name == "array" => PhpType::named(atom("non-empty-array")),
             TypeKind::Named(name) if name == "list" => PhpType::named(atom("non-empty-list")),
