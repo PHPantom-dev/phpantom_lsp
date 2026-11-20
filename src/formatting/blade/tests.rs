@@ -1242,9 +1242,7 @@ fn blade_strategy_is_builtin_without_pint() {
 #[test]
 fn blade_strategy_is_disabled_when_formatting_is() {
     let config = FormattingConfig {
-        pint: Some(String::new()),
-        php_cs_fixer: Some(String::new()),
-        phpcbf: Some(String::new()),
+        enabled: Some(false),
         ..FormattingConfig::default()
     };
     let strategy = resolve_blade_strategy(None, &config, None, None, PhpVersion::default());
