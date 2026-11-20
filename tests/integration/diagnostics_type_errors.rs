@@ -18171,6 +18171,35 @@ class C {
     );
 }
 
+/// A truthy `mixed` joined with other values on another branch is still
+/// `mixed` short of some falsy values, so it is not checked against a
+/// parameter's type any more than `mixed` is.
+#[test]
+fn truthy_mixed_joined_with_other_values_is_not_checked() {
+    let php = r#"<?php
+/** @return array<string>|string */
+function build() { return ''; }
+function take(string $s): void {}
+function test(array $error): void {
+    if (empty($error['message'])) {
+        $message = build();
+    } else {
+        $message = $error['message'];
+    }
+    take($message);
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "got: {:?}",
+        diags
+            .iter()
+            .map(|d| (d.range.start.line, &d.message))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Indexing a union of arrays reads what every alternative holds, so an
 /// `array<TValue>` template bound from the element is the join of both
 /// shapes and neither alternative fails the parameter it was inferred from.

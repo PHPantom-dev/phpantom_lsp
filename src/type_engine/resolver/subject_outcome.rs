@@ -234,8 +234,15 @@ pub(crate) fn resolve_subject_outcome(
 
         // `mixed` is a resolved type, and one that absorbs whatever stands
         // beside it, so it is answered before the narrower classifications
-        // below get a chance to describe only part of the value.
-        if joined.contains_mixed() {
+        // below get a chance to describe only part of the value.  A truthy
+        // `mixed` (`non-empty-mixed`, what `if ($x)` leaves of it) may still
+        // be any object, so it is no more checkable than `mixed` itself.
+        if joined.contains_mixed()
+            || joined
+                .union_members()
+                .iter()
+                .any(|member| member.is_named("non-empty-mixed"))
+        {
             return SubjectOutcome::Mixed;
         }
 

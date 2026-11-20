@@ -10439,6 +10439,31 @@ function test(mixed $obj): void {
 }
 
 #[test]
+fn no_unknown_class_diagnostic_for_truthy_mixed_value() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function make() { return null; }
+function test(mixed $obj): void {
+    if (!$obj) {
+        return;
+    }
+    $obj->doSomething();
+    $made = make();
+    if ($made) {
+        $made->doSomething();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostic for a truthy mixed value, got: {:?}",
+        diags
+    );
+}
+
+#[test]
 fn no_unknown_class_diagnostic_for_class_string_parameter() {
     let backend = create_test_backend_with_stubs();
     let uri = "file:///test.php";

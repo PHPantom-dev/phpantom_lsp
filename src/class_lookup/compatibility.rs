@@ -749,9 +749,13 @@ impl Compat<'_> {
         // When the argument is a union that contains `mixed`, bail out
         // conservatively.  `mixed` means "we don't know" — the actual
         // runtime value could satisfy the parameter type, so reporting
-        // an error would be a false positive.
+        // an error would be a false positive.  A truthy `mixed`
+        // (`non-empty-mixed`) joined with other members is still `mixed`
+        // short of some falsy values, which PHPStan treats the same way.
         if let TypeKind::Union(members) = arg_type.kind()
-            && members.iter().any(|m| m.is_mixed())
+            && members
+                .iter()
+                .any(|m| m.is_mixed() || m.is_named("non-empty-mixed"))
         {
             return Some(true);
         }
