@@ -900,23 +900,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Standard-library return types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b757-array_reduce-with-a-callable-array-callback-returns-null" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B757. <code>array_reduce()</code> with a callable-array callback returns <code>null</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -938,6 +921,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b758-a-truthiness-check-leaves-a-mixed-subject-unrefined" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B758. A truthiness check leaves a <code>mixed</code> subject unrefined
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1540,23 +1540,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Standard-library return types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b757-array_reduce-with-a-callable-array-callback-returns-null" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B757. <code>array_reduce()</code> with a callable-array callback returns <code>null</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1578,6 +1561,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b758-a-truthiness-check-leaves-a-mixed-subject-unrefined" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B758. A truthiness check leaves a <code>mixed</code> subject unrefined
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1718,34 +1718,37 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="conditional-return-types">Conditional return types<a class="headerlink" href="#conditional-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
-<h3 id="b757-array_reduce-with-a-callable-array-callback-returns-null">B757. <code>array_reduce()</code> with a callable-array callback returns <code>null</code><a class="headerlink" href="#b757-array_reduce-with-a-callable-array-callback-returns-null" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<p>No outstanding items.</p>
+<h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
+<p>No outstanding items.</p>
+<h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
+<h3 id="b758-a-truthiness-check-leaves-a-mixed-subject-unrefined">B758. A truthiness check leaves a <code>mixed</code> subject unrefined<a class="headerlink" href="#b758-a-truthiness-check-leaves-a-mixed-subject-unrefined" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class C {</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    /** @return array */</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    public static function reduceOrder($array, $a) {</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        $array = $array ?: [];</span>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        if (!empty($a['children'])) {</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">            // reported: Argument 2 ($arrays) expects array, got null</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">            // reported: Argument 2 ($arrays) expects array, got array|null</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">            $array = array_merge($array, array_reduce($a['children'], [static::class, 'reduceOrder']));</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">        }</span>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        return $array;</span>
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    }</span>
 <a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">}</span>
 </code></pre></div>
-<p>The callback <code>[static::class, 'reduceOrder']</code> returns <code>array</code>, but the
-call resolves to plain <code>null</code>: <code>TCarry</code> binds nothing from a callable
-array, so only the <code>null</code> of <code>TCarry|null</code> survives. Even once it binds,
-the <code>null</code> stays, because the stub patch drops it only when <code>$initial</code> is
-passed. An array the call already knows is non-empty (here through
-<code>!empty()</code>) never reaches the empty-array case that returns <code>null</code>
-either. Drupal's <code>FieldUiTable::reduceOrder()</code> hits this.</p>
-<p><strong>Where to look:</strong> <code>patch_array_reduce</code> in
-<code>src/stub_patches/functions.rs</code>, and the <code>CallableReturnType</code> binding in
-<code>src/type_engine/call_resolution/template_binding.rs</code>.</p>
-<h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
-<h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<p><code>!empty($a['children'])</code> (and <code>if ($x)</code>) keeps a <code>mixed</code> subject as plain
+<code>mixed</code>, so nothing after the check knows the value is truthy. Handed to a
+parameter declared <code>array</code>, a truthy value can only be a non-empty array,
+which is what lets <code>array_reduce()</code> drop the <code>null</code> it returns for an empty
+one. PHPStan narrows such a subject to <code>mixed~(0|0.0|''|'0'|array{}|false|null)</code>;
+we have <code>non-empty-mixed</code> for the same idea but never produce it. Two
+pieces: the truthy narrowing of <code>mixed</code> (<code>PhpType::truthy_type</code> and the
+<code>!empty()</code> arm in <code>forward_walk/cond_narrowing/null_narrowing.rs</code>), and a
+conditional return that decides <code>$array is non-empty-array</code> against the
+argument held to the parameter's native type
+(<code>type_engine/type_ops/conditional.rs</code>). An untyped parameter (<code>$c</code> with no
+hint) gets no type at all after <code>!empty($c)</code>, which is the same gap.
+Drupal's <code>FieldUiTable::reduceOrder()</code> hits this.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
