@@ -15,6 +15,7 @@ use App\Mail\OrderShipped;
 use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
 use App\Models\Baker;
+use App\Models\BakerBuilder;
 use App\Models\Bakery;
 use App\Models\BakeryOrder;
 use App\Models\BlogAuthor;
@@ -185,6 +186,14 @@ class Demo
     }
 
     // ── Eloquent Query Builder ──────────────────────────────────────────────
+
+    /** @return BakerBuilder<Baker> */
+    public function scopedBakers(): BakerBuilder
+    {
+        // Try: hover employed() and available(), then complete after either.
+        // Both scopes keep BakerBuilder<Baker>, including its active() method.
+        return Baker::query()->employed()->available()->active();
+    }
 
     public function eloquentQuery(): void
     {

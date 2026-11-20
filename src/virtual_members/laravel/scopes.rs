@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{MethodExtras, MethodInfo};
-use crate::util::short_name;
 
 use super::ELOQUENT_BUILDER_FQN;
 use super::helpers::extends_eloquent_model;
@@ -91,6 +90,29 @@ pub(super) fn scope_return_type(method: &MethodInfo) -> PhpType {
         Some(t) if t.is_void() => default_scope_return_type(),
         Some(t) => t.clone(),
         None => default_scope_return_type(),
+    }
+}
+
+/// Keep a fluent scope on the model's builder, while preserving a return
+/// that explicitly queries a different model or names another result type.
+pub(super) fn rebind_scope_builder_return(method: &mut MethodInfo, builder: &PhpType) {
+    let Some(ret) = method.return_type.as_ref() else {
+        return;
+    };
+    let should_rebind = match ret.kind() {
+        TypeKind::Named(name) => Fqn::new(name).as_str() == ELOQUENT_BUILDER_FQN,
+        TypeKind::Generic(g) => {
+            Fqn::new(&g.name).as_str() == ELOQUENT_BUILDER_FQN
+                && builder.base_name() != Some(ELOQUENT_BUILDER_FQN)
+                && g.args.first().is_some_and(|model| {
+                    model.is_self_ref()
+                        || matches!(builder.kind(), TypeKind::Generic(b) if b.args.first() == Some(model))
+                })
+        }
+        _ => false,
+    };
+    if should_rebind {
+        method.return_type = Some(builder.clone());
     }
 }
 
@@ -189,6 +211,7 @@ pub fn build_scope_methods_for_builder(
     let subs = super::self_ref_subs(model_type.clone());
 
     let mut methods = Vec::new();
+    let mut builder_type = None;
 
     // The rewrite below depends only on the model, so the produced
     // copies are interned and shared by every Builder and relation
@@ -203,6 +226,8 @@ pub fn build_scope_methods_for_builder(
         if !is_scope_method(method) {
             continue;
         }
+        let builder = builder_type
+            .get_or_insert_with(|| super::model_builder_type(&model_class, class_loader));
 
         let transformed = crate::virtual_members::intern_transformed_method(method, fp, || {
             // Build an instance method (scopes are called as instance
@@ -235,21 +260,8 @@ pub fn build_scope_methods_for_builder(
 
             if let Some(ref mut ret) = m.return_type {
                 *ret = ret.substitute(&subs);
-
-                // When a scope method declares a bare `Builder` return type
-                // (without generic args), the chain loses track of the
-                // concrete model.  Subsequent calls on the returned Builder
-                // would not find model-specific scope methods because
-                // `type_hint_to_classes_typed` only injects scopes when
-                // generic args are present.  Wrap bare Builder return types
-                // as `Builder<ModelName>` to preserve the chain.
-                if is_bare_builder_type(ret) {
-                    *ret = PhpType::generic(
-                        ELOQUENT_BUILDER_FQN,
-                        vec![PhpType::named(atom(model_name))],
-                    );
-                }
             }
+            rebind_scope_builder_return(&mut m, builder);
 
             m
         });
@@ -257,19 +269,6 @@ pub fn build_scope_methods_for_builder(
     }
 
     methods
-}
-
-/// Check whether a `PhpType` is a bare Eloquent Builder reference
-/// without generic arguments.
-///
-/// Matches both the FQN (`Illuminate\Database\Eloquent\Builder`) and
-/// the short name (`Builder`) since scope methods in user code
-/// typically use the imported short name.
-fn is_bare_builder_type(ty: &PhpType) -> bool {
-    match ty.kind() {
-        TypeKind::Named(name) => name == ELOQUENT_BUILDER_FQN || short_name(name) == "Builder",
-        _ => false,
-    }
 }
 
 #[cfg(test)]

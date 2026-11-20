@@ -110,4 +110,41 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B746. `self` inside a trait means the trait alone outside parameter hints
+
+**Impact: Low · Complexity: Medium**
+
+A parameter typed `self` inside a trait, and `$this`, both see the class
+the trait's `@phpstan-require-extends` or `@phpstan-require-implements`
+names. Every other place `self` is written in the trait still resolves to
+the trait alone, so the required class's members are unknown there:
+
+```php
+abstract class Model {
+    public function getTable(): string { return ''; }
+}
+
+/** @phpstan-require-extends Model */
+trait Stamps {
+    public ?self $parent = null;
+
+    public function fluent(): self { return $this; }
+
+    public function run(self $model): void {
+        $model->fluent()->getTable(); // Method Stamps::getTable() not found
+        $model->parent?->getTable();  // Method Stamps::getTable() not found
+        $this->fluent()->              // offers only the trait's methods
+
+        /** @var self $m */
+        $m = make();
+        $m->getTable();               // Method Stamps::getTable() not found
+    }
+}
+```
+
+The bounds are added where `$this` and parameters are seeded
+(`trait_context::extend_this_with_trait_bounds`), not where `self` is
+resolved, so return types, property types and `@var` tags miss them.
+Resolving `self` in a trait to the trait plus its bounds in one place
+would cover all of them, including a `self|Foo` parameter, which the
+parameter seeding leaves to the trait alone.
