@@ -189,6 +189,7 @@ mod diagnostics_partial_union_members;
 mod diagnostics_property_discriminant;
 mod diagnostics_property_type_errors;
 mod diagnostics_psr4_mismatch;
+mod diagnostics_pull;
 mod diagnostics_reachability;
 mod diagnostics_readonly_writes;
 mod diagnostics_return_type_errors;

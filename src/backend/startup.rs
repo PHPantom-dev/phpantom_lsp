@@ -408,10 +408,7 @@ impl Backend {
         // (php_version, vendor_uri_prefixes, vendor_dir_paths) are
         // snapshotted — they are only written during init (above) and
         // never change afterwards.
-        let worker_backend = self.clone_for_blocking();
-        tokio::spawn(async move {
-            worker_backend.diagnostic_worker().await;
-        });
+        self.spawn_diagnostic_worker();
 
         // Spawn the PHPStan worker as a separate background task.
         // PHPStan is extremely slow and resource-intensive, so it runs
@@ -562,6 +559,7 @@ impl Backend {
         // and pull handlers know the project is fully indexed.
         self.init_complete
             .store(true, std::sync::atomic::Ordering::Release);
+        self.diag.pass_done.notify_waiters();
 
         // Files opened during startup (before indexing finished) were
         // not diagnosed because `schedule_diagnostics` skips work when

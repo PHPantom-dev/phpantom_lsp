@@ -1980,6 +1980,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     });
     probe("diagnostic state", &mut || {
         *backend.diag.pending_uris.lock() = Default::default();
+        *backend.diag.edits_awaiting_parse.lock() = Default::default();
+        *backend.diag.in_flight_uris.lock() = Default::default();
+        *backend.diag.pull_generations.lock() = Default::default();
         *backend.diag.last_slow.lock() = Default::default();
         *backend.diag.last_fast.lock() = Default::default();
         *backend.diag.last_full.lock() = Default::default();
