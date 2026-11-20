@@ -250,6 +250,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Type inference
 
+- **`?->` chains compared greater than a value.** Inside `if ($line->product?->stock > 0)`, `$line->product` is known to be non-null, since a `null` chain is never greater than anything.
 - **`self` parameters in traits.** A parameter typed `self` inside a trait now sees the members of the class its `@phpstan-require-extends` or `@phpstan-require-implements` names, as `$this` already did, so a closure such as `static function (self $model)` in a model trait no longer reports the model's methods as unknown. Contributed by @pataar.
 - **Constants passed to calls.** Namespaced and imported constants keep their values and types when used as arguments. Contributed by @shuvroroy.
 - **Constants defined from namespaced or imported constants.** A class constant or namespaced constant such as `const MAX = LIMIT;` now holds the value of the constant its own file means, whether imported with `use const`, declared in its namespace, or global, when it is read from another file. A parameter default that names a constant is read the same way when the argument is left out.

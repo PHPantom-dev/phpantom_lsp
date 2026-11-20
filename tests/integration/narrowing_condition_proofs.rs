@@ -188,6 +188,71 @@ function f(?Tier $tier): void {
     );
 }
 
+/// `null > $x` is never true, so a chain that compared greater than a
+/// value held a non-null value, written either way round.
+#[test]
+fn nullsafe_greater_than_narrows_the_receiver() {
+    let backend = create_test_backend();
+    for (name, condition) in [
+        ("gt", "$image?->fileId > 0"),
+        ("lt", "0 < $image?->fileId"),
+        ("not_le", "!($image?->fileId <= 0)"),
+    ] {
+        let uri = format!("file:///nullsafe_order_{name}.php");
+        let content = format!(
+            r#"<?php
+{SCAFFOLD}
+function f(): void {{
+    $image = Image::first();
+    if ({condition}) {{
+        $image; // <-- here
+    }}
+}}
+"#
+        );
+
+        let text = hover_marked(&backend, &uri, &content);
+        assert!(
+            text.contains("Image"),
+            "{condition}: expected Image, got: {text}"
+        );
+        assert!(
+            !text.contains("null"),
+            "{condition}: the receiver cannot be null inside the branch, got: {text}"
+        );
+    }
+}
+
+/// `null >= 0` and `null < 1` are both true, so the non-strict and the
+/// lesser directions prove nothing about the receiver.
+#[test]
+fn nullsafe_non_strict_order_leaves_the_receiver_alone() {
+    let backend = create_test_backend();
+    for (name, condition) in [
+        ("ge", "$image?->fileId >= 0"),
+        ("lt", "$image?->fileId < 1"),
+    ] {
+        let uri = format!("file:///nullsafe_order_keep_{name}.php");
+        let content = format!(
+            r#"<?php
+{SCAFFOLD}
+function f(): void {{
+    $image = Image::first();
+    if ({condition}) {{
+        $image; // <-- here
+    }}
+}}
+"#
+        );
+
+        let text = hover_marked(&backend, &uri, &content);
+        assert!(
+            text.contains("?Image") || text.contains("null"),
+            "{condition}: the receiver may still be null, got: {text}"
+        );
+    }
+}
+
 /// The else branch gets no such proof — a null receiver is exactly one of
 /// the ways the check fails, so the declared type must survive intact.
 #[test]

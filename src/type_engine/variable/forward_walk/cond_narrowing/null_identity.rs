@@ -468,6 +468,23 @@ pub(super) fn collect_proven_non_null_exprs<'b>(
                 return;
             }
 
+            // `null > $x` is false for every `$x` (as `''`, `null` is no
+            // greater than any string either), so the greater side of a
+            // strict ordering that held is not null.  `<=` failing is the
+            // same proof.  The non-strict directions prove nothing:
+            // `null >= 0` and `null < 1` are both true.
+            let greater = match bin.operator {
+                BinaryOperator::GreaterThan(_) if truthy => Some(bin.lhs),
+                BinaryOperator::LessThan(_) if truthy => Some(bin.rhs),
+                BinaryOperator::LessThanOrEqual(_) if !truthy => Some(bin.lhs),
+                BinaryOperator::GreaterThanOrEqual(_) if !truthy => Some(bin.rhs),
+                _ => None,
+            };
+            if let Some(greater) = greater {
+                out.push(greater);
+                return;
+            }
+
             let inequality = matches!(
                 bin.operator,
                 BinaryOperator::NotIdentical(_) | BinaryOperator::NotEqual(_)

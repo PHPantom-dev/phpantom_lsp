@@ -41,23 +41,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B744. A nullsafe chain compared greater than a value does not prove its receiver
-
-**Impact: Low · Complexity: Low**
-
-```php
-if ($line->product?->supply_amount > 0) {
-    Cart::add($line->product); // still ?Product
-}
-```
-
-`null > $x` is false for every `$x`, so a true `$a?->b > $x` (or
-`$x < $a?->b`) proves `$a` is not null, the same proof
-`apply_nullsafe_receiver_narrowing` already draws from a truthy chain or an
-identity check against a non-null value. Only the strict greater-than
-direction carries it: `null >= 0` and `null < 1` are both true. The miss
-only shows with `possibly-empty-mismatches` on, as a nullable argument
-mismatch on the receiver.
+No outstanding items.
 
 ## Array types
 
