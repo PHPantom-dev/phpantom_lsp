@@ -1365,17 +1365,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l50-create-route-quick-fix-for-an-unresolved-route-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L50. "Create route" quick-fix for an unresolved route name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l61-resolve-aliased-facade-imports-during-route-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2054,17 +2043,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L49. Unguarded Eloquent mass assignment diagnostic
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l50-create-route-quick-fix-for-an-unresolved-route-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L50. "Create route" quick-fix for an unresolved route name
       </span>
     </span>
   </a>
@@ -2765,19 +2743,6 @@ model-argument matching, so reuse it.</p>
 <p><strong>Where to look:</strong> <code>virtual_members/laravel/model_extraction/</code> for
 existing <code>$fillable</code>/<code>$guarded</code> reads; <code>diagnostics/</code> for the
 call-site diagnostic pattern used by similarly-shaped checks.</p>
-<h4 id="l50-create-route-quick-fix-for-an-unresolved-route-name">L50. "Create route" quick-fix for an unresolved route name<a class="headerlink" href="#l50-create-route-quick-fix-for-an-unresolved-route-name" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>The unknown-route-name diagnostic (fed by <code>route_names/</code>) has no
-accompanying fix today. Once the diagnostic fires, generate a
-<code>Route::get('{path}', [{Controller}::class, '{method}'])
--&gt;name('{name}');</code> stub appended to <code>routes/web.php</code> (or <code>api.php</code> if
-the call site is <code>Route::apiResource</code>-shaped context), inferring path
-and controller from the route name's own conventional dashes/dots
-where possible and otherwise leaving placeholders.</p>
-<p><strong>Where to look:</strong> <code>code_actions/</code> for the code-action registration
-pattern used by other "declare the missing thing" fixes;
-<code>virtual_members/laravel/route_names/</code> for the existing scanner
-this reuses for the diagnostic and the insertion point.</p>
 <h4 id="l61-resolve-aliased-facade-imports-during-route-discovery">L61. Resolve aliased facade imports during route discovery<a class="headerlink" href="#l61-resolve-aliased-facade-imports-during-route-discovery" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Route discovery recognizes <code>Route</code> and its fully qualified facade name,
