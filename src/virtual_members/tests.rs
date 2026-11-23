@@ -1137,7 +1137,7 @@ fn apply_providers_same_specificity_preserves_high_priority() {
 
 #[test]
 fn default_providers_has_laravel_and_phpdoc() {
-    let providers = default_providers(true);
+    let providers = default_providers(true, false);
     assert_eq!(
         providers.len(),
         4,
@@ -1148,11 +1148,20 @@ fn default_providers_has_laravel_and_phpdoc() {
 
 #[test]
 fn default_providers_omits_laravel_when_not_laravel() {
-    let providers = default_providers(false);
+    let providers = default_providers(false, false);
     assert_eq!(
         providers.len(),
         1,
         "non-Laravel projects should only register the PHPDoc provider"
+    );
+}
+
+#[test]
+fn default_providers_adds_drupal_only_in_drupal() {
+    assert_eq!(
+        default_providers(false, true).len(),
+        3,
+        "a Drupal project should register the PHPDoc, fieldable entity, and field item providers"
     );
 }
 
@@ -2089,4 +2098,54 @@ fn concurrent_first_resolution_of_the_same_class_is_single_flighted() {
         winner_result.methods.iter().any(|m| m.name == "isInClass"),
         "the interface method must survive the merge"
     );
+}
+
+// ── property_write_is_magic tests ───────────────────────────────────
+
+/// A class with a magic `__set()`, an `@property`-style virtual property
+/// `tagged`, and a field property `title` that a framework stores through
+/// `__set()`.
+fn class_with_magic_set() -> ClassInfo {
+    let mut class = make_class("Entity");
+    class.methods.push(Arc::new(make_method("__set", None)));
+    class
+        .properties
+        .push(Arc::new(make_property("tagged", Some("string"))));
+    class.properties.push(Arc::new(PropertyInfo {
+        source: Some(crate::types::PropertySource::DrupalField),
+        ..make_property("title", Some("FieldItemList"))
+    }));
+    class
+}
+
+#[test]
+fn a_write_to_an_undeclared_property_with_magic_set_is_magic() {
+    let class = class_with_magic_set();
+    let loader = |_: Fqn<'_>| None;
+    assert!(property_write_is_magic(&class, "missing", &loader, None));
+}
+
+#[test]
+fn a_write_to_a_tagged_property_is_not_magic() {
+    let class = class_with_magic_set();
+    let loader = |_: Fqn<'_>| None;
+    assert!(!property_write_is_magic(&class, "tagged", &loader, None));
+}
+
+/// The field keeps its type whatever is written: `__set()` stores the
+/// value into it.
+#[test]
+fn a_write_to_a_field_stored_through_magic_set_is_magic() {
+    let class = class_with_magic_set();
+    let loader = |_: Fqn<'_>| None;
+    assert!(property_write_is_magic(&class, "title", &loader, None));
+}
+
+/// Without `__set()` the write is an ordinary dynamic one.
+#[test]
+fn a_write_to_a_field_without_magic_set_is_not_magic() {
+    let mut class = class_with_magic_set();
+    class.methods = Default::default();
+    let loader = |_: Fqn<'_>| None;
+    assert!(!property_write_is_magic(&class, "title", &loader, None));
 }

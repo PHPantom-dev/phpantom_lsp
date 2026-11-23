@@ -824,6 +824,34 @@ fn scan_drupal_directories_collects_declaration_files_outside_tests() {
     );
 }
 
+/// Core's and contributed extensions' field storage files are read for
+/// their fields; the other default configuration files are only listed.
+#[test]
+fn scan_drupal_directories_reads_field_storage_files_of_extensions() {
+    let dir = tempfile::tempdir().unwrap();
+    let web_root = dir.path();
+    for path in [
+        "core/profiles/standard/config/install/field.storage.user.user_picture.yml",
+        "core/profiles/standard/config/install/user.settings.yml",
+        "core/recipes/article_tags/config/field.storage.node.field_tags.yml",
+        "core/modules/node/tests/modules/node_test/config/install/field.storage.node.field_test.yml",
+    ] {
+        let full = web_root.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, "id: example\n").unwrap();
+    }
+
+    let (_, files) = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    assert_eq!(
+        files.declarations,
+        vec![
+            web_root
+                .join("core/profiles/standard/config/install/field.storage.user.user_picture.yml")
+        ]
+    );
+    assert_eq!(files.default_config.len(), 2);
+}
+
 #[test]
 fn scan_drupal_directories_records_templates_outside_tests() {
     let dir = tempfile::tempdir().unwrap();

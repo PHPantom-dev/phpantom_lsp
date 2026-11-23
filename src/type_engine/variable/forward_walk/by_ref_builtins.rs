@@ -1,7 +1,9 @@
 //! What a call writes into the variables it passes by reference, once its
 //! callee is known: the type each by-reference parameter leaves behind,
 //! the shape `preg_match()` and its relatives fill `$matches` with, and
-//! the locals `extract()` defines for the keys of its array.
+//! the locals `extract()` defines for the keys of its array.  A write
+//! through a variable variable (`$$name = …`) widens the locals it may
+//! replace the same way.
 
 use mago_syntax::cst::argument::Argument;
 
@@ -238,6 +240,72 @@ pub(super) fn process_extract_call<'b>(
         );
     }
     true
+}
+
+/// Which local an assignment to `target` writes when it goes through a
+/// variable variable (`$$name = …`, `${$name}[] = …`, `[$$name] = …`).
+///
+/// `None` for a write to a named variable (or to no variable at all),
+/// `Some(Some(name))` for `${'name'}`, and `Some(None)` when the name is
+/// computed and the write may land in any local.
+pub(super) fn variable_variable_write_target(target: &Expression<'_>) -> Option<Option<String>> {
+    match target {
+        Expression::Variable(Variable::Direct(_)) => None,
+        Expression::Variable(Variable::Indirect(indirect)) => Some(
+            crate::type_engine::type_ops::condition_facts::string_literal_value(
+                indirect.expression,
+            )
+            .filter(|name| is_extractable_variable_name(name)),
+        ),
+        Expression::Variable(Variable::Nested(_)) => Some(None),
+        Expression::Parenthesized(inner) => variable_variable_write_target(inner.expression),
+        Expression::ArrayAccess(access) => variable_variable_write_target(access.array),
+        Expression::ArrayAppend(append) => variable_variable_write_target(append.array),
+        Expression::List(_) | Expression::Array(_) | Expression::LegacyArray(_) => {
+            let mut found: Option<Option<String>> = None;
+            for element in destructuring_targets(target) {
+                match variable_variable_write_target(element) {
+                    Some(None) => return Some(None),
+                    Some(Some(name)) => match &found {
+                        Some(Some(other)) if *other != name => return Some(None),
+                        _ => found = Some(Some(name)),
+                    },
+                    None => {}
+                }
+            }
+            found
+        }
+        _ => None,
+    }
+}
+
+/// The targets a destructuring assignment writes, one level deep.
+fn destructuring_targets<'a, 'b>(
+    target: &'a Expression<'b>,
+) -> impl Iterator<Item = &'a Expression<'b>> {
+    let elements = match target {
+        Expression::List(list) => Some(&list.elements),
+        Expression::Array(array) => Some(&array.elements),
+        Expression::LegacyArray(array) => Some(&array.elements),
+        _ => None,
+    };
+    elements.into_iter().flat_map(|elements| {
+        elements.iter().filter_map(|element| match element {
+            ArrayElement::KeyValue(kv) => Some(kv.value),
+            ArrayElement::Value(v) => Some(v.value),
+            _ => None,
+        })
+    })
+}
+
+/// Forget what is known about the locals a write through a variable
+/// variable may have replaced: the one it names, or every local when its
+/// name is computed.
+pub(super) fn widen_variable_variable_write(name: Option<String>, scope: &mut ScopeState) {
+    match name {
+        Some(name) => widen_extractable_locals(scope, |local| local == name),
+        None => widen_extractable_locals(scope, |_| true),
+    }
 }
 
 /// Widen to `mixed` every local an `extract()` of unknown keys may have

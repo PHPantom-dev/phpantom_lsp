@@ -154,6 +154,63 @@ fn scope_return_type_custom() {
     );
 }
 
+#[test]
+fn rebind_scope_builder_return_preserves_explicit_results() {
+    let custom = PhpType::parse("App\\Builders\\PostBuilder<App\\Models\\Post>");
+    let base = PhpType::parse("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\Post>");
+    for (ret, builder, expected) in [
+        (None, &custom, None),
+        (Some("int"), &custom, Some("int")),
+        (Some("int|string"), &custom, Some("int|string")),
+        (Some("App\\Builder"), &custom, Some("App\\Builder")),
+        (Some("Builder"), &custom, Some("Builder")),
+        (
+            Some("Illuminate\\Database\\Eloquent\\Builder"),
+            &custom,
+            Some("App\\Builders\\PostBuilder<App\\Models\\Post>"),
+        ),
+        (
+            Some("\\Illuminate\\Database\\Eloquent\\Builder"),
+            &custom,
+            Some("App\\Builders\\PostBuilder<App\\Models\\Post>"),
+        ),
+        (
+            Some("Illuminate\\Database\\Eloquent\\Builder"),
+            &base,
+            Some("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\Post>"),
+        ),
+        (
+            Some("Illuminate\\Database\\Eloquent\\Builder<static>"),
+            &custom,
+            Some("App\\Builders\\PostBuilder<App\\Models\\Post>"),
+        ),
+        (
+            Some("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\Post>"),
+            &custom,
+            Some("App\\Builders\\PostBuilder<App\\Models\\Post>"),
+        ),
+        (
+            Some("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\Other>"),
+            &custom,
+            Some("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\Other>"),
+        ),
+        (
+            Some("App\\Builders\\OtherBuilder<static>"),
+            &custom,
+            Some("App\\Builders\\OtherBuilder<static>"),
+        ),
+        (
+            Some("Illuminate\\Database\\Eloquent\\Builder<static>"),
+            &base,
+            Some("Illuminate\\Database\\Eloquent\\Builder<static>"),
+        ),
+    ] {
+        let mut method = make_method("scopePublished", ret);
+        rebind_scope_builder_return(&mut method, builder);
+        assert_eq!(method.return_type, expected.map(PhpType::parse), "{ret:?}");
+    }
+}
+
 // ── build_scope_methods (convention) ─────────────────────────────────
 
 #[test]

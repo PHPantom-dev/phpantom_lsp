@@ -54,8 +54,8 @@ struct ResolvedArg {
     array_string_literals: Vec<(String, usize, usize)>,
     /// Whether the argument is an array written out at the call site
     /// with every key spelled as a literal, so its resolved shape lists
-    /// all the keys the value has rather than the ones we happened to
-    /// see.  See [`enumerates_all_keys`].
+    /// the value's keys in the order the value has them.  See
+    /// [`enumerates_all_keys`].
     enumerates_all_keys: bool,
 }
 
@@ -96,20 +96,17 @@ struct ResolvedCallArgs {
 }
 
 /// Whether the expression is an array literal whose keys are all known
-/// statically, so the shape inferred from it is the whole array rather
-/// than a lower bound on it.
+/// statically, so the order of the keys in the shape inferred from it is
+/// the order of the array's keys.
 ///
-/// This is what separates a missing key from an unproven one. A shape
-/// that came from a variable was built by watching assignments, and a
-/// key we never saw assigned may still be there at runtime — through a
-/// branch we could not follow, a constant key we could not read, or a
-/// merge somewhere upstream. An array written out at the call site has
-/// no such history: every key is right there.
+/// A shape that came from a variable was built by watching assignments,
+/// and lists its keys in the order they were seen, which a branch join
+/// can reorder. An array written out at the call site has no such
+/// history: every key is right there, in its place.
 ///
 /// A single entry written without a key, or spread in with `...`, is
-/// enough to disqualify the literal, because the shape inference drops
-/// positional entries as soon as the array has string keys. `[]` itself
-/// enumerates all (zero) of its keys, so it is not disqualified.
+/// enough to disqualify the literal. `[]` itself enumerates all (zero) of
+/// its keys, so it is not disqualified.
 fn enumerates_all_keys(expr: &Expression<'_>) -> bool {
     use mago_syntax::cst::array::ArrayElement;
 
@@ -832,20 +829,15 @@ impl<'a> ArgumentCheck<'a> {
         }
 
         // The compatibility layer treats an array shape as an open
-        // description — a key it does not mention may still be
-        // there at runtime — which is right for a shape inferred
-        // from a variable but not for one written out at the call
-        // site. There the keys are all of them, so a required key
-        // that is not among them is genuinely absent. A key that
-        // *is* there with the wrong value type stays the
-        // compatibility layer's call.
-        let missing_keys = if arg.enumerates_all_keys {
-            missing_required_shape_keys(arg_type, effective_param_type)
-        } else {
-            Vec::new()
-        };
+        // description, where a key it does not mention may still be
+        // there at runtime. A sealed argument shape lists every key
+        // the value has, so a required key that is not among them is
+        // genuinely absent. A key that *is* there with the wrong
+        // value type stays the compatibility layer's call.
+        let missing_keys =
+            missing_required_shape_keys(arg_type, effective_param_type, self.class_loader);
 
-        // Same reasoning for the keys a `list` demands: only a
+        // The order of a shape's keys is another matter: only a
         // literal that spells every key out proves the value's keys
         // are in an order `array_is_list()` would reject.
         let breaks_list_order =

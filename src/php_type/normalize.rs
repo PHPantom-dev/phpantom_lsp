@@ -58,6 +58,11 @@ impl PhpType {
                 if simplified.iter().any(|m| m.is_mixed()) {
                     return PhpType::mixed();
                 }
+                if simplified.iter().any(|m| m.is_named("non-empty-mixed"))
+                    && PhpType::hold_every_falsy_value(simplified.iter())
+                {
+                    return PhpType::mixed();
+                }
 
                 // Deduplicate without folding case-sensitive literal payloads.
                 dedup_types(&mut simplified);

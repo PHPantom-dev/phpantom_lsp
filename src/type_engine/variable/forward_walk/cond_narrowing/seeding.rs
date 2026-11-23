@@ -199,6 +199,24 @@ pub(crate) fn seed_synthetic_key_if_needed(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    seed_synthetic_key(key, None, false, scope, ctx);
+}
+
+/// [`seed_synthetic_key_if_needed`] for a key written as `expr`.
+///
+/// An argument-less call whose conditional return type decides what it
+/// returns is seeded with what `expr` resolves to, the same answer the
+/// call gets when it is read without a seed, and left unseeded when the
+/// call resolves to nothing. Without `expr`, every key is seeded with what
+/// its declaration promises. With `only_deferred`, every key but such a
+/// call is left to the text-based seeder.
+fn seed_synthetic_key(
+    key: &str,
+    expr: Option<&Expression<'_>>,
+    only_deferred: bool,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
     // Only seed compound keys (property access, array access, or a
     // static property).
     if !condition_facts::is_member_path_key(key) {
@@ -215,6 +233,18 @@ pub(crate) fn seed_synthetic_key_if_needed(
         return;
     }
 
+    if let Some(expr) = expr
+        && is_conditional_call_key(key, scope, ctx)
+    {
+        let types = super::assignment::resolve_rhs_with_receivers_set(expr, scope, ctx);
+        if !types.is_empty() {
+            scope.set(key, types);
+        }
+        return;
+    }
+    if only_deferred {
+        return;
+    }
     let types = resolve_synthetic_key_type(key, scope, ctx);
     scope.set(key, types);
 }
@@ -253,7 +283,7 @@ pub(crate) fn seed_assert_arg_subject_keys(
         if let Some(key) = condition_facts::expr_to_subject_key(arg_expr)
             && condition_facts::is_member_path_key(&key)
         {
-            seed_synthetic_key_if_needed(&key, scope, ctx);
+            seed_synthetic_key(&key, Some(arg_expr), false, scope, ctx);
         }
         // An argument that is itself a check (`assert($items[0] instanceof
         // Foo)`) carries its subject one level further down, so it is
@@ -508,15 +538,27 @@ pub(crate) fn seed_call_subject_keys(
 
 /// Seed one expression under its call key, when it has one and the scope
 /// does not already carry it.
+///
+/// `$m?->make(1)` and `$m->make(1)` share a key, and the plain spelling
+/// only runs once `$m` is set, so the key holds what the call returns
+/// then. A read through `?->` adds the short-circuit `null` back itself.
 fn seed_call_subject(expr: &Expression<'_>, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
     let Some(key) = condition_facts::expr_to_subject_key(expr) else {
         return;
     };
-    if !seeds_from_expression(&key) || scope.contains(&key) {
+    if scope.contains(&key) {
         return;
     }
-    let types = super::assignment::resolve_rhs_with_scope(expr, scope, ctx);
-    scope.set(&key, types);
+    // An argument-less call on a receiver is left to the text-based
+    // seeder, unless a conditional return type decides what it returns:
+    // that seeder can only answer with the declared union, so the call is
+    // seeded here from the expression instead.
+    if seeds_from_expression(&key) {
+        let types = super::assignment::resolve_rhs_with_receivers_set(expr, scope, ctx);
+        scope.set(&key, types);
+    } else if condition_facts::is_call_key(&key) {
+        seed_synthetic_key(&key, Some(expr), true, scope, ctx);
+    }
 }
 
 /// Whether a call key has to be seeded from the expression it was built

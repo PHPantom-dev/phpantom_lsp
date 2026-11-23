@@ -116,6 +116,7 @@ mod convert_to_closure;
 mod convert_to_instance_variable;
 mod convert_to_interpolation;
 mod create_missing_component;
+mod create_missing_route;
 mod create_missing_view;
 mod create_test;
 pub(crate) mod cursor_context;

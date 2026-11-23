@@ -72,6 +72,9 @@ pub(crate) fn seed_static_locals<'b>(
     }
 
     for (name, types) in seeds {
+        // `static` binds the name to the function's static slot by
+        // reference.
+        scope.unbind_reference(&crate::atom::atom(name));
         if types.is_empty() {
             // Declared but never given a value the walker can name: the
             // variable is still in scope (it is `null` until assigned), so

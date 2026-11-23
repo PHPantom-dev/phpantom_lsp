@@ -10,7 +10,7 @@ use mago_span::HasSpan;
 use crate::atom::bytes_to_str;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
-use crate::types::{MethodInfo, ResolvedType};
+use crate::types::{ClassInfo, MethodInfo, ResolvedType};
 
 /// What seeding a function-like body needs to know about its declaration.
 #[derive(Clone, Copy)]
@@ -707,7 +707,7 @@ pub(crate) fn declared_param_type(
     // type `class-string` doesn't resolve to a class.  Unwrap the
     // inner type and resolve it so that `$class::KEY` finds
     // static members on `Foo`.
-    let mut resolved_from_class_string_inner = false;
+    let mut class_string_inner: Option<PhpType> = None;
     if resolved_from_effective.is_empty()
         && let Some(ref eff) = effective_type
         && let Some(inner) = eff.unwrap_class_string_inner()
@@ -720,19 +720,23 @@ pub(crate) fn declared_param_type(
         );
         if !inner_resolved.is_empty() {
             resolved_from_effective = inner_resolved;
-            resolved_from_class_string_inner = true;
+            class_string_inner = Some(inner.clone());
         }
     }
 
     let mut param_results = if !resolved_from_effective.is_empty() {
-        ResolvedType::from_classes_with_hint(
-            resolved_from_effective,
-            effective_type.clone().unwrap_or_else(|| {
+        // Several classes from a `class-string<…>` are read against the
+        // type inside it, which says how they combine (`A|B`, or a trait
+        // and the classes it requires); the wrapper is put back below.
+        let hint = match class_string_inner {
+            Some(ref inner) if resolved_from_effective.len() > 1 => inner.clone(),
+            _ => effective_type.clone().unwrap_or_else(|| {
                 type_for_resolution
                     .cloned()
                     .unwrap_or_else(PhpType::untyped)
             }),
-        )
+        };
+        ResolvedType::from_classes_with_hint(resolved_from_effective, hint)
     } else if let Some(ref eff) = effective_type
         && (trait_refinement.is_some()
             || unmarked_docblock_type
@@ -779,17 +783,33 @@ pub(crate) fn declared_param_type(
     };
 
     // Preserve the `class-string<...>` wrapper on the resolved value
-    // type.  When `class-string<A|B>` unwraps to multiple classes,
-    // `from_classes_with_hint` rebuilds the union from bare class names,
-    // which drops the wrapper and makes the value look like an instance
-    // of the class rather than a class-string naming it.  Re-wrap each
-    // class member so the value keeps its class-string type (matching the
-    // single-class case, which already carries `class-string<Foo>`).
-    if resolved_from_class_string_inner && param_results.len() > 1 {
+    // type.  When `class-string<A|B>` unwraps to multiple classes, they
+    // were read against the bare inner type above, which would make the
+    // value look like an instance of the class rather than a class-string
+    // naming it.  Re-wrap each member so the value keeps its class-string
+    // type (matching the single-class case, which already carries
+    // `class-string<Foo>`).
+    if class_string_inner.is_some() && param_results.len() > 1 {
         for rt in &mut param_results {
-            if let Some(ci) = rt.class_info.as_ref() {
-                let inner = PhpType::named(ci.fqn());
-                rt.type_string = PhpType::class_string(Some(inner));
+            rt.type_string = PhpType::class_string(Some(rt.type_string.clone()));
+        }
+    }
+
+    // A `self` parameter in a trait holds a class using the trait, so it gets `$this`'s bounds.
+    if is_the_current_trait(&param_results, ctx.current_class) {
+        let nullable = param_results[0].type_string.has_null_member();
+        crate::type_engine::trait_context::extend_this_with_trait_bounds(
+            &mut param_results,
+            ctx.current_class,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+            ctx.file.backend,
+        );
+        // The bounds are joined as an intersection that replaces the hint,
+        // so put back the `null` a `?self` or `self $x = null` admits.
+        if nullable && param_results.len() > 1 {
+            for rt in &mut param_results {
+                rt.type_string = PhpType::union(vec![rt.type_string.clone(), PhpType::null()]);
             }
         }
     }
@@ -798,6 +818,32 @@ pub(crate) fn declared_param_type(
         effective: effective_type,
         results: param_results,
     }
+}
+
+/// Whether a parameter holds an instance of the trait being analysed, which
+/// is what a `self` or `?self` hint inside a trait resolves to. A wrapper
+/// such as `class-string<self>` resolves to the trait too but holds a name,
+/// not an instance, so the declared type itself must name the trait.
+fn is_the_current_trait(param_results: &[ResolvedType], current_class: &ClassInfo) -> bool {
+    if current_class.kind != crate::types::ClassLikeKind::Trait {
+        return false;
+    }
+    let [only] = param_results else {
+        return false;
+    };
+    if !only
+        .class_info
+        .as_ref()
+        .is_some_and(|ci| ci.fqn() == current_class.fqn())
+    {
+        return false;
+    }
+    let non_null = only.type_string.non_null_type();
+    non_null
+        .as_ref()
+        .unwrap_or(&only.type_string)
+        .base_name()
+        .is_some_and(|name| name == current_class.fqn() || name.eq_ignore_ascii_case("self"))
 }
 
 /// Turn a variadic parameter's element types into the array it receives.

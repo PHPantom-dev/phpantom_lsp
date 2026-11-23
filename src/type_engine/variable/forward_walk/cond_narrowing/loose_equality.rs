@@ -213,6 +213,17 @@ fn loosely_equal_member(member: &PhpType, literal: &PhpType) -> Option<PhpType> 
             _ => Some(member.clone()),
         };
     }
+    // A number meets a non-numeric string as its own string form, which is
+    // numeric for every int and for every float but `INF`, `-INF` and `NAN`.
+    if matches!(literal_value, LiteralValue::String(_)) && !literal_value.is_numeric_string() {
+        if member.is_int_subtype() {
+            return None;
+        }
+        if member.is_float_subtype() {
+            let content = literal_value.string_content().unwrap_or_default();
+            return matches!(content.as_ref(), "INF" | "-INF" | "NAN").then(|| member.clone());
+        }
+    }
     if !loose_means_identity(member, literal_value) {
         // A string compares with a number, or with another string, as a
         // number only when it is numeric itself (`'abc' == 1` is false), so a

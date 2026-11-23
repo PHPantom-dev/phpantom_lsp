@@ -110,8 +110,8 @@ fn element_writes_refine_the_type_they_are_written_into() {
         ),
         "array{rows: array{'first', string}}"
     );
-    // A dynamic key may land on any entry, so the shape widens instead of
-    // standing still.
+    // A dynamic key may land on any entry or on one beyond them, so each
+    // entry may hold the written value and the rest of the array holds it.
     assert_eq!(
         write(
             "array{name: string}",
@@ -122,7 +122,7 @@ fn element_writes_refine_the_type_they_are_written_into() {
             }],
             "int",
         ),
-        "non-empty-array<string, string|int>"
+        "array{name: string|int, ...<string, int>}"
     );
     // A written-out integer key the shape already spells out updates that
     // entry in place, the same as a positional slot would.
@@ -222,7 +222,7 @@ fn a_nested_write_through_a_dynamic_key_keeps_the_shape_entries_it_misses() {
 
     assert_eq!(
         write("array{a: array{}, b: array{}}", "Foo"),
-        "non-empty-array<string, array{}|array{Foo}>"
+        "array{a: array{}|array{Foo}, b: array{}|array{Foo}, ...<string, array{Foo}>}"
     );
     // An empty shape has no entries for the write to miss.
     assert_eq!(

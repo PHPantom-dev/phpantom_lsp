@@ -14,10 +14,16 @@ use serde::Deserialize;
 /// Explicit configuration in `.phpantom.toml` always takes priority:
 /// set a tool path to use it, or set it to `""` to disable it.
 /// When no external tool is configured or detected, the built-in
-/// formatter is used.
+/// formatter is used.  `enabled = false` turns formatting off entirely.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct FormattingConfig {
+    /// Whether formatting is enabled at all.
+    ///
+    /// - `None` (default) or `true` — format with the resolved strategy.
+    /// - `false` — answer no formatting requests, built-in formatter
+    ///   included.
+    pub enabled: Option<bool>,
     /// Command (path or name) to run php-cs-fixer.
     ///
     /// - `None` (default) — check `require-dev` in `composer.json`;
@@ -90,12 +96,9 @@ impl FormattingConfig {
         self.timeout.unwrap_or(10_000)
     }
 
-    /// Whether formatting is entirely disabled (every tool explicitly
-    /// set to an empty string).
+    /// Whether formatting is turned off with `enabled = false`.
     pub fn is_disabled(&self) -> bool {
-        crate::formatting::Tool::ALL
-            .into_iter()
-            .all(|tool| tool.configured(self) == Some(""))
+        self.enabled == Some(false)
     }
 }
 

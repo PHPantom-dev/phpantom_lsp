@@ -771,7 +771,36 @@ fn formatting_empty_string_disables_tool() {
     assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
     assert_eq!(config.formatting.phpcbf.as_deref(), Some(""));
     assert_eq!(config.formatting.pint.as_deref(), Some(""));
+    assert!(!config.formatting.is_disabled());
+}
+
+#[test]
+fn formatting_enabled_false_disables_formatting() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(CONFIG_FILE_NAME);
+    std::fs::write(&path, "[formatting]\nenabled = false\n").unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert_eq!(config.formatting.enabled, Some(false));
     assert!(config.formatting.is_disabled());
+}
+
+#[test]
+fn formatting_enabled_true_is_not_disabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(CONFIG_FILE_NAME);
+    std::fs::write(&path, "[formatting]\nenabled = true\n").unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(!config.formatting.is_disabled());
+}
+
+#[test]
+fn formatting_enabled_unset_is_not_disabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(CONFIG_FILE_NAME);
+    std::fs::write(&path, "[formatting]\ntimeout = 5000\n").unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert_eq!(config.formatting.enabled, None);
+    assert!(!config.formatting.is_disabled());
 }
 
 #[test]

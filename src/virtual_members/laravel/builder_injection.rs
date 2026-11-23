@@ -279,11 +279,20 @@ fn inject_scopes_and_model_methods(
     // 1. Inject scope methods.
     let scope_methods = build_scope_methods_for_builder(model_arg, class_loader);
     for method in scope_methods {
-        let already_exists = result
+        let existing = result
             .methods
             .iter()
-            .any(|m| m.name == method.name && m.is_static == method.is_static);
-        if !already_exists {
+            .position(|m| m.name.eq_ignore_ascii_case(&method.name));
+        if let Some(index) = existing {
+            // Builder::__call invokes the model's scope ahead of any
+            // @method or @mixin description of that scope. Real builder
+            // methods and registered macros still win at runtime.
+            let previous = &result.methods[index];
+            if previous.is_virtual && !previous.is_macro {
+                result.methods.make_mut()[index] =
+                    forward_builder_return(&method, forwarded, class_loader);
+            }
+        } else {
             result
                 .methods
                 .push(forward_builder_return(&method, forwarded, class_loader));

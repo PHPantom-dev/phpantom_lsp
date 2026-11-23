@@ -36,6 +36,7 @@ enum CheckedStringKind {
     MorphAlias,
     GateAbility,
     Middleware,
+    RateLimiter,
     ServiceId,
     ContainerParameter,
     SymfonyRoute,
@@ -81,6 +82,7 @@ impl CheckedStringKind {
             StringKeyKind::MorphAlias => Self::MorphAlias,
             StringKeyKind::GateAbility => Self::GateAbility,
             StringKeyKind::Middleware => Self::Middleware,
+            StringKeyKind::RateLimiter => Self::RateLimiter,
             StringKeyKind::ServiceId => Self::ServiceId,
             StringKeyKind::ContainerParameter => Self::ContainerParameter,
             StringKeyKind::SymfonyRoute => Self::SymfonyRoute,
@@ -121,7 +123,8 @@ impl CheckedStringKind {
             // name that nothing above defines starts a new block.  A
             // template variable no render was found to pass may be passed
             // by one that builds its context at runtime.  A module can add
-            // an entity type in PHP, through `hook_entity_type_build()`.
+            // an entity type in PHP, through `hook_entity_type_build()`,
+            // and fields, through `hook_entity_base_field_info()`.
             // Drupal sends a route parameter no path declares as the query
             // string, and so does a Yii URL generator a route argument.  A serializer group nothing puts a member in selects
             // nothing, which is no error either.  A module can declare
@@ -146,6 +149,7 @@ impl CheckedStringKind {
             | StringKeyKind::DrupalPermission
             | StringKeyKind::DrupalConfigName
             | StringKeyKind::DrupalConfigKey
+            | StringKeyKind::DrupalFieldName
             | StringKeyKind::DrupalThemeHook
             | StringKeyKind::DrupalThemeHookVariable
             | StringKeyKind::TranslationDomain
@@ -201,6 +205,8 @@ struct DeclaredKeys<'a> {
     /// Whether the middleware aliases and groups the project registers
     /// are all known.
     middleware_known: bool,
+    /// Provider-defined rate limiters, only read when the file names one.
+    rate_limiters: Option<Arc<crate::virtual_members::laravel::rate_limiters::RateLimiterCatalog>>,
     /// The service IDs the project's configuration declares, sorted.
     services: Vec<String>,
     /// The service IDs a Drupal site's services files declare, and those
@@ -276,6 +282,8 @@ impl<'a> DeclaredKeys<'a> {
         let has_morph_alias = names(|kind| kind == CheckedStringKind::MorphAlias);
         let has_gate_ability = names(|kind| kind == CheckedStringKind::GateAbility);
         let has_middleware = names(|kind| kind == CheckedStringKind::Middleware);
+        let rate_limiters = names(|kind| kind == CheckedStringKind::RateLimiter)
+            .then(|| backend.cached_rate_limiters());
         let has_service = names(|kind| kind == CheckedStringKind::ServiceId);
         let has_parameter = names(|kind| kind == CheckedStringKind::ContainerParameter);
         let has_symfony_route = names(|kind| kind == CheckedStringKind::SymfonyRoute);
@@ -513,6 +521,7 @@ impl<'a> DeclaredKeys<'a> {
             morph_map_enforced,
             gate_abilities,
             middleware_known,
+            rate_limiters,
             services,
             drupal_services,
             drupal_plugins,
@@ -595,6 +604,16 @@ impl<'a> DeclaredKeys<'a> {
             }
             CheckedStringKind::ServiceId => self.judge_service(key),
             CheckedStringKind::DrupalPlugin => self.judge_drupal_plugin(key),
+            CheckedStringKind::RateLimiter => {
+                let catalog = self.rate_limiters.as_ref()?;
+                catalog.complete.then(|| {
+                    (
+                        catalog.location(key).is_some(),
+                        "rate limiter",
+                        "invalid_laravel_rate_limiter",
+                    )
+                })
+            }
             CheckedStringKind::ContainerParameter => self.judge_parameter(key),
             CheckedStringKind::SymfonyRoute => self.judge_symfony_route(key),
             CheckedStringKind::SymfonyTranslation => self.judge_symfony_translation(key),

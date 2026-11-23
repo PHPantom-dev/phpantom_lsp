@@ -42,6 +42,9 @@ pub(super) struct ScanPaths<'a> {
     pub(super) uri: &'a Arc<Uri>,
     /// That file's line table, for the position of each declaration.
     pub(super) lines: &'a LineIndex<'a>,
+    /// The server whose editor buffers a file the walk opens is read through,
+    /// so unsaved edits to an included file count.  `None` reads from disk.
+    pub(super) buffers: Option<&'a Backend>,
 }
 
 impl<'a> ScanPaths<'a> {
@@ -78,6 +81,15 @@ pub(super) fn in_parsed_route_file<R>(
     walk(program, &names)
 }
 
+/// The text of a file a route walk opens: the editor's buffer when the file
+/// is open there, else the file on disk.
+pub(super) fn read_route_source(buffers: Option<&Backend>, path: &Path) -> Option<Arc<String>> {
+    if let Some(content) = buffers.and_then(|backend| backend.open_buffer_at_path(path)) {
+        return Some(content);
+    }
+    std::fs::read_to_string(path).ok().map(Arc::new)
+}
+
 // ─── Router macros ───────────────────────────────────────────────────────────
 
 /// The classes a route-registering macro attaches to.
@@ -112,7 +124,7 @@ pub(super) struct MacroScope {
     pub(super) expanding: RefCell<HashSet<String>>,
     /// Source of each macro file, read once per scan.  `None` records a file
     /// that could not be read so the failure is not retried.
-    pub(super) sources: RefCell<HashMap<String, Option<Arc<str>>>>,
+    pub(super) sources: RefCell<HashMap<String, Option<Arc<String>>>>,
 }
 
 impl MacroScope {
@@ -132,13 +144,11 @@ impl MacroScope {
     }
 
     /// Read (and memoize) the source of the file a macro closure lives in.
-    fn source(&self, uri: &str) -> Option<Arc<str>> {
+    fn source(&self, uri: &str, path: &Path, buffers: Option<&Backend>) -> Option<Arc<String>> {
         if let Some(cached) = self.sources.borrow().get(uri) {
             return cached.clone();
         }
-        let loaded = crate::util::uri_to_path(uri)
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .map(Arc::<str>::from);
+        let loaded = read_route_source(buffers, path);
         self.sources
             .borrow_mut()
             .insert(uri.to_string(), loaded.clone());
@@ -152,7 +162,7 @@ impl MacroScope {
 /// second, sibling call to the same macro still expands while a cycle stops.
 pub(super) struct OpenMacro<'a> {
     name: String,
-    pub(super) content: Arc<str>,
+    pub(super) content: Arc<String>,
     pub(super) uri: Arc<Uri>,
     pub(super) path: PathBuf,
     /// Byte offset of the closure within `content`.
@@ -172,7 +182,11 @@ impl Drop for OpenMacro<'_> {
 /// Returns `None` when no router macro of that name is registered, when its
 /// file cannot be read, or when the macro is already being expanded further up
 /// the call stack.
-pub(super) fn open_route_macro<'a>(scope: &'a MacroScope, method: &[u8]) -> Option<OpenMacro<'a>> {
+pub(super) fn open_route_macro<'a>(
+    scope: &'a MacroScope,
+    method: &[u8],
+    buffers: Option<&Backend>,
+) -> Option<OpenMacro<'a>> {
     if scope.bodies.is_empty() {
         return None;
     }
@@ -187,13 +201,13 @@ pub(super) fn open_route_macro<'a>(scope: &'a MacroScope, method: &[u8]) -> Opti
     // expansion stack when `open` is dropped.
     let mut open = OpenMacro {
         name,
-        content: Arc::from(""),
+        content: Arc::default(),
         uri: Arc::new(url),
         path,
         offset: *offset,
         scope,
     };
-    open.content = scope.source(uri)?;
+    open.content = scope.source(uri, &open.path, buffers)?;
     Some(open)
 }
 
@@ -227,7 +241,7 @@ pub(super) fn macro_body_at<'ast, 'arena>(
 /// in the same helper file) still scans both times while a true cycle stops.
 pub(super) struct IncludedFile<'a> {
     pub(super) path: PathBuf,
-    pub(super) content: String,
+    pub(super) content: Arc<String>,
     open: &'a RefCell<HashSet<PathBuf>>,
 }
 
@@ -239,7 +253,7 @@ impl Drop for IncludedFile<'_> {
 
 /// Resolve an include target (`require __DIR__ . '/x.php'`,
 /// `Route::group([], base_path('routes/x.php'))`) and read the file it
-/// names, or return `None` when the path is not statically recoverable, the
+/// names, through the editor's buffer when it is open there, or return `None` when the path is not statically recoverable, the
 /// file cannot be read, or following it would re-enter a file already open.
 pub(super) fn open_included_file<'a>(
     target: &Expression<'_>,
@@ -263,11 +277,11 @@ pub(super) fn open_included_file<'a>(
     // Constructed before the read so that a failed read still pops the path
     // off the include stack when `included` is dropped.
     let mut included = IncludedFile {
-        content: String::new(),
+        content: Arc::default(),
         path,
         open: paths.open,
     };
-    included.content = std::fs::read_to_string(&included.path).ok()?;
+    included.content = read_route_source(paths.buffers, &included.path)?;
     Some(included)
 }
 

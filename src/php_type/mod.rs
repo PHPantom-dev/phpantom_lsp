@@ -35,6 +35,7 @@ mod display;
 mod intern;
 mod keywords;
 mod literal;
+pub(crate) use literal::is_php_numeric_string;
 mod normalize;
 mod parse;
 mod predicates;

@@ -50,7 +50,8 @@ pub(super) fn extract_nested_array_access_chain<'a, 'b>(
 
 /// A single key segment in a (possibly nested) array write like
 /// `$var['a'][$i]['b'] = …`.
-pub(super) enum ArrayWriteKey {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ArrayWriteKey {
     /// A string-literal key tracked as a shape entry, e.g. `['name']`.
     Shape(String),
     /// A dynamic (variable / expression / numeric) key tracked as a
@@ -71,6 +72,19 @@ pub(super) enum ArrayWriteKey {
     /// A trailing `[]` append, as in `$var['a'][] = …`. Only ever the
     /// last segment of a chain.
     Append,
+}
+
+impl ArrayWriteKey {
+    /// The key a literal segment names, as a shape spells it.
+    pub(crate) fn literal(&self) -> Option<std::borrow::Cow<'_, str>> {
+        match self {
+            ArrayWriteKey::Shape(key) => Some(std::borrow::Cow::Borrowed(key)),
+            ArrayWriteKey::Keyed {
+                slot: Some(slot), ..
+            } => Some(std::borrow::Cow::Owned(slot.to_string())),
+            _ => None,
+        }
+    }
 }
 
 /// Merge a nested array write with a mix of literal-string and dynamic
@@ -103,7 +117,7 @@ pub(super) enum ArrayWriteKey {
 ///
 /// `value_type` is stored as given. A loop write whose value can change from
 /// one pass to the next comes in already widened by [`loop_written_value`].
-pub(super) fn merge_nested_array_write(
+pub(crate) fn merge_nested_array_write(
     base: &PhpType,
     keys: &[ArrayWriteKey],
     value_type: &PhpType,
@@ -193,8 +207,10 @@ fn merge_nested_array_write_inner(
         ArrayWriteKey::Keyed { key_type, slot, .. } => {
             // Writing an entry the array already has changes only what its
             // entries hold. The key type, and with it a list's promise, stay
-            // as they were.
-            if writes_existing_entry(base, keys) {
+            // as they were. An unsealed shape answers `kind()` with its
+            // widened `array<K, V>`, which would drop the entries it lists,
+            // so it takes the shape path below instead.
+            if base.as_unsealed_shape().is_none() && writes_existing_entry(base, keys) {
                 let element = if keys.len() == 1 {
                     PhpType::join_runtime_value_types(vec![
                         keyed_slot_base(base),
@@ -276,6 +292,11 @@ fn merge_nested_array_write_inner(
             {
                 return updated;
             }
+            if let Some(updated) =
+                write_dynamic_key_into_shape(base, keys, key_type, value_type, in_loop)
+            {
+                return updated;
+            }
             if keys.len() == 1 {
                 return merge_keyed_type_inner(base, key_type, value_type, true);
             }
@@ -285,18 +306,10 @@ fn merge_nested_array_write_inner(
             // element type instead of joining it. Joining would keep the
             // element as it was before the write, so a key added below a
             // dynamic key could never be read back as present.
-            //
-            // A shape is the exception: it spells out its entries, and the
-            // ones the key does not land on keep what they held, so
-            // `$a[$k][] = $x` on `array{a: array{}, b: array{}}` leaves each
-            // entry `array{}` or `array{X}`.
             let inner_base = keyed_slot_base(base);
             let inner_merged =
                 merge_nested_array_write(&inner_base, &keys[1..], value_type, in_loop);
-            let keeps_other_entries = base
-                .shape_entries()
-                .is_some_and(|entries| !entries.is_empty());
-            merge_keyed_type_inner(base, key_type, &inner_merged, keeps_other_entries)
+            merge_keyed_type_inner(base, key_type, &inner_merged, false)
         }
         ArrayWriteKey::Append => {
             debug_assert_eq!(keys.len(), 1, "`[]` is only valid as the last segment");
@@ -331,6 +344,12 @@ pub(super) fn apply_nested_array_unset(base: &PhpType, keys: &[Option<String>]) 
     let key = keys[0].as_deref();
     if keys.len() == 1 {
         return base.after_element_unset(key);
+    }
+    // Removing an entry never creates the arrays above it, so a value of
+    // unknown type stays unknown rather than becoming one built to hold
+    // the path.  A truthy one may have lost its only entry.
+    if base.is_mixed() || base.is_named("non-empty-mixed") {
+        return PhpType::mixed();
     }
     let inner_base = match key {
         Some(k) => shape_slot_base(base, k),
@@ -782,6 +801,75 @@ fn write_literal_keys_into_shape(
         }
     }
     Some(PhpType::array_shape(updated))
+}
+
+/// Write through a key the walker cannot name into a shape that lists
+/// entries, sealed or not, or `None` when `base` is no such shape.
+///
+/// The key may be any of the listed ones or one beyond them, so each entry
+/// holds what it held or what the write put there, and the written pair
+/// goes in the unsealed tail next to them. Pooling everything into one
+/// `array<K, V>` instead would let a read of one entry see what every other
+/// entry held: `$a[$k]['p'] = true` on `array{x: int, y: array{}}` would
+/// make `$a['y']` an `int` as well.
+fn write_dynamic_key_into_shape(
+    base: &PhpType,
+    keys: &[ArrayWriteKey],
+    key_type: &PhpType,
+    value_type: &PhpType,
+    in_loop: bool,
+) -> Option<PhpType> {
+    let parts = base.shape_parts()?;
+    if parts.entries.is_empty() {
+        return None;
+    }
+    let written_into = |slot_base: &PhpType| {
+        if keys.len() == 1 {
+            value_type.clone()
+        } else {
+            merge_nested_array_write(slot_base, &keys[1..], value_type, in_loop)
+        }
+    };
+    let entries: Vec<ShapeEntry> = parts
+        .entries
+        .iter()
+        .map(|entry| {
+            let written = written_into(&entry.value_type);
+            ShapeEntry {
+                value_type: join_element_types(
+                    vec![entry.value_type.clone(), written.clone()],
+                    &written,
+                    Some(&entry.value_type),
+                ),
+                ..entry.clone()
+            }
+        })
+        .collect();
+    let written_key = normalize_array_key_type(key_type)
+        .filter(|key| !key.is_empty())
+        .unwrap_or_else(|| PhpType::named(atom("array-key")));
+    let (tail_key, tail_value) = match parts.tail {
+        Some((key, value)) => {
+            // An entry beyond the listed ones may already hold an array of
+            // its own, which a nested write builds on.
+            let slot_base = if value.is_mixed() {
+                PhpType::named(atom("array"))
+            } else {
+                keyed_slot_base(&PhpType::generic_array(key.clone(), value.clone()))
+            };
+            let written = written_into(&slot_base);
+            (
+                PhpType::join_runtime_value_types(vec![key.clone(), written_key]),
+                join_element_types(vec![value.clone(), written.clone()], &written, Some(value)),
+            )
+        }
+        None => (written_key, written_into(&PhpType::array_shape(Vec::new()))),
+    };
+    Some(PhpType::unsealed_shape(
+        PhpType::array_shape(entries),
+        tail_key,
+        tail_value,
+    ))
 }
 
 /// The shape holding `entries` after `value_type` is written under `key`,

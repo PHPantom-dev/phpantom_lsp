@@ -21,7 +21,10 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::{CastSources, LaravelMetadata, MethodInfo, model_declaration};
 use crate::util::short_name;
 
-use super::relationships::{config_related_model_key, is_inferable_relationship_short_name};
+use super::relationships::{
+    RelationshipKind, classify_relationship_typed, config_related_model_key,
+    is_inferable_relationship_short_name,
+};
 use super::{infer_relationship_from_body, is_soft_deletes_trait};
 
 mod attributes;
@@ -105,6 +108,66 @@ pub(crate) fn relationship_return_type<'a>(
             Some(inferred)
         }
         _ => Some(declared),
+    }
+}
+
+/// Whether a singular relationship method returns its relation with
+/// `->withDefault()` on every path, so the relation hands back a default
+/// model rather than `null` when no row exists.
+///
+/// The return type cannot say so (`withDefault()` returns the same
+/// relation type), so the body is read here, while it is at hand.
+pub(crate) fn relationship_has_default(
+    return_type: Option<&PhpType>,
+    method: &class_like::method::Method<'_>,
+) -> bool {
+    if return_type.and_then(classify_relationship_typed) != Some(RelationshipKind::Singular) {
+        return false;
+    }
+    let class_like::method::MethodBody::Concrete(block) = &method.body else {
+        return false;
+    };
+    let mut returns = Vec::new();
+    crate::return_collection::collect_returns(block.statements.iter(), &mut returns);
+    !returns.is_empty()
+        && returns
+            .iter()
+            .all(|(value, _, _, _)| value.is_some_and(chain_applies_default))
+}
+
+/// Whether a `$this->…` call chain includes a `withDefault()` call that
+/// enables the default model.  `withDefault(false)` and `withDefault(null)`
+/// leave it off, as Laravel checks the stored value for truthiness.
+fn chain_applies_default(mut value: &Expression<'_>) -> bool {
+    let mut has_default = false;
+    loop {
+        match value {
+            Expression::Parenthesized(parenthesized) => value = parenthesized.expression,
+            Expression::Call(Call::Method(call)) => {
+                if let ClassLikeMemberSelector::Identifier(name) = &call.method
+                    && name.value.eq_ignore_ascii_case(b"withDefault")
+                {
+                    // The outermost call wins, as it is the last to set
+                    // the default.
+                    if !has_default {
+                        has_default = call.argument_list.arguments.first().is_none_or(|arg| {
+                            !matches!(
+                                arg.value(),
+                                Expression::Literal(Literal::False(_) | Literal::Null(_))
+                            )
+                        });
+                        if !has_default {
+                            return false;
+                        }
+                    }
+                }
+                value = call.object;
+            }
+            Expression::Variable(Variable::Direct(variable)) => {
+                return has_default && variable.name == b"$this";
+            }
+            _ => return false,
+        }
     }
 }
 

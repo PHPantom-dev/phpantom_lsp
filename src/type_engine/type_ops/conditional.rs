@@ -230,6 +230,15 @@ fn type_condition_result(
     if arg_ty.is_mixed() || arg_ty.is_untyped() {
         return None;
     }
+    // A truthy value may be of any type, so only a condition every truthy
+    // value meets (or none does) is settled by it.
+    if arg_ty.is_named("non-empty-mixed") {
+        return match condition.truthiness() {
+            Some(false) => Some(false),
+            _ if condition.is_mixed() || condition.is_named("non-empty-mixed") => Some(true),
+            _ => None,
+        };
+    }
     if let (TypeKind::Callable(arg), TypeKind::Callable(cond)) = (arg_ty.kind(), condition.kind()) {
         return callable_condition_result(arg, cond, class_loader);
     }

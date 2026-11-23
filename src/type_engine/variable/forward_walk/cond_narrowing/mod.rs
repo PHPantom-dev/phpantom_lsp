@@ -35,6 +35,7 @@ mod property_checks;
 mod scope_edits;
 mod seeding;
 mod stored_conditions;
+mod subject_comparison;
 mod type_guards;
 
 pub(crate) use assertions::narrow_to_assertion;
@@ -53,7 +54,6 @@ use property_checks::*;
 
 pub(crate) use apply::*;
 pub(crate) use assertion_aliases::*;
-pub(crate) use emptiness::apply_switch_arm_narrowing;
 pub(crate) use enum_cases::*;
 pub(crate) use in_array::*;
 pub(crate) use loose_equality::*;
@@ -65,4 +65,5 @@ pub(crate) use preg::*;
 pub(crate) use scope_edits::*;
 pub(crate) use seeding::*;
 pub(crate) use stored_conditions::*;
+pub(crate) use subject_comparison::*;
 pub(crate) use type_guards::*;

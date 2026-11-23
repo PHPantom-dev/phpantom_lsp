@@ -3,6 +3,7 @@ mod locals;
 mod merge;
 mod proof_map;
 mod proofs;
+mod references;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
@@ -13,6 +14,7 @@ pub(crate) use locals::Locals;
 pub(crate) use merge::{resolved_types_differ, same_types};
 pub(crate) use proof_map::ProofMap;
 pub(crate) use proofs::*;
+pub(crate) use references::{RefLinks, RefTarget};
 pub(crate) use trie::AtomTrie;
 
 use crate::atom::{Atom, AtomMap, atom};
@@ -361,6 +363,11 @@ pub(crate) struct ScopeState {
     /// is almost always: scopes are cloned and cached by the thousand.
     pub key_facts: Option<Box<KeyFacts>>,
 
+    /// The `=&` bindings this path made, so a write to one side reaches
+    /// the other; see [`RefLink`]. `None` while there are none, which is
+    /// almost always.
+    pub ref_links: Option<Box<RefLinks>>,
+
     /// No value can reach this program point.
     ///
     /// Set when a condition narrows some variable down to nothing — the
@@ -396,6 +403,7 @@ impl ScopeState {
             closure_captures: AtomTrie::default(),
             closure_literals: AtomMap::default(),
             key_facts: None,
+            ref_links: None,
             unreachable: false,
         }
     }
@@ -492,6 +500,7 @@ impl ScopeState {
         self.unresolved.remove(&key);
         self.forget_closure_literal(&key);
         self.locals.insert(key, types);
+        self.propagate_reference_write(key);
     }
 
     /// Record that a variable exists in scope with an empty type list,
@@ -515,6 +524,7 @@ impl ScopeState {
         self.forget_closure_literal(&key);
         self.locals.insert(key, Vec::new());
         self.unresolved.insert(key, ());
+        self.propagate_reference_write(key);
     }
 
     /// Replace whatever was known about a variable with "could be
@@ -532,6 +542,7 @@ impl ScopeState {
         self.forget_closure_literal(&key);
         self.locals.insert(key, Vec::new());
         self.unresolved.remove(&key);
+        self.propagate_reference_write(key);
     }
 
     /// Insert a variable's types from parameter seeding.
@@ -552,6 +563,7 @@ impl ScopeState {
         self.unresolved.remove(&key);
         self.closure_captures.remove(&key);
         self.invalidate_proofs(var_name);
+        self.unbind_reference(&key);
     }
 
     /// Remove synthetic keys that read `var_name` — a path rooted at it

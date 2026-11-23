@@ -1,0 +1,19 @@
+// test: a switch (true) case narrows like its condition in an if
+// feature: hover
+// expect_hover: $narrowed => Alpha
+// expect_absent: Beta
+---
+<?php
+
+class Alpha {}
+class Beta {}
+
+function check(Alpha|Beta $x): void
+{
+    switch (true) {
+        case $x instanceof Alpha:
+            $narrowed = $x;
+            echo $narr<>owed;
+            break;
+    }
+}

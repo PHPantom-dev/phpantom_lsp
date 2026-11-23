@@ -36,6 +36,14 @@ impl PhpType {
             }
         }
 
+        // The members of the benevolent unions joined in. Flattening sees
+        // through the marker, so it is put back afterwards when nothing
+        // else survives the join (see the end of this function).
+        let benevolent: Vec<PhpType> = members
+            .iter()
+            .filter(|member| member.is_benevolent())
+            .flat_map(|member| member.union_members().into_iter().cloned())
+            .collect();
         let mut flattened = Vec::with_capacity(members.len());
         for member in members {
             flatten(member, &mut flattened);
@@ -84,9 +92,25 @@ impl PhpType {
         crate::util::retain_by_mask(&mut flattened, &keep);
 
         if flattened.is_empty() {
-            PhpType::never()
+            return PhpType::never();
+        }
+        // A join stays benevolent when every alternative left is one a
+        // benevolent union joined in already holds, as in PHPStan's
+        // `TypeCombinator::union()`: `array{a: 1}` joined with the
+        // benevolent `array|int|float` adds nothing the `array` does not
+        // cover, so the result is no more worth enforcing than before. One
+        // alternative from outside it makes the whole union enforced again.
+        let stays_benevolent = !benevolent.is_empty()
+            && flattened.iter().all(|member| {
+                benevolent
+                    .iter()
+                    .any(|held| member.equivalent(held) || is_runtime_value_subtype(member, held))
+            });
+        let joined = PhpType::union(flattened);
+        if stays_benevolent {
+            PhpType::benevolent(joined)
         } else {
-            PhpType::union(flattened)
+            joined
         }
     }
 }

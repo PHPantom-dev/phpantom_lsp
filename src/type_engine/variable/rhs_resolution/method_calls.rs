@@ -341,6 +341,14 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             ) {
                 return result;
             }
+            if let Some(result) = super::drupal_calls::try_resolve_field_list_type(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+            ) {
+                return result;
+            }
             if let Some(result) =
                 try_resolve_handle_trait_type(owner, &method_name, argument_list, ctx)
             {

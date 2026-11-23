@@ -1682,3 +1682,92 @@ async fn the_base_models_own_properties_are_not_columns() {
     assert!(methods.contains(&"whereEmail"), "{methods:?}");
     assert!(!methods.contains(&"whereGuarded"), "{methods:?}");
 }
+
+const DEFAULT_RELATIONS_TRAIT_PHP: &str = r#"<?php
+namespace App\Concerns;
+use App\Models\Team;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+trait HasOwner {
+    public function owner(): BelongsTo { return $this->belongsTo(Team::class)->withDefault(); }
+}
+"#;
+
+const DEFAULT_RELATIONS_BASE_PHP: &str = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+class BaseRecord extends Model {
+    public function sponsor(): BelongsTo { return $this->belongsTo(Team::class)->withDefault(['name' => '']); }
+    public function reviewer(): BelongsTo { return $this->belongsTo(Team::class)->withDefault(); }
+}
+"#;
+
+const DEFAULT_RELATIONS_RECORD_PHP: &str = r#"<?php
+namespace App\Models;
+use App\Concerns\HasOwner;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+class Record extends BaseRecord {
+    use HasOwner;
+    public function team(): BelongsTo { return $this->belongsTo(Team::class)->withDefault(fn () => new Team()); }
+    public function plain(): BelongsTo { return $this->belongsTo(Team::class); }
+    public function switchedOff(): BelongsTo { return $this->belongsTo(Team::class)->withDefault(false); }
+    public function reviewer(): BelongsTo { return $this->belongsTo(Team::class); }
+}
+"#;
+
+const DEFAULT_RELATIONS_CONSUMER_PHP: &str = r#"<?php
+namespace App\Models;
+class RecordConsumer {
+    public function run(Record $record): void {
+        $record->team;
+        $record->owner;
+        $record->sponsor;
+        $record->plain;
+        $record->switchedOff;
+        $record->reviewer;
+    }
+}
+"#;
+
+/// The hover a character into `needle` in [`DEFAULT_RELATIONS_CONSUMER_PHP`].
+async fn default_relation_hover(needle: &str) -> String {
+    let (backend, dir) = make_workspace(&[
+        ("src/Concerns/HasOwner.php", DEFAULT_RELATIONS_TRAIT_PHP),
+        ("src/Models/BaseRecord.php", DEFAULT_RELATIONS_BASE_PHP),
+        ("src/Models/Record.php", DEFAULT_RELATIONS_RECORD_PHP),
+        (
+            "src/Models/Team.php",
+            "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nclass Team extends Model {}\n",
+        ),
+        (
+            "src/Models/RecordConsumer.php",
+            DEFAULT_RELATIONS_CONSUMER_PHP,
+        ),
+    ]);
+    let uri = Uri::from_file_path(dir.path().join("src/Models/RecordConsumer.php")).unwrap();
+    open_php(&backend, &uri, DEFAULT_RELATIONS_CONSUMER_PHP).await;
+    let (line, character) = crate::common::line_char_of(DEFAULT_RELATIONS_CONSUMER_PHP, needle);
+    crate::common::markup_hover_at(&backend, &uri, line, character + 1).await
+}
+
+#[tokio::test]
+async fn singular_relationship_with_default_is_not_nullable() {
+    for needle in ["team;", "owner;", "sponsor;"] {
+        let hover = default_relation_hover(needle).await;
+        assert!(
+            hover.contains("Team") && !hover.contains("?Team") && !hover.contains("null"),
+            "`{needle}` hands back a default model, got:\n{hover}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn singular_relationship_without_default_is_nullable() {
+    for needle in ["plain;", "switchedOff;", "reviewer;"] {
+        let hover = default_relation_hover(needle).await;
+        assert!(
+            hover.contains("?Team") || hover.contains("Team|null"),
+            "`{needle}` may be null, got:\n{hover}"
+        );
+    }
+}

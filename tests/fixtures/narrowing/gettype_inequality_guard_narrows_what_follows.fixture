@@ -1,0 +1,15 @@
+// test: a gettype() inequality guard narrows what follows it like the matching is_*() call
+// feature: hover
+// expect_hover: $narrowed => int
+// expect_absent: string
+---
+<?php
+
+function check(int|string $x): void
+{
+    if ('integer' !== gettype($x)) {
+        return;
+    }
+    $narrowed = $x;
+    echo $narr<>owed;
+}

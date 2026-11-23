@@ -246,6 +246,10 @@
       "type": "object",
       "description": "Controls the formatting strategy. PHPantom ships a built-in formatter (PER-CS 2.0 style). Projects with php-cs-fixer or PHP_CodeSniffer in composer.json require-dev automatically use those tools instead. Explicit configuration here always takes priority.",
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether formatting is enabled at all. Unset or true: format with the resolved strategy. false: answer no formatting requests, the built-in formatter included."
+        },
         "pint": {
           "type": "string",
           "description": "Command or path to run Laravel Pint. Unset: auto-detect from composer.json require-dev. Empty string: disable Pint. Any other value: use as the command."

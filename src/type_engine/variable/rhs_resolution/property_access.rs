@@ -310,7 +310,9 @@ fn instance_property_type(
         return vec![ResolvedType::from_type_string(literals)];
     }
     let mut resolved = receiver.declared_property_types(prop_name, ctx);
-    apply_nullsafe_short_circuit(&mut resolved, receiver.nullability, nullsafe, object);
+    if !ctx.nullsafe_receivers_set {
+        apply_nullsafe_short_circuit(&mut resolved, receiver.nullability, nullsafe, object);
+    }
     resolved
 }
 

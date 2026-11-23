@@ -1,0 +1,14 @@
+// test: a write through a variable variable with a literal name widens only that local
+// feature: hover
+// expect_hover: $rx => $rx = 1
+// expect_hover: $ry => $ry = mixed
+---
+<?php
+
+function test(): void {
+    $x = 1;
+    $y = 'a';
+    strlen(${'y'} = 2);
+    $rx = $x;
+    $ry = $y;<>
+}

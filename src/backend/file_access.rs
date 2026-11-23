@@ -119,6 +119,37 @@ impl Backend {
         crate::util::read_php_source(&path).map(Arc::new)
     }
 
+    /// The editor's buffer for the file at `path`, when it is open.
+    ///
+    /// A buffer is keyed by the URI the client sent, which need not spell
+    /// the file the way [`path_to_uri`](crate::util::path_to_uri) does: on
+    /// Windows the drive letter's case and encoding can differ, and a
+    /// canonical path expands an 8.3 short directory name the client kept.
+    /// So when the rebuilt URI misses, an open file with the same name is
+    /// compared by canonical path.
+    pub(crate) fn open_buffer_at_path(&self, path: &std::path::Path) -> Option<Arc<String>> {
+        let uri = crate::util::path_to_uri(path);
+        let candidates: Vec<(String, Arc<String>)> = {
+            let open = self.open_files.read();
+            if let Some(content) = open.get(&uri) {
+                return Some(Arc::clone(content));
+            }
+            let name = last_uri_segment(&uri);
+            open.iter()
+                .filter(|(open_uri, _)| last_uri_segment(open_uri).eq_ignore_ascii_case(name))
+                .map(|(open_uri, content)| (open_uri.clone(), Arc::clone(content)))
+                .collect()
+        };
+        if candidates.is_empty() {
+            return None;
+        }
+        let wanted = crate::util::canonical_path_for_comparison(path);
+        candidates.into_iter().find_map(|(open_uri, content)| {
+            let open_path = crate::util::uri_to_path(&open_uri)?;
+            (crate::util::canonical_path_for_comparison(&open_path) == wanted).then_some(content)
+        })
+    }
+
     /// Public helper for tests: get the uri_classes_index entry for a given URI.
     pub fn get_classes_for_uri(&self, uri: &str) -> Option<Vec<ClassInfo>> {
         self.symbols
@@ -616,5 +647,51 @@ fn namespace_and_spans(spans: &[NamespaceSpan]) -> (Option<String>, Option<Vec<N
         (first, Some(spans.to_vec()))
     } else {
         (first, None)
+    }
+}
+
+/// The file name a URI ends in, still percent-encoded.
+fn last_uri_segment(uri: &str) -> &str {
+    uri.rsplit('/').next().unwrap_or(uri)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::Backend;
+
+    /// A buffer the client opened through a path that is not the file's
+    /// canonical spelling (here a symlinked directory, on Windows an 8.3
+    /// short name) is still the file's buffer.
+    #[cfg(unix)]
+    #[test]
+    fn an_open_buffer_is_found_by_its_canonical_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::write(real.join("web.php"), "on disk").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let backend = Backend::new_test();
+        backend.open_files.write().insert(
+            crate::util::path_to_uri(&link.join("web.php")),
+            Arc::new("in the editor".to_string()),
+        );
+
+        let canonical = dunce::canonicalize(real.join("web.php")).unwrap();
+        assert_eq!(
+            backend
+                .open_buffer_at_path(&canonical)
+                .as_deref()
+                .map(String::as_str),
+            Some("in the editor")
+        );
+        assert!(
+            backend
+                .open_buffer_at_path(&real.join("other.php"))
+                .is_none()
+        );
     }
 }

@@ -13,7 +13,7 @@
 use crate::common::{
     LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
     definition_locations, find_references, goto_definition_at, hover_text_at, messages_with_code,
-    position_after,
+    open_php, position_after, workspace_uri,
 };
 use tower_lsp_server::gen_lsp_types::{Location, Uri};
 
@@ -524,6 +524,37 @@ async fn a_with_routing_then_group_prefixes_the_file_it_loads() {
         &["patient.index", "admin.home"],
     )
     .await;
+}
+
+#[tokio::test]
+async fn an_unsaved_edit_to_a_file_a_group_loads_is_seen() {
+    let (backend, _dir, uri, consumer) = workspace_calling(
+        &[
+            ("bootstrap/app.php", BOOTSTRAP_THEN_GROUP),
+            (
+                "routes/web.php",
+                "<?php\nRoute::get('/', fn () => 'ok')->name('home');\n",
+            ),
+            ("routes/web_backstage.php", "<?php\n"),
+        ],
+        &["admin.patient.index"],
+    )
+    .await;
+    let unknown = |backend: &phpantom_lsp::Backend| {
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(uri.as_str(), &consumer, &mut diags);
+        messages_with_code(&diags, "invalid_laravel_route")
+    };
+    assert_eq!(
+        unknown(&backend).len(),
+        1,
+        "the saved file registers nothing"
+    );
+
+    let backstage = workspace_uri(&backend, "routes/web_backstage.php");
+    open_php(&backend, &backstage, BACKSTAGE_ROUTES).await;
+    let messages = unknown(&backend);
+    assert!(messages.is_empty(), "{messages:?}");
 }
 
 #[tokio::test]

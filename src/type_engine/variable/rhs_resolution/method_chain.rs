@@ -102,13 +102,18 @@ pub(super) fn resolve_method_chain<'b>(
             ctx,
         );
         calls::finish_return_constant_operands(&mut resolved, ctx);
-        apply_nullsafe_short_circuit(&mut resolved, nullability, link.nullsafe, link.object);
         // A check written on the call itself (`if ($h->get() instanceof
         // Foo)`, `if ($this->option('from') !== null)`) is keyed under the
         // call's own text, so a later occurrence of that text reads the
         // narrowed type instead of the method's declared return type.
+        // The key holds what the call returns with its receiver set, which
+        // is shared by the `->` and `?->` spellings, so the short-circuit
+        // `null` is folded in after it.
         if let Some(narrowed) = narrowed_call(link.call, ctx) {
             resolved = narrowed;
+        }
+        if !ctx.nullsafe_receivers_set {
+            apply_nullsafe_short_circuit(&mut resolved, nullability, link.nullsafe, link.object);
         }
         receiver = Some((ResolvedType::into_arced_classes(resolved.clone()), resolved));
     }

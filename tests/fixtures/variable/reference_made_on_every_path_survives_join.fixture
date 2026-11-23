@@ -1,0 +1,16 @@
+// test: a reference every path made still carries writes past the join
+// feature: hover
+// expect: $a = 'y'
+---
+<?php
+
+function test(bool $c): void {
+    $a = 1;
+    if ($c) {
+        $r = &$a;
+    } else {
+        $r = &$a;
+    }
+    $r = 'y';
+    echo $<>a;
+}

@@ -29,7 +29,7 @@ use crate::types::ResolvedType;
 use super::*;
 
 /// The variables an included file's top level leaves, with their types.
-/// `None` when the file could not be read.
+/// `None` when the file could not be read, or is already being walked.
 pub(crate) type IncludedLocals = Option<Arc<Vec<(Atom, Vec<ResolvedType>)>>>;
 
 /// The variables an included file's walk starts with, by name and type.
@@ -90,14 +90,20 @@ pub(crate) fn include_path_expr<'b>(construct: &'b Construct<'b>) -> Option<&'b 
 }
 
 /// The variables the file an include's `path` names leaves behind when it
-/// runs in `scope`, when the path resolves.
+/// runs in `scope`.  `None` when the path does not resolve to a file.
 pub(crate) fn include_locals(
     path: &Expression<'_>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) -> IncludedLocals {
-    let backend = ctx.file.backend?;
-    let file = crate::util::uri_to_path(ctx.file.uri?)?;
+) -> Option<IncludedLocals> {
+    // Without a file to resolve against, the include is left alone rather
+    // than read as one that cannot be followed.
+    let (Some(backend), Some(file)) = (
+        ctx.file.backend,
+        ctx.file.uri.and_then(crate::util::uri_to_path),
+    ) else {
+        return Some(None);
+    };
     let namespace = ctx
         .current_class
         .file_namespace
@@ -124,7 +130,7 @@ pub(crate) fn include_locals(
             all
         }
     };
-    included_locals(backend, &included, &seed)
+    Some(included_locals(backend, &included, &seed))
 }
 
 /// Write `locals`, what an include left, into `scope`.

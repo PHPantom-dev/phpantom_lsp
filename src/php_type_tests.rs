@@ -4381,6 +4381,24 @@ mod simplification_tests {
         );
     }
 
+    /// A benevolent union stays benevolent through a join that adds nothing
+    /// it does not already hold, and becomes enforced again once something
+    /// outside it joins.
+    #[test]
+    fn runtime_value_join_keeps_benevolence_it_still_covers() {
+        let lenient = PhpType::benevolent(PhpType::parse("array|int|float"));
+        let covered = PhpType::join_runtime_value_types(vec![
+            lenient.clone(),
+            PhpType::parse("array{a: true}"),
+            PhpType::literal_int("0"),
+        ]);
+        assert!(covered.is_benevolent(), "{covered}");
+        assert_eq!(covered.to_string(), "array|int|float");
+
+        let widened = PhpType::join_runtime_value_types(vec![lenient, PhpType::string()]);
+        assert!(!widened.is_benevolent(), "{widened}");
+    }
+
     #[test]
     fn runtime_value_join_absorbs_real_value_subsets() {
         assert_eq!(
@@ -5658,6 +5676,29 @@ fn a_native_declaration_rules_out_the_alternatives_it_forbids() {
         PhpType::string().without_alternatives_the_native_type_forbids(&PhpType::array()),
         None
     );
+}
+
+#[test]
+fn truthy_mixed_is_non_empty_mixed_until_rejoined_with_every_falsy_value() {
+    let truthy = PhpType::mixed().truthy_type().unwrap();
+    assert_eq!(truthy.to_string(), "non-empty-mixed");
+    assert_eq!(truthy.truthiness(), Some(true));
+    assert_eq!(truthy.falsy_type(), None);
+    // The two sides of an `if ($x)` make up `mixed` again.
+    let falsy = PhpType::mixed().falsy_type().unwrap();
+    assert_eq!(
+        PhpType::union(vec![truthy.clone(), falsy]).simplified(),
+        PhpType::mixed()
+    );
+    // A falsy value the other side does not hold keeps it truthy-only.
+    assert_eq!(
+        PhpType::union(vec![truthy.clone(), PhpType::null()])
+            .simplified()
+            .to_string(),
+        "non-empty-mixed|null"
+    );
+    // Removing an entry may leave an empty array behind.
+    assert_eq!(truthy.after_element_unset(None), PhpType::mixed());
 }
 
 #[test]

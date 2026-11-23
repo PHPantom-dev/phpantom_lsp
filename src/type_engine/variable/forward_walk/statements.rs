@@ -89,13 +89,6 @@ pub(crate) fn process_statement<'b>(
                                 array_access,
                             )
                         {
-                            let Some(base_type) = scope
-                                .get(&base_name)
-                                .last()
-                                .map(|rt| rt.type_string.clone())
-                            else {
-                                continue;
-                            };
                             let keys: Vec<Option<String>> = key_chain
                                 .iter()
                                 .map(|idx| {
@@ -104,11 +97,35 @@ pub(crate) fn process_statement<'b>(
                                     )
                                 })
                                 .collect();
-                            let updated =
-                                super::super::array_shape_writes::apply_nested_array_unset(
-                                    &base_type, &keys,
-                                );
-                            scope.set(&base_name, vec![ResolvedType::from_type_string(updated)]);
+                            let unset_below = |scope: &mut ScopeState, subject: &str, depth| {
+                                let Some(subject_type) =
+                                    scope.get(subject).last().map(|rt| rt.type_string.clone())
+                                else {
+                                    return;
+                                };
+                                let updated =
+                                    super::super::array_shape_writes::apply_nested_array_unset(
+                                        &subject_type,
+                                        &keys[depth..],
+                                    );
+                                scope.set(subject, vec![ResolvedType::from_type_string(updated)]);
+                            };
+                            unset_below(scope, &base_name, 0);
+                            // A check on an element further up the chain
+                            // (`!empty($a['list'])`) is recorded under its
+                            // own key, which loses whatever emptiness
+                            // guarantee the removed entry was supplying.
+                            for depth in 1..key_chain.len() {
+                                let Some(prefix) =
+                                    super::array_assignment::array_write_synthetic_key(
+                                        &base_name,
+                                        &key_chain[..depth],
+                                    )
+                                else {
+                                    break;
+                                };
+                                unset_below(scope, &prefix, depth);
+                            }
                             let removed_from = super::array_assignment::array_write_synthetic_key(
                                 &base_name,
                                 &key_chain[..key_chain.len() - 1],
@@ -133,6 +150,8 @@ pub(crate) fn process_statement<'b>(
                 if let Variable::Direct(dv) = var {
                     let var_name = bytes_to_str(dv.name);
                     imported.push(var_name);
+                    // `global` binds the name to the global by reference.
+                    scope.unbind_reference(&atom(var_name));
                     if let Some((_, php_type)) = declared.iter().find(|(name, _)| name == var_name)
                     {
                         scope.set(var_name, resolve_type_to_resolved_types(php_type, ctx));
@@ -151,7 +170,9 @@ pub(crate) fn process_statement<'b>(
                         // written in.
                         scope.set(var_name, ctx.resolved_types_for(php_type));
                     } else {
-                        scope.set_empty(var_name);
+                        // `global` rebinds the name to the global, so
+                        // whatever the local held before is gone.
+                        scope.set_unknown(var_name);
                     }
                 }
             }
@@ -278,7 +299,11 @@ pub(crate) fn process_expression_statement<'b>(
         };
 
     if !skip_assignment {
-        process_assignment_expr(expr, scope, ctx);
+        if matches!(expr, Expression::Assignment(_)) {
+            process_assignment_expr(expr, scope, ctx);
+        } else {
+            process_discarded_expr(expr, scope, ctx);
+        }
     } else {
         // The docblock stands in for the outermost write alone; whatever
         // the expression does on the way there still happens, and it reads
@@ -307,7 +332,7 @@ pub(crate) fn process_expression_statement<'b>(
                 }
             }
             None => {
-                process_expr(value, scope, ctx);
+                process_discarded_expr(value, scope, ctx);
             }
         }
     }

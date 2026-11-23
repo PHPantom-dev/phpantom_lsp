@@ -299,7 +299,8 @@ fn eloquent_model_type() -> PhpType {
 
 /// Build the property type string for a relationship.
 ///
-/// - Singular relationships → the related type as-is (nullable).
+/// - Singular relationships → the related type, nullable unless the
+///   relationship supplies a default model (`withDefault()`).
 /// - Collection relationships → the custom collection class (if set) or
 ///   `Illuminate\Database\Eloquent\Collection`, parameterised with `<TRelated>`.
 /// - MorphTo → `Illuminate\Database\Eloquent\Model`.
@@ -307,9 +308,11 @@ pub(super) fn build_property_type(
     kind: RelationshipKind,
     related_type: Option<&PhpType>,
     custom_collection: Option<&str>,
+    has_default: bool,
 ) -> Option<PhpType> {
     match kind {
-        RelationshipKind::Singular => related_type.cloned(),
+        RelationshipKind::Singular if has_default => related_type.cloned(),
+        RelationshipKind::Singular => related_type.cloned().map(PhpType::nullable),
         RelationshipKind::Collection => {
             let inner = related_type.cloned().unwrap_or_else(eloquent_model_type);
             let collection_class = custom_collection.unwrap_or(ELOQUENT_COLLECTION_FQN);

@@ -243,6 +243,22 @@ pub(crate) fn strip_null_from_scope(var_name: &str, scope: &mut ScopeState) {
 /// Used after falsy guard clauses (`if (!$var) { throw; }`) where the
 /// variable is known to be truthy (non-null and non-false) after the guard.
 pub(crate) fn strip_falsy_from_scope(var_name: &str, scope: &mut ScopeState) {
+    // A subject with no known type (an untyped parameter, or a path the
+    // seeding could not resolve) could have held anything, so what passes
+    // is any truthy value.  A call key that carries arguments is seeded
+    // from its own expression elsewhere, so its absence here means nothing.
+    if scope.get(var_name).is_empty() {
+        let untyped = scope.contains(var_name)
+            || (condition_facts::is_member_path_key(var_name)
+                && !condition_facts::is_call_key_with_arguments(var_name));
+        if untyped {
+            scope.set(
+                var_name,
+                vec![ResolvedType::from_type_string(PhpType::non_empty_mixed())],
+            );
+        }
+        return;
+    }
     refine_in_scope(var_name, scope, |mut rt| {
         rt.type_string = rt.type_string.truthy_type()?;
         Some(rt)

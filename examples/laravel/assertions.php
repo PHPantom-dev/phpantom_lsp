@@ -376,6 +376,20 @@ check(
     'BakerBuilder holds the Baker model it queries',
     $result->getModel() instanceof \App\Models\Baker
 );
+check(
+    'Convention and attribute scopes preserve BakerBuilder and its model',
+    $result->employed()->available()->active() === $result
+    && $result->getModel() instanceof \App\Models\Baker
+);
+check(
+    'Static scope forwarding preserves BakerBuilder',
+    \App\Models\Baker::employed()->available()->active() instanceof \App\Models\BakerBuilder
+);
+check(
+    'The scoped builder demo returns BakerBuilder<Baker>',
+    ($scopedBakers = (new \App\Demo())->scopedBakers()) instanceof \App\Models\BakerBuilder
+    && $scopedBakers->getModel() instanceof \App\Models\Baker
+);
 
 check(
     'Inherited where/orderBy calls preserve the LoafBuilder instance',
@@ -2376,6 +2390,33 @@ check(
     'EnsureBakeryIsOpen::handle() takes a day after the request and the next closure',
     (new ReflectionMethod(\App\Http\Middleware\EnsureBakeryIsOpen::class, 'handle'))->getParameters()[2]->getName() === 'day'
 );
+
+// ─── Named rate limiters ────────────────────────────────────────────────────
+
+$limiterContainer = \Illuminate\Container\Container::getInstance();
+$limiter = new \Illuminate\Cache\RateLimiter(new \Illuminate\Cache\Repository(new \Illuminate\Cache\ArrayStore()));
+$previousLimiter = \Illuminate\Support\Facades\RateLimiter::getFacadeRoot();
+$previousRouter = \Illuminate\Support\Facades\Route::getFacadeRoot();
+\Illuminate\Support\Facades\RateLimiter::swap($limiter);
+$limiterContainer->instance(\Illuminate\Cache\RateLimiter::class, $limiter);
+$limiterRouter = new \Illuminate\Routing\Router(new \Illuminate\Events\Dispatcher());
+\Illuminate\Support\Facades\Route::swap($limiterRouter);
+(new \App\Providers\DemoServiceProvider($limiterContainer))->registerRateLimiters();
+$queueLimiter = (new \App\Demo())->rateLimiterNames();
+$uploadLimit = $limiter->limiter('bakery-uploads');
+check('The provider registers bakery-uploads with ten attempts per minute',
+    $uploadLimit !== null && $uploadLimit()->maxAttempts === 10 && $uploadLimit()->decaySeconds === 60);
+$throttles = [];
+foreach ($limiterRouter->getRoutes() as $route) {
+    $throttles[$route->uri()] = $route->middleware();
+}
+check('The route names the registered limiter', ($throttles['bakery/uploads'] ?? []) === ['throttle:bakery-uploads']);
+check('The numeric throttle stays an inline limit', ($throttles['bakery/inline-limit'] ?? []) === ['throttle:60,1']);
+check('The queue middleware uses the same named limiter',
+    (new ReflectionProperty($queueLimiter, 'limiterName'))->getValue($queueLimiter) === 'bakery-uploads');
+\Illuminate\Support\Facades\RateLimiter::swap($previousLimiter);
+\Illuminate\Support\Facades\Route::swap($previousRouter);
+$limiterContainer->forgetInstance(\Illuminate\Cache\RateLimiter::class);
 
 // ─── Routes on controller methods ───────────────────────────────────────────
 

@@ -506,7 +506,10 @@ impl Backend {
         if any_signature_changed {
             // A class can become a model or validation rule through an
             // ancestor, even if it was not part of the previous catalog.
-            self.laravel.string_key_cache.write().validation_rules = None;
+            let mut cache = self.laravel.string_key_cache.write();
+            cache.validation_rules = None;
+            // A newly resolvable provider may delegate registrations to helpers.
+            cache.rate_limiters = None;
         }
         if structural_changed {
             self.invalidate_signature_dependents(&changed_names);
@@ -548,6 +551,8 @@ impl Backend {
     /// A parse that lowered no template keeps the lowering the file already
     /// had.
     fn publish_file_states(&self, prepared: &mut [PreparedAstIndexUpdate]) {
+        // The Drupal fields the batch changed go once, after the lock.
+        let _fields = self.drupal_field_flush();
         let mut files = self.files.write();
         for update in prepared.iter_mut() {
             let template = match update.template.take() {
@@ -586,6 +591,7 @@ impl Backend {
         &self,
         maps: impl IntoIterator<Item = (String, Arc<SymbolMap>)>,
     ) {
+        let _fields = self.drupal_field_flush();
         let mut files = self.files.write();
         for (uri, map) in maps {
             self.note_symfony_declarations(&uri, &map);
@@ -851,6 +857,9 @@ impl Backend {
     ) -> (bool, Vec<String>) {
         let mut any_signature_changed = false;
         let mut evicted_fqns = Vec::new();
+        // The classes whose parent, interfaces, or traits changed, which
+        // the Drupal fields of an entity class are read through.
+        let mut reparented: Vec<&str> = Vec::new();
         {
             let mut cache = self.resolved_class_cache.write();
             // A name this batch took over was resolved from the other file's
@@ -874,6 +883,7 @@ impl Backend {
                 }
 
                 if update.old_fqns.is_empty() {
+                    reparented.extend(update.new_fqns.iter().map(String::as_str));
                     continue;
                 }
 
@@ -890,6 +900,13 @@ impl Backend {
                     match (old_cls, new_cls) {
                         (Some(old), Some(new)) if old.signature_eq(new) => {}
                         _ => {
+                            if old_cls.zip(new_cls).is_none_or(|(old, new)| {
+                                old.parent_class != new.parent_class
+                                    || old.interfaces != new.interfaces
+                                    || old.used_traits != new.used_traits
+                            }) {
+                                reparented.push(fqn);
+                            }
                             changed_names.push(crate::resolution_deps::dep_key(fqn));
                             evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
                             any_signature_changed = true;
@@ -899,6 +916,7 @@ impl Backend {
 
                 for fqn in &update.new_fqns {
                     if !update.old_fqns.contains(fqn) {
+                        reparented.push(fqn);
                         changed_names.push(crate::resolution_deps::dep_key(fqn));
                         evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
                         any_signature_changed = true;
@@ -906,6 +924,7 @@ impl Backend {
                 }
             }
         }
+        self.note_drupal_class_graph_changes(&reparented);
         evicted_fqns.sort();
         evicted_fqns.dedup();
         // A class whose own resolution was cached read its parents, traits,

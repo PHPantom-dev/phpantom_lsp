@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::*;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 
@@ -166,6 +168,56 @@ fn resolve_array_key_type(
     key_results
 }
 
+/// The type of the receiver a member key reads through.
+///
+/// Only the leading variable of a path is ever assigned in the scope, so a
+/// deeper path (`$this->holder` in `$this->holder->service`, or `$rows["0"]`
+/// in `$rows["0"]->name`) has to be resolved the same way the key is. Each
+/// step drops one segment, so the recursion is bounded by the number of
+/// segments in the key.
+fn receiver_types<'s>(
+    obj_var: &str,
+    scope: &'s ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Cow<'s, [ResolvedType]> {
+    match scope.get(obj_var) {
+        [] if condition_facts::is_member_path_key(obj_var) => {
+            Cow::Owned(resolve_synthetic_key_type(obj_var, scope, ctx))
+        }
+        from_scope => Cow::Borrowed(from_scope),
+    }
+}
+
+/// Whether `key` is an argument-less call on a receiver whose method
+/// decides its return type with a conditional.
+///
+/// Such a call is seeded from the expression it was written as: the
+/// declared return type [`resolve_synthetic_key_type`] answers with is only
+/// the union of the branches, while the call resolver decides the branch
+/// from the receiver, its class templates and the parameter defaults.
+pub(super) fn is_conditional_call_key(
+    key: &str,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let Some((obj_var, method_name)) = key
+        .strip_suffix("()")
+        .and_then(|head| head.rsplit_once("->"))
+    else {
+        return false;
+    };
+    receiver_types(obj_var, scope, ctx)
+        .iter()
+        .filter_map(|rt| rt.class_info.as_ref())
+        .any(|cls| {
+            crate::inheritance::method_return_is_conditional(
+                cls,
+                method_name,
+                ctx.file.class_loader,
+            )
+        })
+}
+
 /// Resolve what a member key's declaration promises, reading the scope
 /// but not writing to it.
 fn resolve_member_key_type(
@@ -183,20 +235,7 @@ fn resolve_member_key_type(
     let obj_var = &head[..arrow_pos];
     let member_name = &head[arrow_pos + 2..];
 
-    // Resolve the object part's type from scope.  Only the leading
-    // variable of a path is ever assigned there, so a deeper path
-    // (`$this->holder` in `$this->holder->service`, or `$rows["0"]` in
-    // `$rows["0"]->name`) has to be resolved the same way this key is.
-    // Each step drops one segment, so the recursion is bounded by the
-    // number of segments in the key.
-    let resolved_prefix;
-    let obj_types: &[ResolvedType] = match scope.get(obj_var) {
-        [] if condition_facts::is_member_path_key(obj_var) => {
-            resolved_prefix = resolve_synthetic_key_type(obj_var, scope, ctx);
-            &resolved_prefix
-        }
-        from_scope => from_scope,
-    };
+    let obj_types = receiver_types(obj_var, scope, ctx);
     if obj_types.is_empty() {
         return Vec::new();
     }

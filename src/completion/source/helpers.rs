@@ -695,7 +695,26 @@ fn walk_array_segments(
         base_type.clone()
     };
 
-    for seg in segments {
+    for (i, seg) in segments.iter().enumerate() {
+        // Each alternative of a union is indexed on its own, and what the
+        // brackets read is what any of them holds there. Reading the
+        // union's value type directly would take one alternative's.
+        if let TypeKind::Union(members) = current.kind() {
+            let read: Vec<PhpType> = members
+                .iter()
+                .filter_map(|member| {
+                    walk_array_segments(
+                        member,
+                        &segments[i..],
+                        current_class_name,
+                        all_classes,
+                        class_loader,
+                    )
+                })
+                .collect();
+            return (!read.is_empty()).then(|| PhpType::union(read));
+        }
+
         // Try pure-type extraction first (array shapes, generics).
         let extracted = match seg {
             BracketSegment::StringKey(key) | BracketSegment::IntKey(key) => current

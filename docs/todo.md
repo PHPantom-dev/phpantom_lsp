@@ -28,12 +28,6 @@ contributor even though it's short.
 
 # Scheduled Sprints
 
-## Sprint 8 — 1.0 release & IDE extensions
-
-| #   | Item                                                                                                                                                            | Impact      | Complexity  |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-|     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
-
 ## Sprint 9 — Startup performance
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
@@ -132,16 +126,17 @@ ships, remove every row that names it.
 | DR12 | [Translation placeholders](todo/drupal.md#dr12-translation-placeholders) | Low-Medium | Low-Medium |
 | DR13 | [Module names and `*.info.yml`](todo/drupal.md#dr13-module-names-and-infoyml) | Low-Medium | Low-Medium |
 | DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |
-| DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) | Medium-High | High        |
 | DR18 | [Warn on unknown entity type IDs](todo/drupal.md#dr18-warn-on-unknown-entity-type-ids) | Medium | Low-Medium |
 | DR19 | [Warn on unknown hook names](todo/drupal.md#dr19-warn-on-unknown-hook-names) | Low-Medium | Medium |
 | DR20 | [Complete route names built in code](todo/drupal.md#dr20-complete-route-names-built-in-code) | Low-Medium | Medium |
-| DR21 | [Return types core's docblocks leave wide](todo/drupal.md#dr21-return-types-cores-docblocks-leave-wide) | Medium | Low-Medium |
 | DR22 | [Complete permissions built in code](todo/drupal.md#dr22-complete-permissions-built-in-code) | Low-Medium | Medium |
 | DR23 | [Warn on unknown permission names](todo/drupal.md#dr23-warn-on-unknown-permission-names) | Medium | Low-Medium |
 | DR24 | [Warn on unknown theme hook names](todo/drupal.md#dr24-warn-on-unknown-theme-hook-names) | Low-Medium | Medium-High |
 | DR28 | [Plugin types a manager builds at run time](todo/drupal.md#dr28-plugin-types-a-manager-builds-at-run-time) | Medium | Medium |
 | DR27 | [Plugin IDs in YAML](todo/drupal.md#dr27-plugin-ids-in-yaml) | Low-Medium | Medium |
+| DR29 | [Fields added by hooks](todo/drupal.md#dr29-fields-added-by-hooks) | Medium | Medium-High |
+| DR30 | [Warn on unknown field names](todo/drupal.md#dr30-warn-on-unknown-field-names) (depends on DR29) | Medium | Low-Medium |
+| DR31 | [Field names in entity queries and `loadByProperties()`](todo/drupal.md#dr31-field-names-in-entity-queries-and-loadbyproperties) | Low-Medium | Medium |
 | DR32 | [`'::method'` callbacks in a form alter hook](todo/drupal.md#dr32-method-callbacks-in-a-form-alter-hook) | Low-Medium | Low-Medium |
 | DR33 | [Render callbacks that are not trusted](todo/drupal.md#dr33-render-callbacks-that-are-not-trusted) | Low-Medium | Low |
 | DR34 | [Callback parameter checks](todo/drupal.md#dr34-callback-parameter-checks) | Low | Low-Medium |
@@ -176,12 +171,12 @@ ships, remove every row that names it.
 | L69 | [Benchmarks for Laravel string names and Blade](todo/laravel.md#l69-benchmarks-for-laravel-string-names-and-blade) | Medium | Low-Medium |
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L58 | [Laravel rate limiter names](todo/laravel.md#l58-laravel-rate-limiter-names)                                                                                                | Medium      | Medium      |
+| L56 | [Typed Laravel connection names](todo/laravel.md#l56-typed-laravel-connection-names)                                                                                        | Medium      | Medium      |
 | BL20 | [Port Bladestan's tests](todo/blade.md#bl20-port-bladestans-tests) | Medium | Medium |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | L71 | [Inertia page props and asset helpers on a typed URL generator](todo/laravel.md#l71-inertia-page-props-and-asset-helpers-on-a-typed-url-generator) | Low | Low-Medium |
 | L59 | [Typed controller middleware names](todo/laravel.md#l59-typed-controller-middleware-names)                                                                                  | Low-Medium  | Medium      |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |
-| L50 | ["Create route" quick-fix for an unresolved route name](todo/laravel.md#l50-create-route-quick-fix-for-an-unresolved-route-name)                                            | Low-Medium  | Medium      |
 | L61 | [Resolve aliased facade imports during route discovery](todo/laravel.md#l61-resolve-aliased-facade-imports-during-route-discovery)                                          | Low-Medium  | Medium      |
 | L67 | [Laravel refactoring intentions](todo/laravel.md#l67-laravel-refactoring-intentions) | Low-Medium | Medium |
 | L57 | [Laravel queue names](todo/laravel.md#l57-laravel-queue-names)                                                                                                              | Low-Medium  | Medium      |
@@ -224,6 +219,7 @@ ships, remove every row that names it.
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |
 | D50 | [`unused-parameters` skips methods a subclass can override](todo/diagnostics.md#d50-unused-parameters-skips-methods-a-subclass-can-override) | Low         | Medium-High |
 | D52 | [`incompatible_override` only checks a `static` return type](todo/diagnostics.md#d52-incompatible_override-only-checks-a-static-return-type) | Medium      | Medium-High |
+| D53 | [`docblock_missing_null` skips a tag that refines a nullable hint](todo/diagnostics.md#d53-docblock_missing_null-skips-a-tag-that-refines-a-nullable-hint) | Low         | Low         |
 
 ## Code Generation & Refactoring
 
@@ -296,7 +292,7 @@ ships, remove every row that names it.
 | X14 | [Forward Zed's `file_scan_exclusions` and `file_types`](todo/indexing.md#x14-forward-zeds-file_scan_exclusions-and-file_types) (waiting on [zed#66121](https://github.com/zed-industries/zed/pull/66121)) | Low         | Low         |
 | X18 | [Watch `[indexing] include` and stub paths outside the workspace](todo/indexing.md#x18-watch-indexing-include-and-stub-paths-outside-the-workspace)                                         | Low-Medium  | Medium      |
 | X13 | [Decide how workspace-wide edits treat excluded files](todo/indexing.md#x13-decide-how-workspace-wide-edits-treat-excluded-files)                                           | Low-Medium  | Medium      |
-| X22 | [Read the remaining YAML files with the shared parser](todo/indexing.md#x22-read-the-remaining-yaml-files-with-the-shared-parser) | Low-Medium  | Medium-High |
+| X22 | [Read YAML files with a parser](todo/indexing.md#x22-read-yaml-files-with-a-parser) | Low-Medium  | Medium-High |
 | X23 | [Read XML files with a parser](todo/indexing.md#x23-read-xml-files-with-a-parser) | Low-Medium  | Medium-High |
 | X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium-High |
 | X12 | [Say when an exclude hid the class a diagnostic names](todo/indexing.md#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names)                                           | Low-Medium  | Medium-High |

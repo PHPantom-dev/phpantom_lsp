@@ -347,7 +347,7 @@ pub(crate) fn type_guard_kind_from_name(name: &str) -> Option<TypeGuardKind> {
 /// extractors, but a property path (`$this->stream`) only exists in scope
 /// once the condition scan has seeded it, and that scan asks this. So it
 /// must name every function an extractor reads a first-argument subject
-/// from: [`type_guard_kind_from_name`], `is_a()` (both the instanceof and
+/// from: [`type_guard_kind_from_name`], `gettype()`, `is_a()` (both the instanceof and
 /// the class-string form), `try_extract_class_string_guard`,
 /// `try_extract_member_exists_guard`, and `try_extract_in_array`.
 pub(crate) fn narrows_first_argument(name: &str) -> bool {
@@ -356,6 +356,7 @@ pub(crate) fn narrows_first_argument(name: &str) -> bool {
         || matches!(
             name.as_ref(),
             "is_a"
+                | "gettype"
                 | "is_subclass_of"
                 | "class_exists"
                 | "interface_exists"
@@ -600,8 +601,60 @@ pub(crate) fn try_extract_type_guard(
             }
             Some((kind, false))
         }
+        Expression::Binary(bin) => try_extract_gettype_comparison(bin, var_name),
         _ => None,
     }
+}
+
+/// Detect `gettype($var) === 'integer'` (or `==`, `!==`, `!=`, either way
+/// round), which holds exactly where the matching `is_*()` call does.
+fn try_extract_gettype_comparison(
+    bin: &Binary<'_>,
+    var_name: &str,
+) -> Option<(TypeGuardKind, bool)> {
+    let negated = match bin.operator {
+        BinaryOperator::Identical(_) | BinaryOperator::Equal(_) => false,
+        BinaryOperator::NotIdentical(_) | BinaryOperator::NotEqual(_) => true,
+        _ => return None,
+    };
+    let (call, name) = match (string_literal_value(bin.rhs), string_literal_value(bin.lhs)) {
+        (Some(name), _) => (bin.lhs, name),
+        (_, Some(name)) => (bin.rhs, name),
+        _ => return None,
+    };
+    let Expression::Call(Call::Function(fc)) = crate::parser::unwrap_parens(call) else {
+        return None;
+    };
+    let Expression::Identifier(ident) = fc.function else {
+        return None;
+    };
+    if !bytes_to_str(ident.value())
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case("gettype")
+    {
+        return None;
+    }
+    let mut args = fc.argument_list.arguments.iter();
+    let (Some(arg), None) = (args.next(), args.next()) else {
+        return None;
+    };
+    if expr_to_subject_key(argument_value(arg))? != var_name {
+        return None;
+    }
+    // `'resource (closed)'` and `'unknown type'` name no type a guard
+    // describes, and any other string never matches.
+    let kind = match name.as_str() {
+        "boolean" => TypeGuardKind::Bool,
+        "integer" => TypeGuardKind::Int,
+        "double" => TypeGuardKind::Float,
+        "string" => TypeGuardKind::String,
+        "array" => TypeGuardKind::Array,
+        "object" => TypeGuardKind::Object,
+        "resource" => TypeGuardKind::Resource,
+        "NULL" => TypeGuardKind::Null,
+        _ => return None,
+    };
+    Some((kind, negated))
 }
 
 /// Detect `ctype_digit($x)`, returning the scope key of `(int) $x` and

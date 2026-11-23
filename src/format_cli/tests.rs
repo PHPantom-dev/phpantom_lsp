@@ -188,7 +188,7 @@ fn formatting_disabled_in_config_reports_no_run_at_all() {
     write_file(
         dir.path(),
         ".phpantom.toml",
-        "[formatting]\npint = \"\"\nphp-cs-fixer = \"\"\nphpcbf = \"\"\n",
+        "[formatting]\nenabled = false\n",
     );
 
     assert!(
@@ -196,6 +196,22 @@ fn formatting_disabled_in_config_reports_no_run_at_all() {
         "a disabled formatter has nothing to enforce"
     );
     assert_eq!(run(options(dir.path(), true)), 0);
+}
+
+#[test]
+fn every_external_tool_disabled_still_formats_with_the_builtin_formatter() {
+    let dir = workspace(&[("src/Foo.php", "<?php\nnamespace App;\nclass Foo    {}\n")]);
+    write_file(
+        dir.path(),
+        ".phpantom.toml",
+        "[formatting]\npint = \"\"\nphp-cs-fixer = \"\"\nphpcbf = \"\"\n",
+    );
+
+    assert_eq!(
+        unformatted(dir.path(), true),
+        vec!["src/Foo.php".to_string()]
+    );
+    assert_eq!(run(options(dir.path(), true)), 2);
 }
 
 // ── Machine-readable output ─────────────────────────────────────────

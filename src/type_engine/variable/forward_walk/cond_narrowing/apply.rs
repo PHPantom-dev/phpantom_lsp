@@ -10,45 +10,6 @@ use super::*;
 
 use mago_syntax::cst::unary::UnaryPrefixOperator;
 
-/// Narrow a `match ($x::class)` subject to the classes one arm names.
-///
-/// `match ($node::class) { ASTClass::class, ASTEnum::class => … }` proves
-/// the subject is one of the listed classes inside that arm, exactly like
-/// a chain of `instanceof` checks would — except the identity is exact, so
-/// no subclass survives.
-pub(crate) fn apply_class_match_arm_narrowing<'b>(
-    subject_var: &str,
-    expr_arm: &'b MatchExpressionArm<'b>,
-    scope: &mut ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    // The arm runs when any one condition matches, so a condition that
-    // names no class lets the subject in whatever its class.
-    let names = ctx.written_names();
-    let Some(classes) = expr_arm
-        .conditions
-        .iter()
-        .map(|c| condition_facts::class_match_condition_class(c, &names))
-        .collect::<Option<Vec<PhpType>>>()
-    else {
-        return;
-    };
-    if classes.is_empty() {
-        return;
-    }
-
-    let scope_resolver = scope.snapshot_resolver();
-    let var_ctx = build_var_ctx(subject_var, ctx, &scope_resolver);
-    let union = condition_facts::resolve_class_names_to_union(&classes, &var_ctx);
-    if union.is_empty() {
-        return;
-    }
-    scope.set(
-        subject_var,
-        union.into_iter().map(ResolvedType::from_arc).collect(),
-    );
-}
-
 /// Where one subject's accumulated classes came from while walking a
 /// condition's `&&` operands, which decides whether they are
 /// alternatives or members of an intersection.

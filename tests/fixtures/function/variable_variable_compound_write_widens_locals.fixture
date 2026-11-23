@@ -1,0 +1,15 @@
+// test: a compound or element write through a variable variable widens every local
+// feature: hover
+// expect_hover: $rx => $rx = mixed
+// expect_hover: $ry => $ry = mixed
+---
+<?php
+
+function test(string $a, string $b): void {
+    $x = 1;
+    $y = 'a';
+    $$a .= 'z';
+    $rx = $x;
+    ${$b}[] = 1;
+    $ry = $y;<>
+}

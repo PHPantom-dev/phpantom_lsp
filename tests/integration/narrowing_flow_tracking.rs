@@ -712,6 +712,108 @@ function show(User $fallback): void
     ));
 }
 
+// ─── A nullsafe check on a call, repeated as a plain call ───────────────────
+
+const NULLSAFE_CALL_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class User {}
+
+class Maker
+{
+    public function make(int $n): string { return ''; }
+    public function user(): User { return new User(); }
+    public function maybeUser(int $n): ?User { return null; }
+}
+
+function take(string $s): void {}
+function render(User $user): void {}
+"#;
+
+/// The `null` a `?->` adds when its receiver is null belongs to that
+/// spelling. A plain call only runs once the receiver is set, so it reads
+/// what the method returns.
+#[test]
+fn a_nullsafe_check_leaves_no_null_on_the_plain_call_with_arguments() {
+    assert_no_type_errors(&format!(
+        r#"{NULLSAFE_CALL_SCAFFOLD}
+function run(?Maker $m): void
+{{
+    if ($m?->make(1) !== '') {{}}
+    take($m->make(1));
+}}
+"#
+    ));
+}
+
+/// The same for a call without arguments.
+#[test]
+fn a_nullsafe_check_leaves_no_null_on_the_plain_call_without_arguments() {
+    assert_no_type_errors(&format!(
+        r#"{NULLSAFE_CALL_SCAFFOLD}
+function run(?Maker $m): void
+{{
+    if ($m?->user() instanceof User) {{}}
+    render($m->user());
+}}
+"#
+    ));
+}
+
+/// The same for a call without arguments whose return type the receiver
+/// decides, which the declaration alone cannot seed.
+#[test]
+fn a_nullsafe_check_leaves_no_null_on_a_plain_generic_call() {
+    assert_no_type_errors(&format!(
+        r#"{NULLSAFE_CALL_SCAFFOLD}
+/** @template T */
+class Box
+{{
+    /** @return T */
+    public function get(): mixed {{ return null; }}
+}}
+
+/** @param ?Box<User> $b */
+function run(?Box $b): void
+{{
+    if ($b?->get() instanceof User) {{}}
+    render($b->get());
+}}
+"#
+    ));
+}
+
+/// Sharing the key is still what lets a nullsafe check narrow the plain
+/// call written inside its branch.
+#[test]
+fn a_nullsafe_check_narrows_the_plain_call_in_its_branch() {
+    assert_no_type_errors(&format!(
+        r#"{NULLSAFE_CALL_SCAFFOLD}
+function run(?Maker $m): void
+{{
+    if ($m?->maybeUser(1) !== null) {{
+        render($m->maybeUser(1));
+    }}
+}}
+"#
+    ));
+}
+
+/// Read back through `?->`, the call can still be null while the receiver
+/// can.
+#[test]
+fn a_nullsafe_read_after_the_check_keeps_the_receivers_null() {
+    assert_type_error(&format!(
+        r#"{NULLSAFE_CALL_SCAFFOLD}
+function run(?Maker $m): void
+{{
+    if ($m?->make(1) !== '') {{}}
+    take($m?->make(1));
+}}
+"#
+    ));
+}
+
 // ─── A `continue` guard reaches the copy the loop body makes of it ──────────
 
 const CONTINUE_GUARD_SCAFFOLD: &str = r#"<?php

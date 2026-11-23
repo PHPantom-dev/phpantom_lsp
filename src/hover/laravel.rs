@@ -119,6 +119,10 @@ impl Backend {
                 shown = crate::drupal::config_keys::split_config_key(key).1;
                 ("Configuration key", self.drupal_config_key_detail(key))
             }
+            StringKeyKind::DrupalFieldName => {
+                shown = crate::drupal::fields::split_field_key(key).1;
+                ("Field", self.drupal_field_name_detail(key))
+            }
             StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
             StringKeyKind::TwigBlock => (
                 "Block",
@@ -272,6 +276,17 @@ impl Backend {
             }
             StringKeyKind::GateAbility => ("Ability", self.gate_ability_detail(key)),
             StringKeyKind::Middleware => self.middleware_hover(key),
+            StringKeyKind::RateLimiter => {
+                let detail = self
+                    .cached_rate_limiters()
+                    .location(key)
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                    .map_or_else(
+                        || "Rate limiter".to_string(),
+                        |path| format!("Registered in `{path}`"),
+                    );
+                ("Rate limiter", detail)
+            }
             StringKeyKind::ContainerBinding => {
                 let detail = match self.container_binding_target(key) {
                     Some(target) => {

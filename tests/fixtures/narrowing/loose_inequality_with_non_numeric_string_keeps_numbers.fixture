@@ -1,0 +1,14 @@
+// test: a failed loose equality with a non-numeric string keeps ints
+// feature: hover
+// expect_hover: $narrowed => int
+---
+<?php
+
+/** @param 'foo'|'bar'|int $key */
+function check(string|int $key): void
+{
+    if ($key != 'foo') {
+        $narrowed = $key;
+        echo $narr<>owed;
+    }
+}

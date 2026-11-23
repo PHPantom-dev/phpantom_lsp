@@ -16,6 +16,7 @@ use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
 use App\Jobs\SendBakeryReport;
 use App\Models\Baker;
+use App\Models\BakerBuilder;
 use App\Models\Bakery;
 use App\Models\BakeryOrder;
 use App\Models\BlogAuthor;
@@ -48,6 +49,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Middleware\RateLimited;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Env;
@@ -190,6 +192,14 @@ class Demo
     }
 
     // ── Eloquent Query Builder ──────────────────────────────────────────────
+
+    /** @return BakerBuilder<Baker> */
+    public function scopedBakers(): BakerBuilder
+    {
+        // Try: hover employed() and available(), then complete after either.
+        // Both scopes keep BakerBuilder<Baker>, including its active() method.
+        return Baker::query()->employed()->available()->active();
+    }
 
     public function eloquentQuery(): void
     {
@@ -661,6 +671,8 @@ class Demo
         BlogPost::query()->with(['author' => ['posts' => function ($q) {
             $q->getModel()->getTitle(); // → BlogPost::getTitle(); the terminal eager relation is HasMany.
         }]]);
+        // A collection of models eager-loads like a model does.
+        BlogAuthor::all()->load(['posts' => fn ($q) => $q->getModel()->getTitle()]); // → HasMany<BlogPost, BlogAuthor>
 
         if ($bakerQuery) {
             $query = Bakery::query();
@@ -854,6 +866,8 @@ class Demo
 
         // Named Routes
         route('home');
+        // Try: change this to 'admin.users.export' and apply "Create missing route".
+        // Review the stub in routes/web.php and implement its controller action.
         route('admin.users.index');
 
         // Route registered from a provider via Route::…->group(base_path(…)),
@@ -1149,6 +1163,10 @@ class Demo
         BlogPost::with('');              // offers: author, comments, …
         BlogAuthor::with('posts.');      // dot-notation: offers nested relations on BlogPost
 
+        // Try: go to definition on each segment of 'posts.author'. posts
+        // jumps to BlogAuthor::posts() and author to BlogPost::author().
+        BlogAuthor::with('posts.author');
+
         // Column name completion in where(), orderBy(), select(), etc.
         BlogAuthor::where('');           // offers: name, email, active, genre, …
         BlogPost::orderBy('');           // offers: title, published, author_id, …
@@ -1321,6 +1339,22 @@ class Demo
         Route::get('/closed', fn () => 'closed')->withoutMiddleware('bakery.closed');
     }
 
+
+    // ── Named rate limiters ─────────────────────────────────────────────
+
+    public function rateLimiterNames(): RateLimited
+    {
+        // Try: complete or Ctrl+Click `bakery-uploads` to find its
+        // RateLimiter::for() registration in DemoServiceProvider.
+        Route::middleware('throttle:bakery-uploads')->get('/bakery/uploads', fn () => 'upload');
+
+        // Inline limits remain numeric values, not limiter names.
+        Route::middleware('throttle:60,1')->get('/bakery/inline-limit', fn () => 'ok');
+
+        // Try: the same name completes and navigates in queue middleware.
+        // Misspell it to see an unknown rate limiter diagnostic.
+        return new RateLimited('bakery-uploads');
+    }
 
     // ── Cache::remember() — closure return type binding ─────────────────
 

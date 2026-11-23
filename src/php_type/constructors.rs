@@ -44,6 +44,8 @@ keyword_types! {
     void => "void",
     /// `mixed` type.
     mixed => "mixed",
+    /// `non-empty-mixed` type: any truthy value.
+    non_empty_mixed => "non-empty-mixed",
     /// `never` type.
     never => "never",
     /// `array` type (bare, unparameterised).

@@ -87,22 +87,32 @@ fn is_bare_array(ty: &PhpType) -> bool {
 /// argument's array shape does not hold, in the order the parameter
 /// declares them.
 ///
-/// Empty unless both sides are shapes: only a shape enumerates its keys,
-/// so only a shape can be found short of one.  Whether the argument's
-/// shape can be trusted to be the *whole* array is the caller's call —
-/// this only reports the difference between the two.
+/// Empty unless both sides are shapes and the argument's is sealed. A
+/// sealed shape lists every key the value has: the engine records a value
+/// it has not seen every key of (a key written into a plain `array`, an
+/// array spread into a literal) as an unsealed shape, whose tail may hold
+/// the key the parameter asks for.
 ///
-/// Either side may be unsealed; the keys it lists are the ones it holds.
-pub(crate) fn missing_required_shape_keys(arg_type: &PhpType, param_type: &PhpType) -> Vec<String> {
+/// The parameter's shape may be unsealed; the keys it lists are the ones
+/// it requires. A key either side spells as `Foo::CONSTANT` is the key the
+/// constant evaluates to, and one that cannot be evaluated may be any key.
+pub(crate) fn missing_required_shape_keys(
+    arg_type: &PhpType,
+    param_type: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Vec<String> {
     let (Some(arg), Some(param)) = (arg_type.shape_parts(), param_type.shape_parts()) else {
         return Vec::new();
     };
+    if arg.tail.is_some() {
+        return Vec::new();
+    }
 
     let arg_keys = shape_keys(arg.entries);
     shape_keys(param.entries)
         .into_iter()
         .zip(param.entries.iter())
-        .filter(|(key, entry)| !entry.optional && !arg_keys.contains(key))
+        .filter(|(key, entry)| !entry.optional && !may_be_listed(key, &arg_keys, class_loader))
         .map(|(key, _)| key)
         .collect()
 }
@@ -739,9 +749,13 @@ impl Compat<'_> {
         // When the argument is a union that contains `mixed`, bail out
         // conservatively.  `mixed` means "we don't know" — the actual
         // runtime value could satisfy the parameter type, so reporting
-        // an error would be a false positive.
+        // an error would be a false positive.  A truthy `mixed`
+        // (`non-empty-mixed`) joined with other members is still `mixed`
+        // short of some falsy values, which PHPStan treats the same way.
         if let TypeKind::Union(members) = arg_type.kind()
-            && members.iter().any(|m| m.is_mixed())
+            && members
+                .iter()
+                .any(|m| m.is_mixed() || m.is_named("non-empty-mixed"))
         {
             return Some(true);
         }

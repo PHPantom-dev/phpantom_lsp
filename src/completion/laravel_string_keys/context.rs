@@ -536,6 +536,11 @@ pub(super) fn middleware_completion_context(prefix: &str) -> Option<(StringKeyKi
         return (!prefix.contains('\\')).then_some((StringKeyKind::Middleware, prefix, 0));
     };
     let alias = &prefix[..=colon];
+    if alias == "throttle:" {
+        let name = &prefix[colon + 1..];
+        return crate::virtual_members::laravel::rate_limiters::is_named_throttle_parameter(name)
+            .then_some((StringKeyKind::RateLimiter, name, colon + 1));
+    }
     if alias != "auth:" {
         return None;
     }
@@ -1024,9 +1029,7 @@ fn instance_call_key<'a>(
 /// A string passed to a constructor: the `new Middleware('auth')` a
 /// controller's static `middleware()` returns.
 fn instantiation_key<'a>(call: &StringCall<'a, '_>) -> Option<StringKey<'a>> {
-    if call.argument.shape == StringArgumentShape::ArrayKey
-        || !call.argument.slot.is_first_or_named("middleware")
-    {
+    if call.argument.shape == StringArgumentShape::ArrayKey {
         return None;
     }
     let bp_bytes = call.before_paren.as_bytes();
@@ -1052,6 +1055,23 @@ fn instantiation_key<'a>(call: &StringCall<'a, '_>) -> Option<StringKey<'a>> {
     }
     let written_class = &call.before_paren[class_start..];
     let reference = semantic_class_reference(written_class, class_start, call.resolved_names);
+    if call.argument.shape == StringArgumentShape::Scalar
+        && call.argument.slot.is_first_or_named("limiterName")
+        && resolve_known_class_reference(
+            call.content,
+            reference,
+            "Illuminate\\Queue\\Middleware",
+            &["RateLimited", "RateLimitedWithRedis"],
+            false,
+            call.indexed_class_exists,
+        )
+        .is_some()
+    {
+        return Some(StringKey::Whole(StringKeyKind::RateLimiter));
+    }
+    if !call.argument.slot.is_first_or_named("middleware") {
+        return None;
+    }
     resolve_known_class_reference(
         call.content,
         reference,

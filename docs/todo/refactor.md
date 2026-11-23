@@ -211,37 +211,122 @@ Each item must include:
 
 # Outstanding items
 
-## Blocks a Sprint 8 task
+## Blocks a Sprint 9 task
 
-### Read the services files with a YAML parser
+### Split `src/reference_index.rs` by concern
 
-F68 (method names under `calls:`) reads services files and needs the
-key path down to a sequence item, which the line scan in `scan_yaml` (`src/symfony/resources.rs`)
-does not give. PHPantom has no YAML parser: about 50 functions across
-18 files read YAML line by line, each handling indentation, comments,
-quotes, and flow collections its own way.
+P91 rewrites how a file's reference entries are built, moving the work
+from the merging thread into the parse workers. The file is 1,185 lines
+of production code (plus 620 lines of inline tests) doing three jobs:
+the index itself (`ReferenceIndexKey`, `ReferenceIndexInner`, the
+candidate and count queries, `reindex_references_for_symbol_maps_batch`
+and eviction), the per-file entry builder
+(`reference_entries_for_symbol_map`, `reference_keys_for_span`,
+`names_global_fallback`, `resolved_name_at`, the `*_fqn_at` helpers, and
+the free `class_keys`/`function_keys`/`constant_keys`/`symbol_name_keys`),
+and the receiver-resolution cache (`ResolvedMemberAccess`,
+`ResolvedMemberFile`, and the `resolved_member_file`,
+`cache_resolved_member_file`, `clear_resolved_member_files`,
+`retain_resolved_member_files` methods).
 
-Add `yaml-rust2`, the parser PHPlumb uses, so code ported from it fits,
-and a shared module, `src/yaml.rs`, that builds a tree in which every
-scalar keeps its byte range and can give the key path to an offset
-(PHPlumb's `crates/phplumb-index/src/frameworks/yaml.rs` is a 220-line
-model). The parser's markers count characters, not bytes, so convert
-them through a table of line starts, and allow for CRLF. An escaped
-quoted scalar's value differs from its source text. Where a project's
-files are indexed, read the parser's events directly rather than
-building a tree per file, so Drupal core's thousand-plus YAML files do
-not each allocate one.
+Turn it into a directory module: `mod.rs` keeps the index and its
+queries, `entries.rs` takes the entry builder, `resolved_members.rs`
+takes the receiver-resolution cache, and the inline tests move to a
+sibling `tests.rs` behind `#[cfg(test)] #[path]`, the way
+`classmap_scanner/discovery_tests.rs` is laid out. Move code only;
+change no behaviour.
 
-A real parser rejects the whole document at its first error, and a file
-being typed into often has one. Keep the last tree that parsed for an
-open document, and keep the tolerant line scan for working out what the
-cursor is typing (`@` service IDs and the other YAML completions).
+Files: `src/reference_index.rs` → `src/reference_index/{mod.rs,
+entries.rs, resolved_members.rs, tests.rs}`.
 
-Then move `scan_yaml` in `src/symfony/resources.rs` onto the module,
-which reads both Symfony's and Drupal's services files, against its
-existing tests. Measure `benches/memory_usage.py`'s Symfony and Drupal
-scenarios before and after. The other YAML scanners move in X22, outside
-the gate.
+### Move batch parsing out of `src/indexing/preload.rs`
 
-Files: `Cargo.toml`, `src/yaml.rs` (new), `src/lib.rs`,
-`src/symfony/resources.rs`.
+P91 rewrites `parse_batch_parallel` and `parse_and_publish` (overlapping
+a chunk's parse with the previous chunk's merge), and P92 rewrites the
+file discovery in `ensure_workspace_indexed_with_progress_mode`. The
+file is 755 lines and holds both the workspace-index orchestration and
+the batch-parsing engine, and that one function is 280 lines.
+
+Move the batch parser (`parse_files_parallel_with_progress`,
+`parse_paths_parallel_with_progress`, `parse_paths_parallel_awake`,
+`parse_batch_parallel`, `parse_and_publish`, `publish_parsed`,
+`DORMANT_CHUNK`, `ParseCounter`, `largest_first_work_order`, and the
+`report_weighted_*` progress helpers) into `src/indexing/parse_batch.rs`.
+Then extract Phase 1 and Phase 2 discovery (from the `existing_uris`
+set through building `phase2_work` and `resource_work`) out of
+`ensure_workspace_indexed_with_progress_mode` into a function that
+returns the three work lists, so P92 changes discovery without touching
+the parse and publish sequence. Move code only; change no behaviour.
+
+Files: `src/indexing/preload.rs`, `src/indexing/parse_batch.rs` (new),
+`src/indexing/mod.rs`.
+
+### Extract the parallel walk from `walk_roots`
+
+P92 moves `visit_workspace_files_gitignore` and `scan_drupal_directories`
+onto a parallel walk. `walk_roots` in `src/classmap_scanner/walk.rs` is
+the only one today, and its parallel machinery (`build_parallel` over
+`available_cores()`, a channel per worker, collecting, sorting for a
+deterministic order) is tied to PSR-4 root attribution and the PHP-file
+filter. Moving the other two walks onto it as written would add two more
+copies of that machinery.
+
+Extract a helper that runs a `WalkBuilder` in parallel, hands each
+entry to a caller-supplied classifier (`Fn(&ignore::DirEntry) ->
+Option<T>`), and returns the results sorted. Make `walk_roots` its first
+caller. The classifier receives the entry, so it can use
+`entry.file_type()` rather than stat the path again. Change no
+behaviour.
+
+Files: `src/classmap_scanner/walk.rs`.
+
+## General
+
+### Gate Laravel's type-confirmed sites at extraction
+
+`Frameworks` (`src/symbol_map/extraction/mod.rs`) has a flag for
+Symfony, the service container, Drupal, Twig, Doctrine, Yii and Tempest,
+and their extraction records a site for the type engine to confirm only
+in a project that uses the framework. It has no Laravel flag, so the
+Laravel sites are recorded in every project, and each consumer decides
+for itself whether to look at them:
+
+- `record_view_receiver_sites` (`laravel/method_calls.rs`) records a
+  view-factory or mailable site for any `->make('x')`, `->first('x')`,
+  `->exists('x')`, `->view('x')` and the like, in any project.
+  `typed_receiver_spans_for` (`src/blade/typed_receiver.rs`) resolves
+  each such receiver's type the first time the file is read, with no
+  Laravel check. In a Symfony or Drupal project that is a receiver
+  resolution per container `make()` or repository `first()` call, which
+  confirms nothing.
+- Morph column sites (`src/symbol_map/morph_columns.rs`) are recorded
+  for every `$x->prop === 'literal'`. `morph_column_spans_for`
+  (`src/virtual_members/laravel/typed_morph_columns.rs`) skips them
+  outside Laravel at confirmation, and
+  `reference_entries_for_symbol_map` (`src/reference_index.rs`) skips
+  them again with its own `is_laravel` check.
+- Any new Laravel site added the same way (connection names from
+  `->connection('x')`, `->onConnection('x')` and `$connection`) is
+  another copy of the pattern.
+
+Add `laravel` to `Frameworks`, set from
+`resolved_class_cache.laravel().is_enabled()` where the index builds it
+(`src/parser/ast_update.rs`) and `true` in `Frameworks::ALL`. Gate the
+recording of view-receiver and morph column sites on it. Then remove the
+checks this makes redundant: the Laravel test in
+`morph_column_spans_for` and the `is_laravel` filtering of morph sites in
+`reference_entries_for_symbol_map`. Before you remove them, check that a
+project which turns into a Laravel project (a `composer.json` change)
+re-extracts its files the way a change to the Symfony flags does. If it
+does not, the checks at confirmation are what keeps that case working,
+and they stay. Set the flag at the other places that build `Frameworks`
+(`src/symfony/route_world.rs`, `src/symfony/bundles.rs`,
+`src/twig/callables.rs`, `src/yii/definitions.rs`,
+`src/wordpress/hook_sources.rs`, `src/diagnostics/dql_syntax.rs`) to
+what each of them needs.
+
+Files: `src/symbol_map/extraction/mod.rs`,
+`src/symbol_map/extraction/laravel/method_calls.rs`,
+`src/symbol_map/morph_columns.rs`, `src/parser/ast_update.rs`,
+`src/virtual_members/laravel/typed_morph_columns.rs`,
+`src/reference_index.rs`, and the `Frameworks` builders listed above.

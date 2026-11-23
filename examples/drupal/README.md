@@ -44,6 +44,36 @@ Run `composer install` here first. Composer puts core and contrib into
   `$count`: an entity query gives the IDs of its entity type, or their
   number once it counts, and the ID inside `\Drupal::entityQuery('')`
   navigates and completes too.
+- An entity's base fields are typed properties of its class and of its
+  interfaces. In `web/modules/custom/acme/src/NoteSummary.php`, complete
+  after `$note->`: `title` comes from `Note`, `id` and `uuid` from core's
+  `ContentEntityBase` under the names the entity keys give, and `uid` from
+  core's owner trait. Hover `$title`, a list of `StringItem` items, and
+  `$author`, an entity reference list that names `User`, or go to the
+  definition of `title`, which lands on its `$fields['title']` line in
+  `Note`.
+- Configurable fields come from field storage files: the site's exported
+  configuration in `config/sync`, beside the web root, and the default
+  configuration of modules and profiles. In `NoteSummary.php`, `field_tags`
+  completes after `$note->` too; hover `$tags`, an entity reference list
+  that names `Term`, or go to the definition of `field_tags`, which lands in
+  `config/sync/field.storage.acme_note.field_tags.yml`.
+- A field reads the properties of its first item, the ones its item class
+  declares in `propertyDefinitions()`, inherited ones included. In
+  `NoteSummary.php`, complete after `$note->field_tags->` to see
+  `target_id` and `entity`; hover `$firstTag`, a `?Term`, and
+  `$authorAccount`, a `?User`, the class of the entity type each field
+  points to. Every stored value, such as `$titleText`, stays `mixed`.
+- A field's name in a fieldable entity's `get()`, `set()`, `hasField()`,
+  and `getFieldDefinition()` is one of its fields. In `NoteSummary.php`,
+  complete inside `hasField('')` in `isTagged()`, go to the definition of
+  `'field_tags'`, which lands in its field storage file, hover it for its
+  field type, or find its references, the `$note->field_tags` reads
+  included; `$tags`, from `get('field_tags')`, is typed as the field is.
+- A database query's `extend()` returns the extender it is given. In
+  `firstPageIds()` in `web/modules/custom/acme/src/NoteCounter.php`,
+  complete after `->extend(PagerSelectExtender::class)->`: the pager's
+  `limit()` is offered, and is no unknown method.
 - Route names navigate between the routing file that declares them and the
   code, links files, and templates that name them. In
   `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the
@@ -213,6 +243,12 @@ Run `composer install` here first. Composer puts core and contrib into
   the subscription, and the dispatch are one list. Complete an event name
   inside the quotes of `dispatch()` or of the dispatcher's other methods
   that take one.
+- A URL is a string unless the call asks for its bubbleable metadata. In
+  `firstNodePath()` in `web/modules/custom/acme/src/CoreLinks.php`, a plain
+  `toString()` passed to a `string` parameter is not reported, and
+  `toString(TRUE)` is a `GeneratedUrl` that completes `getGeneratedUrl()`.
+  The URL generator's `generateFromRoute()` and the assembler's
+  `assemble()` follow the same flag.
 
 ## What the Symfony support already reads
 

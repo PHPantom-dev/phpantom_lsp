@@ -2,7 +2,7 @@
 
 use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, MethodInfo};
 
 /// Look up a method's return type through the inheritance chain.
 ///
@@ -20,6 +20,31 @@ pub(crate) fn resolve_method_return_type(
     method_name: &str,
     class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
+    with_answering_method(class, method_name, class_loader, |m| m.return_type.clone())
+}
+
+/// Whether the declaration of `method_name` that states its return type
+/// decides it with a conditional, which only the call resolver, seeing the
+/// receiver and the arguments, can evaluate.
+pub(crate) fn method_return_is_conditional(
+    class: &ClassInfo,
+    method_name: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> bool {
+    with_answering_method(class, method_name, class_loader, |m| {
+        Some(m.conditional_return().is_some())
+    })
+    .unwrap_or(false)
+}
+
+/// Apply `answer` to the declaration of `method_name` that states the
+/// method's return type.
+fn with_answering_method<T>(
+    class: &ClassInfo,
+    method_name: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+    answer: impl FnOnce(&MethodInfo) -> Option<T>,
+) -> Option<T> {
     // Try the class directly first — it may already be fully resolved
     // with generic substitutions applied.  Falling through to the cache
     // would return the un-substituted base class (keyed by bare FQN),
@@ -33,7 +58,7 @@ pub(crate) fn resolve_method_return_type(
     if let Some(m) = class.get_method(method_name)
         && m.return_type.is_some()
     {
-        return m.return_type.clone();
+        return answer(m);
     }
     let cache = crate::virtual_members::active_resolved_class_cache();
     let merged =
@@ -41,8 +66,8 @@ pub(crate) fn resolve_method_return_type(
     merged
         .methods
         .iter()
-        .find(|m| m.name == method_name)
-        .and_then(|m| m.return_type.clone())
+        .find(|m| m.name.eq_ignore_ascii_case(method_name))
+        .and_then(|m| answer(m))
 }
 
 /// Look up a property's type hint through the inheritance chain.

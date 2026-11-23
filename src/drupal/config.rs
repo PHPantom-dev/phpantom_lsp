@@ -36,7 +36,7 @@ pub(crate) fn is_default_config_file(path: &Path, web_root: &Path) -> bool {
 
 /// Whether `path` is a `*.yml` right inside a `config/install` or
 /// `config/optional` folder.
-fn has_default_config_shape(path: &Path) -> bool {
+pub(super) fn has_default_config_shape(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "yml")
         && path
             .parent()

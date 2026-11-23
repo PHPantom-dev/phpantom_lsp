@@ -91,7 +91,7 @@ These are shown dimmed rather than underlined, except `unwritten_property`.
 
 | Identifier | Severity | Reports |
 | --- | --- | --- |
-| `invalid_phpunit_data_provider` | Error or Warning | A data provider that is not `public`, or not `static` where the PHPUnit version requires it. |
+| `invalid_phpunit_data_provider` | Error or Warning | A PHPUnit test's data provider that is not `public`, or not `static` where the PHPUnit version requires it. |
 | `missing_phpunit_parent_call` | Warning | A `setUp()` or `tearDown()` override that skips a parent that does work. |
 | `invalid_doctrine_field` | Warning | A field in a repository call that the entity does not map. |
 | `invalid_dql_syntax` | Error | A DQL string that does not parse. |

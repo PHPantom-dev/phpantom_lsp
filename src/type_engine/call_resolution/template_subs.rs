@@ -575,10 +575,31 @@ pub(crate) fn bind_callable_return_template(
     } else {
         // A callable held in a variable or returned by a call has no body
         // to read, but its own type (`callable(callable(): int): string`)
-        // still says what it returns.
-        Backend::resolve_arg_text_to_type(arg_text, ctx)?
-            .callable_return_type()?
-            .clone()
+        // still says what it returns, and an array callable or callable
+        // string returns what the method or function it names does.
+        // A string literal is read as written: the general resolver widens
+        // it to `string`, which no longer names anything.
+        let arg_type = super::return_types::literal_arg_type(arg_text.trim())
+            .or_else(|| Backend::resolve_arg_text_to_type(arg_text, ctx))?;
+        if let Some(ret) = arg_type.callable_return_type() {
+            ret.clone()
+        } else {
+            let current_class_fqn = ctx.current_class.map(|c| c.fqn());
+            super::array_callable_return_type(
+                &arg_type,
+                &ctx.file,
+                current_class_fqn.as_deref().unwrap_or(""),
+                ctx.resolved_class_cache,
+            )
+            .or_else(|| {
+                super::string_callable_return_type(
+                    &arg_type,
+                    &ctx.file,
+                    ctx.function_loader,
+                    ctx.resolved_class_cache,
+                )
+            })?
+        }
     };
     // A `null` the declared return takes in its own right (`Closure(): ?T`)
     // says nothing about `T`.

@@ -92,7 +92,8 @@ pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_
 
 pub(crate) use arg_text_types::array_literal_shape_type_with;
 pub(crate) use array_callable::{
-    array_callable_return_type, with_array_callable_method, with_callable_method,
+    array_callable_return_type, string_callable_return_type, with_array_callable_method,
+    with_callable_method,
 };
 pub(crate) use callable_target::invoked_value_types;
 pub(crate) use closure_invoke::{closure_invoke_return, is_closure_invoke_call};

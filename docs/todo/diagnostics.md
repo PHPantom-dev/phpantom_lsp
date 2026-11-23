@@ -407,6 +407,48 @@ with the parent's templates substituted the way inheritance merging does,
 and native types only: a docblock that disagrees with the parent is not
 an error PHP raises.
 
+Typed properties belong here too. A redeclared property must keep its
+parent's native type exactly, since properties are invariant, and PHP
+refuses the class otherwise ("Type of Child::$p must be ?Countable (as
+in class Base)"). Nothing reports it today:
+
+```php
+class Base { public ?\Countable $p = null; }
+final class Child extends Base { public ?\Iterator $p = null; } // fatal at load
+```
+
 **Where to look:** `src/diagnostics/incompatible_override.rs` and the
 subtype check behind `src/diagnostics/type_errors/`.
+
+## D53. `docblock_missing_null` skips a tag that refines a nullable hint
+
+**Impact: Low · Complexity: Low**
+
+`docblock_missing_null` only fires when the tag repeats the hint word for
+word without its `null` (`@param string $name` on `?string $name`). A tag
+that refines the type and also leaves out the `null` gets nothing:
+
+```php
+/** @param list<int> $items */
+function takesItems(?array $items): void {}
+```
+
+The php-typing-conformance suite expects a report here
+(`phpdoc_advanced_param_typehint_array_nullable_mismatch`, a `style`
+test), next to the plain `string`/`?string` case that already passes.
+The reader of `list<int>` has to look at the signature to learn that
+`null` is accepted, which is the same problem the exact-copy case flags.
+
+The reason the check stops at exact copies is that refining tags are
+common, and PHPStan and Psalm read them as `list<int>|null` without
+complaint, so flagging every `@param non-empty-string` on a `?string`
+could be noisy. Decide where the line goes. One option is to flag any
+plain `@param`/`@return` that leaves out a `null` its hint spells,
+since the "Update docblock" fix (`|null`) is the same in both cases
+and the diagnostic is only a `Hint`. Another is to stop at container
+refinements (`list<int>` and `array<…>` on `?array`).
+
+**Where to look:** `omits_only_null_of` and its caller in
+`src/diagnostics/docblock_native_mismatch.rs`. The module comment there
+explains the current rule and will need updating.
 

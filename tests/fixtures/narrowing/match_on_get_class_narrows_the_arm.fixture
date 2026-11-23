@@ -1,0 +1,17 @@
+// test: a match on get_class() narrows the subject inside the arm
+// feature: hover
+// expect_hover: $narrowed => Alpha
+// expect_absent: Beta
+---
+<?php
+
+class Alpha { public function alphaOnly(): void {} }
+class Beta { public function betaOnly(): void {} }
+
+function check(Alpha|Beta $x): void
+{
+    echo match (get_class($x)) {
+        Alpha::class => ($narrowed = $x) && $narr<>owed,
+        default => '',
+    };
+}

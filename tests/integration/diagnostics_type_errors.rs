@@ -12325,11 +12325,76 @@ takesPair([0 => 'a', 1 => 'b']);
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
-/// A shape inferred from a variable records the keys we saw assigned,
-/// which is a lower bound on the keys the value has — a branch we could
-/// not follow may add more. Only a literal at the call site is proof.
+/// A variable's sealed shape lists every key the value has, whether the
+/// shape came from a literal one assignment ago, from a declared type, or
+/// from one of those with a key `unset()`.
 #[test]
-fn a_shape_that_did_not_come_from_a_literal_argument_stays_silent() {
+fn a_variable_whose_sealed_shape_lacks_a_required_key_is_reported() {
+    let php = r#"<?php
+/** @param array{host: string, port: int} $config */
+function takesConfig(array $config): void {}
+
+/** @param array{host: string, port: int} $config */
+function withoutPort(array $config): void {
+    unset($config['port']);
+    takesConfig($config);
+}
+
+function emptyConfig(): void {
+    $config = [];
+    takesConfig($config);
+}
+
+$partial = ['host' => 'localhost'];
+takesConfig($partial);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(
+        messages[0].contains("missing required key 'port'"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[1].contains("missing required keys 'host', 'port'"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[2].contains("missing required key 'port'"),
+        "got {messages:?}"
+    );
+}
+
+/// A key `unset()` and written again is back, and removing a key the
+/// parameter does not ask for leaves the ones it does.
+#[test]
+fn a_variable_that_still_holds_the_required_keys_after_unset_stays_silent() {
+    let php = r#"<?php
+/** @param array{host: string} $config */
+function takesConfig(array $config): void {}
+
+/** @param array{host: string, port: int} $config */
+function withoutPort(array $config): void {
+    unset($config['port']);
+    takesConfig($config);
+}
+
+/** @param array{host: string} $config */
+function rewritten(array $config): void {
+    unset($config['host']);
+    $config['host'] = 'localhost';
+    takesConfig($config);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A key written into a value whose keys are not all known (a plain
+/// `array`, an untyped parameter) joins the keys that value already had,
+/// one of which may be the one the parameter asks for. A key assigned on
+/// only some paths is optional, which is not reported as missing.
+#[test]
+fn a_shape_that_may_hold_more_keys_stays_silent() {
     let php = r#"<?php
 /** @param array{host: string, port: int} $config */
 function takesConfig(array $config): void {}
@@ -12342,8 +12407,21 @@ function build(bool $withPort): array {
     return $config;
 }
 
-$partial = ['host' => 'localhost'];
-takesConfig($partial);
+function typed(array $config): void {
+    $config['host'] = 'localhost';
+    takesConfig($config);
+}
+
+function untyped($config): void {
+    $config['host'] = 'localhost';
+    takesConfig($config);
+}
+
+function spread(array $more): void {
+    $config = ['host' => 'localhost', ...$more];
+    takesConfig($config);
+}
+
 takesConfig(build(true));
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
@@ -12498,11 +12576,11 @@ takeNames(['a', 3]);
     assert!(messages[0].contains("'a', 3"), "got {messages:?}");
 }
 
-/// A shape inferred from a variable lists the keys we saw assigned, which
-/// is a lower bound on what the value has, so only a literal is proof that
-/// a listed key is absent.
+/// A variable's sealed shape lists every key the value has, so a key an
+/// unsealed parameter shape lists is absent when the shape lacks it. One
+/// assigned on only some paths is optional, which is not reported.
 #[test]
-fn a_shape_that_did_not_come_from_a_literal_stays_silent_against_an_unsealed_shape() {
+fn a_variable_missing_a_key_an_unsealed_shape_lists_is_reported() {
     let php = r#"<?php
 /** @param array{foo: int, ...} $shape */
 function take(array $shape): void {}
@@ -12519,7 +12597,11 @@ $partial = ['bar' => 'x'];
 take($partial);
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
-    assert!(messages.is_empty(), "got {messages:?}");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("missing required key 'foo'"),
+        "got {messages:?}"
+    );
 }
 
 /// A typed array may hold the entries an unsealed shape requires, though
@@ -15537,9 +15619,79 @@ final class Builder {
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
-        messages[0].contains("got non-empty-array<'x'|class-string, 1|2>"),
+        messages[0].contains("got array{x: 1|2, ...<class-string, 2>}"),
         "got {messages:?}"
     );
+}
+
+/// A write below a key the walker cannot name may land on any entry of the
+/// shape, but a read of one entry still sees only what that entry held or
+/// what the write put there, not every other entry's value.
+#[test]
+fn a_write_through_a_dynamic_key_keeps_the_other_entries_apart() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @return list<string> */
+function children(array $e): array { return []; }
+function merge(array $a, array $b): array { return $a; }
+
+/** @param array $element */
+function preRenderLinks($element) {
+    $element += ['#links' => [], '#attached' => []];
+    foreach (children($element) as $key) {
+        if (isset($element[$key]['#links'])) {
+            $element['#links'] += $element[$key]['#links'];
+            $element[$key]['#printed'] = true;
+        }
+        if (isset($element[$key]['#attached'])) {
+            $element['#attached'] = merge($element['#attached'], $element[$key]['#attached']);
+        }
+    }
+}
+
+function takes_string(string $s): void {}
+function shaped(string $key): void {
+    $a = ['count' => 1, 'rows' => []];
+    $a[$key]['seen'] = true;
+    takes_string($a['rows']);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("got array{}|array{seen: true}"),
+        "got {messages:?}"
+    );
+}
+
+/// A write lands in each alternative of a union of a plain `array` and
+/// shapes, rather than in the first shape alone with the plain `array`
+/// dropped. Here the write goes through a reference into the array.
+#[test]
+fn a_write_into_an_array_or_shape_union_keeps_the_plain_array() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @return list<string> */
+function children(array $e): array { return []; }
+function merge(array $a, array $b): array { return $a; }
+
+/** @param array $element */
+function preRenderLinks($element) {
+    $element += ['#links' => [], '#attached' => []];
+    foreach (children($element) as $key) {
+        $child = &$element[$key];
+        if (isset($child['#links']) && empty($child['#printed'])) {
+            $element['#links'] += $child['#links'];
+            $child['#printed'] = TRUE;
+        }
+        if (isset($child['#attached'])) {
+            $element['#attached'] = merge($element['#attached'], $child['#attached']);
+        }
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
 }
 
 #[test]
@@ -17927,4 +18079,413 @@ function test(): void {
         msgs.iter().all(|m| !m.contains("'text'")),
         "`Lib\\Box`'s initializers are not read in `App`'s namespace, got: {msgs:?}"
     );
+}
+
+/// `global $a` rebinds `$a` to the global of that name, so the value the
+/// local held before is gone even when nothing is known about the global.
+#[test]
+fn global_statement_replaces_what_the_local_held() {
+    let php = r#"<?php
+function takesInt(int $i): void {}
+
+function test(): void {
+    $a = 'text';
+    global $a;
+    takesInt($a);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// An `array_reduce()` callback named by an array callable binds the
+/// carry to the method's return, and a `!empty()` check rules out the
+/// empty array that would reduce to `null`.
+#[test]
+fn array_reduce_with_array_callable_returns_the_method_type() {
+    let php = r#"<?php
+class C {
+    /**
+     * @param array{children?: list<array<mixed>>} $a
+     * @return array
+     */
+    public static function reduceOrder($array, $a) {
+        $array = $array ?: [];
+        if (!empty($a['children'])) {
+            $array = array_merge($array, array_reduce($a['children'], [static::class, 'reduceOrder']));
+        }
+        return $array;
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// An untyped subject that passes `!empty()` is truthy, and handed to a
+/// parameter declared `array` a truthy value can only be a non-empty
+/// array, so `array_reduce()` cannot return the `null` it gives back for
+/// an empty one.
+#[test]
+fn array_reduce_of_untyped_truthy_value_is_not_nullable() {
+    let php = r#"<?php
+class C {
+    /** @return array */
+    public static function reduceOrder($array, $a) {
+        $array = $array ?: [];
+        if (!empty($a['children'])) {
+            $array = array_merge($array, array_reduce($a['children'], [static::class, 'reduceOrder']));
+        }
+        return $array;
+    }
+
+    /** @return array */
+    public static function declared(mixed $c) {
+        if ($c) {
+            return array_reduce($c, [static::class, 'reduceOrder']);
+        }
+        return [];
+    }
+
+    /** @return array */
+    public static function plain($c) {
+        if ($c) {
+            return array_reduce($c, [static::class, 'reduceOrder']);
+        }
+        return [];
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "got: {:?}",
+        diags
+            .iter()
+            .map(|d| (d.range.start.line, &d.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A truthy `mixed` joined with other values on another branch is still
+/// `mixed` short of some falsy values, so it is not checked against a
+/// parameter's type any more than `mixed` is.
+#[test]
+fn truthy_mixed_joined_with_other_values_is_not_checked() {
+    let php = r#"<?php
+/** @return array<string>|string */
+function build() { return ''; }
+function take(string $s): void {}
+function test(array $error): void {
+    if (empty($error['message'])) {
+        $message = build();
+    } else {
+        $message = $error['message'];
+    }
+    take($message);
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "got: {:?}",
+        diags
+            .iter()
+            .map(|d| (d.range.start.line, &d.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Indexing a union of arrays reads what every alternative holds, so an
+/// `array<TValue>` template bound from the element is the join of both
+/// shapes and neither alternative fails the parameter it was inferred from.
+#[test]
+fn union_of_shapes_binds_template_from_every_alternative() {
+    let php = r#"<?php
+class C {
+    public static function reduceOrder($array, $a) { return []; }
+
+    /** @param list<string> $list */
+    public static function t(array $regions, array $list, $w) {
+        $tree = ['' => ['name' => '', 'children' => []]];
+        $trees = array_fill_keys(array_keys($regions), $tree);
+        foreach ($list as $name) {
+            $r = (string) $w;
+            $trees[$r]['']['children'][$name] = ['name' => $name, 'weight' => $w];
+        }
+        foreach ($regions as $region_name => $region) {
+            $x = array_reduce($trees[$region_name], [static::class, 'reduceOrder']);
+        }
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "union of shapes should bind TValue from both alternatives, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// A call statement remembers its argument-less call arguments under their
+/// written form, and a later read of the same call text answers from that
+/// entry. The entry has to be what the call resolves to, its conditional
+/// return included, not the wider declared type.
+#[test]
+fn a_repeated_call_with_a_conditional_return_keeps_its_branch() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string) */
+    public function make($flag = false): string|Generated {}
+}
+function take(string $s): void {}
+function run(Maker $m): void {
+    take($m->make());
+    take($m->make());
+}
+"#;
+    let messages: Vec<String> = collect(php)
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// A check on such a call narrows the branch its conditional return picks,
+/// so a guard against `null` leaves the plain `string` the call returns
+/// without arguments.
+#[test]
+fn a_checked_call_with_a_conditional_return_narrows_its_branch() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string|null) */
+    public function make($flag = false): string|Generated|null {}
+}
+function take(string $s): void {}
+function run(Maker $m): void {
+    if ($m->make() !== null) {
+        take($m->make());
+    }
+}
+"#;
+    let messages: Vec<String> = collect(php)
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// The argument-type messages for `php`, in order.
+fn argument_messages(php: &str) -> Vec<String> {
+    collect(php)
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
+}
+
+/// A client whose `send()` answers by its class template, which defaults to
+/// a synchronous client.
+const ASYNC_CLIENT: &str = r#"<?php
+class Response {
+    public function body(): string { return ''; }
+}
+class Promise {}
+/** @template TAsync of bool = false */
+class Client {
+    /** @return (TAsync is false ? Response : Promise) */
+    public function send(): Response|Promise {}
+}
+function takeResponse(Response $r): void {}
+function takePromise(Promise $p): void {}
+"#;
+
+#[test]
+fn a_repeated_call_decided_by_a_class_template_default_keeps_its_branch() {
+    let php = format!(
+        "{ASYNC_CLIENT}function run(Client $c): void {{\n    takeResponse($c->send());\n    takeResponse($c->send());\n}}\n"
+    );
+    let messages = argument_messages(&php);
+    assert!(messages.is_empty(), "{messages:?}");
+
+    let php = format!(
+        "{ASYNC_CLIENT}function run(Client $c): void {{\n    takePromise($c->send());\n    takePromise($c->send());\n}}\n"
+    );
+    assert_eq!(argument_messages(&php).len(), 2);
+}
+
+#[test]
+fn a_repeated_call_decided_by_the_receivers_template_argument_keeps_its_branch() {
+    for (client, take) in [
+        ("Client<false>", "takeResponse"),
+        ("Client<true>", "takePromise"),
+    ] {
+        let php = format!(
+            "{ASYNC_CLIENT}/** @param {client} $c */\nfunction run(Client $c): void {{\n    {take}($c->send());\n    {take}($c->send());\n}}\n"
+        );
+        let messages = argument_messages(&php);
+        assert!(messages.is_empty(), "{client}: {messages:?}");
+    }
+}
+
+#[test]
+fn a_repeated_inherited_call_with_a_conditional_return_keeps_its_branch() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string) */
+    public function make($flag = false): string|Generated {}
+}
+class ChildMaker extends Maker {}
+function take(string $s): void {}
+function run(ChildMaker $m): void {
+    take($m->make());
+    take($m->make());
+}
+"#;
+    let messages = argument_messages(php);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// A `$this`-keyed conditional is decided by the receiver, and left as
+/// both branches when the receiver could still be either.
+#[test]
+fn a_repeated_call_decided_by_its_receiver_keeps_its_branch() {
+    let fixture = r#"<?php
+class Shape {
+    /** @return ($this is Circle ? string : int) */
+    public function label(): string|int {}
+}
+final class Circle extends Shape {}
+function take(string $s): void {}
+function takeInt(int $i): void {}
+"#;
+    let php = format!(
+        "{fixture}function run(Circle $c): void {{\n    take($c->label());\n    take($c->label());\n}}\n"
+    );
+    let messages = argument_messages(&php);
+    assert!(messages.is_empty(), "{messages:?}");
+
+    let php = format!(
+        "{fixture}function run(Shape $s): void {{\n    takeInt($s->label());\n    takeInt($s->label());\n}}\n"
+    );
+    let messages = argument_messages(&php);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+}
+
+/// `@param class-string<T>` with `@return T` reads as a conditional on the
+/// class-string; without the argument, the call is still the declared type,
+/// the second time too.
+#[tokio::test]
+async fn a_repeated_call_to_a_class_string_factory_keeps_the_declared_type() {
+    let (text, cursor) = crate::common::split_cursor(
+        r#"<?php
+class Item {
+    public function price(): int { return 0; }
+}
+class Factory {
+    /**
+     * @template T of Item
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function make(string $class = Item::class): Item {}
+}
+function take(Item $item): void {}
+function run(Factory $f): void {
+    take($f->make());
+    $f->make()->§
+}
+"#,
+    );
+    let backend = create_test_backend();
+    let uri = Uri::from_file_path(std::env::temp_dir().join("repeated_factory.php")).unwrap();
+    let labels =
+        crate::common::complete_labels_at(&backend, &uri, &text, cursor.line, cursor.character)
+            .await;
+    assert!(labels.iter().any(|l| l.starts_with("price")), "{labels:?}");
+}
+
+/// A check that records an argument-less call without the call expression
+/// at hand (here through a boolean the condition stored) still gives the
+/// call its declared type, which the check then narrows.
+#[test]
+fn a_call_recorded_by_a_stored_condition_keeps_its_declared_type() {
+    let php = r#"<?php
+class Foo {}
+class M {
+    /** @return ($strict is true ? Foo : Foo|int) */
+    public function get(bool $strict = false): Foo|int {}
+}
+function takeFoo(Foo $f): void {}
+function run(M $m): void {
+    $ok = !is_int($m->get());
+    if ($ok) {
+        takeFoo($m->get());
+    }
+}
+"#;
+    let messages = argument_messages(php);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// The branch a repeated call got is the receiver's: once the variable holds
+/// a client with the other template argument, the call answers the other
+/// branch.
+#[test]
+fn a_repeated_call_follows_a_reassigned_receiver() {
+    let php = format!(
+        "{ASYNC_CLIENT}/**\n * @param Client<false> $a\n * @param Client<true> $b\n */\nfunction run(Client $a, Client $b): void {{\n    $c = $a;\n    takeResponse($c->send());\n    $c = $b;\n    takePromise($c->send());\n}}\n"
+    );
+    let messages = argument_messages(&php);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// A `?->` check on the call adds a `null` that belongs to that spelling.
+/// The plain call after it only runs once the receiver is set, so it reads
+/// the branch alone.
+#[test]
+fn a_nullsafe_check_leaves_no_null_on_a_repeated_conditional_call() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string) */
+    public function make($flag = false): string|Generated {}
+}
+function take(string $s): void {}
+function run(?Maker $m): void {
+    if ($m?->make() !== '') {}
+    take($m->make());
+}
+"#;
+    let messages = argument_messages(php);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// The argument-less call and the call with an argument are different
+/// calls, each with its own branch, however they interleave.
+#[test]
+fn a_repeated_call_without_arguments_is_not_the_call_with_one() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string) */
+    public function make($flag = false): string|Generated {}
+}
+function take(string $s): void {}
+function takeGen(Generated $g): void {}
+function run(Maker $m): void {
+    take($m->make());
+    takeGen($m->make(true));
+    takeGen($m->make(true));
+    take($m->make());
+}
+"#;
+    let messages = argument_messages(php);
+    assert!(messages.is_empty(), "{messages:?}");
 }

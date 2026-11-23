@@ -201,7 +201,21 @@ fn singular_with_related() {
         build_property_type(
             RelationshipKind::Singular,
             Some(&PhpType::named(atom("App\\Models\\Post"))),
-            None
+            None,
+            false
+        ),
+        Some(PhpType::nullable(PhpType::named(atom("App\\Models\\Post"))))
+    );
+}
+
+#[test]
+fn singular_with_default_is_not_nullable() {
+    assert_eq!(
+        build_property_type(
+            RelationshipKind::Singular,
+            Some(&PhpType::named(atom("App\\Models\\Post"))),
+            None,
+            true
         ),
         Some(PhpType::named(atom("App\\Models\\Post")))
     );
@@ -210,7 +224,7 @@ fn singular_with_related() {
 #[test]
 fn singular_without_related() {
     assert_eq!(
-        build_property_type(RelationshipKind::Singular, None::<&PhpType>, None),
+        build_property_type(RelationshipKind::Singular, None::<&PhpType>, None, false),
         None
     );
 }
@@ -221,7 +235,8 @@ fn collection_with_related() {
         build_property_type(
             RelationshipKind::Collection,
             Some(&PhpType::named(atom("App\\Models\\Post"))),
-            None
+            None,
+            false
         ),
         Some(PhpType::generic(
             "Illuminate\\Database\\Eloquent\\Collection",
@@ -233,7 +248,7 @@ fn collection_with_related() {
 #[test]
 fn collection_without_related_uses_model() {
     assert_eq!(
-        build_property_type(RelationshipKind::Collection, None::<&PhpType>, None),
+        build_property_type(RelationshipKind::Collection, None::<&PhpType>, None, false),
         Some(PhpType::generic(
             "Illuminate\\Database\\Eloquent\\Collection",
             vec![PhpType::named(atom(
@@ -249,7 +264,8 @@ fn morph_to_always_returns_model() {
         build_property_type(
             RelationshipKind::MorphTo,
             Some(&PhpType::named(atom("App\\Models\\Foo"))),
-            None
+            None,
+            false
         ),
         Some(PhpType::named(atom(
             "Illuminate\\Database\\Eloquent\\Model"
@@ -263,7 +279,8 @@ fn collection_with_custom_collection() {
         build_property_type(
             RelationshipKind::Collection,
             Some(&PhpType::named(atom("App\\Models\\Post"))),
-            Some("App\\Collections\\PostCollection")
+            Some("App\\Collections\\PostCollection"),
+            false
         ),
         Some(PhpType::generic(
             "App\\Collections\\PostCollection",
@@ -278,7 +295,8 @@ fn collection_custom_collection_canonical() {
         build_property_type(
             RelationshipKind::Collection,
             Some(&PhpType::named(atom("App\\Models\\Post"))),
-            Some("App\\Collections\\PostCollection")
+            Some("App\\Collections\\PostCollection"),
+            false
         ),
         Some(PhpType::generic(
             "App\\Collections\\PostCollection",
@@ -293,9 +311,10 @@ fn singular_ignores_custom_collection() {
         build_property_type(
             RelationshipKind::Singular,
             Some(&PhpType::named(atom("App\\Models\\Post"))),
-            Some("App\\Collections\\PostCollection")
+            Some("App\\Collections\\PostCollection"),
+            false
         ),
-        Some(PhpType::named(atom("App\\Models\\Post")))
+        Some(PhpType::nullable(PhpType::named(atom("App\\Models\\Post"))))
     );
 }
 
@@ -305,7 +324,8 @@ fn morph_to_ignores_custom_collection() {
         build_property_type(
             RelationshipKind::MorphTo,
             Some(&PhpType::named(atom("App\\Models\\Foo"))),
-            Some("App\\Collections\\FooCollection")
+            Some("App\\Collections\\FooCollection"),
+            false
         ),
         Some(PhpType::named(atom(
             "Illuminate\\Database\\Eloquent\\Model"

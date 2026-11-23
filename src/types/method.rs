@@ -133,6 +133,10 @@ pub struct MethodInfo {
 pub struct MethodExtras {
     /// Whether a modern Eloquent `Attribute` return declares a setter.
     pub has_attribute_setter: bool,
+    /// Whether a singular Eloquent relationship returns its builder with
+    /// `->withDefault()` on every path, so that reading the relationship
+    /// as a property hands back a default model instead of `null`.
+    pub relation_has_default: bool,
     /// Human-readable description extracted from the `@return` tag.
     ///
     /// For `@return list<User> The active users`, this would be
@@ -272,6 +276,7 @@ impl MethodExtras {
     /// Whether every field is empty, i.e. the method needs no extras box.
     pub fn is_empty(&self) -> bool {
         !self.has_attribute_setter
+            && !self.relation_has_default
             && self.return_description.is_none()
             && self.links.is_empty()
             && self.see_refs.is_empty()

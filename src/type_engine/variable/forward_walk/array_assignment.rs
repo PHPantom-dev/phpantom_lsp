@@ -554,8 +554,11 @@ fn apply_array_write<'b>(
     }
     // The write lands on whichever value the variable holds, so every
     // alternative a branch join left behind takes it. A variable that holds
-    // nothing yet auto-vivifies to an empty array.
+    // nothing yet auto-vivifies to an empty array. One that holds a value of
+    // unknown type (an untyped parameter, say) may already be an array with
+    // other keys, which a plain `array` base keeps open.
     let base_type = match scope.get(base_name) {
+        [] if scope.contains(base_name) => PhpType::array(),
         [] => PhpType::array_shape(Vec::new()),
         base_types => ResolvedType::types_joined(base_types),
     };
@@ -595,7 +598,40 @@ fn apply_array_write<'b>(
             .map(|depth| array_write_synthetic_key(base_name, &key_chain[..depth]))
             .collect()
     };
-    let mut write_keys: Vec<super::super::array_shape_writes::ArrayWriteKey> = key_chain
+    let mut write_keys = array_write_keys(key_chain, &subjects, scope, ctx);
+    if append {
+        write_keys.push(super::super::array_shape_writes::ArrayWriteKey::Append);
+    }
+
+    let written =
+        super::super::array_shape_writes::loop_written_value(value_php_type, ctx.in_loop, constant);
+    let merged = super::super::array_shape_writes::merge_nested_array_write(
+        &base_type,
+        &write_keys,
+        &written,
+        ctx.in_loop,
+    );
+    scope.set(base_name, vec![ResolvedType::from_type_string(merged)]);
+    note_element_write(base_name, &subjects, &write_keys, append, scope);
+    forget_proofs_about_written_values(base_name, key_chain, append, scope);
+
+    forget_overwritten_offsets(base_name, key_chain, append, scope);
+    if !append {
+        overwrite_written_offset(base_name, key_chain, rhs_types, scope);
+    }
+}
+
+/// The keys an element write through `key_chain` lands on, evaluated in
+/// `scope`. `subjects` holds the subject key each segment writes into, as
+/// [`apply_array_write`] spells them out, or nothing when no key fact can
+/// apply.
+pub(crate) fn array_write_keys(
+    key_chain: &[&Expression<'_>],
+    subjects: &[Option<String>],
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<super::super::array_shape_writes::ArrayWriteKey> {
+    key_chain
         .iter()
         .enumerate()
         .map(|(depth, idx)| {
@@ -626,27 +662,7 @@ fn apply_array_write<'b>(
                 }
             }
         })
-        .collect();
-    if append {
-        write_keys.push(super::super::array_shape_writes::ArrayWriteKey::Append);
-    }
-
-    let written =
-        super::super::array_shape_writes::loop_written_value(value_php_type, ctx.in_loop, constant);
-    let merged = super::super::array_shape_writes::merge_nested_array_write(
-        &base_type,
-        &write_keys,
-        &written,
-        ctx.in_loop,
-    );
-    scope.set(base_name, vec![ResolvedType::from_type_string(merged)]);
-    note_element_write(base_name, &subjects, &write_keys, append, scope);
-    forget_proofs_about_written_values(base_name, key_chain, append, scope);
-
-    forget_overwritten_offsets(base_name, key_chain, append, scope);
-    if !append {
-        overwrite_written_offset(base_name, key_chain, rhs_types, scope);
-    }
+        .collect()
 }
 
 /// Drop the proofs an element write made stale: the ones about the array

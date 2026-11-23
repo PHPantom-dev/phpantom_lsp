@@ -61,7 +61,35 @@ No outstanding items.
 
 ## Framework names in strings
 
-No outstanding items.
+### B760. A nullable or union receiver never confirms a typed key
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+public function __construct(
+    private ?Factory $views,
+    private Factory|Mailer $renderer,
+) {}
+
+public function show(): void
+{
+    $this->views->make('pages.home');    // no view key
+    $this->renderer->make('pages.home'); // no view key
+}
+```
+
+`typed_receiver_key_kind` (`src/blade/typed_receiver.rs`) asks whether
+the receiver's whole type is a subtype of the target class.
+`is_subtype_of_typed` requires every member of a union to pass, and
+treats `?Factory` as `Factory|null`, so `null` fails it, and so does
+the other half of a `Factory|Mailer`. The key is then not confirmed:
+there is no go-to-definition, completion or reference for it, and no
+missing-template diagnostic. A call is only reached when its receiver
+is not `null`, so drop `null` from the receiver's type, then check each
+remaining member separately and take the first that names a target. Do
+this once in `typed_receiver_key_kind`, for every receiver class (view
+factories, mailables, Symfony containers, Drupal and Yii targets), not
+per receiver.
 
 ## Name resolution
 

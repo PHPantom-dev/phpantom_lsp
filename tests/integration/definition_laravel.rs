@@ -104,6 +104,10 @@ class Collection {
     /** @return TModel|null */
     public function first(): mixed { return null; }
     public function count(): int { return 0; }
+    /** @return $this */
+    public function load($relations) { return $this; }
+    /** @return $this */
+    public function loadMissing($relations) { return $this; }
 }
 ";
 
@@ -4741,4 +4745,237 @@ class User extends Model {
         open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
     let line = definition_line(&result.expect("`date` has a $casts entry"));
     assert_eq!(line, 6, "the `'date'` key, not the value on line 5");
+}
+
+// ─── Relation names in eager-loading strings ────────────────────────────────
+
+const RELATION_MODEL_PHP: &str = "\
+<?php
+namespace Illuminate\\Database\\Eloquent;
+abstract class Model {
+    /** @return \\Illuminate\\Database\\Eloquent\\Builder<static> */
+    public static function with($relations) {}
+    /** @return $this */
+    public function load($relations) { return $this; }
+    /** @return $this */
+    public function loadMissing($relations) { return $this; }
+}
+";
+
+const RELATIONS_PHP: &str = "\
+<?php
+namespace Illuminate\\Database\\Eloquent\\Relations;
+abstract class Relation {}
+/**
+ * @template TRelatedModel
+ * @template TDeclaringModel
+ */
+class HasMany extends Relation {}
+/**
+ * @template TRelatedModel
+ * @template TDeclaringModel
+ */
+class BelongsTo extends Relation {}
+";
+
+const PRODUCT_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class Product extends Model {
+    /** @return HasMany<Conversion, $this> */
+    public function conversions(): HasMany { return new HasMany(); }
+    /** @return HasMany<StockTransaction, $this> */
+    public function stock_transactions(): HasMany { return new HasMany(); }
+}
+";
+
+const CONVERSION_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsTo;
+class Conversion extends Model {
+    /** @return BelongsTo<Unit, $this> */
+    public function source(): BelongsTo { return new BelongsTo(); }
+}
+";
+
+const STOCK_TRANSACTION_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsTo;
+class StockTransaction extends Model {
+    /** @return BelongsTo<Unit, $this> */
+    public function unit(): BelongsTo { return new BelongsTo(); }
+}
+";
+
+const UNIT_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Unit extends Model {}
+";
+
+/// Go to definition at the first `needle` in `consumer`, offset by `shift`
+/// characters, and answer with the file name and line it lands on.
+async fn relation_string_definition(
+    consumer: &str,
+    needle: &str,
+    shift: u32,
+) -> Option<(String, u32)> {
+    let mut files: Vec<(&str, &str)> = framework_stubs()
+        .into_iter()
+        .filter(|(path, _)| !path.ends_with("Model.php"))
+        .collect();
+    files.extend_from_slice(&[
+        ("vendor/illuminate/Eloquent/Model.php", RELATION_MODEL_PHP),
+        (
+            "vendor/illuminate/Eloquent/Relations/HasMany.php",
+            RELATIONS_PHP,
+        ),
+        ("src/Models/Product.php", PRODUCT_PHP),
+        ("src/Models/Conversion.php", CONVERSION_PHP),
+        ("src/Models/StockTransaction.php", STOCK_TRANSACTION_PHP),
+        ("src/Models/Unit.php", UNIT_PHP),
+        ("src/Models/Consumer.php", consumer),
+    ]);
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    let (line, character) = crate::common::line_char_of(consumer, needle);
+    let response = open_and_goto_definition(
+        &backend,
+        &dir,
+        "src/Models/Consumer.php",
+        consumer,
+        line,
+        character + shift,
+    )
+    .await?;
+    let location = match response {
+        DefinitionResponse::Definition(Definition::Location(location)) => location,
+        other => panic!("expected one location, got {other:?}"),
+    };
+    let path = location.uri.to_file_path().ok()?;
+    Some((
+        path.file_name()?.to_string_lossy().into_owned(),
+        location.range.start.line,
+    ))
+}
+
+#[tokio::test]
+async fn test_goto_definition_relation_string_segments() {
+    let consumer = "\
+<?php
+namespace App\\Models;
+class Consumer {
+    public function run(Product $product): void {
+        $product->load(['conversions.source', 'stock_transactions']);
+        Product::with('conversions.source:id,name');
+        Product::query()->withCount('stock_transactions as total');
+    }
+}
+";
+    let conversions = Some(("Product.php".to_string(), 6));
+    let source = Some(("Conversion.php".to_string(), 6));
+    let transactions = Some(("Product.php".to_string(), 8));
+    let cases = [
+        ("['conversions.source'", 4, conversions.clone()),
+        ("['conversions.source'", 15, source.clone()),
+        ("'stock_transactions']", 3, transactions.clone()),
+        ("with('conversions.source:id", 8, conversions),
+        ("with('conversions.source:id", 22, source),
+        // The column list after the colon is not part of the path.
+        ("source:id,name", 9, None),
+        ("withCount('stock_transactions", 13, transactions),
+        // Nor is the alias of a count.
+        ("as total", 4, None),
+    ];
+    for (needle, shift, expected) in cases {
+        assert_eq!(
+            relation_string_definition(consumer, needle, shift).await,
+            expected,
+            "{needle} + {shift}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_relation_string_in_eager_load_callback() {
+    let consumer = "\
+<?php
+namespace App\\Models;
+class Consumer {
+    public function run(Product $product): void {
+        $product->load([
+            'stock_transactions' => fn ($query) => $query->with('unit'),
+        ]);
+    }
+}
+";
+    assert_eq!(
+        relation_string_definition(consumer, "with('unit')", 7).await,
+        Some(("StockTransaction.php".to_string(), 6)),
+    );
+    assert_eq!(
+        relation_string_definition(consumer, "'stock_transactions' =>", 3).await,
+        Some(("Product.php".to_string(), 8)),
+    );
+}
+
+/// A collection of models eager-loads through `with()` on the first model's
+/// query, so its constraint closures see the same relations as a model's.
+#[tokio::test]
+async fn test_goto_definition_relation_string_in_collection_eager_load_callback() {
+    for (method, hint) in [
+        ("load", "Collection<int, Product>"),
+        ("loadMissing", "Collection<int, Product>"),
+        ("load", "Collection<Product>"),
+    ] {
+        let consumer = format!(
+            "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Collection;
+class Consumer {{
+    /** @param {hint} $products */
+    public function run(Collection $products): void {{
+        $products->{method}([
+            'stock_transactions' => fn ($query) => $query->with('unit'),
+        ]);
+    }}
+}}
+"
+        );
+        assert_eq!(
+            relation_string_definition(&consumer, "with('unit')", 7).await,
+            Some(("StockTransaction.php".to_string(), 6)),
+            "{method} on {hint}"
+        );
+    }
+}
+
+/// Only the first argument of `withSum()` is a relation; the second is a
+/// column of the related model.
+#[tokio::test]
+async fn test_goto_definition_relation_string_skips_a_column_argument() {
+    let consumer = "\
+<?php
+namespace App\\Models;
+class Consumer {
+    public function run(): void {
+        Product::query()->withSum('conversions', 'conversions');
+    }
+}
+";
+    assert_eq!(
+        relation_string_definition(consumer, "'conversions')", 3).await,
+        None,
+    );
+    assert_eq!(
+        relation_string_definition(consumer, "withSum('conversions'", 11).await,
+        Some(("Product.php".to_string(), 6)),
+    );
 }

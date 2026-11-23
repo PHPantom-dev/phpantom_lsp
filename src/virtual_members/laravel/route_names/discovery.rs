@@ -172,9 +172,26 @@ pub(crate) struct RouteDiscovery {
     /// Every route, named or not, whose action is a controller method,
     /// sorted by controller and then method, case-insensitively.
     pub actions: Vec<RouteAction>,
+    /// The name prefix each route file the scan read is loaded under, by its
+    /// canonical path, sorted.  `None` when the prefix is not statically
+    /// known.  A file loaded from more than one place has one entry per
+    /// prefix.
+    pub file_prefixes: Vec<(PathBuf, Option<String>)>,
 }
 
 impl RouteDiscovery {
+    /// The name prefixes the route file at `path` is loaded under, empty when
+    /// the scan did not read it.
+    pub(crate) fn file_name_prefixes(&self, path: &Path) -> Vec<Option<&str>> {
+        let path = crate::util::canonical_path_for_comparison(path);
+        let start = self.file_prefixes.partition_point(|(file, _)| file < &path);
+        self.file_prefixes[start..]
+            .iter()
+            .take_while(|(file, _)| file == &path)
+            .map(|(_, prefix)| prefix.as_deref())
+            .collect()
+    }
+
     /// Where the routes `pattern` names are registered, each place once.
     pub(crate) fn definitions(&self, pattern: &str) -> Vec<Location> {
         let matching: &[RouteEntry] = if pattern.contains('*') {
@@ -337,6 +354,8 @@ pub(super) struct RouteCollector {
     sources: Vec<PathBuf>,
     /// The routes whose action is a controller method.
     pub(super) actions: Vec<RouteAction>,
+    /// The name prefix each file the walk read is loaded under, canonically.
+    file_prefixes: Vec<(PathBuf, Option<String>)>,
 }
 
 impl RouteCollector {
@@ -348,6 +367,7 @@ impl RouteCollector {
             mut open_suffixes,
             mut sources,
             mut actions,
+            mut file_prefixes,
         } = self;
         // Sorting the project's own registrations ahead of a package's, and
         // known URIs ahead of unknown ones, then deduping to one entry per
@@ -387,6 +407,8 @@ impl RouteCollector {
                 .then_with(|| a.name.cmp(&b.name))
         });
         actions.dedup();
+        file_prefixes.sort();
+        file_prefixes.dedup();
         // `routes` is sorted by name and deduplicated, so the names come out
         // sorted too.
         let names: std::sync::Arc<[String]> =
@@ -398,6 +420,7 @@ impl RouteCollector {
             open_suffixes,
             sources,
             actions,
+            file_prefixes,
         }
     }
 }
@@ -670,7 +693,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
         if !scanned.insert(canonical.clone()) {
             continue;
         }
-        if let Ok(content) = std::fs::read_to_string(route_path)
+        if let Some(content) = read_route_source(Some(backend), route_path)
             && let Some(uri) = crate::util::path_to_url(route_path)
         {
             collector.sources.push(canonical);
@@ -681,6 +704,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
                 Some(route_path),
                 workspace_root.as_deref(),
                 &macros,
+                Some(backend),
                 &mut collector,
             );
             if route_path
@@ -755,6 +779,7 @@ fn walk_workspace_route_file(
         path.as_deref(),
         workspace_root,
         macros,
+        Some(backend),
         collector,
     );
     if file_uri.contains("/vendor/") {
@@ -776,12 +801,15 @@ pub(super) fn walk_route_file(
     file_path: Option<&Path>,
     workspace_root: Option<&Path>,
     macros: &MacroScope,
+    buffers: Option<&Backend>,
     sink: &mut RouteCollector,
 ) {
     let open = RefCell::new(HashSet::new());
     if let Some(path) = file_path {
-        open.borrow_mut()
-            .insert(dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
+        let canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        sink.file_prefixes
+            .push((canonical.clone(), Some(String::new())));
+        open.borrow_mut().insert(canonical);
     }
     let uri = Arc::new(uri.clone());
     let lines = LineIndex::new(content);
@@ -795,6 +823,7 @@ pub(super) fn walk_route_file(
             names,
             uri: &uri,
             lines: &lines,
+            buffers,
         };
 
         let mut scope = Scope::default();
@@ -1206,7 +1235,7 @@ fn walk_macro(
     paths: ScanPaths<'_>,
     sink: &mut RouteCollector,
 ) -> bool {
-    let Some(open) = open_route_macro(paths.macros, method) else {
+    let Some(open) = open_route_macro(paths.macros, method, paths.buffers) else {
         return false;
     };
     let name_prefix = match chain {
@@ -1438,6 +1467,10 @@ fn walk_included_file(
         .unwrap_or_else(|| Arc::clone(paths.uri));
     // Already canonical: the include stack holds each file by that spelling.
     sink.sources.push(included.path.clone());
+    sink.file_prefixes.push((
+        included.path.clone(),
+        (!group.unknowable).then(|| group.name.to_owned()),
+    ));
 
     let lines = LineIndex::new(&included.content);
     in_parsed_route_file(&included.content, b"included.php", |program, names| {

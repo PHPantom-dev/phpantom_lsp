@@ -906,10 +906,12 @@ Provider priority order (highest first):
 1. **Framework provider** (e.g. Laravel): richest type info
 2. **PHPDoc provider**: `@method`, `@property`, `@property-read`, `@property-write`, `@mixin`
 
-Two providers are currently registered in `default_providers()`:
+Among the providers registered in `default_providers()`:
 
 - **`LaravelModelProvider`** (`virtual_members/laravel/model_provider.rs`): synthesizes virtual members for classes extending `Illuminate\Database\Eloquent\Model`. Produces relationship properties (methods returning `HasMany`, `HasOne`, `BelongsTo`, etc. generate a virtual property typed from the relationship's generic parameters), scope methods (both the `scopeActive` naming convention and the `#[Scope]` attribute from Laravel 11+ are supported; either style becomes `active()` as both static and instance), Builder-as-static forwarding (`User::where()->get()` resolves end-to-end), accessors (legacy `getXAttribute()` and modern `Attribute` casts), and cast properties (`$casts` array or `casts()` method entries are mapped to PHP types like `datetime` to `\Carbon\Carbon`, `boolean` to `bool`, framework class casts such as `AsEnumCollection::of(Status::class)` to `Collection<array-key, Status>`, custom cast classes to their `get()` return type). Highest priority among virtual member providers. Scope methods are also injected onto `Builder<Model>` instances via a post-generic-substitution hook in `type_hint_to_classes_depth` (see "Scope Methods on Builder Instances" below).
 - **`PHPDocProvider`** (`virtual_members/phpdoc.rs`, with `@mixin` collection in `phpdoc/mixins.rs`): surfaces `@method`, `@property`, `@property-read`, `@property-write`, and `@mixin` tags from the class-level docblock. Explicit `@method` / `@property` tags are parsed once during AST extraction into `ClassInfo.doc_members` (an `Arc<DocblockMembers>`, `None` when the docblock declares neither), so `provide` only reads structured data and applies the per-consumer generic substitutions. The provider collects those tags from the class itself, its used traits, its parent chain, and its implemented interfaces. For `@mixin` tags, it loads the referenced classes and merges their public members. Within the provider, explicit tags take precedence over mixin members. Recurses into mixin-of-mixin chains up to `MAX_MIXIN_DEPTH`.
+- **`FieldableEntityProvider`** (`drupal/fields.rs`), in a Drupal project only: gives the classes and interfaces under `FieldableEntityInterface` the fields of the entity types they may hold as typed properties, read from the entity classes' `baseFieldDefinitions()` (`drupal/base_fields.rs`) and from the field storage files of extensions and of the site's exported configuration (`drupal/field_storage.rs`), and gives the interfaces the untyped `__get()` and `__set()` every content entity has. Providers never see the `Backend`, so the field index reaches it through the resolved-class cache, whose slot reads the index through the `Backend` it is bound to when the workspace becomes a Drupal project. A reference field's target is the entity type its `target_type` setting names, the entity type's own `bundle_entity_type` for `getBundleEntityType()`, or else the default its item class's `defaultStorageSettings()` gives. An entity class's fields show on interfaces that do not depend on the entity class, so a change to them, to a field storage file, or to the parent, interfaces, or traits of a class the index was read through, evicts `FieldableEntityInterface` and everything under it, found through the inheritance index, once per publish batch.
+- **`FieldItemProvider`** (`drupal/field_items.rs`), in a Drupal project only: gives field item classes the properties their `propertyDefinitions()` declare, following `parent::propertyDefinitions()`, from the same field index. An item list reads a property on its first item, and a field is typed `List<Item>` with a reference field's target class as a second argument, so the list's properties, its `first()` and `get()`, which give the item carrying the target, and the target's typing of `entity` and `referencedEntities()` depend on the type arguments: `resolve_class_for_type_hint` adds them, as it does Doctrine's repository members, and specialises the list's template with the item alone. A change to an item class's `propertyDefinitions()` evicts that class and every class that extends it, found through the inheritance index, since a resolved class records no dependency on an ancestor further up than its parent.
 
 ### Laravel Class Patches
 
@@ -1423,6 +1425,25 @@ so a tool that inspects the server's capabilities without declaring pull
 support sees it. Push delivery still caches each published set with a
 `resultId`, so a pull from a push client answers with what was last
 published instead of an empty set.
+
+A `textDocument/diagnostic` pull is held until the diagnostics reflect the
+document's current text, since editors pull right after every `didChange`
+and some (Neovim, Emacs) do not pull the document again when the server
+sends `workspace/diagnostic/refresh`. The pull waits for startup to finish,
+for the edit's background parse, for the pass that parse queues, and for
+the pass in flight, without computing anything on the request path. In
+clients known to pull the document again on a refresh (VS Code and Zed,
+`fast_phase_answers_pulls`), it answers once that pass has delivered its
+fast phase, and the fast phase sends no refresh for it (VS Code would
+cancel and re-send the held pull on one); the slow phase follows through
+the usual refresh. Every other client's pull waits for the slow phase as
+well, since the protocol gives no way to tell whether the client would
+pull the document on that refresh. Each stage
+hands the URI on before letting go of it (`edits_awaiting_parse`, then
+`pending_uris`, then `in_flight_uris` on `DiagnosticState`), so the wait
+never sees a gap. A newer pull for the same document releases the held
+one, and shutdown or the worker stopping releases every held pull. The
+`workspace/diagnostic` pull still answers at once from the cache.
 
 Each worker is created during `initialized` via `clone_for_blocking`, which hands it a `Backend` sharing the main one's `BackendState`, so every worker sees all mutations the main `Backend` makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.
 

@@ -32,6 +32,7 @@ impl ScopeState {
             || self.closure_captures != other.closure_captures
             || self.closure_literals != other.closure_literals
             || self.key_facts != other.key_facts
+            || self.ref_links != other.ref_links
             || !same_implied_narrowings(&self.implied_narrowings, &other.implied_narrowings)
         {
             return false;
@@ -192,6 +193,8 @@ impl ScopeState {
                 None => self.key_facts = None,
             }
         }
+
+        self.join_reference_links(other);
 
         for name in &differing {
             if let Some(other_types) = other.locals.get(name) {
@@ -366,6 +369,7 @@ impl ScopeState {
         // sibling branch already covers them after control-flow rejoins.
         // Preserve class-backed alternatives (and their completion
         // metadata) while collapsing only redundant non-class values.
+        ResolvedType::widen_truthy_mixed_entries(entry);
         *entry = ResolvedType::collapse_redundant_runtime_literals(std::mem::take(entry));
         ResolvedType::join_complete_enum_entries(entry);
 

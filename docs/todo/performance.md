@@ -83,6 +83,11 @@ runs on a single core while the other 31 wait:
   737 ms in debug, and it walks most of the web root a second time.
 - `index_resource_paths_batch` reads and scans the 4,494 YAML and Twig
   files the walk found one after another.
+- Every file found is stat'd twice more, serially, for its progress
+  weight: once when `ensure_workspace_indexed_with_progress_mode` sums
+  the phase totals, and again when `parse_batch_parallel` builds its
+  weights (`index_progress_weight_for_path` both times). The walk can
+  record each file's size once, and both can reuse it.
 
 The classmap scanner already has a parallel walk (`walk_roots`:
 `build_parallel`, work stealing, sorted output for a deterministic

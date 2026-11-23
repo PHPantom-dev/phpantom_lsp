@@ -293,6 +293,11 @@ impl ResolvedType {
         classes: Vec<Arc<ClassInfo>>,
         type_hint: PhpType,
     ) -> Vec<ResolvedType> {
+        if classes.len() > 1
+            && let Some(expanded) = intersect_trait_requirements(&type_hint, &classes)
+        {
+            return Self::from_classes_with_hint(classes, expanded);
+        }
         if classes.len() == 1 {
             let class = classes.into_iter().next().unwrap();
             // A bare `self` (or `?self`) names exactly the class it resolved
@@ -700,6 +705,24 @@ impl ResolvedType {
         collapsed
     }
 
+    /// Widen a `non-empty-mixed` entry back to `mixed` once the entries
+    /// beside it hold every falsy value, which is where the two sides of
+    /// an `if ($x)` on a `mixed` subject meet again.
+    pub(crate) fn widen_truthy_mixed_entries(entries: &mut [ResolvedType]) {
+        let is_truthy_mixed = |rt: &ResolvedType| {
+            rt.class_info.is_none() && rt.type_string.is_named("non-empty-mixed")
+        };
+        if entries.len() < 2
+            || !entries.iter().any(is_truthy_mixed)
+            || !PhpType::hold_every_falsy_value(entries.iter().map(|rt| &rt.type_string))
+        {
+            return;
+        }
+        for rt in entries.iter_mut().filter(|rt| is_truthy_mixed(rt)) {
+            rt.type_string = PhpType::mixed();
+        }
+    }
+
     /// Remove entries whose type is a subset of another entry's, e.g.
     /// `string|null` ⊆ `int|string|null` drops the former.
     ///
@@ -1083,6 +1106,79 @@ fn object_covers(cover: &PhpType, covered: &PhpType) -> bool {
         .iter()
         .any(|member| member.is_object())
         && covered.is_subtype_of(cover)
+}
+
+/// `hint` with each alternative naming a trait spelled out as the trait
+/// intersected with the classes it requires of its users, when `classes`
+/// (what `hint` resolved to) holds those classes beside the trait.
+///
+/// Resolving a type that names a trait yields the trait followed by its
+/// `@phpstan-require-*` classes, because only a class using the trait can
+/// be an instance of it.  The hint still names the trait alone, and read
+/// as written the extra classes would become alternatives of a union.
+///
+/// Returns `None` when no alternative names such a trait.
+fn intersect_trait_requirements(hint: &PhpType, classes: &[Arc<ClassInfo>]) -> Option<PhpType> {
+    let present = |name: &str| classes.iter().any(|c| c.fqn().eq_ignore_ascii_case(name));
+    let traits: Vec<(&ClassInfo, Vec<PhpType>)> = classes
+        .iter()
+        .filter(|c| c.kind == ClassLikeKind::Trait)
+        .filter_map(|c| {
+            let required: Vec<PhpType> = c
+                .require_extends
+                .iter()
+                .chain(&c.require_implements)
+                .filter(|name| present(name))
+                .map(|name| PhpType::named(*name))
+                .collect();
+            (!required.is_empty()).then_some((c.as_ref(), required))
+        })
+        .collect();
+    if traits.is_empty() {
+        return None;
+    }
+
+    let expand = |member: &PhpType| -> Option<PhpType> {
+        // `static(Stamps)` and `$this(Stamps)` name a class using the trait
+        // as well; which one late static binding picks is unknown inside
+        // the trait, so they read as the same intersection.
+        let (TypeKind::Named(name) | TypeKind::StaticType(name) | TypeKind::ThisType(name)) =
+            member.kind()
+        else {
+            return None;
+        };
+        // `self`, `static` or `$this` can only name a trait here when the
+        // hint was read in that trait's body, and then it is the only trait
+        // the hint names.
+        let (cls, required) = match traits.as_slice() {
+            [only] if crate::php_type::is_self_ref_name(name) => only,
+            _ => traits
+                .iter()
+                .find(|(c, _)| c.fqn().eq_ignore_ascii_case(name))?,
+        };
+        let mut parts = Vec::with_capacity(required.len() + 1);
+        parts.push(PhpType::named(cls.fqn()));
+        parts.extend(required.iter().cloned());
+        Some(PhpType::intersection(parts))
+    };
+
+    let null = PhpType::null();
+    let alternatives: Vec<&PhpType> = match hint.kind() {
+        TypeKind::Nullable(inner) => vec![inner, &null],
+        _ => hint.union_members(),
+    };
+    let mut changed = false;
+    let members: Vec<PhpType> = alternatives
+        .into_iter()
+        .map(|member| match expand(member) {
+            Some(expanded) => {
+                changed = true;
+                expanded
+            }
+            None => member.clone(),
+        })
+        .collect();
+    changed.then(|| PhpType::union(members))
 }
 
 /// Whether `ty` is the bare `self` keyword.

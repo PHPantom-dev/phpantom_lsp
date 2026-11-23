@@ -14,14 +14,56 @@ use tower_lsp_server::jsonrpc::Result;
 
 use crate::Backend;
 
+use super::state::DiagnosticState;
+
+/// A held document pull's place in `pull_generations`.  Taking one
+/// supersedes the URI's previous pull; dropping it, when the pull answers
+/// or the client cancels it, removes the entry unless a newer pull owns it.
+struct PullTicket<'a> {
+    state: &'a DiagnosticState,
+    uri: &'a str,
+    generation: u64,
+}
+
+impl<'a> PullTicket<'a> {
+    fn take(state: &'a DiagnosticState, uri: &'a str) -> Self {
+        let generation = state.pull_seq.fetch_add(1, Ordering::Relaxed);
+        state
+            .pull_generations
+            .lock()
+            .insert(uri.to_string(), generation);
+        state.pass_done.notify_waiters();
+        Self {
+            state,
+            uri,
+            generation,
+        }
+    }
+
+    fn superseded(&self) -> bool {
+        self.state.pull_generations.lock().get(self.uri) != Some(&self.generation)
+    }
+}
+
+impl Drop for PullTicket<'_> {
+    fn drop(&mut self) {
+        let mut generations = self.state.pull_generations.lock();
+        if generations.get(self.uri) == Some(&self.generation) {
+            generations.remove(self.uri);
+        }
+    }
+}
+
 impl Backend {
     /// Body of `textDocument/diagnostic`. See [`server`](crate::server)'s
     /// module docs for how pull and push delivery are selected.
-    pub(crate) fn document_pull_diagnostic(
+    pub(crate) async fn document_pull_diagnostic(
         &self,
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReport> {
         let uri_str = params.text_document.uri.to_string();
+
+        self.await_fresh_diagnostics(&uri_str).await;
 
         // Check resultId — if the client sends back the same resultId we
         // last returned AND the full cache is still present (not
@@ -50,25 +92,6 @@ impl Backend {
             }
         }
 
-        // In pull mode the pull request *triggers* native diagnostic
-        // computation, but never computes it inline: a synchronous
-        // compute on the request path would hold a tower-lsp concurrency
-        // slot for seconds and wedge the transport under a typing burst
-        // (see `trigger_diagnostics_for_pull`). If the full cache is
-        // missing for this URI, this call queues the debounced
-        // background worker and returns whatever is currently cached
-        // (possibly empty); the worker recomputes, caches the full set,
-        // and requests a `workspace/diagnostic/refresh` so the editor
-        // re-pulls the real results a moment later.
-        let needs_compute = {
-            let cache = self.diag.last_full.lock();
-            !cache.contains_key(&uri_str)
-        };
-
-        if needs_compute {
-            self.trigger_diagnostics_for_pull(&uri_str);
-        }
-
         let (diagnostics, result_id) = {
             let cache = self.diag.last_full.lock();
             let ids = self.diag.result_ids.lock();
@@ -88,6 +111,103 @@ impl Backend {
                 },
             ),
         )
+    }
+
+    /// Hold a document pull until the diagnostics it answers with reflect
+    /// the document's current text.
+    ///
+    /// Editors pull right after every `didChange`.  Answered at once, that
+    /// pull reports the set from before the edit, as `Unchanged` when the
+    /// client echoes the last `resultId`, and the fresh set only reaches a
+    /// client that pulls the document again on `workspace/diagnostic/refresh`.
+    /// Neovim answers the refresh with a `workspace/diagnostic` pull only,
+    /// and Emacs did not pull the document again either, so both kept
+    /// showing the set from the edit before.  The same went for a pull that
+    /// landed while the project was still being indexed at startup, which
+    /// was answered with an empty set.
+    ///
+    /// So the pull waits for startup to finish, queues a pass when nothing
+    /// is cached for the document, and waits while the worker still owes
+    /// the document a pass.  In a client known to pull the document again
+    /// on a refresh (see `fast_phase_answers_pulls`), it answers once that
+    /// pass has delivered its fast phase (syntax errors, unused imports),
+    /// with the slow phase's previous results, and the slow phase reaches
+    /// the editor through the refresh that follows.  Every other client
+    /// waits for the slow phase as well.
+    ///
+    /// Nothing is computed on the request path: a synchronous compute would
+    /// hold a tower-lsp concurrency slot for seconds and wedge the transport
+    /// under a typing burst (see `trigger_diagnostics_for_pull`).  A newer
+    /// pull for the same document releases the held one, so a typing burst
+    /// holds at most one request per document.  A cancelled request drops
+    /// this future, which is equally safe.
+    async fn await_fresh_diagnostics(&self, uri: &str) {
+        let ticket = PullTicket::take(&self.diag, uri);
+        let mut queued = false;
+
+        loop {
+            let woken = self.diag.pass_done.notified();
+            tokio::pin!(woken);
+            // Register before checking, so a wake-up between the check
+            // and the await is not lost.
+            woken.as_mut().enable();
+            if ticket.superseded() || self.shutdown_flag.load(Ordering::Acquire) {
+                return;
+            }
+            if self.init_complete.load(Ordering::Acquire) {
+                if !queued && !self.diag.last_full.lock().contains_key(uri) {
+                    self.trigger_diagnostics_for_pull(uri);
+                }
+                queued = true;
+                if !self.diagnostic_pass_outstanding(uri, self.fast_phase_answers_pulls()) {
+                    return;
+                }
+            }
+            woken.await;
+        }
+    }
+
+    /// Whether the running diagnostic worker still owes `uri` a pass: its
+    /// latest edit is still being parsed, or it is queued for the worker,
+    /// or being diagnosed by it (and, when `fast_phase_answers`, has not
+    /// delivered its fast phase yet).  Each stage hands the URI on before
+    /// it lets go of it, so they are read in that order: the parse queues
+    /// the URI before it drops its `edits_awaiting_parse` entry, and the
+    /// worker moves it into `in_flight_uris` before it releases
+    /// `pending_uris`.
+    fn diagnostic_pass_outstanding(&self, uri: &str, fast_phase_answers: bool) -> bool {
+        if !self.diag.worker_alive.load(Ordering::Acquire) {
+            return false;
+        }
+        if self.diag.edits_awaiting_parse.lock().contains_key(uri) {
+            return true;
+        }
+        let pending = self.diag.pending_uris.lock();
+        if pending.contains(uri) {
+            return true;
+        }
+        let in_flight = self.diag.in_flight_uris.lock();
+        in_flight.contains(uri)
+            && !(fast_phase_answers && self.diag.fast_delivered.lock().contains(uri))
+    }
+
+    /// Whether a held document pull answers as soon as the fast phase is
+    /// in, leaving the slow phase to the refresh that follows.  That is
+    /// only safe in a client that pulls its open documents again on
+    /// `workspace/diagnostic/refresh`, which the protocol cannot tell us:
+    /// Neovim advertises refresh support but answers a refresh with a
+    /// `workspace/diagnostic` pull only, and ignores its items for a buffer
+    /// it pulls one document at a time.  So this lists the clients seen to
+    /// re-pull (VS Code and Zed, including their insider and preview
+    /// builds), and every other client waits for the slow phase.  A client
+    /// missing from the list sees syntax errors later on a large file; one
+    /// wrongly on it would keep the slow phase's stale set.
+    pub(crate) fn fast_phase_answers_pulls(&self) -> bool {
+        let name = self.client_name.lock();
+        ["Visual Studio Code", "Zed"].iter().any(|prefix| {
+            name.get(..prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        })
     }
 
     /// Body of `workspace/diagnostic`. Reports open files from the live

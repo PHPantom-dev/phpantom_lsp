@@ -141,6 +141,10 @@ impl PhpType {
         if self.is_never() || supertype.is_mixed() {
             return Some(true);
         }
+        // `non-empty-mixed` holds every truthy value and nothing else.
+        if supertype.is_named("non-empty-mixed") {
+            return Some(self.falsy_type().is_none());
+        }
 
         // Treat `?T` as `T|null` for uniform handling.
         if let TypeKind::Nullable(inner) = self.kind() {
@@ -828,6 +832,12 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
 
     if sub_is_pseudo_class || sup_is_pseudo_class {
         return false;
+    }
+
+    // `non-empty-mixed` holds every truthy value and nothing else, which
+    // the alias below would widen to every value.
+    if sup_l == "non-empty-mixed" {
+        return PhpType::named(crate::atom::atom(sub_raw)).truthiness() == Some(true);
     }
 
     // Alias normalisation.

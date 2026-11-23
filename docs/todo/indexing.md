@@ -358,14 +358,38 @@ configured. Maintainer's call on the semantics; whichever way it
 goes, the chosen behaviour needs a test and a sentence in
 [`configuration.md`](../configuration.md).
 
-## X22. Read the remaining YAML files with the shared parser
+## X22. Read YAML files with a parser
 
 **Impact: Low-Medium · Complexity: Medium-High**
 
-The refactoring gate gives the project a YAML parser that keeps where
-each scalar is written, and moves the services files onto it. Every
-other YAML file is still read by its own line scan, each with its own
-idea of indentation, comments, quoting, and flow collections:
+PHPantom has no YAML parser: about 50 functions across 18 files read
+YAML line by line, each with its own idea of indentation, comments,
+quoting, and flow collections.
+
+**Step 1: the shared parser and the services files.** Add
+`yaml-rust2`, the parser PHPlumb uses, so code ported from it fits, and
+a shared module, `src/yaml.rs`, that builds a tree in which every
+scalar keeps its byte range and can give the key path to an offset
+(PHPlumb's `crates/phplumb-index/src/frameworks/yaml.rs` is a 220-line
+model). The parser's markers count characters, not bytes, so convert
+them through a table of line starts, and allow for CRLF. An escaped
+quoted scalar's value differs from its source text. Where a project's
+files are indexed, read the parser's events directly rather than
+building a tree per file, so Drupal core's thousand-plus YAML files do
+not each allocate one.
+
+A real parser rejects the whole document at its first error, and a file
+being typed into often has one. Keep the last tree that parsed for an
+open document, and keep the tolerant line scan for working out what the
+cursor is typing (`@` service IDs and the other YAML completions).
+
+Then move `scan_yaml` in `src/symfony/resources.rs`, which reads both
+Symfony's and Drupal's services files, onto the module against its
+existing tests. Measure `benches/memory_usage.py`'s Symfony and Drupal
+scenarios before and after. Files: `Cargo.toml`, `src/yaml.rs` (new),
+`src/lib.rs`, `src/symfony/resources.rs`.
+
+**Step 2: the remaining files.**
 
 - Symfony: `src/symfony/routes.rs`, `translations.rs`, `validation.rs`,
   `serializer.rs`, `tags.rs`, `config_tree.rs`, `bundles.rs`,

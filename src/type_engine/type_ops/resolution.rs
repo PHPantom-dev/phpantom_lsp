@@ -365,6 +365,33 @@ fn type_hint_to_classes_typed_depth(
     }
 }
 
+/// `classes`, followed by what a trait among them requires of its users.
+///
+/// A type naming a trait (`self` in the trait's own body, or the trait's
+/// name that `self` was replaced with) describes an instance of a class
+/// using it, so it is the trait and its `@phpstan-require-*` classes at
+/// once.  [`ResolvedType::from_classes_with_hint`] reads the result back as
+/// that intersection.
+pub(crate) fn with_trait_requirements(
+    mut classes: Vec<Arc<ClassInfo>>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    if let [only] = classes.as_slice()
+        && only.kind == ClassLikeKind::Trait
+    {
+        let required = crate::type_engine::trait_context::trait_required_classes(
+            only,
+            all_classes,
+            class_loader,
+        );
+        for cls in required {
+            ClassInfo::push_unique_arc(&mut classes, cls);
+        }
+    }
+    classes
+}
+
 /// Resolve a named type (with optional generic args) to `ClassInfo`.
 ///
 /// Handles `self`/`static`/`$this`/`parent`, type alias expansion,
@@ -422,8 +449,8 @@ fn resolve_named_type(
             );
         }
         return find_or_load_resolved(owning_class_name, all_classes, class_loader)
-            .into_iter()
-            .collect();
+            .map(|cls| with_trait_requirements(vec![cls], all_classes, class_loader))
+            .unwrap_or_default();
     }
 
     // ── parent ─────────────────────────────────────────────────────
@@ -537,24 +564,39 @@ fn resolve_named_type(
             // never bound (a `static<TNewKey, TValue>` rebind on a
             // concrete collection subclass, a custom Eloquent builder
             // specialised to its model).
-            if !generic_args.is_empty()
+            let generic = !generic_args.is_empty()
                 && (!cls.template_params.is_empty()
                     || crate::inheritance::is_extends_only_generic_rebindable(
                         &cls,
                         generic_args.len(),
                         class_loader,
-                    ))
-            {
+                    ));
+            // A Drupal field item list or item is asked about once.
+            let drupal = (!generic && !generic_args.is_empty())
+                .then(|| {
+                    crate::drupal::field_items::field_type_hint(&cls, generic_args, class_loader)
+                })
+                .flatten();
+            if generic || drupal.is_some() {
                 let generic_arg_strings: Vec<String> =
                     generic_args.iter().map(|a| a.to_string()).collect();
-                vec![virtual_members::resolve_class_for_type_hint(
+                vec![virtual_members::resolve_class_for_field_type_hint(
                     &cls,
                     class_loader,
                     &generic_arg_strings,
                     generic_args,
+                    || {
+                        drupal.or_else(|| {
+                            crate::drupal::field_items::field_type_hint(
+                                &cls,
+                                generic_args,
+                                class_loader,
+                            )
+                        })
+                    },
                 )]
             } else {
-                vec![cls]
+                with_trait_requirements(vec![cls], all_classes, class_loader)
             }
         }
         None => {

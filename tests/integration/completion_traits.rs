@@ -3166,6 +3166,54 @@ async fn test_require_extends_self_return_resolves_to_using_class() {
     }
 }
 
+/// Inside the trait itself, a `self` return type names a class using the
+/// trait, so the required class's members are offered after it.
+#[tokio::test]
+async fn test_require_extends_self_return_inside_trait_offers_required_class() {
+    let backend = create_test_backend();
+
+    let uri = Uri::parse("file:///trait_require_extends_inside.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "abstract class Model {\n",
+        "    public function getTable(): string { return ''; }\n",
+        "}\n",
+        "/** @phpstan-require-extends Model */\n",
+        "trait Stamps {\n",
+        "    public function fluent(): self { return $this; }\n",
+        "    public function run(): void {\n",
+        "        $this->fluent()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let result = completion_response(&backend, &uri, 8, 26, None).await;
+
+    match result {
+        Some(CompletionResponse::CompletionItemList(items)) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getTable"),
+                "should offer getTable() from the required class, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"fluent"),
+                "should still offer the trait's own fluent(), got: {:?}",
+                method_names
+            );
+        }
+        other => panic!("Expected CompletionResponse::CompletionItemList, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn test_require_implements_self_return_resolves_to_using_class() {
     // Ported from Mago trait_require_implements_self_return.php

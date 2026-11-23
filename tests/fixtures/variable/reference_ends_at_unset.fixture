@@ -1,0 +1,15 @@
+// test: unset() ends a reference, so later writes leave the old target alone
+// feature: hover
+// expect: $a = 1
+// expect_absent: 'x'
+---
+<?php
+
+function test(): void {
+    $a = 'text';
+    $r = &$a;
+    $r = 1;
+    unset($r);
+    $r = 'x';
+    echo $<>a;
+}

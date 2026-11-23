@@ -13,6 +13,59 @@ use std::sync::Arc;
 // ── applies_to ──────────────────────────────────────────────────────
 
 #[test]
+fn builder_scope_injection_respects_declared_methods_and_macros() {
+    let mut model = make_class("App\\Models\\Post");
+    model.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
+    model.methods.push(Arc::new(make_method(
+        "scopePublished",
+        Some(ELOQUENT_BUILDER_FQN),
+    )));
+    let loader = |fqn: Fqn<'_>| match fqn.as_str() {
+        "App\\Models\\Post" => Some(Arc::new(model.clone())),
+        ELOQUENT_MODEL_FQN => Some(Arc::new(make_class(ELOQUENT_MODEL_FQN))),
+        _ => None,
+    };
+    for (is_virtual, is_macro, is_static, expected) in [
+        (false, false, false, "int"),
+        (true, true, false, "int"),
+        (
+            true,
+            false,
+            false,
+            "Illuminate\\Database\\Eloquent\\Builder<App\\Models\\Post>",
+        ),
+        (
+            true,
+            false,
+            true,
+            "Illuminate\\Database\\Eloquent\\Builder<App\\Models\\Post>",
+        ),
+    ] {
+        let mut builder = make_class(ELOQUENT_BUILDER_FQN);
+        let raw = builder.clone();
+        let mut method = make_method("PUBLISHED", Some("int"));
+        method.is_virtual = is_virtual;
+        method.is_macro = is_macro;
+        method.is_static = is_static;
+        builder.methods.push(Arc::new(method));
+        super::builder_injection::try_inject_builder_scopes(
+            &mut builder,
+            &raw,
+            ELOQUENT_BUILDER_FQN,
+            &[PhpType::named(model.fqn())],
+            &loader,
+        );
+        let instance = builder
+            .methods
+            .iter()
+            .find(|m| !m.is_static && m.name.eq_ignore_ascii_case("published"))
+            .unwrap();
+        assert_eq!(instance.return_type_str().as_deref(), Some(expected));
+        assert!(!instance.is_static);
+    }
+}
+
+#[test]
 fn model_builder_type_survives_missing_framework_and_custom_stubs() {
     let mut model = make_class("App\\Models\\Product");
     model.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
@@ -606,7 +659,7 @@ fn synthesizes_has_one_property() {
         .iter()
         .find(|p| p.name == "profile")
         .unwrap();
-    assert_eq!(rel_prop.type_hint_str().as_deref(), Some("Profile"));
+    assert_eq!(rel_prop.type_hint_str().as_deref(), Some("?Profile"));
 }
 
 #[test]
@@ -625,7 +678,7 @@ fn synthesizes_belongs_to_property() {
         .iter()
         .find(|p| p.name == "author")
         .unwrap();
-    assert_eq!(rel_prop.type_hint_str().as_deref(), Some("User"));
+    assert_eq!(rel_prop.type_hint_str().as_deref(), Some("?User"));
 }
 
 #[test]
@@ -965,7 +1018,7 @@ fn provides_fqn_related_type_singular() {
         .unwrap();
     assert_eq!(
         rel_prop.type_hint_str().as_deref(),
-        Some("\\App\\Models\\Profile")
+        Some("?\\App\\Models\\Profile")
     );
 }
 
