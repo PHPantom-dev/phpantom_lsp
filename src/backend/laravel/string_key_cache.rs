@@ -103,6 +103,23 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub inertia_pages: parking_lot::Mutex<()>,
 }
 
+impl crate::Backend {
+    /// Drop the key lists and typed usages affected by an edited or removed file.
+    pub(crate) fn invalidate_laravel_string_keys(&self, uri: &str, content: &str) {
+        self.laravel
+            .string_key_cache
+            .write()
+            .invalidate_for_uri(uri, content);
+        // Provider configuration can change which checks are confirmed in
+        // other files even when no PHP class signature changes.
+        if uri.ends_with("/config/auth.php")
+            && self.laravel.auth_provider_models.write().take().is_some()
+        {
+            self.retire_typed_receiver_spans();
+        }
+    }
+}
+
 impl LaravelStringKeyCache {
     pub(crate) fn invalidate_for_uri(&mut self, uri: &str, content: &str) {
         if let Some(catalog) = &self.rate_limiters

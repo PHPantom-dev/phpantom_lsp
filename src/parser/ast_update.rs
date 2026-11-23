@@ -126,10 +126,7 @@ impl Backend {
             |lowering| Arc::clone(&lowering.virtual_php),
         );
 
-        self.laravel
-            .string_key_cache
-            .write()
-            .invalidate_for_uri(uri, content);
+        self.invalidate_laravel_string_keys(uri, content);
         self.refresh_blade_discovery(uri);
         self.refresh_blade_block_index(uri, content);
 

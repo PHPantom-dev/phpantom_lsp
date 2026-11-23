@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use parking_lot::RwLock;
 
@@ -21,6 +22,8 @@ pub(crate) struct LaravelState {
     /// whenever files are re-parsed, so edits to `config/auth.php` take
     /// effect without a restart.
     pub(crate) auth_user_type_cache: RwLock<HashMap<String, Option<PhpType>>>,
+    /// Model names explicitly declared by auth providers, including non-default guards.
+    pub(crate) auth_provider_models: RwLock<OnceLock<Arc<[String]>>>,
     /// Memoized concrete type every configured filesystem disk resolves to,
     /// derived from `config/filesystems.php` and
     /// [`storage_drivers`](Self::storage_drivers).
@@ -182,6 +185,7 @@ impl LaravelState {
     pub(crate) fn new(aliases: laravel::LaravelAliasSlot) -> Self {
         Self {
             auth_user_type_cache: RwLock::new(HashMap::new()),
+            auth_provider_models: Default::default(),
             storage_disk_type_cache: RwLock::new(None),
             config_facts_generation: AtomicU64::new(0),
             storage_drivers: RwLock::default(),
