@@ -977,6 +977,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Framework names in strings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b760-a-nullable-or-union-receiver-never-confirms-a-typed-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B760. A nullable or union receiver never confirms a typed key
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1600,6 +1617,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Framework names in strings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b760-a-nullable-or-union-receiver-never-confirms-a-typed-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B760. A nullable or union receiver never confirms a typed key
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1698,7 +1732,31 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b760-a-nullable-or-union-receiver-never-confirms-a-typed-key">B760. A nullable or union receiver never confirms a typed key<a class="headerlink" href="#b760-a-nullable-or-union-receiver-never-confirms-a-typed-key" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">public function __construct(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    private ?Factory $views,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    private Factory|Mailer $renderer,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">) {}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">public function show(): void</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">{</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    $this-&gt;views-&gt;make('pages.home');    // no view key</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    $this-&gt;renderer-&gt;make('pages.home'); // no view key</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>typed_receiver_key_kind</code> (<code>src/blade/typed_receiver.rs</code>) asks whether
+the receiver's whole type is a subtype of the target class.
+<code>is_subtype_of_typed</code> requires every member of a union to pass, and
+treats <code>?Factory</code> as <code>Factory|null</code>, so <code>null</code> fails it, and so does
+the other half of a <code>Factory|Mailer</code>. The key is then not confirmed:
+there is no go-to-definition, completion or reference for it, and no
+missing-template diagnostic. A call is only reached when its receiver
+is not <code>null</code>, so drop <code>null</code> from the receiver's type, then check each
+remaining member separately and take the first that names a target. Do
+this once in <code>typed_receiver_key_kind</code>, for every receiver class (view
+factories, mailables, Symfony containers, Drupal and Yii targets), not
+per receiver.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>

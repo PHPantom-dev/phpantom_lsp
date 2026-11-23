@@ -1843,34 +1843,109 @@ feature area.    </p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<h2 id="blocks-a-sprint-8-task">Blocks a Sprint 8 task<a class="headerlink" href="#blocks-a-sprint-8-task" title="Permanent link">&para;</a></h2>
-<h3 id="read-the-services-files-with-a-yaml-parser">Read the services files with a YAML parser<a class="headerlink" href="#read-the-services-files-with-a-yaml-parser" title="Permanent link">&para;</a></h3>
-<p>F68 (method names under <code>calls:</code>) reads services files and needs the
-key path down to a sequence item, which the line scan in <code>scan_yaml</code> (<code>src/symfony/resources.rs</code>)
-does not give. PHPantom has no YAML parser: about 50 functions across
-18 files read YAML line by line, each handling indentation, comments,
-quotes, and flow collections its own way.</p>
-<p>Add <code>yaml-rust2</code>, the parser PHPlumb uses, so code ported from it fits,
-and a shared module, <code>src/yaml.rs</code>, that builds a tree in which every
-scalar keeps its byte range and can give the key path to an offset
-(PHPlumb's <code>crates/phplumb-index/src/frameworks/yaml.rs</code> is a 220-line
-model). The parser's markers count characters, not bytes, so convert
-them through a table of line starts, and allow for CRLF. An escaped
-quoted scalar's value differs from its source text. Where a project's
-files are indexed, read the parser's events directly rather than
-building a tree per file, so Drupal core's thousand-plus YAML files do
-not each allocate one.</p>
-<p>A real parser rejects the whole document at its first error, and a file
-being typed into often has one. Keep the last tree that parsed for an
-open document, and keep the tolerant line scan for working out what the
-cursor is typing (<code>@</code> service IDs and the other YAML completions).</p>
-<p>Then move <code>scan_yaml</code> in <code>src/symfony/resources.rs</code> onto the module,
-which reads both Symfony's and Drupal's services files, against its
-existing tests. Measure <code>benches/memory_usage.py</code>'s Symfony and Drupal
-scenarios before and after. The other YAML scanners move in X22, outside
-the gate.</p>
-<p>Files: <code>Cargo.toml</code>, <code>src/yaml.rs</code> (new), <code>src/lib.rs</code>,
-<code>src/symfony/resources.rs</code>.</p>
+<h2 id="blocks-a-sprint-9-task">Blocks a Sprint 9 task<a class="headerlink" href="#blocks-a-sprint-9-task" title="Permanent link">&para;</a></h2>
+<h3 id="split-srcreference_indexrs-by-concern">Split <code>src/reference_index.rs</code> by concern<a class="headerlink" href="#split-srcreference_indexrs-by-concern" title="Permanent link">&para;</a></h3>
+<p>P91 rewrites how a file's reference entries are built, moving the work
+from the merging thread into the parse workers. The file is 1,185 lines
+of production code (plus 620 lines of inline tests) doing three jobs:
+the index itself (<code>ReferenceIndexKey</code>, <code>ReferenceIndexInner</code>, the
+candidate and count queries, <code>reindex_references_for_symbol_maps_batch</code>
+and eviction), the per-file entry builder
+(<code>reference_entries_for_symbol_map</code>, <code>reference_keys_for_span</code>,
+<code>names_global_fallback</code>, <code>resolved_name_at</code>, the <code>*_fqn_at</code> helpers, and
+the free <code>class_keys</code>/<code>function_keys</code>/<code>constant_keys</code>/<code>symbol_name_keys</code>),
+and the receiver-resolution cache (<code>ResolvedMemberAccess</code>,
+<code>ResolvedMemberFile</code>, and the <code>resolved_member_file</code>,
+<code>cache_resolved_member_file</code>, <code>clear_resolved_member_files</code>,
+<code>retain_resolved_member_files</code> methods).</p>
+<p>Turn it into a directory module: <code>mod.rs</code> keeps the index and its
+queries, <code>entries.rs</code> takes the entry builder, <code>resolved_members.rs</code>
+takes the receiver-resolution cache, and the inline tests move to a
+sibling <code>tests.rs</code> behind <code>#[cfg(test)] #[path]</code>, the way
+<code>classmap_scanner/discovery_tests.rs</code> is laid out. Move code only;
+change no behaviour.</p>
+<p>Files: <code>src/reference_index.rs</code> → <code>src/reference_index/{mod.rs,
+entries.rs, resolved_members.rs, tests.rs}</code>.</p>
+<h3 id="move-batch-parsing-out-of-srcindexingpreloadrs">Move batch parsing out of <code>src/indexing/preload.rs</code><a class="headerlink" href="#move-batch-parsing-out-of-srcindexingpreloadrs" title="Permanent link">&para;</a></h3>
+<p>P91 rewrites <code>parse_batch_parallel</code> and <code>parse_and_publish</code> (overlapping
+a chunk's parse with the previous chunk's merge), and P92 rewrites the
+file discovery in <code>ensure_workspace_indexed_with_progress_mode</code>. The
+file is 755 lines and holds both the workspace-index orchestration and
+the batch-parsing engine, and that one function is 280 lines.</p>
+<p>Move the batch parser (<code>parse_files_parallel_with_progress</code>,
+<code>parse_paths_parallel_with_progress</code>, <code>parse_paths_parallel_awake</code>,
+<code>parse_batch_parallel</code>, <code>parse_and_publish</code>, <code>publish_parsed</code>,
+<code>DORMANT_CHUNK</code>, <code>ParseCounter</code>, <code>largest_first_work_order</code>, and the
+<code>report_weighted_*</code> progress helpers) into <code>src/indexing/parse_batch.rs</code>.
+Then extract Phase 1 and Phase 2 discovery (from the <code>existing_uris</code>
+set through building <code>phase2_work</code> and <code>resource_work</code>) out of
+<code>ensure_workspace_indexed_with_progress_mode</code> into a function that
+returns the three work lists, so P92 changes discovery without touching
+the parse and publish sequence. Move code only; change no behaviour.</p>
+<p>Files: <code>src/indexing/preload.rs</code>, <code>src/indexing/parse_batch.rs</code> (new),
+<code>src/indexing/mod.rs</code>.</p>
+<h3 id="extract-the-parallel-walk-from-walk_roots">Extract the parallel walk from <code>walk_roots</code><a class="headerlink" href="#extract-the-parallel-walk-from-walk_roots" title="Permanent link">&para;</a></h3>
+<p>P92 moves <code>visit_workspace_files_gitignore</code> and <code>scan_drupal_directories</code>
+onto a parallel walk. <code>walk_roots</code> in <code>src/classmap_scanner/walk.rs</code> is
+the only one today, and its parallel machinery (<code>build_parallel</code> over
+<code>available_cores()</code>, a channel per worker, collecting, sorting for a
+deterministic order) is tied to PSR-4 root attribution and the PHP-file
+filter. Moving the other two walks onto it as written would add two more
+copies of that machinery.</p>
+<p>Extract a helper that runs a <code>WalkBuilder</code> in parallel, hands each
+entry to a caller-supplied classifier (<code>Fn(&amp;ignore::DirEntry) -&gt;
+Option&lt;T&gt;</code>), and returns the results sorted. Make <code>walk_roots</code> its first
+caller. The classifier receives the entry, so it can use
+<code>entry.file_type()</code> rather than stat the path again. Change no
+behaviour.</p>
+<p>Files: <code>src/classmap_scanner/walk.rs</code>.</p>
+<h2 id="general">General<a class="headerlink" href="#general" title="Permanent link">&para;</a></h2>
+<h3 id="gate-laravels-type-confirmed-sites-at-extraction">Gate Laravel's type-confirmed sites at extraction<a class="headerlink" href="#gate-laravels-type-confirmed-sites-at-extraction" title="Permanent link">&para;</a></h3>
+<p><code>Frameworks</code> (<code>src/symbol_map/extraction/mod.rs</code>) has a flag for
+Symfony, the service container, Drupal, Twig, Doctrine, Yii and Tempest,
+and their extraction records a site for the type engine to confirm only
+in a project that uses the framework. It has no Laravel flag, so the
+Laravel sites are recorded in every project, and each consumer decides
+for itself whether to look at them:</p>
+<ul>
+<li><code>record_view_receiver_sites</code> (<code>laravel/method_calls.rs</code>) records a
+  view-factory or mailable site for any <code>-&gt;make('x')</code>, <code>-&gt;first('x')</code>,
+  <code>-&gt;exists('x')</code>, <code>-&gt;view('x')</code> and the like, in any project.
+  <code>typed_receiver_spans_for</code> (<code>src/blade/typed_receiver.rs</code>) resolves
+  each such receiver's type the first time the file is read, with no
+  Laravel check. In a Symfony or Drupal project that is a receiver
+  resolution per container <code>make()</code> or repository <code>first()</code> call, which
+  confirms nothing.</li>
+<li>Morph column sites (<code>src/symbol_map/morph_columns.rs</code>) are recorded
+  for every <code>$x-&gt;prop === 'literal'</code>. <code>morph_column_spans_for</code>
+  (<code>src/virtual_members/laravel/typed_morph_columns.rs</code>) skips them
+  outside Laravel at confirmation, and
+  <code>reference_entries_for_symbol_map</code> (<code>src/reference_index.rs</code>) skips
+  them again with its own <code>is_laravel</code> check.</li>
+<li>Any new Laravel site added the same way (connection names from
+  <code>-&gt;connection('x')</code>, <code>-&gt;onConnection('x')</code> and <code>$connection</code>) is
+  another copy of the pattern.</li>
+</ul>
+<p>Add <code>laravel</code> to <code>Frameworks</code>, set from
+<code>resolved_class_cache.laravel().is_enabled()</code> where the index builds it
+(<code>src/parser/ast_update.rs</code>) and <code>true</code> in <code>Frameworks::ALL</code>. Gate the
+recording of view-receiver and morph column sites on it. Then remove the
+checks this makes redundant: the Laravel test in
+<code>morph_column_spans_for</code> and the <code>is_laravel</code> filtering of morph sites in
+<code>reference_entries_for_symbol_map</code>. Before you remove them, check that a
+project which turns into a Laravel project (a <code>composer.json</code> change)
+re-extracts its files the way a change to the Symfony flags does. If it
+does not, the checks at confirmation are what keeps that case working,
+and they stay. Set the flag at the other places that build <code>Frameworks</code>
+(<code>src/symfony/route_world.rs</code>, <code>src/symfony/bundles.rs</code>,
+<code>src/twig/callables.rs</code>, <code>src/yii/definitions.rs</code>,
+<code>src/wordpress/hook_sources.rs</code>, <code>src/diagnostics/dql_syntax.rs</code>) to
+what each of them needs.</p>
+<p>Files: <code>src/symbol_map/extraction/mod.rs</code>,
+<code>src/symbol_map/extraction/laravel/method_calls.rs</code>,
+<code>src/symbol_map/morph_columns.rs</code>, <code>src/parser/ast_update.rs</code>,
+<code>src/virtual_members/laravel/typed_morph_columns.rs</code>,
+<code>src/reference_index.rs</code>, and the <code>Frameworks</code> builders listed above.</p>
 
 
 
