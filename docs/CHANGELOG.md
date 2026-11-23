@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Laravel
+
+- **Laravel connection names follow the receiver's type.** Connection names in instance calls and model or job properties now complete, navigate, show hover details and references, and report unknown names against the appropriate config file. Contributed by @shuvroroy.
+
 ### Changed
 
 ### Fixed
@@ -88,7 +92,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Go to a relation from its name.** Go-to-definition on a relation name in `with()`, `load()`, `whereHas()` and the other relation methods jumps to the relationship method. Each segment of a dotted path such as `'posts.author'` goes to the relation on the model the path has reached, including inside an eager-loading constraint closure.
 - **Container call parameters.** The parameter keys passed to `app()->call()` complete from the callable's parameters and go to them. Contributed by @shuvroroy.
 - **Laravel asset paths and Inertia pages.** The paths `asset()`, `mix()`, `@vite` and `Vite::asset()` name, and the pages `Inertia::render()`, `inertia()` and `Route::inertia()` render, complete from the files on disk, jump to the file, and are reported when nothing is there. An unknown Inertia page gets a quick fix that creates it. Page directories and extensions are read from `config/inertia.php`.
-- **Laravel connection names follow the receiver's type.** Connection names in instance calls and model or job properties now complete, navigate, show hover details and references, and report unknown names against the appropriate config file. Contributed by @shuvroroy.
 - **Laravel related classes.** Code lenses on an Eloquent model go to its factory, policy, observers, migrations, API resources, and custom collection, and a factory, policy, or observer gets one back to its model. An event lists the listeners that handle it, whether registered or discovered from their `handle()` type hint, and a listener links to the events it handles.
 - **Eloquent column attributes.** Columns a model lists in class attributes such as `#[Fillable(['name'])]` or `#[Hidden([...])]` now complete on the model and in queries like those in `$fillable` and `$hidden`, and `#[Fillable]` columns are offered first in `create([...])` and `fill([...])`. Attributes and properties combine and inherit the way Laravel applies them. Contributed by @shuvroroy.
 - **Eloquent attribute-array completion.** Complete model columns in calls such as `User::create(['name' => …])`, with fillable attributes first and existing keys omitted. Column suggestions also cover more query methods and Laravel's column-name PHP attributes when available. Contributed by @shuvroroy.
