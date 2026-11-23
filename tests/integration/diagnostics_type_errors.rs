@@ -18433,3 +18433,59 @@ function run(M $m): void {
     let messages = argument_messages(php);
     assert!(messages.is_empty(), "{messages:?}");
 }
+
+/// The branch a repeated call got is the receiver's: once the variable holds
+/// a client with the other template argument, the call answers the other
+/// branch.
+#[test]
+fn a_repeated_call_follows_a_reassigned_receiver() {
+    let php = format!(
+        "{ASYNC_CLIENT}/**\n * @param Client<false> $a\n * @param Client<true> $b\n */\nfunction run(Client $a, Client $b): void {{\n    $c = $a;\n    takeResponse($c->send());\n    $c = $b;\n    takePromise($c->send());\n}}\n"
+    );
+    let messages = argument_messages(&php);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// A `?->` check on the call adds a `null` that belongs to that spelling.
+/// The plain call after it only runs once the receiver is set, so it reads
+/// the branch alone.
+#[test]
+fn a_nullsafe_check_leaves_no_null_on_a_repeated_conditional_call() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string) */
+    public function make($flag = false): string|Generated {}
+}
+function take(string $s): void {}
+function run(?Maker $m): void {
+    if ($m?->make() !== '') {}
+    take($m->make());
+}
+"#;
+    let messages = argument_messages(php);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// The argument-less call and the call with an argument are different
+/// calls, each with its own branch, however they interleave.
+#[test]
+fn a_repeated_call_without_arguments_is_not_the_call_with_one() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string) */
+    public function make($flag = false): string|Generated {}
+}
+function take(string $s): void {}
+function takeGen(Generated $g): void {}
+function run(Maker $m): void {
+    take($m->make());
+    takeGen($m->make(true));
+    takeGen($m->make(true));
+    take($m->make());
+}
+"#;
+    let messages = argument_messages(php);
+    assert!(messages.is_empty(), "{messages:?}");
+}

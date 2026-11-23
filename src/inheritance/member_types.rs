@@ -23,28 +23,18 @@ pub(crate) fn resolve_method_return_type(
     with_answering_method(class, method_name, class_loader, |m| m.return_type.clone())
 }
 
-/// A method's declared return type, or that a conditional return type
-/// decides what a call to it returns.
-pub(crate) enum CallReturn {
-    Declared(PhpType),
-    Conditional,
-}
-
-/// [`resolve_method_return_type`], except that a method whose return type
-/// a conditional decides answers [`CallReturn::Conditional`]: only the call
-/// resolver, which sees the receiver and the arguments, can say which
-/// branch a call takes.
-pub(crate) fn resolve_unconditional_method_return_type(
+/// Whether the declaration of `method_name` that states its return type
+/// decides it with a conditional, which only the call resolver, seeing the
+/// receiver and the arguments, can evaluate.
+pub(crate) fn method_return_is_conditional(
     class: &ClassInfo,
     method_name: &str,
     class_loader: &ResolvedClassLoader<'_>,
-) -> Option<CallReturn> {
+) -> bool {
     with_answering_method(class, method_name, class_loader, |m| {
-        if m.conditional_return().is_some() {
-            return Some(CallReturn::Conditional);
-        }
-        m.return_type.clone().map(CallReturn::Declared)
+        Some(m.conditional_return().is_some())
     })
+    .unwrap_or(false)
 }
 
 /// Apply `answer` to the declaration of `method_name` that states the

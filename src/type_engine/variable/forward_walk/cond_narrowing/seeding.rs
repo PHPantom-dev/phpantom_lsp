@@ -233,22 +233,19 @@ fn seed_synthetic_key(
         return;
     }
 
-    let Some(expr) = expr else {
-        let types = resolve_synthetic_key_type(key, scope, ctx);
-        scope.set(key, types);
-        return;
-    };
-    let types = match resolve_seed_key_type(key, scope, ctx) {
-        Some(_) if only_deferred => return,
-        Some(types) => types,
-        None => {
-            let types = super::assignment::resolve_rhs_with_scope(expr, scope, ctx);
-            if types.is_empty() {
-                return;
-            }
-            types
+    if let Some(expr) = expr
+        && is_conditional_call_key(key, scope, ctx)
+    {
+        let types = super::assignment::resolve_rhs_with_receivers_set(expr, scope, ctx);
+        if !types.is_empty() {
+            scope.set(key, types);
         }
-    };
+        return;
+    }
+    if only_deferred {
+        return;
+    }
+    let types = resolve_synthetic_key_type(key, scope, ctx);
     scope.set(key, types);
 }
 

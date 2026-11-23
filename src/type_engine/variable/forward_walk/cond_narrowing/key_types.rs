@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::*;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 
@@ -31,26 +33,11 @@ pub(super) fn resolve_synthetic_key_type(
     if key.ends_with(']') {
         resolve_array_key_type(key, scope, ctx)
     } else if key.contains("->") {
-        resolve_member_key_type(key, scope, ctx, false).unwrap_or_default()
+        resolve_member_key_type(key, scope, ctx)
     } else if let Some((class_key, prop_name)) = split_static_property_key(key) {
         resolve_static_property_key_type(class_key, prop_name, ctx)
     } else {
         scope.get(key).to_vec()
-    }
-}
-
-/// What a key is seeded with: [`resolve_synthetic_key_type`], except that
-/// an argument-less call key whose method declares a conditional return
-/// type answers `None`, to be seeded from the call expression itself.
-pub(super) fn resolve_seed_key_type(
-    key: &str,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Option<Vec<ResolvedType>> {
-    if key.ends_with("()") && key.contains("->") {
-        resolve_member_key_type(key, scope, ctx, true)
-    } else {
-        Some(resolve_synthetic_key_type(key, scope, ctx))
     }
 }
 
@@ -181,45 +168,76 @@ fn resolve_array_key_type(
     key_results
 }
 
+/// The type of the receiver a member key reads through.
+///
+/// Only the leading variable of a path is ever assigned in the scope, so a
+/// deeper path (`$this->holder` in `$this->holder->service`, or `$rows["0"]`
+/// in `$rows["0"]->name`) has to be resolved the same way the key is. Each
+/// step drops one segment, so the recursion is bounded by the number of
+/// segments in the key.
+fn receiver_types<'s>(
+    obj_var: &str,
+    scope: &'s ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Cow<'s, [ResolvedType]> {
+    match scope.get(obj_var) {
+        [] if condition_facts::is_member_path_key(obj_var) => {
+            Cow::Owned(resolve_synthetic_key_type(obj_var, scope, ctx))
+        }
+        from_scope => Cow::Borrowed(from_scope),
+    }
+}
+
+/// Whether `key` is an argument-less call on a receiver whose method
+/// decides its return type with a conditional.
+///
+/// Such a call is seeded from the expression it was written as: the
+/// declared return type [`resolve_synthetic_key_type`] answers with is only
+/// the union of the branches, while the call resolver decides the branch
+/// from the receiver, its class templates and the parameter defaults.
+pub(super) fn is_conditional_call_key(
+    key: &str,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let Some((obj_var, method_name)) = key
+        .strip_suffix("()")
+        .and_then(|head| head.rsplit_once("->"))
+    else {
+        return false;
+    };
+    receiver_types(obj_var, scope, ctx)
+        .iter()
+        .filter_map(|rt| rt.class_info.as_ref())
+        .any(|cls| {
+            crate::inheritance::method_return_is_conditional(
+                cls,
+                method_name,
+                ctx.file.class_loader,
+            )
+        })
+}
+
 /// Resolve what a member key's declaration promises, reading the scope
 /// but not writing to it.
-///
-/// With `defer_conditional_calls`, an argument-less call key whose method
-/// declares a conditional return type answers `None`: what the call returns
-/// is the call resolver's to say, and the declared type is only the union
-/// of the branches.
 fn resolve_member_key_type(
     key: &str,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-    defer_conditional_calls: bool,
-) -> Option<Vec<ResolvedType>> {
+) -> Vec<ResolvedType> {
     let (head, is_call) = match key.strip_suffix("()") {
         Some(head) => (head, true),
         None => (key, false),
     };
     let Some(arrow_pos) = head.rfind("->") else {
-        return Some(Vec::new());
+        return Vec::new();
     };
     let obj_var = &head[..arrow_pos];
     let member_name = &head[arrow_pos + 2..];
 
-    // Resolve the object part's type from scope.  Only the leading
-    // variable of a path is ever assigned there, so a deeper path
-    // (`$this->holder` in `$this->holder->service`, or `$rows["0"]` in
-    // `$rows["0"]->name`) has to be resolved the same way this key is.
-    // Each step drops one segment, so the recursion is bounded by the
-    // number of segments in the key.
-    let resolved_prefix;
-    let obj_types: &[ResolvedType] = match scope.get(obj_var) {
-        [] if condition_facts::is_member_path_key(obj_var) => {
-            resolved_prefix = resolve_synthetic_key_type(obj_var, scope, ctx);
-            &resolved_prefix
-        }
-        from_scope => from_scope,
-    };
+    let obj_types = receiver_types(obj_var, scope, ctx);
     if obj_types.is_empty() {
-        return Some(Vec::new());
+        return Vec::new();
     }
 
     // Look up the member's type on the resolved class(es).
@@ -245,24 +263,7 @@ fn resolve_member_key_type(
     let mut member_results: Vec<ResolvedType> = Vec::new();
     for cls in owners {
         let type_hint = if is_call {
-            match crate::inheritance::resolve_unconditional_method_return_type(
-                cls,
-                member_name,
-                ctx.file.class_loader,
-            ) {
-                Some(crate::inheritance::CallReturn::Conditional) if defer_conditional_calls => {
-                    return None;
-                }
-                Some(crate::inheritance::CallReturn::Conditional) => {
-                    crate::inheritance::resolve_method_return_type(
-                        cls,
-                        member_name,
-                        ctx.file.class_loader,
-                    )
-                }
-                Some(crate::inheritance::CallReturn::Declared(ty)) => Some(ty),
-                None => None,
-            }
+            crate::inheritance::resolve_method_return_type(cls, member_name, ctx.file.class_loader)
         } else {
             crate::inheritance::resolve_property_type_hint(cls, member_name, ctx.file.class_loader)
         };
@@ -301,7 +302,7 @@ fn resolve_member_key_type(
         }
     }
 
-    Some(member_results)
+    member_results
 }
 
 /// Whether a declared type that resolved to no class still means exactly
