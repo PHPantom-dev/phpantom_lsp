@@ -5,6 +5,7 @@
 //! [`crate::drupal`]).
 
 use super::*;
+use crate::call_args::argument_at;
 use crate::drupal::forms::{
     AJAX, AJAX_CALLBACK, CALLBACK_KEYS, CALLBACK_LIST_KEYS, LAZY_BUILDER, RENDER_CALLBACK_KEYS,
     VALUE_CALLBACK,
@@ -3132,24 +3133,6 @@ pub(in crate::symbol_map::extraction) fn record_drupal_route_parameter_sites(
             receiver,
         });
     }
-}
-
-/// The argument a call passes its parameter `index` in: positional, or
-/// named `name`.
-pub(in crate::symbol_map::extraction) fn argument_at<'a, 'arena>(
-    argument_list: &'a ArgumentList<'arena>,
-    index: usize,
-    name: &[u8],
-) -> Option<&'a Expression<'arena>> {
-    argument_list
-        .arguments
-        .iter()
-        .enumerate()
-        .find_map(|(at, argument)| match argument {
-            Argument::Positional(positional) if at == index => Some(positional.value),
-            Argument::Named(named) if named.name.value == name => Some(named.value),
-            _ => None,
-        })
 }
 
 /// The keys of an array literal of route parameters, or of a Yii URL
