@@ -6298,6 +6298,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Traits used by enums.</strong> An enum's <code>use Greets { hello as greet; }</code> now gives the enum a <code>greet()</code> method, <code>insteadof</code> picks the right trait, and <code>/** @use Holds&lt;Stamp&gt; */</code> binds the trait's templates, as they already did in classes.</li>
 <li><strong>Methods called through a variable name.</strong> When <code>$name</code> holds one known method name, <code>$factory-&gt;$name()</code> and <code>Factory::$name()</code> return what that method returns instead of <code>mixed</code>.</li>
 <li><strong>Compound bitwise assignments on strings stay strings.</strong> <code>$payload ^= $mask</code> (and <code>|=</code>, <code>&amp;=</code>) on two strings, or on operands with no declared type, no longer makes <code>$payload</code> an <code>int</code>, matching <code>$payload ^ $mask</code>. Contributed by @phcorp.</li>
+<li><strong>Repeated calls with a conditional return type.</strong> A call without arguments written a second time in the same method, or checked in a condition, now gets the branch its conditional return type picks instead of the method's wider declared type, so passing it on is no longer reported. Contributed by @giuseppe-esposito-87.</li>
 </ul>
 <h4 id="narrowing-and-control-flow">Narrowing and control flow<a class="headerlink" href="#narrowing-and-control-flow" title="Permanent link">&para;</a></h4>
 <ul>
