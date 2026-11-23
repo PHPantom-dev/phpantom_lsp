@@ -2700,6 +2700,35 @@ When the domain has no catalogue yet, offer to create
 <p><strong>Where to look:</strong> <code>src/code_actions/insert_translation_key.rs</code>,
 <code>src/symfony/translations.rs</code> (<code>catalogue_spans</code>, <code>scan_yaml</code>,
 <code>scan_xliff</code>).</p>
+<hr />
+<h2 id="f70-a-label-at-a-call-of-a-closure-value-binds-nothing">F70. A label at a call of a closure value binds nothing<a class="headerlink" href="#f70-a-label-at-a-call-of-a-closure-value-binds-nothing" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">$render = function (string $field): string { return $field; };</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">$render(field: 'x');</span>
+</code></pre></div>
+<p>A named-argument label navigates, highlights, and renames with the parameter
+it fills by resolving the call's callee to the parameter's declaration token.
+A call through a closure literal, a variable holding one, or a
+<code>callable</code>-typed parameter resolves to a type, not to a declaration, so its
+labels have no go-to-definition, no references, and no rename. For a variable
+assigned the closure, the closure's own parameters have tokens in the file,
+so binding through the callable's type to that parameter is what is missing.
+The forward walker already carries a closure's parameter types this way.</p>
+<p><strong>Where to look:</strong> <code>src/type_engine/call_resolution/named_arguments.rs</code>
+(<code>resolve_named_argument</code>), <code>src/type_engine/call_resolution/callable_target.rs</code>
+(<code>callable_type_as_target</code>).</p>
+<hr />
+<h2 id="f71-hover-on-a-parameter-at-its-declaration">F71. Hover on a parameter at its declaration<a class="headerlink" href="#f71-hover-on-a-parameter-at-its-declaration" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>Hovering a function's or method's own parameter where it is declared shows
+nothing, though the engine has its type there.  A named-argument label is
+covered (it hovers the property the parameter promotes, or the parameter
+itself), but only from what the declaration carries, so <code>#[\NoDiscard]</code>'s
+reason and a template type substituted at the call are still missing on both
+spellings.</p>
+<p><strong>Where to look:</strong> <code>src/hover/mod.rs</code> (<code>hover_from_symbol</code>, which has no
+parameter arm, and <code>parameter_hover_body</code>, which spells the label's hover
+from the declared parameter), <code>src/hover/variable.rs</code>.</p>
 
 
 

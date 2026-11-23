@@ -1077,6 +1077,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d45-a-promoted-parameters-own-deprecated-does-not-deprecate-the-property" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D45. A promoted parameter's own <code>@deprecated</code> does not deprecate the property
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1657,6 +1668,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d45-a-promoted-parameters-own-deprecated-does-not-deprecate-the-property" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D45. A promoted parameter's own <code>@deprecated</code> does not deprecate the property
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2068,6 +2090,30 @@ refinements (<code>list&lt;int&gt;</code> and <code>array&lt;…&gt;</code> on <
 <p><strong>Where to look:</strong> <code>omits_only_null_of</code> and its caller in
 <code>src/diagnostics/docblock_native_mismatch.rs</code>. The module comment there
 explains the current rule and will need updating.</p>
+<hr />
+<h2 id="d45-a-promoted-parameters-own-deprecated-does-not-deprecate-the-property">D45. A promoted parameter's own <code>@deprecated</code> does not deprecate the property<a class="headerlink" href="#d45-a-promoted-parameters-own-deprecated-does-not-deprecate-the-property" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">class Field</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">{</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    public function __construct(</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">        /** @deprecated Use `$name` instead. */ public string $old = '',</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">    ) {}</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">}</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">echo $field-&gt;old;                  // nothing reported</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">new Field(old: 'x');               // …nor the label</span>
+</code></pre></div>
+<p>A property a constructor parameter promotes carries no deprecation at all:
+the parser writes <code>deprecation_message: None</code> for it, so no use of one is
+ever reported whichever spelling it is written in. PHP itself cannot help
+(<code>#[\Deprecated]</code> does not target a parameter), so the docblock the parameter
+carries is the only place an author can say it. Note that the engine already
+reads that same docblock for the property's type.</p>
+<p>Once the property carries the message, the deprecated-usage pass also needs
+an arm for a named-argument label, reporting one whose
+<code>named_argument_location</code> promotes a deprecated property.</p>
+<p><strong>Where to look:</strong> <code>src/parser/classes/methods.rs</code>
+(<code>push_promoted_properties</code>), <code>src/diagnostics/deprecated.rs</code>.</p>
 
 
 
