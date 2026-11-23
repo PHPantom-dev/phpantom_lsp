@@ -282,7 +282,7 @@ impl Backend {
             // the keys read before it (`crate::completion::yii_params`).
             StringKeyKind::YiiParam => Arc::new([]),
             // A path is completed a directory at a time from the files on
-            // disk (see `try_laravel_string_key_completion_inner`).
+            // disk (see `laravel_string_key_response`).
             StringKeyKind::Asset | StringKeyKind::ViteAsset => Arc::new([]),
             // So is a file an asset bundle lists, from the directory the
             // bundle names (`crate::completion::yii_assets`).
@@ -300,9 +300,8 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<CompletionResponse> {
-        let cursor = crate::text_position::position_to_offset(content, position) as usize;
-        let code = crate::completion::source::code_context::code_context_at(content, cursor)?;
-        self.try_laravel_string_key_completion_inner(content, position, &code, None, None, None)
+        let ctx = detect_laravel_string_key_context(content, position)?;
+        self.laravel_string_key_response(content, position, ctx)
     }
 
     /// Live-request form of Laravel string-key completion. Resolved names
@@ -316,36 +315,46 @@ impl Backend {
     ) -> Option<CompletionResponse> {
         let indexed_function_exists = |name: &str| self.has_indexed_function(name);
         let indexed_class_exists = |name: &str| self.has_indexed_class(name);
-        self.try_laravel_string_key_completion_inner(
+        let typed_actor = |operator: &crate::completion::source::code_context::Operator| {
+            crate::completion::eloquent_string::extract_receiver_subject(content, operator)
+                .and_then(|subject| {
+                    let cursor =
+                        crate::text_position::position_to_offset(content, position) as usize;
+                    self.typed_laravel_subject_kind(
+                        &subject,
+                        crate::symbol_map::ReceiverClass::LaravelAuthorizable,
+                        content,
+                        cursor,
+                        file_ctx,
+                    )
+                })
+                .is_some()
+        };
+        detect_laravel_string_key_context_inner(
             content,
             position,
             code,
             file_ctx.resolved_names.as_deref(),
             Some(&indexed_function_exists),
             Some(&indexed_class_exists),
+            &typed_actor,
         )
+        .and_then(|ctx| self.laravel_string_key_response(content, position, ctx))
         .or_else(|| self.try_laravel_connection_completion(content, position, code, file_ctx))
     }
 
-    fn try_laravel_string_key_completion_inner(
+    fn typed_laravel_subject_kind(
         &self,
+        subject: &str,
+        receiver: crate::symbol_map::ReceiverClass,
         content: &str,
-        position: Position,
-        code: &CodeContext<'_>,
-        resolved_names: Option<&crate::names::OwnedResolvedNames>,
-        indexed_function_exists: Option<&dyn Fn(&str) -> bool>,
-        indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
-    ) -> Option<CompletionResponse> {
-        let ctx = detect_laravel_string_key_context_inner(
-            content,
-            position,
-            code,
-            resolved_names,
-            indexed_function_exists,
-            indexed_class_exists,
-        )?;
-
-        self.laravel_string_key_response(content, position, ctx)
+        cursor: usize,
+        ctx: &FileContext,
+    ) -> Option<StringKeyKind> {
+        let loaders = self.file_loaders(ctx);
+        let rctx = loaders.resolution_ctx_at(content, cursor as u32);
+        let ty = Self::resolve_arg_text_to_type(subject, &rctx)?;
+        self.typed_receiver_key_kind(&ty, "", 0, receiver, loaders.resolved_class_loader())
     }
 
     fn laravel_string_key_response(

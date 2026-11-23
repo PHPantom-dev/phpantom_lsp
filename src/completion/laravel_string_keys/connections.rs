@@ -28,7 +28,7 @@ impl Backend {
                 return None;
             }
             let subject = extract_receiver_subject(content, &operator)?;
-            self.connection_subject_kind(&subject, receiver, content, cursor, ctx)?
+            self.typed_laravel_subject_kind(&subject, receiver, content, cursor, ctx)?
         } else {
             let lhs = code.code_before.strip_suffix('=')?.trim_end();
             let (property, before) = extract_identifier_backwards(lhs)?;
@@ -63,7 +63,7 @@ impl Backend {
                 if access != AccessKind::Arrow {
                     return None;
                 }
-                self.connection_subject_kind(
+                self.typed_laravel_subject_kind(
                     &subject,
                     ReceiverClass::LaravelConnectionProperty,
                     content,
@@ -121,20 +121,6 @@ impl Backend {
             .into_iter()
             .find(declares)
             .map(Arc::new)
-    }
-
-    fn connection_subject_kind(
-        &self,
-        subject: &str,
-        receiver: ReceiverClass,
-        content: &str,
-        cursor: usize,
-        ctx: &FileContext,
-    ) -> Option<StringKeyKind> {
-        let loaders = self.file_loaders(ctx);
-        let rctx = loaders.resolution_ctx_at(content, cursor as u32);
-        let ty = Self::resolve_arg_text_to_type(subject, &rctx)?;
-        self.typed_receiver_key_kind(&ty, "", 0, receiver, loaders.resolved_class_loader())
     }
 }
 
