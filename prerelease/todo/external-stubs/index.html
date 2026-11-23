@@ -2036,7 +2036,12 @@ migration below lets a stub declare only the members it overrides.</p>
    no Rust needed).</li>
 </ol>
 <p>The phpstorm-stubs patch system (<code>src/stub_patches/</code>) is an equally
-good candidate for the same treatment once the mechanism exists.</p>
+good candidate for the same treatment once the mechanism exists. So
+are its third-party corrections, which a stub can express as plain
+declarations: Drupal's URL methods (<code>Url::toString()</code>,
+<code>generateFromRoute()</code>, <code>assemble()</code>), whose conditional return keys on
+<code>$collect_bubbleable_metadata</code>, and the method template on a query's
+<code>extend()</code> (<code>src/stub_patches/drupal.rs</code>).</p>
 <h3 id="scope-of-the-rust-patch-system-until-then">Scope of the Rust patch system until then<a class="headerlink" href="#scope-of-the-rust-patch-system-until-then" title="Permanent link">&para;</a></h3>
 <p>The current <code>patches.rs</code> module handles the known cases correctly
 and is well-tested. It stays in place until the partial-class merge
