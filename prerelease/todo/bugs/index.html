@@ -922,23 +922,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b759-a-nullsafe-calls-null-sticks-to-the-plain-call-that-repeats-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B759. A nullsafe call's <code>null</code> sticks to the plain call that repeats it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1562,23 +1545,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b759-a-nullsafe-calls-null-sticks-to-the-plain-call-that-repeats-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B759. A nullsafe call's <code>null</code> sticks to the plain call that repeats it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1722,23 +1688,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b759-a-nullsafe-calls-null-sticks-to-the-plain-call-that-repeats-it">B759. A nullsafe call's <code>null</code> sticks to the plain call that repeats it<a class="headerlink" href="#b759-a-nullsafe-calls-null-sticks-to-the-plain-call-that-repeats-it" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function run(?Maker $m): void {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    if ($m?-&gt;make(1) !== '') {}</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    take($m-&gt;make(1)); // reported: expects string, got null|string</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>expr_to_subject_key</code> keys <code>$m?-&gt;make(1)</code> and <code>$m-&gt;make(1)</code> alike, and a
-call key is seeded from the expression it was written as, so the entry
-carries the <code>null</code> the nullsafe operator adds when <code>$m</code> is null. A later
-plain <code>$m-&gt;make(1)</code> only runs with <code>$m</code> set, yet reads that entry. The same
-holds for an argument-less call whose conditional return type is seeded
-from its expression. Sharing the key is what lets
-<code>if ($m?-&gt;get() !== null) { $m-&gt;get()-&gt;x(); }</code> narrow, so the fix is to
-seed the key with what the call returns once its receiver is known to be
-set, not to split the keys (<code>forward_walk/cond_narrowing/seeding.rs</code>,
-<code>seed_call_subject</code> and <code>seed_synthetic_key</code>).</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
