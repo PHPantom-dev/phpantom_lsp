@@ -657,6 +657,14 @@ pub(crate) struct VarResolutionCtx<'a> {
     /// value a `$d++` yields.  Those nodes are typed where they ran, and
     /// the resolver reads them back from here instead of re-deriving them.
     pub expr_types: Option<&'a ExprTypes>,
+    /// Resolve every `?->` as if its receiver were known to be set, so it
+    /// reads like `->` and adds no short-circuit `null`.
+    ///
+    /// A check on `$m?->make(1)` and a later plain `$m->make(1)` share one
+    /// scope key, and the plain call only runs once `$m` is set, so the
+    /// key is seeded with what the call returns in that case.  A read
+    /// through `?->` adds the receiver's `null` back on top of it.
+    pub nullsafe_receivers_set: bool,
 }
 
 impl<'a> VarResolutionCtx<'a> {
@@ -694,6 +702,7 @@ impl<'a> VarResolutionCtx<'a> {
             scope_contains_resolver: None,
             scope_proofs: None,
             expr_types: None,
+            nullsafe_receivers_set: false,
         }
     }
 

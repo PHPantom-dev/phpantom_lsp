@@ -508,6 +508,10 @@ pub(crate) fn seed_call_subject_keys(
 
 /// Seed one expression under its call key, when it has one and the scope
 /// does not already carry it.
+///
+/// `$m?->make(1)` and `$m->make(1)` share a key, and the plain spelling
+/// only runs once `$m` is set, so the key holds what the call returns
+/// then. A read through `?->` adds the short-circuit `null` back itself.
 fn seed_call_subject(expr: &Expression<'_>, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
     let Some(key) = condition_facts::expr_to_subject_key(expr) else {
         return;
@@ -515,7 +519,7 @@ fn seed_call_subject(expr: &Expression<'_>, scope: &mut ScopeState, ctx: &Forwar
     if !seeds_from_expression(&key) || scope.contains(&key) {
         return;
     }
-    let types = super::assignment::resolve_rhs_with_scope(expr, scope, ctx);
+    let types = super::assignment::resolve_rhs_with_receivers_set(expr, scope, ctx);
     scope.set(&key, types);
 }
 

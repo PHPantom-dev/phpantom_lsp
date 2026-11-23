@@ -958,6 +958,29 @@ pub(crate) fn resolve_rhs_with_types<'b>(
     ctx: &ForwardWalkCtx<'_>,
     expr_types: Option<&ExprTypes>,
 ) -> Vec<ResolvedType> {
+    resolve_rhs_in_scope(rhs, scope, ctx, expr_types, false)
+}
+
+/// [`resolve_rhs_with_scope`] for the value `rhs` has once every `?->`
+/// receiver in it is set: what the same expression spelled with `->`
+/// returns.  See [`VarResolutionCtx::nullsafe_receivers_set`].
+///
+/// [`VarResolutionCtx::nullsafe_receivers_set`]: crate::type_engine::resolver::VarResolutionCtx::nullsafe_receivers_set
+pub(crate) fn resolve_rhs_with_receivers_set<'b>(
+    rhs: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ResolvedType> {
+    resolve_rhs_in_scope(rhs, scope, ctx, None, true)
+}
+
+fn resolve_rhs_in_scope<'b>(
+    rhs: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    expr_types: Option<&ExprTypes>,
+    nullsafe_receivers_set: bool,
+) -> Vec<ResolvedType> {
     if let Some(recorded) = expr_types.and_then(|types| types.get(rhs)) {
         return recorded.to_vec();
     }
@@ -971,8 +994,24 @@ pub(crate) fn resolve_rhs_with_types<'b>(
     if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(rhs) {
         return assignment_value(
             &assignment.operator,
-            || resolve_rhs_with_types(assignment.lhs, scope, ctx, expr_types),
-            || resolve_rhs_with_types(assignment.rhs, scope, ctx, expr_types),
+            || {
+                resolve_rhs_in_scope(
+                    assignment.lhs,
+                    scope,
+                    ctx,
+                    expr_types,
+                    nullsafe_receivers_set,
+                )
+            },
+            || {
+                resolve_rhs_in_scope(
+                    assignment.rhs,
+                    scope,
+                    ctx,
+                    expr_types,
+                    nullsafe_receivers_set,
+                )
+            },
         );
     }
 
@@ -1050,7 +1089,15 @@ pub(crate) fn resolve_rhs_with_types<'b>(
         && let Some(ty) = super::super::rhs_resolution::unary_prefix_result_type(
             &prefix.operator,
             prefix.operand,
-            || resolve_rhs_with_types(prefix.operand, scope, ctx, expr_types),
+            || {
+                resolve_rhs_in_scope(
+                    prefix.operand,
+                    scope,
+                    ctx,
+                    expr_types,
+                    nullsafe_receivers_set,
+                )
+            },
             ctx.file.class_loader,
             ctx.resolved_class_cache,
         )
@@ -1079,6 +1126,7 @@ pub(crate) fn resolve_rhs_with_types<'b>(
     let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
         scope_contains_resolver: Some(&scope_contains),
         expr_types,
+        nullsafe_receivers_set,
         ..ctx.var_ctx_for_with_scope(dummy_var, rhs_offset, &scope_resolver, Some(scope.proofs()))
     };
 

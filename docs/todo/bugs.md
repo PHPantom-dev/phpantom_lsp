@@ -41,27 +41,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B759. A nullsafe call's `null` sticks to the plain call that repeats it
-
-**Impact: Low · Complexity: Medium**
-
-```php
-function run(?Maker $m): void {
-    if ($m?->make(1) !== '') {}
-    take($m->make(1)); // reported: expects string, got null|string
-}
-```
-
-`expr_to_subject_key` keys `$m?->make(1)` and `$m->make(1)` alike, and a
-call key is seeded from the expression it was written as, so the entry
-carries the `null` the nullsafe operator adds when `$m` is null. A later
-plain `$m->make(1)` only runs with `$m` set, yet reads that entry. The same
-holds for an argument-less call whose conditional return type is seeded
-from its expression. Sharing the key is what lets
-`if ($m?->get() !== null) { $m->get()->x(); }` narrow, so the fix is to
-seed the key with what the call returns once its receiver is known to be
-set, not to split the keys (`forward_walk/cond_narrowing/seeding.rs`,
-`seed_call_subject` and `seed_synthetic_key`).
+No outstanding items.
 
 ## Array types
 
