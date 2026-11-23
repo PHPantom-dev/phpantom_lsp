@@ -51,6 +51,9 @@ use Drupal\Core\Validation\Attribute\Constraint;
 use Drupal\Core\Validation\Plugin\Validation\Constraint\UniqueFieldConstraint;
 use Drupal\Core\Config\ConfigBase;
 use Drupal\Core\Config\FileStorage;
+use Drupal\Core\Database\Query\ExtendableInterface;
+use Drupal\Core\Database\Query\PagerSelectExtender;
+use Drupal\Core\Database\Query\Select;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\DependencyInjection\ClassResolver;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
@@ -387,6 +390,13 @@ check('NoteInterface is fieldable', is_subclass_of(NoteInterface::class, Fieldab
 check('NoteSummary::isTagged() asks for and reads field_tags by name', str_contains($summarySource, "\$note->hasField('field_tags')") && str_contains($summarySource, "\$tags = \$note->get('field_tags');"));
 check('NoteSummary::isTagged() returns a bool', (new ReflectionMethod(NoteSummary::class, 'isTagged'))->getReturnType()?->getName() === 'bool');
 
+// A query's extend() builds the extender class it is given, which PHPantom
+// reads from the parameter extend() declares.
+check("ExtendableInterface::extend() takes the extender's class as \$extender_name", (new ReflectionMethod(ExtendableInterface::class, 'extend'))->getParameters()[0]->getName() === 'extender_name');
+check('the select query Connection::select() builds is extendable', is_subclass_of(Select::class, ExtendableInterface::class));
+check('PagerSelectExtender is extendable and has limit()', is_subclass_of(PagerSelectExtender::class, ExtendableInterface::class) && (new ReflectionClass(PagerSelectExtender::class))->hasMethod('limit'));
+check('NoteCounter::firstPageIds() extends its query with PagerSelectExtender and limits it', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "->extend(PagerSelectExtender::class)\n            ->limit(10);"));
+
 // Drupal upcasts a controller's parameter named after an entity type and
 // hinted with a class or interface the entity class is (core's
 // EntityResolverManager::setParametersFromReflection()).
@@ -622,6 +632,23 @@ $lazyCallable = (new CallableResolver(new ClassResolver($lazyContainer)))->getCa
 check("CallableResolver calls 'acme.greeter:buildGreeting' on the service", is_array($lazyCallable) && $lazyCallable[0] instanceof Greeter && $lazyCallable[1] === 'buildGreeting');
 check('acme.services.yml builds acme.greeter from Greeter, which declares buildGreeting()', $container->getDefinition('acme.greeter')->getClass() === Greeter::class && (new ReflectionMethod(Greeter::class, 'buildGreeting'))->isPublic());
 check('Greeter trusts buildGreeting() as a render callback', is_subclass_of(Greeter::class, TrustedCallbackInterface::class) && in_array('buildGreeting', Greeter::trustedCallbacks(), true));
+
+// The URL methods return a GeneratedUrl only when asked for its bubbleable
+// metadata, through a flag that defaults to FALSE. PHPantom keys their
+// return type on that parameter's name.
+foreach ([
+    [\Drupal\Core\Url::class, 'toString'],
+    [\Drupal\Core\Routing\UrlGeneratorInterface::class, 'generateFromRoute'],
+    [\Drupal\Core\Utility\UnroutedUrlAssemblerInterface::class, 'assemble'],
+] as [$urlClass, $urlMethod]) {
+    $urlFlag = array_values(array_filter(
+        (new ReflectionMethod($urlClass, $urlMethod))->getParameters(),
+        static fn (ReflectionParameter $parameter): bool => $parameter->getName() === 'collect_bubbleable_metadata',
+    ))[0] ?? null;
+    check("$urlClass::$urlMethod() takes \$collect_bubbleable_metadata, FALSE by default", $urlFlag !== null && $urlFlag->isDefaultValueAvailable() && $urlFlag->getDefaultValue() === false);
+}
+check('A GeneratedUrl has getGeneratedUrl()', method_exists(\Drupal\Core\GeneratedUrl::class, 'getGeneratedUrl'));
+check('CoreLinks::firstNodePath() passes a plain toString() to a string parameter and uses toString(TRUE) as a GeneratedUrl', str_contains((string) file_get_contents("$module/src/CoreLinks.php"), '$this->describe($url->toString())') && str_contains((string) file_get_contents("$module/src/CoreLinks.php"), '$url->toString(TRUE)'));
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

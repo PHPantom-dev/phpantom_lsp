@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\acme;
 
 use Drupal\acme\Entity\Note;
+use Drupal\Core\Database\Query\PagerSelectExtender;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -67,5 +68,22 @@ final class NoteCounter implements ContainerInjectionInterface
         $ids = \Drupal::entityQuery('acme_note')->accessCheck(false)->execute();
 
         return $ids;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function firstPageIds(): array
+    {
+        // Try: complete after `->extend(PagerSelectExtender::class)->`. A
+        // query's extend() returns the extender it is given, so the pager's
+        // `limit()` is no unknown method.
+        $query = \Drupal::database()
+            ->select('acme_note', 'n')
+            ->extend(PagerSelectExtender::class)
+            ->limit(10);
+        $query->fields('n', ['id']);
+
+        return $query->execute()->fetchCol();
     }
 }

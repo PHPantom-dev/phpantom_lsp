@@ -70,6 +70,10 @@ Run `composer install` here first. Composer puts core and contrib into
   `'field_tags'`, which lands in its field storage file, hover it for its
   field type, or find its references, the `$note->field_tags` reads
   included; `$tags`, from `get('field_tags')`, is typed as the field is.
+- A database query's `extend()` returns the extender it is given. In
+  `firstPageIds()` in `web/modules/custom/acme/src/NoteCounter.php`,
+  complete after `->extend(PagerSelectExtender::class)->`: the pager's
+  `limit()` is offered, and is no unknown method.
 - Route names navigate between the routing file that declares them and the
   code, links files, and templates that name them. In
   `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the
@@ -239,6 +243,12 @@ Run `composer install` here first. Composer puts core and contrib into
   the subscription, and the dispatch are one list. Complete an event name
   inside the quotes of `dispatch()` or of the dispatcher's other methods
   that take one.
+- A URL is a string unless the call asks for its bubbleable metadata. In
+  `firstNodePath()` in `web/modules/custom/acme/src/CoreLinks.php`, a plain
+  `toString()` passed to a `string` parameter is not reported, and
+  `toString(TRUE)` is a `GeneratedUrl` that completes `getGeneratedUrl()`.
+  The URL generator's `generateFromRoute()` and the assembler's
+  `assemble()` follow the same flag.
 
 ## What the Symfony support already reads
 
