@@ -21,13 +21,10 @@
 //! `Sequentially`'s) are left alone in YAML, where telling them from an
 //! option's other values would take reading the constraint's options.
 
-use std::sync::Arc;
-
 use crate::Backend;
 use crate::atom::atom;
 use crate::class_lookup::Fqn;
 use crate::symbol_map::{ClassRefContext, DocblockMemberRef, SubjectText, SymbolKind, SymbolSpan};
-use crate::types::ClassInfo;
 
 const CONSTRAINTS_NS: &str = "Symfony\\Component\\Validator\\Constraints\\";
 
@@ -273,7 +270,7 @@ impl Backend {
     pub(crate) fn constraint_options(&self, fqn: &str) -> Option<ConstraintOptions> {
         let loader = self.resolved_class_loader_with(&[]);
         let class = loader(Fqn::new(fqn))?;
-        if !ancestors_load(&class, &loader) {
+        if !crate::inheritance::ancestors_load(&class, &loader) {
             return None;
         }
         let class = crate::virtual_members::resolve_class_fully_cached(
@@ -306,38 +303,6 @@ impl Backend {
         }
         Some(options)
     }
-}
-
-/// Whether every class `class` extends and every trait it or they use
-/// loads, so that its members are all known.
-pub(crate) fn ancestors_load(
-    class: &ClassInfo,
-    loader: &impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>>,
-) -> bool {
-    let mut pending: Vec<_> = class
-        .parent_class
-        .iter()
-        .chain(&class.used_traits)
-        .copied()
-        .collect();
-    let mut seen = Vec::new();
-    while let Some(name) = pending.pop() {
-        if seen.contains(&name) {
-            continue;
-        }
-        seen.push(name);
-        let Some(ancestor) = loader(Fqn::new(&name)) else {
-            return false;
-        };
-        pending.extend(
-            ancestor
-                .parent_class
-                .iter()
-                .chain(&ancestor.used_traits)
-                .copied(),
-        );
-    }
-    true
 }
 
 // ─── YAML ───────────────────────────────────────────────────────────────────

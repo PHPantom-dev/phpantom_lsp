@@ -1365,6 +1365,82 @@ function test(): void {
         assert!(diags.is_empty(), "got: {diags:?}");
     }
 
+    /// A class with no constructor ignores positional arguments, but PHP
+    /// throws for any named one, in `new` and in an attribute alike.
+    #[test]
+    fn flags_named_argument_to_constructorless_class() {
+        let php = r#"<?php
+#[\Attribute]
+class Marker {}
+trait Stamps {}
+class Base {}
+class Plain extends Base { use Stamps; }
+#[Marker(label: 'x')]
+class Tagged {}
+function test(): void {
+    new Plain(x: 1);
+    new Plain(1, 2);
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            unknown_named(&diags),
+            vec![
+                (6, "Unknown named parameter $label"),
+                (9, "Unknown named parameter $x"),
+            ],
+            "got: {diags:?}",
+        );
+    }
+
+    /// A parent or trait that does not load could declare the
+    /// constructor, so a named argument to a class that has none of its
+    /// own is left alone then.
+    #[test]
+    fn no_named_argument_report_when_an_ancestor_is_missing() {
+        let php = r#"<?php
+class FromVendor extends \Vendor\Missing {}
+class UsesMissing { use \Vendor\MissingTrait; }
+class Middle extends \Vendor\AlsoMissing {}
+class Leaf extends Middle {}
+function test(): void {
+    new FromVendor(x: 1);
+    new UsesMissing(x: 1);
+    new Leaf(x: 1);
+}
+"#;
+        let diags = collect(php);
+        assert!(unknown_named(&diags).is_empty(), "got: {diags:?}");
+    }
+
+    /// `new self` in a trait builds the class using the trait, and
+    /// `new static` may build a subclass, either of which can declare the
+    /// constructor. `new self`, and `new static` in a final class, build
+    /// the class itself.
+    #[test]
+    fn named_argument_to_constructorless_class_through_a_keyword() {
+        let php = r#"<?php
+trait Requeues {
+    public function again(): void { new self(model: 1); new static(model: 1); }
+}
+class Job {
+    public function again(): void { new self(model: 1); new static(model: 1); }
+}
+final class Sealed {
+    public function again(): void { new static(model: 1); }
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            unknown_named(&diags),
+            vec![
+                (5, "Unknown named parameter $model"),
+                (8, "Unknown named parameter $model"),
+            ],
+            "got: {diags:?}",
+        );
+    }
+
     fn unknown_named(diags: &[Diagnostic]) -> Vec<(u32, &str)> {
         diags
             .iter()

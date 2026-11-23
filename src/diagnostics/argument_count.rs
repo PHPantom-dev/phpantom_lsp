@@ -309,13 +309,6 @@ impl Backend {
                 None => continue,
             };
 
-            // A callable that accepts any number of arguments (e.g. a class
-            // with no explicit constructor, which PHP lets you call with
-            // extra arguments) is never an argument-count error.
-            if resolved.accepts_any_args {
-                continue;
-            }
-
             let params = &resolved.parameters;
             let actual_args = call_site.arg_count;
 
@@ -340,6 +333,13 @@ impl Backend {
                     &resolved.overloads,
                     out,
                 );
+            }
+
+            // A callable that accepts any number of arguments (e.g. a class
+            // with no explicit constructor, which PHP lets you call with
+            // extra arguments) is never an argument-count error.
+            if resolved.accepts_any_args {
+                continue;
             }
 
             let mut required_count = params.iter().filter(|p| p.is_required).count() as u32;

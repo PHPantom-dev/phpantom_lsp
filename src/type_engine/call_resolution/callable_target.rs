@@ -535,8 +535,11 @@ impl Backend {
     /// calling `new Box(new Gift())` resolves `T` → `Gift` and substitutes it
     /// into the constructor parameters so that type-error diagnostics see
     /// `Gift` instead of the raw `T`.
+    ///
+    /// `late_bound` is set for `new static`, which may build a subclass.
     fn resolve_constructor_callable(
         class_name: &str,
+        late_bound: bool,
         class_loader: &ResolvedClassLoader<'_>,
         cache: &crate::virtual_members::ResolvedClassCache,
         args_text: Option<&str>,
@@ -547,14 +550,22 @@ impl Backend {
         let ctor = match merged.get_method("__construct") {
             Some(c) => c.clone(),
             // A class with no constructor (and none inherited) accepts any
-            // arguments without error: PHP silently ignores them. Mark the
-            // target so the argument-count diagnostic skips it, while
-            // signature help still shows the empty `()` signature.
+            // positional arguments without error: PHP silently ignores
+            // them. Mark the target so the argument-count diagnostic skips
+            // it, while signature help still shows the empty `()`
+            // signature. A named argument still throws, but only report it
+            // when the class built is the one loaded, and every parent and
+            // trait of it loaded, since a missing one may be what declares
+            // the constructor. `new self` in a trait builds the class using
+            // it, and `new static` may build a subclass with a constructor.
             None => {
+                let exact = ci.kind == ClassLikeKind::Class && (!late_bound || ci.is_final);
                 return Some(ResolvedCallableTarget {
                     parameters: crate::types::SharedVec::new(),
                     return_type: None,
                     accepts_any_args: true,
+                    binds_named_args: exact
+                        && crate::inheritance::ancestors_load(&ci, class_loader),
                     owner_class: Some(ci.fqn()),
                     ..Default::default()
                 });
@@ -791,6 +802,7 @@ impl Backend {
                     [only] => only.class_info.as_ref().and_then(|class| {
                         Self::resolve_constructor_callable(
                             &class.fqn(),
+                            false,
                             &resolved_class_loader,
                             &self.resolved_class_cache,
                             effective_args_text,
@@ -813,6 +825,7 @@ impl Backend {
                 };
                 Self::resolve_constructor_callable(
                     &resolved_class_name,
+                    class_name.eq_ignore_ascii_case("static"),
                     &resolved_class_loader,
                     &self.resolved_class_cache,
                     effective_args_text,
