@@ -1,0 +1,2728 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/1.0.0/todo/">
+      
+      
+      
+        <link rel="prev" href="../CONTRIBUTING/">
+      
+      
+        <link rel="next" href="./actions/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.70">
+    
+    
+      
+        <title>Overview - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.e442bf79.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.b60ce83d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="./.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Overview
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="./.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Getting Started
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Development
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_4_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Roadmap
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-roadmap">PHPantom — Roadmap<a class="headerlink" href="#phpantom-roadmap" title="Permanent link">&para;</a></h1>
+<p>This document tracks planned work for PHPantom. Each item links to a
+domain document with full context. Items are grouped into time-boxed
+sprints (roughly 1-2 weeks each) and feature sets: one per framework,
+and one per area of the language server for everything else.</p>
+<p><strong>Guiding priorities:</strong> Completion accuracy → Type intelligence →
+Cross-file navigation → Diagnostics → Code actions → Performance.</p>
+<p>Items inside each sprint and feature set are ordered by priority (top =
+do first): low-complexity items (easiest to assign, least
+implementation risk) before heavy lifts, dependencies before their
+dependents, and within the same complexity tier by impact descending.</p>
+<p><strong>Complexity measures how hard the task is to implement correctly,
+not how long it takes</strong> (time estimates are consistently wrong; skill
+required is not). Use it to decide who to assign: a <strong>Low</strong>-complexity
+item (e.g. adding a hundred repetitive docblock tags) is safe for a
+low-skill contributor even if it's tedious; a <strong>High</strong>-complexity item
+(e.g. a 50-line change to the forward walker) needs an experienced
+contributor even though it's short.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<h1 id="scheduled-sprints">Scheduled Sprints<a class="headerlink" href="#scheduled-sprints" title="Permanent link">&para;</a></h1>
+<h2 id="sprint-8-10-release-ide-extensions">Sprint 8 — 1.0 release &amp; IDE extensions<a class="headerlink" href="#sprint-8-10-release-ide-extensions" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td></td>
+<td><strong>Release 1.0.0 + IDE extensions</strong></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="sprint-9-startup-performance">Sprint 9 — Startup performance<a class="headerlink" href="#sprint-9-startup-performance" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td></td>
+<td>Clear <a href="../todo/refactor/">refactoring gate</a></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>T61</td>
+<td><a href="../todo/type-inference/#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed">A regression that changes where a call resolves goes unnoticed</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>P92</td>
+<td><a href="../todo/performance/#p92-startups-file-walks-and-resource-indexing-run-on-one-core">Startup's file walks and resource indexing run on one core</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>P86</td>
+<td><a href="../todo/performance/#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse">A Symfony app's generated <code>config/reference.php</code> is slow to parse</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>P91</td>
+<td><a href="../todo/performance/#p91-parsing-and-merging-of-the-full-index-take-turns">Parsing and merging of the full index take turns</a></td>
+<td>Medium-High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Release 1.1.0</strong></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h1 id="feature-sets">Feature Sets<a class="headerlink" href="#feature-sets" title="Permanent link">&para;</a></h1>
+<p>A feature set is the work toward one goal: making PHPantom fully usable
+for a framework, or improving one area of the language server. Feature
+sets are not time-boxed and not ordered against each other or the
+sprints; one is taken up when its users ask for it, and items move from
+a set into a sprint when they are scheduled. A framework's set opens
+with a demo project and a baseline from real code, so the support is
+tested against what its users write rather than built on spec.</p>
+<p>An item may appear in more than one sprint or feature set when several
+depend on it (F59 serves Symfony and Drupal). When it
+ships, remove every row that names it.</p>
+<h2 id="symfony-twig">Symfony &amp; Twig<a class="headerlink" href="#symfony-twig" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F59</td>
+<td><a href="../todo/lsp-features/#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed">Send Twig, YAML, and XML documents to the server from Zed</a> (Zed PR)</td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>P86</td>
+<td><a href="../todo/performance/#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse">A Symfony app's generated <code>config/reference.php</code> is slow to parse</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F27</td>
+<td><a href="../todo/lsp-features/#f27-symfony-route-parameters">Symfony route parameters</a> (blocks full Symfony support)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F57</td>
+<td><a href="../todo/lsp-features/#f57-add-translation-quick-fix-for-an-undeclared-symfony-key">"Add translation" quick fix for an undeclared Symfony key</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F58</td>
+<td><a href="../todo/lsp-features/#f58-configured-twig-roots-and-namespaces">Configured Twig roots and namespaces</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F31</td>
+<td><a href="../todo/lsp-features/#f31-symfony-twig-templates-outside-templates">Symfony Twig templates outside <code>templates/</code></a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F66</td>
+<td><a href="../todo/lsp-features/#f66-report-twig-template-diagnostics-from-analyze">Report Twig template diagnostics from <code>analyze</code></a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>F64</td>
+<td><a href="../todo/lsp-features/#f64-report-unknown-parameters-in-yaml-and-xml-configuration">Report unknown parameters in YAML and XML configuration</a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>F63</td>
+<td><a href="../todo/lsp-features/#f63-check-container-parameters-outside-app">Check container parameters outside <code>app.*</code></a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F62</td>
+<td><a href="../todo/lsp-features/#f62-check-symfony-logout-route-names">Check Symfony logout route names</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>F65</td>
+<td><a href="../todo/lsp-features/#f65-check-interpolated-and-listed-twig-names">Check interpolated and listed Twig names</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F30</td>
+<td><a href="../todo/lsp-features/#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter">Symfony translations outside YAML, XLIFF, and the <code>trans</code> filter</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T71</td>
+<td><a href="../todo/type-inference/#t71-a-service-asdecorator-registers-does-not-take-over-the-id">A service <code>#[AsDecorator]</code> registers does not take over the ID</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>T54</td>
+<td><a href="../todo/type-inference/#t54-messenger-handlers-a-service-tag-registers">Messenger handlers a service tag registers</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F61</td>
+<td><a href="../todo/lsp-features/#f61-port-twigstans-tests">Port TwigStan's tests</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T55</td>
+<td><a href="../todo/type-inference/#t55-symfony-array-parameters-are-typed-as-plain-array">Symfony array parameters are typed as plain <code>array</code></a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F34</td>
+<td><a href="../todo/lsp-features/#f34-template-names-a-php-wrapper-builds">Template names a PHP wrapper builds</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>F38</td>
+<td><a href="../todo/lsp-features/#f38-twig-components">Twig components</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>F56</td>
+<td><a href="../todo/lsp-features/#f56-live-components">Live components</a> (depends on F38)</td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>T68</td>
+<td><a href="../todo/type-inference/#t68-a-dql-field-is-typed-by-its-property-not-its-columns-type">A DQL field is typed by its property, not its column's type</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T69</td>
+<td><a href="../todo/type-inference/#t69-identity-in-a-dql-select-is-mixed"><code>IDENTITY()</code> in a DQL <code>SELECT</code> is <code>mixed</code></a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>T65</td>
+<td><a href="../todo/type-inference/#t65-the-expression-builders-fragments-are-not-literal-strings">The expression builder's fragments are not literal strings</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>F48</td>
+<td><a href="../todo/lsp-features/#f48-symfony-environment-variables">Symfony environment variables</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>F24</td>
+<td><a href="../todo/lsp-features/#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories">Doctrine lenses miss attribute mappings and generic repositories</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F25</td>
+<td><a href="../todo/lsp-features/#f25-names-a-php-configurator-spells-as-strings">Names a PHP configurator spells as strings</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F45</td>
+<td><a href="../todo/lsp-features/#f45-symfony-events-named-by-their-class-or-a-constant">Symfony events named by their class or a constant</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F42</td>
+<td><a href="../todo/lsp-features/#f42-symfony-console-arguments-and-options">Symfony console arguments and options</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F39</td>
+<td><a href="../todo/lsp-features/#f39-report-unknown-symfony-configuration-keys">Report unknown Symfony configuration keys</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>F46</td>
+<td><a href="../todo/lsp-features/#f46-symfony-listener-methods-a-tag-or-a-default-names">Symfony listener methods a tag or a default names</a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>T52</td>
+<td><a href="../todo/type-inference/#t52-symfony-return-types-an-argument-decides">Symfony return types an argument decides</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D30</td>
+<td><a href="../todo/diagnostics/#d30-getting-a-private-symfony-service-from-the-container-is-not-reported">Getting a private Symfony service from the container is not reported</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F40</td>
+<td><a href="../todo/lsp-features/#f40-symfony-configuration-schemas-the-treebuilder-walk-misses">Symfony configuration schemas the <code>TreeBuilder</code> walk misses</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F41</td>
+<td><a href="../todo/lsp-features/#f41-symfony-forms-and-validation-beyond-a-form-types-own-data-class">Symfony forms and validation beyond a form type's own data class</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F47</td>
+<td><a href="../todo/lsp-features/#f47-symfony-messenger-transports">Symfony Messenger transports</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F49</td>
+<td><a href="../todo/lsp-features/#f49-symfony-security-names">Symfony security names</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D31</td>
+<td><a href="../todo/diagnostics/#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported">Doctrine mappings that disagree with the entity are not reported</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>D40</td>
+<td><a href="../todo/diagnostics/#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties">A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T56</td>
+<td><a href="../todo/type-inference/#t56-a-dbal-results-row-count-ignores-the-connections-driver">A DBAL result's row count ignores the connection's driver</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>F51</td>
+<td><a href="../todo/lsp-features/#f51-class-names-in-twigs-constant-and-enum">Class names in Twig's <code>constant()</code> and <code>enum()</code></a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>F52</td>
+<td><a href="../todo/lsp-features/#f52-asset-paths-in-twig">Asset paths in Twig</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>T53</td>
+<td><a href="../todo/type-inference/#t53-doctrine-collections-narrowed-by-isempty">Doctrine collections narrowed by <code>isEmpty()</code></a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F23</td>
+<td><a href="../todo/lsp-features/#f23-rename-a-class-through-its-xml-entity-escaped-occurrences">Rename a class through its XML entity-escaped occurrences</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F53</td>
+<td><a href="../todo/lsp-features/#f53-stimulus-controllers-in-twig">Stimulus controllers in Twig</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F55</td>
+<td><a href="../todo/lsp-features/#f55-symfony-expressionlanguage-strings">Symfony ExpressionLanguage strings</a></td>
+<td>Low</td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="wordpress">WordPress<a class="headerlink" href="#wordpress" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WP9</td>
+<td><a href="../todo/wordpress/#wp9-the-argument-types-the-wordpress-stubs-declare">The argument types the WordPress stubs declare</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>WP3</td>
+<td><a href="../todo/wordpress/#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own">WordPress core for a plugin or theme opened on its own</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>WP15</td>
+<td><a href="../todo/wordpress/#wp15-analyze-leaves-out-a-plugins-files-outside-its-psr-4-roots"><code>analyze</code> leaves out a plugin's files outside its PSR-4 roots</a></td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>WP6</td>
+<td><a href="../todo/wordpress/#wp6-template-parts">Template parts</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>E7</td>
+<td><a href="../todo/external-stubs/#e7-stub-based-framework-patches">Stub-based framework patches</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>WP5</td>
+<td><a href="../todo/wordpress/#wp5-hook-callback-parameter-and-return-types">Hook callback parameter and return types</a></td>
+<td>Medium-High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>WP8</td>
+<td><a href="../todo/wordpress/#wp8-sage-view-composers">Sage view composers</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>WP10</td>
+<td><a href="../todo/wordpress/#wp10-hook-docblocks-that-do-not-match-the-call">Hook docblocks that do not match the call</a> (depends on WP5)</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>WP12</td>
+<td><a href="../todo/wordpress/#wp12-constants-wp-configphp-defines-keep-the-value-of-one-install">Constants <code>wp-config.php</code> defines keep the value of one install</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>WP11</td>
+<td><a href="../todo/wordpress/#wp11-assertwperror-and-assertnotwperror-narrow"><code>assertWPError()</code> and <code>assertNotWPError()</code> narrow</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>WP14</td>
+<td><a href="../todo/wordpress/#wp14-wp_parse_args-of-an-object"><code>wp_parse_args()</code> of an object</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+</tbody>
+</table>
+<h2 id="drupal">Drupal<a class="headerlink" href="#drupal" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F59</td>
+<td><a href="../todo/lsp-features/#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed">Send Twig, YAML, and XML documents to the server from Zed</a> (Zed PR)</td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>DR12</td>
+<td><a href="../todo/drupal/#dr12-translation-placeholders">Translation placeholders</a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>DR13</td>
+<td><a href="../todo/drupal/#dr13-module-names-and-infoyml">Module names and <code>*.info.yml</code></a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>DR14</td>
+<td><a href="../todo/drupal/#dr14-port-phpstans-drupal-extension-tests">Port PHPStan's Drupal extension tests</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR18</td>
+<td><a href="../todo/drupal/#dr18-warn-on-unknown-entity-type-ids">Warn on unknown entity type IDs</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>DR19</td>
+<td><a href="../todo/drupal/#dr19-warn-on-unknown-hook-names">Warn on unknown hook names</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR20</td>
+<td><a href="../todo/drupal/#dr20-complete-route-names-built-in-code">Complete route names built in code</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR22</td>
+<td><a href="../todo/drupal/#dr22-complete-permissions-built-in-code">Complete permissions built in code</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR23</td>
+<td><a href="../todo/drupal/#dr23-warn-on-unknown-permission-names">Warn on unknown permission names</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>DR24</td>
+<td><a href="../todo/drupal/#dr24-warn-on-unknown-theme-hook-names">Warn on unknown theme hook names</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>DR28</td>
+<td><a href="../todo/drupal/#dr28-plugin-types-a-manager-builds-at-run-time">Plugin types a manager builds at run time</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR27</td>
+<td><a href="../todo/drupal/#dr27-plugin-ids-in-yaml">Plugin IDs in YAML</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR29</td>
+<td><a href="../todo/drupal/#dr29-fields-added-by-hooks">Fields added by hooks</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>DR30</td>
+<td><a href="../todo/drupal/#dr30-warn-on-unknown-field-names">Warn on unknown field names</a> (depends on DR29)</td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>DR31</td>
+<td><a href="../todo/drupal/#dr31-field-names-in-entity-queries-and-loadbyproperties">Field names in entity queries and <code>loadByProperties()</code></a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>DR32</td>
+<td><a href="../todo/drupal/#dr32-method-callbacks-in-a-form-alter-hook"><code>'::method'</code> callbacks in a form alter hook</a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>DR33</td>
+<td><a href="../todo/drupal/#dr33-render-callbacks-that-are-not-trusted">Render callbacks that are not trusted</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>DR34</td>
+<td><a href="../todo/drupal/#dr34-callback-parameter-checks">Callback parameter checks</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>DR35</td>
+<td><a href="../todo/drupal/#dr35-invokable-classes-and-services-as-callbacks">Invokable classes and services as callbacks</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>DR36</td>
+<td><a href="../todo/drupal/#dr36-array-callables-that-name-their-class-in-a-string">Array callables that name their class in a string</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>DR37</td>
+<td><a href="../todo/drupal/#dr37-listener-methods-in-subscriber-maps">Listener methods in subscriber maps</a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+</tbody>
+</table>
+<h2 id="yii">Yii<a class="headerlink" href="#yii" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Y9</td>
+<td><a href="../todo/yii/#y9-views-a-template-renders-by-name">Views a template renders by name</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Y10</td>
+<td><a href="../todo/yii/#y10-the-renderers-configured-view-path">The renderer's configured view path</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+</tbody>
+</table>
+<h2 id="phpunit-pest">PHPUnit &amp; Pest<a class="headerlink" href="#phpunit-pest" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TS5</td>
+<td><a href="../todo/testing/#ts5-assertion-libraries">Assertion libraries</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>TS10</td>
+<td><a href="../todo/testing/#ts10-benchmark-for-test-code">Benchmark for test code</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>TS8</td>
+<td><a href="../todo/testing/#ts8-port-phpstans-phpunit-and-mockery-extension-tests">Port PHPStan's PHPUnit and Mockery extension tests</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>TS9</td>
+<td><a href="../todo/testing/#ts9-phpunit-and-pest-demo-project">PHPUnit and Pest demo project</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>TS11</td>
+<td><a href="../todo/testing/#ts11-mock-unions-in-property-docblocks">Mock unions in property docblocks</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+</tbody>
+</table>
+<h2 id="laravel-blade">Laravel &amp; Blade<a class="headerlink" href="#laravel-blade" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L68</td>
+<td><a href="../todo/laravel/#l68-port-larastans-type-and-rule-tests">Port Larastan's type and rule tests</a></td>
+<td>High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L1</td>
+<td><a href="../todo/laravel/#l1-facade-completion-upstream-method-generator-improvement">Facade completion</a> (upstream <code>facade-documenter</code> PRs)</td>
+<td>High</td>
+<td>High</td>
+</tr>
+<tr>
+<td>L46</td>
+<td><a href="../todo/laravel/#l46-can-on-a-user-model-the-receiver-does-not-name"><code>-&gt;can()</code> on a user model the receiver does not name</a></td>
+<td>Medium-High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>L69</td>
+<td><a href="../todo/laravel/#l69-benchmarks-for-laravel-string-names-and-blade">Benchmarks for Laravel string names and Blade</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>L49</td>
+<td><a href="../todo/laravel/#l49-unguarded-eloquent-mass-assignment-diagnostic">Unguarded Eloquent mass assignment diagnostic</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L56</td>
+<td><a href="../todo/laravel/#l56-typed-laravel-connection-names">Typed Laravel connection names</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>BL20</td>
+<td><a href="../todo/blade/#bl20-port-bladestans-tests">Port Bladestan's tests</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>E7</td>
+<td><a href="../todo/external-stubs/#e7-stub-based-framework-patches">Stub-based framework patches</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>L71</td>
+<td><a href="../todo/laravel/#l71-inertia-page-props-and-asset-helpers-on-a-typed-url-generator">Inertia page props and asset helpers on a typed URL generator</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>L59</td>
+<td><a href="../todo/laravel/#l59-typed-controller-middleware-names">Typed controller middleware names</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L31</td>
+<td><a href="../todo/laravel/#l31-string-key-rename-highlight-and-semantic-tokens">String-key rename, highlight, and semantic tokens</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L61</td>
+<td><a href="../todo/laravel/#l61-resolve-aliased-facade-imports-during-route-discovery">Resolve aliased facade imports during route discovery</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L67</td>
+<td><a href="../todo/laravel/#l67-laravel-refactoring-intentions">Laravel refactoring intentions</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L57</td>
+<td><a href="../todo/laravel/#l57-laravel-queue-names">Laravel queue names</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L8</td>
+<td><a href="../todo/laravel/#l8-withsum-withavg-withmin-withmax-aggregate-properties"><code>withSum</code>/<code>withAvg</code>/<code>withMin</code>/<code>withMax</code> aggregate properties</a></td>
+<td>Low-Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>L45</td>
+<td><a href="../todo/laravel/#l45-_count-properties-are-offered-on-every-relationship"><code>*_count</code> properties are offered on every relationship</a></td>
+<td>Low-Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>L27</td>
+<td><a href="../todo/laravel/#l27-legacy-controllermethod-action-strings">Legacy <code>Controller@method</code> action strings</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>L60</td>
+<td><a href="../todo/laravel/#l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature">Read relation callback overrides and fallbacks from the declared signature</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>L29</td>
+<td><a href="../todo/laravel/#l29-livewire-and-volt-component-names">Livewire and Volt component names</a> (Livewire projects only)</td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>L10</td>
+<td><a href="../todo/laravel/#l10-redirectresponsewithx-dynamic-methods"><code>RedirectResponse::withX()</code> dynamic methods</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L39</td>
+<td><a href="../todo/laravel/#l39-unused-view-and-translation-key-detection">Unused view and translation key detection</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+</tbody>
+</table>
+<h2 id="type-inference">Type Inference<a class="headerlink" href="#type-inference" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T41</td>
+<td><a href="../todo/type-inference/#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out">A reading of the callee's body overrides a declared <code>@param-out</code></a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>T58</td>
+<td><a href="../todo/type-inference/#t58-newt-is-not-supported"><code>new&lt;T&gt;</code> is not supported</a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>T62</td>
+<td><a href="../todo/type-inference/#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members">A sealed hierarchy is not narrowed by ruling out its other members</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T49</td>
+<td><a href="../todo/type-inference/#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it">A closure passed to a constructor gets no parameter types from it</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T59</td>
+<td><a href="../todo/type-inference/#t59-tk-on-a-class-template-is-not-resolved"><code>T[K]</code> on a class template is not resolved</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T61</td>
+<td><a href="../todo/type-inference/#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed">A regression that changes where a call resolves goes unnoticed</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C13</td>
+<td><a href="../todo/completion/#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members"><code>self::</code>/<code>static::</code> inside a <code>@require-extends</code> trait does not see the required class's static members</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D23</td>
+<td><a href="../todo/diagnostics/#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it">A rebound closure's scope is added to the lexical one rather than replacing it</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T43</td>
+<td><a href="../todo/type-inference/#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved"><code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T34</td>
+<td><a href="../todo/type-inference/#t34-staticconst-over-narrows-to-the-declaring-classs-value"><code>static::CONST</code> over-narrows to the declaring class's value</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>C7</td>
+<td><code>class_alias()</code> support</td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>T29</td>
+<td><a href="../todo/type-inference/#t29-definite-vs-possible-variable-existence-tracking">Definite vs possible variable existence tracking</a></td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>T46</td>
+<td><a href="../todo/type-inference/#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later">Template arguments are not inferred from how the object is used later</a></td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>T47</td>
+<td><a href="../todo/type-inference/#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used">A closure assigned to a variable gets no parameter types from where it is used</a></td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>C1</td>
+<td>Array functions needing new code paths</td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="diagnostics">Diagnostics<a class="headerlink" href="#diagnostics" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D29</td>
+<td><a href="../todo/diagnostics/#d29-namespace-and-declare-bodies-break-the-reachability-flow"><code>namespace</code> and <code>declare</code> bodies break the reachability flow</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>D19</td>
+<td><a href="../todo/diagnostics/#d19-inaccessible_member-cannot-tell-a-property-read-from-a-write"><code>inaccessible_member</code> cannot tell a property read from a write</a> (includes PHP 8.4 <code>private(set)</code>)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D16</td>
+<td><a href="../todo/diagnostics/#d16-unreachable_match_arm-ignores-literal-subject-types"><code>unreachable_match_arm</code> ignores literal subject types</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D20</td>
+<td><a href="../todo/diagnostics/#d20-foobar-and-foobar-are-the-same-span"><code>Foo::$bar</code> and <code>Foo::bar</code> are the same span</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D22</td>
+<td><a href="../todo/diagnostics/#d22-member-provenance-is-recomputed-instead-of-recorded">Member provenance is recomputed instead of recorded</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>D50</td>
+<td><a href="../todo/diagnostics/#d50-unused-parameters-skips-methods-a-subclass-can-override"><code>unused-parameters</code> skips methods a subclass can override</a></td>
+<td>Low</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>D52</td>
+<td><a href="../todo/diagnostics/#d52-incompatible_override-only-checks-a-static-return-type"><code>incompatible_override</code> only checks a <code>static</code> return type</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>D53</td>
+<td><a href="../todo/diagnostics/#d53-docblock_missing_null-skips-a-tag-that-refines-a-nullable-hint"><code>docblock_missing_null</code> skips a tag that refines a nullable hint</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+</tbody>
+</table>
+<h2 id="code-generation-refactoring">Code Generation &amp; Refactoring<a class="headerlink" href="#code-generation-refactoring" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A16</td>
+<td><a href="../todo/actions/#a16-snippet-placeholder-for-extracted-method-name">Snippet placeholder for extracted method name</a> (lets the user type over the generated name immediately)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A43</td>
+<td><a href="../todo/actions/#a43-update-docblock-generics">Update docblock generics</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>H13</td>
+<td>Declare missing property (native unknown-member diagnostic and PHPStan <code>property.notFound</code>)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>H15</td>
+<td>Template bound from tip — add <code>@template T of X</code></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F17</td>
+<td><a href="../todo/lsp-features/#f17-wire-class-move-to-workspacewillrenamefiles">Wire class move to <code>workspace/willRenameFiles</code></a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A40</td>
+<td><a href="../todo/actions/#a40-generate-method-from-call">Generate method from call</a></td>
+<td>High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>A41</td>
+<td><a href="../todo/actions/#a41-create-class-from-non-existing-name">Create class from non-existing name</a></td>
+<td>High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>FX7</td>
+<td><a href="../todo/fix-cli/#fx7-add_return_type-generate-return-docblocks-from-function-bodies"><code>add_return_type</code> — generate <code>@return</code> docblocks from function bodies</a></td>
+<td>Medium-High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>H16</td>
+<td><code>match.unhandled</code> — add missing match arms</td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>F22</td>
+<td><a href="../todo/lsp-features/#f22-merge-a-namespace-onto-one-that-shares-a-class-name">Merge a namespace onto one that shares a class name</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cleanup-modernize">Cleanup &amp; Modernize<a class="headerlink" href="#cleanup-modernize" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FX3</td>
+<td><a href="../todo/fix-cli/#fx3-phpstanreturnunusedtype-remove-unused-type-from-return-union"><code>phpstan.return.unusedType</code> — remove unused type from return union</a></td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>H19</td>
+<td><code>property.unused</code> / <code>method.unused</code> — remove unused member</td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>H23</td>
+<td><code>instanceof.alwaysTrue</code> — remove redundant instanceof check</td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>H24</td>
+<td><code>catch.neverThrown</code> — remove unnecessary catch clause</td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>D5</td>
+<td><a href="../todo/diagnostics/#d5-external-tool-diagnostic-suppression-actions">External tool diagnostic suppression actions</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>A25</td>
+<td><a href="../todo/actions/#a25-strpos-str_contains-php-80"><code>strpos</code> → <code>str_contains</code></a> (PHP 8.0+)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>H4</td>
+<td><code>assign.byRefForeachExpr</code> — unset by-reference foreach variable</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>FX2</td>
+<td><a href="../todo/fix-cli/#fx2-unused_variable-remove-unused-variables"><code>unused_variable</code> — remove unused variables</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A29</td>
+<td><a href="../todo/actions/#a29-simplify-boolean-return">Simplify boolean return</a> (<code>if (cond) return true; return false;</code> → <code>return cond;</code>)</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A45</td>
+<td><a href="../todo/actions/#a45-simplify-with-elvis-operator">Simplify with <code>?:</code></a> (replace <code>$x ? $x : $y</code> with <code>$x ?: $y</code>)</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A46</td>
+<td><a href="../todo/actions/#a46-convert-nested-calls-to-the-pipe-operator-php-85">Convert nested calls to the pipe operator</a> (PHP 8.5+)</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D28</td>
+<td><a href="../todo/diagnostics/#d28-remove-unreachable-code-is-wired-to-phpstan-only">"Remove unreachable code" is wired to PHPStan only</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A47</td>
+<td><a href="../todo/actions/#a47-convert-a-getter-or-setter-method-into-a-property-hook-php-84">Convert a getter or setter method into a property hook</a> (PHP 8.4+)</td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>A31</td>
+<td><a href="../todo/actions/#a31-remove-always-else-extract-guard-clause">Remove always-else</a> (extract guard clause)</td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>A37</td>
+<td><a href="../todo/actions/#a37-simplify-with-nullsafe-operator">Simplify with <code>?-&gt;</code></a> (replace null-checked chains with the nullsafe operator)</td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>A38</td>
+<td><a href="../todo/actions/#a38-convert-ifelseif-chain-to-match">Convert if/elseif chain to <code>match</code></a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="editing-experience">Editing Experience<a class="headerlink" href="#editing-experience" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F7</td>
+<td><a href="../todo/lsp-features/#f7-evaluatable-expression-support-dap-integration">Evaluatable expression support (DAP integration)</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>F16</td>
+<td><a href="../todo/lsp-features/#f16-on-type-brace-de-indent">On-type <code>}</code> brace de-indent</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>S2</td>
+<td><a href="../todo/signature-help/#s2-closure-arrow-function-parameter-signature-help">Closure / arrow function parameter signature help</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>N1</td>
+<td>Template engine (type-aware snippets)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C8</td>
+<td><a href="../todo/completion/#c8-filesystem-proximity-as-an-affinity-tiebreaker">Filesystem proximity as an affinity tiebreaker</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C3</td>
+<td>Go-to-definition for array shape keys via bracket access</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C10</td>
+<td><a href="../todo/completion/#c10-deprecation-markers-on-class-name-completions-from-all-sources">Deprecation markers on class-name completions from all sources</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>C12</td>
+<td><a href="../todo/completion/#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion">The implicit <code>$value</code> of a <code>set</code> hook is not offered by variable completion</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>Named argument awareness in active parameter</td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>Language construct signature help and hover</td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>X7</td>
+<td><a href="../todo/indexing/#x7-recency-tracking">Recency tracking</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>C11</td>
+<td><a href="../todo/completion/#c11-smarter-member-ordering-after-">Smarter member ordering after <code>-&gt;</code> / <code>::</code></a></td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>N2</td>
+<td>N-gram prediction from PHP corpus</td>
+<td>Medium</td>
+<td>Very High</td>
+</tr>
+<tr>
+<td>N3</td>
+<td>Fine-tuned GGUF sidecar model</td>
+<td>Medium</td>
+<td>Very High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="editors-distribution">Editors &amp; Distribution<a class="headerlink" href="#editors-distribution" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F59</td>
+<td><a href="../todo/lsp-features/#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed">Send Twig, YAML, and XML documents to the server from Zed</a> (Zed PR)</td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>F14</td>
+<td><a href="../todo/lsp-features/#f14-helix-upstream-pr">Helix upstream PR</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>F11</td>
+<td><a href="../todo/lsp-features/#f11-windows-code-signing">Windows code signing</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F12</td>
+<td><a href="../todo/lsp-features/#f12-intellij-phpstorm-plugin">IntelliJ / PHPStorm plugin</a></td>
+<td>High</td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+<h2 id="indexing-configuration">Indexing &amp; Configuration<a class="headerlink" href="#indexing-configuration" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Impact</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>X14</td>
+<td><a href="../todo/indexing/#x14-forward-zeds-file_scan_exclusions-and-file_types">Forward Zed's <code>file_scan_exclusions</code> and <code>file_types</code></a> (waiting on <a href="https://github.com/zed-industries/zed/pull/66121">zed#66121</a>)</td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>X18</td>
+<td><a href="../todo/indexing/#x18-watch-indexing-include-and-stub-paths-outside-the-workspace">Watch <code>[indexing] include</code> and stub paths outside the workspace</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>X13</td>
+<td><a href="../todo/indexing/#x13-decide-how-workspace-wide-edits-treat-excluded-files">Decide how workspace-wide edits treat excluded files</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>X22</td>
+<td><a href="../todo/indexing/#x22-read-the-remaining-yaml-files-with-the-shared-parser">Read the remaining YAML files with the shared parser</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>X23</td>
+<td><a href="../todo/indexing/#x23-read-xml-files-with-a-parser">Read XML files with a parser</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>X2</td>
+<td>Parallel file processing — remaining work</td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>X12</td>
+<td><a href="../todo/indexing/#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names">Say when an exclude hid the class a diagnostic names</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"redirect":null,"search":"../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a2388154.min.js"></script>
+      
+    
+  </body>
+</html>

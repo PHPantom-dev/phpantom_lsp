@@ -1,0 +1,1918 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/1.0.0/todo/drupal/">
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.70">
+    
+    
+      
+        <title>PHPantom — Drupal - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e442bf79.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.b60ce83d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Drupal
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Getting Started
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Development
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Roadmap
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#dr12-translation-placeholders" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR12. Translation placeholders
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr13-module-names-and-infoyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR13. Module names and <code>*.info.yml</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr14-port-phpstans-drupal-extension-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR14. Port PHPStan's Drupal extension tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr18-warn-on-unknown-entity-type-ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR18. Warn on unknown entity type IDs
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr19-warn-on-unknown-hook-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR19. Warn on unknown hook names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr20-complete-route-names-built-in-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR20. Complete route names built in code
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr22-complete-permissions-built-in-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR22. Complete permissions built in code
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr23-warn-on-unknown-permission-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR23. Warn on unknown permission names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr24-warn-on-unknown-theme-hook-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR24. Warn on unknown theme hook names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr27-plugin-ids-in-yaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR27. Plugin IDs in YAML
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr28-plugin-types-a-manager-builds-at-run-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR28. Plugin types a manager builds at run time
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr29-fields-added-by-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR29. Fields added by hooks
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr30-warn-on-unknown-field-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR30. Warn on unknown field names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr31-field-names-in-entity-queries-and-loadbyproperties" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR31. Field names in entity queries and <code>loadByProperties()</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr32-method-callbacks-in-a-form-alter-hook" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR32. <code>'::method'</code> callbacks in a form alter hook
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr33-render-callbacks-that-are-not-trusted" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR33. Render callbacks that are not trusted
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr34-callback-parameter-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR34. Callback parameter checks
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr35-invokable-classes-and-services-as-callbacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR35. Invokable classes and services as callbacks
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr36-array-callables-that-name-their-class-in-a-string" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR36. Array callables that name their class in a string
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr37-listener-methods-in-subscriber-maps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR37. Listener methods in subscriber maps
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/drupal.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-drupal">PHPantom — Drupal<a class="headerlink" href="#phpantom-drupal" title="Permanent link">&para;</a></h1>
+<p>Known gaps and missing features in PHPantom's Drupal support. The web
+root is detected with or without a <code>composer.json</code>. Core and every
+module, theme, and profile, with the Drupal file extensions (<code>.module</code>,
+<code>.install</code>, <code>.theme</code>, …), are indexed past <code>.gitignore</code>, and
+the services the <code>*.services.yml</code> files declare, the entity types
+entity classes declare, the routes the routing files, route attributes,
+and route builders declare, the hooks the <code>*.api.php</code> files document
+and the extensions implement, the plugin types plugin managers declare and
+the plugins of each, the permissions the <code>*.permissions.yml</code>
+files declare, the configuration objects and keys the default
+configuration and the configuration schema declare, the theme hooks
+<code>hook_theme()</code> implementations declare, the render elements element
+classes declare, the libraries the <code>*.libraries.yml</code> files declare, the
+callbacks form and render arrays name, the event names and listener
+methods event subscribers declare, and the fields entity classes and
+field storage files declare are read.</p>
+<p>The requests in
+<a href="https://github.com/PHPantom-dev/phpantom_lsp/issues/48">#48</a> are the
+scope of this document: the indexing it asked for first has shipped, and
+every Drupal-specific feature its discussion lists is one of the items
+below.</p>
+<p>Drupal is built on Symfony components, so its service container and
+YAML files are close to what the Symfony support already reads. PHPStan's
+Drupal extension (<code>mglaman/phpstan-drupal</code>) is the checklist of what a
+Drupal developer expects from types; PhpStorm's built-in Drupal support
+is what they expect from an editor.</p>
+<p><strong>Benchmarks.</strong> <code>benches/memory_usage.py</code> measures memory on a site that
+installs core into <code>web/core</code> through Composer (<code>memory_drupal_module</code>),
+next to the other framework scenarios. <code>benches/drupal_completion.rs</code>
+measures completion of service IDs, route names, entity type IDs,
+permission names, configuration names, render element names, plugin IDs,
+hook names, theme hook names, library names, field names, and hook
+implementations over a generated site with many custom modules. Every
+item that adds a name Drupal declares adds its case to it.</p>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dr12-translation-placeholders">DR12. Translation placeholders<a class="headerlink" href="#dr12-translation-placeholders" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$this-&gt;t('Order @number was placed by %name', ['@number' =&gt; $id, '%nmae' =&gt; $name]);</span>
+</code></pre></div>
+<p><code>t()</code>, <code>$this-&gt;t()</code>, <code>new TranslatableMarkup()</code>, and <code>formatPlural()</code>
+replace <code>@</code>, <code>%</code>, and <code>:</code> placeholders from the array they are given.
+Report a placeholder the string uses that the array does not supply, and
+a key the string never uses.</p>
+<hr />
+<h2 id="dr13-module-names-and-infoyml">DR13. Module names and <code>*.info.yml</code><a class="headerlink" href="#dr13-module-names-and-infoyml" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">\Drupal::moduleHandler()-&gt;moduleExists('acme_shop');</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">dependencies</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">drupal:node</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">acme:acme_shop</span>
+</code></pre></div>
+<p>A module's machine name is the basename of its <code>*.info.yml</code>. Complete
+and navigate machine names in <code>moduleExists()</code>, <code>getModule()</code>, and the
+<code>dependencies</code> of an info file, and report one that names no module.
+Check an info file's required keys (<code>name</code>, <code>type</code>,
+<code>core_version_requirement</code>) and their shapes.</p>
+<hr />
+<h2 id="dr14-port-phpstans-drupal-extension-tests">DR14. Port PHPStan's Drupal extension tests<a class="headerlink" href="#dr14-port-phpstans-drupal-extension-tests" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>PHPStan's Drupal extension (<code>mglaman/phpstan-drupal</code>) is this
+document's checklist, but its tests are not ported, as the Symfony,
+Doctrine, and WordPress extensions' are (<code>tests/phpstan_symfony/</code>,
+<code>tests/phpstan_doctrine/</code>, <code>tests/wordpress_stubs/</code>). Its type tests
+cover <code>\Drupal::service()</code> and container lookups, entity storage and
+entity queries, field item lists, and the rule tests deprecated and
+discouraged calls. Port them into <code>tests/phpstan_drupal/</code> the same way:
+the <code>assertType()</code> fixtures run by <code>tests/assert_type_runner.rs</code>, the
+rule tests as <code>.fixture</code> files, a slice of <code>drupal/core</code> copied by
+<code>scripts/extract-framework-stubs.php</code>, and upstream's test modules and
+their <code>*.services.yml</code> as the project. Until the items that cover them ship most
+assertions are a <code>// SKIP</code> pointing at the item that covers them; file
+any that no item does. Rules about Drupal's own deprecations are listed
+in the README as not ported.</p>
+<hr />
+<h2 id="dr18-warn-on-unknown-entity-type-ids">DR18. Warn on unknown entity type IDs<a class="headerlink" href="#dr18-warn-on-unknown-entity-type-ids" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$storage = \Drupal::entityTypeManager()-&gt;getStorage('nod');</span>
+</code></pre></div>
+<p>An entity type ID no entity class declares is a typo or a module the
+site lacks, and the entity type manager throws for it at run time.
+Report one where <code>getStorage()</code>, <code>\Drupal::entityQuery()</code>, and the other
+calls that take an entity type ID take it. A module can add entity types
+in code from <code>hook_entity_type_build()</code>, which no class declares, so a
+site where an implementation of that hook may add one stays silent.</p>
+<hr />
+<h2 id="dr19-warn-on-unknown-hook-names">DR19. Warn on unknown hook names<a class="headerlink" href="#dr19-warn-on-unknown-hook-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">\Drupal::moduleHandler()-&gt;invokeAll('acme_order_placd', [$order]);</span>
+</code></pre></div>
+<p>Any module may invoke any hook name, and many hooks have no <code>*.api.php</code>
+documentation, so a name nothing documents is not wrong on that alone.
+Report only a hook name that nothing in the site documents, implements,
+or invokes anywhere else, which is most likely a typo.</p>
+<hr />
+<h2 id="dr20-complete-route-names-built-in-code">DR20. Complete route names built in code<a class="headerlink" href="#dr20-complete-route-names-built-in-code" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">Url::fromRoute('entity.node.canonical', ['node' =&gt; $nid]);</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">Url::fromRoute('view.content.page_1');</span>
+</code></pre></div>
+<p>Entity routes and Views routes are accepted without a warning, but
+neither completes nor goes to a definition, since no routing file declares
+them. Read them from where Drupal builds them: each entity type's link
+templates (<code>entity.&lt;type&gt;.&lt;link&gt;</code>) and each view's displays
+(<code>view.&lt;view_id&gt;.&lt;display_id&gt;</code>).</p>
+<p>The same reading would narrow what goes unreported. Any <code>view.&lt;a&gt;.&lt;b&gt;</code>
+is accepted by its shape alone, so a misspelt view or display is not
+reported. And a route builder that adds a route under a name held in a
+variable or returned by a call (<code>$collection-&gt;add($route_name, $route)</code>,
+as Views and JSON:API do) leaves every name under its extension
+(<code>views.*</code>, <code>jsonapi.*</code>) unjudged. Following the variable to the string
+the method assigns it (<code>"view.$view_id.$display_id"</code>) would keep only that
+shape.</p>
+<hr />
+<h2 id="dr22-complete-permissions-built-in-code">DR22. Complete permissions built in code<a class="headerlink" href="#dr22-complete-permissions-built-in-code" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$account-&gt;hasPermission('create article content');</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$account-&gt;hasPermission('use text format basic_html');</span>
+</code></pre></div>
+<p>Permissions a permissions file builds through its
+<code>permission_callbacks</code> neither complete nor go to a definition, since no
+key of the file declares them. Ten of core's permissions files do, among
+them node, taxonomy, media, block content, and filter, which build one
+set of permissions per bundle or text format. Read them from where
+Drupal builds them: each callback returns an array keyed by names such as
+<code>"create $type_id content"</code>, and the bundles and formats the names are
+built from are configuration entities (<code>node.type.*</code>,
+<code>filter.format.*</code>). Their names come from the default configuration,
+and on most sites from the exported configuration. A name built from something the
+site's files do not hold could be kept as a pattern, as route builders'
+names are.</p>
+<hr />
+<h2 id="dr23-warn-on-unknown-permission-names">DR23. Warn on unknown permission names<a class="headerlink" href="#dr23-warn-on-unknown-permission-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$account-&gt;hasPermission('administer acme ordres');</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$account-&gt;hasPermission('administer acme+access content');</span>
+</code></pre></div>
+<p>A permission name no <code>*.permissions.yml</code> declares is a typo or a module
+the site lacks, and Drupal does not throw for it: the check fails, and the
+mistake shows only as access denied. <code>hasPermission()</code> checks one exact
+name, so <code>'administer acme+access content'</code> is a name of its own; <code>+</code> and
+<code>,</code> only combine permissions in a route's <code>_permission</code>. Report a name
+nothing declares wherever permission names are read: the access checks,
+the access result helpers, the user module's role functions, each part of
+a route's <code>_permission</code>, and an entity type's <code>admin_permission</code>. This
+depends on <a href="#dr22-complete-permissions-built-in-code">DR22</a>: the names
+permission callbacks build would otherwise be reported.</p>
+<hr />
+<h2 id="dr24-warn-on-unknown-theme-hook-names">DR24. Warn on unknown theme hook names<a class="headerlink" href="#dr24-warn-on-unknown-theme-hook-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">return ['#theme' =&gt; 'acme_order_sumary', '#order' =&gt; $order];</span>
+</code></pre></div>
+<p>A <code>#theme</code> that names no theme hook never reaches a template: Drupal
+logs a warning and renders only the array's children and <code>#markup</code>. Render element and library names are reported when
+nothing declares them, but theme hook names are not, because the hooks
+read from <code>hook_theme()</code> implementations are not all of them. Views, in
+core, and some contributed modules build their hooks in a loop or from
+other calls, which are not read, and a hook name does not say which
+extension declares it, so the only safe rule, silence wherever an
+implementation cannot be read, would silence every site. Report a name
+only once those hooks are read, or with a rule that knows which names
+such an implementation can add. A suggestion such as
+<code>acme_greeting__compact</code> is valid when its base hook is.</p>
+<hr />
+<h2 id="dr27-plugin-ids-in-yaml">DR27. Plugin IDs in YAML<a class="headerlink" href="#dr27-plugin-ids-in-yaml" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># config/install/core.entity_form_display.node.article.default.yml</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">content</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">title</span><span class="p">:</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">string_textfield</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="c1"># config/install/block.block.acme_theme_greeting.yml</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="nt">plugin</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">acme_greeting_block</span>
+</code></pre></div>
+<p>Plugin IDs complete and navigate in PHP: a plugin manager's lookups, the
+field type <code>BaseFieldDefinition::create()</code> takes, the widget or formatter
+of a field's display options, and the constraint <code>addConstraint()</code> takes.
+The YAML that names them does not yet: a form or view display's <code>type</code>
+(a widget or formatter), a field storage's <code>type</code> (a field type), a
+block's <code>plugin</code>, and a migration's <code>source</code>, <code>process</code>, and
+<code>destination</code> plugins. Default configuration files are not parsed today
+(see <code>drupal::config</code>), so this needs a reader for the keys that name a
+plugin and the manager each one belongs to.</p>
+<hr />
+<h2 id="dr28-plugin-types-a-manager-builds-at-run-time">DR28. Plugin types a manager builds at run time<a class="headerlink" href="#dr28-plugin-types-a-manager-builds-at-run-time" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">class ViewsPluginManager extends DefaultPluginManager {</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">  public function __construct($type, \Traversable $namespaces, …) {</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    parent::__construct("Plugin/views/$type", $namespaces, …);</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">  }</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>A plugin type is read from the literals a manager's constructor passes to
+<code>DefaultPluginManager</code>'s. Views and Migrate serve many plugin types from
+one manager class whose subdirectory is built from a constructor
+argument, which each service in <code>views.services.yml</code> and
+<code>migrate.services.yml</code> passes (<code>plugin.manager.views.field</code> passes
+<code>field</code>), so their plugins (Views fields, filters, and displays, Migrate
+sources and processes) neither complete nor navigate. Read the argument
+each such service passes, and type the service by the plugin type it
+builds.</p>
+<hr />
+<h2 id="dr29-fields-added-by-hooks">DR29. Fields added by hooks<a class="headerlink" href="#dr29-fields-added-by-hooks" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$state = $node-&gt;moderation_state-&gt;value;</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">$alias = $node-&gt;path-&gt;alias;</span>
+</code></pre></div>
+<p>A field name comes from an entity class's <code>baseFieldDefinitions()</code> or
+from a field storage file. Modules also add fields in code:
+<code>hook_entity_base_field_info()</code> and <code>hook_entity_bundle_field_info()</code>
+return field definitions, and <code>hook_entity_field_storage_info()</code> returns
+storage definitions, as <code>content_moderation</code> does for <code>moderation_state</code>
+and <code>path</code> does for <code>path</code>. Those names are not read, so they stay
+<code>mixed</code> and do not complete. Read the definitions an implementation
+builds, as the base field reader does for a class, including those it
+adds from a helper, and keep the ones that depend on a condition (a
+bundle, a module's setting) as fields of every bundle.</p>
+<hr />
+<h2 id="dr30-warn-on-unknown-field-names">DR30. Warn on unknown field names<a class="headerlink" href="#dr30-warn-on-unknown-field-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$node-&gt;hasField('field_tgas');</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">$node-&gt;get('field_tgas');</span>
+</code></pre></div>
+<p>A field name no entity type declares is a typo or a field the site
+lacks, and <code>get()</code> throws for it at run time. Report one where
+<code>get()</code>, <code>set()</code>, <code>hasField()</code>, and <code>getFieldDefinition()</code> take it. This
+depends on <a href="#dr29-fields-added-by-hooks">DR29</a>: without the fields hooks
+add, <code>moderation_state</code> would be reported on every moderated site.
+A lookup the code checks with <code>hasField()</code> first is left alone.</p>
+<hr />
+<h2 id="dr31-field-names-in-entity-queries-and-loadbyproperties">DR31. Field names in entity queries and <code>loadByProperties()</code><a class="headerlink" href="#dr31-field-names-in-entity-queries-and-loadbyproperties" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">$ids = $storage-&gt;getQuery()-&gt;condition('field_tags.target_id', $tid)-&gt;execute();</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">$nodes = $storage-&gt;loadByProperties(['field_tags' =&gt; $tid]);</span>
+</code></pre></div>
+<p>A field name completes and navigates in <code>get()</code> and the other calls
+that take one on an entity, but not where it is a condition of an entity
+query or a key of <code>loadByProperties()</code>. Read the entity type from the
+storage or query, offer its field names there, and for a condition read
+the field property after the dot (<code>field_tags.target_id</code>) from the
+field's item class.</p>
+<hr />
+<h2 id="dr32-method-callbacks-in-a-form-alter-hook">DR32. <code>'::method'</code> callbacks in a form alter hook<a class="headerlink" href="#dr32-method-callbacks-in-a-form-alter-hook" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">function acme_form_node_article_form_alter(array &amp;$form, FormStateInterface $form_state) {</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">  $form['actions']['submit']['#submit'][] = '::saveDraft';</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">}</span>
+</code></pre></div>
+<p>In <code>hook_form_FORM_ID_alter()</code>, or <code>#[Hook('form_FORM_ID_alter')]</code>, a
+<code>'::method'</code> names a method of the form class that <code>FORM_ID</code> belongs to,
+not of the module's own class. Resolve the form ID to its form class, so
+the callback navigates, completes, renames, and is reported when the
+class has no such method.</p>
+<hr />
+<h2 id="dr33-render-callbacks-that-are-not-trusted">DR33. Render callbacks that are not trusted<a class="headerlink" href="#dr33-render-callbacks-that-are-not-trusted" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">$build['#pre_render'][] = [Formatter::class, 'prepare'];</span>
+</code></pre></div>
+<p>Drupal refuses to run a <code>#pre_render</code>, <code>#post_render</code>, <code>#lazy_builder</code>, or
+<code>#access_callback</code> callback that is not trusted. Report a callback whose
+class implements neither <code>TrustedCallbackInterface</code> nor
+<code>RenderCallbackInterface</code>, and one whose method <code>trustedCallbacks()</code> does
+not list.</p>
+<hr />
+<h2 id="dr34-callback-parameter-checks">DR34. Callback parameter checks<a class="headerlink" href="#dr34-callback-parameter-checks" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">public function submitOrder(array $form) {}</span>
+</code></pre></div>
+<p>A submit or validate handler takes <code>array &amp;$form, FormStateInterface
+$form_state</code>, and an <code>#ajax</code> callback takes the same two parameters.
+Report a callback that takes a different list, such as one that lacks the
+form state or types it as something else.</p>
+<hr />
+<h2 id="dr35-invokable-classes-and-services-as-callbacks">DR35. Invokable classes and services as callbacks<a class="headerlink" href="#dr35-invokable-classes-and-services-as-callbacks" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">$form['#validate'][] = [OrderValidator::class, '__invoke'];</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">$form['#submit'][] = 'order_handler:submit';</span>
+</code></pre></div>
+<p>A class with <code>__invoke()</code> named as a callback, and a class name written
+as the service part of <code>'Class:method'</code>, are not read as callbacks.
+Navigate, rename, and report them like any other callback.</p>
+<hr />
+<h2 id="dr36-array-callables-that-name-their-class-in-a-string">DR36. Array callables that name their class in a string<a class="headerlink" href="#dr36-array-callables-that-name-their-class-in-a-string" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">$form['#submit'][] = ['Drupal\acme\Form\OrderForm', 'submitOrder'];</span>
+</code></pre></div>
+<p>An array callable whose class is a string rather than <code>OrderForm::class</code>
+names no method, so it neither navigates nor renames, and a method the
+class lacks is not reported. Read the string as the fully qualified class
+name PHP reads it as, wherever an array callable is read.</p>
+<hr />
+<h2 id="dr37-listener-methods-in-subscriber-maps">DR37. Listener methods in subscriber maps<a class="headerlink" href="#dr37-listener-methods-in-subscriber-maps" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">public static function getSubscribedEvents(): array {</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">    $events[KernelEvents::REQUEST][] = ['onRequest', 100];</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">    return $events;</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">}</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="x">private function onRequest(RequestEvent $event): void {}</span>
+</code></pre></div>
+<p>A subscriber's <code>getSubscribedEvents()</code> names its listener methods as
+strings, which jump to the method, follow a rename, and are reported
+when the class has no such method. Complete the subscriber's public
+methods inside a map value, the way a services file's <code>calls:</code> completes
+the service's methods. Report a listener method that is private or
+protected too: the event dispatcher calls it from outside the class, so
+it fails at run time. Symfony projects read the same maps, so this
+applies to them as well.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"redirect":null,"search":"../../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a2388154.min.js"></script>
+      
+    
+  </body>
+</html>
