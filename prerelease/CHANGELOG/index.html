@@ -1357,6 +1357,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Internal
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1833,7 +1844,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#internal" class="md-nav__link">
+  <a href="#internal_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Internal
@@ -3821,6 +3832,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Internal
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4297,7 +4319,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#internal" class="md-nav__link">
+  <a href="#internal_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Internal
@@ -6198,6 +6220,10 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Faster CI builds and benchmarks.</strong> Test runners share a compiled suite and matching benchmark builds are reused. Performance checks keep the same thresholds and wait for background diagnostics before measuring memory. Contributed by @shuvroroy.</li>
+</ul>
 <h2 id="100-2026-11-23"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.1...1.0.0">1.0.0</a> - 2026-11-23<a class="headerlink" href="#100-2026-11-23" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
 <h4 id="command-line">Command line<a class="headerlink" href="#command-line" title="Permanent link">&para;</a></h4>
@@ -6912,7 +6938,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Find References no longer hangs on constructors or Laravel macros.</strong> Finding the references of a <code>__construct</code> method could leave the server unresponsive until it was restarted, and so could finding or renaming a macro while a file that registers macros was being edited.</li>
 <li><strong>No more crash on generated files with long operator chains.</strong> A file that joins thousands of values with <code>.</code>, <code>+</code>, <code>&amp;&amp;</code> or a similar operator, as generated code often does, no longer crashes the server while indexing, in plain PHP and framework projects alike, and is analyzed and edited without delay. Expanding the selection from one operand of such a chain now selects the whole chain.</li>
 </ul>
-<h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
+<h3 id="internal_1">Internal<a class="headerlink" href="#internal_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Tempest performance checks.</strong> CI measures template editing, completion, navigation, and memory use against the Tempest playground. Contributed by @shuvroroy.</li>
 <li><strong>Pull request benchmarks no longer fail on a slow runner.</strong> Each benchmark runner measures both the PR and its base, so the 30% regression check reflects the change rather than which machine ran it. Contributed by @shuvroroy. Closes #489.</li>
