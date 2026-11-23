@@ -2186,3 +2186,36 @@ async fn rename_promoted_property_renames_the_label_of_an_attribute() {
         "got:\n{updated}"
     );
 }
+
+/// A label whose declaration the engine cannot show has no parameter for a
+/// rename to start from: a built-in is described by an embedded stub, which
+/// has no text to open, and a call of a closure value names no declaration at
+/// all. Both decline, rather than entering rename mode to produce no edits.
+#[tokio::test]
+async fn prepare_rename_of_a_label_that_binds_no_declaration_declines() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = Uri::parse("file:///builtin_label_rename.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$render = function (string $field): string { return $field; };\n",
+        "$filtered = array_filter(array: [1, 2], callback: null);\n",
+        "$render(field: 'x');\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "array: [1, 2]");
+    assert!(
+        prepare_rename(&backend, &uri, line, character)
+            .await
+            .is_none(),
+        "a label at a stub declaration has nothing to rename"
+    );
+
+    let (line, character) = line_char_of(text, "field: 'x'");
+    assert!(
+        prepare_rename(&backend, &uri, line, character)
+            .await
+            .is_none(),
+        "a label at a call of a closure value names no declaration the engine reads"
+    );
+}
