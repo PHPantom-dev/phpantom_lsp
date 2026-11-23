@@ -321,11 +321,12 @@ impl Backend {
 
             // ── Unknown named arguments ─────────────────────────────
             // A name no parameter declares throws, unless a variadic
-            // parameter collects it.  Attributes are recorded as `new` call
-            // sites, so `#[Length(mni: 3)]` is checked here too.
+            // parameter collects it.  `func_get_args()` reads extra
+            // positional arguments only, so a callee that calls it still
+            // throws for an unknown name.  Attributes are recorded as `new`
+            // call sites, so `#[Length(mni: 3)]` is checked here too.
             if resolved.binds_named_args
                 && !call_site.named_arg_indices.is_empty()
-                && !resolved.reads_func_args
                 && !params.iter().any(|p| p.is_variadic)
                 && !resolved.owner_class.is_some_and(|owner| {
                     self.method_declared_by_unbundled_extension(&owner, expr, file_ctx)

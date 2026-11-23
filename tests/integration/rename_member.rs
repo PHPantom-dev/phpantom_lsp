@@ -2057,6 +2057,101 @@ async fn rename_a_method_parameter_renames_the_labels_at_the_calls() {
     );
 }
 
+/// A closure that assigns a variable of the parameter's name, without
+/// capturing it, holds a variable of its own, so renaming that variable
+/// leaves the labels that fill the enclosing method's parameter alone.
+/// A top-level variable is not the parameter of an interface method the same
+/// file declares either.
+#[tokio::test]
+async fn rename_a_variable_that_shadows_a_parameter_leaves_its_labels() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///shadow.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Shape { public function area(int $field): int; }\n",
+        "class Renderer\n",
+        "{\n",
+        "    public function render(string $field): \\Closure\n",
+        "    {\n",
+        "        return function () { $field = 'inner'; return $field; };\n",
+        "    }\n",
+        "}\n",
+        "function show(Renderer $renderer, Shape $shape): void\n",
+        "{\n",
+        "    $renderer->render(field: 'x');\n",
+        "    $shape->area(field: 1);\n",
+        "}\n",
+        "$field = 1;\n",
+        "echo $field;\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "$field; };");
+    let edit = rename(&backend, &uri, line, character + 1, "$other")
+        .await
+        .unwrap();
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert!(
+        updated.contains("render(field: 'x')") && updated.contains("string $field)"),
+        "the closure's own variable is not the method's parameter, got:\n{updated}"
+    );
+
+    let (line, character) = line_char_of(text, "echo $field");
+    let edit = rename(&backend, &uri, line, character + 6, "$other")
+        .await
+        .unwrap();
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert!(
+        updated.contains("area(field: 1)"),
+        "a top-level variable is not an interface method's parameter, got:\n{updated}"
+    );
+}
+
+/// A parameter of a body-less interface method is renamed from its own token,
+/// and reaches the labels of the calls made through the interface.  A
+/// constructor's parameter reaches the label a subclass passes through
+/// `parent::__construct()` as well as the one a `new` writes.
+#[tokio::test]
+async fn rename_a_parameter_reaches_interface_and_parent_constructor_labels() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///bodyless.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Shape { public function area(int $side): int; }\n",
+        "class Base { public function __construct(string $title) {} }\n",
+        "class Child extends Base {\n",
+        "    public function __construct() { parent::__construct(title: 'x'); }\n",
+        "}\n",
+        "function show(Shape $shape): void\n",
+        "{\n",
+        "    $shape->area(side: 1);\n",
+        "    new Base(title: 'y');\n",
+        "}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "$side)");
+    let edit = rename(&backend, &uri, line, character + 1, "$edge")
+        .await
+        .unwrap();
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert!(
+        updated.contains("int $edge)") && updated.contains("area(edge: 1)"),
+        "got:\n{updated}"
+    );
+
+    let (line, character) = line_char_of(text, "$title)");
+    let edit = rename(&backend, &uri, line, character + 1, "$heading")
+        .await
+        .unwrap();
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert!(
+        updated.contains("parent::__construct(heading: 'x')")
+            && updated.contains("new Base(heading: 'y')"),
+        "got:\n{updated}"
+    );
+}
+
 /// A property declared in the body and a same-named parameter the constructor
 /// does not promote are two members: renaming the property leaves the label
 /// that fills the parameter exactly as it is.
