@@ -452,3 +452,34 @@ refinements (`list<int>` and `array<…>` on `?array`).
 `src/diagnostics/docblock_native_mismatch.rs`. The module comment there
 explains the current rule and will need updating.
 
+---
+
+## D45. A promoted parameter's own `@deprecated` does not deprecate the property
+
+**Impact: Low · Complexity: Low**
+
+```php
+class Field
+{
+    public function __construct(
+        /** @deprecated Use `$name` instead. */ public string $old = '',
+    ) {}
+}
+
+echo $field->old;                  // nothing reported
+new Field(old: 'x');               // …nor the label
+```
+
+A property a constructor parameter promotes carries no deprecation at all:
+the parser writes `deprecation_message: None` for it, so no use of one is
+ever reported whichever spelling it is written in. PHP itself cannot help
+(`#[\Deprecated]` does not target a parameter), so the docblock the parameter
+carries is the only place an author can say it. Note that the engine already
+reads that same docblock for the property's type.
+
+Once the property carries the message, the deprecated-usage pass also needs
+an arm for a named-argument label, reporting one whose
+`named_argument_location` promotes a deprecated property.
+
+**Where to look:** `src/parser/classes/methods.rs`
+(`push_promoted_properties`), `src/diagnostics/deprecated.rs`.

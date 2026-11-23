@@ -156,6 +156,34 @@ fn collect_used_traits(
     }
 }
 
+/// Whether every class `class` extends and every trait it or they use
+/// loads, so that its members are all known.
+pub(crate) fn ancestors_load(class: &ClassInfo, class_loader: ClassLoader<'_>) -> bool {
+    let mut pending: Vec<Atom> = class
+        .parent_class
+        .iter()
+        .chain(&class.used_traits)
+        .copied()
+        .collect();
+    let mut seen: HashSet<Atom> = HashSet::new();
+    while let Some(name) = pending.pop() {
+        if !seen.insert(name) {
+            continue;
+        }
+        let Some(ancestor) = class_loader(Fqn::new(&name)) else {
+            return false;
+        };
+        pending.extend(
+            ancestor
+                .parent_class
+                .iter()
+                .chain(&ancestor.used_traits)
+                .copied(),
+        );
+    }
+    true
+}
+
 /// `iface_name` or the first interface it extends for which `declares`
 /// holds. An interface's parents are recorded both in `interfaces` and,
 /// for a single `extends`, in `parent_class`.

@@ -70,6 +70,7 @@ pub(super) fn extract_instantiation_expr<'a>(
                 args,
                 &mut ctx.call_sites,
                 &mut ctx.untyped_closure_sites,
+                &mut ctx.spans,
             );
         }
         extract_from_arguments(&args.arguments, ctx, scope_start);
@@ -499,6 +500,7 @@ fn extract_function_call<'a>(
             &func_call.argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
+            &mut ctx.spans,
         );
     }
     extract_from_arguments(&func_call.argument_list.arguments, ctx, scope_start);
@@ -567,6 +569,7 @@ fn extract_method_call<'a>(
             argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
+            &mut ctx.spans,
         );
         ctx.spans.push(SymbolSpan {
             start: ident.span.start.offset,
@@ -643,6 +646,7 @@ fn extract_static_method_call<'a>(
             &static_call.argument_list,
             &mut ctx.call_sites,
             &mut ctx.untyped_closure_sites,
+            &mut ctx.spans,
         );
         let class_span = static_call.class.span();
         ctx.spans.push(SymbolSpan {

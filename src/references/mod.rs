@@ -24,7 +24,7 @@
 //! same name are excluded.
 //!
 //! The per-symbol-kind finders live in sibling submodules
-//! ([`dispatch`], [`variables`], [`classes`], [`members`],
+//! ([`dispatch`], [`variables`], [`classes`], [`members`], [`labels`],
 //! [`functions`]); this module retains the shared symbol-map snapshot
 //! helpers, the workspace-indexing pipeline, and the free helpers those
 //! finders share.
@@ -35,6 +35,7 @@ mod dispatch;
 mod eloquent;
 mod events;
 mod functions;
+mod labels;
 mod member_scope;
 mod members;
 mod receivers;

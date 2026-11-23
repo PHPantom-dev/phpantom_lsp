@@ -124,16 +124,6 @@ pub(super) struct AccessReceiver<'a> {
     pub(super) docblock_ref: DocblockMemberRef,
 }
 
-impl AccessReceiver<'_> {
-    /// Whether the member named is a static one.  An attribute's
-    /// named-argument label has a class name for its subject, which is
-    /// what makes it a static access, but names a promoted property,
-    /// which never is.
-    pub(super) fn member_is_static(&self) -> bool {
-        self.is_static && self.docblock_ref != DocblockMemberRef::AttributeNamedArg
-    }
-}
-
 impl Backend {
     /// Resolve the class hierarchy for a `MemberAccess` subject.
     ///
@@ -152,12 +142,12 @@ impl Backend {
         member_name: &str,
         mode: ReferenceSearchMode,
     ) -> (Option<MemberScope>, Option<MemberScope>) {
-        let is_static = receiver.member_is_static();
+        let is_static = receiver.is_static;
         let ctx = self.file_context(uri);
         let Some(content) = self.reference_file_content(uri) else {
             return (None, None);
         };
-        let fqns = self.member_receiver_fqns(receiver, member_name, &ctx, span_start, &content);
+        let fqns = self.member_receiver_fqns(receiver, &ctx, span_start, &content);
         if fqns.is_empty() {
             return (None, None);
         }

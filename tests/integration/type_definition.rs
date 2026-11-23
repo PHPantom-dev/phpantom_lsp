@@ -744,3 +744,29 @@ async fn param_closure_this_union_navigation() {
     lines.sort();
     assert_eq!(lines, vec![1, 2]);
 }
+
+/// A label's type definition is the type of the parameter it fills, so
+/// "go to type definition" on `widget:` lands on the class the callee
+/// declares the parameter as taking.
+#[tokio::test]
+async fn a_named_argument_defines_the_type_its_parameter_takes() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///label_type_definition.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {}\n",
+        "class Registry\n",
+        "{\n",
+        "    public function register(Widget $widget): void {}\n",
+        "}\n",
+        "\n",
+        "(new Registry())->register(widget: new Widget());\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let response = goto_type_definition(&backend, &uri, 7, 32)
+        .await
+        .expect("a label's parameter has a type to define");
+    let location = assert_single_location(response, 1);
+    assert_eq!(location.uri, uri);
+}

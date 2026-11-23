@@ -1313,7 +1313,7 @@ namespace App {
         );
     }
 
-    // ── Unknown named arguments ─────────────────────────────────────
+    // ─── Unknown named parameters ───────────────────────────────────────
 
     /// A named argument no constructor parameter is named after throws,
     /// in an attribute as in `new`, and is reported on its name.
@@ -1332,10 +1332,9 @@ function test(): void {
     new Length(min: 1, maks: 2);
 }
 "#;
-        let diags = collect(php);
+        let diags = crate::common::with_code(collect(php), "unknown_named_argument");
         let found: Vec<(u32, &str)> = diags
             .iter()
-            .filter(|d| d.code == Some(Code::String("unknown_named_argument".to_string())))
             .map(|d| (d.range.start.line, message_text(&d.message)))
             .collect();
         assert_eq!(
@@ -1350,22 +1349,96 @@ function test(): void {
         assert_eq!(diags[0].range.end.character, 16);
     }
 
-    /// A variadic parameter collects the names nothing else takes, and a
-    /// class with no constructor ignores its arguments.
+    /// A variadic parameter collects the names nothing else takes, in a
+    /// constructor as anywhere else.
     #[test]
-    fn no_unknown_named_argument_for_variadic_or_constructorless_class() {
+    fn no_unknown_named_argument_for_a_variadic_parameter() {
         let php = r#"<?php
 class Collects {
     public function __construct(int $first, mixed ...$rest) {}
 }
-class Plain {}
 function test(): void {
     new Collects(first: 1, anything: 2);
-    new Plain(whatever: 1);
 }
 "#;
         let diags = collect(php);
         assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    /// A class with no constructor ignores positional arguments, but PHP
+    /// throws for any named one, in `new` and in an attribute alike.
+    #[test]
+    fn flags_named_argument_to_constructorless_class() {
+        let php = r#"<?php
+#[\Attribute]
+class Marker {}
+trait Stamps {}
+class Base {}
+class Plain extends Base { use Stamps; }
+#[Marker(label: 'x')]
+class Tagged {}
+function test(): void {
+    new Plain(x: 1);
+    new Plain(1, 2);
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            unknown_named(&diags),
+            vec![
+                (6, "Unknown named parameter $label"),
+                (9, "Unknown named parameter $x"),
+            ],
+            "got: {diags:?}",
+        );
+    }
+
+    /// A parent or trait that does not load could declare the
+    /// constructor, so a named argument to a class that has none of its
+    /// own is left alone then.
+    #[test]
+    fn no_named_argument_report_when_an_ancestor_is_missing() {
+        let php = r#"<?php
+class FromVendor extends \Vendor\Missing {}
+class UsesMissing { use \Vendor\MissingTrait; }
+class Middle extends \Vendor\AlsoMissing {}
+class Leaf extends Middle {}
+function test(): void {
+    new FromVendor(x: 1);
+    new UsesMissing(x: 1);
+    new Leaf(x: 1);
+}
+"#;
+        let diags = collect(php);
+        assert!(unknown_named(&diags).is_empty(), "got: {diags:?}");
+    }
+
+    /// `new self` in a trait builds the class using the trait, and
+    /// `new static` may build a subclass, either of which can declare the
+    /// constructor. `new self`, and `new static` in a final class, build
+    /// the class itself.
+    #[test]
+    fn named_argument_to_constructorless_class_through_a_keyword() {
+        let php = r#"<?php
+trait Requeues {
+    public function again(): void { new self(model: 1); new static(model: 1); }
+}
+class Job {
+    public function again(): void { new self(model: 1); new static(model: 1); }
+}
+final class Sealed {
+    public function again(): void { new static(model: 1); }
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            unknown_named(&diags),
+            vec![
+                (5, "Unknown named parameter $model"),
+                (8, "Unknown named parameter $model"),
+            ],
+            "got: {diags:?}",
+        );
     }
 
     fn unknown_named(diags: &[Diagnostic]) -> Vec<(u32, &str)> {
@@ -1565,5 +1638,293 @@ function test(\Imagick $image, Thumbnail $thumb): void {
             Backend::collect_argument_count_diagnostics,
         );
         assert!(unknown_named(&diags).is_empty(), "got: {diags:?}");
+    }
+
+    /// A misspelled label at a constructor call names no parameter, and PHP
+    /// throws for it whether or not the parameter it meant is promoted.
+    #[test]
+    fn a_misspelled_label_at_a_constructor_is_reported() {
+        let php = r#"<?php
+class SelectField
+{
+    public function __construct(
+        public string $name = '',
+        public string $label = '',
+    ) {}
+}
+
+$field = new SelectField(name: 'x', labl: 'y');
+"#;
+        let diags = crate::common::with_code(collect(php), "unknown_named_argument");
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert_eq!(
+            message_text(&diags[0].message),
+            "Unknown named parameter $labl",
+            "{diags:?}",
+        );
+        // The label is underlined, not the whole call.
+        assert_eq!(diags[0].range.start.line, 9);
+        assert_eq!(diags[0].range.start.character, 36);
+        assert_eq!(diags[0].range.end.character, 40);
+    }
+
+    /// A plain (non-promoted) parameter is bound by its label the same way,
+    /// so a method call's misspelled label is reported too.
+    #[test]
+    fn a_misspelled_label_at_a_method_is_reported() {
+        let php = r#"<?php
+class Renderer
+{
+    public function render(string $field, int $count = 0): string
+    {
+        return $field . $count;
+    }
+}
+
+(new Renderer())->render(fiels: 'x');
+"#;
+        let diags = crate::common::with_code(collect(php), "unknown_named_argument");
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert_eq!(
+            message_text(&diags[0].message),
+            "Unknown named parameter $fiels"
+        );
+    }
+
+    /// PHP binds a label to the parameter whose name spells it, and a
+    /// parameter's name is case-sensitive, so `name:` fills no `$Name`.
+    #[test]
+    fn a_label_differing_only_in_case_is_reported() {
+        let php = r#"<?php
+class SelectField
+{
+    public function __construct(public string $Name = '') {}
+}
+
+new SelectField(name: 'x');
+"#;
+        let diags = crate::common::with_code(collect(php), "unknown_named_argument");
+        assert_eq!(diags.len(), 1, "PHP throws for this call, got: {diags:?}");
+        assert_eq!(
+            message_text(&diags[0].message),
+            "Unknown named parameter $name"
+        );
+    }
+
+    /// A variadic parameter collects whatever label is passed for it, so no
+    /// name the signature does not declare is unknown.
+    #[test]
+    fn a_variadic_parameter_takes_any_label() {
+        let php = r#"<?php
+function gather(string ...$values): int { return count($values); }
+
+function many(string $first, mixed ...$rest): string { return $first; }
+
+gather(whatever: 'a');
+many(first: 'a', unrelated: 'b');
+"#;
+        let diags = collect(php);
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    /// A call the engine cannot resolve to a signature names nothing it can
+    /// check, so nothing is reported: a magic `__call` receives whatever the
+    /// caller writes.
+    #[test]
+    fn a_call_routed_through_magic_is_not_reported() {
+        let php = r#"<?php
+class Widget
+{
+    public function __call(string $name, array $arguments): mixed { return null; }
+}
+
+$widget = new Widget();
+$widget->shine(anythingGoes: 1);
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "a magic method accepts any label, got: {diags:?}"
+        );
+    }
+
+    /// The label's own range is what a fix or a rename needs to land on, and
+    /// a nested call's labels are read against their own callee.
+    #[test]
+    fn nested_calls_report_their_own_labels() {
+        let php = r#"<?php
+function outer(string $alpha = '') {}
+function inner(string $beta = '') {}
+
+outer(alpha: inner(nme: 'x'));
+"#;
+        let diags = crate::common::with_code(collect(php), "unknown_named_argument");
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert_eq!(
+            message_text(&diags[0].message),
+            "Unknown named parameter $nme"
+        );
+        assert_eq!(diags[0].range.start.character, 19, "{diags:?}");
+    }
+
+    /// An attribute's arguments construct the attribute's class, so a label
+    /// there is checked against its constructor like any other `new`.
+    #[test]
+    fn a_misspelled_label_on_an_attribute_is_reported() {
+        let php = r#"<?php
+#[Attribute]
+class Slug
+{
+    public function __construct(public string $value = '') {}
+}
+
+#[Slug(val: 'post')]
+class Page {}
+"#;
+        let diags = crate::common::with_code(collect(php), "unknown_named_argument");
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert_eq!(
+            message_text(&diags[0].message),
+            "Unknown named parameter $val"
+        );
+        assert_eq!(diags[0].range.start.line, 7, "the label, not the attribute");
+        assert_eq!(diags[0].range.start.character, 7);
+    }
+
+    /// A label that matches the attribute's promoted parameter is not an
+    /// error, however the parameter is named at the call.
+    #[test]
+    fn a_label_that_fills_an_attribute_parameter_is_not_reported() {
+        let php = r#"<?php
+#[Attribute]
+class Slug
+{
+    public function __construct(public string $value = '') {}
+}
+
+#[Slug(value: 'post')]
+class Page {}
+"#;
+        let diags = collect(php);
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    /// A method the engine synthesized — from an `@method` tag, a macro, or a
+    /// forwarder — documents what `__call` receives rather than bounding it,
+    /// and `__call` collects whatever label the caller writes into its
+    /// arguments array.  A parameter list read off a docblock is therefore not
+    /// proof that a label names nothing, however complete it looks.
+    ///
+    /// (The argument-count check has its own long-standing reading of a
+    /// documented `@method` parameter as required, which is a separate
+    /// question from whether a label names nothing.)
+    #[test]
+    fn a_label_at_a_docblock_declared_method_is_not_reported() {
+        let php = r#"<?php
+/**
+ * @method void notify(string $message)
+ */
+class Notifier
+{
+    public function __call(string $name, array $arguments): void {}
+}
+
+$n = new Notifier();
+$n->notify(mesage: 'hello');
+
+/**
+ * @method void remind()
+ */
+class Reminder
+{
+    public function __call(string $name, array $arguments): void {}
+}
+
+$r = new Reminder();
+$r->remind(message: 'hello');
+"#;
+        let diags = crate::common::with_code(collect(php), "unknown_named_argument");
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    /// `func_get_args()` lets a callee read arguments its signature does not
+    /// declare, but only positionally: a label it names nothing by still
+    /// throws, so it is reported like any other.
+    #[test]
+    fn a_func_get_args_callee_rejects_a_label_it_does_not_name() {
+        let php = r#"<?php
+function collector(): array { return func_get_args(); }
+
+collector(anything: 1);
+"#;
+        let diags = crate::common::with_code(collect(php), "unknown_named_argument");
+        assert_eq!(diags.len(), 1, "PHP throws for this call, got: {diags:?}");
+        assert_eq!(
+            message_text(&diags[0].message),
+            "Unknown named parameter $anything"
+        );
+    }
+
+    /// A `callable` *type* says what a callee takes, never what its parameters
+    /// are called, so the engine numbers them.  Neither a label that matches
+    /// a number nor one that matches no name of the real closure is proof of
+    /// anything, so no name is reported — while the count the type does
+    /// declare is still held to.
+    #[test]
+    fn a_label_at_a_typed_callable_is_not_checked_by_name() {
+        let php = r#"<?php
+/** @return callable(string): string */
+function make() {}
+
+make()(argument: 'a');
+make()(param1: 'a');
+"#;
+        let unknown = crate::common::with_code(collect(php), "unknown_named_argument");
+        assert!(
+            unknown.is_empty(),
+            "names the engine invented bound no caller, got: {unknown:?}"
+        );
+        let count = crate::common::with_code(collect(php), "argument_count_mismatch");
+        assert_eq!(
+            count.len(),
+            1,
+            "the type's own arity is still what a call is held to: {count:?}"
+        );
+        assert_eq!(count[0].range.start.line, 4, "{count:?}");
+    }
+
+    /// A built-in bundled with PHP is held to its signature, overloads
+    /// included.
+    #[test]
+    fn a_builtin_is_held_to_its_signature() {
+        let php = r#"<?php
+array_filter(notion_at_all: [1, 2]);
+session_set_cookie_params(lifetime_or_options: [], path: '/', domain: 'x', secure: true, httponly: true);
+new DateTimeZone(notion_at_all: 'UTC');
+"#;
+        let backend = crate::common::create_test_backend_with_full_stubs();
+        let unknown = crate::common::with_code(
+            collect_diagnostics_with(&backend, php, Backend::collect_argument_count_diagnostics),
+            "unknown_named_argument",
+        );
+        let lines: Vec<u32> = unknown.iter().map(|d| d.range.start.line).collect();
+        assert_eq!(lines, vec![1, 3], "{unknown:?}");
+    }
+
+    #[test]
+    fn a_label_at_a_user_class_that_extends_a_builtin_is_reported() {
+        let php = r#"<?php
+class Timestamps extends DateTime
+{
+}
+
+new Timestamps(notion_at_all: 'now');
+"#;
+        let backend = crate::common::create_test_backend_with_full_stubs();
+        let diags = crate::common::with_code(
+            collect_diagnostics_with(&backend, php, Backend::collect_argument_count_diagnostics),
+            "unknown_named_argument",
+        );
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
     }
 }

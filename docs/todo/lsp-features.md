@@ -1073,3 +1073,44 @@ When the domain has no catalogue yet, offer to create
 **Where to look:** `src/code_actions/insert_translation_key.rs`,
 `src/symfony/translations.rs` (`catalogue_spans`, `scan_yaml`,
 `scan_xliff`).
+
+---
+
+## F70. A label at a call of a closure value binds nothing
+
+**Impact: Low · Complexity: Medium**
+
+```php
+$render = function (string $field): string { return $field; };
+$render(field: 'x');
+```
+
+A named-argument label navigates, highlights, and renames with the parameter
+it fills by resolving the call's callee to the parameter's declaration token.
+A call through a closure literal, a variable holding one, or a
+`callable`-typed parameter resolves to a type, not to a declaration, so its
+labels have no go-to-definition, no references, and no rename. For a variable
+assigned the closure, the closure's own parameters have tokens in the file,
+so binding through the callable's type to that parameter is what is missing.
+The forward walker already carries a closure's parameter types this way.
+
+**Where to look:** `src/type_engine/call_resolution/named_arguments.rs`
+(`resolve_named_argument`), `src/type_engine/call_resolution/callable_target.rs`
+(`callable_type_as_target`).
+
+---
+
+## F71. Hover on a parameter at its declaration
+
+**Impact: Low · Complexity: Low**
+
+Hovering a function's or method's own parameter where it is declared shows
+nothing, though the engine has its type there.  A named-argument label is
+covered (it hovers the property the parameter promotes, or the parameter
+itself), but only from what the declaration carries, so `#[\NoDiscard]`'s
+reason and a template type substituted at the call are still missing on both
+spellings.
+
+**Where to look:** `src/hover/mod.rs` (`hover_from_symbol`, which has no
+parameter arm, and `parameter_hover_body`, which spells the label's hover
+from the declared parameter), `src/hover/variable.rs`.

@@ -113,6 +113,16 @@ pub enum CallableInvocation {
 }
 
 impl ParameterInfo {
+    /// The parameter's name without the `$` its declaration carries.
+    ///
+    /// A named argument spells the parameter's name bare (`name:` fills
+    /// `$name`), so every comparison between a label and a declaration
+    /// strips the prefix first.
+    pub(crate) fn bare_name(&self) -> &str {
+        let name = self.name.as_str();
+        name.strip_prefix('$').unwrap_or(name)
+    }
+
     /// Compare two parameters by signature-relevant fields only.
     ///
     /// Ignores `name_offset` (not present on this struct) and

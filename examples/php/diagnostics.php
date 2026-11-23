@@ -85,9 +85,11 @@ class DeprecationDemo
         //   - sendLegacy() (@deprecated docblock, no since) → still shown
 
         // ── Replacement code action ─────────────────────────────────
-        // When #[Deprecated(replacement: "...")] provides a template,
-        // placing the cursor on the call and pressing the quick-fix
-        // shortcut offers "Replace with `newFunc(...)`".
+        // When a `#[Deprecated]` attribute provides a `replacement:`
+        // template (PHP's own takes `message` and `since`; PhpStorm's takes
+        // the template too, and PHPantom reads it from either), placing the
+        // cursor on the call and pressing the quick-fix shortcut
+        // offers "Replace with `newFunc(...)`".
         // Template variables: %parametersList%, %parameter0%, %class%.
         $src->legacySetTimezone('UTC');
     }
@@ -296,6 +298,10 @@ class DeadCatchDemo
 // PHPantom flags calls that pass too few or too many arguments.  Variadic
 // parameters accept unlimited trailing args.  Argument unpacking (`...$args`)
 // suppresses the diagnostic because the actual count is unknown statically.
+//
+// A named argument is checked against the parameter it names: a label that
+// matches nothing is what PHP throws `Unknown named parameter` for, so it is
+// flagged on the label itself.
 
 class ArgumentCountDemo
 {
@@ -313,6 +319,21 @@ class ArgumentCountDemo
 
         // Too many arguments — error diagnostic appears:
         $user->getEmail('extra');
+    }
+}
+
+class NamedArgumentDemo
+{
+    public function demo(): void
+    {
+        // Correct — a label binds the parameter of the same name, however
+        // the arguments are ordered:
+        $user = new Scaffolding\User(email: 'alice@test.com', name: 'Alice');
+        echo $user->getName();
+
+        // A misspelled label names no parameter — error diagnostic appears:
+        $broken = new Scaffolding\User(nme: 'Alice', email: 'a@test.com');
+        echo $broken->getEmail();
     }
 }
 

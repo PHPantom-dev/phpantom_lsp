@@ -249,7 +249,72 @@ impl Backend {
                         declaration_scope.flatten().as_ref(),
                     );
                 }
-                self.find_variable_references(uri, content, name, span_start, include_declaration)
+                let mut locations = self.find_variable_references(
+                    uri,
+                    content,
+                    name,
+                    span_start,
+                    include_declaration,
+                );
+                // A parameter is named from outside its own scope as well:
+                // every call that hands it a value by name writes its name as
+                // a label, and those labels are part of what renaming the
+                // parameter reaches.  A use of the parameter — including the
+                // declaration itself — resolves back to the token the label
+                // binds, so the search starts from there.
+                let parameter_declaration = self.symbol_map_for(uri).and_then(|map| {
+                    let def = map.enclosing_parameter_for_use(name.as_str(), span_start)?;
+                    let source = map.source(content)?.text();
+                    let function = identifier_at(source, map.named_function_of_parameter(def)?)?;
+                    Some((def.token_range(), function.to_owned()))
+                });
+                if let Some((declaration_token, function)) = parameter_declaration {
+                    locations.extend(self.find_parameter_label_references(
+                        name.as_str(),
+                        &function,
+                        uri,
+                        declaration_token,
+                    ));
+                }
+                locations
+            }
+            SymbolKind::NamedArgument { .. } => {
+                // A label stands for the parameter it binds, so asking for a
+                // label's references asks for that parameter's: its
+                // declaration, the labels that bind it elsewhere, and — when
+                // the parameter promotes a property — every access to that
+                // property.  Starting the search from the declaration is what
+                // keeps the two answers identical.
+                let Some(declaration) = self.named_argument_location(uri, content, span) else {
+                    return Vec::new();
+                };
+                // A declaration the engine cannot show (an embedded stub) has
+                // no parameter to search for, and no label of it to reach.
+                let Some(name_token) = declaration.name_token else {
+                    return Vec::new();
+                };
+                let Some(declaration_uri) = crate::util::parse_url(&declaration.uri) else {
+                    return Vec::new();
+                };
+                let Some(declaration_content) = self.reference_file_content(&declaration.uri)
+                else {
+                    return Vec::new();
+                };
+                let position = offset_to_position(&declaration_content, name_token.0 as usize);
+                let Some(declaration_span) = self.lookup_symbol_at_position(
+                    declaration_uri.as_str(),
+                    &declaration_content,
+                    position,
+                ) else {
+                    return Vec::new();
+                };
+                self.dispatch_symbol_references(
+                    &declaration_span,
+                    declaration_uri.as_str(),
+                    &declaration_content,
+                    include_declaration,
+                    mode,
+                )
             }
             SymbolKind::ClassReference {
                 name,
@@ -289,23 +354,19 @@ impl Backend {
                     is_static: *is_static,
                     docblock_ref: *docblock_ref,
                 };
-                let member_is_static = receiver.member_is_static();
                 let (hierarchy, declaration_scope) =
                     self.resolve_member_access_scopes(uri, receiver, span_start, member_name, mode);
                 // A string passed to `allows()` on something that is not a
                 // mock names no method, so there is nothing to search for;
                 // the name-only search an unresolved receiver falls back to
-                // would match every method of that name.  Likewise an
-                // attribute's named-argument label whose parameter the
-                // constructor does not promote names no property, and a
-                // field helper's string given something other than a form
-                // model names none either, nor does a form callback's
-                // `'::method'` outside a form.
+                // would match every method of that name.  Likewise a field
+                // helper's string given something other than a form model
+                // names no property, nor does a form callback's `'::method'`
+                // outside a form.
                 if hierarchy.is_none()
                     && matches!(
                         docblock_ref,
                         DocblockMemberRef::MockedMethod
-                            | DocblockMemberRef::AttributeNamedArg
                             | DocblockMemberRef::EntityField
                             | DocblockMemberRef::YiiAttribute
                             | DocblockMemberRef::YiiProperty { form_model: true }
@@ -346,7 +407,7 @@ impl Backend {
                 };
                 let mut locations = self.find_member_references(
                     member_name,
-                    member_is_static,
+                    *is_static,
                     target_kind,
                     include_declaration,
                     hierarchy.as_ref(),
@@ -542,4 +603,14 @@ impl Backend {
             | SymbolKind::Comment => Vec::new(),
         }
     }
+}
+
+/// The identifier that starts at `offset` in `content`.
+fn identifier_at(content: &str, offset: u32) -> Option<&str> {
+    let rest = content.get(offset as usize..)?;
+    let len = rest
+        .bytes()
+        .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b >= 0x80)
+        .count();
+    (len > 0).then(|| &rest[..len])
 }

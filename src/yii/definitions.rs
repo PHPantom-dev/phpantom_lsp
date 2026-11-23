@@ -320,7 +320,7 @@ impl Backend {
     pub(crate) fn yii_defined_class(&self, fqn: &str) -> Option<Arc<ClassInfo>> {
         let loader = self.resolved_class_loader_with(&[]);
         let class = loader(Fqn::new(fqn))?;
-        if !crate::symfony::validation::ancestors_load(&class, &loader) {
+        if !crate::inheritance::ancestors_load(&class, &loader) {
             return None;
         }
         Some(crate::virtual_members::resolve_class_fully_cached(
