@@ -2153,6 +2153,17 @@ check(
     $gate->getPolicyFor(\App\Models\Review::class) instanceof \App\Policies\ReviewModerationPolicy
 );
 
+$previousContainer = \Illuminate\Container\Container::getInstance();
+$authContainer = new \Illuminate\Container\Container();
+$authContainer->instance(\Illuminate\Contracts\Auth\Access\Gate::class, $gate);
+\Illuminate\Container\Container::setInstance($authContainer);
+try {
+    $customer = new \App\Models\Customer();
+    check('Customer::can checks update through BakeryPolicy', $customer->can('update', new \App\Models\Bakery()));
+} finally {
+    \Illuminate\Container\Container::setInstance($previousContainer);
+}
+
 $gate->policy(\App\Models\BlogPost::class, \App\Policies\PublishingPolicy::class);
 check(
     'an explicit registration wins over the naming convention',

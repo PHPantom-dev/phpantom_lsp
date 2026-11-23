@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Laravel
 
+- **Authorization abilities on typed user models.** In calls such as `$customer->can('update', $post)`, complete the ability, jump to its policy, or see why it does not apply to the model. Contributed by @shuvroroy.
+
 - **Laravel connection names follow the receiver's type.** Connection names in instance calls and model or job properties now complete, navigate, show hover details and references, and report unknown names against the appropriate config file. Contributed by @shuvroroy.
 
 ### Changed

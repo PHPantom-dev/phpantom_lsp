@@ -476,40 +476,6 @@ always-on diagnostics — dynamic construction (`view("emails.$type")`)
 makes "unused" inherently a heuristic, so it must read as "no static
 reference found," never as an error.
 
-#### L46. `->can()` on a user model the receiver does not name
-
-**Impact: Medium-High · Complexity: Medium-High**
-
-Authorization abilities are recognized on `Gate::allows()`,
-`$this->authorize()`, the `can:` middleware parameter, and Blade's `@can`,
-but the most common spelling of all, `$user->can('update', $post)`, is
-only recognized when the receiver plainly reads as the authenticated user:
-a variable or property whose name ends in `user`, or any `user()` call
-(`auth()->user()`, `Auth::user()`, `$request->user()`).
-
-An application whose user model is not called `User` writes the same check
-and gets nothing. `$customer->can('update', $routine)`,
-`$member->canAny([…])`, and `$account->cannot(…)` are all invisible: no
-completion inside the string, no hover, no go-to-definition, and no
-unknown-ability diagnostic. In a production codebase where every
-authorization call is written that way, the whole feature is inert.
-
-The receiver's *type* is what settles this, and `can()` is far too ordinary
-a method name to claim on the name alone, so the fix is the mechanism main
-already uses for render sites whose receiver only a type settles: emit a
-candidate site during extraction and confirm it in a later, type-aware
-pass, the way `TypedReceiverSite` /
-`typed_receiver_spans_for` (`blade/typed_receiver.rs`) does. A receiver that resolves to the
-configured auth model (or to `Illuminate\Contracts\Auth\Access\Authorizable`)
-makes the call an authorization check; anything else leaves it alone. The
-existing name heuristic stays as the cheap path that needs no type
-resolution at all.
-
-**Where to look:** `receiver_is_user_like` in
-`symbol_map/extraction/laravel/gates.rs` and its completion-side twin (a
-local check in `completion/laravel_string_keys/context.rs`); `TypedReceiverSite` in
-`symbol_map/string_keys.rs` for the confirm-later shape.
-
 #### L49. Unguarded Eloquent mass assignment diagnostic
 
 **Impact: Medium · Complexity: Medium**

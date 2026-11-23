@@ -1111,7 +1111,7 @@ class Demo
      *  4. Change `'publish'` below to `'update'` — the ability exists, but
      *     not for BlogPost, so it is flagged as such rather than as unknown.
      */
-    public function authorizationAbilities(Review $review): void
+    public function authorizationAbilities(Customer $customer, Review $review): void
     {
         $bakery = new Bakery();
 
@@ -1123,6 +1123,8 @@ class Demo
         // BakeryPolicy is found by the naming convention
         // (App\Models\Bakery → App\Policies\BakeryPolicy).  `before()` is a
         // hook and `sameOwner()` is protected, so neither is offered.
+        // Try: Ctrl+Click 'update' on the customer to open BakeryPolicy::update().
+        $customer->can('update', $bakery);
         Gate::allows('update', $bakery);
         Gate::any(['update', 'delete'], $bakery);
         auth()->user()->can('delete', $bakery);
