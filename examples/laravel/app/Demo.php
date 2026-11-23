@@ -14,6 +14,7 @@ use App\Http\Controllers\BakeryController;
 use App\Mail\OrderShipped;
 use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
+use App\Jobs\SendBakeryReport;
 use App\Models\Baker;
 use App\Models\BakerBuilder;
 use App\Models\Bakery;
@@ -29,6 +30,7 @@ use App\Models\Loaf;
 use App\Models\PostCollection;
 use App\Models\Review;
 use App\Models\ReviewCollection;
+use App\Models\ReportingCustomer;
 use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
@@ -39,6 +41,9 @@ use Illuminate\Container\Attributes\Database as InjectDatabase;
 use Illuminate\Container\Attributes\Log as InjectLog;
 use Illuminate\Container\Attributes\Storage as InjectStorage;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Contracts\Broadcasting\Factory as BroadcastFactory;
+use Illuminate\Contracts\Queue\Factory as QueueFactory;
+use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
@@ -1293,6 +1298,23 @@ class Demo
         // matching child needs to exist in cache.php or queue.php.
         Cache::store('null');
         Queue::connection('null');
+    }
+
+    public function typedConnections(
+        ConnectionResolverInterface $database,
+        QueueFactory $queue,
+        BroadcastFactory $broadcast,
+        SendBakeryReport $job,
+        ReportingCustomer $customer,
+    ): void {
+        // Try: complete, hover, Ctrl+Click, or find references on each name.
+        // The receiver selects database.php, queue.php, or broadcasting.php.
+        $database->connection('mysql');
+        $queue->connection('redis');
+        $broadcast->connection('internal');
+        $job->onConnection('redis');
+        // Try: open these classes and complete their $connection values.
+        $customer->getConnectionName();
     }
 
     // ── Middleware names ────────────────────────────────────────────────

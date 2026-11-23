@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Laravel
+
+- **Laravel connection names follow the receiver's type.** Connection names in instance calls and model or job properties now complete, navigate, show hover details and references, and report unknown names against the appropriate config file. Contributed by @shuvroroy.
+
 ### Changed
 
 ### Fixed
