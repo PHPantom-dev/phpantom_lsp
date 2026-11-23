@@ -110,7 +110,7 @@ fn patch_url_method(class: &mut ClassInfo, method: &str) {
         PhpType::conditional(
             URL_FLAG,
             false,
-            PhpType::named(atom("true")),
+            PhpType::true_(),
             PhpType::named(atom(GENERATED_URL)),
             PhpType::string(),
         ),
