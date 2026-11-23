@@ -331,9 +331,7 @@ impl Backend {
                     // Telling a mock's `allows('update')` from any other
                     // object's takes the type engine, which tokens do not
                     // run for a variable, so the string keeps its colour.
-                    // An attribute's named-argument label names a parameter
-                    // first, and keeps the colour the editor gives one, and
-                    // a repository call's field name is an array key first,
+                    // A repository call's field name is an array key first,
                     // as a record's attribute name is a string first.  A
                     // property a Yii form field or map names is a string or
                     // a key first, too, and so is a form callback's
@@ -341,7 +339,6 @@ impl Backend {
                     if matches!(
                         docblock_ref,
                         crate::symbol_map::DocblockMemberRef::MockedMethod
-                            | crate::symbol_map::DocblockMemberRef::AttributeNamedArg
                             | crate::symbol_map::DocblockMemberRef::EntityField
                             | crate::symbol_map::DocblockMemberRef::YiiAttribute
                             | crate::symbol_map::DocblockMemberRef::YiiProperty { .. }
@@ -482,6 +479,18 @@ impl Backend {
                         // constants and enum cases).
                         (TT_ENUM_MEMBER, TM_READONLY)
                     }
+                }
+
+                SymbolKind::NamedArgument { .. } => {
+                    // A label always names a parameter; whether that parameter
+                    // also promotes a property takes the type engine, which
+                    // tokens do not run.  A file whose editor has a PHP
+                    // grammar already colours the label, so only the files
+                    // without one (Blade templates) need the token.
+                    if mode == SemanticTokensMode::Contextual {
+                        continue;
+                    }
+                    (TT_PARAMETER, 0)
                 }
 
                 SymbolKind::Keyword => {

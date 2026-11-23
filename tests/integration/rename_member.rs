@@ -1867,10 +1867,322 @@ async fn rename_property_leaves_an_attribute_label_naming_a_plain_parameter() {
     );
 
     let (line, character) = line_char_of(text, "path:");
+    let edit = rename(&backend, &uri, line, character + 1, "target")
+        .await
+        .expect("a label names the parameter it fills, so it renames with it");
+    assert_eq!(
+        apply_edits(text, &edits_for_uri(&edit, &uri)),
+        concat!(
+            "<?php\n",
+            "#[\\Attribute]\n",
+            "class Route {\n",
+            "    private string $path;\n",
+            "    public function __construct(string $target) { $this->path = $target; }\n",
+            "}\n",
+            "#[Route(target: '/home')]\n",
+            "class HomeController {}\n",
+        ),
+        "the parameter, its uses, and the label move; the property of the same name does not",
+    );
+}
+
+// ─── Named-argument labels ──────────────────────────────────────────────────
+
+const LABELLED_STRUCT: &str = concat!(
+    "<?php\n",
+    "namespace App;\n",
+    "\n",
+    "class SelectField\n",
+    "{\n",
+    "    public function __construct(\n",
+    "        public string $name = '',\n",
+    "        public string $label = '',\n",
+    "    ) {}\n",
+    "}\n",
+);
+
+const LABELLED_USAGE: &str = concat!(
+    "<?php\n",
+    "namespace App;\n",
+    "\n",
+    "$a = new SelectField(\n",
+    "    name: 'dashboard_template',\n",
+    "    label: 'Client Dashboard Template',\n",
+    ");\n",
+    "$b = new SelectField();\n",
+    "$b->name = 'dashboard_template';\n",
+    "echo $b->name . $a->label;\n",
+);
+
+/// The label a constructor writes is the promoted property's name at the call
+/// site, so renaming the property has to rewrite it — in every file that
+/// spells it, not only the property accesses.
+#[tokio::test]
+async fn rename_promoted_property_renames_the_labels_at_the_calls() {
+    let backend = create_test_backend();
+    let class_uri = Uri::parse("file:///SelectField.php").unwrap();
+    let usage_uri = Uri::parse("file:///usage.php").unwrap();
+    open_php(&backend, &class_uri, LABELLED_STRUCT).await;
+    open_php(&backend, &usage_uri, LABELLED_USAGE).await;
+
+    let (line, character) = line_char_of(LABELLED_STRUCT, "$name");
+    let edit = rename(&backend, &class_uri, line, character, "field")
+        .await
+        .unwrap();
+
+    let usage_edits = edits_for_uri(&edit, &usage_uri);
+    let updated = apply_edits(LABELLED_USAGE, &usage_edits);
     assert!(
-        rename(&backend, &uri, line, character + 1, "target")
-            .await
-            .is_none(),
-        "a label naming a plain parameter is not the property"
+        updated.contains("    field: 'dashboard_template',"),
+        "the label at the constructor call follows the property, got:\n{updated}"
+    );
+    assert!(
+        updated.contains("$b->field = 'dashboard_template';"),
+        "the property access follows too, got:\n{updated}"
+    );
+    assert!(
+        updated.contains("label: 'Client Dashboard Template',"),
+        "the other property's label is untouched, got:\n{updated}"
+    );
+    assert!(
+        updated.contains("echo $b->field . $a->label;"),
+        "got:\n{updated}"
+    );
+
+    let class_edits = edits_for_uri(&edit, &class_uri);
+    let updated_class = apply_edits(LABELLED_STRUCT, &class_edits);
+    assert!(
+        updated_class.contains("public string $field = ''"),
+        "got:\n{updated_class}"
+    );
+}
+
+/// Renaming can start at the label: the parameter it names, the property it
+/// promotes, and every other spelling of that name all move together.
+#[tokio::test]
+async fn rename_a_promoted_property_from_a_label() {
+    let backend = create_test_backend();
+    let class_uri = Uri::parse("file:///SelectField.php").unwrap();
+    let usage_uri = Uri::parse("file:///usage.php").unwrap();
+    open_php(&backend, &class_uri, LABELLED_STRUCT).await;
+    open_php(&backend, &usage_uri, LABELLED_USAGE).await;
+
+    let (line, character) = line_char_of(LABELLED_USAGE, "name: 'dashboard_template'");
+    let edit = rename(&backend, &usage_uri, line, character, "field")
+        .await
+        .expect("a label is renameable");
+
+    let updated_class = apply_edits(LABELLED_STRUCT, &edits_for_uri(&edit, &class_uri));
+    assert!(
+        updated_class.contains("public string $field = ''"),
+        "the declaration follows the label, got:\n{updated_class}"
+    );
+    let updated_usage = apply_edits(LABELLED_USAGE, &edits_for_uri(&edit, &usage_uri));
+    assert!(
+        updated_usage.contains("    field: 'dashboard_template',")
+            && updated_usage.contains("$b->field = 'dashboard_template';"),
+        "every spelling of the property follows, got:\n{updated_usage}"
+    );
+}
+
+/// Prepare-rename offers the label itself as the text being replaced.
+#[tokio::test]
+async fn prepare_rename_of_a_label_offers_the_label() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///SelectField.php").unwrap();
+    open_php(&backend, &uri, LABELLED_STRUCT).await;
+    open_php(
+        &backend,
+        &Uri::parse("file:///usage.php").unwrap(),
+        LABELLED_USAGE,
+    )
+    .await;
+
+    let usage_uri = Uri::parse("file:///usage.php").unwrap();
+    let (line, character) = line_char_of(LABELLED_USAGE, "name: 'dashboard_template'");
+    let prepared = prepare_rename(&backend, &usage_uri, line, character)
+        .await
+        .expect("the label is renameable");
+    let PrepareRenameResult::PrepareRenamePlaceholder(placeholder) = prepared else {
+        panic!("expected a placeholder, got {prepared:?}");
+    };
+    assert_eq!(placeholder.placeholder, "name");
+    assert_eq!(placeholder.range.start.character, character);
+    assert_eq!(placeholder.range.end.character, character + 4);
+}
+
+/// A method parameter's name is written at the call site as a label too, so
+/// renaming the parameter reaches the calls that pass it a value by name.
+#[tokio::test]
+async fn rename_a_method_parameter_renames_the_labels_at_the_calls() {
+    let backend = create_test_backend();
+    let class_uri = Uri::parse("file:///Renderer.php").unwrap();
+    let usage_uri = Uri::parse("file:///render.php").unwrap();
+    let class = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Renderer\n",
+        "{\n",
+        "    public function render(string $field, int $count = 0): string\n",
+        "    {\n",
+        "        return $field . $count;\n",
+        "    }\n",
+        "}\n",
+    );
+    let usage = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "function show(Renderer $renderer): string\n",
+        "{\n",
+        "    return $renderer->render(field: 'x', count: 2);\n",
+        "}\n",
+    );
+    open_php(&backend, &class_uri, class).await;
+    open_php(&backend, &usage_uri, usage).await;
+
+    let (line, character) = line_char_of(class, "$field .");
+    let edit = rename(&backend, &class_uri, line, character + 1, "$key")
+        .await
+        .unwrap();
+
+    let updated_usage = apply_edits(usage, &edits_for_uri(&edit, &usage_uri));
+    assert!(
+        updated_usage.contains("render(key: 'x', count: 2)"),
+        "the label follows the parameter, got:\n{updated_usage}"
+    );
+    let updated_class = apply_edits(class, &edits_for_uri(&edit, &class_uri));
+    assert!(
+        updated_class.contains("string $key") && updated_class.contains("return $key ."),
+        "the declaration and its uses follow, got:\n{updated_class}"
+    );
+}
+
+/// A property declared in the body and a same-named parameter the constructor
+/// does not promote are two members: renaming the property leaves the label
+/// that fills the parameter exactly as it is.
+#[tokio::test]
+async fn rename_property_leaves_a_label_that_names_an_unpromoted_parameter() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///Field.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Field\n",
+        "{\n",
+        "    public string $name;\n",
+        "\n",
+        "    public function __construct(string $name)\n",
+        "    {\n",
+        "        $this->name = $name;\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "$field = new Field(name: 'x');\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "$name;");
+    let edit = rename(&backend, &uri, line, character, "title")
+        .await
+        .unwrap();
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert!(
+        updated.contains("$field = new Field(name: 'x');"),
+        "the label fills the parameter, not the property, got:\n{updated}"
+    );
+    assert!(updated.contains("public string $title;"), "got:\n{updated}");
+}
+
+/// A name written in code is resolved by the rule for where it is written:
+/// two classes that share a short name in different namespaces have promoted
+/// properties of the same name, and renaming one must not touch the label
+/// that fills the other.
+#[tokio::test]
+async fn a_label_rename_follows_the_class_the_name_resolves_to() {
+    let backend = create_test_backend();
+    let app_uri = Uri::parse("file:///AppField.php").unwrap();
+    let global_uri = Uri::parse("file:///Field.php").unwrap();
+    let app_use_uri = Uri::parse("file:///uses_app.php").unwrap();
+    let global_use_uri = Uri::parse("file:///uses_global.php").unwrap();
+
+    let app_class = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Field { public function __construct(public string $name = '') {} }\n",
+    );
+    let global_class = concat!(
+        "<?php\n",
+        "class Field { public function __construct(public string $name = '') {} }\n",
+    );
+    let app_use = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "$a = new Field(name: 'app');\n",
+    );
+    let global_use = concat!(
+        "<?php\n",
+        "namespace Other;\n",
+        "use \\Field;\n",
+        "$b = new Field(name: 'global');\n",
+    );
+    for (uri, text) in [
+        (&app_uri, app_class),
+        (&global_uri, global_class),
+        (&app_use_uri, app_use),
+        (&global_use_uri, global_use),
+    ] {
+        open_php(&backend, uri, text).await;
+    }
+
+    let (line, character) = line_char_of(app_class, "$name");
+    let edit = rename(&backend, &app_uri, line, character, "title")
+        .await
+        .expect("a promoted property renames");
+
+    assert!(
+        apply_edits(app_use, &edits_for_uri(&edit, &app_use_uri)).contains("title: 'app'"),
+        "the label that fills App\\Field's property follows"
+    );
+    let untouched_global_use = apply_edits(global_use, &edits_for_uri(&edit, &global_use_uri));
+    assert!(
+        untouched_global_use.contains("name: 'global'"),
+        "the global class of the same short name keeps its own property:\n{untouched_global_use}"
+    );
+    assert!(
+        edits_for_uri(&edit, &global_uri).is_empty(),
+        "the global declaration is not part of this rename"
+    );
+}
+
+/// An attribute is a constructor call written with `#[...]`, so the label it
+/// writes names the promoted property the same way and follows its rename.
+#[tokio::test]
+async fn rename_promoted_property_renames_the_label_of_an_attribute() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///attribute_labels.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "#[Attribute]\n",
+        "class Slug\n",
+        "{\n",
+        "    public function __construct(public string $value = '') {}\n",
+        "}\n",
+        "\n",
+        "#[Slug(value: 'post')]\n",
+        "class Page {}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "$value");
+    let edit = rename(&backend, &uri, line, character, "slug")
+        .await
+        .expect("a promoted property renames");
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert!(
+        updated.contains("#[Slug(slug: 'post')]"),
+        "the attribute's label follows, got:\n{updated}"
+    );
+    assert!(
+        updated.contains("public string $slug = ''"),
+        "got:\n{updated}"
     );
 }

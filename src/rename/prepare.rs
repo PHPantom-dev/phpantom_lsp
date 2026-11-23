@@ -410,11 +410,17 @@ impl Backend {
 
         // Determine whether this is a property rename.  Properties are
         // special because the `$` prefix is part of the declaration but
-        // usage sites via `->` or `?->` don't include it.
+        // usage sites via `->` or `?->` don't include it.  A label is in the
+        // same case: it names a parameter, or the property a parameter
+        // promotes, without the `$` the declaration carries, so it goes
+        // through the per-site spelling below rather than being called a
+        // property rename it is not.
         let is_property = self.is_property_rename(&span.kind, uri, &span);
         let is_variable = matches!(
             &span.kind,
-            SymbolKind::Variable { .. } | SymbolKind::CompactVariable { .. }
+            SymbolKind::Variable { .. }
+                | SymbolKind::CompactVariable { .. }
+                | SymbolKind::NamedArgument { .. }
         ) && !is_property;
 
         // For class renames, delegate to the specialised handler that
@@ -474,6 +480,18 @@ impl Backend {
                 match loc_symbol {
                     Some(crate::symbol_map::SymbolSpan {
                         kind: SymbolKind::CompactVariable { .. },
+                        ..
+                    }) => bare_name.to_string(),
+                    // A parameter named at a call site is written without the
+                    // `$` its declaration carries.
+                    Some(crate::symbol_map::SymbolSpan {
+                        kind: SymbolKind::NamedArgument { .. },
+                        ..
+                    }) => bare_name.to_string(),
+                    // A rename started at a label reaches a promoted property's
+                    // accesses too, and those spell the name bare.
+                    Some(crate::symbol_map::SymbolSpan {
+                        kind: SymbolKind::MemberAccess { .. },
                         ..
                     }) => bare_name.to_string(),
                     _ if loc_content.as_deref().is_some_and(|content| {
@@ -751,6 +769,7 @@ impl Backend {
             SymbolKind::ClassReference { name, .. } => Some((name.to_string(), range)),
             SymbolKind::ClassDeclaration { name } => Some((name.to_string(), range)),
             SymbolKind::MemberAccess { member_name, .. } => Some((member_name.to_string(), range)),
+            SymbolKind::NamedArgument { name, .. } => Some((name.to_string(), range)),
             SymbolKind::MemberDeclaration { name, .. } => Some((name.to_string(), range)),
             // A callback string's function name keeps the leading `\` that
             // makes it global; the name to edit goes without it.

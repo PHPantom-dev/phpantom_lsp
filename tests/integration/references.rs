@@ -5240,6 +5240,12 @@ fn position_in(text: &str, needle: &str, sub: &str) -> (u32, u32) {
     (line, character + needle.find(sub).unwrap() as u32)
 }
 
+/// [`position_in`] as the [`Position`] a request carries.
+fn point_at(text: &str, needle: &str, sub: &str) -> Position {
+    let (line, character) = position_in(text, needle, sub);
+    Position::new(line, character)
+}
+
 /// The references (declaration included) to the `sub` inside `needle`, as
 /// sorted `(line, character)` starts.
 async fn reference_starts(text: &str, needle: &str, sub: &str) -> Vec<(u32, u32)> {
@@ -5557,5 +5563,216 @@ class Target {}
         reference_lines(&results),
         vec![3, 15],
         "only the constructor that promotes `$level` makes the label the property: {results:#?}"
+    );
+}
+
+// ─── Named-argument labels ──────────────────────────────────────────────────
+
+const LABELLED_FIELD: &str = concat!(
+    "<?php\n",
+    "class SelectField\n",
+    "{\n",
+    "    public function __construct(\n",
+    "        public string $name = '',\n",
+    "        public string $label = '',\n",
+    "    ) {}\n",
+    "}\n",
+    "\n",
+    "$a = new SelectField(name: 'dashboard', label: 'Dashboard');\n",
+    "$b = new SelectField();\n",
+    "$b->name = 'dashboard';\n",
+    "echo $a->label;\n",
+);
+
+/// The label a constructor call writes names the promoted property just as
+/// `$b->name` does, so both spellings belong to the same reference set.
+#[tokio::test]
+async fn property_references_include_the_label_that_fills_it() {
+    let expected = vec![
+        position_in(LABELLED_FIELD, "public string $name", "$name"),
+        position_in(LABELLED_FIELD, "name: 'dashboard'", "name"),
+        position_in(LABELLED_FIELD, "$b->name", "name"),
+    ];
+    for needle in ["public string $name", "$b->name"] {
+        let found = reference_starts(LABELLED_FIELD, needle, "name").await;
+        assert_eq!(found, expected, "from {needle:?}");
+    }
+}
+
+/// The other label of the same constructor call names the other property, and
+/// a search started from a label answers with that property's references.
+#[tokio::test]
+async fn label_references_are_the_promoted_property_s() {
+    let expected = vec![
+        position_in(LABELLED_FIELD, "public string $label", "$label"),
+        position_in(LABELLED_FIELD, "label: 'Dashboard'", "label"),
+        position_in(LABELLED_FIELD, "$a->label", "label"),
+    ];
+    for needle in ["label: 'Dashboard'", "$a->label"] {
+        let found = reference_starts(LABELLED_FIELD, needle, "label").await;
+        assert_eq!(found, expected, "from {needle:?}");
+    }
+}
+
+/// A plain parameter's name is written at the call site as a label, so
+/// renaming or finding references to the parameter reaches it as well as the
+/// uses inside the function.
+#[tokio::test]
+async fn parameter_references_include_the_labels_at_the_call_sites() {
+    let text = concat!(
+        "<?php\n",
+        "class Renderer\n",
+        "{\n",
+        "    public function render(string $field, int $count = 0): string\n",
+        "    {\n",
+        "        return $field . $count;\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "$out = (new Renderer())->render(field: 'x', count: 2);\n",
+        "$out .= $out;\n",
+    );
+    let expected = vec![
+        position_in(text, "string $field", "$field"),
+        position_in(text, "return $field", "$field"),
+        position_in(text, "field: 'x'", "field"),
+    ];
+    let found = reference_starts(text, "string $field", "$field").await;
+    assert_eq!(found, expected);
+
+    // Starting from the label answers with the same set.
+    let from_label = reference_starts(text, "field: 'x'", "field").await;
+    assert_eq!(from_label, expected);
+}
+
+/// A label at one call and a label of the same name at another call do not
+/// name the same parameter, so a search for one leaves the other out.
+#[tokio::test]
+async fn parameter_labels_of_a_different_function_are_left_out() {
+    let text = concat!(
+        "<?php\n",
+        "class Renderer { public function render(string $field): string { return $field; } }\n",
+        "class Saver { public function save(string $field): bool { return true; } }\n",
+        "\n",
+        "(new Renderer())->render(field: 'x');\n",
+        "(new Saver())->save(field: 'y');\n",
+    );
+    let expected = vec![
+        position_in(text, "function render(string $field", "$field"),
+        position_in(text, "return $field", "$field"),
+        position_in(text, "render(field:", "field"),
+    ];
+    let found = reference_starts(text, "function render(string $field", "$field").await;
+    assert_eq!(
+        found, expected,
+        "`Saver::save(field:)` names its own parameter"
+    );
+}
+
+/// A constructor the class inherits is filled by labels written under the
+/// child's name, which still bind the parent's promoted property.
+#[test]
+fn a_label_at_a_subclass_constructor_counts_for_the_inherited_property() {
+    let parent = "<?php\nnamespace App;\nclass Field\n{\n    public function __construct(public string $name = '') {}\n}\n";
+    let report = "<?php\nnamespace App;\nfunction report(): string\n{\n    $field = new DashboardField(name: 'dashboard');\n    return $field->name;\n}\n";
+    let (backend, dir) = crate::common::create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[
+            ("src/Field.php", parent),
+            (
+                "src/DashboardField.php",
+                "<?php\nnamespace App;\nclass DashboardField extends Field {}\n",
+            ),
+            ("src/Report.php", report),
+        ],
+    );
+
+    let parent_uri = format!("file://{}", dir.path().join("src/Field.php").display());
+    let report_uri = format!("file://{}", dir.path().join("src/Report.php").display());
+    open_file(&backend, &parent_uri, parent);
+    open_file(&backend, &report_uri, report);
+
+    let results = backend
+        .find_references(
+            &parent_uri,
+            parent,
+            point_at(parent, "string $name", "$name"),
+            true,
+        )
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "inherited_promoted_property_labels");
+    let lines: Vec<u32> = results
+        .iter()
+        .filter(|loc| loc.uri.as_str() == report_uri)
+        .map(|loc| loc.range.start.line)
+        .collect();
+    assert_eq!(
+        lines,
+        vec![4, 5],
+        "the label and the property read in Report.php both reference the inherited property: {results:?}"
+    );
+}
+
+/// A property declared in the class body next to a same-named parameter that
+/// is *not* promoted is not what the label fills: the label names the
+/// parameter, so the property's references leave it out and the parameter's
+/// take it in.
+#[test]
+fn a_label_is_not_a_reference_to_a_property_the_parameter_does_not_promote() {
+    let class = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Field\n",
+        "{\n",
+        "    public string $name;\n",
+        "\n",
+        "    public function __construct(string $name)\n",
+        "    {\n",
+        "        $this->name = $name;\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "$field = new Field(name: 'x');\n",
+    );
+    let (backend, dir) = crate::common::create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[("src/Field.php", class)],
+    );
+    let uri = format!("file://{}", dir.path().join("src/Field.php").display());
+    open_file(&backend, &uri, class);
+
+    let property_lines = backend
+        .find_references(
+            &uri,
+            class,
+            point_at(class, "public string $name", "$name"),
+            true,
+        )
+        .expect("should find the property's references")
+        .iter()
+        .map(|loc| loc.range.start.line)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        property_lines,
+        vec![4, 8],
+        "the property is declared and written; the label fills the parameter, not it: {property_lines:?}"
+    );
+
+    let parameter_lines = backend
+        .find_references(
+            &uri,
+            class,
+            point_at(class, "__construct(string $name", "$name"),
+            true,
+        )
+        .expect("should find the parameter's references")
+        .iter()
+        .map(|loc| loc.range.start.line)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parameter_lines,
+        vec![6, 8, 12],
+        "the parameter is declared, read in the body, and named by the label: {parameter_lines:?}"
     );
 }

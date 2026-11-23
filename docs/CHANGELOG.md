@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Editing and navigation
+
+- **Named arguments follow the parameter they name.** A label such as `name:` in `new SelectField(name: 'x')` or `$field->render(name: 'x')` jumps to the parameter it fills, hovers as it, highlights with it, shows up in its references, and renames with it. When that parameter promotes a property, the label moves with the property as well. Contributed by @AbyssWaIker.
+
 #### Laravel
 
 - **Laravel connection names follow the receiver's type.** Connection names in instance calls and model or job properties now complete, navigate, show hover details and references, and report unknown names against the appropriate config file. Contributed by @shuvroroy.

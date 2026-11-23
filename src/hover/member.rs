@@ -383,13 +383,6 @@ impl Backend {
                     &self.resolved_class_cache,
                 );
             }
-            DocblockMemberRef::AttributeNamedArg => candidates.retain(|class| {
-                crate::class_lookup::constructor_promotes(
-                    class,
-                    member_name,
-                    &resolved_class_loader,
-                )
-            }),
             DocblockMemberRef::YiiAttribute => {
                 candidates.retain(|class| {
                     crate::yii::active_record::is_record(class, &resolved_class_loader)

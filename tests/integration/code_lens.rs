@@ -2586,3 +2586,26 @@ async fn controller_methods_list_the_routes_that_reach_them() {
         serde_json::json!({ "line": 5, "character": 0 })
     );
 }
+
+/// A promoted property whose only other spelling is a label at a constructor
+/// call is not a symbol nothing uses: the label counts, both as a candidate
+/// (so the lens is offered at all) and in the resolved title.
+#[tokio::test]
+async fn a_promoted_property_lens_counts_the_labels_that_fill_it() {
+    let class = "<?php\nnamespace App;\nclass Field\n{\n    public function __construct(public string $name = '') {}\n}\n";
+    let usage =
+        "<?php\nnamespace App;\nfunction make(): Field {\n    return new Field(name: 'x');\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/Field.php", class), ("src/make.php", usage)],
+    );
+    let uri = Uri::from_file_path(dir.path().join("src/Field.php")).unwrap();
+    open_php(&backend, &uri, class).await;
+    warm_workspace_index(&backend, &uri, Position::new(4, 46)).await;
+
+    assert_eq!(
+        resolved_reference_title(&backend, &uri, 4).await.as_deref(),
+        Some("1 reference"),
+        "the label at the constructor call is the property's one reference"
+    );
+}

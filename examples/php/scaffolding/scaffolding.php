@@ -575,16 +575,18 @@ class ScaffoldingDeprecation
     #[\JetBrains\PhpStorm\Deprecated(reason: "The property is deprecated", since: "8.4")]
     public string $attrProp = '';
 
-    #[\Deprecated(reason: "Use NEW_SETTING instead")]
+    #[\Deprecated(message: "Use NEW_SETTING instead")]
     const ATTR_OLD = 0;
 
     /**
      * @deprecated Docblock message wins.
      */
-    #[\Deprecated(reason: "Attribute message loses")]
+    #[\Deprecated(message: "Attribute message loses")]
     public function bothDocAndAttr(): void {}
 
-    #[\Deprecated(replacement: "%class%->setTimezone(%parametersList%)", since: "5.5")]
+    // PHP's own `\Deprecated` takes `message` and `since`; the replacement
+    // template is the PhpStorm attribute's, which PHPantom reads from either.
+    #[\JetBrains\PhpStorm\Deprecated(reason: "Use setTimezone() instead", replacement: "%class%->setTimezone(%parametersList%)", since: "5.5")]
     public function legacySetTimezone(string $tz): void {}
 
     public function setTimezone(string $tz): void {}
