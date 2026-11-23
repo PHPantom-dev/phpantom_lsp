@@ -1299,17 +1299,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l56-typed-laravel-connection-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L56. Typed Laravel connection names
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l59-typed-controller-middleware-names" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1977,17 +1966,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L31. String-key rename, highlight, and semantic tokens
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l56-typed-laravel-connection-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L56. Typed Laravel connection names
       </span>
     </span>
   </a>
@@ -2663,15 +2641,6 @@ semantic tokens reuse the existing spans. Renaming a view name implies
 moving the Blade file — defer that one until the rest is in place.
 Symfony service IDs and container parameters are string-key spans too,
 declarations included, so their rename comes with the same work.</p>
-<h4 id="l56-typed-laravel-connection-names">L56. Typed Laravel connection names<a class="headerlink" href="#l56-typed-laravel-connection-names" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>The method name <code>-&gt;connection()</code> does not identify one config subtree: the
-receiver may select <code>database.connections.*</code>, <code>queue.connections.*</code>, or
-<code>broadcasting.connections.*</code>. Resolve it through the shared type engine, and
-treat <code>-&gt;onConnection()</code> as a queue connection. A model's <code>$connection</code> is a
-database connection, while the same property on a queueable job selects a
-queue connection. Each confirmed literal should receive the same completion,
-hover, navigation, diagnostics, and references as the direct facade spelling.</p>
 <h4 id="l59-typed-controller-middleware-names">L59. Typed controller middleware names<a class="headerlink" href="#l59-typed-controller-middleware-names" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p><code>$this-&gt;middleware('auth:admin')</code> names middleware only when <code>$this</code> is a
