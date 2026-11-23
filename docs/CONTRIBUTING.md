@@ -48,24 +48,46 @@ Note that clippy runs twice, once for library code and once including test code.
 
 ## Testing
 
-CI runs the test suite with coverage across six parallel Nextest shards.
+CI builds the instrumented test suite once and runs its Nextest archive across
+six parallel shards, without compiling again on those runners.
 The `Test` check passes only after every shard succeeds and their coverage
 reports are uploaded together to Codecov. To reproduce one shard locally
 (replace `1` with the shard number):
 
 ```bash
-cargo llvm-cov nextest --partition hash:1/6 --lcov --output-path lcov.info
+cargo llvm-cov nextest-archive --locked --archive-file coverage-tests.tar.zst
+cargo llvm-cov nextest --archive-file coverage-tests.tar.zst \
+  --partition hash:1/6 --lcov --output-path lcov.info
 ```
 
-PR latency benchmarks build the base and PR revisions with the same toolchain
-and settings, then distribute the cases across four runners. Each runner
-runs both revisions sequentially with Criterion's usual sampling settings
+Windows builds the suite once and runs it across four Nextest archive
+partitions. The `Test (Windows)` check passes only when every partition passed
+for the tested revision, and it does not block merging.
+
+The optional semantic-export feature has its own integration test target, so
+its check does not compile the default integration suite again:
+
+```bash
+cargo test --features semantic-export --lib --test semantic_export semantic_export
+```
+
+PR latency benchmarks build the base and PR revisions in parallel with the same
+toolchain and settings, then distribute the cases across twelve runners. Each
+runner runs both revisions sequentially with Criterion's usual sampling settings
 and each revision's own fixtures. One shared assignment
 keeps matching cases on the same runner even when a PR adds benchmarks.
 The `Benchmark (PR comparison)` check compares the paired results only after
 every shard passes and every case is accounted for. New cases are reported
 without a baseline; removed cases are listed explicitly. Main-branch
-measurements continue to populate the historical dashboard.
+measurements use the same sharding to populate the historical dashboard.
+The head build also produces the release server used by the scaling and memory
+checks. Benchmark builds and the Windows test archive are cached only for an
+exact commit and toolchain, so a rerun or a PR whose base was built on `main`
+skips compiling; anything else is built fresh. Memory sampling waits for both
+diagnostic passes on the opened file before it settles and measures.
+
+CI pins the Rust version (`1.99.1`), so bump it in `.github/workflows/ci.yml`
+and `.github/actions/build-benchmarks/action.yml` together.
 
 To reproduce a paired shard locally from the repository root, replace
 `BASE_COMMIT` with the PR's base revision:
@@ -73,16 +95,16 @@ To reproduce a paired shard locally from the repository root, replace
 ```bash
 benchmark_root="$PWD"
 git worktree add --detach /tmp/phpantom-bench-base BASE_COMMIT
-cargo bench --locked --manifest-path /tmp/phpantom-bench-base/Cargo.toml \
-  --bench '*' --no-run --message-format=json > /tmp/baseline-build.jsonl
+cargo build --locked --release --manifest-path /tmp/phpantom-bench-base/Cargo.toml \
+  --bench '*' --message-format=json > /tmp/baseline-build.jsonl
 (
   cd /tmp/phpantom-bench-base
   python3 "$benchmark_root/benches/ci_benchmarks.py" prepare \
     --build-dir /tmp/phpantom-baseline --shards 1 < /tmp/baseline-build.jsonl
 )
-cargo bench --locked --bench '*' --no-run --message-format=json > /tmp/benchmark-build.jsonl
+cargo build --locked --release --bench '*' --message-format=json > /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py prepare --build-dir /tmp/phpantom-benchmarks \
-  --shards 4 --baseline-dir /tmp/phpantom-baseline < /tmp/benchmark-build.jsonl
+  --shards 12 --baseline-dir /tmp/phpantom-baseline < /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py run --build-dir /tmp/phpantom-benchmarks \
   --baseline-source /tmp/phpantom-bench-base --shard 1 --output /tmp/shard-1.json
 ```

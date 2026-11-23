@@ -13,7 +13,7 @@ jobs:
     name: Publish Rust package
     runs-on: ubuntu-latest
     container:
-      image: rust:latest
+      image: rust:1.99.1
     environment:
       name: crates
       url: https://crates.io/crates/phpantom_lsp

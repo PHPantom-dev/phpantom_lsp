@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Internal
+
+- **Faster CI builds and benchmarks.** Test runners share a compiled suite and matching benchmark builds are reused. Performance checks keep the same thresholds and wait for background diagnostics before measuring memory. Contributed by @shuvroroy.
+
 ## [1.0.0] - 2026-11-23
 
 ### Added
