@@ -18230,3 +18230,262 @@ class C {
         diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+/// A call statement remembers its argument-less call arguments under their
+/// written form, and a later read of the same call text answers from that
+/// entry. The entry has to be what the call resolves to, its conditional
+/// return included, not the wider declared type.
+#[test]
+fn a_repeated_call_with_a_conditional_return_keeps_its_branch() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string) */
+    public function make($flag = false): string|Generated {}
+}
+function take(string $s): void {}
+function run(Maker $m): void {
+    take($m->make());
+    take($m->make());
+}
+"#;
+    let messages: Vec<String> = collect(php)
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// A check on such a call narrows the branch its conditional return picks,
+/// so a guard against `null` leaves the plain `string` the call returns
+/// without arguments.
+#[test]
+fn a_checked_call_with_a_conditional_return_narrows_its_branch() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string|null) */
+    public function make($flag = false): string|Generated|null {}
+}
+function take(string $s): void {}
+function run(Maker $m): void {
+    if ($m->make() !== null) {
+        take($m->make());
+    }
+}
+"#;
+    let messages: Vec<String> = collect(php)
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// The argument-type messages for `php`, in order.
+fn argument_messages(php: &str) -> Vec<String> {
+    collect(php)
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
+}
+
+/// A client whose `send()` answers by its class template, which defaults to
+/// a synchronous client.
+const ASYNC_CLIENT: &str = r#"<?php
+class Response {
+    public function body(): string { return ''; }
+}
+class Promise {}
+/** @template TAsync of bool = false */
+class Client {
+    /** @return (TAsync is false ? Response : Promise) */
+    public function send(): Response|Promise {}
+}
+function takeResponse(Response $r): void {}
+function takePromise(Promise $p): void {}
+"#;
+
+#[test]
+fn a_repeated_call_decided_by_a_class_template_default_keeps_its_branch() {
+    let php = format!(
+        "{ASYNC_CLIENT}function run(Client $c): void {{\n    takeResponse($c->send());\n    takeResponse($c->send());\n}}\n"
+    );
+    let messages = argument_messages(&php);
+    assert!(messages.is_empty(), "{messages:?}");
+
+    let php = format!(
+        "{ASYNC_CLIENT}function run(Client $c): void {{\n    takePromise($c->send());\n    takePromise($c->send());\n}}\n"
+    );
+    assert_eq!(argument_messages(&php).len(), 2);
+}
+
+#[test]
+fn a_repeated_call_decided_by_the_receivers_template_argument_keeps_its_branch() {
+    for (client, take) in [
+        ("Client<false>", "takeResponse"),
+        ("Client<true>", "takePromise"),
+    ] {
+        let php = format!(
+            "{ASYNC_CLIENT}/** @param {client} $c */\nfunction run(Client $c): void {{\n    {take}($c->send());\n    {take}($c->send());\n}}\n"
+        );
+        let messages = argument_messages(&php);
+        assert!(messages.is_empty(), "{client}: {messages:?}");
+    }
+}
+
+#[test]
+fn a_repeated_inherited_call_with_a_conditional_return_keeps_its_branch() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string) */
+    public function make($flag = false): string|Generated {}
+}
+class ChildMaker extends Maker {}
+function take(string $s): void {}
+function run(ChildMaker $m): void {
+    take($m->make());
+    take($m->make());
+}
+"#;
+    let messages = argument_messages(php);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// A `$this`-keyed conditional is decided by the receiver, and left as
+/// both branches when the receiver could still be either.
+#[test]
+fn a_repeated_call_decided_by_its_receiver_keeps_its_branch() {
+    let fixture = r#"<?php
+class Shape {
+    /** @return ($this is Circle ? string : int) */
+    public function label(): string|int {}
+}
+final class Circle extends Shape {}
+function take(string $s): void {}
+function takeInt(int $i): void {}
+"#;
+    let php = format!(
+        "{fixture}function run(Circle $c): void {{\n    take($c->label());\n    take($c->label());\n}}\n"
+    );
+    let messages = argument_messages(&php);
+    assert!(messages.is_empty(), "{messages:?}");
+
+    let php = format!(
+        "{fixture}function run(Shape $s): void {{\n    takeInt($s->label());\n    takeInt($s->label());\n}}\n"
+    );
+    let messages = argument_messages(&php);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+}
+
+/// `@param class-string<T>` with `@return T` reads as a conditional on the
+/// class-string; without the argument, the call is still the declared type,
+/// the second time too.
+#[tokio::test]
+async fn a_repeated_call_to_a_class_string_factory_keeps_the_declared_type() {
+    let (text, cursor) = crate::common::split_cursor(
+        r#"<?php
+class Item {
+    public function price(): int { return 0; }
+}
+class Factory {
+    /**
+     * @template T of Item
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function make(string $class = Item::class): Item {}
+}
+function take(Item $item): void {}
+function run(Factory $f): void {
+    take($f->make());
+    $f->make()->§
+}
+"#,
+    );
+    let backend = create_test_backend();
+    let uri = Uri::from_file_path(std::env::temp_dir().join("repeated_factory.php")).unwrap();
+    let labels =
+        crate::common::complete_labels_at(&backend, &uri, &text, cursor.line, cursor.character)
+            .await;
+    assert!(labels.iter().any(|l| l.starts_with("price")), "{labels:?}");
+}
+
+/// A check that records an argument-less call without the call expression
+/// at hand (here through a boolean the condition stored) still gives the
+/// call its declared type, which the check then narrows.
+#[test]
+fn a_call_recorded_by_a_stored_condition_keeps_its_declared_type() {
+    let php = r#"<?php
+class Foo {}
+class M {
+    /** @return ($strict is true ? Foo : Foo|int) */
+    public function get(bool $strict = false): Foo|int {}
+}
+function takeFoo(Foo $f): void {}
+function run(M $m): void {
+    $ok = !is_int($m->get());
+    if ($ok) {
+        takeFoo($m->get());
+    }
+}
+"#;
+    let messages = argument_messages(php);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// The branch a repeated call got is the receiver's: once the variable holds
+/// a client with the other template argument, the call answers the other
+/// branch.
+#[test]
+fn a_repeated_call_follows_a_reassigned_receiver() {
+    let php = format!(
+        "{ASYNC_CLIENT}/**\n * @param Client<false> $a\n * @param Client<true> $b\n */\nfunction run(Client $a, Client $b): void {{\n    $c = $a;\n    takeResponse($c->send());\n    $c = $b;\n    takePromise($c->send());\n}}\n"
+    );
+    let messages = argument_messages(&php);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// A `?->` check on the call adds a `null` that belongs to that spelling.
+/// The plain call after it only runs once the receiver is set, so it reads
+/// the branch alone.
+#[test]
+fn a_nullsafe_check_leaves_no_null_on_a_repeated_conditional_call() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string) */
+    public function make($flag = false): string|Generated {}
+}
+function take(string $s): void {}
+function run(?Maker $m): void {
+    if ($m?->make() !== '') {}
+    take($m->make());
+}
+"#;
+    let messages = argument_messages(php);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// The argument-less call and the call with an argument are different
+/// calls, each with its own branch, however they interleave.
+#[test]
+fn a_repeated_call_without_arguments_is_not_the_call_with_one() {
+    let php = r#"<?php
+class Generated {}
+class Maker {
+    /** @return ($flag is true ? Generated : string) */
+    public function make($flag = false): string|Generated {}
+}
+function take(string $s): void {}
+function takeGen(Generated $g): void {}
+function run(Maker $m): void {
+    take($m->make());
+    takeGen($m->make(true));
+    takeGen($m->make(true));
+    take($m->make());
+}
+"#;
+    let messages = argument_messages(php);
+    assert!(messages.is_empty(), "{messages:?}");
+}

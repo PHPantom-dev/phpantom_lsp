@@ -303,6 +303,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Traits used by enums.** An enum's `use Greets { hello as greet; }` now gives the enum a `greet()` method, `insteadof` picks the right trait, and `/** @use Holds<Stamp> */` binds the trait's templates, as they already did in classes.
 - **Methods called through a variable name.** When `$name` holds one known method name, `$factory->$name()` and `Factory::$name()` return what that method returns instead of `mixed`.
 - **Compound bitwise assignments on strings stay strings.** `$payload ^= $mask` (and `|=`, `&=`) on two strings, or on operands with no declared type, no longer makes `$payload` an `int`, matching `$payload ^ $mask`. Contributed by @phcorp.
+- **Repeated calls with a conditional return type.** A call without arguments written a second time in the same method, or checked in a condition, now gets the branch its conditional return type picks instead of the method's wider declared type, so passing it on is no longer reported. Contributed by @giuseppe-esposito-87.
 
 #### Narrowing and control flow
 
