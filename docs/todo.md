@@ -28,12 +28,6 @@ contributor even though it's short.
 
 # Scheduled Sprints
 
-## Sprint 8 — 1.0 release & IDE extensions
-
-| #   | Item                                                                                                                                                            | Impact      | Complexity  |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-|     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
-
 ## Sprint 9 — Startup performance
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
@@ -297,7 +291,7 @@ ships, remove every row that names it.
 | X14 | [Forward Zed's `file_scan_exclusions` and `file_types`](todo/indexing.md#x14-forward-zeds-file_scan_exclusions-and-file_types) (waiting on [zed#66121](https://github.com/zed-industries/zed/pull/66121)) | Low         | Low         |
 | X18 | [Watch `[indexing] include` and stub paths outside the workspace](todo/indexing.md#x18-watch-indexing-include-and-stub-paths-outside-the-workspace)                                         | Low-Medium  | Medium      |
 | X13 | [Decide how workspace-wide edits treat excluded files](todo/indexing.md#x13-decide-how-workspace-wide-edits-treat-excluded-files)                                           | Low-Medium  | Medium      |
-| X22 | [Read the remaining YAML files with the shared parser](todo/indexing.md#x22-read-the-remaining-yaml-files-with-the-shared-parser) | Low-Medium  | Medium-High |
+| X22 | [Read YAML files with a parser](todo/indexing.md#x22-read-yaml-files-with-a-parser) | Low-Medium  | Medium-High |
 | X23 | [Read XML files with a parser](todo/indexing.md#x23-read-xml-files-with-a-parser) | Low-Medium  | Medium-High |
 | X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium-High |
 | X12 | [Say when an exclude hid the class a diagnostic names](todo/indexing.md#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names)                                           | Low-Medium  | Medium-High |
