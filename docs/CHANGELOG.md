@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [1.0.0] - 2026-11-23
+
+### Added
+
 #### Command line
 
 - **Filter `analyze` by diagnostic code.** `--code unused_import` reports only that code and `--exclude-code unused_import` leaves it out. Both are repeatable and work with `--severity` and every output format. Contributed by @stubbedev.
@@ -2455,7 +2463,8 @@ Initial release.
 - **Embedded phpstorm-stubs.**
 - **Zed editor extension.**
 
-[Unreleased]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.1...HEAD
+[Unreleased]: https://github.com/PHPantom-dev/phpantom_lsp/compare/1.0.0...HEAD
+[1.0.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.1...1.0.0
 [0.11.1]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.0...0.11.1
 [0.11.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.10.0...0.11.0
 [0.10.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.9.0...0.10.0
