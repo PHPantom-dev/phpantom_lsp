@@ -60,14 +60,12 @@ cargo llvm-cov nextest --archive-file coverage-tests.tar.zst \
   --partition hash:1/6 --lcov --output-path lcov.info
 ```
 
-Windows also builds once, then runs the full suite across four Nextest archive
-partitions. The `Test (Windows)` check accounts for every partition's successful
-result for the tested revision and retains its existing non-blocking policy.
-An exact-commit archive cache also avoids compilation on reruns, keyed by the
-compiler, runner image, target, and test profile. Every partition still runs.
+Windows builds the suite once and runs it across four Nextest archive
+partitions. The `Test (Windows)` check passes only when every partition passed
+for the tested revision, and it does not block merging.
 
-The optional semantic-export feature has a separate integration test target,
-so its checks do not compile the full default integration suite again:
+The optional semantic-export feature has its own integration test target, so
+its check does not compile the default integration suite again:
 
 ```bash
 cargo test --features semantic-export --lib --test semantic_export semantic_export
@@ -83,35 +81,13 @@ every shard passes and every case is accounted for. New cases are reported
 without a baseline; removed cases are listed explicitly. Main-branch
 measurements use the same sharding to populate the historical dashboard.
 The head build also produces the release server used by the scaling and memory
-checks, so those jobs do not rebuild it.
+checks. Benchmark builds and the Windows test archive are cached only for an
+exact commit and toolchain, so a rerun or a PR whose base was built on `main`
+skips compiling; anything else is built fresh. Memory sampling waits for both
+diagnostic passes on the opened file before it settles and measures.
 
-CI keeps every check on each PR, including Windows, coverage, WebAssembly,
-and performance comparisons. Superseded PR runs are cancelled. Rust dependency
-caches are separated by build type and can be saved in each PR's own cache
-scope as well as on `main`; memory checks also cache Composer downloads.
-Tests omit debug information to reduce disk usage and linking time, while
-release optimization and Criterion sampling stay
-unchanged.
-
-Rust and runner families are pinned so updates do not silently replace the
-build environment. Benchmark binaries are cached for an exact source revision,
-compiler, target, native toolchain, build recipe, and release settings. A matching
-base built on `main` is reused by later PRs; a missing match is compiled. Scaling
-and memory checks depend only on the head build. Each benchmark runner pairs
-the manifests locally, avoiding a separate preparation job.
-
-The manual CI trigger accepts 8, 12, or 16 benchmark workers for controlled
-comparisons. The comparison summary lists job queue and execution times and
-release artifact cache hits; Cargo timing reports are retained with the build
-artifacts. Measure cold runs, warm reruns, source changes, and concurrent PRs
-separately. A 5–6 minute result remains a target until measured on GitHub with
-the full set of checks.
-
-Memory sampling waits for the opened file's native diagnostic passes before
-the settling period, so a slow background pass does not leave a temporary
-parse in the memory measurement. Manual profiling runs without a Codecov
-token retain the coverage reports without uploading them; PR and push uploads
-keep their existing behavior.
+CI pins the Rust version (`1.99.1`), so bump it in `.github/workflows/ci.yml`
+and `.github/actions/build-benchmarks/action.yml` together.
 
 To reproduce a paired shard locally from the repository root, replace
 `BASE_COMMIT` with the PR's base revision:

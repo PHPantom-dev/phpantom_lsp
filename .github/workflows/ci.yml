@@ -22,10 +22,16 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # Full debuginfo makes every debug binary 500-900 MB, which fills the
+  # runner's disk. Line tables keep file:line in backtraces.
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
   # Coverage uses instrumentation rather than debuginfo. Smaller test
   # binaries avoid slow links and the need to delete runner software.
   CARGO_PROFILE_TEST_DEBUG: 0
+  # Linux jobs build the static musl target the released binaries use
+  # (see release.yml), including the mimalloc allocator, so CI exercises
+  # what users run. Each job sets CARGO_BUILD_TARGET because Windows and
+  # WebAssembly build other targets.
 
 jobs:
   lint:
@@ -60,6 +66,9 @@ jobs:
       - run: cargo clippy --locked --all-targets --features semantic-export -- -D warnings
       - run: cargo test --locked --features semantic-export --lib --test semantic_export semantic_export
 
+  # Path handling differs on Windows (drive letters, `\` separators,
+  # `\\?\` canonical paths), and nothing else in CI runs there. It does not
+  # block until the suite passes there.
   test-windows-build:
     name: Test (Windows build)
     runs-on: windows-2025
@@ -67,6 +76,8 @@ jobs:
     env:
       CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
     steps:
+      # The runner checks out with CRLF line endings, which would shift
+      # every offset the fixtures and embedded stubs are tested at.
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -248,6 +259,10 @@ jobs:
           name: coverage-tests
       - name: Run compiled tests with coverage
         env:
+          # nextest runs each test in its own process, and the default
+          # `%p` (per-pid) profile name leaves one full-size .profraw per
+          # test, thousands per shard. `%m` without `%p` merges every
+          # process of the same binary into a small pool of files instead.
           LLVM_PROFILE_FILE_NAME: phpantom-%8m.profraw
         run: >-
           cargo llvm-cov nextest --archive-file coverage-tests.tar.zst
@@ -412,6 +427,9 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
+      # The checkout is GitHub's test merge of the PR into its base, so its
+      # first parent is exactly the base the measured head was built on.
+      # `pull_request.base.sha` is not guaranteed to be that parent.
       - name: Identify the actual test-merge parent
         id: base
         env:
@@ -597,8 +615,10 @@ jobs:
             --results output.json --summary "$GITHUB_STEP_SUMMARY" \
             --base-revision "$BASE_REVISION" --head-revision "$HEAD_REVISION" \
             --threshold 1.30
+      # Informational only; an API hiccup must not fail the required check.
       - name: Report workflow timing and cache outcomes
         if: ${{ !cancelled() }}
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           HEAD_CACHE_HIT: ${{ needs.benchmark-head.outputs.cache-hit }}

@@ -31,7 +31,9 @@ runs:
       shell: bash
       env:
         SOURCE_REVISION: ${{ inputs.revision }}
-        BUILD_RECIPE: ${{ hashFiles('.github/actions/build-benchmarks/action.yml') }}
+        # The manifest is written by the measuring revision's helper, not the
+        # built one, so a base build restored for a PR must match its helper.
+        BUILD_RECIPE: ${{ hashFiles('.github/actions/build-benchmarks/action.yml', 'benches/ci_benchmarks.py') }}
       run: |
         python3 - <<'PY' >> "$GITHUB_OUTPUT"
         import hashlib
