@@ -101,9 +101,22 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      # x86_64 binaries target the baseline x86-64 ISA (SSE2, no AVX or
+      # BMI) so they run on every 64-bit x86 CPU. This was measured
+      # against x86-64-v2/v3 and the gain was within noise, while thin LTO
+      # (which costs no compatibility) gave the whole difference. The C
+      # code (mimalloc, ring) is pinned too: the cc crate does not pass
+      # rustc's target-cpu on to the C compiler, so without it the C code
+      # follows whatever the runner's GCC defaults to, which put AVX2 into
+      # mimalloc's startup path and crashed the binary with SIGILL on
+      # older CPUs. The macOS and aarch64 targets keep rustc's defaults,
+      # which already match the oldest hardware those platforms support.
       - name: Build
         shell: bash
         env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-cpu=x86-64"
+          CFLAGS_x86_64_unknown_linux_musl: "-march=x86-64 -mtune=generic"
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-cpu=x86-64"
           CARGO_PROFILE_RELEASE_LTO: "thin"
           # Embed the tag as the version explicitly; actions/checkout
           # fetches a shallow clone, so `git describe` may not see it.
@@ -113,6 +126,26 @@ jobs:
             cross build --release --target ${{ matrix.target }}
           else
             cargo build --release --target ${{ matrix.target }}
+          fi
+
+      # Run the Linux x86_64 binary on an emulated baseline CPU (qemu64 has
+      # no SSSE3, SSE4, POPCNT, AVX or BMI), so a build that picked up newer
+      # instructions fails here instead of crashing on users' machines.
+      # Analysing the demo project exercises far more code than --version;
+      # its diagnostics are intentional, so only a signal (exit code 128+)
+      # counts as a failure.
+      - name: Check baseline CPU compatibility
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          sudo apt-get install -y qemu-user
+          bin=target/${{ matrix.target }}/release/phpantom_lsp
+          qemu-x86_64 -cpu qemu64 "$bin" --version
+          status=0
+          qemu-x86_64 -cpu qemu64 "$bin" analyze --project-root examples/php --no-colour > /dev/null || status=$?
+          if [ "$status" -ge 128 ]; then
+            echo "::error::phpantom_lsp died with exit code $status on a baseline x86-64 CPU"
+            exit 1
           fi
 
       # --- macOS: import certificate and sign the binary ---
