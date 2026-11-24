@@ -219,6 +219,24 @@ impl SymbolIndex {
         self.class_lookup_generation.fetch_add(1, Ordering::Release);
     }
 
+    /// Whether `class` is a parsed declaration of `fqn` that lost the name
+    /// to another file's declaration.
+    pub(crate) fn lost_class_name(&self, fqn: &str, class: &Arc<ClassInfo>) -> bool {
+        let declared = {
+            let dupes = self.duplicate_classes.read();
+            !dupes.is_empty()
+                && dupes
+                    .get(fqn)
+                    .is_some_and(|decls| decls.values().any(|c| Arc::ptr_eq(c, class)))
+        };
+        declared
+            && !self
+                .fqn_class_index
+                .read()
+                .get(fqn)
+                .is_some_and(|winner| Arc::ptr_eq(winner, class))
+    }
+
     /// Every file known to declare the class `fqn` other than the one
     /// `fqn_uri_index` names, parsed or not.
     pub(crate) fn alternate_class_uris(&self, fqn: &str) -> Vec<String> {

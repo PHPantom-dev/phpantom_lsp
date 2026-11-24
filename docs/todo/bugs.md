@@ -65,34 +65,7 @@ No outstanding items.
 
 ## Name resolution
 
-### B762. `$this` in a class declared twice reads the other declaration
-
-**Impact: Low · Complexity: Medium**
-
-```php
-// a.php
-namespace V;
-class Variant {}
-
-// b.php
-namespace V;
-class Variant { private int $x = 1; public function f(): int { return $this->x; } }
-// "Property V\Variant::$x not found"
-```
-
-When more than one file declares a class, the class index keeps one
-declaration for the name (the lowest-sorting file, or the one that does
-not wait for the autoloader behind a `class_exists` guard). Inside the
-body of a declaration that lost, `$this`, `self` and `static` resolve
-by name to that winner, so every member only the losing declaration has
-is reported unknown in its own file, and hover and completion there show
-the other declaration's members. Polyfills and version-specific variants
-of a class (`symfony/polyfill-*`, Carbon's `DatePeriodBase`) are where
-this shows up in real code.
-
-**Fix:** resolve `$this`, `self` and `static` inside a class body to the
-declaration that encloses them in the current file, not to whatever the
-class index holds for the name.
+No outstanding items.
 
 ## Code actions
 

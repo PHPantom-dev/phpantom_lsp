@@ -25,7 +25,7 @@ use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 use crate::virtual_members::laravel::patches::apply_laravel_patches;
 
-use super::cache::PendingClaim;
+use super::cache::{PendingClaim, ResolvedCacheInner};
 use super::laravel;
 use super::{
     ResolvedClassCache, ResolvedClassCacheKey, active_resolved_class_cache, apply_virtual_members,
@@ -376,6 +376,20 @@ fn resolved_key(fqn: crate::atom::Atom, mut args: Vec<String>) -> ResolvedClassC
     (fqn, args)
 }
 
+/// The cache key for `class` instantiated with `args`: its name's, unless
+/// it is a declaration that lost the name to another file's, which is
+/// kept apart.
+fn declaration_key(
+    cache: &ResolvedCacheInner,
+    class: &ClassInfo,
+    mut args: Vec<String>,
+) -> ResolvedClassCacheKey {
+    if let Some(tag) = cache.losing_declaration_tag(class) {
+        args.push(tag);
+    }
+    resolved_key(class.fqn(), args)
+}
+
 /// Reserved generic-args marker for [`resolve_class_base_cached`]'s cache
 /// key. Contains a NUL byte, which `PhpType::to_string()` never produces,
 /// so it can never collide with a real `(FQN, generic_args)` key.
@@ -412,14 +426,14 @@ pub(crate) fn resolve_class_base_cached(
         return Arc::new(resolve_class_with_inheritance(class, class_loader));
     };
 
-    let key = resolved_key(class.fqn(), vec![BASE_RESOLUTION_MARKER.to_string()]);
-
-    {
+    let key = {
         let map = cache.read();
+        let key = declaration_key(&map, class, vec![BASE_RESOLUTION_MARKER.to_string()]);
         if let Some(cached) = map.get(&key) {
             return Arc::clone(cached);
         }
-    }
+        key
+    };
 
     let mut merged = resolve_class_with_inheritance(class, class_loader);
     cache.read().share_members(&mut merged);
@@ -459,14 +473,17 @@ pub fn resolve_class_fully_with_generics(
 
     // Check the cache for (FQN, generic_args).
     let fqn = class.fqn();
-    let cache_key = resolved_key(fqn, generic_arg_strings.to_vec());
-
-    if let Some(c) = cache {
-        let map = c.read();
-        if let Some(cached) = map.get(&cache_key) {
-            return Arc::clone(cached);
+    let cache_key = match cache {
+        Some(c) => {
+            let map = c.read();
+            let key = declaration_key(&map, class, generic_arg_strings.to_vec());
+            if let Some(cached) = map.get(&key) {
+                return Arc::clone(cached);
+            }
+            key
         }
-    }
+        None => resolved_key(fqn, generic_arg_strings.to_vec()),
+    };
 
     let started = std::time::Instant::now();
     // Resolve the base class (cached at (FQN, [])).
@@ -624,17 +641,22 @@ pub(crate) fn resolve_class_for_field_type_hint(
 ) -> Arc<ClassInfo> {
     let cache = super::cache::active_resolved_class_cache();
     let fqn = class.fqn();
-    let key = resolved_key(
-        fqn,
-        generic_arg_strings
-            .iter()
-            .cloned()
-            .chain(std::iter::once(TYPE_HINT_KEY_MARKER.to_string()))
-            .collect(),
-    );
-    if let Some(cached) = cache.and_then(|c| c.read().get(&key).cloned()) {
-        return cached;
-    }
+    let args: Vec<String> = generic_arg_strings
+        .iter()
+        .cloned()
+        .chain(std::iter::once(TYPE_HINT_KEY_MARKER.to_string()))
+        .collect();
+    let key = match cache {
+        Some(c) => {
+            let map = c.read();
+            let key = declaration_key(&map, class, args);
+            if let Some(cached) = map.get(&key) {
+                return Arc::clone(cached);
+            }
+            key
+        }
+        None => resolved_key(fqn, args),
+    };
 
     // A Drupal field item list's template is its item, which carries the
     // reference field's target the list names after it.
@@ -657,8 +679,12 @@ pub(crate) fn resolve_class_for_field_type_hint(
     // A specialisation that was left uncached is a partial result handed
     // to a re-entrant caller, and so is anything built on it.
     let cacheable = cache.is_some_and(|c| {
-        c.read()
-            .contains_key(&resolved_key(fqn, specialised_arg_strings.to_vec()))
+        let map = c.read();
+        map.contains_key(&declaration_key(
+            &map,
+            class,
+            specialised_arg_strings.to_vec(),
+        ))
     });
 
     let mut result = Arc::unwrap_or_clone(specialised);
@@ -760,7 +786,6 @@ fn resolve_class_fully_inner(
     let _active_guard = super::cache::with_active_resolved_class_cache(cache);
 
     let fqn = class.fqn();
-    let cache_key = resolved_key(fqn, Vec::new());
 
     // ── Reload raw class from class_loader ──────────────────────────
     // Callers sometimes pass a ClassInfo that has already been through
@@ -791,12 +816,14 @@ fn resolve_class_fully_inner(
     };
 
     // ── Cache lookup ────────────────────────────────────────────────
-    {
+    let cache_key = {
         let map = cache.read();
-        if let Some(cached) = map.get(&cache_key) {
+        let key = declaration_key(&map, effective_class, Vec::new());
+        if let Some(cached) = map.get(&key) {
             return Arc::clone(cached);
         }
-    }
+        key
+    };
 
     // ── Cross-thread single-flight for the first resolution ─────────
     // Two threads racing to resolve the same never-before-cached class

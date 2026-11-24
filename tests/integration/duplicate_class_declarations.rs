@@ -372,3 +372,37 @@ async fn guarded_autoload_file_does_not_hide_the_vendor_class() {
         );
     }
 }
+
+const LOSING_VARIANT: &str = "<?php\nnamespace Vendor;\nclass Variant {\n    private int $x = 1;\n    const C = 2;\n    public function f(): int { return $this->x + self::C + static::g() + $this->h() + $this->f(); }\n    public static function g(): int { return 1; }\n    private function h(): int { return 1; }\n}\n";
+const VARIANT_CALLER: &str =
+    "<?php\nfunction f(\\Vendor\\Variant $v): void { $v->rich(); $v->f(); }\n";
+
+/// Inside the body of a declaration that lost the name to another file,
+/// `$this`, `self` and `static` are that declaration, not the winner,
+/// while every other file still sees the winner, whichever of the two
+/// was resolved first.
+#[tokio::test]
+async fn this_inside_a_losing_declaration_reads_its_own_members() {
+    for caller_first in [false, true] {
+        let backend = create_test_backend();
+        backend.update_ast("file:///a_rich.php", RICH);
+        backend.update_ast("file:///b_variant.php", LOSING_VARIANT);
+
+        let caller = || unknown_members(&backend, "file:///caller.php", VARIANT_CALLER);
+        let before = caller_first.then(caller);
+        let own = unknown_members(&backend, "file:///b_variant.php", LOSING_VARIANT);
+        assert!(
+            own.is_empty(),
+            "members of the enclosing declaration: {own:?}"
+        );
+        let after = caller();
+        assert_eq!(
+            after,
+            vec!["Method Vendor\\Variant::f() not found".to_string()],
+            "other files see a_rich.php's declaration"
+        );
+        if let Some(before) = before {
+            assert_eq!(before, after);
+        }
+    }
+}

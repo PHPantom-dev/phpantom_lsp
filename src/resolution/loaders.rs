@@ -136,13 +136,19 @@ impl Backend {
     /// retried against any file's imports or namespace.
     ///
     /// `classes` are the caller's own classes, which a re-parse of patched
-    /// content holds where the index does not.
+    /// content holds where the index does not.  One of them also wins
+    /// over the index when another file's declaration of the same name
+    /// took the name: inside the caller's file, `$this`, `self` and the
+    /// name itself are the declaration written there.
     pub(crate) fn resolved_class_loader_with<'a>(
         &'a self,
         classes: &'a [Arc<ClassInfo>],
     ) -> impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + 'a {
         move |fqn: Fqn<'_>| {
             let fqn = fqn.as_str();
+            if let Some(own) = self.own_losing_declaration(classes, fqn) {
+                return Some(own);
+            }
             // Container keys and the configured-date sentinel are never
             // class names; `find_or_load_class` routes them itself.
             if fqn.contains('.')
@@ -159,6 +165,33 @@ impl Backend {
             // Laravel's alias tables, which the lookup above leaves out.
             self.resolve_laravel_alias(fqn)
         }
+    }
+
+    /// The declaration of `fqn` among `classes` (one file's), linked, when
+    /// another file's declaration of the name is the one the index holds.
+    ///
+    /// The resolved-class cache is told it is such a declaration, so its
+    /// merged form is cached apart from the winner's under the same name.
+    fn own_losing_declaration(
+        &self,
+        classes: &[Arc<ClassInfo>],
+        fqn: &str,
+    ) -> Option<Arc<ClassInfo>> {
+        let own = crate::class_lookup::find_class_by_fqn(classes, fqn)?;
+        if !self.symbols.lost_class_name(fqn, own) {
+            return None;
+        }
+        let linked = self.link_loaded_class(Arc::clone(own));
+        if !self
+            .resolved_class_cache
+            .read()
+            .is_losing_declaration(&linked)
+        {
+            self.resolved_class_cache
+                .write()
+                .note_losing_declaration(&linked);
+        }
+        Some(linked)
     }
 
     /// Return a Laravel macro `$this` resolver closure bound to a class

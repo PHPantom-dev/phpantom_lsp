@@ -151,6 +151,15 @@ pub struct ResolvedCacheInner {
     /// Length of [`linked_classes`](Self::linked_classes) after its last
     /// dead-witness sweep.  See [`sweep_dead_witnesses`].
     linked_classes_swept_len: usize,
+    /// Declarations of a class name that another file's declaration took,
+    /// keyed by identity, as handed out to their own file's lookups.  The
+    /// map is keyed by name, which means the winner, so these are cached
+    /// under a key marked with their identity instead.  See
+    /// [`losing_declaration_tag`](Self::losing_declaration_tag).
+    losing_declarations: HashMap<usize, Weak<ClassInfo>>,
+    /// Length of [`losing_declarations`](Self::losing_declarations) after
+    /// its last dead-witness sweep.
+    losing_declarations_swept_len: usize,
     /// Members of the cached classes, pooled by content so classes that
     /// inherit an identical member share one allocation of it.  See
     /// [`MemberPool`].
@@ -490,6 +499,39 @@ impl ResolvedCacheInner {
         self.linked_classes.clear();
         self.linked_classes_swept_len = 0;
         self.member_pool.get_mut().clear();
+    }
+
+    /// Record `class` as a declaration that lost its name to another
+    /// file's.  See [`losing_declarations`](Self::losing_declarations).
+    pub(crate) fn note_losing_declaration(&mut self, class: &Arc<ClassInfo>) {
+        sweep_dead_witnesses(
+            &mut self.losing_declarations,
+            &mut self.losing_declarations_swept_len,
+            |witness| witness.strong_count() > 0,
+        );
+        self.losing_declarations
+            .insert(Arc::as_ptr(class) as usize, Arc::downgrade(class));
+    }
+
+    /// Whether `class` was recorded by
+    /// [`note_losing_declaration`](Self::note_losing_declaration).
+    pub(crate) fn is_losing_declaration(&self, class: &ClassInfo) -> bool {
+        if self.losing_declarations.is_empty() {
+            return false;
+        }
+        let ptr = std::ptr::from_ref(class);
+        self.losing_declarations
+            .get(&(ptr as usize))
+            .and_then(Weak::upgrade)
+            .is_some_and(|alive| std::ptr::eq(Arc::as_ptr(&alive), ptr))
+    }
+
+    /// The extra cache key argument that keeps `class` apart from the
+    /// winning declaration of its name, when it is a
+    /// [losing declaration](Self::note_losing_declaration).
+    pub(crate) fn losing_declaration_tag(&self, class: &ClassInfo) -> Option<String> {
+        self.is_losing_declaration(class)
+            .then(|| format!("\0declaration@{:x}", std::ptr::from_ref(class) as usize))
     }
 
     /// Share the members of a resolved class about to be cached with the
