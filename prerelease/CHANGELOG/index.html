@@ -6250,6 +6250,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong><code>clamp()</code> returns its arguments' types.</strong> The result of <code>clamp($value, $min, $max)</code> is typed from its arguments instead of <code>mixed</code>.</li>
 <li><strong>No unknown members on a class whose parent cannot be found.</strong> When a parent class, interface, or trait is missing, such as a test extending PHPUnit's <code>TestCase</code> before <code>composer install</code>, the missing class is reported once instead of every member it would have supplied.</li>
 <li><strong>A guarded copy of a class no longer hides the real one.</strong> A fallback declared behind <code>if (! class_exists(Foo::class))</code> or <code>if (false)</code> gives way to the class Composer would autoload, so members only the real class has are no longer reported unknown.</li>
+<li><strong>A class declared in more than one file reads its own members.</strong> Inside each declaration of a class that several files declare, such as a polyfill's variants, <code>$this</code>, <code>self</code> and <code>static</code> see the members declared there, not another file's.</li>
 </ul>
 <h2 id="110-2026-11-24"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/1.0.0...1.1.0">1.1.0</a> - 2026-11-24<a class="headerlink" href="#110-2026-11-24" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
