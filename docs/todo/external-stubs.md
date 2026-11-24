@@ -334,3 +334,26 @@ The current `patches.rs` module handles the known cases correctly
 and is well-tested. It stays in place until the partial-class merge
 above is ready. New patches can still be added
 in Rust in the interim.
+
+---
+
+## E8. The embedded stubs lack PHP 8.6 additions
+
+**Impact: Low-Medium · Complexity: Low**
+
+The pinned phpstorm-stubs commit has some of PHP 8.6 (`clamp()`,
+`SortDirection`, `Io\Poll\Context`) but not all of it. Missing:
+
+- `Time\Duration` and the rest of the `Time` namespace.
+- `Uri\WhatWg\url_percent_encode()` and `Uri\WhatWg\UrlPercentEncodingMode`.
+- The 8.6 deprecations: the alias functions (`is_integer()`, `is_long()`,
+  `is_double()`, `doubleval()`), the `mb_ereg*` family, `spl_object_hash()`,
+  `strcoll()` and a few more, and `ArrayIterator`'s sort and flag methods
+  (`asort()`, `ksort()`, `getFlags()`, `setFlags()`, and the rest). Tusk
+  PHP's `internal/checks/deprecated_functions.go` has the function list.
+
+Add them to the `AJenbo/phpstorm-stubs` fork (or upstream) and bump
+`stubs.lock`. Tusk PHP's `internal/stubs/php/core/*/php-8.6.php` lists
+what 8.6's reflection reports. The cases are in
+`tests/fixtures/tusk/php_8_6/`, marked `// ignore:`.
+

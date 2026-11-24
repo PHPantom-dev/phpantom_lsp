@@ -1,0 +1,43 @@
+// test: field run/a write that keeps its class in a loop stays typed
+// Ported from Tusk PHP (MIT), case "field run/a write that keeps its class in a loop stays typed".
+// php: 8.5
+// feature: diagnostics
+// expect_code: unknown_member
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+class Query {
+public function where(string $c): static {
+return $this;
+}
+}
+function run(array $xs, bool $c): void {
+	$q = new Query();
+	foreach ($xs as $x) {
+$q = $q->where('a');
+}
+	if ($c) {
+		$q = $q->where('b');
+	}
+	$q->nope();
+}

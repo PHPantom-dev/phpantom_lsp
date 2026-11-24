@@ -1,0 +1,37 @@
+// test: 8.1/enum method shows in hover
+// Ported from Tusk PHP (MIT), case "8.1/enum method shows in hover".
+// php: 8.5
+// feature: hover
+// expect: string
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+enum Suit: string {
+case Hearts = 'h';
+public function label(): string {
+return '';
+}
+}
+function run(Suit $s): void {
+$s->la<>bel();
+}

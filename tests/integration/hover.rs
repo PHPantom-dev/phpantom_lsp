@@ -17970,12 +17970,12 @@ class Post extends Model {
     assert!(plain.contains("$plain = Stamps&Model\n"), "{plain}");
     let nullable = crate::common::hover_last(&backend, php, "$nullable;");
     assert!(
-        nullable.contains("$nullable = Stamps&Model|null"),
+        nullable.contains("$nullable = (Stamps&Model)|null"),
         "{nullable}"
     );
     let defaulted = crate::common::hover_last(&backend, php, "$defaulted;");
     assert!(
-        defaulted.contains("$defaulted = Stamps&Model|null"),
+        defaulted.contains("$defaulted = (Stamps&Model)|null"),
         "{defaulted}"
     );
     let cls = crate::common::hover_last(&backend, php, "$cls;");
@@ -18022,7 +18022,7 @@ class Post extends Model {
     );
     let property = crate::common::hover_last(&backend, php, "$property;");
     assert!(
-        property.contains("$property = Stamps&Model|null"),
+        property.contains("$property = (Stamps&Model)|null"),
         "{property}"
     );
     let chained = crate::common::hover_last(&backend, php, "$chained;");

@@ -1,0 +1,35 @@
+// test: 8.6/@var in a parameter doc comment types it
+// Ported from Tusk PHP (MIT), case "8.6/@var in a parameter doc comment types it".
+// php: 8.6
+// feature: completion
+// expect: info
+// ignore: PHP 8.6 parameter doc comments are not read
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function handle(
+	/** @var Logger */
+	$log,
+): void {
+$log-><>
+}

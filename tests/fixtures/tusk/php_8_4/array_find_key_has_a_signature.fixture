@@ -1,0 +1,31 @@
+// test: 8.4/array_find_key has a signature
+// Ported from Tusk PHP (MIT), case "8.4/array_find_key has a signature".
+// php: 8.5
+// feature: hover
+// expect: callable
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function run(array $a): void {
+array_find_k<>ey($a, fn ($x) => true);
+}

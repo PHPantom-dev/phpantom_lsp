@@ -1,0 +1,54 @@
+// test: field run/a member of any branch's value is no unknown member
+// Ported from Tusk PHP (MIT), case "field run/a member of any branch's value is no unknown member".
+// php: 8.5
+// feature: diagnostics
+// expect_clean
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function run(bool $c, int $n): void {
+	if ($c) {
+$a = new Person();
+} else {
+$a = new Logger();
+}
+	$a->name();
+	switch ($n) {
+		case 1:
+			$b = new Person();
+			break;
+		default:
+			$b = new Logger();
+	}
+	$b->name();
+	$d = new Person();
+	if ($c) {
+$d = new Logger();
+}
+	$d->name();
+	$e = new Person();
+	while ($c) {
+$e = new Logger();
+}
+	$e->name();
+}

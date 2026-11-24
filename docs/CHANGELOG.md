@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Claude Code no longer sees outdated diagnostics after an edit.** Results from before an edit, at line numbers that no longer match the file, are not reported to the agent as new findings.
 - **Claude Code follows files changed by shell commands.** A file rewritten or deleted by a command the agent runs, such as a formatter or `git checkout`, is picked up within a second instead of keeping its old contents until the agent next edits it.
+- **Missing properties on the left of `??` are no longer reported.** `$this->label ?? ''` and `$this->cache ??= []` read the property the way `isset()` does, so a property the class does not declare is not an error there. A missing method on that side is still reported.
+- **Undefined variables in a dynamic class constant fetch.** An undefined `$name` in `Foo::{$name}` is reported like any other read of it.
+- **Hover shows `readonly` properties.** A property declared `readonly`, promoted as one, or belonging to a `readonly` class shows the keyword in its hover.
+- **DNF types are spelled as PHP writes them.** A union holding an intersection shows as `(A&B)|null` in hover and anywhere else a type is written out, instead of `A&B|null`, which is not valid PHP.
+- **`clamp()` returns its arguments' types.** The result of `clamp($value, $min, $max)` is typed from its arguments instead of `mixed`.
 
 ## [1.1.0] - 2026-11-24
 

@@ -74,6 +74,35 @@ coverage alongside the diagnostic counts.
 
 ---
 
+## T72. Diagnostic changes on real projects are only caught by hand
+
+**Impact: Medium · Complexity: Medium**
+
+Whether a change adds false positives on real code is checked by running
+`analyze` over the local sample projects and comparing counts by hand.
+CI never does it, so a regression that only real code triggers reaches
+`main` unless someone remembers to look, and a fix that removes findings
+is never recorded either.
+
+Pin a few public projects at fixed commits (laravel/framework,
+symfony/symfony, WordPress, Drupal core), install their Composer
+dependencies from a lock file kept in the repo, and commit what
+`analyze` reports on each as a baseline in F72's format (path, code and
+message, no line numbers). A CI job runs `analyze` over each pinned
+checkout and fails when a finding appears or disappears, printing the
+new ones with their positions. A script rewrites the baselines after an
+intended change, so every shift in findings shows up in the PR diff.
+Cache the checkouts and dependencies by the pinned commit, and run the
+projects as a matrix so the job's wall time stays close to the slowest
+project. T61's resolution dump can later ride on the same checkouts.
+
+Tusk PHP does exactly this (`scripts/field-baseline.sh`,
+`testdata/field/`, the `field-baseline` job in its
+`.github/workflows/conformance.yml`) for Laravel, Symfony, WordPress and
+Magento 2.
+
+---
+
 ## T34. `static::CONST` over-narrows to the declaring class's value
 **Impact: Medium · Complexity: Medium-High**
 

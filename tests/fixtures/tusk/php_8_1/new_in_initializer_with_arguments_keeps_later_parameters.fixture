@@ -1,0 +1,36 @@
+// test: 8.1/new in initializer with arguments keeps later parameters
+// Ported from Tusk PHP (MIT), case "8.1/new in initializer with arguments keeps later parameters".
+// php: 8.5
+// feature: completion
+// expect: second
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+class Pair {
+public function __construct(public int $a = 0, public int $b = 0) {}
+}
+class Svc {
+public function __construct(private Pair $p = new Pair(1, 2), private int $second = 3) {} function go(): void {
+$this-><>
+}
+}

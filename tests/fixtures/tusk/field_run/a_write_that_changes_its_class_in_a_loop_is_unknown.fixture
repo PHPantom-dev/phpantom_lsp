@@ -1,0 +1,43 @@
+// test: field run/a write that changes its class in a loop is unknown
+// Ported from Tusk PHP (MIT), case "field run/a write that changes its class in a loop is unknown".
+// php: 8.5
+// feature: diagnostics
+// Tusk stays quiet once the loop changes the class. PHPantom knows $n is
+// Node|Leaf after the loop, and neither declares nope().
+// expect_code: unknown_member
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+class Leaf {}
+class Node {
+public function next(): Leaf {
+return new Leaf();
+}
+}
+function run(array $xs): void {
+	$n = new Node();
+	foreach ($xs as $x) {
+$n = $n->next();
+}
+	$n->nope();
+}

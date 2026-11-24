@@ -1,0 +1,37 @@
+// test: 8.3/override shows in hover
+// Ported from Tusk PHP (MIT), case "8.3/override shows in hover".
+// php: 8.5
+// feature: hover
+// PHPantom names the overridden class instead of repeating the attribute.
+// expect: overrides **Base**
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+class Base {
+public function go(): void {}
+}
+class Svc extends Base {
+#[\Override] public function go(): void {
+$this->g<>o();
+}
+}

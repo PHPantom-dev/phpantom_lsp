@@ -38,10 +38,14 @@ $f-><>
 | `// expect_sig_active:` | no | no | **Signature help:** the expected active parameter index (0-based). |
 | `// expect_sig_param:` | no | yes | **Signature help:** expected parameter labels in order. |
 | `// ignore:` | no | no | Mark the test as ignored with a reason (e.g. `// ignore: needs todo.md §2`). |
+| `// php:` | no | no | Run on the full embedded stubs, for this PHP version (e.g. `// php: 8.5`). |
 | `// project:` | diagnostics | no | **Diagnostics:** the fixture project the files are analysed in, relative to `tests/`. |
 | `// file:` | diagnostics | yes | **Diagnostics:** a file of the project to analyse, relative to the project. |
 | `// codes:` | no | no | **Diagnostics:** comma-separated diagnostic codes the comparison covers. |
 | `// expect_diagnostic:` | no | yes | **Diagnostics:** `[FILE:]LINE: message` that must be reported. |
+| `// expect_clean` | no | no | **Diagnostics:** the body must report no diagnostics at all. |
+| `// expect_code:` | no | yes | **Diagnostics:** a code the body must report. |
+| `// expect_absent_code:` | no | yes | **Diagnostics:** a code the body must not report. |
 
 Lines that don't match any directive are silently ignored, so you can add
 plain comments:
@@ -134,7 +138,23 @@ At least one signature help assertion is required.
 
 ### `diagnostics`
 
-A diagnostics fixture has no body and no cursor. It analyses files of a
+A diagnostics fixture without a `// project:` analyses its own body, where
+a `<>` cursor is optional. Every diagnostic the server would publish for the
+file counts: `// expect_clean` requires there are none, and
+`// expect_code:` and `// expect_absent_code:` require a code is or is not
+among them.
+
+```
+// test: an unknown class after `??` is reported
+// feature: diagnostics
+// php: 8.5
+// expect_code: unknown_class
+---
+<?php
+function run(?object $a): object { return $a ?? throw new Missing(); }
+```
+
+A diagnostics fixture with a `// project:` has no body and no cursor. It analyses files of a
 fixture project (`tests/phpstan_symfony/`, `tests/phpstan_doctrine/`), the
 way the PHPStan extensions' rule tests analyse their data files, with the
 project's classes and configuration indexed first:
@@ -182,6 +202,14 @@ tests/fixtures/
   ...
 ```
 
+## Stubs and PHP version
+
+By default a fixture runs on a handful of minimal stubs (`UnitEnum`,
+`BackedEnum`, a few array and JSON functions), which keeps it fast and
+independent of the standard library. A `// php: X.Y` line runs it on the
+full embedded stubs instead, filtered to what that PHP version has, for
+cases that use the standard library or a version's new builtins.
+
 ## Ignored fixtures
 
 Use `// ignore:` to mark a test as ignored. The runner prints the reason and
@@ -211,3 +239,19 @@ these into the closest LSP feature:
 When a Phpactor fixture has multiple `wrAssertType` calls at different
 offsets, split it into separate `.fixture` files (one per cursor position).
 Name them clearly so the connection is obvious.
+## Ported from Tusk PHP
+
+`tusk/` holds the language-version cases of Tusk PHP's
+`internal/lsp/php_versions_test.go` (one directory per PHP version), its
+`member_owner_test.go` cases, and the "field run" cases of its
+`generics_test.go`, one fixture per case. Each runs under Tusk's shared
+prelude (`namespace App;` with `Logger`, `Named`, `Aged` and `Person`),
+laid out over several lines the way Tusk's runner lays it out. Tusk's
+`<|>` cursor became `<>`, its hover and completion wants became
+`// expect:`, and its diagnostic codes map to ours (`unknown-class` to
+`unknown_class`, `unused-result` to `discarded_return_value`,
+`undefined-variable` to `unknown_variable`, `deprecated` to
+`deprecated_usage`, `invalid-override` to `invalid_override_attribute`).
+A hover want is checked against PHPantom's own spelling of the same
+answer, and a case PHPantom does not meet yet is marked `// ignore:`
+with the reason.

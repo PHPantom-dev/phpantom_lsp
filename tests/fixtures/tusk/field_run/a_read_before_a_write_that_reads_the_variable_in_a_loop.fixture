@@ -1,0 +1,42 @@
+// test: field run/a read before a write that reads the variable in a loop
+// Ported from Tusk PHP (MIT), case "field run/a read before a write that reads the variable in a loop".
+// php: 8.5
+// feature: completion
+// expect: where
+// expect: get
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+class Query {
+public function where(string $c): static {
+return $this;
+} public function get(): array {
+return [];
+}
+}
+function run(Query $p, array $xs): void {
+	foreach ($xs as $x) {
+		$p-><>get();
+		$p = $p->where('x');
+	}
+}

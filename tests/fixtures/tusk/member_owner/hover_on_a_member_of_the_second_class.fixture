@@ -1,0 +1,35 @@
+// test: union/hover on a member of the second class
+// Ported from Tusk PHP (MIT), case "union/hover on a member of the second class".
+// php: 8.5
+// feature: hover
+// expect: name
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function run(bool $c): void {
+if ($c) {
+$x = new Logger();
+} else {
+$x = new Person();
+} $x->na<>me();
+}

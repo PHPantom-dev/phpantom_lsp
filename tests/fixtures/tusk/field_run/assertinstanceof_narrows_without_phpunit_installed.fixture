@@ -1,0 +1,52 @@
+// test: field run/assertInstanceOf narrows without PHPUnit installed
+// Ported from Tusk PHP (MIT), case "field run/assertInstanceOf narrows without PHPUnit installed".
+// php: 8.5
+// feature: diagnostics
+// expect_absent_code: unknown_member
+// ignore: members of a class whose ancestor cannot be loaded are reported unknown; narrowing by assertInstanceOf() comes from PHPUnit's own annotations, so it needs PHPUnit installed
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+abstract class Shape {}
+class Circle extends Shape {
+public function radius(): int {
+return 1;
+}
+}
+class Factory {
+	/**
+	 * @template T of object
+	 * @param class-string<T> $class
+	 * @return T
+	 */
+	public function make(string $class): object {
+return new Circle();
+}
+}
+class ShapeTest extends \PHPUnit\Framework\TestCase {
+	function go(Factory $f): void {
+		$shape = $f->make(Shape::class);
+		$this->assertInstanceOf(Circle::class, $shape);
+		echo $shape->radius();
+	}
+}

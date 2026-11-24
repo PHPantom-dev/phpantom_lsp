@@ -1,0 +1,32 @@
+// test: 7.4/null coalescing assignment defines the variable
+// Ported from Tusk PHP (MIT), case "7.4/null coalescing assignment defines the variable".
+// php: 8.5
+// feature: diagnostics
+// expect_clean
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function run(): Logger {
+$log ??= new Logger();
+return $log;
+}

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use phpantom_lsp::Backend;
+use phpantom_lsp::types::PhpVersion;
 use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
@@ -108,6 +109,19 @@ function json_decode(string $json, ?bool $associative = null, int $depth = 512, 
 function json_encode(mixed $value, int $flags = 0, int $depth = 512): string|false {}
 ";
 
+/// The backend a fixture runs on: the full embedded stubs for the PHP
+/// version a `// php:` line names, and otherwise the minimal stubs above.
+fn fixture_backend(meta: &TestMeta) -> Backend {
+    match meta.php_version {
+        Some(version) => {
+            let backend = Backend::new_test_with_full_stubs();
+            backend.set_php_version(version);
+            backend
+        }
+        None => create_fixture_backend(),
+    }
+}
+
 /// Create a test backend with embedded class and function stubs pre-loaded.
 fn create_fixture_backend() -> Backend {
     let mut class_stubs: HashMap<&'static str, &'static str> = HashMap::new();
@@ -164,6 +178,17 @@ struct TestMeta {
     codes: Vec<String>,
     /// The diagnostics the files must report (from `// expect_diagnostic:`).
     expect_diagnostics: Vec<ExpectedDiagnostic>,
+    /// The PHP version a body fixture is analysed for, against the full
+    /// embedded stubs (from `// php:`).
+    php_version: Option<PhpVersion>,
+    /// Whether a body diagnostics fixture must report nothing at all (from
+    /// `// expect_clean`).
+    expect_clean: bool,
+    /// Codes a body diagnostics fixture must report (from `// expect_code:`).
+    expect_codes: Vec<String>,
+    /// Codes a body diagnostics fixture must not report (from
+    /// `// expect_absent_code:`).
+    expect_absent_codes: Vec<String>,
 }
 
 /// One `// expect_diagnostic: [FILE:]LINE: message` line.
@@ -216,10 +241,29 @@ fn parse_fixture(content: &str) -> Result<ParsedFixture, String> {
         .ok_or("Fixture missing `---` separator between header and body")?;
 
     let meta = parse_header(header)?;
-    // A diagnostics fixture analyses files of its project; it has no
-    // cursor and no body.
+    // A diagnostics fixture with a project analyses files of that project;
+    // it has no cursor and no body.  One without analyses its body, where
+    // a cursor marker is optional.
     let (files, cursor_file, cursor_line, cursor_char) = if meta.feature == Feature::Diagnostics {
-        (Vec::new(), 0, 0, 0)
+        if meta.project.is_some() {
+            (Vec::new(), 0, 0, 0)
+        } else {
+            let content = body.trim_start();
+            let (content, line, char) = if content.contains("<>") {
+                strip_cursor(content)?
+            } else {
+                (content.to_string(), 0, 0)
+            };
+            (
+                vec![FixtureFile {
+                    path: "test.php".to_string(),
+                    content,
+                }],
+                0,
+                line,
+                char,
+            )
+        }
     } else {
         parse_body(body.trim_start())?
     };
@@ -248,6 +292,10 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
     let mut project_files = Vec::new();
     let mut codes = Vec::new();
     let mut expect_diagnostics = Vec::new();
+    let mut php_version = None;
+    let mut expect_clean = false;
+    let mut expect_codes = Vec::new();
+    let mut expect_absent_codes = Vec::new();
 
     for line in header.lines() {
         let line = line.trim();
@@ -300,6 +348,17 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
             );
         } else if let Some(val) = line.strip_prefix("// expect_diagnostic:") {
             expect_diagnostics.push(parse_expected_diagnostic(val)?);
+        } else if let Some(val) = line.strip_prefix("// php:") {
+            php_version = Some(
+                PhpVersion::from_composer_constraint(val.trim())
+                    .ok_or_else(|| format!("Invalid php version: {val}"))?,
+            );
+        } else if line == "// expect_clean" {
+            expect_clean = true;
+        } else if let Some(val) = line.strip_prefix("// expect_code:") {
+            expect_codes.push(val.trim().to_string());
+        } else if let Some(val) = line.strip_prefix("// expect_absent_code:") {
+            expect_absent_codes.push(val.trim().to_string());
         }
         // Lines that don't match any prefix are silently ignored (comments).
     }
@@ -308,8 +367,18 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
     if description.is_empty() {
         return Err("Fixture missing `// test:` header".to_string());
     }
-    if feature == Feature::Diagnostics && (project.is_none() || project_files.is_empty()) {
-        return Err("Diagnostics fixture needs a `// project:` and a `// file:`".to_string());
+    if feature == Feature::Diagnostics {
+        let body_checks =
+            expect_clean || !expect_codes.is_empty() || !expect_absent_codes.is_empty();
+        match (&project, body_checks) {
+            (Some(_), false) if !project_files.is_empty() => {}
+            (None, true) => {}
+            _ => {
+                return Err("Diagnostics fixture needs either a `// project:` and a `// file:`, \
+                     or a body with `// expect_clean`, `// expect_code:` or `// expect_absent_code:`"
+                    .to_string());
+            }
+        }
     }
 
     Ok(TestMeta {
@@ -327,6 +396,10 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
         project_files,
         codes,
         expect_diagnostics,
+        php_version,
+        expect_clean,
+        expect_codes,
+        expect_absent_codes,
     })
 }
 
@@ -479,7 +552,7 @@ fn run_fixture(path: &Path, content: String) -> datatest_stable::Result<()> {
 
     // The project backend runs its own startup, so this one runs outside
     // the runtime below.
-    if fixture.meta.feature == Feature::Diagnostics {
+    if fixture.meta.feature == Feature::Diagnostics && fixture.meta.project.is_some() {
         return run_diagnostics(&fixture).map_err(|e| format!("{} — {e}", path.display()).into());
     }
 
@@ -495,7 +568,7 @@ fn run_fixture(path: &Path, content: String) -> datatest_stable::Result<()> {
             Feature::Hover => run_hover(&fixture).await,
             Feature::Definition => run_definition(&fixture).await,
             Feature::SignatureHelp => run_signature_help(&fixture).await,
-            Feature::Diagnostics => unreachable!("run above"),
+            Feature::Diagnostics => run_body_diagnostics(&fixture).await,
         }
     })
     .map_err(|e| format!("{} — {e}", path.display()))?;
@@ -538,7 +611,7 @@ async fn open_files(backend: &Backend, fixture: &ParsedFixture) -> Uri {
 // ─── Feature runners ────────────────────────────────────────────────────────
 
 async fn run_completion(fixture: &ParsedFixture) -> Result<(), String> {
-    let backend = create_fixture_backend();
+    let backend = fixture_backend(&fixture.meta);
     let uri = open_files(&backend, fixture).await;
 
     let position = Position {
@@ -609,7 +682,7 @@ fn extract_hover_text(hover: &Hover) -> String {
 }
 
 async fn run_hover(fixture: &ParsedFixture) -> Result<(), String> {
-    let backend = create_fixture_backend();
+    let backend = fixture_backend(&fixture.meta);
     let uri = open_files(&backend, fixture).await;
     let source = &fixture.files[fixture.cursor_file].content;
 
@@ -714,7 +787,7 @@ fn check_hover_absent(fixture: &ParsedFixture, hover_text: &str) -> Result<(), S
 }
 
 async fn run_definition(fixture: &ParsedFixture) -> Result<(), String> {
-    let backend = create_fixture_backend();
+    let backend = fixture_backend(&fixture.meta);
     let uri = open_files(&backend, fixture).await;
 
     let position = Position {
@@ -805,7 +878,7 @@ async fn run_definition(fixture: &ParsedFixture) -> Result<(), String> {
 }
 
 async fn run_signature_help(fixture: &ParsedFixture) -> Result<(), String> {
-    let backend = create_fixture_backend();
+    let backend = fixture_backend(&fixture.meta);
     let uri = open_files(&backend, fixture).await;
 
     let position = Position {
@@ -898,6 +971,58 @@ async fn run_signature_help(fixture: &ParsedFixture) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Analyse the fixture's body and check the codes of every diagnostic it
+/// reports against `// expect_clean`, `// expect_code:` and
+/// `// expect_absent_code:`.
+async fn run_body_diagnostics(fixture: &ParsedFixture) -> Result<(), String> {
+    let backend = fixture_backend(&fixture.meta);
+    let uri = open_files(&backend, fixture).await.to_string();
+    let content = &fixture.files[fixture.cursor_file].content;
+    let mut diagnostics = Vec::new();
+    backend.collect_fast_diagnostics(&uri, content, &mut diagnostics);
+    backend.collect_slow_diagnostics(&uri, content, &mut diagnostics);
+    let reported: Vec<String> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let code = match &diagnostic.code {
+                Some(Code::String(code)) => code.as_str(),
+                _ => "",
+            };
+            let message = match &diagnostic.message {
+                Message::String(text) => text.as_str(),
+                Message::MarkupContent(markup) => markup.value.as_str(),
+            };
+            format!("{}: {code}: {message}", diagnostic.range.start.line + 1)
+        })
+        .collect();
+    let has_code = |code: &str| {
+        diagnostics
+            .iter()
+            .any(|d| matches!(&d.code, Some(Code::String(c)) if c == code))
+    };
+
+    let meta = &fixture.meta;
+    let mut failures = Vec::new();
+    if meta.expect_clean && !reported.is_empty() {
+        failures.push("expected no diagnostics".to_string());
+    }
+    for code in &meta.expect_codes {
+        if !has_code(code) {
+            failures.push(format!("missing {code}"));
+        }
+    }
+    for code in &meta.expect_absent_codes {
+        if has_code(code) {
+            failures.push(format!("unexpected {code}"));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{}\nGot: {reported:#?}", failures.join("\n")))
+    }
 }
 
 /// Analyse the fixture's project files and compare the diagnostics whose

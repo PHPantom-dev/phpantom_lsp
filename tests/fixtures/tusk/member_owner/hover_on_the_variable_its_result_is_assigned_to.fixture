@@ -1,0 +1,33 @@
+// test: called closure/hover on the variable its result is assigned to
+// Ported from Tusk PHP (MIT), case "called closure/hover on the variable its result is assigned to".
+// php: 8.5
+// feature: hover
+// expect: Person
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function run(): void {
+$g = fn (int $i): Person => new Person();
+$x = $g(1);
+echo $<>x;
+}

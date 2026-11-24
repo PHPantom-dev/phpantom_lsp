@@ -1,0 +1,31 @@
+// test: 8.6/clamp is known and keeps the argument type
+// Ported from Tusk PHP (MIT), case "8.6/clamp is known and keeps the argument type".
+// php: 8.6
+// feature: hover
+// expect: $clamped = 5|1|3
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function run(): void {
+$c<>lamped = \clamp(5, 1, 3);
+}

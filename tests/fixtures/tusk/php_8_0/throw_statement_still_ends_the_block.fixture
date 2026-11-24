@@ -1,0 +1,32 @@
+// test: 8.0/throw statement still ends the block
+// Ported from Tusk PHP (MIT), case "8.0/throw statement still ends the block".
+// php: 8.5
+// feature: diagnostics
+// expect_code: unreachable_code
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function run(): void {
+throw new \RuntimeException('no');
+echo 1;
+}

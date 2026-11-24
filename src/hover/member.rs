@@ -752,6 +752,12 @@ impl Backend {
     ) -> Hover {
         let visibility = format_visibility(property.visibility);
         let static_kw = if property.is_static { "static " } else { "" };
+        // Every property of a readonly class is readonly without the keyword.
+        let readonly_kw = if property.is_readonly || (owner.is_readonly && !property.is_virtual) {
+            "readonly "
+        } else {
+            ""
+        };
 
         // Use native type hint in the code block, effective type as docblock annotation.
         let native_type = property
@@ -761,8 +767,8 @@ impl Backend {
             .unwrap_or_default();
 
         let member_line = format!(
-            "{}{}{}${};",
-            visibility, static_kw, native_type, property.name
+            "{}{}{}{}${};",
+            visibility, static_kw, readonly_kw, native_type, property.name
         );
 
         let var_section = build_var_section(

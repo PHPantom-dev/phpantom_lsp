@@ -1,0 +1,36 @@
+// test: 8.6/calling a partial application gives the return type
+// Ported from Tusk PHP (MIT), case "8.6/calling a partial application gives the return type".
+// php: 8.6
+// feature: completion
+// expect: info
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function make(string $name, int $level): Logger {
+return new Logger();
+}
+function run(): void {
+$mk = make('app', ?);
+$l = $mk(1);
+$l-><>
+}

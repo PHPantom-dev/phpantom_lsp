@@ -1373,7 +1373,7 @@ fn intersection_of_decided_unions_is_met() {
     assert_eq!(
         resolve_with_classes("($output is 'OBJECT' ? T|null : int) & (string|null)", "1")
             .as_deref(),
-        Some("T&string|null")
+        Some("(T&string)|null")
     );
 }
 

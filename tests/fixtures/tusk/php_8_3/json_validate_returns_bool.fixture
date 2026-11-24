@@ -1,0 +1,31 @@
+// test: 8.3/json_validate returns bool
+// Ported from Tusk PHP (MIT), case "8.3/json_validate returns bool".
+// php: 8.5
+// feature: hover
+// expect: bool
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function run(string $j): void {
+json_val<>idate($j);
+}

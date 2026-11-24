@@ -1,0 +1,47 @@
+// test: field run/a chain goes on after a closure argument
+// Ported from Tusk PHP (MIT), case "field run/a chain goes on after a closure argument".
+// php: 8.5
+// feature: completion
+// expect: name
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+class PersonFactory {
+	public static function new(): PersonFactory {
+return new PersonFactory();
+}
+	public function afterMaking(\Closure $fn): static {
+return $this;
+}
+	public function createOne(): Person {
+return new Person();
+}
+}
+function run(): void {
+	$person = PersonFactory::new()
+		->afterMaking(function (Person $p) {
+			$p->name();
+		})
+		->createOne();
+	$person-><>
+}

@@ -1,0 +1,32 @@
+// test: called closure/definition of a member of its result
+// Ported from Tusk PHP (MIT), case "called closure/definition of a member of its result".
+// php: 8.5
+// feature: definition
+// expect_definition: self:15
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function run(): void {
+$g = fn (int $i): Person => new Person();
+$g(1)->na<>me();
+}

@@ -38,6 +38,7 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "class_uses" => patch_class_relation(func, "trait-string"),
         "mb_convert_encoding" => patch_mb_convert_encoding(func),
         "abs" => patch_abs(func),
+        "clamp" => patch_clamp(func),
         "var_export" => patch_var_export(func),
         "mb_internal_encoding" => patch_mb_internal_encoding(func),
         "version_compare" => patch_version_compare(func),
@@ -801,6 +802,33 @@ fn patch_abs(func: &mut FunctionInfo) {
         PhpType::int_range("0", "max"),
         PhpType::float(),
     );
+}
+
+/// Patch `clamp()` to return one of its arguments' types.
+///
+/// The stubs declare every parameter and the return `mixed`, but the result
+/// is always one of `$value`, `$min` and `$max`.
+fn patch_clamp(func: &mut FunctionInfo) {
+    const NAMES: [(&str, &str); 3] = [("TValue", "$value"), ("TMin", "$min"), ("TMax", "$max")];
+    let mut bindings = Vec::with_capacity(NAMES.len());
+    for (template, param_name) in NAMES {
+        let Some(param) = func
+            .parameters
+            .iter()
+            .find(|p| p.name.as_str() == param_name)
+        else {
+            return;
+        };
+        bindings.push((atom(template), param.name));
+    }
+    for param in func.parameters.make_mut() {
+        if let Some((template, _)) = NAMES.iter().find(|(_, name)| param.name.as_str() == *name) {
+            param.type_hint = Some(PhpType::parse(template));
+        }
+    }
+    func.return_type = Some(PhpType::parse("TValue|TMin|TMax"));
+    func.template_params = NAMES.iter().map(|(template, _)| atom(template)).collect();
+    func.template_bindings = bindings;
 }
 
 /// Patch `var_export()` to have a conditional return type keyed on

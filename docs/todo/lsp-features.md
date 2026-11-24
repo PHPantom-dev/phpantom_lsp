@@ -1114,3 +1114,114 @@ spellings.
 **Where to look:** `src/hover/mod.rs` (`hover_from_symbol`, which has no
 parameter arm, and `parameter_hover_body`, which spells the label's hover
 from the declared parameter), `src/hover/variable.rs`.
+
+---
+
+## F72. A baseline for `analyze`
+
+**Impact: Medium-High · Complexity: Low-Medium**
+
+A project with existing findings can't turn `phpantom_lsp analyze` on in
+CI: it exits `1` until every finding is fixed or silenced one by one in
+`[[diagnostics.ignore]]`. PHPStan, Psalm and Tusk PHP all solve this with
+a baseline file, written once, after which a run reports only findings
+the file doesn't list.
+
+Add `--generate-baseline[=FILE]` and `--baseline FILE`, plus a
+`[diagnostics] baseline` key in `.phpantom.toml` so the editor can hide
+baselined findings too. Key each entry by the file's path relative to the
+project root, the diagnostic code and the message, never by line, so it
+survives code moving around it, and store a count per key the way
+PHPStan does: without it, a third copy of a message a file already has
+twice slips through. Sort the file so a regenerated baseline diffs
+cleanly. At the end of a run, say how many baselined findings were not
+found, so a stale baseline gets noticed and regenerated.
+
+**Where to look:** `src/analyse/stages.rs` (where the exit code is
+decided), `src/analyse/output.rs`, `src/diagnostics/ignore_rules.rs` (the
+existing config-driven suppression, which the baseline filter should run
+beside).
+
+---
+
+## F73. An MCP server for agents without LSP support
+
+**Impact: Low-Medium · Complexity: Medium**
+
+Claude Code already gets PHPantom's index through the
+`PHPantom-dev/phpantom_claude` plugin, which runs the language server
+and puts the `analyze`, `fix` and `move` commands on its path. Agents that
+cannot host a language server (Codex CLI, Gemini CLI, and others that
+speak MCP) get none of it and fall back to grep.
+
+Add `phpantom_lsp mcp`, serving MCP over stdio from the same `Backend`
+the language server builds, with tools for what an agent asks most:
+find a symbol by name, its definition and signature, its references,
+the type of an expression at a position, and the diagnostics for a file
+or the project. Add project-level questions no LSP request covers, which
+help Claude Code users too: the routes, a model's columns and relations,
+the config keys, and the views. Keep the tools to facts the index
+already holds, with no database or application boot. Tusk PHP's
+`internal/mcpserver/` and `docs/ai-agents.md` show one tool set; leave
+out its live-database tools.
+
+---
+
+## F74. Hover does not show a declaration's attributes
+
+**Impact: Low · Complexity: Low**
+
+Hovering a method or function shows its signature and docblock but none of
+its attributes, so `#[\NoDiscard]` and the project's own attributes
+(`#[Marker] public function go()`) are invisible there. `#[\Override]` and
+`#[\Deprecated]` already surface as the "overrides" and "deprecated"
+lines, so they need nothing more.
+
+Show the attribute list above the declaration in the hover's code block,
+spelled as written, for classes, functions, methods, properties, constants
+and enum cases. The cases are in `tests/fixtures/tusk/php_8_0/` and
+`tests/fixtures/tusk/php_8_5/`, marked `// ignore:`.
+
+**Where to look:** `src/hover/member.rs`, `src/hover/function.rs`; the
+parser would have to keep the attribute text on `MethodInfo`,
+`FunctionInfo` and the rest.
+
+---
+
+## F75. Hover leaves out asymmetric visibility
+
+**Impact: Low · Complexity: Low-Medium**
+
+`public private(set) string $name` hovers as `public string $name`: the
+model has no field for a property's write visibility, so hover cannot show
+it. The same field is what D19 needs to tell a write outside the set scope
+from a read.
+
+**Where to look:** `src/types/property.rs` (`PropertyInfo`), the property
+parser, `src/hover/member.rs` (`hover_for_property`). The case is
+`tests/fixtures/tusk/php_8_4/asymmetric_visibility_shows_in_hover.fixture`.
+
+---
+
+## F76. PHP 8.6 parameter doc comments are not read
+
+**Impact: Low · Complexity: Low-Medium**
+
+PHP 8.6 lets a parameter carry its own doc comment:
+
+```php
+function handle(
+    /** The request ID. */
+    string $id,
+    /** @var Logger */
+    $log,
+): void {}
+```
+
+Hovering `$id` should show the description, and an `@var` there should type
+an untyped parameter. Today both are ignored.
+
+**Where to look:** the parameter parser in `src/parser/`, and
+`src/hover/variable.rs`. The cases are in `tests/fixtures/tusk/php_8_6/`,
+marked `// ignore:`.
+

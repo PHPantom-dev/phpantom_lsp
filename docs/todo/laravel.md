@@ -488,6 +488,51 @@ model-argument matching, so reuse it.
 existing `$fillable`/`$guarded` reads; `diagnostics/` for the
 call-site diagnostic pattern used by similarly-shaped checks.
 
+#### L72. Unknown Eloquent columns and relations in query strings
+
+**Impact: Medium-High · Complexity: Medium**
+
+Relation and column names passed as strings to a model's query builder
+complete and navigate (`completion/eloquent_string.rs`), but a typo is
+not reported: `Post::query()->where('tilte', …)` and
+`Post::with('coments')` run until the query hits the database or the
+relation is loaded. Report a relation name that the model does not
+declare in `with()`, `without()`, `has()`, `doesntHave()`, `whereHas()`,
+`whereDoesntHave()`, `withCount()`, the `withSum()` family,
+`withExists()`, `load()`, `loadMissing()`, and `loadCount()`, following
+dotted paths (`'author.profile'`) through each relation's related model.
+Report a column name in `where()` and its variants, `whereIn()`,
+`whereNull()`, `whereBetween()`, the date filters, `whereColumn()`,
+`select()`, `addSelect()`, `pluck()`, `value()`, `increment()`, and
+`decrement()`.
+
+Stay quiet whenever the answer is not certain:
+
+- **Columns** only on a model whose table the migrations or schema dump
+  declare in full (the same condition the strict-mode unknown-attribute
+  check uses). A `$table` the project builds at run time, or a table no
+  migration creates, leaves the model's columns unknown.
+- **Aliases.** `orderBy()`, `latest()`, `oldest()`, `groupBy()`, and
+  `having()` also take an alias from the select list
+  (`selectRaw('count(*) as total')->orderBy('total')`, `withCount('posts')`
+  then `having('posts_count', …)`), so they are not checked.
+- **Qualified and raw names.** `'posts.title'` is read against the named
+  table only when that table is the model's own or a joined table whose
+  columns are known; anything containing an expression is skipped.
+- **Relations** only when every class and trait the model is made of is
+  indexed, so a relation from an unindexed trait or a macro is never
+  reported missing.
+
+Tusk PHP's `internal/checks/invalid_builder_args.go` is a reference for
+the method lists and for the same "complete knowledge only" rule.
+
+**Where to look:** `diagnostics/yii_relations.rs` and
+`diagnostics/yii_queries.rs` report the same two mistakes for Yii from
+migrations, and `completion/eloquent_string.rs` already resolves the
+model and enumerates its relations and columns at these call sites. Add
+the diagnostic beside the other Laravel string checks in
+`diagnostics/laravel_string_keys.rs`.
+
 #### L61. Resolve aliased facade imports during route discovery
 
 **Impact: Low-Medium · Complexity: Medium**

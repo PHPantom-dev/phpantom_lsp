@@ -1,0 +1,38 @@
+// test: 8.5/used NoDiscard result is clean
+// Ported from Tusk PHP (MIT), case "8.5/used NoDiscard result is clean".
+// php: 8.5
+// feature: diagnostics
+// expect_clean
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+#[\NoDiscard] function must(): int {
+return 1;
+}
+function run(): int {
+$x = must();
+(void) must();
+if (must()) {
+echo $x;
+} return must();
+}

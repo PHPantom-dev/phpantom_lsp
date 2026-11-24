@@ -1,0 +1,34 @@
+// test: 8.4/deprecated attribute on a constant is reported
+// Ported from Tusk PHP (MIT), case "8.4/deprecated attribute on a constant is reported".
+// php: 8.5
+// feature: diagnostics
+// expect_code: deprecated_usage
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+class Svc {
+#[\Deprecated] const OLD = 1;
+}
+function run(): int {
+return Svc::OLD;
+}

@@ -60,8 +60,10 @@ impl fmt::Display for PhpType {
                     }
                     // Wrap callable types in parentheses so
                     // `(Closure(int): string)|Foo` is not misread as
-                    // `Closure(int): string|Foo`.
-                    if matches!(ty.kind(), TypeKind::Callable(_)) {
+                    // `Closure(int): string|Foo`.  An intersection keeps
+                    // them too: PHPDoc reads `A&B|null` either way, but a
+                    // native DNF type must be written `(A&B)|null`.
+                    if matches!(ty.kind(), TypeKind::Callable(_) | TypeKind::Intersection(_)) {
                         write!(f, "({ty})")?;
                     } else {
                         write!(f, "{ty}")?;

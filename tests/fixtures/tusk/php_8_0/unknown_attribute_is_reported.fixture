@@ -1,0 +1,30 @@
+// test: 8.0/unknown attribute is reported
+// Ported from Tusk PHP (MIT), case "8.0/unknown attribute is reported".
+// php: 8.5
+// feature: diagnostics
+// expect_code: unknown_class
+// ignore: attribute class names are deliberately not checked: PHP only resolves them through reflection, and they often come from dependencies that are not indexed
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+#[Missing] class Svc {}

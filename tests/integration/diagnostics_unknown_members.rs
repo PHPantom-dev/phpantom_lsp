@@ -7916,6 +7916,38 @@ function probeIsset(CanApply $item): int {
     );
 }
 
+/// The left side of `??` and `??=` fetches its properties the way `isset()`
+/// does, so a missing one is no error, but a missing method on that side is
+/// still called and still fails.
+#[test]
+fn null_coalescing_fetches_like_isset_but_calls_methods() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Holder {
+    public ?Holder $next = null;
+    public function run(): string {
+        $this->cache ??= [];
+        echo $this->next->label['x'] ?? '';
+        echo static::$shared ?? '';
+        return $this->missing()->label ?? '';
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
+    assert!(
+        messages.iter().any(|m| m.contains("missing()")),
+        "{messages:?}"
+    );
+    for fetched in ["cache", "label", "shared"] {
+        assert!(
+            !messages.iter().any(|m| m.contains(fetched)),
+            "{fetched}: {messages:?}"
+        );
+    }
+}
+
 /// `!empty($obj->prop)` implies `isset($obj->prop)`, so it proves the
 /// property on every union member, as does the guard clause
 /// `if (empty($obj->prop)) return;`.  A bare `empty()` proves nothing.

@@ -423,6 +423,10 @@ pub(super) fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'
             }
             Access::ClassConstant(cca) => {
                 walk_expression(cca.class, collector);
+                // `Foo::{$name}` (PHP 8.3) reads the variable it names.
+                if let ClassLikeConstantSelector::Expression(selector) = &cca.constant {
+                    walk_expression(selector.expression, collector);
+                }
             }
         },
         Expression::ArrayAccess(access) => {

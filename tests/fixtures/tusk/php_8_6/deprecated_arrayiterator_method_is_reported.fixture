@@ -1,0 +1,32 @@
+// test: 8.6/deprecated ArrayIterator method is reported
+// Ported from Tusk PHP (MIT), case "8.6/deprecated ArrayIterator method is reported".
+// php: 8.6
+// feature: diagnostics
+// expect_code: deprecated_usage
+// ignore: the embedded stubs lack PHP 8.6 additions
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+function run(\ArrayIterator $it): void {
+$it->asort();
+}

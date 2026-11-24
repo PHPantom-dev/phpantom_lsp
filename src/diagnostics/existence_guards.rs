@@ -14,7 +14,8 @@ use mago_syntax::cst::*;
 use super::helpers::ByteRange;
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 
-/// Compute the byte ranges of `isset(...)` and `empty(...)` argument lists.
+/// Compute the byte ranges of `isset(...)` and `empty(...)` argument lists,
+/// and of the property names the left side of `??` and `??=` fetches.
 ///
 /// A member or array-index access inside these constructs never triggers
 /// a runtime error or warning even when the accessed member doesn't
@@ -29,12 +30,52 @@ pub(crate) fn compute_isset_empty_argument_ranges(content: &str) -> Vec<ByteRang
             let parens = match node {
                 Node::IssetConstruct(isset) => (isset.left_parenthesis, isset.right_parenthesis),
                 Node::EmptyConstruct(empty) => (empty.left_parenthesis, empty.right_parenthesis),
+                Node::Binary(binary) if binary.operator.is_null_coalesce() => {
+                    push_coalesce_fetches(binary.lhs, &mut ranges);
+                    return;
+                }
+                Node::Assignment(assignment)
+                    if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) =>
+                {
+                    push_coalesce_fetches(assignment.lhs, &mut ranges);
+                    return;
+                }
                 _ => return,
             };
             ranges.push((parens.0.end.offset as usize, parens.1.start.offset as usize));
         });
         ranges
     })
+}
+
+/// Push the property names the left side of `??` fetches the way `isset()`
+/// does: every property and array fetch down its chain, which do not warn
+/// when missing.  A call in the chain still runs, and still fails when the
+/// method does not exist, so the walk stops there.
+fn push_coalesce_fetches<'a>(mut expression: &'a Expression<'a>, ranges: &mut Vec<ByteRange>) {
+    loop {
+        expression = crate::parser::unwrap_parens(expression);
+        match expression {
+            Expression::Access(Access::Property(access)) => {
+                push_span(access.property.span(), ranges);
+                expression = access.object;
+            }
+            Expression::Access(Access::NullSafeProperty(access)) => {
+                push_span(access.property.span(), ranges);
+                expression = access.object;
+            }
+            Expression::Access(Access::StaticProperty(access)) => {
+                push_span(access.property.span(), ranges);
+                return;
+            }
+            Expression::ArrayAccess(access) => expression = access.array,
+            _ => return,
+        }
+    }
+}
+
+fn push_span(span: mago_span::Span, ranges: &mut Vec<ByteRange>) {
+    ranges.push((span.start.offset as usize, span.end.offset as usize));
 }
 
 /// Information about symbols guarded by existence checks.

@@ -1,0 +1,37 @@
+// test: 8.5/pipe into a static callable
+// Ported from Tusk PHP (MIT), case "8.5/pipe into a static callable".
+// php: 8.5
+// feature: completion
+// expect: info
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+class Svc {
+static function make(string $s): Logger {
+return new Logger();
+}
+}
+function run(): void {
+$l = 'a' |> Svc::make(...);
+$l-><>
+}

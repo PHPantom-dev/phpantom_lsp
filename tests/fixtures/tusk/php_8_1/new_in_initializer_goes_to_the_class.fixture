@@ -1,0 +1,31 @@
+// test: 8.1/new in initializer goes to the class
+// Ported from Tusk PHP (MIT), case "8.1/new in initializer goes to the class".
+// php: 8.5
+// feature: definition
+// expect_definition: self:4
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+class Svc {
+public function __construct(private Logger $log = new Log<>ger()) {}
+}

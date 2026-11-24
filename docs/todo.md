@@ -37,6 +37,7 @@ contributor even though it's short.
 | P92 | [Startup's file walks and resource indexing run on one core](todo/performance.md#p92-startups-file-walks-and-resource-indexing-run-on-one-core) | Medium | Medium |
 | P86 | [A Symfony app's generated `config/reference.php` is slow to parse](todo/performance.md#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse) | Medium | Medium |
 | P91 | [Parsing and merging of the full index take turns](todo/performance.md#p91-parsing-and-merging-of-the-full-index-take-turns) | Medium-High | Medium-High |
+| L72 | [Unknown Eloquent columns and relations in query strings](todo/laravel.md#l72-unknown-eloquent-columns-and-relations-in-query-strings) | Medium-High | Medium |
 |     | **Release 1.1.0**                                                                                                                                               |             |             |
 
 # Feature Sets
@@ -168,6 +169,7 @@ ships, remove every row that names it.
 | L68 | [Port Larastan's type and rule tests](todo/laravel.md#l68-port-larastans-type-and-rule-tests) | High | Medium |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
 | L69 | [Benchmarks for Laravel string names and Blade](todo/laravel.md#l69-benchmarks-for-laravel-string-names-and-blade) | Medium | Low-Medium |
+| L72 | [Unknown Eloquent columns and relations in query strings](todo/laravel.md#l72-unknown-eloquent-columns-and-relations-in-query-strings) | Medium-High | Medium |
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L58 | [Laravel rate limiter names](todo/laravel.md#l58-laravel-rate-limiter-names)                                                                                                | Medium      | Medium      |
 | L56 | [Typed Laravel connection names](todo/laravel.md#l56-typed-laravel-connection-names)                                                                                        | Medium      | Medium      |
@@ -190,12 +192,14 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| E8  | [The embedded stubs lack PHP 8.6 additions](todo/external-stubs.md#e8-the-embedded-stubs-lack-php-86-additions) | Low-Medium | Low |
 | T41 | [A reading of the callee's body overrides a declared `@param-out`](todo/type-inference.md#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out)            | Low-Medium  | Low         |
 | T58 | [`new<T>` is not supported](todo/type-inference.md#t58-newt-is-not-supported) | Low-Medium  | Low-Medium  |
 | T62 | [A sealed hierarchy is not narrowed by ruling out its other members](todo/type-inference.md#t62-a-sealed-hierarchy-is-not-narrowed-by-ruling-out-its-other-members) | Medium      | Medium      |
 | T49 | [A closure passed to a constructor gets no parameter types from it](todo/type-inference.md#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it) | Medium      | Medium      |
 | T59 | [`T[K]` on a class template is not resolved](todo/type-inference.md#t59-tk-on-a-class-template-is-not-resolved) | Medium      | Medium      |
 | T61 | [A regression that changes where a call resolves goes unnoticed](todo/type-inference.md#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed) | Medium      | Medium      |
+| T72 | [Diagnostic changes on real projects are only caught by hand](todo/type-inference.md#t72-diagnostic-changes-on-real-projects-are-only-caught-by-hand) | Medium | Medium |
 | C13 | [`self::`/`static::` inside a `@require-extends` trait does not see the required class's static members](todo/completion.md#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members) | Low-Medium  | Medium      |
 | D23 | [A rebound closure's scope is added to the lexical one rather than replacing it](todo/diagnostics.md#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it) | Low-Medium  | Medium      |
 | T43 | [`self::TypeAlias` inside `@extends`'s generic argument is not resolved](todo/type-inference.md#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved) | Low         | Medium      |
@@ -210,6 +214,7 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| F72 | [A baseline for `analyze`](todo/lsp-features.md#f72-a-baseline-for-analyze) | Medium-High | Low-Medium |
 | D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
 | D19 | [`inaccessible_member` cannot tell a property read from a write](todo/diagnostics.md#d19-inaccessible_member-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
@@ -270,6 +275,9 @@ ships, remove every row that names it.
 | C12 | [The implicit `$value` of a `set` hook is not offered by variable completion](todo/completion.md#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion) | Low         | Medium      |
 | F70 | [A label at a call of a closure value binds nothing](todo/lsp-features.md#f70-a-label-at-a-call-of-a-closure-value-binds-nothing) | Low         | Medium      |
 | F71 | [Hover on a parameter at its declaration](todo/lsp-features.md#f71-hover-on-a-parameter-at-its-declaration) | Low         | Low         |
+| F74 | [Hover does not show a declaration's attributes](todo/lsp-features.md#f74-hover-does-not-show-a-declarations-attributes) | Low | Low |
+| F75 | [Hover leaves out asymmetric visibility](todo/lsp-features.md#f75-hover-leaves-out-asymmetric-visibility) | Low | Low-Medium |
+| F76 | [PHP 8.6 parameter doc comments are not read](todo/lsp-features.md#f76-php-86-parameter-doc-comments-are-not-read) | Low | Low-Medium |
 | S4  | Named argument awareness in active parameter                                                                                                                                | Low         | Medium      |
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Medium      |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |
@@ -284,6 +292,7 @@ ships, remove every row that names it.
 | F59 | [Send Twig, YAML, and XML documents to the server from Zed](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed) (Zed PR) | Medium | Low |
 | F14 | [Helix upstream PR](todo/lsp-features.md#f14-helix-upstream-pr)                                                                                                             | Low-Medium  | Low         |
 | F11 | [Windows code signing](todo/lsp-features.md#f11-windows-code-signing)                                                                                                        | Medium      | Medium      |
+| F73 | [An MCP server for agents without LSP support](todo/lsp-features.md#f73-an-mcp-server-for-agents-without-lsp-support) | Low-Medium | Medium |
 | F12 | [IntelliJ / PHPStorm plugin](todo/lsp-features.md#f12-intellij-phpstorm-plugin)                                                                                            | High        | Medium-High |
 
 ## Indexing & Configuration

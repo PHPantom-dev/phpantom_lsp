@@ -1,0 +1,48 @@
+// test: field run/a call after an offset is followed
+// Ported from Tusk PHP (MIT), case "field run/a call after an offset is followed".
+// php: 8.5
+// feature: completion
+// expect: getRetryCount
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+class RedeliveryStamp {
+public function getRetryCount(): int {
+return 0;
+}
+}
+final class Envelope {
+	/**
+	 * @template TStamp of object
+	 * @param class-string<TStamp> $class
+	 * @return TStamp|null
+	 */
+	public function last(string $class): ?object {
+return null;
+}
+}
+/** @param list<Envelope> $envelopes */
+function run(array $envelopes): void {
+$stamp = $envelopes[0]->last(RedeliveryStamp::class);
+$stamp-><>
+}

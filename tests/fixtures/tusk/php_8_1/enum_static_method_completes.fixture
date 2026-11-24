@@ -1,0 +1,37 @@
+// test: 8.1/enum static method completes
+// Ported from Tusk PHP (MIT), case "8.1/enum static method completes".
+// php: 8.5
+// feature: completion
+// expect: fromCode
+---
+<?php
+namespace App;
+
+class Logger {
+public function info(string $m): void {} public int $level = 0;
+const LEVEL = 1;
+}
+interface Named {
+public function name(): string;
+}
+interface Aged {
+public function age(): int;
+}
+class Person implements Named, Aged {
+	public function name(): string {
+return '';
+}
+	public function age(): int {
+return 0;
+}
+}
+
+enum Suit {
+case Hearts;
+public static function fromCode(): self {
+return self::Hearts;
+}
+}
+function run(): void {
+Suit::<>
+}
