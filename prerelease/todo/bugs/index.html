@@ -992,10 +992,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b761-a-guarded-copy-of-a-vendor-class-hides-the-real-one" class="md-nav__link">
+  <a href="#b762-this-in-a-class-declared-twice-reads-the-other-declaration" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B761. A guarded copy of a vendor class hides the real one
+        B762. <code>$this</code> in a class declared twice reads the other declaration
       </span>
     </span>
   </a>
@@ -1632,10 +1632,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b761-a-guarded-copy-of-a-vendor-class-hides-the-real-one" class="md-nav__link">
+  <a href="#b762-this-in-a-class-declared-twice-reads-the-other-declaration" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B761. A guarded copy of a vendor class hides the real one
+        B762. <code>$this</code> in a class declared twice reads the other declaration
       </span>
     </span>
   </a>
@@ -1734,45 +1734,29 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b761-a-guarded-copy-of-a-vendor-class-hides-the-real-one">B761. A guarded copy of a vendor class hides the real one<a class="headerlink" href="#b761-a-guarded-copy-of-a-vendor-class-hides-the-real-one" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// stubs/polyfill.php, listed under "autoload": {"files": [...]}</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">namespace Acme;</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">if (!class_exists(Widget::class)) {      // or `if (false)`</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    class Widget { public function old(): void {} }</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">}</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">// vendor/acme/lib/src/Widget.php, found through PSR-4</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">namespace Acme;</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">class Widget { public function old(): void {} public function render(): string { return ''; } }</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">// src/UseIt.php</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">$w-&gt;render();   // "Method Acme\Widget::render() not found"</span>
+<h3 id="b762-this-in-a-class-declared-twice-reads-the-other-declaration">B762. <code>$this</code> in a class declared twice reads the other declaration<a class="headerlink" href="#b762-this-in-a-class-declared-twice-reads-the-other-declaration" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// a.php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">namespace V;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">class Variant {}</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">// b.php</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">namespace V;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">class Variant { private int $x = 1; public function f(): int { return $this-&gt;x; } }</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">// "Property V\Variant::$x not found"</span>
 </code></pre></div>
-<p>PHP never runs the guarded declaration here: <code>class_exists()</code> autoloads
-the PSR-4 file first, and an <code>if (false)</code> body never runs at all. PHPantom
-resolves <code>Acme\Widget</code> to the guarded copy instead, so every member only
-the real class has is reported unknown, and hover, completion and
-go-to-definition all read the stub. It happens wherever the guarded file
-sits on disk and whichever guard it uses, as long as the real class is
-reached through a vendor package's PSR-4 mapping. The same probe with the
-real class under the project's own PSR-4 root resolved correctly.</p>
-<p>The parser descends into <code>if</code> and block bodies on purpose
-(<code>src/parser/classes/mod.rs</code>, so Doctrine's <code>ServiceEntityRepository</code>,
-declared only under a guard, is indexed), but nothing records that the
-declaration was conditional. A file from <code>autoload.files</code> is indexed
-eagerly, so its copy is in the class index before the vendor PSR-4 file
-is ever looked up, and the lookup stops there.</p>
-<p><strong>Fix:</strong> record on the declaration that it sits inside a conditional
-block, and when such a declaration is the one a name resolves to, try
-the Composer autoloader (classmap, then PSR-4) for an unconditional
-declaration of the same name and prefer it, as PHP's autoloader does.
-Keep the guarded declaration when the autoloader finds nothing, which is
-the Doctrine case. Tusk PHP reported false positives from the same kind of
-guarded declaration in Symfony's MongoDB and PHPUnit bridges and
-Magento's Redis adapter (its CHANGELOG, "A class
-declared inside a block"), which are the real-code places to verify the
-fix against.</p>
+<p>When more than one file declares a class, the class index keeps one
+declaration for the name (the lowest-sorting file, or the one that does
+not wait for the autoloader behind a <code>class_exists</code> guard). Inside the
+body of a declaration that lost, <code>$this</code>, <code>self</code> and <code>static</code> resolve
+by name to that winner, so every member only the losing declaration has
+is reported unknown in its own file, and hover and completion there show
+the other declaration's members. Polyfills and version-specific variants
+of a class (<code>symfony/polyfill-*</code>, Carbon's <code>DatePeriodBase</code>) are where
+this shows up in real code.</p>
+<p><strong>Fix:</strong> resolve <code>$this</code>, <code>self</code> and <code>static</code> inside a class body to the
+declaration that encloses them in the current file, not to whatever the
+class index holds for the name.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
