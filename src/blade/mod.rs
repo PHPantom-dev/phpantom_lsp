@@ -13,6 +13,7 @@ pub(crate) mod discovery;
 pub(crate) mod echo_delimiter;
 pub(crate) mod implicit_props;
 pub(crate) mod layout;
+pub(crate) mod livewire_views;
 pub(crate) mod markers;
 pub(crate) mod outline;
 pub(crate) mod pairing;

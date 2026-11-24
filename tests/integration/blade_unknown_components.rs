@@ -287,6 +287,96 @@ async fn a_bare_tag_reaches_a_path_registered_under_a_prefix() {
     assert_eq!(reported[0].1, "Unknown Blade component 'bdage'");
 }
 
+/// Livewire 4 installed: its provider merges its own config, whose component
+/// locations and namespaces are where view-based components live.
+fn livewire_4_files(config: &'static str) -> [(&'static str, &'static str); 3] {
+    [
+        (
+            "bootstrap/providers.php",
+            "<?php\nreturn [\n    Livewire\\LivewireServiceProvider::class,\n];\n",
+        ),
+        (
+            "stubs/Livewire/LivewireServiceProvider.php",
+            "<?php\nnamespace Livewire;\n\
+             class LivewireServiceProvider {\n\
+                 public function register(): void {\n\
+                     $this->mergeConfigFrom(__DIR__.'/../config/livewire.php', 'livewire');\n\
+                 }\n\
+             }\n",
+        ),
+        ("stubs/config/livewire.php", config),
+    ]
+}
+
+const LIVEWIRE_4_CONFIG: &str = "<?php\nreturn [\n\
+    'component_locations' => [resource_path('views/components'), resource_path('views/livewire'), base_path('sfc')],\n\
+    'component_namespaces' => ['pages' => resource_path('views/pages')],\n\
+];\n";
+
+/// A view-based component is found in every location Livewire's config
+/// names, under each of the file layouts its finder tries, and a name none
+/// of them holds is reported.
+#[tokio::test]
+async fn livewire_4_view_based_components_are_found_in_its_locations() {
+    let mut extra = livewire_4_files(LIVEWIRE_4_CONFIG).to_vec();
+    extra.extend_from_slice(&[
+        (
+            "resources/views/livewire/\u{26A1}greeting.blade.php",
+            "<?php new class extends Livewire\\Component {}; ?>\n<p>Hi</p>\n",
+        ),
+        (
+            "resources/views/livewire/admin/stats/index.blade.php",
+            "<p>Stats</p>\n",
+        ),
+        ("sfc/\u{26A1}card/card.blade.php", "<p>Card</p>\n"),
+        ("sfc/\u{26A1}card/card.php", "<?php\n"),
+        (
+            "resources/views/pages/\u{26A1}dashboard.blade.php",
+            "<p>Hi</p>\n",
+        ),
+        ("resources/views/elsewhere.blade.php", "<p>Hi</p>\n"),
+    ]);
+    let (backend, _dir, uri) = start(
+        "<livewire:greeting />\n\
+         <livewire:admin.stats />\n\
+         <livewire:card />\n\
+         <livewire:pages::dashboard />\n\
+         <livewire:greting />\n\
+         <livewire:pages::dashbaord />\n\
+         <livewire:elsewhere />\n\
+         <livewire:other::thing />\n",
+        &extra,
+    )
+    .await;
+    let reported: Vec<String> = unknown_components(&backend, &uri)
+        .into_iter()
+        .map(|(_, message, _, _)| message)
+        .collect();
+    assert_eq!(
+        reported,
+        vec![
+            "Unknown Livewire component 'greting'".to_string(),
+            "Unknown Livewire component 'pages::dashbaord'".to_string(),
+            "Unknown Livewire component 'elsewhere'".to_string(),
+        ]
+    );
+}
+
+/// A location the config names in a way this cannot read could hold any
+/// component, Livewire or anonymous Blade.
+#[tokio::test]
+async fn an_unreadable_livewire_location_judges_no_bare_tag() {
+    let extra = livewire_4_files(
+        "<?php\nreturn [\n    'component_locations' => [resource_path('views/livewire'), $somewhere],\n];\n",
+    );
+    let (backend, _dir, uri) = start(
+        "<livewire:greting />\n<x-buttons.bakc />\n<x-acme::thing />\n",
+        &extra,
+    )
+    .await;
+    assert_eq!(unknown_components(&backend, &uri), vec![]);
+}
+
 // ── Quick fixes ─────────────────────────────────────────────────────────────
 
 async fn actions_at(backend: &Backend, uri: &Uri, line: u32, character: u32) -> Vec<CodeAction> {

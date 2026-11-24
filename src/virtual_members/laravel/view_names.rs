@@ -47,7 +47,7 @@ pub(crate) fn resolve_view_definitions(backend: &Backend, name: &str) -> Vec<Loc
 
     if let Some((namespace, view_name)) = name.split_once("::") {
         let rel = view_name.replace('.', "/");
-        for res in &backend.laravel.provider_resources.read().view_dirs {
+        for res in &backend.laravel_view_namespace_dirs() {
             if res.namespace != namespace {
                 continue;
             }

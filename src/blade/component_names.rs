@@ -90,13 +90,25 @@ impl Backend {
     fn anonymous_component_registrations(
         &self,
     ) -> (Vec<AnonymousNamespace>, Vec<(String, std::path::PathBuf)>) {
-        let (namespaces, paths) = {
+        let (namespaces, mut paths) = {
             let resources = self.laravel.provider_resources.read();
             (
                 resources.anonymous_component_namespaces.clone(),
                 resources.anonymous_component_paths.clone(),
             )
         };
+        // Livewire 4 registers every component location as a prefix-less
+        // anonymous component path and every component namespace as one
+        // under its name, skipping a directory that does not exist.
+        let livewire = self.livewire_views();
+        paths.extend(
+            livewire
+                .locations
+                .iter()
+                .map(|location| (String::new(), location.clone()))
+                .chain(livewire.namespaces.iter().cloned())
+                .filter(|(_, path)| path.is_dir()),
+        );
         let mut registrations: Vec<AnonymousNamespace> = namespaces
             .iter()
             .map(|(prefix, directory)| AnonymousNamespace::new(prefix, directory, false))

@@ -135,6 +135,18 @@ impl Backend {
         // any other resource count moved.
         self.laravel.string_key_cache.write().shared_view_vars = None;
 
+        // Livewire's own config is found through the scan, and its view
+        // directories feed the view roots and the template index.
+        {
+            let mut cache = self.laravel.string_key_cache.write();
+            if cache.livewire_views.take().is_some() {
+                cache.view_roots = None;
+                cache.view_names = None;
+                cache.blade_discovery = None;
+                cache.blade_blocks = None;
+            }
+        }
+
         if has_string_key_sources {
             let mut cache = self.laravel.string_key_cache.write();
             cache.config_keys = None;

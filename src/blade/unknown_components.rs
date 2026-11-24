@@ -28,12 +28,15 @@ const MAIL_PREFIX: &str = "mail";
 /// dynamic component, whose real name is an attribute.
 const BUILTIN_LIVEWIRE_TAGS: [&str; 4] = ["styles", "scripts", "is", "dynamic-component"];
 
-/// The directories a Livewire tag can name a single-file (Volt or Livewire
-/// 4) component in, as view-name prefixes.
-const LIVEWIRE_VIEW_DIRECTORIES: [&str; 4] = ["livewire", "components", "pages", "layouts"];
+/// The directories a Livewire tag can name a single-file component in
+/// when the installed Livewire's own locations are not known (Volt's
+/// default mounts and Livewire 4's default locations and namespaces), as
+/// view-name prefixes.
+const FALLBACK_VIEW_DIRECTORIES: [&str; 4] = ["livewire.", "components.", "pages.", "layouts."];
 
-/// The marker Livewire 4 puts in front of a single-file component's name.
-const LIVEWIRE_SFC_MARKER: &str = "\u{26A1}";
+/// The markers Livewire 4 accepts in front of a view-based component's
+/// name: none, or the zap emoji bare or with either variation selector.
+const LIVEWIRE_MARKERS: [&str; 4] = ["", "\u{26A1}", "\u{26A1}\u{FE0E}", "\u{26A1}\u{FE0F}"];
 
 /// The class a dotted component path names below `namespace`, each segment
 /// studly-cased the way Laravel and Livewire derive a class from a tag:
@@ -76,6 +79,28 @@ pub(crate) struct ComponentIndex {
     /// namespace)`, the application's own having no prefix.
     class_namespaces: Vec<(Option<String>, String)>,
     livewire_namespace: String,
+    /// Where a Livewire tag can name a view-based component.
+    livewire_view_prefixes: Vec<LivewireViewPrefix>,
+    /// Livewire 4's config names its component locations in a way this
+    /// cannot read, so any tag that names no namespace may be an anonymous
+    /// component in one of them.
+    open_anonymous_paths: bool,
+}
+
+/// A directory a Livewire tag can name a view-based component in, as the
+/// view names its templates are indexed under.
+pub(crate) struct LivewireViewPrefix {
+    /// The component namespace the directory is registered under, `None`
+    /// for a component location.
+    namespace: Option<String>,
+    /// What the templates' view names start with: `livewire.` for a
+    /// location inside a view root, `pages::` for a component namespace,
+    /// nothing for a location that is a view root of its own.
+    prefix: String,
+    /// The directory itself, when `prefix` is empty: a view root of its own
+    /// shares its names with every other root, so a name only counts when
+    /// the template is in this directory.
+    root: Option<std::path::PathBuf>,
 }
 
 impl Backend {
@@ -88,6 +113,7 @@ impl Backend {
     pub(crate) fn component_index(&self, with_livewire: bool) -> ComponentIndex {
         let discovery = self.blade_discovery();
         let anonymous = self.anonymous_component_namespaces();
+        let livewire_views = self.livewire_views();
         let (
             known_prefixes,
             aliases,
@@ -114,6 +140,12 @@ impl Backend {
                         .map(|(prefix, _)| prefix.clone()),
                 )
                 .chain(resources.view_dirs.iter().map(|dir| dir.namespace.clone()))
+                .chain(
+                    livewire_views
+                        .namespaces
+                        .iter()
+                        .map(|(namespace, _)| namespace.clone()),
+                )
                 .filter(|prefix| !prefix.is_empty())
                 .collect();
             (
@@ -146,9 +178,11 @@ impl Backend {
             // A project that has no component Livewire can find may keep
             // them where this cannot look (Livewire 2's `App\Http\Livewire`
             // without a config file), so it tells nothing about any name.
-            && (!discovery.livewire.is_empty() || !livewire_aliases.is_empty())
+            && (!discovery.livewire.is_empty()
+                || !livewire_aliases.is_empty()
+                || livewire_views.is_active())
             && self.find_or_load_class("Livewire\\Component").is_some()
-            && !self.livewire_config_has_component_locations();
+            && !livewire_views.open;
         ComponentIndex {
             discovery,
             anonymous,
@@ -164,20 +198,73 @@ impl Backend {
             } else {
                 String::new()
             },
+            livewire_view_prefixes: if livewire_judgeable {
+                self.livewire_view_prefixes(&livewire_views)
+            } else {
+                Vec::new()
+            },
+            open_anonymous_paths: livewire_views.open,
         }
     }
 
-    /// Whether `config/livewire.php` lists the directories Livewire 4
-    /// looks for single-file components in, which this does not read.
-    fn livewire_config_has_component_locations(&self) -> bool {
-        let Some(root) = self.workspace_root().read().clone() else {
-            return false;
-        };
-        let path = root.join("config").join("livewire.php");
-        let content = crate::util::path_to_url(&path)
-            .and_then(|uri| self.get_file_content(uri.as_str()))
-            .or_else(|| std::fs::read_to_string(&path).ok());
-        content.is_some_and(|content| content.contains("component_locations"))
+    /// The view-name prefixes Livewire's finder reaches a view-based
+    /// component under.  A component location is named relative to the
+    /// first view root that holds it, which is the name the template index
+    /// records it under: Livewire 4 makes the location a view root of its
+    /// own, but only after the configured ones.
+    fn livewire_view_prefixes(
+        &self,
+        livewire: &super::livewire_views::LivewireViews,
+    ) -> Vec<LivewireViewPrefix> {
+        if !livewire.is_active() {
+            return FALLBACK_VIEW_DIRECTORIES
+                .iter()
+                .map(|prefix| LivewireViewPrefix {
+                    namespace: None,
+                    prefix: (*prefix).to_string(),
+                    root: None,
+                })
+                .collect();
+        }
+        let roots = self.laravel_view_roots();
+        let mut prefixes: Vec<LivewireViewPrefix> = livewire
+            .locations
+            .iter()
+            .filter_map(|location| {
+                let canonical = dunce::canonicalize(location).unwrap_or_else(|_| location.clone());
+                let rel = roots.iter().find_map(|root| {
+                    location
+                        .strip_prefix(&root.path)
+                        .ok()
+                        .or_else(|| canonical.strip_prefix(root.canonical.as_ref()?).ok())
+                })?;
+                let rel = rel.to_string_lossy().replace(['/', '\\'], ".");
+                Some(if rel.is_empty() {
+                    LivewireViewPrefix {
+                        namespace: None,
+                        prefix: rel,
+                        root: Some(location.clone()),
+                    }
+                } else {
+                    LivewireViewPrefix {
+                        namespace: None,
+                        prefix: format!("{rel}."),
+                        root: None,
+                    }
+                })
+            })
+            .collect();
+        prefixes.extend(
+            livewire
+                .namespaces
+                .iter()
+                .map(|(namespace, _)| LivewireViewPrefix {
+                    namespace: Some(namespace.clone()),
+                    prefix: format!("{namespace}::"),
+                    root: None,
+                }),
+        );
+        prefixes
     }
 }
 
@@ -239,6 +326,9 @@ impl ComponentIndex {
         if BUILTIN_BLADE_TAGS.contains(&name) || name.starts_with("slot:") {
             return false;
         }
+        if self.open_anonymous_paths && !name.contains("::") {
+            return false;
+        }
         // A project whose views the scan found none of may keep them
         // anywhere, so no name is provably missing.
         if self.discovery.views.is_empty() && self.discovery.components.is_empty() {
@@ -272,7 +362,18 @@ impl ComponentIndex {
         let Some(aliases) = &self.livewire_aliases else {
             return false;
         };
-        if BUILTIN_LIVEWIRE_TAGS.contains(&name) || name.contains("::") {
+        if BUILTIN_LIVEWIRE_TAGS.contains(&name) {
+            return false;
+        }
+        // A namespace only Livewire's own config declares is one whose
+        // components are all view-based; any other may hold classes this
+        // cannot enumerate.
+        if let Some((namespace, _)) = name.split_once("::")
+            && !self
+                .livewire_view_prefixes
+                .iter()
+                .any(|registered| registered.namespace.as_deref() == Some(namespace))
+        {
             return false;
         }
         !(self.discovery.livewire_component(name).is_some()
@@ -280,31 +381,59 @@ impl ComponentIndex {
             || self.livewire_view_resolves(name))
     }
 
-    /// Whether a single-file component answers to the Livewire tag
-    /// `name`: a template in one of the directories Volt and Livewire 4
-    /// look in, with or without Livewire 4's marker, either on its own or
-    /// as the index of a directory of the same name.
+    /// Whether a view-based component answers to the Livewire tag `name`:
+    /// a template in one of the directories Livewire's finder looks in,
+    /// with or without Livewire 4's marker, either on its own, as the index
+    /// of a directory of the same name, or as a multi-file component's
+    /// directory.
     fn livewire_view_resolves(&self, name: &str) -> bool {
-        let (dirs, last) = match name.rsplit_once('.') {
-            Some((dirs, last)) => (Some(dirs), last),
+        let (namespace, path) = match name.split_once("::") {
+            Some((namespace, path)) => (Some(namespace), path),
             None => (None, name),
         };
-        let marked = format!("{LIVEWIRE_SFC_MARKER}{last}");
-        LIVEWIRE_VIEW_DIRECTORIES.iter().any(|directory| {
-            [last, marked.as_str()].iter().any(|leaf| {
-                let base = match dirs {
-                    Some(dirs) => format!("{directory}.{dirs}.{leaf}"),
-                    None => format!("{directory}.{leaf}"),
-                };
-                [
-                    base.clone(),
-                    format!("{base}.index"),
-                    format!("{base}.{last}"),
-                ]
-                .iter()
-                .any(|view| self.discovery.views.contains_key(view))
+        let (lead, last) = match path.rsplit_once('.') {
+            Some((dirs, last)) => (format!("{dirs}."), last),
+            None => (String::new(), path),
+        };
+        self.livewire_view_prefixes
+            .iter()
+            .filter(|registered| registered.namespace.as_deref() == namespace)
+            .any(|LivewireViewPrefix { prefix, root, .. }| {
+                LIVEWIRE_MARKERS.iter().any(|marker| {
+                    [
+                        // A single file, on its own, as an index, or named
+                        // after its directory.
+                        format!("{prefix}{lead}{marker}{last}"),
+                        format!("{prefix}{lead}{last}.{marker}index"),
+                        format!("{prefix}{lead}{last}.{marker}{last}"),
+                        // A multi-file component's directory, holding a
+                        // template named after it without the marker.
+                        format!("{prefix}{lead}{marker}{last}.{last}"),
+                        format!("{prefix}{lead}{last}.{marker}index.index"),
+                        format!("{prefix}{lead}{last}.{marker}{last}.{last}"),
+                    ]
+                    .iter()
+                    .any(|view| self.livewire_view_exists(view, root.as_deref()))
+                })
             })
-        })
+    }
+
+    /// Whether the template index holds `view`, in `root` when one is
+    /// given.  An earlier view root can hold a template of the same name,
+    /// which the index then records instead, so that case falls back to
+    /// looking in `root` itself.
+    fn livewire_view_exists(&self, view: &str, root: Option<&std::path::Path>) -> bool {
+        let Some(path) = self.discovery.views.get(view) else {
+            return false;
+        };
+        let Some(root) = root else {
+            return true;
+        };
+        path.starts_with(root)
+            || [".blade.php", ".php"].iter().any(|extension| {
+                root.join(format!("{}{extension}", view.replace('.', "/")))
+                    .is_file()
+            })
     }
 
     /// Every name a tag of `kind` can be written with, sorted, for

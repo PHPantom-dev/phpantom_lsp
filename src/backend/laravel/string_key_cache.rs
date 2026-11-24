@@ -30,6 +30,9 @@ pub(crate) struct LaravelStringKeyCache {
     /// against them, which would otherwise re-read and re-parse the config
     /// file once per template.
     pub view_roots: Option<std::sync::Arc<Vec<crate::blade::view_paths::ViewRoot>>>,
+    /// Livewire 4's view-based component directories, read from
+    /// `config/livewire.php` and the installed Livewire's own config.
+    pub livewire_views: Option<std::sync::Arc<crate::blade::livewire_views::LivewireViews>>,
     /// Shared translation declarations, values, locales, and file locations.
     pub translations: Option<Arc<crate::virtual_members::laravel::TranslationCatalog>>,
     /// The Blade templates and component classes the project ships, keyed
@@ -93,6 +96,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub config_keys: parking_lot::Mutex<()>,
     pub view_names: parking_lot::Mutex<()>,
     pub view_roots: parking_lot::Mutex<()>,
+    pub livewire_views: parking_lot::Mutex<()>,
     pub translations: parking_lot::Mutex<()>,
     pub config_trees: parking_lot::Mutex<()>,
     pub blade_discovery: parking_lot::Mutex<()>,
@@ -193,7 +197,13 @@ impl LaravelStringKeyCache {
         // Blade file, any path containing a `views/` directory, and on
         // `config/view.php` itself (which changes the set of roots).
         let looks_like_view_file = uri.ends_with(".blade.php") || uri.contains("/views/");
-        if looks_like_view_file || uri.contains("/config/view.php") {
+        // Livewire 4 adds the directories `config/livewire.php` lists as
+        // view roots and view namespaces of their own.
+        let livewire_config = uri.ends_with("/config/livewire.php");
+        if livewire_config {
+            self.livewire_views = None;
+        }
+        if looks_like_view_file || livewire_config || uri.contains("/config/view.php") {
             self.view_names = None;
         }
         // A file that is not covered by any already-known root may be the
@@ -203,6 +213,7 @@ impl LaravelStringKeyCache {
         // recompute so the new directory is picked up without waiting for
         // `config/view.php` itself to change.
         if uri.contains("/config/view.php")
+            || livewire_config
             || (looks_like_view_file
                 && self
                     .view_roots

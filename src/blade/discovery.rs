@@ -414,7 +414,7 @@ impl Backend {
         for root in self.laravel_view_roots().iter() {
             merge_view_root(&root.path, "", &mut views);
         }
-        for res in &self.laravel.provider_resources.read().view_dirs {
+        for res in &self.laravel_view_namespace_dirs() {
             merge_view_root(&res.path, &res.namespace, &mut views);
         }
         for (namespace, path) in self.anonymous_component_view_roots() {

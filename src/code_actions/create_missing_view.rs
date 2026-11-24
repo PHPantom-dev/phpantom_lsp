@@ -249,13 +249,10 @@ impl Backend {
     fn laravel_view_create_target(&self, view_key: &str) -> Option<PathBuf> {
         if let Some((namespace, _)) = view_key.split_once("::") {
             return self
-                .laravel
-                .provider_resources
-                .read()
-                .view_dirs
-                .iter()
+                .laravel_view_namespace_dirs()
+                .into_iter()
                 .find(|res| res.namespace == namespace)
-                .map(|res| res.path.clone());
+                .map(|res| res.path);
         }
 
         if let Some(root) = self.laravel_view_roots().first() {

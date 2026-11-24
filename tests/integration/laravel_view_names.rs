@@ -227,6 +227,165 @@ async fn a_view_only_the_published_directory_holds_is_known() {
     );
 }
 
+// ─── Livewire 4's view locations ────────────────────────────────────────────
+
+/// An application with Livewire installed as a path package, whose service
+/// provider merges the package's own `config/livewire.php` the way the real
+/// one does.
+const LIVEWIRE_COMPOSER: &str = r#"{
+    "require": { "laravel/framework": "^11.0" },
+    "autoload": { "psr-4": { "App\\": "app/", "Livewire\\": "packages/livewire/src/" } }
+}"#;
+
+const LIVEWIRE_PROVIDER_LIST: &str =
+    "<?php\nreturn [\n    Livewire\\LivewireServiceProvider::class,\n];\n";
+
+const LIVEWIRE_PROVIDER: &str = "\
+<?php
+namespace Livewire;
+
+class LivewireServiceProvider
+{
+    public function register(): void
+    {
+        $config = __DIR__.'/../config/livewire.php';
+        $this->mergeConfigFrom($config, 'livewire');
+    }
+}
+";
+
+/// Livewire 4's shipped defaults.
+const LIVEWIRE_4_CONFIG: &str = "\
+<?php
+return [
+    'component_locations' => [
+        resource_path('views/components'),
+        resource_path('views/livewire'),
+    ],
+    'component_namespaces' => [
+        'layouts' => resource_path('views/layouts'),
+        'pages' => resource_path('views/pages'),
+    ],
+];
+";
+
+/// A Livewire 4 project with `package_config` as Livewire's own config,
+/// `extra` on top, and a controller rendering each of `views`.  Returns the
+/// `invalid_laravel_view` messages on the controller.
+async fn livewire_view_diagnostics(
+    package_config: &str,
+    extra: &[(&str, &str)],
+    views: &[&str],
+) -> (
+    phpantom_lsp::Backend,
+    tempfile::TempDir,
+    Uri,
+    String,
+    Vec<String>,
+) {
+    let body = views
+        .iter()
+        .map(|view| format!("view('{view}');"))
+        .collect::<Vec<_>>()
+        .join("\n        ");
+    let caller = controller("PageController", &format!("{body}\n        return null;"));
+    let mut files: Vec<(&str, &str)> = vec![
+        ("bootstrap/providers.php", LIVEWIRE_PROVIDER_LIST),
+        (
+            "packages/livewire/src/LivewireServiceProvider.php",
+            LIVEWIRE_PROVIDER,
+        ),
+        ("packages/livewire/config/livewire.php", package_config),
+        ("resources/views/livewire/greeting.blade.php", "<p>Hi</p>\n"),
+        ("resources/views/pages/dashboard.blade.php", "<p>Hi</p>\n"),
+        ("app/PageController.php", &caller),
+    ];
+    files.extend_from_slice(extra);
+    let (backend, dir) = create_psr4_workspace(LIVEWIRE_COMPOSER, &files);
+    backend.initialized(InitializedParams {}).await;
+    let uri = open_php_file(&backend, "app/PageController.php").await;
+    let messages = view_diagnostics(&backend, &uri, &caller);
+    (backend, dir, uri, caller, messages)
+}
+
+/// Livewire 4 makes each component location a view root and each component
+/// namespace a view namespace, so a template there is a view by its name
+/// relative to that directory.
+#[tokio::test]
+async fn a_livewire_4_location_is_a_view_root() {
+    let (backend, _dir, uri, caller, messages) = livewire_view_diagnostics(
+        LIVEWIRE_4_CONFIG,
+        &[],
+        &[
+            "greeting",
+            "livewire.greeting",
+            "pages::dashboard",
+            "greting",
+        ],
+    )
+    .await;
+    assert_eq!(messages.len(), 1, "only the misspelt name: {messages:?}");
+    assert!(messages[0].contains("greting"), "got {messages:?}");
+
+    let found = definitions_at(&backend, &uri, &caller, "pages::dashboard").await;
+    assert!(
+        found.iter().any(|l| l
+            .uri
+            .as_str()
+            .ends_with("/resources/views/pages/dashboard.blade.php")),
+        "go-to-definition should reach the namespaced template, got {found:?}"
+    );
+}
+
+/// The project's own `config/livewire.php` replaces a setting the package
+/// ships, while one it leaves out keeps the package's.
+#[tokio::test]
+async fn the_projects_livewire_config_replaces_the_package_locations() {
+    let (_backend, _dir, _uri, _caller, messages) = livewire_view_diagnostics(
+        LIVEWIRE_4_CONFIG,
+        &[
+            (
+                "config/livewire.php",
+                "<?php\nreturn [\n    'component_locations' => [resource_path('views/sfc')],\n];\n",
+            ),
+            ("resources/views/sfc/widget.blade.php", "<p>Hi</p>\n"),
+        ],
+        &["widget", "pages::dashboard", "greeting"],
+    )
+    .await;
+    assert_eq!(messages.len(), 1, "only the dropped location: {messages:?}");
+    assert!(messages[0].contains("'greeting'"), "got {messages:?}");
+}
+
+/// A location this cannot read could hold any view.
+#[tokio::test]
+async fn an_unreadable_livewire_location_judges_no_view() {
+    let (_backend, _dir, _uri, _caller, messages) = livewire_view_diagnostics(
+        LIVEWIRE_4_CONFIG,
+        &[(
+            "config/livewire.php",
+            "<?php\nreturn [\n    'component_locations' => [$elsewhere],\n];\n",
+        )],
+        &["greting"],
+    )
+    .await;
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Livewire 3 has no component locations, so its directory is not a view
+/// root.
+#[tokio::test]
+async fn livewire_3_adds_no_view_root() {
+    let (_backend, _dir, _uri, _caller, messages) = livewire_view_diagnostics(
+        "<?php\nreturn [\n    'class_namespace' => 'App\\\\Livewire',\n];\n",
+        &[],
+        &["livewire.greeting", "greeting"],
+    )
+    .await;
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("'greeting'"), "got {messages:?}");
+}
+
 // ─── Creating a missing view ────────────────────────────────────────────────
 
 /// The file a "Create missing view" action on `line` of `content` would

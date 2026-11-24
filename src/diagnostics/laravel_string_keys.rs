@@ -198,6 +198,9 @@ struct DeclaredKeys<'a> {
     /// config keys cover.
     config_resource_mask: u8,
     view_names: Arc<[String]>,
+    /// Livewire 4's config names a view directory this cannot read, so any
+    /// view name may be one.
+    views_open: bool,
     trans_keys: Arc<[String]>,
     commands_indexed: bool,
     morph_map_enforced: bool,
@@ -359,6 +362,7 @@ impl<'a> DeclaredKeys<'a> {
         } else {
             Arc::default()
         };
+        let views_open = has_view && backend.livewire_views().open;
 
         // An application whose strings live in a database still has `vendor/`'s
         // own `lang/` files on disk, so the enumerated set is non-empty while
@@ -516,6 +520,7 @@ impl<'a> DeclaredKeys<'a> {
             open_config_namespace,
             config_resource_mask,
             view_names,
+            views_open,
             trans_keys,
             commands_indexed,
             morph_map_enforced,
@@ -551,6 +556,7 @@ impl<'a> DeclaredKeys<'a> {
             CheckedStringKind::ConfigResource(resource) => {
                 self.judge_config_resource(resource, key)
             }
+            CheckedStringKind::View if self.views_open => None,
             CheckedStringKind::View => Some((
                 self.view_names
                     .binary_search_by(|name| name.as_str().cmp(key))
@@ -1459,12 +1465,18 @@ impl Backend {
     ///   registers. When no provider registered that namespace, the
     ///   package's templates are simply not enumerable here, so the name
     ///   is unjudgeable rather than wrong.
+    /// * A project whose Livewire 4 config names its view directories in a
+    ///   way this cannot read may keep a view in any of them.
     pub(crate) fn view_string_literal_is_unknown(&self, literal: &str) -> bool {
         if literal.is_empty() {
             return false;
         }
         let known = self.cached_view_names();
         if known.is_empty() {
+            return false;
+        }
+        let livewire = self.livewire_views();
+        if livewire.open {
             return false;
         }
         let name = crate::virtual_members::laravel::canonical_view_name(literal);
@@ -1476,6 +1488,7 @@ impl Backend {
                 .view_dirs
                 .iter()
                 .any(|dir| dir.namespace == namespace)
+            && !livewire.namespaces.iter().any(|(ns, _)| ns == namespace)
         {
             return false;
         }

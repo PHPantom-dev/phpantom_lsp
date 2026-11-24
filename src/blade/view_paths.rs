@@ -91,16 +91,55 @@ impl crate::Backend {
             || {
                 let config_uri = crate::util::path_to_uri(&root.join("config/view.php"));
                 let config = self.get_file_content_arc(&config_uri);
-                let roots = view_paths_from_config(config.as_deref().map(String::as_str), &root)
-                    .into_iter()
-                    .map(|path| ViewRoot {
-                        canonical: dunce::canonicalize(&path).ok(),
-                        path,
-                    })
-                    .collect();
+                let mut roots: Vec<ViewRoot> =
+                    view_paths_from_config(config.as_deref().map(String::as_str), &root)
+                        .into_iter()
+                        .map(|path| ViewRoot {
+                            canonical: dunce::canonicalize(&path).ok(),
+                            path,
+                        })
+                        .collect();
+                // Livewire 4 adds its component locations after the
+                // configured paths (`View::addLocation()`).  One that does not
+                // exist yet is kept, so a template created there later is
+                // still named.
+                for location in &self.livewire_views().locations {
+                    let canonical = dunce::canonicalize(location).ok();
+                    let known = roots.iter().any(|root| {
+                        root.path == *location
+                            || (canonical.is_some() && root.canonical == canonical)
+                    });
+                    if !known {
+                        roots.push(ViewRoot {
+                            path: location.clone(),
+                            canonical,
+                        });
+                    }
+                }
                 std::sync::Arc::new(roots)
             },
         )
+    }
+
+    /// The directories views are addressed under a `namespace::` prefix
+    /// in: the ones providers register (`loadViewsFrom()`), then Livewire
+    /// 4's component namespaces.
+    pub(crate) fn laravel_view_namespace_dirs(
+        &self,
+    ) -> Vec<crate::virtual_members::laravel::ProviderResource> {
+        let mut dirs = self.laravel.provider_resources.read().view_dirs.clone();
+        dirs.extend(
+            self.livewire_views()
+                .namespaces
+                .iter()
+                .map(
+                    |(namespace, path)| crate::virtual_members::laravel::ProviderResource {
+                        path: path.clone(),
+                        namespace: namespace.clone(),
+                    },
+                ),
+        );
+        dirs
     }
 
     /// Derive the view names a Blade file is addressable by: one per
@@ -171,7 +210,7 @@ impl crate::Backend {
         for root in self.laravel_view_roots().iter() {
             match_root(&root.path, &|| root.canonical.clone(), "");
         }
-        for res in &self.laravel.provider_resources.read().view_dirs {
+        for res in &self.laravel_view_namespace_dirs() {
             match_root(
                 &res.path,
                 &|| dunce::canonicalize(&res.path).ok(),

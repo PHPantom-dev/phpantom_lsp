@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Livewire 4's view locations are view roots.** Templates in the directories Livewire 4's `component_locations` and `component_namespaces` settings name (by default `resources/views/livewire` and `pages::`) are views by those names, so `view()` and `@include` calls naming them are no longer reported as unknown. A `<livewire:…>` tag is checked against the components in every location the config names.
 - **No unknown-component report for a bare tag a package path answers.** `<x-badge>` reaches a template a package registered with `Blade::anonymousComponentPath()` under a prefix, as Laravel resolves it, so it is no longer reported as unknown.
 
 - **Claude Code no longer sees outdated diagnostics after an edit.** Results from before an edit, at line numbers that no longer match the file, are not reported to the agent as new findings.

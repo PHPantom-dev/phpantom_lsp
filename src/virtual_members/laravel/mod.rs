@@ -216,11 +216,9 @@ pub(crate) use patches::STORAGE_FACADE_FQN;
 pub(crate) use path_helpers::{
     collect_path_helper_links, is_path_helper, path_helper_base, resolve_path_helper_definition,
 };
-#[cfg(test)]
-pub(crate) use provider_resources::ProviderResource;
 pub(crate) use provider_resources::{
-    ProviderIdentity, ProviderOrigin, ProviderResources, ProviderScan, ProviderScans,
-    extract_provider_resources,
+    PathContext, ProviderIdentity, ProviderOrigin, ProviderResource, ProviderResources,
+    ProviderScan, ProviderScans, extract_provider_resources, resolve_path_arg,
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::{
