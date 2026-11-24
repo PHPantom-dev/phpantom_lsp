@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-24
+
 ### Added
 
 #### Editing and navigation
@@ -27,8 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Authorization abilities on typed user models.** In calls such as `$customer->can('update', $post)`, complete the ability, jump to its policy, or see why it does not apply to the model. Contributed by @shuvroroy.
 
 - **Laravel connection names follow the receiver's type.** Connection names in instance calls and model or job properties now complete, navigate, show hover details and references, and report unknown names against the appropriate config file. Contributed by @shuvroroy.
-
-### Changed
 
 ### Fixed
 
@@ -2492,7 +2492,8 @@ Initial release.
 - **Embedded phpstorm-stubs.**
 - **Zed editor extension.**
 
-[Unreleased]: https://github.com/PHPantom-dev/phpantom_lsp/compare/1.0.0...HEAD
+[Unreleased]: https://github.com/PHPantom-dev/phpantom_lsp/compare/1.1.0...HEAD
+[1.1.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/1.0.0...1.1.0
 [1.0.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.1...1.0.0
 [0.11.1]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.0...0.11.1
 [0.11.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.10.0...0.11.0
