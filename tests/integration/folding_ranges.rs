@@ -1660,3 +1660,20 @@ class Foo {
     let ranges = get_folding_ranges(php);
     assert!(import_ranges(&ranges).is_empty(), "got: {ranges:?}");
 }
+
+#[test]
+fn trailing_comments_on_imports_do_not_fold_as_a_comment() {
+    let php = r#"<?php
+use App\Models\User; // the account
+use App\Models\Post; // its posts
+use App\Models\Tag;
+"#;
+    let ranges = get_folding_ranges(php);
+    assert_eq!(import_ranges(&ranges), vec![(1, 3)], "got: {ranges:?}");
+    assert!(
+        ranges
+            .iter()
+            .all(|r| r.kind != Some(FoldingRangeKind::Comment)),
+        "trailing comments must not fold the code beside them, got: {ranges:?}"
+    );
+}

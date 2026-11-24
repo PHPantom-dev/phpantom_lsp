@@ -931,8 +931,20 @@ fn collect_comment_ranges(
 
     // ── Consecutive single-line comments (`//` or `#`) ──
     // Group adjacent single-line comment trivia whose lines differ by
-    // exactly 1 (allowing interleaved whitespace trivia).
-    let mut single_line_comments = trivia.iter().filter(|t| t.kind.is_single_line_comment());
+    // exactly 1 (allowing interleaved whitespace trivia).  Only comments
+    // that start their line count: a group of trailing comments would fold
+    // away the code they sit beside.
+    let content = idx.content();
+    let mut single_line_comments = trivia.iter().filter(|t| {
+        if !t.kind.is_single_line_comment() {
+            return false;
+        }
+        let start = t.span.start.offset as usize;
+        let line_start = idx.line_start(idx.line_of(start));
+        content
+            .get(line_start..start)
+            .is_some_and(|before| before.trim().is_empty())
+    });
     let Some(first) = single_line_comments.next() else {
         return;
     };
