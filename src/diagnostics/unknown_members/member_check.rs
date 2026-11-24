@@ -13,8 +13,8 @@ use crate::virtual_members::resolve_class_fully_cached;
 
 use super::super::helpers::make_diagnostic;
 use super::super::member_lookup::{
-    display_class_name, has_magic_method_for_access, member_exists, member_exists_relaxed,
-    member_is_public,
+    display_class_name, has_magic_method_for_access, has_unloadable_ancestor, member_exists,
+    member_exists_relaxed, member_is_public,
 };
 use super::super::member_visibility::{INVALID_MEMBER_ACCESS_CODE, inaccessible_member_message};
 use super::access::MemberAccessSite;
@@ -145,8 +145,9 @@ impl UnknownMemberPass<'_> {
     ///
     /// An alternative answers when one of its classes declares the member
     /// or has a magic method that takes it.  An intersection one of whose
-    /// parts could not be loaded is taken to answer, since that part may
-    /// be the one declaring it.
+    /// parts could not be loaded, or a class with an ancestor that could
+    /// not be loaded, is taken to answer, since the missing class may be
+    /// the one declaring it.
     fn partial_union_message(
         &self,
         access: &MemberAccessSite,
@@ -168,7 +169,7 @@ impl UnknownMemberPass<'_> {
                 || (!access.is_method_call && !access.is_static && c.allows_dynamic_properties)
         };
         let class_answers = |c: &Arc<ClassInfo>| {
-            if answers(c) {
+            if answers(c) || has_unloadable_ancestor(c, self.class_loader()) {
                 return true;
             }
             // Synthetic shapes carry all their members already and share
@@ -413,6 +414,16 @@ impl UnknownMemberPass<'_> {
         // — that PHP does not inherit private members — would be lost.
         if self.push_inaccessible_member(access, &resolved_classes, &mut diagnostics) {
             // The member is real, so its type still carries the chain.
+            return (MemberCheckResult::Ok, diagnostics);
+        }
+
+        // ── An ancestor that did not load may declare the member ────
+        // The missing class is reported on its own; reporting every
+        // member it would have supplied as well only repeats that.
+        if base_classes
+            .iter()
+            .any(|c| has_unloadable_ancestor(c, self.class_loader()))
+        {
             return (MemberCheckResult::Ok, diagnostics);
         }
 

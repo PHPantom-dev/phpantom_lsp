@@ -73,15 +73,15 @@ async fn inherited_member_not_flagged_after_indexing_completes() {
 
     // ── Pre-indexing request poisons the cache ──────────────────────
     // Resolving the child here cannot find the vendor parent, so the
-    // merged child is cached without its inherited members.
+    // merged child is cached without its inherited members.  The method
+    // is not flagged yet only because the parent does not load.
     backend.update_ast(uri, text);
     let mut pre = Vec::new();
     backend.collect_unknown_member_diagnostics(uri, text, &mut pre);
     assert!(
-        pre.iter()
+        !pre.iter()
             .any(|d| message_text(&d.message).contains("redirectToRoute")),
-        "setup precondition: the inherited method should be flagged \
-         while the vendor parent is not yet indexed, got: {pre:?}"
+        "a member of a class whose parent does not load is not flagged, got: {pre:?}"
     );
 
     // ── Indexing completes ──────────────────────────────────────────
@@ -1553,7 +1553,7 @@ $d = Color::Green;
 
 #[test]
 fn flags_unknown_enum_case() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_stubs();
     let uri = "file:///test.php";
     let text = r#"<?php
 enum Color {
@@ -18473,5 +18473,63 @@ function run(Drawer $d): void {
     assert!(
         diags.is_empty(),
         "expected each call to resolve on its matching branch, got: {diags:?}"
+    );
+}
+
+/// A member of a class whose ancestor cannot be loaded may come from that
+/// ancestor.  The missing class is reported as an unknown class; its
+/// members are not reported again as unknown members.
+#[test]
+fn member_of_class_with_unloadable_ancestor_is_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+class ShapeTest extends \PHPUnit\Framework\TestCase {
+    public function go(): void {
+        $this->assertTrue(true);
+        $this->backupGlobals;
+        static::assertSame(1, 1);
+    }
+}
+trait UsesMissing { use \Vendor\MissingTrait; }
+class Base { use UsesMissing; }
+class Child extends Base {
+    public function go(): void { $this->fromTrait(); }
+}
+class Implementer implements \Vendor\MissingInterface {}
+function run(Implementer $i, Child $c): void {
+    echo Implementer::SOME_CONSTANT;
+    $c->fromTrait();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "expected no unknown members on classes with an unloadable ancestor, got: {diags:?}"
+    );
+}
+
+/// A class whose whole hierarchy loads is still checked.
+#[test]
+fn member_of_class_with_loaded_ancestors_is_still_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+interface Named { public function name(): string; }
+trait Greets { public function greet(): void {} }
+abstract class Base implements Named { use Greets; }
+class Child extends Base {
+    public function name(): string { return ''; }
+    public function go(): void { $this->missing(); }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("missing")),
+        "expected missing() to be flagged, got: {diags:?}"
     );
 }

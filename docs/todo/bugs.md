@@ -117,26 +117,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B762. Members of a class whose ancestor cannot be loaded are reported unknown
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-class ShapeTest extends \PHPUnit\Framework\TestCase {   // PHPUnit not installed
-    function go(): void {
-        $this->assertInstanceOf(Circle::class, $shape);    // "Method ShapeTest::assertInstanceOf() not found"
-    }
-}
-```
-
-The missing parent is already reported as `unknown_class`. Every member
-the parent would have supplied is then reported again as
-`unknown_member`, one per use, though the missing class may well declare
-it. `#[\Override]` already handles this right
-(`overrides_something` in `src/diagnostics/override_attribute.rs` answers
-"yes" when part of the hierarchy cannot be loaded).
-
-**Fix:** when the member is not found, walk the receiver's parents,
-traits and interfaces, and stay quiet if one of them cannot be loaded.
-The case is
-`tests/fixtures/tusk/field_run/assertinstanceof_narrows_without_phpunit_installed.fixture`.
+No outstanding items.

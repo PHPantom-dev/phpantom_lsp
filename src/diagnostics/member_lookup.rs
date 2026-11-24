@@ -2,6 +2,8 @@
 //! declares a member of the kind an access asks for, with what
 //! visibility, and whether a magic handler answers for it instead.
 
+use crate::atom::{Atom, AtomSet};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::types::{ClassInfo, Visibility};
 
 /// Which kind of member a lookup turned out to be, so the message can
@@ -197,4 +199,37 @@ pub(super) fn display_class_name(class: &ClassInfo) -> String {
         return "anonymous class".to_string();
     }
     class.fqn().to_string()
+}
+
+/// Whether some class, interface or trait `class` extends, implements or
+/// uses (directly or further up) cannot be loaded.
+///
+/// A member missing from such a class is not known to be missing: the
+/// ancestor that did not load may well be the one declaring it.
+pub(super) fn has_unloadable_ancestor(
+    class: &ClassInfo,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> bool {
+    let ancestors = |c: &ClassInfo| -> Vec<Atom> {
+        c.parent_class
+            .into_iter()
+            .chain(c.interfaces.iter().copied())
+            .chain(c.used_traits.iter().copied())
+            .collect()
+    };
+    let mut pending = ancestors(class);
+    let mut seen = AtomSet::default();
+    while let Some(name) = pending.pop() {
+        // A keyword type is no class to load: PHP's stubs declare
+        // `\Traversable` to extend `iterable`.
+        if !seen.insert(name) || !crate::php_type::is_class_like_name(name.trim_start_matches('\\'))
+        {
+            continue;
+        }
+        let Some(ancestor) = class_loader(Fqn::new(&name)) else {
+            return true;
+        };
+        pending.extend(ancestors(&ancestor));
+    }
+    false
 }

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hover shows `readonly` properties.** A property declared `readonly`, promoted as one, or belonging to a `readonly` class shows the keyword in its hover.
 - **DNF types are spelled as PHP writes them.** A union holding an intersection shows as `(A&B)|null` in hover and anywhere else a type is written out, instead of `A&B|null`, which is not valid PHP.
 - **`clamp()` returns its arguments' types.** The result of `clamp($value, $min, $max)` is typed from its arguments instead of `mixed`.
+- **No unknown members on a class whose parent cannot be found.** When a parent class, interface, or trait is missing, such as a test extending PHPUnit's `TestCase` before `composer install`, the missing class is reported once instead of every member it would have supplied.
 
 ## [1.1.0] - 2026-11-24
 

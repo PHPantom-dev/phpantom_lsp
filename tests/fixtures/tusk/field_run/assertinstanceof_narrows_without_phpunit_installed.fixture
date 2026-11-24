@@ -3,7 +3,7 @@
 // php: 8.5
 // feature: diagnostics
 // expect_absent_code: unknown_member
-// ignore: members of a class whose ancestor cannot be loaded are reported unknown; narrowing by assertInstanceOf() comes from PHPUnit's own annotations, so it needs PHPUnit installed
+// ignore: narrowing by assertInstanceOf() comes from PHPUnit's own annotations, so it needs PHPUnit installed
 ---
 <?php
 namespace App;
