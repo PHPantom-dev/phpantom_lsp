@@ -1535,3 +1535,145 @@ function foo() {}
         "Expected hash comment group range (1..3), got: {ranges:?}"
     );
 }
+
+// ─── Imports ────────────────────────────────────────────────────────────────
+
+fn import_ranges(ranges: &[FoldingRange]) -> Vec<(u32, u32)> {
+    ranges
+        .iter()
+        .filter(|r| r.kind == Some(FoldingRangeKind::Imports))
+        .map(|r| (r.start_line, r.end_line))
+        .collect()
+}
+
+#[test]
+fn consecutive_use_statements_produce_one_imports_range() {
+    let php = r#"<?php
+namespace App;
+
+use App\Models\User;
+use App\Models\Post;
+use function App\helper;
+use const App\VERSION;
+
+class Foo {}
+"#;
+    let ranges = get_folding_ranges(php);
+    assert_eq!(import_ranges(&ranges), vec![(3, 6)], "got: {ranges:?}");
+}
+
+#[test]
+fn single_use_statement_produces_no_imports_range() {
+    let php = r#"<?php
+namespace App;
+
+use App\Models\User;
+
+class Foo {}
+"#;
+    let ranges = get_folding_ranges(php);
+    assert!(import_ranges(&ranges).is_empty(), "got: {ranges:?}");
+}
+
+#[test]
+fn multi_line_group_use_produces_imports_range() {
+    let php = r#"<?php
+use App\Models\{
+    User,
+    Post,
+};
+"#;
+    let ranges = get_folding_ranges(php);
+    assert_eq!(import_ranges(&ranges), vec![(1, 4)], "got: {ranges:?}");
+}
+
+#[test]
+fn blank_lines_and_comments_do_not_split_imports() {
+    let php = r#"<?php
+use App\Models\User;
+
+// Services
+use App\Services\Mailer;
+"#;
+    let ranges = get_folding_ranges(php);
+    assert_eq!(import_ranges(&ranges), vec![(1, 4)], "got: {ranges:?}");
+}
+
+#[test]
+fn other_statement_splits_imports() {
+    let php = r#"<?php
+use App\Models\User;
+use App\Models\Post;
+const LIMIT = 10;
+use App\Services\Mailer;
+use App\Services\Logger;
+"#;
+    let ranges = get_folding_ranges(php);
+    assert_eq!(
+        import_ranges(&ranges),
+        vec![(1, 2), (4, 5)],
+        "got: {ranges:?}"
+    );
+}
+
+#[test]
+fn imports_without_namespace_produce_imports_range() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+use App\Models\User;
+use App\Models\Post;
+"#;
+    let ranges = get_folding_ranges(php);
+    assert_eq!(import_ranges(&ranges), vec![(3, 4)], "got: {ranges:?}");
+}
+
+#[test]
+fn imports_in_each_braced_namespace_fold_separately() {
+    let php = r#"<?php
+namespace App {
+    use App\Models\User;
+    use App\Models\Post;
+}
+
+namespace Other {
+    use Other\Models\User;
+    use Other\Models\Post;
+}
+"#;
+    let ranges = get_folding_ranges(php);
+    assert_eq!(
+        import_ranges(&ranges),
+        vec![(2, 3), (7, 8)],
+        "got: {ranges:?}"
+    );
+}
+
+#[test]
+fn trait_use_is_not_an_import() {
+    let php = r#"<?php
+class Foo {
+    use FirstTrait;
+    use SecondTrait;
+}
+"#;
+    let ranges = get_folding_ranges(php);
+    assert!(import_ranges(&ranges).is_empty(), "got: {ranges:?}");
+}
+
+#[test]
+fn trailing_comments_on_imports_do_not_fold_as_a_comment() {
+    let php = r#"<?php
+use App\Models\User; // the account
+use App\Models\Post; // its posts
+use App\Models\Tag;
+"#;
+    let ranges = get_folding_ranges(php);
+    assert_eq!(import_ranges(&ranges), vec![(1, 3)], "got: {ranges:?}");
+    assert!(
+        ranges
+            .iter()
+            .all(|r| r.kind != Some(FoldingRangeKind::Comment)),
+        "trailing comments must not fold the code beside them, got: {ranges:?}"
+    );
+}
