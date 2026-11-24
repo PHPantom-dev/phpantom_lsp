@@ -324,7 +324,7 @@ impl Backend {
                             && !crate::drupal::services::SERVICE_CONTAINERS.iter().any(
                                 |container| {
                                     crate::class_lookup::is_subtype_of_named(
-                                        &ty,
+                                        ty.unwrap_nullable(),
                                         container,
                                         loaders.resolved_class_loader(),
                                     )
@@ -370,13 +370,8 @@ impl Backend {
             return (name == Some(StringKeyKind::YiiRoute))
                 .then_some(StringKeyKind::YiiUrlArgument);
         }
-        let connection = matches!(
-            receiver,
-            ReceiverClass::LaravelConnection
-                | ReceiverClass::LaravelQueueConnection
-                | ReceiverClass::LaravelConnectionProperty
-        );
-        let ty = if connection { ty.unwrap_nullable() } else { ty };
+        // A call is only reached when its receiver is not `null`.
+        let ty = ty.unwrap_nullable();
         // A Drupal target is not worth a subtype check outside Drupal: a
         // Symfony project's `get()` is never asked about the config factory.
         if let Some((_, kind)) = receiver.targets().iter().find(|(fqn, kind)| {
@@ -385,6 +380,26 @@ impl Backend {
                 && crate::class_lookup::is_subtype_of_named(ty, fqn, class_loader)
         }) {
             return Some(*kind);
+        }
+        // A union that is not a target as a whole is asked member by member,
+        // since the call may be made on any of them: a member that names a
+        // key decides it, unless another names a different kind.  The whole
+        // is asked first so that a narrowed `(Database&Queue)|Queue` stays
+        // a queue rather than splitting into a disagreement.
+        if let crate::php_type::TypeKind::Union(members) = ty.kind() {
+            let mut found = None;
+            for member in members.iter().filter(|member| !member.is_null()) {
+                match (
+                    found,
+                    self.typed_receiver_key_kind(member, method, index, receiver, class_loader),
+                ) {
+                    (_, None) => {}
+                    (None, kind) => found = kind,
+                    (Some(found), Some(kind)) if found == kind => {}
+                    _ => return None,
+                }
+            }
+            return found;
         }
         // A class that uses core's `ConfigFormBaseTrait` has its `config()`,
         // and a trait is no type a target can name.
@@ -395,14 +410,6 @@ impl Backend {
                 .filter_map(|class| class_loader(crate::class_lookup::Fqn::new(class)))
                 .any(|class| crate::drupal::config::uses_config_form_trait(&class, class_loader))
                 .then_some(StringKeyKind::DrupalConfigName);
-        }
-        if connection && let crate::php_type::TypeKind::Union(members) = ty.kind() {
-            let mut kinds = members
-                .iter()
-                .filter(|ty| !ty.is_null())
-                .map(|ty| self.typed_receiver_key_kind(ty, method, index, receiver, class_loader));
-            let kind = kinds.next()??;
-            return kinds.all(|other| other == Some(kind)).then_some(kind);
         }
         // Queueable supplies the connection behavior through a trait, not
         // a subtype relationship. Follow the same ancestor/trait walk used

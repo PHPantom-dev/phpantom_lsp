@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Internal
 
 - **Faster CI builds and benchmarks.** Test runners share a compiled suite and matching benchmark builds are reused. Performance checks keep the same thresholds and wait for background diagnostics before measuring memory. Contributed by @shuvroroy.
+- **Nullable and union receivers name their string keys.** A template, service, route or other name passed to a call on a `?Factory` or `Factory|Mailer` receiver now navigates, completes and is checked the same as one on a plain `Factory`.
 
 ## [1.0.0] - 2026-11-23
 

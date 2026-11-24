@@ -785,6 +785,46 @@ mod tests {
         );
     }
 
+    /// A call is only made on a receiver that is not `null`, and a union
+    /// receiver names a template through the member that is a factory.
+    #[tokio::test]
+    async fn a_nullable_or_union_factory_names_a_template() {
+        let controller = "<?php\nnamespace App;\nuse Illuminate\\Contracts\\View\\Factory;\n\
+            use Illuminate\\Contracts\\Mail\\Mailer;\n\
+            class PageController {\n\
+            \x20   public function __construct(private ?Factory $views, private Factory|Mailer $renderer) {}\n\
+            \x20   public function show(): mixed {\n\
+            \x20       $this->views->make('pages.about', ['title' => 'About']);\n\
+            \x20       return $this->renderer->make('pages.about', ['titel' => 'About']);\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/pages/about.blade.php", TITLED),
+            ("app/PageController.php", controller),
+        ]);
+
+        for (line, character) in [(7, 31), (8, 41)] {
+            let target = definition_file(
+                &backend,
+                &dir,
+                "app/PageController.php",
+                "php",
+                line,
+                character,
+            )
+            .await;
+            assert!(
+                target
+                    .as_deref()
+                    .is_some_and(|uri| uri.ends_with("/resources/views/pages/about.blade.php")),
+                "line {line} should reach the template, got {target:?}"
+            );
+        }
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
+        assert_eq!(diags.len(), 2, "got {diags:?}");
+    }
+
     #[tokio::test]
     async fn an_injected_factory_is_judged_against_the_contract() {
         let controller = "<?php\nnamespace App;\nuse Illuminate\\Contracts\\View\\Factory;\n\
