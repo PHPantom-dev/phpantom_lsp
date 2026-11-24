@@ -45,6 +45,7 @@ pub(crate) mod resources;
 pub(crate) mod route_world;
 pub(crate) mod routes;
 pub(crate) mod serializer;
+pub(crate) mod service_arguments;
 pub(crate) mod service_calls;
 pub(crate) mod tags;
 pub(crate) mod translations;

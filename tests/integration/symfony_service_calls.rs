@@ -208,3 +208,161 @@ async fn a_drupal_services_file_navigates_and_completes_its_calls() {
     let labels = completion_labels(&backend, &uri, position_in(services, "[set]", 4)).await;
     assert_eq!(labels, vec!["setGreeting"]);
 }
+
+#[tokio::test]
+async fn service_wiring_resolves_arguments_tags_and_factories_on_their_own_classes() {
+    let php = r"<?php
+namespace App;
+class Builder {
+    public function make(string $directory): Product { return new Product($directory); }
+    public static function create(): Product { return new Product(''); }
+}
+class Product {
+    public function __construct(string $directory) {}
+    public function receive(): void {}
+}
+class Unrelated {
+    public function receive(): void {}
+    public function make(): void {}
+}";
+    let yaml = r"services:
+  _defaults:
+    bind:
+      $directory: default
+  builder:
+    class: App\Builder
+  builder.alias: '@builder'
+  App\Product:
+    arguments:
+      '$directory': product
+    tags:
+      - { name: kernel.event_listener, method: receive, event: foo }
+      - { name: other, method: receive }
+  from.factory:
+    class: App\Product
+    factory: ['@builder.alias', 'make']
+    arguments: { $directory: factory }
+  still.static:
+    factory: 'App\Builder::create'
+";
+    let xml = r#"<services><service id="App\Product"><tag name="kernel.event_listener" method="receive"/></service></services>"#;
+    let (backend, dir) = symfony_workspace(&[
+        ("src/Builder.php", php),
+        ("config/services.yaml", yaml),
+        ("config/services.xml", xml),
+    ])
+    .await;
+    let config = uri_for(&dir, "config/services.yaml");
+    let mapping = uri_for(&dir, "config/services.xml");
+    let owner = uri_for(&dir, "src/Builder.php");
+    for (needle, line) in [
+        ("$directory': product", 7),
+        ("$directory: factory", 3),
+        ("receive, event", 8),
+        ("make']", 3),
+        ("create'", 4),
+    ] {
+        let pos = position_in(yaml, needle, 1);
+        assert_eq!(
+            definitions(&backend, &config, pos).await,
+            vec![(owner.clone(), line)],
+            "{needle}"
+        );
+        assert!(
+            references(&backend, &config, pos)
+                .await
+                .contains(&(config.clone(), pos.line)),
+            "{needle}"
+        );
+    }
+    let mut defaults = definitions(
+        &backend,
+        &config,
+        position_in(yaml, "$directory: default", 1),
+    )
+    .await;
+    defaults.sort();
+    assert_eq!(defaults, vec![(owner.clone(), 3), (owner.clone(), 7)]);
+    assert_eq!(
+        definitions(&backend, &mapping, position_in(xml, "receive", 1)).await,
+        vec![(owner.clone(), 8)]
+    );
+    assert!(
+        definitions(&backend, &config, position_in(yaml, "receive }", 1))
+            .await
+            .is_empty()
+    );
+    let refs = references(&backend, &owner, position_in(php, "make(string", 1)).await;
+    assert!(refs.contains(&(config.clone(), 15)), "{refs:?}");
+    let refs = references(
+        &backend,
+        &owner,
+        position_in(php, "__construct(string $directory)", 21),
+    )
+    .await;
+    for line in [3, 9] {
+        assert!(refs.contains(&(config.clone(), line)), "{refs:?}");
+    }
+    assert!(!refs.contains(&(config.clone(), 16)), "{refs:?}");
+    let pos = position_in(php, "__construct(string $directory)", 21);
+    assert!(
+        crate::common::rename_result(&backend, &owner, pos.line, pos.character, "elsewhere")
+            .await
+            .ok()
+            .flatten()
+            .is_none()
+    );
+    for (needle, expected) in [("make']", "make"), ("create'", "create")] {
+        let completions = completion_labels(&backend, &config, position_in(yaml, needle, 2)).await;
+        assert!(
+            completions.iter().any(|label| label == expected),
+            "{completions:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn default_bindings_follow_the_file_resource_and_respect_its_exclusions() {
+    let php = r"<?php namespace App\Feature; class Handler { public function __construct(string $path) {} }";
+    let excluded = r"<?php namespace App\Feature; class Hidden { public function __construct(string $path) {} }";
+    let yaml = r"services:
+  App\Feature\:
+    resource: '../src/Feature'
+    exclude:
+      - '../src/Feature/Hidden.php'
+  _defaults:
+    bind:
+      $path: example
+      'string $path': typed
+      'int $path': mismatch
+when@test:
+  services:
+    App\Mailer: ~
+    _defaults:
+      bind: { $path: other }
+";
+    let (backend, dir) = symfony_workspace(&[
+        ("src/Feature/Handler.php", php),
+        ("src/Feature/Hidden.php", excluded),
+        ("config/services.yaml", yaml),
+    ])
+    .await;
+    let config = uri_for(&dir, "config/services.yaml");
+    assert_eq!(
+        definitions(&backend, &config, position_in(yaml, "$path: example", 0)).await,
+        vec![(uri_for(&dir, "src/Feature/Handler.php"), 0)]
+    );
+    for (needle, count) in [("$path': typed", 1), ("$path': mismatch", 0)] {
+        assert_eq!(
+            definitions(&backend, &config, position_in(yaml, needle, 1))
+                .await
+                .len(),
+            count
+        );
+    }
+    assert!(
+        definitions(&backend, &config, position_in(yaml, "$path: other", 1))
+            .await
+            .is_empty()
+    );
+}

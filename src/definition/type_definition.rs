@@ -206,6 +206,7 @@ impl Backend {
             | SymbolKind::CommandOwnParam { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
+            | SymbolKind::ServiceArgument { .. }
             | SymbolKind::Comment => {
                 // No meaningful type definition target for these.
                 Vec::new()

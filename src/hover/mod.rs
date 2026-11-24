@@ -369,6 +369,7 @@ impl Backend {
             SymbolKind::LaravelMacroString { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
+            | SymbolKind::ServiceArgument { .. }
             | SymbolKind::Comment => None,
         }
     }

@@ -69,6 +69,23 @@ pub(crate) struct NamedArgumentDeclaration {
 }
 
 impl NamedArgumentDeclaration {
+    /// The exact parameter token in the coordinate space of its declaring file.
+    pub(crate) fn location(
+        &self,
+        backend: &Backend,
+    ) -> Option<tower_lsp_server::gen_lsp_types::Location> {
+        let (start, end) = self.name_token?;
+        let content = backend.reference_file_content_arc(&self.uri)?;
+        Some(tower_lsp_server::gen_lsp_types::Location {
+            uri: crate::util::parse_url(&self.uri)?,
+            range: crate::text_position::byte_range_to_lsp_range(
+                &content,
+                start as usize,
+                end as usize,
+            ),
+        })
+    }
+
     /// Whether both labels name the same parameter.
     ///
     /// Only a declaration with a token answers: two built-ins described by
@@ -172,11 +189,12 @@ impl Backend {
     ) -> Option<NamedArgumentDeclaration> {
         let (callee, target) = self.resolve_named_argument(uri, content, call_args_start, name)?;
         let (mut declaration, is_constructor) = match &callee {
-            NamedArgumentCallee::Constructor { class } => {
-                (self.declared_parameter(uri, class, CONSTRUCT, name)?, true)
-            }
+            NamedArgumentCallee::Constructor { class } => (
+                self.declared_parameter(uri, class, CONSTRUCT, name, None)?,
+                true,
+            ),
             NamedArgumentCallee::Method { class, method } => (
-                self.declared_parameter(uri, class, method.as_str(), name)?,
+                self.declared_parameter(uri, class, method.as_str(), name, None)?,
                 false,
             ),
             NamedArgumentCallee::Function { source } => (
@@ -283,12 +301,13 @@ impl Backend {
     /// that declares that function rather than the class the call names: the
     /// two differ when the method is inherited, and only the declaring class
     /// owns the token every label naming it has to agree on.
-    fn declared_parameter(
+    pub(crate) fn declared_parameter(
         &self,
         call_uri: &str,
         class: &Atom,
         function: &str,
         name: &Atom,
+        native_type: Option<Atom>,
     ) -> Option<NamedArgumentDeclaration> {
         let owner = self.find_or_load_class(class)?;
         let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
@@ -298,7 +317,19 @@ impl Backend {
             &MemberKindForOrigin::Method,
             &class_loader,
         );
-        let name_offset = declaring.get_method(function)?.name_offset;
+        let method = declaring.get_method(function)?;
+        if let Some(expected) = native_type {
+            let ty = method
+                .parameters
+                .iter()
+                .find(|p| p.bare_name() == name.as_str())?
+                .native_type_hint
+                .as_ref()?;
+            if ty.to_string().trim_start_matches('\\') != expected.as_str() {
+                return None;
+            }
+        }
+        let name_offset = method.name_offset;
         let declaring_fqn = declaring.fqn();
         // Looked up by the exact FQN first: the file lookup by name prefers
         // the calling file when it declares a class of the same short name,
@@ -347,7 +378,11 @@ impl Backend {
     /// The declaration already names the class whose constructor runs, so
     /// this asks the same question the rest of the engine asks of a promoted
     /// parameter (see [`crate::class_lookup::constructor_promotes`]).
-    fn constructor_promotes(&self, declaration: &NamedArgumentDeclaration, name: &Atom) -> bool {
+    pub(crate) fn constructor_promotes(
+        &self,
+        declaration: &NamedArgumentDeclaration,
+        name: &Atom,
+    ) -> bool {
         let Some(class) = declaration.class else {
             return false;
         };

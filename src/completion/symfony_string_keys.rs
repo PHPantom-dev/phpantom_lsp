@@ -896,13 +896,17 @@ impl Backend {
         position: Position,
     ) -> Option<CompletionResponse> {
         let site = crate::symfony::service_calls::call_site_at(uri, content, cursor)?;
-        self.public_method_response(
-            &[crate::atom::atom(&site.class)],
-            content,
-            site.start,
-            cursor,
-            position,
-        )
+        let classes = if let Some(id) = site.class.strip_prefix('@') {
+            self.symfony_service_classes(id)
+        } else {
+            vec![crate::atom::atom(&site.class)]
+        };
+        let offered = if site.is_static {
+            OfferedMethods::Static
+        } else {
+            OfferedMethods::Instance
+        };
+        self.public_method_response(&classes, content, site.start, cursor, position, offered)
     }
 
     /// Complete the method of a Drupal `_controller` or `_title_callback`
@@ -916,7 +920,14 @@ impl Backend {
     ) -> Option<CompletionResponse> {
         let (service, start) = crate::drupal::routing::service_method_start(content, cursor)?;
         let classes = self.symfony_service_classes(&service);
-        self.public_method_response(&classes, content, start, cursor, position)
+        self.public_method_response(
+            &classes,
+            content,
+            start,
+            cursor,
+            position,
+            OfferedMethods::Instance,
+        )
     }
 
     /// The public instance methods of `classes` whose name starts with
@@ -928,18 +939,15 @@ impl Backend {
         start: usize,
         cursor: usize,
         position: Position,
+        offered: OfferedMethods,
     ) -> Option<CompletionResponse> {
         let loader = self.resolved_class_loader_with(&[]);
         let classes: Vec<_> = classes
             .iter()
             .filter_map(|class| loader(crate::class_lookup::Fqn::new(class)))
             .collect();
-        let names = self.public_method_names(
-            &classes,
-            &loader,
-            content.get(start..cursor)?,
-            OfferedMethods::Instance,
-        );
+        let names =
+            self.public_method_names(&classes, &loader, content.get(start..cursor)?, offered);
         string_key_response(names, CompletionItemKind::Method, content, start, position)
     }
 

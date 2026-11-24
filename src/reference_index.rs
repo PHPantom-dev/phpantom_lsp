@@ -946,7 +946,7 @@ impl Backend {
             // a zero: a promoted property whose only other spelling is a
             // label has to reach the exact search, not be answered as having
             // nothing to find.
-            SymbolKind::NamedArgument { name, .. } => {
+            SymbolKind::NamedArgument { name, .. } | SymbolKind::ServiceArgument { name, .. } => {
                 vec![(
                     ReferenceIndexKey::Member {
                         name: name.to_string(),

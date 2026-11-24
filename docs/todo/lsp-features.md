@@ -836,22 +836,14 @@ side table to mirror), and `references/symfony-language-tools`
 
 ---
 
-## F46. Symfony listener methods a tag or a default names
+## F72. Symfony listener methods chosen by convention
 
 **Impact: Low-Medium · Complexity: Low-Medium**
 
-The method an `#[AsEventListener(method: …)]` or a subscriber's map names
-navigates to the listener's method, and one that does not exist is
-reported. Two other ways of naming it do not: the `method` of a
-`kernel.event_listener` tag in YAML or XML, which names a method of the
-tagged service's class, and no method at all, where Symfony calls
-`on` followed by the event name in camel case, else `__invoke()`. The
-second also leaves a listener whose method name is never written
-anywhere looking unused.
-
-**Where to look:** `src/symfony/tags.rs` (the tag scan, which already
-reads the `event` beside the `method`), `src/resource_navigation.rs` (the
-`Class::member` spans a resource map already holds).
+When no listener method is written, Symfony tries `on` followed by the
+camel-cased event name and then `__invoke()`. Track the method Symfony
+chooses so its registration counts as a use. Report a missing listener
+method, including an explicit method on a YAML or XML tag.
 
 ---
 
