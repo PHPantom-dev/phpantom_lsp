@@ -1331,11 +1331,10 @@ class Consumer {
 async fn typed_authorization_rechecks_configured_models_after_an_auth_config_edit() {
     let consumer = r#"<?php
 namespace App;
-use Illuminate\Contracts\Auth\Access\Authorizable;
 class Member { public function can($abilities) {} }
 class Account extends Member {}
 class Consumer {
-    public function go(Account|Authorizable $actor, Account|Consumer $either, \App\Guest\Member $guest): void {
+    public function go(Account $actor, Account|Consumer $either, \App\Guest\Member $guest): void {
         $actor->can('typo');
         $either->can('unrelated');
         $guest->can('same-short-name');
@@ -1365,7 +1364,14 @@ return ['providers' => ['staff' => ['model' => env('STAFF_MODEL', Client::class)
             .map(|d| d.range.start.line)
             .collect::<Vec<_>>()
     };
-    assert_eq!(flagged(), [position_after(consumer, "can('typo").line]);
+    // A union is an actor when any of its members is.
+    assert_eq!(
+        flagged(),
+        [
+            position_after(consumer, "can('typo").line,
+            position_after(consumer, "can('unrelated").line
+        ]
+    );
     let auth_uri = Uri::from_file_path(dir.path().join("config/auth.php")).unwrap();
     open_php_str(&backend, auth_uri.as_str(), "<?php return [];").await;
     assert!(flagged().is_empty());
