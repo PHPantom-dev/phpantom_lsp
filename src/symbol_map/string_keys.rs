@@ -1510,12 +1510,39 @@ const SYMFONY_DENORMALIZER: &str =
 pub(crate) const SYMFONY_ROUTING_CONFIGURATOR_NS: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\";
 
+/// The independently navigable names inside a Laravel middleware string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MiddlewarePart {
+    Alias,
+    Guard,
+    Ability,
+    Limiter,
+}
+
+impl MiddlewarePart {
+    /// The controller type that accepts this part and the key it resolves to.
+    pub(crate) fn controller_target(self) -> &'static (&'static str, StringKeyKind) {
+        const CONTROLLER: &str = "Illuminate\\Routing\\Controller";
+        match self {
+            Self::Alias => &(CONTROLLER, StringKeyKind::Middleware),
+            Self::Guard => &(
+                CONTROLLER,
+                StringKeyKind::ConfigResource(LaravelConfigResource::AuthGuard),
+            ),
+            Self::Ability => &(CONTROLLER, StringKeyKind::GateAbility),
+            Self::Limiter => &(CONTROLLER, StringKeyKind::RateLimiter),
+        }
+    }
+}
+
 /// The classes or traits whose behavior makes a receiver's call or property
 /// value name a string key, and which kind of key each one makes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReceiverClass {
     /// An authorization contract or a model named by an auth provider.
     LaravelAuthorizable,
+    /// Middleware registered by an instance of the routing controller.
+    LaravelControllerMiddleware(MiddlewarePart),
     /// A Laravel manager or factory whose `connection()` selects a config subtree.
     LaravelConnection,
     /// A queued dispatch or an object using Laravel's Queueable trait.
@@ -1710,6 +1737,9 @@ impl ReceiverClass {
             TranslationDomain, TwigTemplate, TwigVariable, View, YiiRoute, YiiView,
         };
         match self {
+            Self::LaravelControllerMiddleware(part) => {
+                std::slice::from_ref(part.controller_target())
+            }
             Self::LaravelAuthorizable => &[(
                 "Illuminate\\Contracts\\Auth\\Access\\Authorizable",
                 StringKeyKind::GateAbility,

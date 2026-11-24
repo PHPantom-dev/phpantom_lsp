@@ -381,19 +381,21 @@ fn emit_gate_ability_spans_for_method<'a>(
     ctx: &mut ExtractionCtx<'a>,
 ) {
     if is_middleware_method(member_name) {
-        let route_receiver = receiver.roots_at_route();
-        if !route_receiver && !receiver.is_this() {
-            return;
+        if receiver.roots_at_route() {
+            let start = ctx.spans.len();
+            try_emit_middleware_spans(
+                argument_list,
+                ctx.content,
+                MiddlewareSpans::Known(&mut ctx.spans),
+            );
+            defer_on_route_root(receiver, start, ctx);
+        } else if receiver.is_this() && member_name.eq_ignore_ascii_case("middleware") {
+            try_emit_middleware_spans(
+                argument_list,
+                ctx.content,
+                MiddlewareSpans::Controller(&mut ctx.typed_receiver_sites),
+            );
         }
-        // `->middleware()` is a plain enough name that `$this` only names
-        // middleware inside a controller.
-        let parts = MiddlewareSpans {
-            alias: route_receiver || ctx.in_controller,
-            auth_guards: route_receiver,
-        };
-        let span_start = ctx.spans.len();
-        try_emit_middleware_spans(argument_list, parts, ctx.content, &mut ctx.spans);
-        defer_on_route_root(receiver, span_start, ctx);
         return;
     }
 

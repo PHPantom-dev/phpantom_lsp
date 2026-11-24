@@ -201,11 +201,12 @@ impl Backend {
         let laravel =
             std::cell::LazyCell::new(|| self.resolved_class_cache.read().laravel().is_enabled());
         let mut by_offset: Vec<&TypedReceiverSite> = Vec::with_capacity(sites.len());
-        by_offset.extend(
-            sites
-                .iter()
-                .filter(|site| site.receiver != ReceiverClass::LaravelAuthorizable || *laravel),
-        );
+        by_offset.extend(sites.iter().filter(|site| {
+            !matches!(
+                site.receiver,
+                ReceiverClass::LaravelAuthorizable | ReceiverClass::LaravelControllerMiddleware(_)
+            ) || *laravel
+        }));
         if by_offset.is_empty() {
             return Vec::new();
         }

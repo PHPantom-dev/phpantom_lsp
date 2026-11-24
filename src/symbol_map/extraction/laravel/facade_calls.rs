@@ -408,12 +408,8 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     {
         try_emit_middleware_spans(
             argument_list,
-            MiddlewareSpans {
-                alias: true,
-                auth_guards: true,
-            },
             ctx.content,
-            &mut ctx.spans,
+            MiddlewareSpans::Known(&mut ctx.spans),
         );
     }
     // Eloquent morph aliases: the keys of a

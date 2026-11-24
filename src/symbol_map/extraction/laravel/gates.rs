@@ -3,6 +3,7 @@
 //! `can:` middleware) name one, along with the model the check is about.
 
 use super::*;
+use crate::symbol_map::{MiddlewarePart, ReceiverClass, TypedReceiverSite};
 use crate::virtual_members::laravel::helpers::string_literal_at_range;
 
 /// What a recognised ability span is doing with the name it holds.
@@ -209,25 +210,51 @@ fn gate_model_subject(
     }
 }
 
-/// Which parts of a middleware string a call site makes navigable.
-#[derive(Clone, Copy)]
-pub(in crate::symbol_map::extraction) struct MiddlewareSpans {
-    /// The alias or group name before any `:`.
-    pub(in crate::symbol_map::extraction) alias: bool,
-    /// The guards of an `auth:guard[,guard]` string.
-    pub(in crate::symbol_map::extraction) auth_guards: bool,
+/// Route calls and attributes identify middleware directly. Controller
+/// calls need their receiver confirmed before the same names become spans.
+pub(in crate::symbol_map::extraction) enum MiddlewareSpans<'a> {
+    Known(&'a mut Vec<SymbolSpan>),
+    Controller(&'a mut Vec<TypedReceiverSite>),
+}
+
+impl MiddlewareSpans<'_> {
+    fn push(&mut self, part: MiddlewarePart, key: &str, start: u32, end: u32) {
+        if key.is_empty() {
+            return;
+        }
+        match self {
+            Self::Known(spans) => spans.push(SymbolSpan {
+                start,
+                end,
+                kind: SymbolKind::StringKey {
+                    kind: part.controller_target().1,
+                    key: key.to_owned(),
+                    is_write: false,
+                    is_optional: false,
+                },
+            }),
+            Self::Controller(sites) => sites.push(TypedReceiverSite {
+                start,
+                end,
+                key: key.to_owned(),
+                receiver: ReceiverClass::LaravelControllerMiddleware(part),
+                is_write: false,
+                is_optional: false,
+                guards: 0,
+            }),
+        }
+    }
 }
 
 /// Emit the navigable parts of the Laravel middleware strings a call's
 /// `middleware` argument names.
 pub(in crate::symbol_map::extraction) fn try_emit_middleware_spans(
     argument_list: &ArgumentList<'_>,
-    parts: MiddlewareSpans,
     content: &str,
-    spans: &mut Vec<SymbolSpan>,
+    spans: MiddlewareSpans<'_>,
 ) {
     if let Some(middleware) = argument_expr_for_parameter(argument_list, "middleware") {
-        emit_middleware_value_spans(middleware, parts, content, spans);
+        emit_middleware_value_spans(middleware, content, spans);
     }
 }
 
@@ -236,13 +263,12 @@ pub(in crate::symbol_map::extraction) fn try_emit_middleware_spans(
 /// `can:ability,Model`, and the guards of `auth:guard[,guard]`.
 pub(in crate::symbol_map::extraction) fn emit_middleware_value_spans(
     middleware: &Expression<'_>,
-    parts: MiddlewareSpans,
     content: &str,
-    spans: &mut Vec<SymbolSpan>,
+    mut spans: MiddlewareSpans<'_>,
 ) {
     // Laravel reads a middleware array's values whatever their keys.
     let Some(elements) = crate::parser::array_literal_elements(middleware) else {
-        push_middleware_parameter_spans(middleware, parts, content, spans);
+        push_middleware_parameter_spans(middleware, content, &mut spans);
         return;
     };
     for element in elements.iter() {
@@ -251,15 +277,14 @@ pub(in crate::symbol_map::extraction) fn emit_middleware_value_spans(
             ArrayElement::Value(element) => element.value,
             ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
         };
-        push_middleware_parameter_spans(value, parts, content, spans);
+        push_middleware_parameter_spans(value, content, &mut spans);
     }
 }
 
 fn push_middleware_parameter_spans(
     expr: &Expression<'_>,
-    parts: MiddlewareSpans,
     content: &str,
-    spans: &mut Vec<SymbolSpan>,
+    spans: &mut MiddlewareSpans<'_>,
 ) {
     let Some((text, inner_start, _)) = string_literal_at_range(expr, content) else {
         return;
@@ -267,12 +292,12 @@ fn push_middleware_parameter_spans(
     let alias = text.split_once(':').map_or(text, |(alias, _)| alias);
     // A name with a namespace separator is a middleware class, which the
     // router instantiates without looking it up.
-    if parts.alias && !alias.contains('\\') {
-        push_embedded_string_span(
-            crate::symbol_map::StringKeyKind::Middleware,
+    if !alias.contains('\\') {
+        spans.push(
+            MiddlewarePart::Alias,
             alias,
             inner_start,
-            spans,
+            inner_start + alias.len() as u32,
         );
     }
     let Some((alias, parameters)) = text.split_once(':') else {
@@ -281,66 +306,33 @@ fn push_middleware_parameter_spans(
     let parameter_start = inner_start + alias.len() as u32 + 1;
     if alias == "can" {
         let ability = parameters.split(',').next().unwrap_or(parameters);
-        push_embedded_string_span(
-            crate::symbol_map::StringKeyKind::GateAbility,
+        spans.push(
+            MiddlewarePart::Ability,
             ability,
             parameter_start,
-            spans,
+            parameter_start + ability.len() as u32,
         );
-    } else if parts.alias && alias == "throttle" {
+    } else if alias == "throttle" {
         if let Some((decoded, _, end)) =
             crate::virtual_members::laravel::helpers::resolved_string_literal(expr, content)
             && let Some(name) = decoded.strip_prefix("throttle:")
             && !name.is_empty()
             && crate::virtual_members::laravel::rate_limiters::is_named_throttle_parameter(name)
         {
-            spans.push(SymbolSpan {
-                start: parameter_start,
-                end: end as u32,
-                kind: SymbolKind::StringKey {
-                    kind: crate::symbol_map::StringKeyKind::RateLimiter,
-                    key: name.to_string(),
-                    is_write: false,
-                    is_optional: false,
-                },
-            });
+            spans.push(MiddlewarePart::Limiter, name, parameter_start, end as u32);
         }
-    } else if parts.auth_guards
-        && crate::symbol_map::laravel_resources::middleware_resource(&text[..alias.len() + 1])
-            == Some(crate::symbol_map::LaravelConfigResource::AuthGuard)
+    } else if crate::symbol_map::laravel_resources::middleware_resource(&text[..alias.len() + 1])
+        == Some(crate::symbol_map::LaravelConfigResource::AuthGuard)
     {
         let mut offset = parameter_start;
         for guard in parameters.split(',') {
-            push_embedded_string_span(
-                crate::symbol_map::StringKeyKind::ConfigResource(
-                    crate::symbol_map::LaravelConfigResource::AuthGuard,
-                ),
+            spans.push(
+                MiddlewarePart::Guard,
                 guard,
                 offset,
-                spans,
+                offset + guard.len() as u32,
             );
             offset += guard.len() as u32 + 1;
         }
     }
-}
-
-fn push_embedded_string_span(
-    kind: crate::symbol_map::StringKeyKind,
-    key: &str,
-    start: u32,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    if key.is_empty() {
-        return;
-    }
-    spans.push(SymbolSpan {
-        start,
-        end: start + key.len() as u32,
-        kind: SymbolKind::StringKey {
-            kind,
-            key: key.to_string(),
-            is_write: false,
-            is_optional: false,
-        },
-    });
 }

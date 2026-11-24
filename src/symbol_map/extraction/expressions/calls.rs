@@ -32,15 +32,7 @@ pub(super) fn extract_instantiation_expr<'a>(
                     .unwrap_or(&class_text),
             )
         {
-            try_emit_middleware_spans(
-                args,
-                MiddlewareSpans {
-                    alias: true,
-                    auth_guards: true,
-                },
-                ctx.content,
-                &mut ctx.spans,
-            );
+            try_emit_middleware_spans(args, ctx.content, MiddlewareSpans::Known(&mut ctx.spans));
         }
         emit_symfony_instantiation_spans(inst.class, args, ctx);
         if let Expression::Identifier(ident) = inst.class
