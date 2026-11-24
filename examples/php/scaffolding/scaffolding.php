@@ -528,6 +528,19 @@ class ScaffoldingSignatureHelp
     public function search(string $query, int $page = 1, int $perPage = 20): array { return []; }
 }
 
+class ScaffoldingGreetAction
+{
+    /**
+     * @param string $name Who to greet.
+     * @param bool $shout Whether to upper-case the greeting.
+     */
+    public function __invoke(string $name, bool $shout = false): string
+    {
+        $greeting = 'Hello, ' . $name;
+        return $shout ? strtoupper($greeting) : $greeting;
+    }
+}
+
 class ScaffoldingDeprecation
 {
     /**

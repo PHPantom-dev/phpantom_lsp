@@ -858,10 +858,22 @@ impl Backend {
             // Check for a partial application assignment and recurse.  One
             // with bound arguments (`$fn = $r->make(1, ?)`) passes them on
             // with the call's own and takes only the parameters its
-            // placeholders leave open.
+            // placeholders leave open.  Any other variable is invoked as the
+            // value it holds: a typed closure, or an object's `__invoke()`.
             SubjectExpr::Variable(var_name) if !visited_vars.iter().any(|v| v == var_name) => {
-                let assigned =
-                    Self::extract_callable_target_from_variable(var_name, content, cursor_offset)?;
+                let Some(assigned) =
+                    Self::extract_callable_target_from_variable(var_name, content, cursor_offset)
+                else {
+                    return Self::resolve_invoked_value_callable(
+                        effective,
+                        &rctx,
+                        effective_args_text,
+                    )
+                    .map(|mut target| {
+                        evaluate_constant_operands_in_target(&mut target, &rctx);
+                        target
+                    });
+                };
                 let wrapped_args = assigned.bound.as_deref().map(|bound| {
                     crate::call_args::bind_partial_text_arguments(
                         bound,
@@ -953,9 +965,17 @@ impl Backend {
         if matches!(&parsed, SubjectExpr::CallExpr { .. })
             && let Some(ref target) = result
             && let Some(ref return_type) = target.return_type
-            && let Some(invoked) = callable_type_as_target(return_type)
         {
-            return Some(invoked);
+            if let Some(invoked) = callable_type_as_target(return_type) {
+                return Some(invoked);
+            }
+            // An object returned by the call (`app(Action::class)(…)`) is
+            // invoked through its `__invoke()` method.
+            if let Some(invoked) =
+                Self::resolve_instance_method_callable(&parsed, "__invoke", &rctx, call_args_text)
+            {
+                return Some(invoked);
+            }
         }
 
         result

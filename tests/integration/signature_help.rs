@@ -1375,6 +1375,75 @@ async fn first_class_callable_invocation_in_enum_method() {
     assert!(sig_label(&sh).contains("string $ink"));
 }
 
+#[tokio::test]
+async fn invokable_object_variable_shows_invoke_parameters() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///sig_invokable_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class TestAction {\n",
+        "    public function __invoke(string $x, int $y): void {}\n",
+        "}\n",
+        "class Controller {\n",
+        "    public function __invoke(TestAction $action) {\n",
+        "        $action('a', );\n",
+        "    }\n",
+        "}\n",
+    );
+    // Line 6: "        $action('a', );"
+    let sh = sig_help_at(&backend, &uri, text, 6, 21)
+        .await
+        .expect("signature help for the invokable object");
+    assert_eq!(param_labels(&sh), vec!["string $x", "int $y"]);
+    assert_eq!(active_param(&sh), 1);
+}
+
+#[tokio::test]
+async fn invokable_object_returned_by_a_call_shows_invoke_parameters() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///sig_invokable_call.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class TestAction {\n",
+        "    public function __invoke(string $x): void {}\n",
+        "}\n",
+        "/**\n",
+        " * @template T\n",
+        " * @param class-string<T> $abstract\n",
+        " * @return T\n",
+        " */\n",
+        "function app(string $abstract): mixed { return new $abstract(); }\n",
+        "class Controller {\n",
+        "    public function handle() {\n",
+        "        app(TestAction::class)();\n",
+        "    }\n",
+        "}\n",
+    );
+    // Line 12: "        app(TestAction::class)();"
+    let sh = sig_help_at(&backend, &uri, text, 12, 31)
+        .await
+        .expect("signature help for the invokable returned by app()");
+    assert_eq!(param_labels(&sh), vec!["string $x"]);
+}
+
+#[tokio::test]
+async fn invokable_object_from_new_shows_invoke_parameters() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///sig_invokable_new.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class TestAction {\n",
+        "    public function __invoke(string $x): void {}\n",
+        "}\n",
+        "(new TestAction())();\n",
+    );
+    // Line 4: "(new TestAction())();"
+    let sh = sig_help_at(&backend, &uri, text, 4, 19)
+        .await
+        .expect("signature help for the invokable built in place");
+    assert_eq!(param_labels(&sh), vec!["string $x"]);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  Default values in parameter labels
 // ═══════════════════════════════════════════════════════════════════════════

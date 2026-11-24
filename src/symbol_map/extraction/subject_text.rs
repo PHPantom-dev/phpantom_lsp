@@ -308,9 +308,19 @@ fn render_spine(
 /// calls the closure the property holds, not a method named `onClose`.  A
 /// callee that reads a member therefore keeps its parentheses, which is how
 /// the callable resolver tells an invoked value apart from a method name.
+/// So does a freshly built instance: `(new Action())()` invokes the object,
+/// where its lowered text alone (`Action`) would read as a function name.
 pub(super) fn invoked_callee_text(callee: &Expression<'_>) -> String {
     if is_closure_literal(callee) {
         return String::new();
+    }
+    if matches!(
+        crate::parser::unwrap_parens(callee),
+        Expression::Instantiation(_)
+    ) {
+        return expr_to_subject_expr(callee)
+            .map(|value| format!("({})", value.to_subject_text()))
+            .unwrap_or_default();
     }
     match expr_to_subject_expr(callee) {
         Some(value @ (SubjectExpr::PropertyChain { .. } | SubjectExpr::StaticAccess { .. })) => {

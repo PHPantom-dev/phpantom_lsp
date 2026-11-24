@@ -1230,6 +1230,33 @@ final class Calculator
     }
 
     #[test]
+    fn invokable_objects_are_checked_against_invoke() {
+        let php = r#"<?php
+final class Adder
+{
+    public function __invoke(int $a, int $b): int { return $a + $b; }
+}
+function makeAdder(): Adder { return new Adder(); }
+function run(Adder $add): void
+{
+    $add(1);
+    makeAdder()(1);
+    (new Adder())(1);
+    $add(1, 2);
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 3, "got: {diags:?}");
+        for (diag, line) in diags.iter().zip([8, 9, 10]) {
+            assert_eq!(diag.range.start.line, line, "got: {diags:?}");
+            assert!(
+                message_text(&diag.message).contains("Expected 2 arguments"),
+                "An invoked object is checked against its __invoke(), got: {diags:?}",
+            );
+        }
+    }
+
+    #[test]
     fn invoked_property_of_unknown_type_is_not_checked() {
         let php = r#"<?php
 final class Callbacks

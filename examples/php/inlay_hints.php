@@ -88,7 +88,7 @@ class InlayHintsDemo
      * @param callable(T): T $fn
      * @return array<T>
      */
-    public function transformItems(array $items, callable $fn): array { return $fn(); }
+    public function transformItems(array $items, callable $fn): array { return array_map($fn, $items); }
 
     /** @param \Closure(Scaffolding\User): string $fn */
     public function mapUsers(\Closure $fn): array { return []; }

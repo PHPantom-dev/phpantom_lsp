@@ -45,6 +45,13 @@ class SignatureHelpDemo
         // the description is prefixed with the effective type:
         $svc->search('php', 1, 25);
     }
+
+    public function invokable(Scaffolding\ScaffoldingGreetAction $greet): void
+    {
+        // Invoking an object shows the parameters of its __invoke() method:
+        $greet('Alice', true);                                      // injected instance
+        (new Scaffolding\ScaffoldingGreetAction())('Bob');          // (new ...)()
+    }
 }
 
 
