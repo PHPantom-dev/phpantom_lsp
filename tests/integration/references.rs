@@ -1,6 +1,6 @@
 use crate::common::{
     block_on, create_test_backend, create_test_backend_with_full_stubs, find_references,
-    line_char_of, open_php,
+    line_char_of, open_php, workspace_uri,
 };
 use phpantom_lsp::Backend;
 use tower_lsp_server::LanguageServer;
@@ -5675,7 +5675,7 @@ async fn parameter_labels_of_a_different_function_are_left_out() {
 fn a_label_at_a_subclass_constructor_counts_for_the_inherited_property() {
     let parent = "<?php\nnamespace App;\nclass Field\n{\n    public function __construct(public string $name = '') {}\n}\n";
     let report = "<?php\nnamespace App;\nfunction report(): string\n{\n    $field = new DashboardField(name: 'dashboard');\n    return $field->name;\n}\n";
-    let (backend, dir) = crate::common::create_psr4_workspace(
+    let (backend, _dir) = crate::common::create_psr4_workspace(
         r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
         &[
             ("src/Field.php", parent),
@@ -5687,8 +5687,8 @@ fn a_label_at_a_subclass_constructor_counts_for_the_inherited_property() {
         ],
     );
 
-    let parent_uri = format!("file://{}", dir.path().join("src/Field.php").display());
-    let report_uri = format!("file://{}", dir.path().join("src/Report.php").display());
+    let parent_uri = workspace_uri(&backend, "src/Field.php").to_string();
+    let report_uri = workspace_uri(&backend, "src/Report.php").to_string();
     open_file(&backend, &parent_uri, parent);
     open_file(&backend, &report_uri, report);
 
@@ -5735,11 +5735,11 @@ fn a_label_is_not_a_reference_to_a_property_the_parameter_does_not_promote() {
         "\n",
         "$field = new Field(name: 'x');\n",
     );
-    let (backend, dir) = crate::common::create_psr4_workspace(
+    let (backend, _dir) = crate::common::create_psr4_workspace(
         r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
         &[("src/Field.php", class)],
     );
-    let uri = format!("file://{}", dir.path().join("src/Field.php").display());
+    let uri = workspace_uri(&backend, "src/Field.php").to_string();
     open_file(&backend, &uri, class);
 
     let property_lines = backend
